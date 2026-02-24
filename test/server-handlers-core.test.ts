@@ -50,6 +50,9 @@ import {
   handleCount,
 } from '../src/infrastructure/server/handlers/advanced';
 
+// Monitoring handlers
+import { handlePing } from '../src/infrastructure/server/handlers/monitoring';
+
 // Handler router
 import { handleCommand } from '../src/infrastructure/server/handler';
 
@@ -284,6 +287,51 @@ describe('Core Handlers', () => {
         'req-batch'
       );
       expect(res.reqId).toBe('req-batch');
+    });
+
+    test('should deduplicate jobs with same customId in batch', async () => {
+      const res = await handlePushBatch(
+        {
+          cmd: 'PUSHB',
+          queue: 'dedup-test',
+          jobs: [
+            { data: { id: 1 }, customId: 'same-key' },
+            { data: { id: 2 }, customId: 'same-key' },
+            { data: { id: 3 }, customId: 'same-key' },
+          ],
+        },
+        ctx
+      );
+      expect(res.ok).toBe(true);
+      const ids = (res as any).ids as string[];
+      expect(ids).toHaveLength(3);
+      // All IDs should be the same (deduplicated)
+      expect(ids[0]).toBe(ids[1]);
+      expect(ids[1]).toBe(ids[2]);
+    });
+
+    test('should deduplicate across separate PUSHB calls with same customId', async () => {
+      const res1 = await handlePushBatch(
+        {
+          cmd: 'PUSHB',
+          queue: 'dedup-test-2',
+          jobs: [{ data: { id: 1 }, customId: 'cross-batch-key' }],
+        },
+        ctx
+      );
+      const res2 = await handlePushBatch(
+        {
+          cmd: 'PUSHB',
+          queue: 'dedup-test-2',
+          jobs: [{ data: { id: 2 }, customId: 'cross-batch-key' }],
+        },
+        ctx
+      );
+      expect(res1.ok).toBe(true);
+      expect(res2.ok).toBe(true);
+      const ids1 = (res1 as any).ids as string[];
+      const ids2 = (res2 as any).ids as string[];
+      expect(ids1[0]).toBe(ids2[0]);
     });
   });
 
@@ -1752,5 +1800,36 @@ describe('End-to-End Flows', () => {
     const countsRes = handleGetJobCounts({ cmd: 'GetJobCounts', queue: 'emails' }, ctx);
     expect((countsRes as any).counts.active).toBe(2);
     expect((countsRes as any).counts.waiting).toBe(0);
+  });
+});
+
+// ============================================================
+// MONITORING HANDLERS (Ping)
+// ============================================================
+
+describe('Monitoring Handlers', () => {
+  let qm: QueueManager;
+  let ctx: HandlerContext;
+
+  beforeEach(() => {
+    qm = new QueueManager();
+    ctx = createContext(qm);
+  });
+
+  afterEach(() => {
+    qm.shutdown();
+  });
+
+  describe('handlePing', () => {
+    test('handlePing response should match client expected structure', () => {
+      const res = handlePing({ cmd: 'Ping' } as any, ctx, 'req-42');
+      // Client checks: response.data.pong === true
+      expect(res.ok).toBe(true);
+      expect((res as any).data).toBeDefined();
+      expect((res as any).data.pong).toBe(true);
+      expect((res as any).data.time).toBeDefined();
+      expect(typeof (res as any).data.time).toBe('number');
+      expect((res as any).reqId).toBe('req-42');
+    });
   });
 });

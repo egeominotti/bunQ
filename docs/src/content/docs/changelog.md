@@ -10,6 +10,25 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.5.2] - 2026-02-24
+
+### Fixed
+- **TCP deduplication** — `jobId` deduplication now works correctly in TCP mode. The auto-batcher was sending `jobId` instead of `customId` in PUSHB commands, causing the server to skip deduplication for all batched operations ([#10](https://github.com/egeominotti/bunqueue/issues/10))
+- **CLI `--host` and `-p` flags** — `bunqueue start --host 127.0.0.1 -p 6666` now correctly binds to the specified host and port. Previously, `parseGlobalOptions()` consumed these flags as global options, removing them before the server could use them ([#9](https://github.com/egeominotti/bunqueue/issues/9))
+- **Docker healthcheck** — Changed healthcheck URL from `localhost` to `127.0.0.1` to avoid IPv6 resolution issues in Alpine containers ([#7](https://github.com/egeominotti/bunqueue/issues/7))
+- **TCP ping health check** — Fixed ping response parsing from `response.pong` to `response.data.pong` matching the actual server response structure ([#5](https://github.com/egeominotti/bunqueue/issues/5))
+
+### Added
+- Tests for PUSHB deduplication (same-batch and cross-batch)
+- Tests for CLI server argument re-injection (`--host`, `-p`, `--host=VALUE`, `--port=VALUE`)
+- Test for ping response structure validation
+- E2E TCP deduplication test script (`scripts/tcp/test-dedup-tcp.ts`)
+
+### Docs
+- Updated deployment guide healthcheck example (`localhost` → `127.0.0.1`)
+- Clarified that `jobId` deduplication works in both embedded and TCP modes
+- Added `--host` flag example to CLI start command reference
+
 ## [2.5.1] - 2026-02-23
 
 ### Fixed

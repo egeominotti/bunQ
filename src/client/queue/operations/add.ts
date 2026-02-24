@@ -268,7 +268,7 @@ export async function addBulk<T>(
       maxAttempts: m.attempts,
       backoff: m.backoff,
       timeout: m.timeout,
-      jobId: m.jobId,
+      customId: m.jobId,
       repeat: m.repeat,
       durable: m.durable,
     };

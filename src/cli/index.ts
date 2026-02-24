@@ -31,6 +31,8 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   let json = false;
   let help = false;
   let version = false;
+  let hostExplicit = false;
+  let portExplicit = false;
 
   const commandArgs: string[] = [];
   let i = 0;
@@ -40,6 +42,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
 
     if (arg === '--host' || arg === '-H') {
       host = allArgs[++i] ?? 'localhost';
+      hostExplicit = true;
     } else if (arg === '--port' || arg === '-p') {
       const raw = allArgs[++i] ?? '6789';
       const parsed = parseInt(raw, 10);
@@ -48,6 +51,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
         port = 6789;
       } else {
         port = parsed;
+        portExplicit = true;
       }
     } else if (arg === '--token' || arg === '-t') {
       const nextArg = allArgs[i + 1];
@@ -64,6 +68,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
       version = true;
     } else if (arg.startsWith('--host=')) {
       host = arg.slice(7);
+      hostExplicit = true;
     } else if (arg.startsWith('--port=')) {
       const raw = arg.slice(7);
       const parsed = parseInt(raw, 10);
@@ -72,6 +77,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
         port = 6789;
       } else {
         port = parsed;
+        portExplicit = true;
       }
     } else if (arg.startsWith('--token=')) {
       const val = arg.slice(8);
@@ -85,6 +91,18 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
       commandArgs.push(arg);
     }
     i++;
+  }
+
+  // When the command is 'start', re-inject explicitly-set --host and --port
+  // into commandArgs so they reach parseServerArgs in runServer().
+  // Global -p/--port maps to --tcp-port for the server command.
+  if (commandArgs[0] === 'start') {
+    if (hostExplicit) {
+      commandArgs.push('--host', host);
+    }
+    if (portExplicit) {
+      commandArgs.push('--tcp-port', String(port));
+    }
   }
 
   return {

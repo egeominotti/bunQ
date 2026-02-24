@@ -196,7 +196,8 @@ export class TcpClient extends EventEmitter {
     try {
       const start = Date.now();
       const response = await this.send({ cmd: 'Ping' });
-      const success = response.data.pong === true;
+      const data = response.data as Record<string, unknown> | undefined;
+      const success = data?.pong === true;
 
       if (success) {
         this.health.recordPingSuccess(Date.now() - start);

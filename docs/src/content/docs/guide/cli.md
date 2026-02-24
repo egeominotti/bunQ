@@ -25,6 +25,9 @@ bunqueue start
 # Custom ports
 bunqueue start --tcp-port 7000 --http-port 7001
 
+# Bind to specific host
+bunqueue start --host 127.0.0.1 -p 6789
+
 # With persistent storage
 bunqueue start --data-path ./data/production.db
 

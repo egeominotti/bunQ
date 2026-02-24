@@ -157,7 +157,7 @@ Use `durable: true` for:
 
 ### Job Deduplication (BullMQ-style)
 
-Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` already exists, **the existing job is returned** instead of creating a duplicate. This is BullMQ-compatible idempotent behavior.
+Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` already exists, **the existing job is returned** instead of creating a duplicate. This works in both **embedded** and **TCP** modes (including auto-batched operations). This is BullMQ-compatible idempotent behavior.
 
 ```typescript
 // Basic deduplication with jobId (BullMQ-style idempotency)

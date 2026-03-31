@@ -132,10 +132,12 @@ function handleDeduplication(
     throw new Error('Duplicate unique_key (extended TTL)');
   }
 
-  // Default: return existing job (BullMQ-style)
+  // Default: return existing job (BullMQ-style).
+  // Block if job is waiting (in priority queue) OR active (uniqueKey held until ack,
+  // jobIndex entry type 'processing' means the worker is still running it).
   if (input.customId) ctx.customIdMap.delete(input.customId);
   const existingJob = q.find(existingEntry.jobId);
-  if (existingJob) {
+  if (existingJob || ctx.jobIndex.has(existingEntry.jobId)) {
     ctx.broadcast({
       eventType: EventType.Duplicated,
       queue,
@@ -150,7 +152,7 @@ function handleDeduplication(
     return { skip: true, existingId: existingEntry.jobId };
   }
 
-  // Job not in queue (completed/failed) - allow new insert
+  // Job is completed/failed (not in jobIndex) - allow new insert
   shard.registerUniqueKeyWithTtl(queue, job.uniqueKey, job.id, input.dedup?.ttl);
   return { skip: false };
 }
@@ -216,10 +218,14 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
     const dedupResult = handleDeduplication(job, input, queue, shard, ctx);
     if (dedupResult.skip) {
       const existingJob = shard.getQueue(queue).find(dedupResult.existingId);
-      if (existingJob) {
-        result = { job: existingJob, persisted: false };
-        return;
-      }
+      // Return existing waiting job if found; if active (not in queue), use a
+      // placeholder with the correct ID so the caller sees the right ID without
+      // inserting a duplicate.
+      result = {
+        job: existingJob ?? ({ ...job, id: dedupResult.existingId } as Job),
+        persisted: false,
+      };
+      return;
     }
 
     // Insert to shard

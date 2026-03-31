@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.6.93] - 2026-03-31
+
+### Fixed
+- **Deduplication now blocks pushes while a job is active** — previously, pushing with the same `uniqueKey` while the original job was being processed (active) would succeed and insert a duplicate. The `uniqueKey` is held until ack, so the duplicate should have been rejected. Now correctly detects active jobs via `jobIndex` and returns `{ skip: true }`. Also fixed the fall-through in `pushJob` where a skipped dedup result could still proceed to insert if `q.find()` returned null.
+- This fixes a real-world cron scenario: a cron with pattern `* * * * *` whose job takes longer than 1 minute would accumulate duplicate jobs in the queue. On restart, the worker would pick them up immediately. Setting `deduplication.id` on the cron job template now correctly prevents this.
+
 ## [2.6.92] - 2026-03-31
 
 ### Added

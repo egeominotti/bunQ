@@ -26,7 +26,7 @@ const tcpConfigCache = new Map<string, StallConfig>();
 /** Set stall detection configuration */
 export function setStallConfig(ctx: StallContext, config: Partial<StallConfig>): void {
   if (ctx.embedded) {
-    dlqOps.setStallConfigEmbedded(ctx.name, config as Record<string, unknown>);
+    dlqOps.setStallConfigEmbedded(ctx.name, config);
   } else if (ctx.tcp) {
     // Cache locally so getStallConfig() returns the correct value
     const current = tcpConfigCache.get(ctx.name) ?? { ...DEFAULT_STALL_CONFIG };

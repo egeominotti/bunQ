@@ -407,11 +407,11 @@ export class WsHandler {
     try {
       const raw = JSON.parse(text) as Record<string, unknown>;
       if (raw['cmd'] === 'Subscribe') {
-        this.handleSubscribe(ws, raw as { events?: string[]; reqId?: string });
+        this.handleSubscribe(ws, raw);
         return;
       }
       if (raw['cmd'] === 'Unsubscribe') {
-        this.handleUnsubscribe(ws, raw as { events?: string[]; reqId?: string });
+        this.handleUnsubscribe(ws, raw);
         return;
       }
     } catch {

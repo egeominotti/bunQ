@@ -255,7 +255,7 @@ export async function routeJobRoutes(
         ids: body['ids'] as string[],
         results: body['results'] as unknown[] | undefined,
         tokens: body['tokens'] as string[] | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -269,7 +269,7 @@ export async function routeJobRoutes(
         ids: body['ids'] as string[],
         tokens: body['tokens'] as string[],
         durations: body['durations'] as number[],
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -282,7 +282,7 @@ export async function routeJobRoutes(
         cmd: 'JobHeartbeatB',
         ids: body['ids'] as string[],
         tokens: body['tokens'] as string[] | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);

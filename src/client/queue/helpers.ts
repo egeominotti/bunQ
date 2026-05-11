@@ -45,5 +45,5 @@ export function toDomainFilter(filter: ClientDlqFilter | undefined): DlqFilter |
 
 /** Convert client DLQ config to domain config */
 export function toDomainDlqConfig(config: Record<string, unknown>): Partial<DomainDlqConfig> {
-  return config as Partial<DomainDlqConfig>;
+  return config;
 }

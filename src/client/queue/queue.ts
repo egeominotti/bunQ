@@ -209,7 +209,7 @@ export class Queue<T = unknown> {
   add(name: string, data: T, opts?: JobOptions): Promise<Job<T>> {
     // Bypass batcher for durable jobs or when batcher is not active
     if (this.addBatcher && !opts?.durable) {
-      return this.addBatcher.enqueue(name, data as unknown, opts) as Promise<Job<T>>;
+      return this.addBatcher.enqueue(name, data, opts) as Promise<Job<T>>;
     }
     return addOps.add(this.addCtx, name, data, opts);
   }
@@ -233,13 +233,10 @@ export class Queue<T = unknown> {
     end?: number;
     asc?: boolean;
   }): Job<T>[] {
-    return queryOps.getJobs(this.queryCtx, opts as Parameters<typeof queryOps.getJobs>[1]);
+    return queryOps.getJobs(this.queryCtx, opts);
   }
   getJobsAsync(opts?: { state?: string | string[]; start?: number; end?: number; asc?: boolean }) {
-    return queryOps.getJobsAsync(
-      this.queryCtx,
-      opts as Parameters<typeof queryOps.getJobsAsync>[1]
-    );
+    return queryOps.getJobsAsync(this.queryCtx, opts);
   }
   getWaiting(start?: number, end?: number) {
     return queryOps.getWaiting<T>(this.queryCtx, start, end);

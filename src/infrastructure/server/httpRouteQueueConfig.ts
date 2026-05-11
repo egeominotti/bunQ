@@ -52,7 +52,7 @@ export async function routeQueueConfigRoutes(
         cmd: 'RetryDlq',
         queue,
         jobId: body['jobId'] as string | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);
@@ -77,7 +77,7 @@ export async function routeQueueConfigRoutes(
         cmd: 'RateLimit',
         queue,
         limit: body['limit'] as number,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);
@@ -99,7 +99,7 @@ export async function routeQueueConfigRoutes(
         cmd: 'SetConcurrency',
         queue,
         limit: body['limit'] as number,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);

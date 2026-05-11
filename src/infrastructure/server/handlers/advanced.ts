@@ -166,7 +166,7 @@ export function handleClean(
       count: ids.length,
     });
   }
-  return { ok: true, count: ids.length, ids, reqId } as Response;
+  return { ok: true, count: ids.length, ids, reqId };
 }
 
 /** Handle Count command */
@@ -176,7 +176,7 @@ export function handleCount(
   reqId?: string
 ): Response {
   const count = ctx.queueManager.count(cmd.queue);
-  return { ok: true, count, reqId } as Response;
+  return { ok: true, count, reqId };
 }
 
 // ============ Rate Limiting ============
@@ -344,7 +344,7 @@ export async function handlePromoteJobs(
     const success = await ctx.queueManager.promote(delayed[i].id);
     if (success) count++;
   }
-  return { ok: true, count, reqId } as Response;
+  return { ok: true, count, reqId };
 }
 
 // ============ Flow Dependency Commands ============

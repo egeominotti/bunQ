@@ -23,7 +23,7 @@ export class BatchAccumulator<T = unknown, R = unknown> {
 
   /** Build a Processor that buffers jobs into batches */
   buildProcessor(): Processor<T, R> {
-    return ((job: Job<T & FlowJobData>): Promise<R> => {
+    return (job: Job<T & FlowJobData>): Promise<R> => {
       return new Promise<R>((resolve, reject) => {
         this.buffer.push({ job, resolve, reject });
 
@@ -36,7 +36,7 @@ export class BatchAccumulator<T = unknown, R = unknown> {
           }, timeout);
         }
       });
-    }) as Processor<T, R>;
+    };
   }
 
   flush(): void {

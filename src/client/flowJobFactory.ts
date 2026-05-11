@@ -102,7 +102,7 @@ export function createFlowJobObject<T>(
 
     updateProgress: async (progress) => {
       if (callbacks?.updateProgress) {
-        return callbacks.updateProgress(id, progress as number | object);
+        return callbacks.updateProgress(id, progress);
       }
       if (embedded) {
         await getSharedManager().updateProgress(jobId(id), progress);
@@ -156,7 +156,7 @@ export function createFlowJobObject<T>(
       if (embedded) {
         return (await getSharedManager().getChildrenValues(jobId(id))) as Record<string, R>;
       }
-      if (!tcp) return {} as Record<string, R>;
+      if (!tcp) return {};
       const res = await tcp.send({ cmd: 'GetChildrenValues', id });
       const vals = (res as { data?: { values?: Record<string, unknown> } }).data?.values ?? {};
       return vals as Record<string, R>;

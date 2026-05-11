@@ -113,5 +113,5 @@ export function handleCronList(
       timezone: c.timezone,
     })),
     reqId,
-  } as Response;
+  };
 }

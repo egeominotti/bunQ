@@ -161,7 +161,7 @@ export class IndexedPriorityQueue {
     const updatedJob: Job = {
       ...indexed.job,
       priority: newPriority,
-    } as Job;
+    };
 
     // Create new heap entry with new generation
     const gen = this.generation++;

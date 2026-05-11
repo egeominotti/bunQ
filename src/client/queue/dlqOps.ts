@@ -5,14 +5,7 @@
 
 import { getSharedManager } from '../manager';
 import { jobId } from '../../domain/types/job';
-import type {
-  DlqConfig,
-  DlqEntry,
-  DlqStats,
-  DlqFilter,
-  FailureReason,
-  StallConfig,
-} from '../types';
+import type { DlqConfig, DlqEntry, DlqStats, DlqFilter, StallConfig } from '../types';
 import { toDlqEntry } from '../types';
 import { getShard, getDlqContext, toDomainFilter, toDomainDlqConfig } from './helpers';
 import * as dlqOps from '../../application/dlqManager';
@@ -21,7 +14,7 @@ import * as dlqOps from '../../application/dlqManager';
 export function setDlqConfig(queue: string, config: Partial<DlqConfig>): void {
   const manager = getSharedManager();
   const ctx = getDlqContext(manager);
-  dlqOps.configureDlq(queue, ctx, toDomainDlqConfig(config as Record<string, unknown>));
+  dlqOps.configureDlq(queue, ctx, toDomainDlqConfig(config));
 }
 
 /** Get DLQ configuration (embedded only) */
@@ -46,7 +39,7 @@ export function getDlqStatsEmbedded(queue: string): DlqStats {
   const stats = dlqOps.getDlqStats(queue, ctx);
   return {
     total: stats.total,
-    byReason: stats.byReason as Record<FailureReason, number>,
+    byReason: stats.byReason,
     pendingRetry: stats.pendingRetry,
     expired: stats.expired,
     oldestEntry: stats.oldestEntry,
@@ -85,5 +78,5 @@ export function setStallConfigEmbedded(queue: string, config: Record<string, unk
 export function getStallConfigEmbedded(queue: string): StallConfig {
   const manager = getSharedManager();
   const shard = getShard(manager, queue);
-  return shard.getStallConfig(queue) as StallConfig;
+  return shard.getStallConfig(queue);
 }

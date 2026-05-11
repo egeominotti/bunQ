@@ -18,7 +18,7 @@ import type {
   DlqFilter,
 } from './types';
 import { DlqRateLimitManager } from './bunqueue/dlqRateLimit';
-import type { RepeatOpts, JobTemplate, SchedulerInfo } from './queue/scheduler';
+import type { SchedulerInfo } from './queue/scheduler';
 import type {
   BunqueueOptions,
   BunqueueMiddleware,
@@ -88,8 +88,7 @@ export class Bunqueue<T = unknown, R = unknown> {
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
-    const wrappedProcessor: Processor<T, R> = ((job: Job<T & FlowJobData>) =>
-      self.processJob(job)) as Processor<T, R>;
+    const wrappedProcessor: Processor<T, R> = (job: Job<T & FlowJobData>) => self.processJob(job);
 
     this.queue = new Queue<T>(name, this.buildQueueOpts(opts));
     this.worker = new Worker<T, R>(name, wrappedProcessor, this.buildWorkerOpts(opts));
@@ -109,11 +108,11 @@ export class Bunqueue<T = unknown, R = unknown> {
 
   private buildRouteProcessor(routes: Record<string, Processor<T, R>>): Processor<T, R> {
     const routeMap: Partial<Record<string, Processor<T, R>>> = routes;
-    return ((job: Job<T & FlowJobData>): Promise<R> | R => {
+    return (job: Job<T & FlowJobData>): Promise<R> | R => {
       const handler = routeMap[job.name];
       if (!handler) throw new Error(`No route for job "${job.name}" in queue "${this.name}"`);
       return handler(job);
-    }) as Processor<T, R>;
+    };
   }
 
   private buildQueueOpts(opts: BunqueueOptions<T, R>): QueueOptions {
@@ -237,8 +236,8 @@ export class Bunqueue<T = unknown, R = unknown> {
   ): Promise<SchedulerInfo | null> {
     return this.queue.upsertJobScheduler(
       id,
-      { pattern, timezone: opts?.timezone } as RepeatOpts,
-      { name: id, data, opts: opts?.jobOpts } as JobTemplate<T>
+      { pattern, timezone: opts?.timezone },
+      { name: id, data, opts: opts?.jobOpts }
     );
   }
 
@@ -250,8 +249,8 @@ export class Bunqueue<T = unknown, R = unknown> {
   ): Promise<SchedulerInfo | null> {
     return this.queue.upsertJobScheduler(
       id,
-      { every: intervalMs } as RepeatOpts,
-      { name: id, data, opts: opts?.jobOpts } as JobTemplate<T>
+      { every: intervalMs },
+      { name: id, data, opts: opts?.jobOpts }
     );
   }
 

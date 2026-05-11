@@ -54,7 +54,7 @@ export async function routeResourceRoutes(
         uniqueKey: body['uniqueKey'] as string | undefined,
         dedup: body['dedup'] as { ttl?: number; extend?: boolean; replace?: boolean } | undefined,
         skipMissedOnRestart: body['skipMissedOnRestart'] as boolean | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -98,7 +98,7 @@ export async function routeResourceRoutes(
         events: body['events'] as string[],
         queue: body['queue'] as string | undefined,
         secret: body['secret'] as string | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -111,7 +111,7 @@ export async function routeResourceRoutes(
       {
         cmd: 'RemoveWebhook',
         webhookId: webhookMatch[1],
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 404, cors);
@@ -127,7 +127,7 @@ export async function routeResourceRoutes(
         cmd: 'SetWebhookEnabled',
         id: webhookEnabledMatch[1],
         enabled: body['enabled'] as boolean,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -159,7 +159,7 @@ export async function routeResourceRoutes(
         hostname: body['hostname'] as string | undefined,
         pid: body['pid'] as number | undefined,
         startedAt: body['startedAt'] as number | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
@@ -172,7 +172,7 @@ export async function routeResourceRoutes(
       {
         cmd: 'UnregisterWorker',
         workerId: workerMatch[1],
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 404, cors);
@@ -194,7 +194,7 @@ export async function routeResourceRoutes(
         activeJobs: body['activeJobs'] as number | undefined,
         processed: body['processed'] as number | undefined,
         failed: body['failed'] as number | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);

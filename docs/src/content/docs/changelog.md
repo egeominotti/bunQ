@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.12] - 2026-05-11
+
+### Internal
+- Remove 63 unnecessary `as Type` assertions across `src/` flagged by `@typescript-eslint/no-unnecessary-type-assertion` on CI's stricter `@types/bun@1.3.13`. Pure type-level cleanup, no runtime impact.
+- Refactor `src/cli/output.ts` `str()` to narrow `unknown` via explicit `typeof` branches and a `{ toString(): string }` interface cast, avoiding both `no-unnecessary-type-assertion` and `no-base-to-string` rule conflicts.
+
 ## [2.7.11] - 2026-05-11
 
 ### Fixed

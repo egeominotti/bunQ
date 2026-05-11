@@ -39,7 +39,7 @@ export function handleGetResult(
   reqId?: string
 ): Response {
   const result = ctx.queueManager.getResult(jobId(cmd.id));
-  return { ok: true, id: cmd.id, result, reqId } as Response;
+  return { ok: true, id: cmd.id, result, reqId };
 }
 
 /** Handle GetJobCounts command */

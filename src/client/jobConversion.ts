@@ -4,14 +4,7 @@
  */
 
 import type { DlqEntry as InternalDlqEntry } from '../domain/types/dlq';
-import type {
-  Job,
-  JobStateType,
-  ChangePriorityOpts,
-  GetDependenciesOpts,
-  DlqEntry,
-  FailureReason,
-} from './types';
+import type { Job, JobStateType, ChangePriorityOpts, GetDependenciesOpts, DlqEntry } from './types';
 import { buildJobOpts } from './jobHelpers';
 import {
   buildJobProperties,
@@ -76,10 +69,10 @@ export function createPublicJob<T>(opts: CreatePublicJobOptions): Job<T> {
     getState: () => (getState ? getState(id) : Promise.resolve('unknown' as JobStateType)),
     remove: () => (remove ? remove(id) : Promise.resolve()),
     retry: () => (retry ? retry(id) : Promise.resolve()),
-    getChildrenValues: <R = unknown>() =>
-      (getChildrenValues ? getChildrenValues(id) : Promise.resolve({})) as Promise<
-        Record<string, R>
-      >,
+    getChildrenValues: <R = unknown>(): Promise<Record<string, R>> =>
+      getChildrenValues
+        ? (getChildrenValues(id) as unknown as Promise<Record<string, R>>)
+        : Promise.resolve({}),
 
     // BullMQ v5 mutation methods
     updateData: (data: T) => (updateData ? updateData(id, data) : Promise.resolve()),
@@ -190,10 +183,10 @@ export function toPublicJob<T>(opts: ToPublicJobOptions): Job<T> {
     getState: () => (getState ? getState(id) : Promise.resolve('unknown' as JobStateType)),
     remove: () => (remove ? remove(id) : Promise.resolve()),
     retry: () => (retry ? retry(id) : Promise.resolve()),
-    getChildrenValues: <R = unknown>() =>
-      (getChildrenValues ? getChildrenValues(id) : Promise.resolve({})) as Promise<
-        Record<string, R>
-      >,
+    getChildrenValues: <R = unknown>(): Promise<Record<string, R>> =>
+      getChildrenValues
+        ? (getChildrenValues(id) as unknown as Promise<Record<string, R>>)
+        : Promise.resolve({}),
 
     // BullMQ v5 mutation methods
     updateData: (data: T) => (updateData ? updateData(id, data) : Promise.resolve()),
@@ -261,13 +254,13 @@ export function toDlqEntry<T>(entry: InternalDlqEntry): DlqEntry<T> {
   return {
     job: toPublicJob<T>({ job: entry.job, name: jobData?.name ?? 'default' }),
     enteredAt: entry.enteredAt,
-    reason: entry.reason as FailureReason,
+    reason: entry.reason,
     error: entry.error,
     attempts: entry.attempts.map((a) => ({
       attempt: a.attempt,
       startedAt: a.startedAt,
       failedAt: a.failedAt,
-      reason: a.reason as FailureReason,
+      reason: a.reason,
       error: a.error,
       duration: a.duration,
     })),

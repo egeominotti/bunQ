@@ -222,7 +222,7 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
       // placeholder with the correct ID so the caller sees the right ID without
       // inserting a duplicate.
       result = {
-        job: existingJob ?? ({ ...job, id: dedupResult.existingId } as Job),
+        job: existingJob ?? { ...job, id: dedupResult.existingId },
         persisted: false,
       };
       return;

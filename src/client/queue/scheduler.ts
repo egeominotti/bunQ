@@ -69,7 +69,7 @@ export interface SchedulerInfo {
 function buildCronData(jobTemplate?: JobTemplate): unknown {
   if (!jobTemplate) return {};
   return jobTemplate.name
-    ? { name: jobTemplate.name, ...((jobTemplate.data ?? {}) as object) }
+    ? { name: jobTemplate.name, ...(jobTemplate.data ?? {}) }
     : (jobTemplate.data ?? {});
 }
 

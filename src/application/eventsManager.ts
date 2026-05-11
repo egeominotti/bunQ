@@ -138,7 +138,7 @@ export class EventsManager {
     if (hasSubscribers) {
       for (const sub of this.subscribers) {
         try {
-          sub(event as JobEvent);
+          sub(event);
         } catch {
           // Ignore subscriber errors
         }

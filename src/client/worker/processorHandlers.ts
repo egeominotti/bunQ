@@ -61,7 +61,7 @@ export function createGetStateHandler(embedded: boolean, tcp: TcpConnection | nu
       const response = await tcp.send({ cmd: 'GetState', id });
       return ((response as { state?: string }).state ?? 'unknown') as JobStateType;
     }
-    return 'unknown' as JobStateType;
+    return 'unknown';
   };
 }
 

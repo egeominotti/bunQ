@@ -924,7 +924,7 @@ export class QueueManager {
   }
 
   setDlqConfig(queue: string, config: Record<string, unknown>): void {
-    this.shards[shardIndex(queue)].setDlqConfig(queue, config as Partial<DlqConfig>);
+    this.shards[shardIndex(queue)].setDlqConfig(queue, config);
   }
 
   getDlqConfig(queue: string): DlqConfig {

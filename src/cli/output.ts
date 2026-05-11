@@ -26,8 +26,10 @@ function color(text: string, colorCode: string): string {
 /** Safely convert unknown value to string */
 function str(value: unknown, fallback = ''): string {
   if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
   if (typeof value === 'object') return JSON.stringify(value);
-  return String(value as string | number | boolean | bigint | symbol);
+  // value is narrowed to number | boolean | bigint | symbol | function — all have a defined toString.
+  return (value as { toString(): string }).toString();
 }
 
 /** Format a job object for display */

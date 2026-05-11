@@ -34,16 +34,16 @@ export function getDlqConfig(ctx: DlqContext): DlqConfig {
   if (ctx.embedded) return dlqOps.getDlqConfigEmbedded(ctx.name);
   // Return cached config if available
   const cached = tcpDlqConfigCache.get(ctx.name);
-  if (cached) return cached as DlqConfig;
-  return {} as DlqConfig;
+  if (cached) return cached;
+  return {};
 }
 
 /** Get DLQ configuration (async, works in TCP mode) */
 export async function getDlqConfigAsync(ctx: DlqContext): Promise<DlqConfig> {
   if (ctx.embedded) return dlqOps.getDlqConfigEmbedded(ctx.name);
-  if (!ctx.tcp) return {} as DlqConfig;
+  if (!ctx.tcp) return {};
   const response = await ctx.tcp.send({ cmd: 'GetDlqConfig', queue: ctx.name });
-  if (!response.ok) return {} as DlqConfig;
+  if (!response.ok) return {};
   return (response as { config: DlqConfig }).config;
 }
 

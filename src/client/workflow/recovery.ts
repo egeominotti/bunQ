@@ -54,7 +54,7 @@ async function enqueueExecution(exec: Execution, queue: Queue): Promise<void> {
     workflowName: exec.workflowName,
     nodeIndex: exec.currentNodeIndex,
   };
-  await queue.add('wf:step', jobData as unknown as Record<string, unknown>);
+  await queue.add('wf:step', jobData);
 }
 
 async function recoverWaiting(exec: Execution, wf: Workflow, deps: RecoverDeps): Promise<void> {

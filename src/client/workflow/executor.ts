@@ -280,7 +280,7 @@ export class WorkflowExecutor {
       workflowName: exec.workflowName,
       nodeIndex: exec.currentNodeIndex,
     };
-    await this.queue.add('wf:step', jobData as unknown as Record<string, unknown>);
+    await this.queue.add('wf:step', jobData);
   }
 
   private scheduleTimeoutCheck(execId: string, workflowName: string, nodeIdx: number, ms: number) {

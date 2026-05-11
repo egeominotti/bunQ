@@ -321,7 +321,7 @@ export async function handleExtendLocks(
     );
     if (success) count++;
   }
-  return { ok: true, count, reqId } as Response;
+  return { ok: true, count, reqId };
 }
 
 // ============ Set Webhook Enabled ============

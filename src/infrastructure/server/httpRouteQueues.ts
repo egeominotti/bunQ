@@ -114,7 +114,7 @@ async function routeJobOps(
         timeout: body['timeout'] as number | undefined,
         owner: body['owner'] as string | undefined,
         lockTtl: body['lockTtl'] as number | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);
@@ -295,7 +295,7 @@ export async function routeQueueRoutes(
         cmd: 'PromoteJobs',
         queue,
         count: body['count'] as number | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);
@@ -312,7 +312,7 @@ export async function routeQueueRoutes(
         cmd: 'RetryCompleted',
         queue,
         id: body['id'] as string | undefined,
-      } as Parameters<typeof handleCommand>[0],
+      },
       ctx
     );
     return jsonResponse(r, 200, cors);

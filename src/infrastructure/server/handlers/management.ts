@@ -46,7 +46,7 @@ export function handleGetProgress(
     progress: progress.progress,
     message: progress.message,
     reqId,
-  } as Response;
+  };
 }
 
 /** Handle Pause command */
@@ -76,7 +76,7 @@ export function handleDrain(
   reqId?: string
 ): Response {
   const count = ctx.queueManager.drain(cmd.queue);
-  return { ok: true, count, reqId } as Response;
+  return { ok: true, count, reqId };
 }
 
 /** Handle Stats command */

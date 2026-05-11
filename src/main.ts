@@ -4,40 +4,42 @@
  * Main entry point - routes to CLI for client commands or starts server
  */
 
-// Check for CLI client commands (not server mode)
-const clientCommands = [
-  'push',
-  'pull',
-  'ack',
-  'fail',
-  'job',
-  'queue',
-  'dlq',
-  'cron',
-  'worker',
-  'webhook',
-  'rate-limit',
-  'concurrency',
-  'stats',
-  'metrics',
-  'health',
-  'backup',
-];
+// Only run startup dispatch when this file is the program entry point.
+// Issue #85: re-exporting `defineConfig` means user config files import this
+// module; without this guard, the top-level dispatch would re-run the CLI/server
+// on every import and cause "Failed to listen at 0.0.0.0".
+if (import.meta.main) {
+  const clientCommands = [
+    'push',
+    'pull',
+    'ack',
+    'fail',
+    'job',
+    'queue',
+    'dlq',
+    'cron',
+    'worker',
+    'webhook',
+    'rate-limit',
+    'concurrency',
+    'stats',
+    'metrics',
+    'health',
+    'backup',
+  ];
 
-const firstArg = process.argv[2];
-const isClientCommand = firstArg && clientCommands.includes(firstArg);
-const isStartCommand = firstArg === 'start';
-const hasHelpOrVersion = process.argv.includes('--help') || process.argv.includes('--version');
-// Route to CLI when flags are passed (e.g. `bunqueue -p 8945`)
-// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- process.argv[2] can be undefined at runtime
-const hasFlags = firstArg?.startsWith('-');
+  const firstArg = process.argv[2];
+  const isClientCommand = firstArg && clientCommands.includes(firstArg);
+  const isStartCommand = firstArg === 'start';
+  const hasHelpOrVersion = process.argv.includes('--help') || process.argv.includes('--version');
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- process.argv[2] can be undefined at runtime
+  const hasFlags = firstArg?.startsWith('-');
 
-// Route to CLI for client commands, help, version, start, or when flags are present
-if (isClientCommand || hasHelpOrVersion || isStartCommand || hasFlags) {
-  void import('./cli/index').then(({ main }) => main());
-} else {
-  // Direct server mode (no args at all)
-  void startServer();
+  if (isClientCommand || hasHelpOrVersion || isStartCommand || hasFlags) {
+    void import('./cli/index').then(({ main }) => main());
+  } else {
+    void startServer();
+  }
 }
 
 import { QueueManager } from './application/queueManager';
@@ -263,16 +265,19 @@ async function startServer(): Promise<void> {
   }, config.statsIntervalMs);
 }
 
-// Enable JSON logging if requested (fallback for CLI mode which doesn't go through startServer)
-if (Bun.env.LOG_FORMAT === 'json') {
-  Logger.enableJsonMode();
-}
+// Logger env-var bootstrap only applies when this file is the entry point.
+// Imported consumers (e.g. user config files using `defineConfig`) must not
+// have their process Logger state mutated as a side effect — see Issue #85.
+if (import.meta.main) {
+  if (Bun.env.LOG_FORMAT === 'json') {
+    Logger.enableJsonMode();
+  }
 
-// Set log level from environment (fallback for CLI mode)
-if (Bun.env.LOG_LEVEL) {
-  const validLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
-  const level = Bun.env.LOG_LEVEL.toLowerCase();
-  if (validLevels.includes(level as LogLevel)) {
-    Logger.setLevel(level as LogLevel);
+  if (Bun.env.LOG_LEVEL) {
+    const validLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
+    const level = Bun.env.LOG_LEVEL.toLowerCase();
+    if (validLevels.includes(level as LogLevel)) {
+      Logger.setLevel(level as LogLevel);
+    }
   }
 }

@@ -10,6 +10,14 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.11] - 2026-05-11
+
+### Fixed
+- **`defineConfig` caused "Failed to listen at 0.0.0.0" when used in config file** (Issue #85, reported by @timnew) — `src/main.ts` re-executes its top-level dispatch on every import. Running `bunqueue start -c typed.ts` started the server, then `loadConfigFile()` imported the user config which imports `defineConfig` from `'bunqueue'` → resolves to `dist/main.js` → top-level code sees `argv[2] === 'start'` and re-invokes the CLI, attempting a second bind on the same port. Wrapped the top-level CLI/server dispatch and the Logger env-var bootstrap in `if (import.meta.main)` so importing the package entry (for `defineConfig` or other re-exports) has no side effect. Behavior when `src/main.ts` is the actual entry (e.g. `bun run src/main.ts`, compiled binary) is unchanged.
+
+### Tests
+- New regression test `test/issue-85-config-import-side-effect.test.ts` — spawns a subprocess that imports `src/main.ts` with `process.argv` emulating `bunqueue start`, asserts no server banner/bind logs.
+
 ## [2.7.10] - 2026-04-20
 
 ### Fixed

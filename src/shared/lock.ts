@@ -68,8 +68,14 @@ export class AsyncLock {
 
     this.locked = true;
 
+    let released = false;
     return {
       release: () => {
+        // Idempotent: ignore double-release on the same guard.
+        // Prevents stale releases from clobbering the next owner's `locked` flag
+        // and breaking the mutual-exclusion invariant.
+        if (released) return;
+        released = true;
         this.locked = false;
         // Skip cancelled entries - O(k) where k = cancelled entries at head
         let next = this.queue.shift();
@@ -142,8 +148,11 @@ export class RWLock {
 
     this.readers++;
 
+    let released = false;
     return {
       release: () => {
+        if (released) return;
+        released = true;
         this.readers--;
         if (this.readers === 0 && this.writerWaiting > 0) {
           // Skip cancelled entries
@@ -213,8 +222,11 @@ export class RWLock {
 
   /** Create write lock guard - extracted to avoid code duplication */
   private createWriteGuard(): LockGuard {
+    let released = false;
     return {
       release: () => {
+        if (released) return;
+        released = true;
         this.writer = false;
         // Notify waiting writers first (priority)
         if (this.writerWaiting > 0) {

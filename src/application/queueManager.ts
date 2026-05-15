@@ -598,6 +598,16 @@ export class QueueManager {
     return lockMgr.releaseClientJobs(clientId, this.contextFactory.getLockContext());
   }
 
+  /**
+   * Force-release client tracking without acquiring queue locks. Last-resort
+   * fallback when releaseClientJobs has exhausted its retry budget — clears
+   * the clientJobs map entry to prevent leaks and resets job heartbeats so
+   * the stall detector recovers orphaned active jobs on its next tick.
+   */
+  forceReleaseClientJobs(clientId: string): number {
+    return lockMgr.forceReleaseClientJobs(clientId, this.contextFactory.getLockContext());
+  }
+
   // ============ Query Operations ============
 
   async getJob(jobId: JobId): Promise<Job | null> {

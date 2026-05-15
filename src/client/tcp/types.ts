@@ -81,6 +81,13 @@ export interface PendingCommand {
   resolve: (value: Record<string, unknown>) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  /**
+   * Reference to the Promise returned to the caller. Used by rejectAll() on
+   * intentional shutdown to attach a silent .catch — prevents unhandled
+   * rejections from leaking when callers (fire-and-forget heartbeats, polling
+   * loops mid-await) don't have a .catch in place at the moment we reject.
+   */
+  promise?: Promise<Record<string, unknown>>;
 }
 
 /** Socket wrapper interface */

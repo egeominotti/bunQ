@@ -14,6 +14,17 @@ import { pack, unpack, rowToJob, reconstructDlqEntry } from './sqliteSerializer'
 import { BatchInsertManager, WriteBuffer } from './sqliteBatch';
 import { storageLog } from '../../shared/logger';
 
+/** Critical-loss callback: invoked when WriteBuffer drops jobs after exhausting retries. */
+export type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: number) => void;
+
+/** Record of a critical job loss event (jobs dropped after max retries). */
+export interface SqliteCriticalLoss {
+  jobs: Job[];
+  error: string;
+  attempts: number;
+  at: number;
+}
+
 /** SQLite configuration */
 export interface SqliteConfig {
   path: string;
@@ -24,6 +35,8 @@ export interface SqliteConfig {
   writeBufferSize?: number;
   /** Write buffer flush interval in ms (default: 50) */
   writeBufferFlushMs?: number;
+  /** Callback invoked when WriteBuffer drops jobs after exhausting retries. */
+  onCriticalLoss?: SqliteCriticalLossCallback;
 }
 
 /** Check if an error is a SQLITE_FULL (disk full) error */
@@ -44,12 +57,17 @@ export class SqliteStorage {
   private _diskFull = false;
   private _lastDiskFullError: string | null = null;
   private _lastDiskFullAt: number | null = null;
+  private readonly _criticalLosses: SqliteCriticalLoss[] = [];
+  private readonly _onCriticalLoss?: SqliteCriticalLossCallback;
+  /** Cap on retained critical-loss records to prevent unbounded growth */
+  private static readonly MAX_RETAINED_LOSSES = 100;
 
   constructor(config: SqliteConfig) {
     this.db = new Database(config.path, { create: true });
     this.db.run(PRAGMA_SETTINGS);
     this.migrate();
     this.statements = prepareStatements(this.db);
+    this._onCriticalLoss = config.onCriticalLoss;
 
     // Initialize batch manager and write buffer
     this.batchManager = new BatchInsertManager(this.db);
@@ -66,8 +84,80 @@ export class SqliteStorage {
           error: err.message,
           diskFull: this._diskFull,
         });
+      },
+      (jobs, lastError, attempts) => {
+        this.handleCriticalLoss(jobs, lastError, attempts);
       }
     );
+  }
+
+  /**
+   * Default handler for WriteBuffer critical loss. Logs every dropped job so
+   * ops can recover from logs, retains the last MAX_RETAINED_LOSSES records
+   * for programmatic inspection, and forwards to a user-provided callback.
+   *
+   * Without this handler the dropped jobs would be silently discarded by
+   * sqliteBatch.ts:209-223 (no callback = no recovery path).
+   */
+  private handleCriticalLoss(jobs: Job[], lastError: Error, attempts: number): void {
+    storageLog.error('CRITICAL: WriteBuffer dropped jobs after exhausting retries', {
+      lostJobCount: jobs.length,
+      attempts,
+      error: lastError.message,
+      diskFull: this._diskFull,
+    });
+    for (const job of jobs) {
+      storageLog.error('Lost job (recover from this log if needed)', {
+        id: String(job.id),
+        queue: job.queue,
+        customId: job.customId,
+        priority: job.priority,
+        createdAt: job.createdAt,
+        attempts: job.attempts,
+        // Data preview (truncated to avoid log spam from huge payloads)
+        dataPreview: this.previewJobData(job.data),
+      });
+    }
+    this._criticalLosses.push({
+      jobs,
+      error: lastError.message,
+      attempts,
+      at: Date.now(),
+    });
+    // Bound retention
+    while (this._criticalLosses.length > SqliteStorage.MAX_RETAINED_LOSSES) {
+      this._criticalLosses.shift();
+    }
+    // Forward to user-supplied callback if provided
+    if (this._onCriticalLoss) {
+      try {
+        this._onCriticalLoss(jobs, lastError, attempts);
+      } catch (err) {
+        storageLog.error('onCriticalLoss callback threw', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  /** Truncate job data preview to keep logs readable. */
+  private previewJobData(data: unknown): string {
+    try {
+      const s = JSON.stringify(data);
+      return s.length > 500 ? s.slice(0, 500) + '...[truncated]' : s;
+    } catch {
+      return '[unserializable]';
+    }
+  }
+
+  /** Retrieve retained critical-loss records (most recent last). */
+  getCriticalLosses(): readonly SqliteCriticalLoss[] {
+    return this._criticalLosses;
+  }
+
+  /** Clear retained critical-loss records (e.g. after operator acknowledgement). */
+  clearCriticalLosses(): void {
+    this._criticalLosses.length = 0;
   }
 
   /** Mark disk as full and log */
@@ -191,7 +281,28 @@ export class SqliteStorage {
     });
   }
 
+  /**
+   * Ensure a job's buffered INSERT has been written to disk before issuing a
+   * state-mutating UPDATE. Without this, markActive/markCompleted's UPDATE
+   * would silently match 0 rows and the state change would be overwritten
+   * when the buffered INSERT eventually fires with the original
+   * 'waiting'/'delayed' state baked at insert time.
+   */
+  private flushIfBuffered(jobId: JobId): void {
+    if (this.writeBuffer.hasPending(String(jobId))) {
+      try {
+        this.writeBuffer.flush();
+      } catch {
+        // Flush errors are already routed through onError/onCriticalLoss.
+        // Proceed to UPDATE — if the row really isn't there the UPDATE will
+        // no-op and the caller's in-memory state stays authoritative until
+        // the next successful flush or recovery cycle.
+      }
+    }
+  }
+
   markActive(jobId: JobId, startedAt: number, timeline?: JobTimelineEntry[]): void {
+    this.flushIfBuffered(jobId);
     this.safeWrite(() => {
       this.statements
         .get('updateJobState')!
@@ -200,6 +311,7 @@ export class SqliteStorage {
   }
 
   markCompleted(jobId: JobId, completedAt: number, timeline?: JobTimelineEntry[]): void {
+    this.flushIfBuffered(jobId);
     this.safeWrite(() => {
       this.statements
         .get('completeJob')!
@@ -213,6 +325,7 @@ export class SqliteStorage {
   }
 
   markFailed(job: Job, error: string | null): void {
+    this.flushIfBuffered(job.id);
     this.safeWrite(() => {
       this.statements.get('insertDlq')!.run(job.id, job.queue, pack({ job, error }), Date.now());
     });

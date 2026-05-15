@@ -3,9 +3,9 @@
  * Creates the wrapper script that loads processor in worker process
  */
 
-import { mkdir, unlink } from 'node:fs/promises';
+import { mkdir, unlink, realpath } from 'node:fs/promises';
 import { closeSync, fsyncSync, openSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 
 /**
  * Escape a string for safe embedding in a template literal
@@ -22,9 +22,41 @@ export async function createWrapperScript(
   queueName: string,
   processorPath: string
 ): Promise<string> {
-  const fullPath = processorPath.startsWith('/')
-    ? processorPath
-    : `${process.cwd()}/${processorPath}`;
+  // Normalize the path so double slashes from callers like
+  // `${TMPDIR}/file` (TMPDIR often ends with `/`) don't trip the Worker's
+  // import resolver. Then resolve symlinks (e.g. macOS `/var` → `/private/var`)
+  // so the import target matches what Bun's module loader will see.
+  const normalized = normalize(
+    processorPath.startsWith('/') ? processorPath : `${process.cwd()}/${processorPath}`
+  );
+
+  // Verify the processor file is visible on disk before generating a wrapper
+  // that will import it from a Worker thread. On macOS, files written by
+  // Bun.write (no fsync) can briefly be invisible to fresh Worker processes,
+  // surfacing as ModuleNotFound when the wrapper's top-level await import()
+  // runs. Poll briefly with a fast cap to catch the race without slowing
+  // the happy path.
+  let processorVisible = false;
+  for (let i = 0; i < 20; i++) {
+    if (await Bun.file(normalized).exists()) {
+      processorVisible = true;
+      break;
+    }
+    await Bun.sleep(5);
+  }
+  if (!processorVisible) {
+    throw new Error(`Processor file not visible after polling: ${normalized}`);
+  }
+
+  // Resolve symlinks AFTER the existence check so a non-existent file fails
+  // with a clear error rather than realpath's ENOENT.
+  let fullPath: string;
+  try {
+    fullPath = await realpath(normalized);
+  } catch {
+    // realpath can fail in restricted sandboxes; fall back to normalized.
+    fullPath = normalized;
+  }
 
   // Escape the path to prevent code injection via backticks or template expressions
   const escapedPath = escapeForTemplateLiteral(fullPath);

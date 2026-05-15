@@ -92,38 +92,93 @@ export async function releaseClientJobs(clientId: string, ctx: LockContext): Pro
   let released = 0;
   const now = Date.now();
 
-  // Phase 3: Process each processing shard with proper locking
-  // Lock order: shardLocks BEFORE processingLocks (per lock hierarchy in CLAUDE.md)
-  for (const [procIdx, items] of byProcShard) {
-    // Group items by queue shard to minimize lock acquisitions
-    const byQueueShard = new Map<number, typeof items>();
-    for (const item of items) {
-      let list = byQueueShard.get(item.queueShardIdx);
-      if (!list) {
-        list = [];
-        byQueueShard.set(item.queueShardIdx, list);
+  try {
+    // Phase 3: Process each processing shard with proper locking
+    // Lock order: shardLocks BEFORE processingLocks (per lock hierarchy in CLAUDE.md)
+    for (const [procIdx, items] of byProcShard) {
+      // Group items by queue shard to minimize lock acquisitions
+      const byQueueShard = new Map<number, typeof items>();
+      for (const item of items) {
+        let list = byQueueShard.get(item.queueShardIdx);
+        if (!list) {
+          list = [];
+          byQueueShard.set(item.queueShardIdx, list);
+        }
+        list.push(item);
       }
-      list.push(item);
+
+      // Acquire shard locks first, then processing lock
+      for (const [queueShardIdx, shardItems] of byQueueShard) {
+        await withWriteLock(ctx.shardLocks[queueShardIdx], async () => {
+          await withWriteLock(ctx.processingLocks[procIdx], () => {
+            for (const { jobId } of shardItems) {
+              const job = ctx.processingShards[procIdx].get(jobId);
+              if (!job) continue;
+              released += releaseJobToQueue({ jobId, job, procIdx, queueShardIdx, ctx, now });
+            }
+          });
+        });
+      }
     }
 
-    // Acquire shard locks first, then processing lock
-    for (const [queueShardIdx, shardItems] of byQueueShard) {
-      await withWriteLock(ctx.shardLocks[queueShardIdx], async () => {
-        await withWriteLock(ctx.processingLocks[procIdx], () => {
-          for (const { jobId } of shardItems) {
-            const job = ctx.processingShards[procIdx].get(jobId);
-            if (!job) continue;
-            released += releaseJobToQueue({ jobId, job, procIdx, queueShardIdx, ctx, now });
-          }
-        });
-      });
-    }
+    return released;
+  } finally {
+    // Always clear client tracking, even if locking failed mid-flight.
+    // Prevents a leak in ctx.clientJobs that would otherwise accumulate
+    // across every TCP disconnect that hit a lock timeout. Jobs left in
+    // 'active' state will be recovered by the stall detector on its next tick.
+    ctx.clientJobs.delete(clientId);
+  }
+}
+
+/**
+ * Force-release client tracking without acquiring queue locks.
+ * Used as a last-resort fallback when releaseClientJobs has exhausted its
+ * retry budget (e.g. persistent lock contention on TCP disconnect). For each
+ * orphaned job:
+ *   - clears `jobLocks` so a stale lock token can't survive the disconnect
+ *     until its TTL expires;
+ *   - expires both `lastHeartbeat` (so stall detection's heartbeat check
+ *     fires) and `startedAt` (so the gracePeriod check passes immediately).
+ *
+ * Recovery latency: stall detection uses two-phase confirmation
+ * (stalledCandidates collected on one tick, acted on the next), so a job is
+ * recovered within ~2 stall-check ticks (≈10s with defaults). This is faster
+ * than the full stallTimeout (30s default) but NOT instant.
+ *
+ * This path runs lock-free: callers must accept that another path (stall
+ * detector, lock expiration) may concurrently mutate or remove the same job
+ * from processingShards. Worst case: our mutation lands on an object that is
+ * no longer in the Map, wasting the write. Never corrupts state.
+ *
+ * Returns the number of jobs whose state was reset.
+ */
+export function forceReleaseClientJobs(clientId: string, ctx: LockContext): number {
+  const jobs = ctx.clientJobs.get(clientId);
+  if (!jobs || jobs.size === 0) {
+    ctx.clientJobs.delete(clientId);
+    return 0;
   }
 
-  // Clear client tracking
-  ctx.clientJobs.delete(clientId);
+  let touched = 0;
+  for (const jobId of jobs) {
+    // Always drop any lock token for this job, even if the location is no
+    // longer 'processing' — prevents stale tokens from surviving.
+    ctx.jobLocks.delete(jobId);
 
-  return released;
+    const loc = ctx.jobIndex.get(jobId);
+    if (loc?.type !== 'processing') continue;
+    const job = ctx.processingShards[loc.shardIdx].get(jobId);
+    if (!job) continue;
+    // Expire heartbeat AND startedAt so the stall detector's grace-period
+    // gate passes on the next eligible tick.
+    job.lastHeartbeat = 0;
+    job.startedAt = 0;
+    touched++;
+  }
+
+  ctx.clientJobs.delete(clientId);
+  return touched;
 }
 
 /** Options for releasing a job back to queue */

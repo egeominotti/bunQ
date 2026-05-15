@@ -5,13 +5,54 @@
  */
 
 import { EventEmitter } from 'events';
-import type { ConnectionOptions, ConnectionHealth, SocketWrapper } from './types';
+import type { ConnectionOptions, ConnectionHealth, SocketWrapper, PendingCommand } from './types';
 import { DEFAULT_CONNECTION } from './types';
 import { HealthTracker } from './health';
 import { ReconnectManager } from './reconnect';
 import { createConnection, CommandQueue } from './connection';
 import { pack, unpack } from 'msgpackr';
 import { FrameParser } from '../../infrastructure/server/protocol';
+
+/**
+ * Sentinel error class for the synthetic rejection issued by close()/rejectAll().
+ * Using a dedicated subclass (instead of matching `error.message`) ensures the
+ * process-level filter never collides with user code that happens to throw an
+ * Error whose message is "Client closed" (Redis, HTTP, DB pool clients all do).
+ */
+export class ClientClosedError extends Error {
+  constructor(message = 'Client closed') {
+    super(message);
+    this.name = 'ClientClosedError';
+  }
+}
+
+/**
+ * One-time installer of a process-level filter that swallows the synthetic
+ * ClientClosedError issued by close()/rejectAll(). Catches the rare chained-
+ * Promise leak that `cmd.promise?.catch(() => {})` in rejectAll cannot reach
+ * (e.g. await-then-throw patterns where the rejection propagates through the
+ * awaiter's own Promise chain).
+ *
+ * Implementation note: the listener is intentionally a no-op for non-matching
+ * rejections. process.on('unhandledRejection', fn) calls all registered
+ * listeners independently — so existing handlers (e.g. main.ts shutdown
+ * handler) still fire for real rejections. We must NOT re-throw here because
+ * a throw inside an unhandledRejection listener becomes an uncaughtException,
+ * which would interact badly with main.ts's existing uncaughtException
+ * handler and cause double-shutdown attempts.
+ */
+let clientClosedFilterInstalled = false;
+function installClientClosedFilter(): void {
+  if (clientClosedFilterInstalled) return;
+  clientClosedFilterInstalled = true;
+  process.on('unhandledRejection', (reason: unknown) => {
+    if (reason instanceof ClientClosedError) {
+      return; // swallow — other listeners (if any) fire independently
+    }
+    // Non-matching rejection: no-op here. Other registered listeners (or the
+    // runtime default per --unhandled-rejections) handle it independently.
+  });
+}
 
 /**
  * TCP Client - manages connection to bunqueue server
@@ -298,7 +339,9 @@ export class TcpClient extends EventEmitter {
     const reqId = this.generateReqId();
     const commandWithReqId = { ...command, reqId };
 
-    return new Promise((resolve, reject) => {
+    // Definite-assignment assertion: assigned synchronously by Promise executor below.
+    let pendingRef!: PendingCommand;
+    const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Try to remove from in-flight
         const removed = this.commands.removeByReqId(reqId);
@@ -308,7 +351,7 @@ export class TcpClient extends EventEmitter {
         }
       }, this.options.commandTimeout);
 
-      const pending = {
+      pendingRef = {
         id: 0,
         reqId,
         command: commandWithReqId,
@@ -322,13 +365,16 @@ export class TcpClient extends EventEmitter {
         },
         timeout,
       };
-
-      // Add to in-flight tracking
-      this.commands.addInFlight(pending);
-
-      // Send immediately
-      this.socket?.write(FrameParser.frame(pack(commandWithReqId)));
     });
+
+    // Promise constructor executor is synchronous, so pendingRef is assigned.
+    pendingRef.promise = promise;
+    this.commands.addInFlight(pendingRef);
+
+    // Send immediately (this.socket null-checked at entry of sendDirect)
+    this.socket.write(FrameParser.frame(pack(commandWithReqId)));
+
+    return promise;
   }
 
   /**
@@ -372,9 +418,10 @@ export class TcpClient extends EventEmitter {
     const reqId = this.generateReqId();
     const commandWithReqId = { ...command, reqId };
 
-    return new Promise((resolve, reject) => {
-      const id = this.commands.nextId();
-
+    const id = this.commands.nextId();
+    // Definite-assignment assertion: assigned synchronously by Promise executor below.
+    let pendingRef!: PendingCommand;
+    const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Try to remove from queue first
         if (this.commands.remove(id)) {
@@ -390,7 +437,7 @@ export class TcpClient extends EventEmitter {
         }
       }, this.options.commandTimeout);
 
-      const pending = {
+      pendingRef = {
         id,
         reqId,
         command: commandWithReqId,
@@ -404,18 +451,21 @@ export class TcpClient extends EventEmitter {
         },
         timeout,
       };
-
-      // Add to queue
-      this.commands.enqueue(pending);
-
-      // Connect if needed, then process queue
-      if (!this.connected && !this.connecting) {
-        // Connection errors during send are handled by command timeout/rejection
-        this.connect().catch(() => {});
-      } else if (this.connected) {
-        this.processQueue();
-      }
     });
+
+    // Promise constructor executor is synchronous, so pendingRef is assigned.
+    pendingRef.promise = promise;
+    this.commands.enqueue(pendingRef);
+
+    // Connect if needed, then process queue
+    if (!this.connected && !this.connecting) {
+      // Connection errors during send are handled by command timeout/rejection
+      this.connect().catch(() => {});
+    } else if (this.connected) {
+      this.processQueue();
+    }
+
+    return promise;
   }
 
   /** Close connection */
@@ -423,7 +473,12 @@ export class TcpClient extends EventEmitter {
     this.reconnect.setClosed(true);
     this.health.stopPing();
     this.reconnect.cancelReconnect();
-    this.commands.rejectAll(new Error('Client closed'));
+    // Install a process-level filter for the synthetic ClientClosedError we
+    // are about to issue. Catches the rare case where a caller's .catch() is
+    // attached on a chained Promise that our cmd.promise?.catch() cannot
+    // reach (await-then-throw patterns).
+    installClientClosedFilter();
+    this.commands.rejectAll(new ClientClosedError());
     if (this.socket) {
       this.socket.end();
       this.socket = null;

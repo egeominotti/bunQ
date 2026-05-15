@@ -23,7 +23,12 @@ export {
 } from './lockOperations';
 
 // Re-export client tracking
-export { registerClientJob, unregisterClientJob, releaseClientJobs } from './clientTracking';
+export {
+  registerClientJob,
+  unregisterClientJob,
+  releaseClientJobs,
+  forceReleaseClientJobs,
+} from './clientTracking';
 
 /**
  * Check and handle expired locks.

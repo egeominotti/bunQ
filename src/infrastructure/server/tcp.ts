@@ -184,12 +184,16 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
           // Jobs released successfully
         })
         .catch((err: unknown) => {
-          // After all retries failed, log the final error
-          // Jobs may be left in inconsistent state - manual intervention may be needed
-          tcpLog.error('Client jobs may be in inconsistent state', {
+          // After all retries failed, fall back to a force-release that
+          // unconditionally clears client tracking (prevents Map leak) and
+          // resets heartbeats so the stall detector recovers any orphaned
+          // 'active' jobs on its next tick.
+          const touched = queueManager.forceReleaseClientJobs(clientId);
+          tcpLog.error('Client jobs release failed; fell back to force-release', {
             clientId,
             error: String(err),
-            action: 'Manual cleanup may be required',
+            forcedJobs: touched,
+            note: 'Stall detector will recover orphaned active jobs on next tick',
           });
         });
     },

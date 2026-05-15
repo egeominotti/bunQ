@@ -218,9 +218,13 @@ export class CommandQueue {
 
   /** Reject all pending and in-flight commands */
   rejectAll(error: Error): void {
-    // Reject queued commands
+    // Reject queued commands. Attach a silent .catch BEFORE rejecting so that
+    // callers without a .catch in place (fire-and-forget heartbeats, polling
+    // loops mid-await on intentional close) don't surface as unhandled
+    // rejections and force non-zero process exit.
     for (const cmd of this.pendingCommands.values()) {
       clearTimeout(cmd.timeout);
+      cmd.promise?.catch(() => {});
       cmd.reject(error);
     }
     this.pendingCommands.clear();
@@ -229,6 +233,7 @@ export class CommandQueue {
     // Reject in-flight commands (pipelining)
     for (const cmd of this.inFlightByReqId.values()) {
       clearTimeout(cmd.timeout);
+      cmd.promise?.catch(() => {});
       cmd.reject(error);
     }
     this.inFlightByReqId.clear();

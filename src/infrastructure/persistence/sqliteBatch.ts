@@ -286,6 +286,19 @@ export class WriteBuffer {
     if (j !== -1) this.flushBuffer.splice(j, 1);
   }
 
+  /**
+   * Check whether a job is still sitting in the WriteBuffer (not yet persisted).
+   * Used by state-transition writes (markActive/Completed/Failed) to decide
+   * whether they need to flush the buffer first — otherwise their UPDATE
+   * would silently match 0 rows and the state change would be lost when the
+   * buffered INSERT eventually writes with the original state.
+   */
+  hasPending(jobId: string): boolean {
+    for (const j of this.activeBuffer) if (j.id === jobId) return true;
+    for (const j of this.flushBuffer) if (j.id === jobId) return true;
+    return false;
+  }
+
   /** Stop auto-flush timer and flush pending jobs */
   stop(): void {
     // Clear auto-flush timer

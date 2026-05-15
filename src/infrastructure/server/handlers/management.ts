@@ -29,24 +29,39 @@ export async function handleProgress(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
-  const success = await ctx.queueManager.updateProgress(jobId(cmd.id), cmd.progress, cmd.message);
-  return success ? resp.ok(undefined, reqId) : resp.error('Job not found or not active', reqId);
+  const id = jobId(cmd.id);
+  const success = await ctx.queueManager.updateProgress(id, cmd.progress, cmd.message);
+  if (success) return resp.ok(undefined, reqId);
+  // Disambiguate "not found" from "not active" so callers can act on the
+  // distinction (e.g. retry on transient state vs surface a missing-ID error).
+  const state = await ctx.queueManager.getJobState(id);
+  if (state === 'unknown') {
+    return resp.error('Job not found', reqId);
+  }
+  return resp.error(`Job is not active (current state: ${state})`, reqId);
 }
 
 /** Handle GetProgress command */
-export function handleGetProgress(
+export async function handleGetProgress(
   cmd: Extract<Command, { cmd: 'GetProgress' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
-  const progress = ctx.queueManager.getProgress(jobId(cmd.id));
-  if (!progress) return resp.error('Job not found or not active', reqId);
-  return {
-    ok: true,
-    progress: progress.progress,
-    message: progress.message,
-    reqId,
-  };
+): Promise<Response> {
+  const id = jobId(cmd.id);
+  const progress = ctx.queueManager.getProgress(id);
+  if (progress) {
+    return {
+      ok: true,
+      progress: progress.progress,
+      message: progress.message,
+      reqId,
+    };
+  }
+  const state = await ctx.queueManager.getJobState(id);
+  if (state === 'unknown') {
+    return resp.error('Job not found', reqId);
+  }
+  return resp.error(`Job is not active (current state: ${state})`, reqId);
 }
 
 /** Handle Pause command */

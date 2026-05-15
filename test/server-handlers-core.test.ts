@@ -952,14 +952,14 @@ describe('Query Handlers', () => {
         ctx
       );
 
-      const res = handleGetProgress({ cmd: 'GetProgress', id: jobId }, ctx);
+      const res = await handleGetProgress({ cmd: 'GetProgress', id: jobId }, ctx);
       expect(res.ok).toBe(true);
       expect((res as any).progress).toBe(42);
       expect((res as any).message).toBe('Step 2');
     });
 
-    test('should return error for non-active job', () => {
-      const res = handleGetProgress(
+    test('should return error for non-active job', async () => {
+      const res = await handleGetProgress(
         { cmd: 'GetProgress', id: 'non-existent' },
         ctx
       );
@@ -975,7 +975,7 @@ describe('Query Handlers', () => {
       await handlePull({ cmd: 'PULL', queue: 'emails' }, ctx);
       await handleProgress({ cmd: 'Progress', id: jobId, progress: 10 }, ctx);
 
-      const res = handleGetProgress(
+      const res = await handleGetProgress(
         { cmd: 'GetProgress', id: jobId, reqId: 'req-prog' },
         ctx,
         'req-prog'
@@ -1599,7 +1599,7 @@ describe('End-to-End Flows', () => {
     expect(progRes.ok).toBe(true);
 
     // Get progress
-    const getProgRes = handleGetProgress({ cmd: 'GetProgress', id: jobId }, ctx);
+    const getProgRes = await handleGetProgress({ cmd: 'GetProgress', id: jobId }, ctx);
     expect((getProgRes as any).progress).toBe(50);
 
     // Ack with result

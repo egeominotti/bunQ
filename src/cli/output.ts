@@ -32,12 +32,53 @@ function str(value: unknown, fallback = ''): string {
   return (value as { toString(): string }).toString();
 }
 
+/**
+ * Derive a job's state from its fields when not explicitly provided.
+ * The server-side Job domain object doesn't carry an explicit `state` field
+ * (state is tracked separately in jobIndex), so responses like PULL omit it.
+ *
+ * Used only as a display fallback when the response includes a Job object
+ * but no explicit state. Conservative: errs toward 'unknown' rather than
+ * guessing 'active' for a job that may actually be in DLQ/failed/stalled.
+ *   - explicit state field present → use it
+ *   - completedAt → completed
+ *   - attempts >= maxAttempts && no completedAt → likely failed / DLQ → unknown
+ *   - startedAt && !completedAt → likely active, but not certain → unknown
+ *     for the most common pull-response case the caller (PULL) knows it's
+ *     active and will pass `state` explicitly in future iterations
+ *   - runAt > now → delayed
+ *   - else → waiting
+ */
+function deriveJobState(job: Record<string, unknown>): string {
+  if (typeof job.state === 'string' && job.state.length > 0) return job.state;
+
+  const completedAt = typeof job.completedAt === 'number' ? job.completedAt : 0;
+  const startedAt = typeof job.startedAt === 'number' ? job.startedAt : 0;
+  const attempts = typeof job.attempts === 'number' ? job.attempts : 0;
+  const maxAttempts = typeof job.maxAttempts === 'number' ? job.maxAttempts : 0;
+  const runAt = typeof job.runAt === 'number' ? job.runAt : 0;
+
+  if (completedAt > 0) return 'completed';
+  // A job whose retries are exhausted with no completion is in DLQ. We can't
+  // tell from timestamps alone whether it's there or merely retrying, so
+  // surface 'unknown' rather than confidently print 'active'.
+  if (maxAttempts > 0 && attempts >= maxAttempts && startedAt > 0) return 'unknown';
+  if (startedAt > 0) return 'active';
+  if (runAt > Date.now()) return 'delayed';
+  // If we have zero signal at all (no timestamps, no state), fall back to
+  // 'unknown' rather than confidently print 'waiting'. Real responses from
+  // the server include a `runAt` (set at push time), so 'waiting' inference
+  // still triggers for real waiting jobs.
+  if (runAt === 0 && startedAt === 0 && completedAt === 0) return 'unknown';
+  return 'waiting';
+}
+
 /** Format a job object for display */
 function formatJob(job: Record<string, unknown>): string {
   const lines = [
     `${color('Job:', colors.bold)} ${str(job.id)}`,
     `  Queue:      ${str(job.queue)}`,
-    `  State:      ${str(job.state, 'unknown')}`,
+    `  State:      ${deriveJobState(job)}`,
     `  Priority:   ${str(job.priority)}`,
     `  Attempts:   ${str(job.attempts)}/${str(job.maxAttempts)}`,
     `  Data:       ${JSON.stringify(job.data)}`,
@@ -268,7 +309,11 @@ function formatCollection(r: Record<string, unknown>, command: string): string |
 }
 
 /** Format a successful response based on its content */
-function formatSuccess(response: Record<string, unknown>, command: string): string {
+function formatSuccess(
+  response: Record<string, unknown>,
+  command: string,
+  subcommand?: string
+): string {
   // Unwrap nested data wrapper (server wraps workers, webhooks, logs, metrics in {data: {...}})
   const r = unwrap(response);
 
@@ -276,9 +321,18 @@ function formatSuccess(response: Record<string, unknown>, command: string): stri
   if ('id' in r && typeof r.id === 'string' && command === 'push') {
     return color(`Job created: ${r.id}`, colors.green);
   }
-  // Batch jobs created
+  // Batch jobs IDs returned. Wording depends on command + subcommand.
   if ('ids' in r && Array.isArray(r.ids)) {
-    return color(`Created ${r.ids.length} jobs: ${r.ids.join(', ')}`, colors.green);
+    const n = r.ids.length;
+    const idsStr = r.ids.join(', ');
+    let verb = 'Affected';
+    if (command === 'push') verb = 'Created';
+    else if (command === 'queue') {
+      verb = subcommand === 'drain' ? 'Drained' : 'Cleaned';
+    } else if (command === 'dlq') {
+      verb = subcommand === 'retry' ? 'Retried' : subcommand === 'purge' ? 'Purged' : 'Affected';
+    }
+    return color(`${verb} ${n} jobs${idsStr ? ': ' + idsStr : ''}`, colors.green);
   }
 
   // Try collection/list formats
@@ -289,8 +343,13 @@ function formatSuccess(response: Record<string, unknown>, command: string): stri
   if ('workerId' in r) return color(`Worker registered: ${str(r.workerId)}`, colors.green);
   // State
   if ('state' in r) return `State: ${str(r.state)}`;
-  // Result
-  if ('result' in r) return `Result: ${JSON.stringify(r.result, null, 2)}`;
+  // Result. undefined → no result stored yet (job not completed or removeOnComplete).
+  if ('result' in r) {
+    if (r.result === undefined || r.result === null) {
+      return color('No result available (job not completed or result was removed)', colors.yellow);
+    }
+    return `Result: ${JSON.stringify(r.result, null, 2)}`;
+  }
   // Progress
   if ('progress' in r) {
     const msg = r.message ? ` - ${str(r.message)}` : '';
@@ -314,7 +373,8 @@ function formatSuccess(response: Record<string, unknown>, command: string): stri
 export function formatOutput(
   response: Record<string, unknown>,
   command: string,
-  asJson: boolean
+  asJson: boolean,
+  subcommand?: string
 ): string {
   if (asJson) {
     return JSON.stringify(response, null, 2);
@@ -324,7 +384,7 @@ export function formatOutput(
     return formatError(str(response.error, 'Unknown error'), false);
   }
 
-  return formatSuccess(response, command);
+  return formatSuccess(response, command, subcommand);
 }
 
 /** Format error message */

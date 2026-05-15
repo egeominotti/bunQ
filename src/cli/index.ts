@@ -22,6 +22,32 @@ interface GlobalOptions {
   version: boolean;
 }
 
+/**
+ * Resolve TCP port from env when not set via --port flag.
+ * Priority: explicit CLI flag (caller-checked) > TCP_PORT (server's primary var)
+ *          > BUNQUEUE_TCP_PORT > BQ_TCP_PORT. Reads TCP_PORT first so users
+ * running both server and client in the same shell with TCP_PORT=X get
+ * consistent behavior — same var binds the server AND routes the client.
+ */
+function resolveEnvPort(currentPort: number): number {
+  const envPort = Bun.env.TCP_PORT ?? Bun.env.BUNQUEUE_TCP_PORT ?? Bun.env.BQ_TCP_PORT;
+  if (!envPort) return currentPort;
+  const parsed = parseInt(envPort, 10);
+  if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    console.warn(`Warning: Invalid env port "${envPort}". Using ${currentPort}.`);
+    return currentPort;
+  }
+  return parsed;
+}
+
+/**
+ * Resolve host from env when not set via --host flag.
+ * Priority: HOST (server's primary var) > BUNQUEUE_HOST > BQ_HOST.
+ */
+function resolveEnvHost(currentHost: string): string {
+  return Bun.env.HOST ?? Bun.env.BUNQUEUE_HOST ?? Bun.env.BQ_HOST ?? currentHost;
+}
+
 /** Parse global options from process.argv */
 export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: string[] } {
   const allArgs = process.argv.slice(2);
@@ -64,9 +90,9 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
       }
     } else if (arg === '--json') {
       json = true;
-    } else if (arg === '--help') {
+    } else if (arg === '--help' || arg === '-h') {
       help = true;
-    } else if (arg === '--version') {
+    } else if (arg === '--version' || arg === '-v') {
       version = true;
     } else if (arg.startsWith('--host=')) {
       host = arg.slice(7);
@@ -114,6 +140,9 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   // Fall back to environment variables for token if not set via CLI flag
   // Priority: --token flag > BQ_TOKEN > BUNQUEUE_TOKEN
   token = resolveToken(token);
+
+  if (!portExplicit) port = resolveEnvPort(port);
+  if (!hostExplicit) host = resolveEnvHost(host);
 
   return {
     options: { host, port, token, json, help, version },

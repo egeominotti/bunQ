@@ -182,11 +182,29 @@ export async function executeCommand(
     // Execute command
     const response = await sendCommand(connection.socket, cmd);
 
+    // Extract subcommand (first positional arg) so the formatter can pick the
+    // right verb for batch-id responses (queue drain → "Drained", dlq retry
+    // → "Retried", etc.). Falls back to undefined when not applicable.
+    const subcommand =
+      typeof args[0] === 'string' && !args[0].startsWith('-') ? args[0] : undefined;
+
     if (!response.ok) {
-      console.error(formatOutput(response, command, options.json));
+      console.error(formatOutput(response, command, options.json, subcommand));
       process.exit(1);
     }
-    console.log(formatOutput(response, command, options.json));
+    console.log(formatOutput(response, command, options.json, subcommand));
+
+    // Worker registrations are tied to the TCP connection — the server
+    // auto-unregisters when the client disconnects (see tcp.ts close handler).
+    // The one-shot CLI command opens, registers, and immediately closes, so
+    // by the time control returns to the shell the worker is already gone.
+    // Emit a warning to stderr so users don't expect persistence.
+    if (cmd.cmd === 'RegisterWorker' && !options.json && response.ok) {
+      process.stderr.write(
+        'Warning: worker registration is transient and expires when this CLI process exits. ' +
+          'For persistent workers, run a long-lived process via the SDK (Worker class) or `bunqueue start` with --processor.\n'
+      );
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error(formatError(message, options.json));

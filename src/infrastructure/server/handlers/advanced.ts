@@ -71,14 +71,20 @@ export async function handleMoveToDelayed(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
-  const success = await ctx.queueManager.moveToDelayed(jobId(cmd.id), cmd.delay);
+  const id = jobId(cmd.id);
+  const success = await ctx.queueManager.moveToDelayed(id, cmd.delay);
   if (success) {
     ctx.queueManager.emitDashboardEvent('job:moved-to-delayed', {
       jobId: cmd.id,
       delay: cmd.delay,
     });
+    return resp.ok(undefined, reqId);
   }
-  return success ? resp.ok(undefined, reqId) : resp.error('Job not found or not active', reqId);
+  const state = await ctx.queueManager.getJobState(id);
+  if (state === 'unknown') {
+    return resp.error('Job not found', reqId);
+  }
+  return resp.error(`Job is not active (current state: ${state})`, reqId);
 }
 
 /** Handle Discard command - move to DLQ */

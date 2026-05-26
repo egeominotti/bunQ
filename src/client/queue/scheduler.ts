@@ -6,6 +6,7 @@
 import { getSharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
 import type { JobOptions } from '../types';
+import type { CronJobOptions } from '../../domain/types/cron';
 
 interface SchedulerContext {
   /** Server-side queue key (already prefixed with `prefixKey` if set). */
@@ -18,6 +19,8 @@ interface SchedulerContext {
    * cannot collide on the global cron-name PRIMARY KEY.
    */
   prefixKey?: string;
+  /** Queue-level default job options, merged under the scheduler template opts. */
+  defaultJobOptions?: JobOptions;
 }
 
 /** Apply the namespace prefix to a user-facing scheduler ID. */
@@ -73,6 +76,28 @@ function buildCronData(jobTemplate?: JobTemplate): unknown {
     : (jobTemplate.data ?? {});
 }
 
+/**
+ * Build the job options carried by every cron-spawned job (issue #86).
+ * Queue defaultJobOptions are the base; per-scheduler template opts override.
+ * Returns undefined when nothing relevant is set so the server keeps its
+ * own JOB_DEFAULTS fallback.
+ */
+function buildCronJobOptions(
+  defaultJobOptions: JobOptions | undefined,
+  jobTemplate?: JobTemplate
+): CronJobOptions | undefined {
+  const merged: JobOptions = { ...defaultJobOptions, ...jobTemplate?.opts };
+  const opts: { -readonly [K in keyof CronJobOptions]: CronJobOptions[K] } = {};
+  if (merged.attempts !== undefined) opts.maxAttempts = merged.attempts;
+  if (merged.backoff !== undefined) opts.backoff = merged.backoff;
+  if (merged.timeout !== undefined) opts.timeout = merged.timeout;
+  if (merged.delay !== undefined) opts.delay = merged.delay;
+  if (merged.stallTimeout !== undefined) opts.stallTimeout = merged.stallTimeout;
+  if (typeof merged.removeOnComplete === 'boolean') opts.removeOnComplete = merged.removeOnComplete;
+  if (typeof merged.removeOnFail === 'boolean') opts.removeOnFail = merged.removeOnFail;
+  return Object.keys(opts).length > 0 ? opts : undefined;
+}
+
 /** Extract dedup config from job template */
 function buildCronDedup(jobTemplate?: JobTemplate) {
   const dedup = jobTemplate?.opts?.deduplication;
@@ -94,6 +119,7 @@ export async function upsertJobScheduler(
   const repeatEvery = repeatOpts.every;
   const data = buildCronData(jobTemplate);
   const dedupFields = buildCronDedup(jobTemplate);
+  const jobOptions = buildCronJobOptions(ctx.defaultJobOptions, jobTemplate);
   const cronName = toCronName(ctx, schedulerId);
 
   if (ctx.embedded) {
@@ -109,6 +135,7 @@ export async function upsertJobScheduler(
       immediately: repeatOpts.immediately,
       skipIfNoWorker: repeatOpts.skipIfNoWorker,
       preventOverlap: repeatOpts.preventOverlap,
+      jobOptions,
       ...dedupFields,
     });
     return {
@@ -130,6 +157,7 @@ export async function upsertJobScheduler(
     immediately: repeatOpts.immediately,
     skipIfNoWorker: repeatOpts.skipIfNoWorker,
     preventOverlap: repeatOpts.preventOverlap,
+    jobOptions,
     ...dedupFields,
   });
 

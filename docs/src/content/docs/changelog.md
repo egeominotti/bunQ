@@ -10,6 +10,15 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.15] - 2026-05-26
+
+### Fixed
+- **Cron/scheduler jobs ignored job options (#86)** — Jobs spawned by `upsertJobScheduler`/cron always used `JOB_DEFAULTS` (`maxAttempts: 3`, `removeOnFail: false`), ignoring both the scheduler job template `opts` and the Queue `defaultJobOptions`. A scheduler with `attempts: 1, removeOnFail: true` still retried 3× and landed failed jobs in the DLQ. Cron definitions now carry a `jobOptions` field (`maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`) that `fireCronJob` forwards into each spawned job. The client merges Queue `defaultJobOptions` (base) with per-scheduler template `opts` (override), mapping `attempts` → `maxAttempts`. Persisted via new `job_options` column (schema migration 12); old rows load as `null` and fall back to defaults.
+
+### Notes
+- For cron jobs, `removeOnComplete`/`removeOnFail` honor only the boolean form. The numeric/`KeepJobs` variants accepted by `queue.add()` are not applied to scheduler-spawned jobs and fall back to `false`.
+- A per-job `delay` set in scheduler options stacks on top of the cron fire time (the spawned job is delayed `delay` ms after each scheduled fire).
+
 ## [2.7.14] - 2026-05-15
 
 ### Fixed (CLI audit, 8 bugs)

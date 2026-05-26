@@ -418,11 +418,19 @@ export class CronScheduler {
     // preventOverlap: auto-set uniqueKey to block pushes while previous job is active
     const effectiveUniqueKey =
       cron.uniqueKey ?? (cron.preventOverlap ? `cron:${cron.name}` : undefined);
+    const opts = cron.jobOptions;
     await this.pushJob!(cron.queue, {
       data: cron.data,
       priority: cron.priority,
       uniqueKey: effectiveUniqueKey,
       dedup: cron.dedup ?? undefined,
+      maxAttempts: opts?.maxAttempts,
+      backoff: opts?.backoff,
+      timeout: opts?.timeout,
+      delay: opts?.delay,
+      stallTimeout: opts?.stallTimeout,
+      removeOnComplete: opts?.removeOnComplete,
+      removeOnFail: opts?.removeOnFail,
     });
     this.lastFiredAt.set(cron.name, now);
     this.dashboardEmit?.('cron:fired', { name: cron.name, queue: cron.queue });

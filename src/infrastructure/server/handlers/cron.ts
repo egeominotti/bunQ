@@ -31,6 +31,7 @@ export function handleCron(
       immediately: cmd.immediately,
       skipIfNoWorker: cmd.skipIfNoWorker,
       preventOverlap: cmd.preventOverlap,
+      jobOptions: cmd.jobOptions,
     });
     ctx.queueManager.emitDashboardEvent(existing ? 'cron:updated' : 'cron:created', {
       name: cron.name,

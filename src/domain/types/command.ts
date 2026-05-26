@@ -4,6 +4,7 @@
  */
 
 import type { JobInput, JobState } from './job';
+import type { CronJobOptions } from './cron';
 
 /** Base command interface */
 interface BaseCommand {
@@ -324,6 +325,8 @@ export interface CronCommand extends BaseCommand {
   readonly skipIfNoWorker?: boolean;
   /** Prevent overlapping cron jobs via automatic dedup */
   readonly preventOverlap?: boolean;
+  /** Job options applied to each spawned job (retry/cleanup policy, etc.) */
+  readonly jobOptions?: CronJobOptions;
 }
 
 export interface CronDeleteCommand extends BaseCommand {

@@ -465,7 +465,12 @@ export class Queue<T = unknown> {
     repeatOpts: RepeatOpts,
     jobTemplate?: JobTemplate<T>
   ): Promise<SchedulerInfo | null> {
-    return schedulerOps.upsertJobScheduler(this.ctx, schedulerId, repeatOpts, jobTemplate);
+    return schedulerOps.upsertJobScheduler(
+      { ...this.ctx, defaultJobOptions: this.opts.defaultJobOptions },
+      schedulerId,
+      repeatOpts,
+      jobTemplate
+    );
   }
   removeJobScheduler(schedulerId: string) {
     return schedulerOps.removeJobScheduler(this.ctx, schedulerId);

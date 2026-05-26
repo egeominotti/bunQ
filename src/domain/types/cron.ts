@@ -9,6 +9,21 @@ export interface CronDedup {
   readonly replace?: boolean;
 }
 
+/**
+ * Job options applied to every job spawned by a cron (issue #86).
+ * Mirrors the relevant subset of JobInput so retry/cleanup policy can be
+ * configured per-scheduler instead of always falling back to JOB_DEFAULTS.
+ */
+export interface CronJobOptions {
+  readonly maxAttempts?: number;
+  readonly backoff?: number | { type: 'fixed' | 'exponential'; delay: number };
+  readonly timeout?: number;
+  readonly delay?: number;
+  readonly stallTimeout?: number;
+  readonly removeOnComplete?: boolean;
+  readonly removeOnFail?: boolean;
+}
+
 /** Cron job definition */
 export interface CronJob {
   readonly name: string;
@@ -32,6 +47,8 @@ export interface CronJob {
   readonly skipIfNoWorker: boolean;
   /** Prevent overlapping cron jobs via automatic dedup (default: true) */
   readonly preventOverlap: boolean;
+  /** Job options applied to each spawned job (retry/cleanup policy, etc.) */
+  readonly jobOptions: CronJobOptions | null;
 }
 
 /** Input for creating a cron job */
@@ -57,6 +74,8 @@ export interface CronJobInput {
   skipIfNoWorker?: boolean;
   /** Prevent overlapping cron jobs via automatic dedup (default: true) */
   preventOverlap?: boolean;
+  /** Job options applied to each spawned job (retry/cleanup policy, etc.) */
+  jobOptions?: CronJobOptions;
 }
 
 /** Create a new cron job */
@@ -81,6 +100,7 @@ export function createCronJob(input: CronJobInput, nextRun: number): CronJob {
     skipMissedOnRestart: input.skipMissedOnRestart ?? true,
     skipIfNoWorker: input.skipIfNoWorker ?? false,
     preventOverlap: input.preventOverlap ?? true,
+    jobOptions: input.jobOptions ?? null,
   };
 }
 

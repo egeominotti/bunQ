@@ -114,7 +114,8 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     dedup BLOB,
     skip_missed_on_restart INTEGER NOT NULL DEFAULT 0,
     skip_if_no_worker INTEGER NOT NULL DEFAULT 0,
-    prevent_overlap INTEGER NOT NULL DEFAULT 1
+    prevent_overlap INTEGER NOT NULL DEFAULT 1,
+    job_options BLOB
 );
 
 -- Queue state persistence (optional)
@@ -135,7 +136,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -182,5 +183,9 @@ ALTER TABLE cron_jobs ADD COLUMN prevent_overlap INTEGER NOT NULL DEFAULT 1;
   11: `
 CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
     ON jobs(completed_at DESC) WHERE state = 'completed';
+`,
+  // Migration 12: Add per-cron job options (retry/cleanup policy, issue #86)
+  12: `
+ALTER TABLE cron_jobs ADD COLUMN job_options BLOB;
 `,
 };

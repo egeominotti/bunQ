@@ -15,7 +15,19 @@ import type {
 } from '../../types';
 import { toPublicJob } from '../../types';
 import { jobId } from '../../../domain/types/job';
+import type { Job as InternalJob } from '../../../domain/types/job';
 import { createSimpleJob } from '../jobProxy';
+import { buildJobOpts } from '../../jobHelpers';
+
+/** Build reflection meta (priority/delay/opts) from an internal job shape */
+function metaFromJob(job: InternalJob): {
+  priority: number;
+  delay: number;
+  opts: ReturnType<typeof buildJobOpts>;
+} {
+  const opts = buildJobOpts(job);
+  return { priority: job.priority ?? 0, delay: opts.delay ?? 0, opts };
+}
 
 interface QueryContext {
   name: string;
@@ -97,7 +109,7 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
       });
     }
 
-    // Fallback to simple job
+    // Fallback to simple job — reflect priority/delay/opts from the real job (#88)
     return createSimpleJob(String(job.id), name, job.data as T, job.createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
@@ -106,20 +118,16 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
+      meta: metaFromJob(job),
     });
   }
 
   const response = await ctx.tcp!.send({ cmd: 'GetJob', id });
   if (!response.ok || !response.job) return null;
 
-  const j = response.job as {
-    id: string;
-    data: T;
-    progress?: number;
-    state?: string;
-  };
+  const j = response.job as InternalJob & { data: T; progress?: number };
   const name = (j.data as { name?: string })?.name ?? 'unknown';
-  const result = createSimpleJob(j.id, name, j.data, Date.now(), {
+  const result = createSimpleJob(String(j.id), name, j.data, j.createdAt ?? Date.now(), {
     queueName: ctx.name,
     embedded: ctx.embedded,
     tcp: ctx.tcp,
@@ -127,6 +135,7 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
     removeAsync: ctx.removeAsync,
     retryJob: ctx.retryJob,
     getChildrenValues: ctx.getChildrenValues,
+    meta: metaFromJob(j),
   });
   if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
   return result;
@@ -251,7 +260,10 @@ export async function getJobsAsync<T>(
   const now = Date.now();
   return jobs.map((j) => {
     const name = (j.data as { name?: string })?.name ?? 'unknown';
-    const result = createSimpleJob(j.id, name, j.data, j.createdAt ?? now, {
+    const createdAt = j.createdAt ?? now;
+    // Reflect priority/delay from the listing payload (slim shape, no full opts).
+    const delay = j.runAt !== undefined && j.runAt > createdAt ? j.runAt - createdAt : 0;
+    const result = createSimpleJob(j.id, name, j.data, createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -259,6 +271,7 @@ export async function getJobsAsync<T>(
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
+      meta: { priority: j.priority ?? 0, delay },
     });
     if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
     if (j.priority !== undefined) (result as { priority: number }).priority = j.priority;

@@ -130,6 +130,9 @@ export async function add<T>(
       sizeLimit: merged.sizeLimit,
       failParentOnFailure: merged.failParentOnFailure,
       removeDependencyOnFailure: merged.removeDependencyOnFailure,
+      continueParentOnFailure: merged.continueParentOnFailure,
+      ignoreDependencyOnFailure: merged.ignoreDependencyOnFailure,
+      timestamp: merged.timestamp,
       debounceId: merged.debounce?.id,
       debounceTtl: merged.debounce?.ttl,
     });
@@ -158,39 +161,114 @@ export async function add<T>(
     });
   }
 
-  // TCP mode
+  // TCP mode — forward the full option set so nothing is silently dropped (#88)
   const tcp = ctx.tcp!;
-  const response = await tcp.send({
-    cmd: 'PUSH',
-    queue: ctx.name,
-    data: jobData,
-    priority: merged.priority,
-    delay: merged.delay,
-    maxAttempts: merged.attempts,
-    backoff: merged.backoff,
-    timeout: merged.timeout,
-    jobId: merged.jobId,
-    removeOnComplete: merged.removeOnComplete,
-    removeOnFail: merged.removeOnFail,
-    stallTimeout: merged.stallTimeout,
-    durable: merged.durable,
-    repeat: merged.repeat,
-    parentId: merged.parent?.id,
-  });
+  const response = await tcp.send(buildPushPayload(ctx.name, jobData, merged));
 
   if (!response.ok) {
     throw new Error((response.error as string | undefined) ?? 'Failed to add job');
   }
 
   const jobIdStr = response.id as string;
-  return createJobProxy(jobIdStr, jobName, data, {
-    queueName: ctx.name,
-    tcp,
-    getJobState: ctx.getJobState,
-    removeAsync: ctx.removeAsync,
-    retryJob: ctx.retryJob,
-    getChildrenValues: ctx.getChildrenValues,
+  return createJobProxy(
+    jobIdStr,
+    jobName,
+    data,
+    {
+      queueName: ctx.name,
+      tcp,
+      getJobState: ctx.getJobState,
+      removeAsync: ctx.removeAsync,
+      retryJob: ctx.retryJob,
+      getChildrenValues: ctx.getChildrenValues,
+    },
+    { priority: merged.priority, delay: merged.delay, opts: merged }
+  );
+}
+
+/**
+ * Strip undefined-valued keys so the msgpack frame stays compact. Sending a
+ * field as `undefined` still serializes a nil entry; for large batches this
+ * bloats the frame (and intermittently trips large-frame delivery). Omitting
+ * undefined keeps option-less jobs minimal while still forwarding real options.
+ */
+function compact<T extends Record<string, unknown>>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const k in obj) {
+    if (obj[k] !== undefined) out[k] = obj[k];
+  }
+  return out as T;
+}
+
+/** Build the compacted PUSH command payload, forwarding the full option set (#88) */
+function buildPushPayload(
+  queue: string,
+  jobData: Record<string, unknown>,
+  m: ExtendedJobOptions
+): Record<string, unknown> {
+  return compact({
+    cmd: 'PUSH',
+    queue,
+    data: jobData,
+    priority: m.priority,
+    delay: m.delay,
+    maxAttempts: m.attempts,
+    backoff: m.backoff,
+    ttl: m.ttl,
+    timeout: m.timeout,
+    jobId: m.jobId,
+    uniqueKey: m.deduplication?.id,
+    dedup: m.deduplication
+      ? {
+          ttl: m.deduplication.ttl,
+          extend: m.deduplication.extend,
+          replace: m.deduplication.replace,
+        }
+      : undefined,
+    dependsOn: m.dependsOn,
+    tags: m.tags,
+    groupId: m.groupId,
+    lifo: m.lifo,
+    removeOnComplete: m.removeOnComplete,
+    removeOnFail: m.removeOnFail,
+    stallTimeout: m.stallTimeout,
+    stackTraceLimit: m.stackTraceLimit,
+    keepLogs: m.keepLogs,
+    sizeLimit: m.sizeLimit,
+    failParentOnFailure: m.failParentOnFailure,
+    removeDependencyOnFailure: m.removeDependencyOnFailure,
+    continueParentOnFailure: m.continueParentOnFailure,
+    ignoreDependencyOnFailure: m.ignoreDependencyOnFailure,
+    debounceId: m.debounce?.id,
+    debounceTtl: m.debounce?.ttl,
+    timestamp: m.timestamp,
+    durable: m.durable,
+    repeat: m.repeat,
+    parentId: m.parent?.id,
   });
+}
+
+/** Build the data payload for a bulk job, injecting parent refs when present */
+function buildBulkData(
+  name: string,
+  data: unknown,
+  m: ExtendedJobOptions
+): Record<string, unknown> {
+  const jobData: Record<string, unknown> = { name, ...(data as object) };
+  if (m.parent) {
+    jobData.__parentId = m.parent.id;
+    jobData.__parentQueue = m.parent.queue;
+  }
+  return jobData;
+}
+
+/** Reflection meta so the returned bulk Job reflects the requested options (#88) */
+function reflectionMeta(m: ExtendedJobOptions): {
+  priority?: number;
+  delay?: number;
+  opts: JobOptions;
+} {
+  return { priority: m.priority, delay: m.delay, opts: m };
 }
 
 /** Add multiple jobs in bulk */
@@ -201,20 +279,33 @@ export async function addBulk<T>(
   if (jobs.length === 0) return [];
   const now = Date.now();
 
+  // Merge defaults once per job so input building and reflection stay in sync
+  const merged = jobs.map(
+    ({ opts }) => ({ ...ctx.opts.defaultJobOptions, ...opts }) as ExtendedJobOptions
+  );
+
   if (ctx.embedded) {
     const manager = getSharedManager();
-    const inputs = jobs.map(({ name, data, opts }) => {
-      const m = { ...ctx.opts.defaultJobOptions, ...opts } as ExtendedJobOptions;
+    const inputs = jobs.map(({ name, data }, i) => {
+      const m = merged[i];
       const removeOnComplete = typeof m.removeOnComplete === 'boolean' ? m.removeOnComplete : false;
       const removeOnFail = typeof m.removeOnFail === 'boolean' ? m.removeOnFail : false;
       return {
-        data: { name, ...data },
+        data: buildBulkData(name, data, m),
         priority: m.priority,
         delay: m.delay,
         maxAttempts: m.attempts,
         backoff: m.backoff,
         timeout: m.timeout,
+        ttl: m.ttl,
         customId: m.jobId,
+        uniqueKey: m.deduplication?.id,
+        dependsOn: m.dependsOn?.map((id: string) => jobId(id)),
+        parentId: m.parent ? jobId(m.parent.id) : undefined,
+        tags: m.tags,
+        groupId: m.groupId,
+        stallTimeout: m.stallTimeout,
+        timestamp: m.timestamp,
         removeOnComplete,
         removeOnFail,
         repeat: m.repeat
@@ -240,6 +331,15 @@ export async function addBulk<T>(
         sizeLimit: m.sizeLimit,
         failParentOnFailure: m.failParentOnFailure,
         removeDependencyOnFailure: m.removeDependencyOnFailure,
+        continueParentOnFailure: m.continueParentOnFailure,
+        ignoreDependencyOnFailure: m.ignoreDependencyOnFailure,
+        dedup: m.deduplication
+          ? {
+              ttl: m.deduplication.ttl,
+              extend: m.deduplication.extend,
+              replace: m.deduplication.replace,
+            }
+          : undefined,
         debounceId: m.debounce?.id,
         debounceTtl: m.debounce?.ttl,
       };
@@ -255,16 +355,19 @@ export async function addBulk<T>(
         removeAsync: ctx.removeAsync,
         retryJob: ctx.retryJob,
         getChildrenValues: ctx.getChildrenValues,
+        meta: reflectionMeta(merged[i]),
       })
     );
   }
 
   // TCP mode
   const tcp = ctx.tcp!;
-  const batchJobs = jobs.map(({ name, data, opts }) => {
-    const m = { ...ctx.opts.defaultJobOptions, ...opts } as ExtendedJobOptions;
-    return {
-      data: { name, ...data },
+  const batchJobs = jobs.map(({ name, data }, i) => {
+    const m = merged[i];
+    const removeOnComplete = typeof m.removeOnComplete === 'boolean' ? m.removeOnComplete : false;
+    const removeOnFail = typeof m.removeOnFail === 'boolean' ? m.removeOnFail : false;
+    return compact({
+      data: buildBulkData(name, data, m),
       priority: m.priority,
       delay: m.delay,
       maxAttempts: m.attempts,
@@ -274,6 +377,8 @@ export async function addBulk<T>(
       customId: m.jobId,
       tags: m.tags,
       groupId: m.groupId,
+      dependsOn: m.dependsOn?.map((id: string) => jobId(id)),
+      parentId: m.parent ? jobId(m.parent.id) : undefined,
       uniqueKey: m.deduplication?.id,
       dedup: m.deduplication
         ? {
@@ -284,6 +389,9 @@ export async function addBulk<T>(
         : undefined,
       lifo: m.lifo,
       stallTimeout: m.stallTimeout,
+      timestamp: m.timestamp,
+      removeOnComplete,
+      removeOnFail,
       repeat: m.repeat,
       durable: m.durable,
       stackTraceLimit: m.stackTraceLimit,
@@ -291,9 +399,11 @@ export async function addBulk<T>(
       sizeLimit: m.sizeLimit,
       failParentOnFailure: m.failParentOnFailure,
       removeDependencyOnFailure: m.removeDependencyOnFailure,
+      continueParentOnFailure: m.continueParentOnFailure,
+      ignoreDependencyOnFailure: m.ignoreDependencyOnFailure,
       debounceId: m.debounce?.id,
       debounceTtl: m.debounce?.ttl,
-    };
+    });
   });
 
   const response = await tcp.send({
@@ -306,14 +416,20 @@ export async function addBulk<T>(
 
   const ids = (response.ids ?? []) as string[];
   return ids.map((id, i) =>
-    createJobProxy(id, jobs[i].name, jobs[i].data, {
-      queueName: ctx.name,
-      tcp,
-      getJobState: ctx.getJobState,
-      removeAsync: ctx.removeAsync,
-      retryJob: ctx.retryJob,
-      getChildrenValues: ctx.getChildrenValues,
-    })
+    createJobProxy(
+      id,
+      jobs[i].name,
+      jobs[i].data,
+      {
+        queueName: ctx.name,
+        tcp,
+        getJobState: ctx.getJobState,
+        removeAsync: ctx.removeAsync,
+        retryJob: ctx.retryJob,
+        getChildrenValues: ctx.getChildrenValues,
+      },
+      reflectionMeta(merged[i])
+    )
   );
 }
 

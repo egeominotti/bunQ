@@ -3,7 +3,7 @@
  * Creates Job objects with methods for TCP and embedded modes
  */
 
-import type { Job } from '../types';
+import type { Job, JobOptions } from '../types';
 import type { TcpConnectionPool } from '../tcpPool';
 
 import type { JobStateType, ChangePriorityOpts } from '../types';
@@ -19,10 +19,27 @@ interface JobProxyContext {
   getChildrenValues: (id: string) => Promise<Record<string, unknown>>;
 }
 
+/**
+ * Options actually requested for the job, so the returned Job object reflects
+ * them (priority, delay, opts) instead of hardcoded defaults. See issue #88.
+ */
+export interface JobReflectionMeta {
+  priority?: number;
+  delay?: number;
+  opts?: JobOptions;
+  timestamp?: number;
+}
+
 /** Create a full Job proxy with TCP methods */
-export function createJobProxy<T>(id: string, name: string, data: T, ctx: JobProxyContext): Job<T> {
+export function createJobProxy<T>(
+  id: string,
+  name: string,
+  data: T,
+  ctx: JobProxyContext,
+  meta?: JobReflectionMeta
+): Job<T> {
   const { tcp, queueName } = ctx;
-  const ts = Date.now();
+  const ts = meta?.timestamp ?? Date.now();
 
   return {
     id,
@@ -32,14 +49,14 @@ export function createJobProxy<T>(id: string, name: string, data: T, ctx: JobPro
     attemptsMade: 0,
     timestamp: ts,
     progress: 0,
-    delay: 0,
+    delay: meta?.delay ?? 0,
     processedOn: undefined,
     finishedOn: undefined,
     stacktrace: null,
     stalledCounter: 0,
-    priority: 0,
+    priority: meta?.priority ?? 0,
     parentKey: undefined,
-    opts: {},
+    opts: meta?.opts ?? {},
     token: undefined,
     processedBy: undefined,
     deduplicationId: undefined,
@@ -218,6 +235,8 @@ interface SimpleJobContext {
   removeAsync: (id: string) => Promise<void>;
   retryJob: (id: string) => Promise<void>;
   getChildrenValues: (id: string) => Promise<Record<string, unknown>>;
+  /** Requested options to reflect on the returned job (priority/delay/opts) — #88 */
+  meta?: JobReflectionMeta;
 }
 
 /**
@@ -231,7 +250,7 @@ export function createSimpleJob<T>(
   timestamp: number,
   ctx: SimpleJobContext
 ): Job<T> {
-  const { queueName, embedded, tcp } = ctx;
+  const { queueName, embedded, tcp, meta } = ctx;
 
   return {
     id,
@@ -241,14 +260,14 @@ export function createSimpleJob<T>(
     attemptsMade: 0,
     timestamp,
     progress: 0,
-    delay: 0,
+    delay: meta?.delay ?? 0,
     processedOn: undefined,
     finishedOn: undefined,
     stacktrace: null,
     stalledCounter: 0,
-    priority: 0,
+    priority: meta?.priority ?? 0,
     parentKey: undefined,
-    opts: {},
+    opts: meta?.opts ?? {},
     token: undefined,
     processedBy: undefined,
     deduplicationId: undefined,

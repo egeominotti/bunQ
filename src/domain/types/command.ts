@@ -43,6 +43,19 @@ export interface PushCommand extends BaseCommand {
   readonly removeDependencyOnFailure?: boolean;
   readonly ignoreDependencyOnFailure?: boolean;
   readonly continueParentOnFailure?: boolean;
+  /** Stall detection timeout (ms) */
+  readonly stallTimeout?: number;
+  /** BullMQ v5 options not in the core set */
+  readonly stackTraceLimit?: number;
+  readonly keepLogs?: number;
+  readonly sizeLimit?: number;
+  /** Deduplication options (uniqueKey carries the id) */
+  readonly dedup?: { ttl?: number; extend?: boolean; replace?: boolean };
+  /** Debounce options */
+  readonly debounceId?: string;
+  readonly debounceTtl?: number;
+  /** Explicit creation timestamp */
+  readonly timestamp?: number;
 }
 
 export interface PushBatchCommand extends BaseCommand {

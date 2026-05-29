@@ -76,6 +76,14 @@ export async function handlePush(
       removeDependencyOnFailure: cmd.removeDependencyOnFailure,
       ignoreDependencyOnFailure: cmd.ignoreDependencyOnFailure,
       continueParentOnFailure: cmd.continueParentOnFailure,
+      stallTimeout: cmd.stallTimeout,
+      stackTraceLimit: cmd.stackTraceLimit,
+      keepLogs: cmd.keepLogs,
+      sizeLimit: cmd.sizeLimit,
+      dedup: cmd.dedup,
+      debounceId: cmd.debounceId,
+      debounceTtl: cmd.debounceTtl,
+      timestamp: cmd.timestamp,
     });
 
     return resp.ok(job.id, reqId);

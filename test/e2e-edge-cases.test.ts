@@ -32,15 +32,28 @@ describe('E2E Edge Cases', () => {
     const ctx = setup();
 
     test('webhook tracks successCount after delivery', async () => {
-      const wh = ctx.mgr.webhookManager.add('https://httpbin.org/post', ['job.completed'], 'wh-q');
-      expect(wh.successCount).toBe(0);
-      expect(wh.failureCount).toBe(0);
+      // Use a local server (not an external service like httpbin.org) so the
+      // assertion is deterministic and CI never flakes on network conditions.
+      const server = Bun.serve({ port: 0, fetch: () => new Response('ok', { status: 200 }) });
+      try {
+        const url = `http://localhost:${server.port}/hook`;
+        const wh = ctx.mgr.webhookManager.add(url, ['job.completed'], 'wh-q');
+        expect(wh.successCount).toBe(0);
+        expect(wh.failureCount).toBe(0);
 
-      await ctx.mgr.webhookManager.trigger('job.completed', 'job-1', 'wh-q');
-      await Bun.sleep(3000);
+        await ctx.mgr.webhookManager.trigger('job.completed', 'job-1', 'wh-q');
+        // Delivery is fire-and-forget; poll until it records a result.
+        const deadline = Date.now() + 5000;
+        while (ctx.mgr.webhookManager.get(wh.id)!.successCount === 0 && Date.now() < deadline) {
+          await Bun.sleep(10);
+        }
 
-      const updated = ctx.mgr.webhookManager.get(wh.id)!;
-      expect(updated.successCount + updated.failureCount).toBeGreaterThanOrEqual(1);
+        const updated = ctx.mgr.webhookManager.get(wh.id)!;
+        expect(updated.successCount).toBe(1);
+        expect(updated.failureCount).toBe(0);
+      } finally {
+        server.stop(true);
+      }
     }, 10000);
 
     test('webhook tracks failureCount for invalid URL', async () => {

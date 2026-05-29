@@ -10,6 +10,18 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.17] - 2026-05-30
+
+### Fixed
+- **Created job has wrong priority / options not reflected in TCP mode (#88)** — `await queue.add(name, data, { priority: 10 })` returned `job.priority === 0` over TCP. The Job object returned by `add()`/`addBulk()` (and `getJob()`/`getJobs()`) is built client-side by `createJobProxy`/`createSimpleJob`, which hardcoded `priority: 0`, `delay: 0`, `opts: {}`. These now reflect the requested/stored options (`priority`, `delay`, `opts`). Embedded `add()` was already correct (it uses `toPublicJob`).
+- **TCP `add()` silently dropped job options** — the single-job TCP `PUSH` path forwarded only a subset of options, so `deduplication`, `ttl`, `tags`, `groupId`, `lifo`, `keepLogs`, `sizeLimit`, `stackTraceLimit`, `debounce`, `dependsOn`, `failParentOnFailure`, `removeDependencyOnFailure`, `continueParentOnFailure`, `ignoreDependencyOnFailure` and `timestamp` were ignored when adding a single job over TCP. The `PUSH` command and its handler now carry and apply the full option set, matching embedded mode and bulk add. `addBulk` forwarding gaps (`removeOnComplete`/`removeOnFail`, parent, dedup, tags, groupId, dependsOn) were closed too.
+
+### Changed
+- TCP job payloads now omit `undefined`-valued keys, keeping large bulk frames compact (a 1000-job bulk payload dropped from ~446 KB to ~320 KB), which also avoids an intermittent large-frame delivery stall under load.
+
+### Notes
+- `getJobsAsync()` returns a slim `opts` (`{}`) for listed jobs, whereas `getJob()` returns the full `opts`. The reflected `delay` tracks current scheduling (`runAt - createdAt`), so after a retry/backoff it reflects the next run, not the originally requested delay.
+
 ## [2.7.16] - 2026-05-29
 
 ### Fixed

@@ -100,6 +100,7 @@ export function handleDashboardQueues(
     return {
       name,
       waiting: stats?.waiting ?? 0,
+      prioritized: stats?.prioritized ?? 0,
       delayed: stats?.delayed ?? 0,
       active: stats?.active ?? 0,
       dlq: stats?.dlq ?? 0,

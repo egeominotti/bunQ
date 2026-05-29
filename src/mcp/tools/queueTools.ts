@@ -181,7 +181,7 @@ export function registerQueueTools(server: McpServer, backend: McpBackend) {
 
   server.tool(
     'bunqueue_get_counts_per_priority',
-    'Get job count breakdown by priority level for a queue.',
+    'Get job count breakdown by priority level for a queue. Counts only waiting/delayed (queued) jobs — active, completed and failed jobs are not included.',
     {
       queue: z.string().describe('Queue name'),
     },

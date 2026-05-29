@@ -861,20 +861,32 @@ export class TcpBackend implements McpBackend {
   }
 
   async getJobs(queue: string, opts?: { state?: string; start?: number; end?: number }) {
-    const res = await this.send({ cmd: 'GetJobs', queue, ...opts });
+    // The TCP protocol uses offset/limit; the MCP tool exposes start/end.
+    // Translate so pagination actually takes effect (issue #87).
+    const start = opts?.start ?? 0;
+    const hasEnd = opts?.end !== undefined && opts.end >= 0;
+    const res = await this.send({
+      cmd: 'GetJobs',
+      queue,
+      state: opts?.state,
+      offset: start,
+      limit: hasEnd ? Math.max(0, opts!.end! - start) : undefined,
+    });
     return ((res.jobs as Array<Record<string, unknown>>) ?? []).map((j) => this.parseJob(j));
   }
 
   async getJobCounts(queue: string): Promise<JobCounts> {
     const res = await this.send({ cmd: 'GetJobCounts', queue });
+    // Server nests the counts under `counts` (resp.counts envelope).
+    const c = (res.counts as Record<string, number> | undefined) ?? {};
     return {
-      waiting: (res.waiting as number) ?? 0,
-      prioritized: (res.prioritized as number) ?? 0,
-      delayed: (res.delayed as number) ?? 0,
-      active: (res.active as number) ?? 0,
-      completed: (res.completed as number) ?? 0,
-      failed: (res.failed as number) ?? 0,
-      paused: (res.paused as number) ?? 0,
+      waiting: c.waiting ?? 0,
+      prioritized: c.prioritized ?? 0,
+      delayed: c.delayed ?? 0,
+      active: c.active ?? 0,
+      completed: c.completed ?? 0,
+      failed: c.failed ?? 0,
+      paused: c.paused ?? 0,
     };
   }
 
@@ -1027,14 +1039,17 @@ export class TcpBackend implements McpBackend {
 
   async listWorkers(): Promise<WorkerInfo[]> {
     const res = await this.send({ cmd: 'ListWorkers' });
-    return ((res.workers as Array<Record<string, unknown>>) ?? []).map((w) => ({
+    // Server nests workers under `data` (resp.data envelope).
+    const data = res.data as { workers?: Array<Record<string, unknown>> } | undefined;
+    const workers = data?.workers ?? (res.workers as Array<Record<string, unknown>>) ?? [];
+    return workers.map((w) => ({
       id: String(w.id),
       name: w.name as string,
       queues: (w.queues as string[]) ?? [],
       active: (w.activeJobs as number) ?? 0,
-      processed: (w.processed as number) ?? 0,
-      failed: (w.failed as number) ?? 0,
-      lastHeartbeat: (w.lastHeartbeat as number) ?? 0,
+      processed: (w.processedJobs as number) ?? (w.processed as number) ?? 0,
+      failed: (w.failedJobs as number) ?? (w.failed as number) ?? 0,
+      lastHeartbeat: (w.lastSeen as number) ?? (w.lastHeartbeat as number) ?? 0,
     }));
   }
 
@@ -1077,8 +1092,25 @@ export class TcpBackend implements McpBackend {
   }
 
   async getPerQueueStats(): Promise<Record<string, unknown>> {
-    const res = await this.send({ cmd: 'Metrics' });
-    return (res.queues as Record<string, unknown>) ?? res;
+    // `Metrics` returns global aggregates, not a per-queue breakdown.
+    // Use `DashboardQueues`, which carries real per-queue stats (issue #87).
+    const res = await this.send({ cmd: 'DashboardQueues' });
+    const data = res.data as { queues?: Array<Record<string, unknown>> } | undefined;
+    const queues = data?.queues ?? [];
+    const result: Record<string, unknown> = {};
+    for (const q of queues) {
+      const name = q.name;
+      if (typeof name !== 'string') continue;
+      // Match EmbeddedBackend shape: { waiting, prioritized, delayed, active, dlq }
+      result[name] = {
+        waiting: (q.waiting as number) ?? 0,
+        prioritized: (q.prioritized as number) ?? 0,
+        delayed: (q.delayed as number) ?? 0,
+        active: (q.active as number) ?? 0,
+        dlq: (q.dlq as number) ?? 0,
+      };
+    }
+    return result;
   }
 
   async getMemoryStats(): Promise<Record<string, unknown>> {

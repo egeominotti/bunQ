@@ -280,9 +280,10 @@ export async function addBulk<T>(
   const now = Date.now();
 
   // Merge defaults once per job so input building and reflection stay in sync
-  const merged = jobs.map(
-    ({ opts }) => ({ ...ctx.opts.defaultJobOptions, ...opts }) as ExtendedJobOptions
-  );
+  const merged: ExtendedJobOptions[] = jobs.map(({ opts }) => ({
+    ...ctx.opts.defaultJobOptions,
+    ...opts,
+  }));
 
   if (ctx.embedded) {
     const manager = getSharedManager();

@@ -24,7 +24,7 @@
  * real — the bug is specifically about stale rows surviving in the on-disk db.
  */
 
-import { describe, test, expect, afterEach, beforeAll } from 'bun:test';
+import { describe, test, expect, afterEach, afterAll, beforeAll } from 'bun:test';
 import { existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +33,11 @@ import { Queue, shutdownManager } from '../src/client';
 // Unique file-backed db under /tmp so SQLite persistence is real (not :memory:).
 const DB_DIR = mkdtempSync(join(tmpdir(), 'bunq-drain-'));
 const DB_PATH = join(DB_DIR, 'drain.db');
+
+// Capture the original env BEFORE we override it, so afterAll can restore it.
+// The embedded shared manager reads BUNQUEUE_DATA_PATH on first use; leaking it
+// here would point every later test file's shared manager at this (deleted) file.
+const PREV_DATA_PATH = Bun.env.BUNQUEUE_DATA_PATH;
 
 function cleanupDbFiles(): void {
   for (const suffix of ['', '-wal', '-shm']) {
@@ -61,6 +66,20 @@ describe('AUDIT: drain() must delete rows from SQLite (embedded)', () => {
 
   afterEach(() => {
     shutdownManager();
+  });
+
+  afterAll(() => {
+    // CRITICAL: restore the global env so this file does not poison other test
+    // files. Leaving BUNQUEUE_DATA_PATH set makes every subsequent embedded
+    // getSharedManager() (and any spawned server) bind to this deleted file,
+    // corrupting their state (the cause of cross-file full-suite failures).
+    if (PREV_DATA_PATH === undefined) {
+      delete Bun.env.BUNQUEUE_DATA_PATH;
+    } else {
+      Bun.env.BUNQUEUE_DATA_PATH = PREV_DATA_PATH;
+    }
+    shutdownManager();
+    cleanupDbFiles();
   });
 
   test('drain() removes jobs everywhere including SQLite (no resurrection)', async () => {

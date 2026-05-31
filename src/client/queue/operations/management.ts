@@ -256,10 +256,10 @@ export async function changeJobPriority(
   opts: { priority: number; lifo?: boolean }
 ): Promise<void> {
   if (ctx.embedded) {
-    await getSharedManager().changePriority(jobId(id), opts.priority);
+    await getSharedManager().changePriority(jobId(id), opts.priority, opts.lifo);
     return;
   }
-  await ctx.tcp!.send({ cmd: 'ChangePriority', id, priority: opts.priority });
+  await ctx.tcp!.send({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
 }
 
 /** Extend job lock */

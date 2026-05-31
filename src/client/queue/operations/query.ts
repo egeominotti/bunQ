@@ -41,7 +41,7 @@ interface QueryContext {
   updateJobData?: (id: string, data: unknown) => Promise<void>;
   promoteJob?: (id: string) => Promise<void>;
   changeJobDelay?: (id: string, delay: number) => Promise<void>;
-  changeJobPriority?: (id: string, opts: { priority: number }) => Promise<void>;
+  changeJobPriority?: (id: string, opts: { priority: number; lifo?: boolean }) => Promise<void>;
   extendJobLock?: (id: string, token: string, duration: number) => Promise<number>;
   clearJobLogs?: (id: string, keepLogs?: number) => Promise<void>;
   getJobDependencies?: (id: string, opts?: GetDependenciesOpts) => Promise<JobDependencies>;
@@ -241,29 +241,15 @@ export async function getJobsAsync<T>(
     return [];
   }
 
-  const jobs = (
-    response as {
-      jobs: Array<{
-        id: string;
-        queue: string;
-        data: T;
-        progress?: number;
-        createdAt?: number;
-        startedAt?: number;
-        attempts?: number;
-        priority?: number;
-        runAt?: number;
-      }>;
-    }
-  ).jobs;
+  // handleGetJobs returns the full internal job per element ({ ...job, state }),
+  // so reflect the complete opts via metaFromJob instead of a slim subset (#90).
+  const jobs = (response as { jobs: Array<InternalJob & { data: T; progress?: number }> }).jobs;
 
   const now = Date.now();
   return jobs.map((j) => {
     const name = (j.data as { name?: string })?.name ?? 'unknown';
     const createdAt = j.createdAt ?? now;
-    // Reflect priority/delay from the listing payload (slim shape, no full opts).
-    const delay = j.runAt !== undefined && j.runAt > createdAt ? j.runAt - createdAt : 0;
-    const result = createSimpleJob(j.id, name, j.data, createdAt, {
+    const result = createSimpleJob(String(j.id), name, j.data, createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -271,7 +257,7 @@ export async function getJobsAsync<T>(
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
-      meta: { priority: j.priority ?? 0, delay },
+      meta: metaFromJob(j),
     });
     if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
     if (j.priority !== undefined) (result as { priority: number }).priority = j.priority;

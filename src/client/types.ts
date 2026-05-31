@@ -342,10 +342,14 @@ export interface JobOptions {
   timeout?: number;
   /** Custom job ID (for idempotent/deduplication) */
   jobId?: string;
-  /** Remove job on completion (can be boolean, max age in ms, or KeepJobs config) */
-  removeOnComplete?: boolean | number | KeepJobs;
-  /** Remove job on failure (can be boolean, max age in ms, or KeepJobs config) */
-  removeOnFail?: boolean | number | KeepJobs;
+  /**
+   * Remove job on completion. Boolean only — age/count retention
+   * (number | KeepJobs) is not implemented and was silently ignored, so the
+   * type is narrowed to prevent the misuse. See issue #90.
+   */
+  removeOnComplete?: boolean;
+  /** Remove job on failure. Boolean only — see removeOnComplete. */
+  removeOnFail?: boolean;
   /** Stall timeout in ms - job is stalled if no heartbeat after this time */
   stallTimeout?: number;
   /** Repeat configuration for recurring jobs */

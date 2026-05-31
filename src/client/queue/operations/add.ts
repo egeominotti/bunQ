@@ -39,7 +39,7 @@ interface AddContext {
   updateJobData: (id: string, data: unknown) => Promise<void>;
   promoteJob: (id: string) => Promise<void>;
   changeJobDelay: (id: string, delay: number) => Promise<void>;
-  changeJobPriority: (id: string, opts: { priority: number }) => Promise<void>;
+  changeJobPriority: (id: string, opts: { priority: number; lifo?: boolean }) => Promise<void>;
   extendJobLock: (id: string, token: string, duration: number) => Promise<number>;
   clearJobLogs: (id: string, keepLogs?: number) => Promise<void>;
   getJobDependencies: (id: string, opts?: GetDependenciesOpts) => Promise<JobDependencies>;
@@ -229,8 +229,9 @@ function buildPushPayload(
     tags: m.tags,
     groupId: m.groupId,
     lifo: m.lifo,
-    removeOnComplete: m.removeOnComplete,
-    removeOnFail: m.removeOnFail,
+    // Coerce to boolean for parity with embedded (which ignores non-boolean). #90
+    removeOnComplete: typeof m.removeOnComplete === 'boolean' ? m.removeOnComplete : undefined,
+    removeOnFail: typeof m.removeOnFail === 'boolean' ? m.removeOnFail : undefined,
     stallTimeout: m.stallTimeout,
     stackTraceLimit: m.stackTraceLimit,
     keepLogs: m.keepLogs,

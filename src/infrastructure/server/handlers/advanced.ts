@@ -30,7 +30,7 @@ export async function handleChangePriority(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
-  const success = await ctx.queueManager.changePriority(jobId(cmd.id), cmd.priority);
+  const success = await ctx.queueManager.changePriority(jobId(cmd.id), cmd.priority, cmd.lifo);
   if (success) {
     ctx.queueManager.emitDashboardEvent('job:priority-changed', {
       jobId: cmd.id,

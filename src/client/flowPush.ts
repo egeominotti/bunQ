@@ -24,6 +24,95 @@ function parseRemoveOptions(opts: JobOptions): {
   };
 }
 
+/** Normalize repeat startDate/endDate to epoch ms for the embedded manager. */
+function normalizeRepeat(repeat: JobOptions['repeat']) {
+  if (!repeat) return undefined;
+  const toMs = (d: Date | string | number | undefined): number | undefined =>
+    d instanceof Date ? d.getTime() : typeof d === 'string' ? new Date(d).getTime() : d;
+  return {
+    every: repeat.every,
+    limit: repeat.limit,
+    pattern: repeat.pattern,
+    count: repeat.count,
+    startDate: toMs(repeat.startDate),
+    endDate: toMs(repeat.endDate),
+    tz: repeat.tz,
+    immediately: repeat.immediately,
+    prevMillis: repeat.prevMillis,
+    offset: repeat.offset,
+    jobId: repeat.jobId,
+  };
+}
+
+function dedupConfig(opts: JobOptions) {
+  return opts.deduplication
+    ? {
+        ttl: opts.deduplication.ttl,
+        extend: opts.deduplication.extend,
+        replace: opts.deduplication.replace,
+      }
+    : undefined;
+}
+
+/**
+ * Full option set for the embedded manager.push, mirroring Queue.add (#90).
+ * Flow nodes must forward the same options as a direct add, not a subset.
+ */
+function managerOptions(opts: JobOptions) {
+  return {
+    priority: opts.priority,
+    delay: opts.delay,
+    maxAttempts: opts.attempts,
+    backoff: opts.backoff,
+    timeout: opts.timeout,
+    customId: opts.jobId ?? opts.deduplication?.id,
+    uniqueKey: opts.deduplication?.id,
+    dedup: dedupConfig(opts),
+    lifo: opts.lifo,
+    stallTimeout: opts.stallTimeout,
+    durable: opts.durable,
+    stackTraceLimit: opts.stackTraceLimit,
+    keepLogs: opts.keepLogs,
+    sizeLimit: opts.sizeLimit,
+    timestamp: opts.timestamp,
+    repeat: normalizeRepeat(opts.repeat),
+    debounceId: opts.debounce?.id,
+    debounceTtl: opts.debounce?.ttl,
+    failParentOnFailure: opts.failParentOnFailure,
+    removeDependencyOnFailure: opts.removeDependencyOnFailure,
+    ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
+    continueParentOnFailure: opts.continueParentOnFailure,
+  };
+}
+
+/** Full option set for the TCP PUSH command, mirroring buildPushPayload in add.ts (#90). */
+function tcpOptions(opts: JobOptions) {
+  return {
+    priority: opts.priority,
+    delay: opts.delay,
+    maxAttempts: opts.attempts,
+    backoff: opts.backoff,
+    timeout: opts.timeout,
+    jobId: opts.jobId,
+    uniqueKey: opts.deduplication?.id,
+    dedup: dedupConfig(opts),
+    lifo: opts.lifo,
+    stallTimeout: opts.stallTimeout,
+    durable: opts.durable,
+    stackTraceLimit: opts.stackTraceLimit,
+    keepLogs: opts.keepLogs,
+    sizeLimit: opts.sizeLimit,
+    timestamp: opts.timestamp,
+    repeat: opts.repeat,
+    debounceId: opts.debounce?.id,
+    debounceTtl: opts.debounce?.ttl,
+    failParentOnFailure: opts.failParentOnFailure,
+    removeDependencyOnFailure: opts.removeDependencyOnFailure,
+    ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
+    continueParentOnFailure: opts.continueParentOnFailure,
+  };
+}
+
 /** Push a job via embedded manager or TCP */
 export async function pushJob(
   ctx: PushContext,
@@ -32,23 +121,15 @@ export async function pushJob(
   opts: JobOptions = {},
   dependsOn?: string[]
 ): Promise<string> {
+  const { removeOnComplete, removeOnFail } = parseRemoveOptions(opts);
+
   if (ctx.embedded) {
     const manager = getSharedManager();
-    const { removeOnComplete, removeOnFail } = parseRemoveOptions(opts);
     const job = await manager.push(queueName, {
       data,
-      priority: opts.priority,
-      delay: opts.delay,
-      maxAttempts: opts.attempts,
-      backoff: opts.backoff,
-      timeout: opts.timeout,
-      customId: opts.jobId,
+      ...managerOptions(opts),
       removeOnComplete,
       removeOnFail,
-      failParentOnFailure: opts.failParentOnFailure,
-      removeDependencyOnFailure: opts.removeDependencyOnFailure,
-      ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
-      continueParentOnFailure: opts.continueParentOnFailure,
       dependsOn: dependsOn?.map((id) => jobId(id)),
     });
     return String(job.id);
@@ -59,18 +140,9 @@ export async function pushJob(
     cmd: 'PUSH',
     queue: queueName,
     data,
-    priority: opts.priority,
-    delay: opts.delay,
-    maxAttempts: opts.attempts,
-    backoff: opts.backoff,
-    timeout: opts.timeout,
-    jobId: opts.jobId,
-    removeOnComplete: opts.removeOnComplete,
-    removeOnFail: opts.removeOnFail,
-    failParentOnFailure: opts.failParentOnFailure,
-    removeDependencyOnFailure: opts.removeDependencyOnFailure,
-    ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
-    continueParentOnFailure: opts.continueParentOnFailure,
+    ...tcpOptions(opts),
+    removeOnComplete,
+    removeOnFail,
     dependsOn,
   });
 
@@ -94,24 +166,15 @@ export async function pushJobWithParent(
   params: PushWithParentOpts
 ): Promise<string> {
   const { queueName, data, opts, parentRef, childIds } = params;
+  const { removeOnComplete, removeOnFail } = parseRemoveOptions(opts);
   if (ctx.embedded) {
     const manager = getSharedManager();
-    const { removeOnComplete, removeOnFail } = parseRemoveOptions(opts);
     const childJobIds = childIds.map((id) => jobId(id));
     const job = await manager.push(queueName, {
       data,
-      priority: opts.priority,
-      delay: opts.delay,
-      maxAttempts: opts.attempts,
-      backoff: opts.backoff,
-      timeout: opts.timeout,
-      customId: opts.jobId,
+      ...managerOptions(opts),
       removeOnComplete,
       removeOnFail,
-      failParentOnFailure: opts.failParentOnFailure,
-      removeDependencyOnFailure: opts.removeDependencyOnFailure,
-      ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
-      continueParentOnFailure: opts.continueParentOnFailure,
       parentId: parentRef ? jobId(parentRef.id) : undefined,
       dependsOn: childJobIds.length > 0 ? childJobIds : undefined,
       childrenIds: childJobIds.length > 0 ? childJobIds : undefined,
@@ -131,18 +194,9 @@ export async function pushJobWithParent(
     cmd: 'PUSH',
     queue: queueName,
     data,
-    priority: opts.priority,
-    delay: opts.delay,
-    maxAttempts: opts.attempts,
-    backoff: opts.backoff,
-    timeout: opts.timeout,
-    jobId: opts.jobId,
-    removeOnComplete: opts.removeOnComplete,
-    removeOnFail: opts.removeOnFail,
-    failParentOnFailure: opts.failParentOnFailure,
-    removeDependencyOnFailure: opts.removeDependencyOnFailure,
-    ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
-    continueParentOnFailure: opts.continueParentOnFailure,
+    ...tcpOptions(opts),
+    removeOnComplete,
+    removeOnFail,
     parentId: parentRef?.id,
     childrenIds: childIds.length > 0 ? childIds : undefined,
     dependsOn: childIds.length > 0 ? childIds : undefined,

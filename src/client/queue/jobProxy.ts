@@ -30,6 +30,36 @@ export interface JobReflectionMeta {
   timestamp?: number;
 }
 
+/** Fields derived from the requested options. Mirrors the embedded path
+ * (jobConversionHelpers.buildJobProperties / jobHelpers) so a job returned
+ * over TCP reflects deduplicationId/parentKey/parent/repeatJobKey/opts/delay
+ * identically to embedded mode. See issues #88 and #90. */
+interface ReflectedFields {
+  delay: number;
+  priority: number;
+  opts: JobOptions;
+  deduplicationId: string | undefined;
+  parentKey: string | undefined;
+  parent: { id: string; queueQualifiedName: string } | undefined;
+  repeatJobKey: string | undefined;
+}
+
+function reflectFields(id: string, queueName: string, meta?: JobReflectionMeta): ReflectedFields {
+  const opts = meta?.opts ?? {};
+  const p = opts.parent;
+  const repeat = opts.repeat;
+  const pattern = repeat?.pattern ?? (repeat?.every ? `every:${repeat.every}` : '');
+  return {
+    delay: meta?.delay ?? 0,
+    priority: meta?.priority ?? 0,
+    opts,
+    deduplicationId: opts.jobId ?? opts.deduplication?.id,
+    parentKey: p ? `${p.queue}:${p.id}` : undefined,
+    parent: p ? { id: p.id, queueQualifiedName: p.queue } : undefined,
+    repeatJobKey: repeat ? `${queueName}:${id}:${pattern}` : undefined,
+  };
+}
+
 /** Create a full Job proxy with TCP methods */
 export function createJobProxy<T>(
   id: string,
@@ -40,6 +70,7 @@ export function createJobProxy<T>(
 ): Job<T> {
   const { tcp, queueName } = ctx;
   const ts = meta?.timestamp ?? Date.now();
+  const r = reflectFields(id, queueName, meta);
 
   return {
     id,
@@ -49,18 +80,19 @@ export function createJobProxy<T>(
     attemptsMade: 0,
     timestamp: ts,
     progress: 0,
-    delay: meta?.delay ?? 0,
+    delay: r.delay,
     processedOn: undefined,
     finishedOn: undefined,
     stacktrace: null,
     stalledCounter: 0,
-    priority: meta?.priority ?? 0,
-    parentKey: undefined,
-    opts: meta?.opts ?? {},
+    priority: r.priority,
+    parent: r.parent,
+    parentKey: r.parentKey,
+    opts: r.opts,
     token: undefined,
     processedBy: undefined,
-    deduplicationId: undefined,
-    repeatJobKey: undefined,
+    deduplicationId: r.deduplicationId,
+    repeatJobKey: r.repeatJobKey,
     attemptsStarted: 0,
 
     // Methods
@@ -94,7 +126,7 @@ export function createJobProxy<T>(
       await tcp.send({ cmd: 'ChangeDelay', id, delay });
     },
     changePriority: async (opts) => {
-      await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority });
+      await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
     },
     extendLock: async (token, duration) => {
       const res = await tcp.send({ cmd: 'ExtendLock', id, token, duration });
@@ -119,24 +151,26 @@ export function createJobProxy<T>(
       id,
       name,
       data,
-      opts: {},
+      opts: r.opts,
       progress: 0,
-      delay: 0,
+      delay: r.delay,
       timestamp: ts,
       attemptsMade: 0,
       stacktrace: null,
       queueQualifiedName: `bull:${queueName}`,
+      parentKey: r.parentKey,
     }),
     asJSON: () => ({
       id,
       name,
       data: JSON.stringify(data),
-      opts: '{}',
+      opts: JSON.stringify(r.opts),
       progress: '0',
-      delay: '0',
+      delay: String(r.delay),
       timestamp: String(ts),
       attemptsMade: '0',
       stacktrace: null,
+      parentKey: r.parentKey,
     }),
 
     // Move methods
@@ -251,6 +285,7 @@ export function createSimpleJob<T>(
   ctx: SimpleJobContext
 ): Job<T> {
   const { queueName, embedded, tcp, meta } = ctx;
+  const r = reflectFields(id, queueName, meta);
 
   return {
     id,
@@ -260,18 +295,19 @@ export function createSimpleJob<T>(
     attemptsMade: 0,
     timestamp,
     progress: 0,
-    delay: meta?.delay ?? 0,
+    delay: r.delay,
     processedOn: undefined,
     finishedOn: undefined,
     stacktrace: null,
     stalledCounter: 0,
-    priority: meta?.priority ?? 0,
-    parentKey: undefined,
-    opts: meta?.opts ?? {},
+    priority: r.priority,
+    parent: r.parent,
+    parentKey: r.parentKey,
+    opts: r.opts,
     token: undefined,
     processedBy: undefined,
-    deduplicationId: undefined,
-    repeatJobKey: undefined,
+    deduplicationId: r.deduplicationId,
+    repeatJobKey: r.repeatJobKey,
     attemptsStarted: 0,
 
     updateProgress: async (progress, message) => {
@@ -324,10 +360,12 @@ export function createSimpleJob<T>(
     },
     changePriority: async (opts: ChangePriorityOpts) => {
       if (embedded) {
-        await getSharedManager().changePriority(jobId(id), opts.priority);
+        await getSharedManager().changePriority(jobId(id), opts.priority, opts.lifo);
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority });
+      if (tcp) {
+        await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
+      }
     },
     extendLock: async (token, duration) => {
       if (embedded) {
@@ -359,24 +397,26 @@ export function createSimpleJob<T>(
       id,
       name,
       data,
-      opts: {},
+      opts: r.opts,
       progress: 0,
-      delay: 0,
+      delay: r.delay,
       timestamp,
       attemptsMade: 0,
       stacktrace: null,
       queueQualifiedName: `bull:${queueName}`,
+      parentKey: r.parentKey,
     }),
     asJSON: () => ({
       id,
       name,
       data: JSON.stringify(data),
-      opts: '{}',
+      opts: JSON.stringify(r.opts),
       progress: '0',
-      delay: '0',
+      delay: String(r.delay),
       timestamp: String(timestamp),
       attemptsMade: '0',
       stacktrace: null,
+      parentKey: r.parentKey,
     }),
 
     moveToCompleted: async (returnValue) => {

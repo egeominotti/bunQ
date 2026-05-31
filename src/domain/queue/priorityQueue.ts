@@ -152,15 +152,18 @@ export class IndexedPriorityQueue {
     return indexed.job;
   }
 
-  /** Update job priority - O(log n) */
-  updatePriority(jobId: JobId, newPriority: number): boolean {
+  /** Update job priority - O(log n). Optionally update the LIFO tie-break flag. */
+  updatePriority(jobId: JobId, newPriority: number, newLifo?: boolean): boolean {
     const indexed = this.index.get(jobId);
     if (!indexed) return false;
+
+    const lifo = newLifo ?? indexed.job.lifo;
 
     // Create new job with updated priority (immutable pattern)
     const updatedJob: Job = {
       ...indexed.job,
       priority: newPriority,
+      lifo,
     };
 
     // Create new heap entry with new generation
@@ -173,7 +176,7 @@ export class IndexedPriorityQueue {
       jobId: updatedJob.id,
       priority: newPriority,
       runAt: updatedJob.runAt,
-      lifo: updatedJob.lifo,
+      lifo,
       generation: gen,
     };
     this.heap.push(entry);

@@ -175,7 +175,7 @@ export class Queue<T = unknown> {
       updateJobData: (id: string, data: unknown) => this.updateJobData(id, data),
       promoteJob: (id: string) => this.promoteJob(id),
       changeJobDelay: (id: string, delay: number) => this.changeJobDelay(id, delay),
-      changeJobPriority: (id: string, opts: { priority: number }) =>
+      changeJobPriority: (id: string, opts: { priority: number; lifo?: boolean }) =>
         this.changeJobPriority(id, opts),
       extendJobLock: (id: string, token: string, dur: number) => this.extendJobLock(id, token, dur),
       clearJobLogs: (id: string, keep?: number) => this.clearJobLogs(id, keep),

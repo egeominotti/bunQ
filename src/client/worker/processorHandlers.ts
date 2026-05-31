@@ -281,11 +281,11 @@ export function createChangePriorityHandler(
 ): (id: string, opts: ChangePriorityOpts) => Promise<void> {
   return async (id: string, opts: ChangePriorityOpts) => {
     if (embedded) {
-      await getSharedManager().changePriority(jobId(id), opts.priority);
+      await getSharedManager().changePriority(jobId(id), opts.priority, opts.lifo);
       return;
     }
     if (!tcp) return;
-    await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority });
+    await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
   };
 }
 

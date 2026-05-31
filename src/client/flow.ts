@@ -312,7 +312,7 @@ export class FlowProducer extends EventEmitter {
       log: (id, msg) => managementOps.addJobLog(ctx, id, msg).then(() => {}),
       promote: (id) => managementOps.promoteJob(ctx, id),
       remove: (id) => managementOps.removeAsync(ctx, id),
-      changePriority: (id, p) => managementOps.changeJobPriority(ctx, id, { priority: p }),
+      changePriority: (id, opts) => managementOps.changeJobPriority(ctx, id, opts),
       changeDelay: (id, d) => managementOps.changeJobDelay(ctx, id, d),
       clearLogs: (id) => managementOps.clearJobLogs(ctx, id),
       retry: (id) => managementOps.retryJob(ctx, id),

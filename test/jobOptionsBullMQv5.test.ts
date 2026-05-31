@@ -448,42 +448,40 @@ describe('JobOptions - Extended RemoveOnComplete/RemoveOnFail', () => {
     shutdownManager();
   });
 
-  test('should accept removeOnComplete as boolean', async () => {
+  test('should accept removeOnComplete as boolean (true)', async () => {
     const job = await queue.add('test', { value: 1 }, { removeOnComplete: true });
     expect(job.id).toBeDefined();
+    expect(job.opts.removeOnComplete).toBe(true);
   });
 
-  test('should accept removeOnComplete as number (age in ms)', async () => {
-    const job = await queue.add('test', { value: 1 }, { removeOnComplete: 3600000 });
+  test('should accept removeOnComplete as boolean (false)', async () => {
+    const job = await queue.add('test', { value: 1 }, { removeOnComplete: false });
     expect(job.id).toBeDefined();
+    expect(job.opts.removeOnComplete).toBe(false);
   });
 
-  test('should accept removeOnComplete as KeepJobs object', async () => {
+  test('removeOnComplete non-boolean is coerced (age/count retention not supported)', async () => {
+    // The type is boolean-only (#90); a JS caller passing a number is coerced
+    // to a boolean rather than enabling silent age-based retention.
     const job = await queue.add(
       'test',
       { value: 1 },
-      { removeOnComplete: { age: 3600000, count: 1000 } }
+      { removeOnComplete: 3600000 as unknown as boolean }
     );
-    expect(job.id).toBeDefined();
+    const fetched = await queue.getJob(job.id);
+    expect(typeof fetched!.opts.removeOnComplete).toBe('boolean');
   });
 
-  test('should accept removeOnFail as boolean', async () => {
+  test('should accept removeOnFail as boolean (true)', async () => {
     const job = await queue.add('test', { value: 1 }, { removeOnFail: true });
     expect(job.id).toBeDefined();
+    expect(job.opts.removeOnFail).toBe(true);
   });
 
-  test('should accept removeOnFail as number (age in ms)', async () => {
-    const job = await queue.add('test', { value: 1 }, { removeOnFail: 86400000 });
+  test('should accept removeOnFail as boolean (false)', async () => {
+    const job = await queue.add('test', { value: 1 }, { removeOnFail: false });
     expect(job.id).toBeDefined();
-  });
-
-  test('should accept removeOnFail as KeepJobs object', async () => {
-    const job = await queue.add(
-      'test',
-      { value: 1 },
-      { removeOnFail: { age: 86400000, count: 500 } }
-    );
-    expect(job.id).toBeDefined();
+    expect(job.opts.removeOnFail).toBe(false);
   });
 });
 
@@ -570,8 +568,8 @@ describe('JobOptions - Combined options', () => {
 
         // BullMQ v5 behavior
         lifo: false,
-        removeOnComplete: { age: 3600000, count: 1000 },
-        removeOnFail: { age: 86400000, count: 500 },
+        removeOnComplete: true,
+        removeOnFail: false,
 
         // BullMQ v5 limits
         stackTraceLimit: 15,

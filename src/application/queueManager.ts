@@ -997,8 +997,13 @@ export class QueueManager {
     return jobMgmt.updateJobData(jobId, data, this.contextFactory.getJobMgmtContext());
   }
 
-  async changePriority(jobId: JobId, priority: number): Promise<boolean> {
-    return jobMgmt.changeJobPriority(jobId, priority, this.contextFactory.getJobMgmtContext());
+  async changePriority(jobId: JobId, priority: number, lifo?: boolean): Promise<boolean> {
+    return jobMgmt.changeJobPriority(
+      jobId,
+      priority,
+      this.contextFactory.getJobMgmtContext(),
+      lifo
+    );
   }
 
   async promote(jobId: JobId): Promise<boolean> {

@@ -177,6 +177,8 @@ export interface ChangePriorityCommand extends BaseCommand {
   readonly cmd: 'ChangePriority';
   readonly id: string;
   readonly priority: number;
+  /** Tie-break ordering among same-priority jobs (BullMQ v5). See #90. */
+  readonly lifo?: boolean;
 }
 
 export interface PromoteCommand extends BaseCommand {

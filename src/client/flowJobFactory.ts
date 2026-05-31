@@ -18,7 +18,7 @@ export interface FlowJobCallbacks {
   log?: (id: string, message: string) => Promise<void>;
   promote?: (id: string) => Promise<void>;
   remove?: (id: string) => Promise<void>;
-  changePriority?: (id: string, priority: number) => Promise<void>;
+  changePriority?: (id: string, opts: { priority: number; lifo?: boolean }) => Promise<void>;
   changeDelay?: (id: string, delay: number) => Promise<void>;
   clearLogs?: (id: string) => Promise<void>;
   retry?: (id: string) => Promise<void>;
@@ -194,12 +194,16 @@ export function createFlowJobObject<T>(
       if (tcp) await tcp.send({ cmd: 'ChangeDelay', id, delay });
     },
     changePriority: async (opts: ChangePriorityOpts) => {
-      if (callbacks?.changePriority) return callbacks.changePriority(id, opts.priority);
+      if (callbacks?.changePriority) {
+        return callbacks.changePriority(id, { priority: opts.priority, lifo: opts.lifo });
+      }
       if (embedded) {
-        await getSharedManager().changePriority(jobId(id), opts.priority);
+        await getSharedManager().changePriority(jobId(id), opts.priority, opts.lifo);
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority });
+      if (tcp) {
+        await tcp.send({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
+      }
     },
     extendLock: async (token, duration) => {
       if (embedded) {

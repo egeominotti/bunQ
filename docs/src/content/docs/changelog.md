@@ -10,6 +10,18 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.18] - 2026-05-31
+
+### Fixed (option-forwarding audit, follow-ups to #88)
+- **`getJobsAsync()` (and `getWaitingAsync`/`getDelayedAsync`/`getActiveAsync`/`getCompletedAsync`/`getFailedAsync`) dropped `job.opts` over TCP** — listed jobs returned `opts: {}`, so `job.opts.attempts`/`timeout`/etc. were `undefined`, while `getJob(id).opts` was correct. The server already sends the full job; the client now reflects the complete `opts` via `metaFromJob`. This closes the slim-`opts` limitation noted in 2.7.17.
+- **Returned Job hardcoded `deduplicationId`/`parentKey`/`parent`/`repeatJobKey`** — `createJobProxy`/`createSimpleJob` set these to `undefined` even when known at call time, diverging from embedded mode. They are now derived from the requested options (shared `reflectFields`), matching `buildJobProperties`.
+- **`FlowProducer` silently dropped extended job options** — flow nodes ignored `lifo`, `deduplication`, `durable`, `stallTimeout`, `stackTraceLimit`, `keepLogs`, `sizeLimit`, `repeat`, `timestamp` and `debounce` in **both** embedded and TCP modes (`durable: true` being ignored meant a critical flow job used buffered writes instead of immediate persistence). `flowPush` now forwards the full option set, mirroring `Queue.add`.
+- **`job.toJSON()`/`asJSON()` hardcoded `opts: {}` and `delay: 0`** — the BullMQ-compatible serializers on a TCP/bulk-created Job lost the reflected options. They now reflect `opts`, `delay` and `parentKey`.
+- **`changePriority({ priority, lifo })` silently dropped `lifo`** — the option was accepted by the type but never applied (the engine had no way to honor it). `lifo` is now threaded end-to-end: `ChangePriorityCommand` → server handler → `queueManager.changePriority` → `jobManagement.changeJobPriority` → `priorityQueue.updatePriority` (updates the tie-break flag). Forwarded from all SDK surfaces: `Queue`, the job proxies, the in-processor job handler, and `FlowProducer` job nodes.
+
+### Changed
+- **`JobOptions.removeOnComplete`/`removeOnFail` narrowed to `boolean`** — the previously documented `number | KeepJobs` (age/count retention) forms were never implemented and were silently coerced inconsistently (embedded kept the job, TCP removed it immediately for the same input). The type now rejects the unsupported forms at compile time, the single-`PUSH` path coerces for embedded/TCP parity, and the server hardens `parseCoreOptions` with `Boolean()`. (Worker-level `removeOnComplete`/`removeOnFail` defaults are unaffected.)
+
 ## [2.7.17] - 2026-05-30
 
 ### Fixed

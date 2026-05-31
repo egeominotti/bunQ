@@ -286,6 +286,12 @@ function parseRepeatConfig(repeat: JobInput['repeat']): RepeatConfig | null {
 }
 
 /** Parse core job options with defaults */
+/** Coerce a wire value to boolean. The JobInput boundary is not type-safe at
+ * runtime — a hand-crafted/legacy client can send a non-boolean. See issue #90. */
+function toBoolean(value: unknown, fallback: boolean): boolean {
+  return value === undefined ? fallback : Boolean(value);
+}
+
 function parseCoreOptions(input: JobInput): {
   priority: number;
   lifo: boolean;
@@ -297,8 +303,10 @@ function parseCoreOptions(input: JobInput): {
     priority: input.priority ?? JOB_DEFAULTS.priority,
     lifo: input.lifo ?? JOB_DEFAULTS.lifo,
     maxAttempts: input.maxAttempts ?? JOB_DEFAULTS.maxAttempts,
-    removeOnComplete: input.removeOnComplete ?? JOB_DEFAULTS.removeOnComplete,
-    removeOnFail: input.removeOnFail ?? JOB_DEFAULTS.removeOnFail,
+    // Coerce to boolean: a stray number/object forwarded over the wire must not
+    // persist as a non-boolean and diverge from embedded mode. See issue #90.
+    removeOnComplete: toBoolean(input.removeOnComplete, JOB_DEFAULTS.removeOnComplete),
+    removeOnFail: toBoolean(input.removeOnFail, JOB_DEFAULTS.removeOnFail),
   };
 }
 

@@ -172,14 +172,15 @@ async function updateRepeatSuccessor(
 export async function changeJobPriority(
   jobId: JobId,
   priority: number,
-  ctx: JobManagementContext
+  ctx: JobManagementContext,
+  lifo?: boolean
 ): Promise<boolean> {
   const location = ctx.jobIndex.get(jobId);
   if (location?.type !== 'queue') return false;
 
   return withWriteLock(ctx.shardLocks[location.shardIdx], () => {
     const q = ctx.shards[location.shardIdx].getQueue(location.queueName);
-    return q.updatePriority(jobId, priority);
+    return q.updatePriority(jobId, priority, lifo);
   });
 }
 

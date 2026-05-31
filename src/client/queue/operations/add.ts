@@ -414,7 +414,13 @@ export async function addBulk<T>(
     jobs: batchJobs,
   });
 
-  if (!response.ok) return [];
+  // Mirror the single-PUSH path (~line 168): a rejected response (e.g. auth
+  // failure) must propagate as a thrown error so the AddBatcher rejects the
+  // queued callers, instead of resolving them with undefined jobs. An OK
+  // response with zero jobs is a legitimate empty result and is NOT an error.
+  if (!response.ok) {
+    throw new Error((response.error as string | undefined) ?? 'Failed to add jobs');
+  }
 
   const ids = (response.ids ?? []) as string[];
   return ids.map((id, i) =>

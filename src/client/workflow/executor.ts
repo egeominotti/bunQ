@@ -218,8 +218,12 @@ export class WorkflowExecutor {
         };
         exec.state = 'failed';
         this.store.update(exec);
+        // Compensate here, then signal completion via the WaitForSignalError
+        // sentinel so processStep short-circuits (return null) instead of
+        // re-running compensation through its generic catch path.
         await this.compensate(exec, wf);
-        throw new Error(`Signal "${node.event}" timed out`);
+        this.emitter?.emitWorkflow('workflow:failed', exec.id, exec.workflowName, 'failed');
+        throw new WaitForSignalError(node.event);
       }
       this.store.update(exec);
       const remaining = node.timeout - (Date.now() - waitingSince);

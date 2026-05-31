@@ -43,9 +43,13 @@ export function isQueuePaused(queue: string, ctx: QueueControlContext): boolean 
 export function drainQueue(queue: string, ctx: QueueControlContext): number {
   const idx = shardIndex(queue);
   const { count, jobIds } = ctx.shards[idx].drain(queue);
-  // Clean up jobIndex for all drained jobs
+  // Clean up jobIndex AND the SQLite row for every drained job so they cannot
+  // resurrect from a stale on-disk row (parity with clean/obliterate).
+  // safeDeleteJob also clears the pending write-buffer entry, so a buffered
+  // (not-yet-flushed) add cannot land on disk after the drain.
   for (const jobId of jobIds) {
     ctx.jobIndex.delete(jobId);
+    safeDeleteJob(ctx, jobId);
   }
   return count;
 }

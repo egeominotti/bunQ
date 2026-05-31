@@ -136,13 +136,15 @@ describe('CronScheduler Execution Logic', () => {
       });
 
       await new Promise((r) => setTimeout(r, 120));
-      const beforeTick = Date.now();
+      // Fixed-rate anchoring: nextRun is scheduledSlot + interval (not now + interval),
+      // so a late tick does not drift the schedule forward.
+      const scheduledSlot = scheduler.get('next-run-job')!.nextRun;
       await tickScheduler(scheduler);
 
       const job = scheduler.get('next-run-job');
       expect(job).toBeDefined();
-      // nextRun should be approximately now + 100ms
-      expect(job!.nextRun).toBeGreaterThanOrEqual(beforeTick + 100);
+      // nextRun anchored to the scheduled slot, not wall-clock now (no drift)
+      expect(job!.nextRun).toBe(scheduledSlot + 100);
     });
 
     test('should not push jobs if pushJob callback is not set', async () => {
@@ -403,14 +405,15 @@ describe('CronScheduler Execution Logic', () => {
       });
 
       await new Promise((r) => setTimeout(r, 220));
-      const beforeTick = Date.now();
+      // Fixed-rate anchoring: nextRun is scheduledSlot + interval (not now + interval),
+      // preventing cumulative drift when the tick runs late.
+      const scheduledSlot = scheduler.get('interval-job')!.nextRun;
       await tickScheduler(scheduler);
 
       const job = scheduler.get('interval-job');
       expect(job).toBeDefined();
-      // Next run should be approximately executionTime + 200ms
-      expect(job!.nextRun).toBeGreaterThanOrEqual(beforeTick + 200);
-      expect(job!.nextRun).toBeLessThanOrEqual(beforeTick + 300);
+      // Next run anchored to the scheduled slot, not wall-clock execution time
+      expect(job!.nextRun).toBe(scheduledSlot + 200);
     });
 
     test('should persist correct next run for interval cron', async () => {

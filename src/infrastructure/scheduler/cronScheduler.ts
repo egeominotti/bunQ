@@ -165,6 +165,9 @@ export class CronScheduler {
     const existing = this.cronJobs.get(cron.name);
     if (existing) {
       cron.executions = existing.cron.executions;
+      // Reset per-name overlap tracking on upsert: the redefined cron starts
+      // fresh and must not be blocked by the previous definition's last fire (H10)
+      this.lastFiredAt.delete(cron.name);
     }
 
     // Handle immediately option: set nextRun to now so it fires on next tick
@@ -195,6 +198,9 @@ export class CronScheduler {
 
     // Just remove from map - heap entry becomes stale (lazy deletion)
     this.cronJobs.delete(name);
+    // Clear per-name overlap tracking so a future cron re-added with the same
+    // name isn't blocked by this cron's stale last-fire timestamp (fixes H10)
+    this.lastFiredAt.delete(name);
 
     // Reschedule in case removed cron was the next timer target
     if (this.started) {
@@ -321,12 +327,16 @@ export class CronScheduler {
         // Calculate new state BEFORE pushing job
         const newExecutions = cron.executions + 1;
         const executionTime = Date.now();
+        // The slot this fire was scheduled for (anchor for fixed-rate intervals)
+        const scheduledRun = cron.nextRun;
         let newNextRun: number;
         if (cron.schedule) {
           const expanded = expandCronShortcut(cron.schedule);
           newNextRun = getNextCronRun(expanded, executionTime, cron.timezone ?? undefined);
         } else if (cron.repeatEvery) {
-          newNextRun = getNextIntervalRun(cron.repeatEvery, executionTime);
+          // Fixed-rate: anchor to the scheduled slot, not wall-clock now, so a
+          // slow/late job does not cumulatively drift the schedule forward (M4)
+          newNextRun = getNextIntervalRun(cron.repeatEvery, scheduledRun);
         } else {
           newNextRun = executionTime;
         }

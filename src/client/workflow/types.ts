@@ -163,6 +163,10 @@ export interface StepRecord {
   startedAt?: number;
   completedAt?: number;
   attempts?: number;
+  /** forEach iteration item — persisted so compensation can restore __item */
+  loopItem?: unknown;
+  /** forEach iteration index — persisted so compensation can restore __index */
+  loopIndex?: number;
 }
 
 /** Full execution state */

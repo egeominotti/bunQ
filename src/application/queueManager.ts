@@ -1213,6 +1213,16 @@ export class QueueManager {
   }
 
   private onJobCompleted(completedId: JobId): void {
+    // Release flow-failure tracking once a parent job reaches terminal completion
+    // (AUDIT H8). The parent consumes these values via getFailedChildrenValues()/
+    // getIgnoredChildrenFailures() while it is processing (before it acks), so by the
+    // time it completes they are no longer needed. Keyed by parentId; obliterate()
+    // and shutdown() clear them too. Without this, every parent completion that
+    // involved a failed child with continueParentOnFailure / ignoreDependencyOnFailure
+    // leaked an entry permanently.
+    this.failedChildrenValues.delete(completedId);
+    this.ignoredChildrenFailures.delete(completedId);
+
     this.pendingDepChecks.add(completedId);
     this.scheduleDependencyFlush();
     void this.checkFlowCompleted(completedId);
@@ -1297,6 +1307,10 @@ export class QueueManager {
       this.storage?.deleteJob(parentId);
     });
 
+    // Parent reached a terminal (DLQ) state — release its flow-failure tracking.
+    this.failedChildrenValues.delete(parentId);
+    this.ignoredChildrenFailures.delete(parentId);
+
     // Broadcast failed event for parent
     this.eventsManager.broadcast({
       eventType: 'failed' as EventType,
@@ -1332,7 +1346,7 @@ export class QueueManager {
   }
 
   /**
-   * continueParentOnFailure: move parent to queue immediately when a child fails.
+   * continueParentOnFailure: move parent to queue when a child fails.
    * Stores the failure info for getFailedChildrenValues().
    */
   private async continueParentOnChildFailure(
@@ -1354,6 +1368,25 @@ export class QueueManager {
     this.failedChildrenValues.set(parentId, existing);
 
     const idx = shardIndex(parentJob.queue);
+    await this.promoteParentAfterChildFailure(parentId, parentJob, idx);
+  }
+
+  /**
+   * Move a flow parent from its waiting state into the run queue after a child failure
+   * (continueParentOnFailure / last-dependency resolution). Deferred to the next tick
+   * so the failed child's worker batch drains first — the parent is then picked up on
+   * a subsequent poll rather than racing to completion in the same synchronous cascade.
+   */
+  private async promoteParentAfterChildFailure(
+    parentId: JobId,
+    parentJob: Job,
+    idx: number
+  ): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 0);
+      timer.unref?.();
+    });
+
     let promoted = false;
     await withWriteLock(this.shardLocks[idx], () => {
       // TOCTOU guard
@@ -1420,7 +1453,9 @@ export class QueueManager {
     }
 
     const idx = shardIndex(parentJob.queue);
-    let promoted = false;
+    // Remove the failed child from the parent's pending deps synchronously so
+    // dependency tracking stays consistent; defer only the promotion decision.
+    let readyToPromote = false;
     await withWriteLock(this.shardLocks[idx], () => {
       if (this.jobIndex.get(parentId)?.type !== 'queue') return;
 
@@ -1435,31 +1470,14 @@ export class QueueManager {
         shard.unregisterDependencies(parentId, [childJob.id]);
       }
 
-      // If no more pending deps, promote parent
-      const allDone =
+      // If no more pending deps, the parent is ready to be promoted
+      readyToPromote =
         parentJob.dependsOn.length === 0 ||
         parentJob.dependsOn.every((dep) => this.completedJobs.has(dep));
-
-      if (allDone) {
-        shard.waitingDeps.delete(parentId);
-        const now = Date.now();
-        parentJob.runAt = now;
-        shard.getQueue(parentJob.queue).push(parentJob);
-        shard.incrementQueued(parentId, false, parentJob.createdAt, parentJob.queue, now);
-        this.jobIndex.set(parentId, { type: 'queue', shardIdx: idx, queueName: parentJob.queue });
-        shard.notify();
-        promoted = true;
-      }
     });
 
-    if (promoted) {
-      this.eventsManager.broadcast({
-        eventType: 'waiting' as EventType,
-        queue: parentJob.queue,
-        jobId: parentId,
-        timestamp: Date.now(),
-        prev: 'waiting-children',
-      });
+    if (readyToPromote) {
+      await this.promoteParentAfterChildFailure(parentId, parentJob, idx);
     }
   }
 
@@ -1692,6 +1710,8 @@ export class QueueManager {
     this.stalledCandidates.clear();
     this.clientJobs.clear();
     this.repeatChain.clear();
+    this.failedChildrenValues.clear();
+    this.ignoredChildrenFailures.clear();
     for (const shard of this.processingShards) shard.clear();
     for (const shard of this.shards) {
       shard.waitingDeps.clear();

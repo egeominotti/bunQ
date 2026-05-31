@@ -117,6 +117,11 @@ describe('BullMQ v5 - ignoreDependencyOnFailure', () => {
     let resolveParentCompleted: () => void;
     const parentCompleted = new Promise<void>((r) => (resolveParentCompleted = r));
 
+    // Capture the ignored-children failures while the parent is PROCESSING — this is
+    // the BullMQ-documented read point (job.getIgnoredChildrenFailures()). The tracking
+    // entry is released once the parent completes (AUDIT H8), so we read it here.
+    let capturedFailures: Record<string, string> = {};
+
     const worker = new Worker(
       queueName,
       async (job) => {
@@ -124,7 +129,8 @@ describe('BullMQ v5 - ignoreDependencyOnFailure', () => {
         if (data.role === 'child') {
           throw new Error('Child ignored failure');
         }
-        // parent processes
+        // parent processes — read failure metadata before it completes
+        capturedFailures = await getSharedManager().getIgnoredChildrenFailures(jobId(job.id));
         return { parentDone: true };
       },
       { embedded: true, concurrency: 5 }
@@ -164,14 +170,12 @@ describe('BullMQ v5 - ignoreDependencyOnFailure', () => {
     await childFailed;
     await parentCompleted;
 
-    // getIgnoredChildrenFailures should have the child's failure (via manager directly)
-    const manager = getSharedManager();
-    const failures = await manager.getIgnoredChildrenFailures(jobId(parentJobId!));
-    expect(Object.keys(failures).length).toBeGreaterThan(0);
+    // getIgnoredChildrenFailures should have had the child's failure during processing
+    expect(Object.keys(capturedFailures).length).toBeGreaterThan(0);
 
-    const childKey = Object.keys(failures)[0];
+    const childKey = Object.keys(capturedFailures)[0];
     expect(childKey).toContain(childJobId!);
-    expect(failures[childKey]).toContain('Child ignored failure');
+    expect(capturedFailures[childKey]).toContain('Child ignored failure');
 
     await worker.close();
   });
@@ -196,6 +200,11 @@ describe('BullMQ v5 - continueParentOnFailure', () => {
     let resolveParentCompleted: () => void;
     const parentCompleted = new Promise<void>((r) => (resolveParentCompleted = r));
 
+    // Capture the failed-children values while the parent is PROCESSING — this is the
+    // BullMQ-documented read point (job.getFailedChildrenValues()). The tracking entry
+    // is released once the parent completes (AUDIT H8), so we read it here.
+    let capturedFailedValues: Record<string, string> = {};
+
     const worker = new Worker(
       queueName,
       async (job) => {
@@ -203,6 +212,8 @@ describe('BullMQ v5 - continueParentOnFailure', () => {
         if (data.role === 'child') {
           throw new Error('Child continue-parent failure');
         }
+        // parent processes — read failure metadata before it completes
+        capturedFailedValues = await getSharedManager().getFailedChildrenValues(jobId(job.id));
         return { parentDone: true };
       },
       { embedded: true, concurrency: 5 }
@@ -242,14 +253,12 @@ describe('BullMQ v5 - continueParentOnFailure', () => {
     await childFailed;
     await parentCompleted;
 
-    // getFailedChildrenValues should have the child's failure
-    const manager = getSharedManager();
-    const failedValues = await manager.getFailedChildrenValues(jobId(parentJobId!));
-    expect(Object.keys(failedValues).length).toBeGreaterThan(0);
+    // getFailedChildrenValues should have had the child's failure during processing
+    expect(Object.keys(capturedFailedValues).length).toBeGreaterThan(0);
 
-    const childKey = Object.keys(failedValues)[0];
+    const childKey = Object.keys(capturedFailedValues)[0];
     expect(childKey).toContain(childJobId!);
-    expect(failedValues[childKey]).toContain('Child continue-parent failure');
+    expect(capturedFailedValues[childKey]).toContain('Child continue-parent failure');
 
     await worker.close();
   });

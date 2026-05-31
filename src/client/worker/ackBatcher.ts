@@ -42,17 +42,27 @@ export class AckBatcher {
   }
 
   /** Queue ACK for batch processing (with optional lock token) */
-  queue(id: string, result: unknown, token?: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      // Prevent unbounded memory growth during server outages
+  async queue(id: string, result: unknown, token?: string): Promise<void> {
+    // Backpressure: never silently drop accepted ACKs. When the buffer is at/over
+    // capacity, force a flush of the pending ACKs (sending them to the server)
+    // before accepting more. If a flush is already in-flight, await it first to
+    // avoid reentrancy/double-send, then re-check and flush any remainder.
+    while (this.pendingAcks.length >= this.MAX_PENDING_ACKS && !this.stopped) {
+      // Wait for any in-flight flush to drain the buffer it owns.
+      await this.waitForInFlight();
+      // If still over capacity (buffer refilled or nothing was in-flight),
+      // flush the current pending ACKs ourselves to make room. The enclosing
+      // while-loop already re-checks `stopped`, so at most one extra flush runs
+      // if stop() lands during the await above (flushing on shutdown is fine).
       if (this.pendingAcks.length >= this.MAX_PENDING_ACKS) {
-        // Drop oldest entries (10%) and reject their promises
-        const dropped = this.pendingAcks.splice(0, Math.floor(this.MAX_PENDING_ACKS * 0.1));
-        for (const ack of dropped) {
-          ack.reject(new Error('Ack buffer overflow - oldest entries dropped'));
-        }
+        const flushPromise = this.flush();
+        this.inFlightFlushes.add(flushPromise);
+        void flushPromise.finally(() => this.inFlightFlushes.delete(flushPromise));
+        await flushPromise;
       }
+    }
 
+    return new Promise<void>((resolve, reject) => {
       this.pendingAcks.push({
         id,
         result,

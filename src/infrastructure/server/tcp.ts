@@ -20,9 +20,35 @@ import { tcpLog } from '../../shared/logger';
 import { getRateLimiter } from './rateLimiter';
 import { pack, unpack } from 'msgpackr';
 import { Semaphore, withSemaphore } from '../../shared/semaphore';
+import { SocketWriteQueue } from './socketWriteQueue';
 
 /** Max concurrent commands per connection for pipelining */
 const MAX_CONCURRENT_PER_CONNECTION = 50;
+
+/**
+ * Idle/read stall timeout (ms) for the slowloris mitigation. A connection that
+ * has STARTED a frame (partial bytes buffered) but makes no further progress
+ * toward completing it within this window is closed. Healthy connections that
+ * are simply idle (no partial frame buffered) are never affected, so long-lived
+ * idle-but-healthy clients are not disturbed. 0 disables the timeout.
+ *
+ * Implemented with a manual per-connection timer (Bun.listen has no
+ * `idleTimeout` socket option as of Bun 1.3.x, and `socket.timeout()` resets on
+ * every byte — so a slowloris that trickles one byte per window would defeat
+ * it). The manual timer is armed only while a partial frame is in progress.
+ */
+const TCP_IDLE_TIMEOUT_MS = Math.max(0, parseInt(Bun.env.TCP_IDLE_TIMEOUT_MS ?? '60000', 10) || 0);
+
+/**
+ * Maximum bytes that may be buffered in a connection's outbound write queue
+ * before the connection is dropped. A client that stops reading while the
+ * server keeps producing responses would otherwise grow the pending queue
+ * without bound (write-side memory DoS). Generous default (64MB). 0 disables.
+ */
+const MAX_WRITE_QUEUE_BYTES = Math.max(
+  0,
+  parseInt(Bun.env.TCP_MAX_WRITE_QUEUE_BYTES ?? String(64 * 1024 * 1024), 10) || 0
+);
 
 /**
  * Release client jobs with retry logic and exponential backoff.
@@ -60,6 +86,18 @@ export interface TcpServerConfig {
   hostname?: string;
   /** Auth tokens for authentication */
   authTokens?: string[];
+  /**
+   * Slowloris stall timeout (ms): close a connection that started a frame but
+   * made no progress completing it within this window. 0 disables. Defaults to
+   * TCP_IDLE_TIMEOUT_MS env (60s). Mainly for tests.
+   */
+  idleTimeoutMs?: number;
+  /**
+   * Max outbound write-queue bytes before dropping a connection (write-side
+   * memory bound). 0 disables. Defaults to TCP_MAX_WRITE_QUEUE_BYTES env (64MB).
+   * Mainly for tests.
+   */
+  maxWriteQueueBytes?: number;
 }
 
 /** Per-connection data */
@@ -69,6 +107,10 @@ interface ConnectionData {
   ctx: HandlerContext;
   /** Semaphore for limiting concurrent command processing (pipelining) */
   semaphore: Semaphore;
+  /** Backpressure-aware write queue: buffers unwritten tails, flushes on drain */
+  writeQueue: SocketWriteQueue;
+  /** Active partial-frame stall timer (slowloris mitigation); null when idle. */
+  stallTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Serialize response to framed msgpack */
@@ -87,6 +129,39 @@ function errorResponse(message: string, reqId?: string): Uint8Array {
 export function createTcpServer(queueManager: QueueManager, config: TcpServerConfig) {
   const authTokens = new Set(config.authTokens ?? []);
   const connections = new Map<string, Socket<ConnectionData>>();
+  const idleTimeoutMs = config.idleTimeoutMs ?? TCP_IDLE_TIMEOUT_MS;
+  const maxWriteQueueBytes = config.maxWriteQueueBytes ?? MAX_WRITE_QUEUE_BYTES;
+
+  /** Cancel any pending stall timer for a connection. */
+  function clearStallTimer(socket: Socket<ConnectionData>): void {
+    if (socket.data.stallTimer !== null) {
+      clearTimeout(socket.data.stallTimer);
+      socket.data.stallTimer = null;
+    }
+  }
+
+  /**
+   * (Re)arm the slowloris stall timer based on parser state. The timer runs
+   * ONLY while a partial frame is buffered (a frame was started but not yet
+   * completed). It is reset on every data event that still leaves a partial
+   * frame, and cleared once the buffer drains to empty (frame completed). If it
+   * fires, the peer started a frame and then stalled -> terminate.
+   */
+  function updateStallTimer(socket: Socket<ConnectionData>): void {
+    if (idleTimeoutMs <= 0) return;
+    clearStallTimer(socket);
+    if (!socket.data.frameParser.hasPartialFrame) return;
+    socket.data.stallTimer = setTimeout(() => {
+      socket.data.stallTimer = null;
+      tcpLog.warn('Closing stalled connection (incomplete frame)', {
+        clientId: socket.data.state.clientId,
+        bufferedBytes: socket.data.frameParser.bufferedBytes,
+        idleTimeoutMs,
+      });
+      socket.data.writeQueue.clear();
+      socket.terminate();
+    }, idleTimeoutMs);
+  }
 
   const socketHandlers = {
     open(socket: Socket<ConnectionData>) {
@@ -104,6 +179,8 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
         frameParser: new FrameParser(),
         ctx,
         semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
+        writeQueue: new SocketWriteQueue(maxWriteQueueBytes),
+        stallTimer: null,
       };
 
       connections.set(clientId, socket);
@@ -111,13 +188,13 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     },
 
     async data(socket: Socket<ConnectionData>, data: Buffer) {
-      const { frameParser, ctx, state, semaphore } = socket.data;
+      const { frameParser, ctx, state, semaphore, writeQueue } = socket.data;
       const rateLimiter = getRateLimiter();
 
       // Check rate limit
       if (!rateLimiter.isAllowed(state.clientId)) {
         ctx.queueManager.emitDashboardEvent('ratelimit:hit', { clientId: state.clientId });
-        socket.write(errorResponse('Rate limit exceeded'));
+        writeQueue.write(socket, errorResponse('Rate limit exceeded'));
         return;
       }
 
@@ -126,7 +203,9 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
         frames = frameParser.addData(new Uint8Array(data));
       } catch (err) {
         if (err instanceof FrameSizeError) {
-          socket.write(
+          clearStallTimer(socket);
+          writeQueue.write(
+            socket,
             errorResponse(
               `Frame too large: ${err.requestedSize} bytes exceeds maximum ${err.maxSize}`
             )
@@ -137,6 +216,28 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
         throw err;
       }
 
+      // Slowloris mitigation: (re)arm the stall timer based on whether a partial
+      // frame is now buffered. Progress (a completed frame draining the buffer)
+      // disarms it; a started-but-unfinished frame arms it. This bounds memory
+      // held by a peer that declares a large (legal) frame then never finishes.
+      updateStallTimer(socket);
+
+      // Drop a connection whose outbound queue grew unbounded (client stopped
+      // reading while we keep producing responses) — bounds write-side memory.
+      const dropForWriteOverflow = (): boolean => {
+        if (writeQueue.isOverBudget) {
+          tcpLog.warn('Closing connection: write queue exceeded budget', {
+            clientId: state.clientId,
+            queuedBytes: writeQueue.bytesQueued,
+          });
+          clearStallTimer(socket);
+          writeQueue.clear();
+          socket.terminate();
+          return true;
+        }
+        return false;
+      };
+
       // Process frames in parallel for pipelining support
       // Each command is processed with semaphore-controlled concurrency
       const processFrame = async (frame: Uint8Array): Promise<void> => {
@@ -144,12 +245,12 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
         try {
           cmd = unpack(frame) as Command;
         } catch {
-          socket.write(errorResponse('Invalid command format'));
+          writeQueue.write(socket, errorResponse('Invalid command format'));
           return;
         }
 
         if (!cmd?.cmd) {
-          socket.write(errorResponse('Invalid command'));
+          writeQueue.write(socket, errorResponse('Invalid command'));
           return;
         }
 
@@ -157,12 +258,14 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
         await withSemaphore(semaphore, async () => {
           try {
             const response = await handleCommand(cmd, ctx);
-            socket.write(serializeResponse(response));
+            writeQueue.write(socket, serializeResponse(response));
+            dropForWriteOverflow();
           } catch (err) {
             const raw = err instanceof Error ? err.message : 'Unknown error';
             const message =
               raw.includes('SQLITE') || raw.includes('database') ? 'Internal server error' : raw;
-            socket.write(errorResponse(message, cmd.reqId));
+            writeQueue.write(socket, errorResponse(message, cmd.reqId));
+            dropForWriteOverflow();
           }
         });
       };
@@ -173,6 +276,10 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
 
     close(socket: Socket<ConnectionData>) {
       const clientId = socket.data.state.clientId;
+      // Cancel the slowloris stall timer and drop any buffered-but-unwritten
+      // bytes; the socket is gone.
+      clearStallTimer(socket);
+      socket.data.writeQueue.clear();
       connections.delete(clientId);
       getRateLimiter().removeClient(clientId);
       queueManager.unregisterWorkersByClientId(clientId);
@@ -202,8 +309,10 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
       tcpLog.error('Connection error', { error: error.message });
     },
 
-    drain(_socket: Socket<ConnectionData>) {
-      // Called when socket is ready for more writes after backpressure
+    drain(socket: Socket<ConnectionData>) {
+      // Socket is ready for more writes after backpressure: flush any unwritten
+      // tail bytes buffered by short writes, preserving frame order.
+      socket.data.writeQueue.flush(socket);
     },
   };
 
@@ -226,7 +335,15 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     broadcast(message: unknown): void {
       const frame = FrameParser.frame(pack(message));
       for (const socket of connections.values()) {
-        socket.write(frame);
+        // Each connection writes through its own backpressure-aware queue so a
+        // slow reader buffers (in order) instead of dropping frame tail bytes.
+        socket.data.writeQueue.write(socket, frame);
+        // Drop any reader that has fallen too far behind (write-side bound).
+        if (socket.data.writeQueue.isOverBudget) {
+          clearStallTimer(socket);
+          socket.data.writeQueue.clear();
+          socket.terminate();
+        }
       }
     },
 
@@ -234,6 +351,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     stop(): void {
       server.stop();
       for (const socket of connections.values()) {
+        clearStallTimer(socket);
         socket.end();
       }
       connections.clear();

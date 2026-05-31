@@ -83,6 +83,10 @@ export interface CollectSnapshotParams {
   sequenceId: number;
   serverHandles?: ServerHandles;
   includeHeavy: boolean;
+  /** Fields to redact from job data (mirrors CloudConfig.redactFields). Default: none */
+  redactFields?: readonly string[];
+  /** Include job data in recentJobs/dlqEntries (mirrors CloudConfig.includeJobData). Default: true */
+  includeJobData?: boolean;
 }
 
 /** Enrich failed jobs in recentJobs with duration from DLQ attempt history */
@@ -110,10 +114,41 @@ function enrichFailedJobDurations(
   }
 }
 
+/** Resolve redaction options with defaults (includeJobData defaults on). */
+function resolveRedaction(params: CollectSnapshotParams): {
+  redactFields: readonly string[];
+  includeJobData: boolean;
+} {
+  return {
+    redactFields: params.redactFields ?? [],
+    includeJobData: params.includeJobData ?? true,
+  };
+}
+
+/** Map cron definitions to snapshot shape */
+function collectCrons(queueManager: QueueManager): CloudSnapshot['crons'] {
+  return queueManager.listCrons().map((c) => ({
+    name: c.name,
+    queue: c.queue,
+    schedule: c.schedule ?? null,
+    repeatEvery: c.repeatEvery ?? null,
+    nextRun: c.nextRun,
+    executions: c.executions,
+    maxLimit: c.maxLimit,
+    lastRun: c.executions > 0 && c.repeatEvery ? c.nextRun - c.repeatEvery : null,
+    priority: c.priority,
+    timezone: c.timezone ?? null,
+    data: c.data,
+    uniqueKey: c.uniqueKey ?? null,
+    dedup: c.dedup ?? null,
+  }));
+}
+
 /** Collect a snapshot. Light data always fresh, heavy data cached between refreshes. */
 export async function collectSnapshot(params: CollectSnapshotParams): Promise<CloudSnapshot> {
   const t0 = performance.now();
   const { queueManager, instanceId, instanceName, startedAt, sequenceId, serverHandles } = params;
+  const { redactFields, includeJobData } = resolveRedaction(params);
 
   // ─── MCP operations (drain buffer into snapshot) ───
   const mcpData = serverHandles?.getMcpOperations?.();
@@ -146,32 +181,22 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
     };
   });
 
-  const crons = queueManager.listCrons().map((c) => ({
-    name: c.name,
-    queue: c.queue,
-    schedule: c.schedule ?? null,
-    repeatEvery: c.repeatEvery ?? null,
-    nextRun: c.nextRun,
-    executions: c.executions,
-    maxLimit: c.maxLimit,
-    lastRun: c.executions > 0 && c.repeatEvery ? c.nextRun - c.repeatEvery : null,
-    priority: c.priority,
-    timezone: c.timezone ?? null,
-    data: c.data,
-    uniqueKey: c.uniqueKey ?? null,
-    dedup: c.dedup ?? null,
-  }));
+  const crons = collectCrons(queueManager);
 
   // ─── Full data (every snapshot) ───
   const allQueueNames = queues.map((q) => q.name);
   const dlqQueues = queues.filter((q) => q.failed > 0);
 
   // Live jobs: waiting/active/delayed/failed — bounded by processing capacity
-  const recentJobs = collectLiveJobs(queueManager, allQueueNames);
+  const recentJobs = collectLiveJobs(queueManager, allQueueNames, {
+    redactFields,
+    includeJobData,
+  });
 
   const dlqEntries = collectDlqEntries(
     queueManager,
-    dlqQueues.map((q) => q.name)
+    dlqQueues.map((q) => q.name),
+    { redactFields, includeJobData }
   );
 
   enrichFailedJobDurations(recentJobs, dlqEntries);

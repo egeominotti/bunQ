@@ -14,6 +14,7 @@ import type { JobEvent } from '../../domain/types/queue';
 import type { CloudConfig, CloudEvent, CloudSnapshot } from './types';
 import { loadCloudConfig } from './config';
 import { collectSnapshot, type ServerHandles } from './snapshotCollector';
+import { redactData } from './redact';
 import { HttpSender } from './httpSender';
 import { WsSender } from './wsSender';
 import { handleCommand, type CommandContext } from './commandHandler';
@@ -145,6 +146,8 @@ export class CloudAgent {
         sequenceId: ++this.sequenceId,
         serverHandles: this.serverHandles,
         includeHeavy: true,
+        redactFields: this.config.redactFields,
+        includeJobData: this.config.includeJobData,
       });
       snapshot.shutdown = true;
 
@@ -191,6 +194,8 @@ export class CloudAgent {
         sequenceId: ++this.sequenceId,
         serverHandles: this.serverHandles,
         includeHeavy: true,
+        redactFields: this.config.redactFields,
+        includeJobData: this.config.includeJobData,
       });
 
       // Embed buffered events in snapshot
@@ -238,19 +243,9 @@ export class CloudAgent {
     });
   }
 
-  /** Redact sensitive fields from job data */
+  /** Redact sensitive fields from job data (delegates to the shared helper) */
   private redactData(data: unknown): unknown {
-    if (!data || typeof data !== 'object' || this.config.redactFields.length === 0) {
-      return data;
-    }
-
-    const redacted = { ...(data as Record<string, unknown>) };
-    for (const field of this.config.redactFields) {
-      if (field in redacted) {
-        redacted[field] = '[REDACTED]';
-      }
-    }
-    return redacted;
+    return redactData(data, this.config.redactFields);
   }
 
   getInstanceId(): string {
@@ -267,6 +262,8 @@ export class CloudAgent {
       sequenceId: ++this.sequenceId,
       serverHandles: this.serverHandles,
       includeHeavy: true,
+      redactFields: this.config.redactFields,
+      includeJobData: this.config.includeJobData,
     });
     return snapshot;
   }

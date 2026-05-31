@@ -5,7 +5,7 @@
 
 import { queueLog } from '../shared/logger';
 import { shardIndex } from '../shared/hash';
-import { FailureReason } from '../domain/types/dlq';
+import { FailureReason, createDlqEntry } from '../domain/types/dlq';
 import { calculateBackoff } from '../domain/types/job';
 import * as dlqOps from './dlqManager';
 import { checkExpiredLocks } from './lockManager';
@@ -14,8 +14,10 @@ import { checkStalledJobs } from './stallDetection';
 import { processPendingDependencies } from './dependencyProcessor';
 import { handleTaskError, handleTaskSuccess, getTaskErrorStats } from './taskErrorTracking';
 import { runMonitoringChecks } from './monitoringChecks';
+import { isCorruptDependsOn } from '../infrastructure/persistence/sqliteSerializer';
 import type { BackgroundContext, LockContext } from './types';
 import type { CronScheduler } from '../infrastructure/scheduler/cronScheduler';
+import type { Job } from '../domain/types/job';
 
 export { getTaskErrorStats };
 
@@ -185,6 +187,31 @@ function performDlqMaintenance(ctx: BackgroundContext): void {
 /** Batch size for paginated recovery */
 const RECOVERY_BATCH_SIZE = 10000;
 
+/**
+ * Route a job whose `depends_on` blob was corrupt on disk straight to the DLQ.
+ *
+ * Its real dependency metadata is unrecoverable, so it must never be enqueued
+ * as "ready" (out-of-order execution) nor parked in waitingDeps behind a
+ * dependency that can never complete (an unbounded leak).
+ *
+ * We persist the DLQ entry to disk and drop the jobs row here, but do NOT add
+ * it to the in-memory DLQ — the later `loadDlq()` pass (which runs after both
+ * recovery phases) restores every persisted entry into memory exactly once.
+ * Adding it here too would double-count it. The job row is deleted so that pass
+ * sees only the DLQ table.
+ */
+function quarantineCorruptDependsOn(ctx: BackgroundContext, job: Job): void {
+  if (!ctx.storage) return;
+  const entry = createDlqEntry(job, FailureReason.Unknown, 'corrupt-dependency-metadata');
+  ctx.storage.saveDlqEntry(entry);
+  ctx.storage.deleteJob(job.id);
+  ctx.registerQueueName(job.queue);
+  queueLog.error('Recovered job with corrupt depends_on metadata -> routed to DLQ', {
+    jobId: String(job.id),
+    queue: job.queue,
+  });
+}
+
 // eslint-disable-next-line complexity
 export function recover(ctx: BackgroundContext): void {
   if (!ctx.storage) return;
@@ -225,6 +252,14 @@ export function recover(ctx: BackgroundContext): void {
       if (dlqJobIds.has(job.id)) {
         ctx.storage.deleteJob(job.id);
         ctx.registerQueueName(job.queue);
+        continue;
+      }
+
+      // A corrupt depends_on blob makes the job's real dependencies
+      // unrecoverable: route it to the DLQ instead of retrying it (which could
+      // execute it out-of-order once stalls are exhausted).
+      if (isCorruptDependsOn(job)) {
+        quarantineCorruptDependsOn(ctx, job);
         continue;
       }
 
@@ -274,6 +309,14 @@ export function recover(ctx: BackgroundContext): void {
     for (const job of jobs) {
       const idx = shardIndex(job.queue);
       const shard = ctx.shards[idx];
+
+      // A corrupt depends_on blob means the real dependencies are unrecoverable.
+      // Route the job to the DLQ rather than enqueuing it as ready (out-of-order
+      // execution) or parking it in waitingDeps forever (unbounded leak).
+      if (isCorruptDependsOn(job)) {
+        quarantineCorruptDependsOn(ctx, job);
+        continue;
+      }
 
       // Check if job has unmet dependencies
       // Check both in-memory completedJobs AND SQLite job_results table

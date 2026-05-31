@@ -7,7 +7,7 @@
 import { Database } from 'bun:sqlite';
 import type { Job, JobId, JobTimelineEntry } from '../../domain/types/job';
 import type { CronJob } from '../../domain/types/cron';
-import type { DlqEntry } from '../../domain/types/dlq';
+import { type DlqEntry, FailureReason, createDlqEntry } from '../../domain/types/dlq';
 import { PRAGMA_SETTINGS, SCHEMA, MIGRATION_TABLE, SCHEMA_VERSION, MIGRATIONS } from './schema';
 import { prepareStatements, type StatementName, type DbJob, type DbCron } from './statements';
 import { pack, unpack, rowToJob, reconstructDlqEntry } from './sqliteSerializer';
@@ -127,6 +127,22 @@ export class SqliteStorage {
     // Bound retention
     while (this._criticalLosses.length > SqliteStorage.MAX_RETAINED_LOSSES) {
       this._criticalLosses.shift();
+    }
+    // Durably persist each lost job to the DLQ table so it survives a restart
+    // and is recoverable via the normal DLQ path (getDlqEntry / loadDlq).
+    // saveDlqEntry() writes directly via the prepared `insertDlq` statement
+    // (NOT through the WriteBuffer that just exhausted its retries), so this
+    // cannot recurse back into the failing flush path.
+    for (const job of jobs) {
+      try {
+        this.saveDlqEntry(createDlqEntry(job, FailureReason.Unknown, lastError.message));
+      } catch (err) {
+        storageLog.error('Failed to persist lost job to DLQ', {
+          id: String(job.id),
+          queue: job.queue,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     // Forward to user-supplied callback if provided
     if (this._onCriticalLoss) {

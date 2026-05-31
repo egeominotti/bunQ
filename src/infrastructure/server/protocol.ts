@@ -221,7 +221,12 @@ export class FrameParser {
           this.buffer[3]) >>>
         0;
 
-      // Validate frame size to prevent memory exhaustion DoS
+      // Validate frame size to prevent memory exhaustion DoS. A single frame's
+      // declared length can never exceed maxFrameSize (64MB), so the partial
+      // buffer is bounded by maxFrameSize regardless of how it is segmented
+      // across TCP reads. Slowloris (a connection that declares a large frame
+      // then never completes it) is handled at the transport layer by an idle
+      // read timeout in the server, NOT by dropping legal large partial frames.
       if (length > this.maxFrameSize) {
         // Clear buffer to prevent further processing of malicious data
         this.buffer = new Uint8Array(0);
@@ -229,7 +234,9 @@ export class FrameParser {
       }
 
       if (this.buffer.length < 4 + length) {
-        // Not enough data
+        // Not enough data for this (legal, < maxFrameSize) frame yet. Keep the
+        // partial bytes buffered until the rest of the frame arrives across
+        // subsequent TCP segments.
         break;
       }
 
@@ -239,6 +246,16 @@ export class FrameParser {
     }
 
     return frames;
+  }
+
+  /** Number of bytes currently buffered awaiting a complete frame. */
+  get bufferedBytes(): number {
+    return this.buffer.length;
+  }
+
+  /** True while a partial (incomplete) frame is buffered. */
+  get hasPartialFrame(): boolean {
+    return this.buffer.length > 0;
   }
 
   /** Clear the internal buffer */

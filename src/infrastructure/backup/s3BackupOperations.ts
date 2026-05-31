@@ -74,7 +74,14 @@ async function withRetry<T>(
   throw lastError;
 }
 
-/** Verify restored database integrity via PRAGMA integrity_check */
+/**
+ * Verify database integrity via PRAGMA integrity_check.
+ *
+ * Validates the file at `databasePath` and throws on failure. This function
+ * is intended to run against a TEMP file (never the live DB): on integrity
+ * failure it deletes the file it inspected, so it must only ever be pointed
+ * at a throwaway candidate, not the live database.
+ */
 async function verifyDatabaseIntegrity(databasePath: string): Promise<void> {
   const { Database } = await import('bun:sqlite');
   let db: InstanceType<typeof Database> | null = null;
@@ -86,7 +93,14 @@ async function verifyDatabaseIntegrity(databasePath: string): Promise<void> {
       throw new Error(`Database integrity check failed: ${status || 'unknown error'}`);
     }
   } catch (error) {
-    // Clean up the corrupt file
+    // Close before unlinking so the file handle is released.
+    try {
+      db?.close();
+    } catch {
+      /* already closed */
+    }
+    db = null;
+    // Clean up the corrupt candidate file (this is a temp file, never the live DB).
     try {
       const { unlink } = await import('fs/promises');
       await unlink(databasePath);
@@ -317,11 +331,33 @@ export async function restoreBackup(
       throw new Error('Restored data is not a valid SQLite database');
     }
 
-    // Write to database path
-    await Bun.write(config.databasePath, data);
+    // Atomic, validate-before-replace restore:
+    // Write the payload to a TEMP file next to the target, validate integrity
+    // on the temp file, and only swap the live DB into place on full success.
+    // On any failure the temp file is removed and the live DB is left untouched.
+    const tempPath = `${config.databasePath}.restore-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.tmp`;
+    try {
+      await Bun.write(tempPath, data);
 
-    // Verify restored database integrity
-    await verifyDatabaseIntegrity(config.databasePath);
+      // Verify integrity on the temp candidate (this deletes the temp file on failure).
+      await verifyDatabaseIntegrity(tempPath);
+
+      // Validation passed: atomically replace the live DB with the temp file.
+      const { rename } = await import('fs/promises');
+      await rename(tempPath, config.databasePath);
+    } catch (error) {
+      // Best-effort cleanup of the temp file (may already be removed by the
+      // integrity check). The live DB at config.databasePath is never touched.
+      try {
+        const { unlink } = await import('fs/promises');
+        await unlink(tempPath);
+      } catch {
+        /* best effort — temp file may not exist */
+      }
+      throw error;
+    }
 
     const duration = Date.now() - startTime;
 

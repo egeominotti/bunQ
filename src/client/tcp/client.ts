@@ -243,14 +243,17 @@ export class TcpClient extends EventEmitter {
       // Unknown response - log warning
       this.emit('warning', { type: 'unknown_response', reqId });
     } catch {
-      // Invalid response - reject current command if any
-      const current = this.commands.getCurrentCommand();
-      if (current) {
-        clearTimeout(current.timeout);
-        current.reject(new Error('Invalid response from server'));
-        this.commands.setCurrentCommand(null);
-        this.processQueue();
-      }
+      // Malformed/unparseable frame: the framed byte stream is now
+      // unrecoverable (we cannot trust subsequent frame boundaries), and in
+      // pipelining mode the legacy `currentCommand` slot is null — so checking
+      // it alone would leave every in-flight command hanging until its
+      // per-command timeout. Reject ALL pending + in-flight commands promptly
+      // and tear down the socket so reconnection (if enabled) can re-establish
+      // a clean stream.
+      const err = new Error('Invalid response from server');
+      this.emit('warning', { type: 'malformed_frame' });
+      this.commands.rejectAll(err);
+      this.forceReconnect();
     }
   }
 

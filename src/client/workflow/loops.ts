@@ -90,6 +90,13 @@ export async function executeForEach(
     };
     const stepCtx = buildContext(exec);
     await executeStepWithRetry(indexedStep, stepCtx, exec, emitter, updateFn);
+    // Persist this iteration's __item/__index alongside the step record so
+    // saga compensation can restore the correct per-iteration context later.
+    // executeStepWithRetry has just written this record (it throws otherwise).
+    const record = exec.steps[indexedName];
+    record.loopItem = item;
+    record.loopIndex = i;
+    updateFn(exec);
   }
 }
 

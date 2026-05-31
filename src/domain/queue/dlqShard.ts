@@ -95,6 +95,15 @@ export class DlqShard {
       entries = [];
       this.dlq.set(queue, entries);
     }
+
+    const config = this.getConfig(queue);
+
+    // Enforce max entries (mirror add(): evict oldest-first)
+    while (entries.length >= config.maxEntries) {
+      entries.shift(); // Remove oldest
+      this.stats.decrementDlq();
+    }
+
     entries.push(entry);
     this.stats.incrementDlq();
   }

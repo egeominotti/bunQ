@@ -806,33 +806,53 @@ describe('AckBatcher', () => {
   // ------------------------------------------------------------------
   // Overflow protection (MAX_PENDING_ACKS)
   // ------------------------------------------------------------------
-  test('should drop oldest entries when buffer overflows', async () => {
-    // Create a batcher that never sends (no TCP, large interval)
+  test('should apply backpressure (not drop) when buffer overflows', async () => {
+    // BUG H4: previously the batcher dropped the oldest ~10% of pending ACKs on
+    // overflow. The fix applies backpressure instead — at capacity it flushes
+    // pending ACKs (sending them) before accepting more, so none are discarded.
+    const sentIds = new Set<string>();
     const batcher = new AckBatcher({
       batchSize: 100_000,
       interval: 60_000,
       embedded: false,
       maxRetries: 0,
     });
-    // Intentionally do NOT set TCP so sends would fail; but we stop before flushing.
+    batcher.setTcp({
+      send: async (cmd: Record<string, unknown>) => {
+        for (const id of (cmd.ids as string[]) ?? []) sentIds.add(id);
+        return { ok: true };
+      },
+    });
 
     const rejected: string[] = [];
+    const promises: Array<Promise<void>> = [];
 
     // Queue MAX_PENDING_ACKS items (10000)
     for (let i = 0; i < 10_000; i++) {
-      void batcher.queue(`j${i}`, null).catch(() => {
-        rejected.push(`j${i}`);
-      });
+      promises.push(
+        batcher.queue(`j${i}`, null).catch(() => {
+          rejected.push(`j${i}`);
+        })
+      );
     }
 
-    // Queue one more to trigger overflow
-    void batcher.queue('overflow', null).catch(() => {});
+    // Queue one more to trigger overflow → backpressure flush, no drop.
+    promises.push(batcher.queue('overflow', null).catch(() => rejected.push('overflow')));
 
-    // Give microtasks a tick to process rejections
-    await Bun.sleep(1);
+    // Drain repeatedly: the backpressure path may leave a survivor in the
+    // buffer once it resumes after the in-flight flush completes.
+    for (let i = 0; i < 5; i++) {
+      await batcher.waitForInFlight();
+      await batcher.flush();
+    }
+    await Promise.allSettled(promises);
 
-    // 10% of oldest should have been dropped
-    expect(rejected.length).toBe(1000);
+    // No ack may be silently dropped/rejected by the overflow path.
+    expect(rejected.length).toBe(0);
+    // Every accepted ack eventually reached the sink.
+    expect(sentIds.size).toBe(10_001);
+    expect(sentIds.has('overflow')).toBe(true);
+    expect(sentIds.has('j0')).toBe(true);
 
     batcher.stop();
   });

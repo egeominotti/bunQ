@@ -31,10 +31,19 @@ export async function runCompensation(
   store.update(exec);
   emitter?.emitWorkflow('workflow:compensating', exec.id, exec.workflowName, 'compensating');
 
-  const ctx = buildContext(exec);
-  for (const [name] of completed) {
+  const baseCtx = buildContext(exec);
+  for (const [name, record] of completed) {
     const def = findStepDef(wf, name);
     if (def?.compensate) {
+      // For forEach iterations, restore that iteration's __item/__index so the
+      // compensate handler knows exactly which item it is rolling back.
+      const ctx =
+        record.loopIndex !== undefined
+          ? {
+              ...baseCtx,
+              steps: { ...baseCtx.steps, __item: record.loopItem, __index: record.loopIndex },
+            }
+          : baseCtx;
       try {
         await def.compensate(ctx);
       } catch {

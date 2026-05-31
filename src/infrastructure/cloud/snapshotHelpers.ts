@@ -6,6 +6,15 @@
 import type { QueueManager } from '../../application/queueManager';
 import { jobId as toJobId } from '../../domain/types/job';
 import type { CloudSnapshot } from './types';
+import { redactData } from './redact';
+
+/** Redaction options threaded from the cloud config into job-data collectors */
+export interface RedactOptions {
+  /** Fields to redact from job data (mirrors CloudConfig.redactFields) */
+  redactFields: readonly string[];
+  /** When false, omit job data entirely (mirrors CloudConfig.includeJobData) */
+  includeJobData: boolean;
+}
 
 /** Per-queue previous totals for delta-based throughput calculation */
 const prevQueueTotals = new Map<
@@ -50,7 +59,8 @@ function arrOrUndef<T>(arr: T[]): T[] | undefined {
 /** Map core job fields (identity, state, timing) */
 function mapJobCore(
   j: DomainJob,
-  state: string
+  state: string,
+  redact: RedactOptions
 ): Pick<
   SnapshotJob,
   | 'id'
@@ -74,13 +84,14 @@ function mapJobCore(
   | 'totalDuration'
 > {
   const data = j.data as Record<string, unknown> | undefined;
+  const safeData = redact.includeJobData ? redactData(data, redact.redactFields) : undefined;
   const processTime = j.completedAt && j.startedAt ? j.completedAt - j.startedAt : undefined;
   return {
     id: String(j.id),
     name: (data?.name as string | undefined) ?? 'default',
     queue: j.queue,
     state,
-    data,
+    data: safeData,
     priority: j.priority,
     createdAt: j.createdAt,
     startedAt: nullUndef(j.startedAt),
@@ -138,13 +149,14 @@ function mapJobExtended(j: DomainJob): Partial<SnapshotJob> {
 }
 
 /** Map a domain Job to the snapshot format */
-function mapJobToSnapshot(j: DomainJob, state: string): SnapshotJob {
-  return { ...mapJobCore(j, state), ...mapJobExtended(j) } as SnapshotJob;
+function mapJobToSnapshot(j: DomainJob, state: string, redact: RedactOptions): SnapshotJob {
+  return { ...mapJobCore(j, state, redact), ...mapJobExtended(j) } as SnapshotJob;
 }
 
 export function collectLiveJobs(
   queueManager: QueueManager,
-  queueNames: string[]
+  queueNames: string[],
+  redact: RedactOptions
 ): CloudSnapshot['recentJobs'] {
   if (queueNames.length === 0) return [];
 
@@ -155,7 +167,7 @@ export function collectLiveJobs(
       try {
         const queueJobs = queueManager.getJobs(name, { state: [state], start: 0, end: 999 });
         for (const j of queueJobs) {
-          jobs.push(mapJobToSnapshot(j, state));
+          jobs.push(mapJobToSnapshot(j, state, redact));
         }
       } catch {
         // Skip queue/state on error
@@ -169,7 +181,8 @@ export function collectLiveJobs(
 /** Collect ALL DLQ entries — no cap */
 export function collectDlqEntries(
   queueManager: QueueManager,
-  dlqQueueNames: string[]
+  dlqQueueNames: string[],
+  redact: RedactOptions
 ): CloudSnapshot['dlqEntries'] {
   if (dlqQueueNames.length === 0) return [];
 
@@ -191,7 +204,7 @@ export function collectDlqEntries(
           expiresAt: (e as unknown as { expiresAt?: number }).expiresAt ?? undefined,
           jobAttempts: e.job.attempts,
           jobMaxAttempts: e.job.maxAttempts,
-          jobData: e.job.data,
+          jobData: redact.includeJobData ? redactData(e.job.data, redact.redactFields) : undefined,
           jobCreatedAt: e.job.createdAt,
           jobPriority: e.job.priority,
           attemptHistory: e.attempts.map((a) => ({

@@ -10,6 +10,14 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.22] - 2026-06-02
+
+### Fixed (CI — broken transitive publish of `typescript-eslint@8.60.1`)
+
+CI lint job failed with `error: No version matching "8.60.1" found for specifier "@typescript-eslint/types" (but package exists)`. Root cause: `bun.lock` is gitignored and CI runs `bun install` without `--frozen-lockfile`, so every run does a fresh, non-reproducible resolve. The dev dependency was declared `typescript-eslint: "^8.56.1"`, which floated up to `8.60.1` — an upstream release whose meta-package was published before its sub-packages (`@typescript-eslint/types`, `@typescript-eslint/scope-manager`) propagated, leaving a window where fresh installs couldn't resolve them. npm has since healed.
+
+- **Pinned `typescript-eslint` to exact `8.56.1`** (dropped the `^` caret) in `package.json` so CI no longer floats into a broken or unexpected upstream release. Lint-only devDependency; zero runtime impact. All three suites pass (5479 unit, 59 TCP, 36 embedded).
+
 ## [2.7.21] - 2026-06-02
 
 ### Fixed (docs — `bunx bunqueue-mcp` 404, #91)

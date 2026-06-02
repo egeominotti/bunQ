@@ -10,6 +10,17 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.3] - 2026-06-03
+
+### Fixed — expose `./package.json` in `exports`
+
+With the `exports` map defined, `require('bunqueue/package.json')` (and `import`
+of the same subpath) failed with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Some tools read
+a dependency's `package.json` directly (e.g. to detect the installed version).
+Added `"./package.json": "./package.json"` to `exports`. No other change; all
+existing subpath exports (`.`, `./client`, `./queue`, `./mcp`, `./workflow`) are
+unaffected.
+
 ## [2.8.2] - 2026-06-02
 
 ### Stop shipping source maps — another −34% off the install

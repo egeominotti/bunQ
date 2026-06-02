@@ -43,6 +43,24 @@ The only honest benchmark is one you run on your own hardware. Clone the repo an
 
 ---
 
+## Install Footprint
+
+Throughput isn't the only number that shrank. As of 2.8.2, a clean `bun add bunqueue` is a featherweight install:
+
+| Metric | bunqueue 2.8.2 | Before (2.7.x) | Change |
+|--------|----------------|----------------|--------|
+| `node_modules` size | 5.4 MB | 93 MB | **−94%** |
+| packages installed | 7 | 117 | **117 → 7** |
+| cold install time | ~1.2 s | ~6 s | **up to ~5× faster** |
+
+bunqueue ships just **2 runtime dependencies** — `croner` (cron parsing) and `msgpackr` (binary serialization). SQLite, S3, HTTP, and WebSocket are all built into Bun, so there's nothing else to download. The MCP server's `@modelcontextprotocol/sdk` is an **optional peer dependency**: queue and worker users never pull it in, and you install it once only if you run `bunqueue-mcp`.
+
+<Aside>
+The 2.8.0/2.8.1 MCP refactor removed the SDK, `zod`, and the HTTP stack from the install path; 2.8.2 dropped 2.8 MB of unusable sourcemaps from the published package. A new user goes from ~6s to ~1.2s on a cold install.
+</Aside>
+
+---
+
 ## Embedded Mode Results
 
 Embedded mode uses direct SQLite access with no network overhead. Ideal for single-process applications.

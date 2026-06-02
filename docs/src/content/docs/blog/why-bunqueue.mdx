@@ -41,7 +41,7 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
 
 <CardGrid>
   <Card title="Zero Dependencies" icon="rocket">
-    No Redis, no external services. Just your app and a file on disk. `bun add bunqueue` installs 7 packages (8.2 MB) — only `croner` and `msgpackr` at runtime.
+    No Redis, no external services. Just your app and a file on disk. `bun add bunqueue` installs 7 packages (5.4 MB) — only `croner` and `msgpackr` at runtime.
   </Card>
   <Card title="In-Process Speed" icon="star">
     Direct memory access instead of TCP round-trips to Redis.
@@ -107,7 +107,7 @@ bunqueue is designed for **single-instance deployments**. It's the right choice 
 If you need multi-node clustering or Redis pub/sub features, BullMQ remains a solid choice. But for the majority of applications that run on a single server, bunqueue eliminates an entire layer of infrastructure.
 
 <Aside type="note" title="A genuinely small install">
-  Eliminating Redis isn't just an operational win — it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (8.2 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin — so queue and worker users never download it.
+  Eliminating Redis isn't just an operational win — it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.4 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin — so queue and worker users never download it.
 </Aside>
 
 ## What's Next?

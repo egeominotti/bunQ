@@ -10,6 +10,27 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.2] - 2026-06-02
+
+### Stop shipping source maps — another −34% off the install
+
+The published package included `*.js.map` and `*.d.ts.map` source maps (512 files,
+2.8 MB) whose `sources` point at `src/*.ts` — which is **not** shipped in the
+package. With no source to resolve against, those maps were dead weight on every
+install. Disabled `sourceMap`/`declarationMap` in `tsconfig.build.json` so tsc
+emits neither the maps nor the trailing `sourceMappingURL` comments (no dangling
+references), and dropped the now-empty `*.map` globs from `files[]`.
+
+| Metric                | 2.8.1   | 2.8.2  | Delta            |
+| --------------------- | ------- | ------ | ---------------- |
+| `node_modules` size   | 8.2 MB  | 5.4 MB | **−2.8 MB (−34%)** |
+| `bunqueue` package    | 5.8 MB  | 3.0 MB | −48%             |
+| files in package      | 1027    | 503    | −524             |
+| tarball (download)    | 664 KB  | 409 KB | −38%             |
+
+No runtime change. Cumulative since 2.7.x: a clean `bun add bunqueue` went from
+**94 MB / 117 packages to 5.4 MB / 7 packages (−94%)**.
+
 ## [2.8.1] - 2026-06-02
 
 > Released as 2.8.1 because 2.8.0 was already taken on npm (an earlier accidental publish, since deprecated). Same changes as intended for 2.8.0.

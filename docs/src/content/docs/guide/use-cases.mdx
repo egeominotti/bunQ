@@ -61,7 +61,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 <Aside type="note">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 8.2 MB instead of 117 and 93 MB, a 91% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 </Aside>
 
 The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (local SQLite) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.

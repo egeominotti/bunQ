@@ -37,7 +37,7 @@ This is a **fair comparison**: both systems use network connections (bunqueue TC
   <Card title="Zero Infrastructure" icon="laptop">
     **No Redis Required**
 
-    Embedded SQLite vs Redis server. 7 packages, 8.2 MB installed.
+    Embedded SQLite vs Redis server. 7 packages, 5.4 MB installed.
   </Card>
 </CardGrid>
 
@@ -169,7 +169,7 @@ Both bunqueue and BullMQ use **identical test conditions**: same payload size (1
 | **Persistence** | ✅ SQLite (embedded) | ✅ Redis |
 | **Horizontal Scaling** | ⚠️ Single process | ✅ Multi-process |
 | **External Dependencies** | ✅ None (2 runtime deps) | ❌ Redis required |
-| **Install Footprint** | ✅ 7 packages, 8.2 MB | ❌ ~3 MB lib + Redis server |
+| **Install Footprint** | ✅ 7 packages, 5.4 MB | ❌ ~3 MB lib + Redis server |
 | **S3 Backup** | ✅ Built-in | ❌ Manual |
 | **TCP Pipelining** | ✅ Built-in | ✅ Via Redis |
 | **MCP Server (AI Agents)** | ✅ 73 tools built-in | ❌ Not available |

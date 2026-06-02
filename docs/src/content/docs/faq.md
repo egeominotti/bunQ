@@ -83,7 +83,7 @@ head:
             "name": "How many dependencies does bunqueue have?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 8.2 MB and completes in about 0.72s on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
+              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 5.4 MB and completes up to roughly 5x faster on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
             }
           },
           {
@@ -170,7 +170,7 @@ brew install oven-sh/bun/bun
 
 ### How many dependencies does bunqueue have?
 
-bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 8.2 MB** and completes in about **0.72s** on a cold cache.
+bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.4 MB** and completes **up to ~5× faster** on a cold install.
 
 As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency — both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
 

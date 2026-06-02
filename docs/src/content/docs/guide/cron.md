@@ -118,7 +118,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 8.2 MB instead of 117 and 93 MB, a 91% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
 :::
 
 :::tip[Related Guides]

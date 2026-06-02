@@ -49,6 +49,24 @@ That's it. Queue + Worker in one object. No Redis, no config, no setup.
 
 ---
 
+## 🪶 Featherweight install
+
+`bun add bunqueue` pulls **7 packages and 5.4 MB** — and that includes the binary
+queue server, the CLI, and the MCP server. Most queue libraries pull a Redis
+client and its dependency tree before you've queued a single job.
+
+| | Before (2.7.x) | Now | |
+| --- | --- | --- | --- |
+| **`node_modules`** | 93 MB | **5.4 MB** | **−94%** |
+| **packages** | 117 | **7** | **−110** |
+| **cold install** | ~6 s | **~1.2 s** | **~5× faster** |
+
+Just **2 runtime dependencies** (`croner` + `msgpackr`). SQLite, S3, HTTP and
+WebSocket are all Bun built-ins. The MCP SDK is an optional peer dependency —
+queue users never download it. ([details →](https://bunqueue.dev/changelog/))
+
+---
+
 ## Simple Mode
 
 Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons — all from one place.
@@ -602,7 +620,7 @@ https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116
 - **MCP server included** — 73 tools, 5 resources, 3 prompts. AI agents get full control out of the box
 - **BullMQ-compatible API** — Same `Queue`, `Worker`, `QueueEvents`
 - **Zero dependencies** — No Redis, no MongoDB
-- **Tiny footprint** — 8.2 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
+- **Tiny footprint** — 5.4 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
 - **SQLite persistence** — Survives restarts, WAL mode for concurrent access
 - **Up to 286K ops/sec** — [Verified benchmarks](https://bunqueue.dev/guide/benchmarks/)
 
@@ -631,7 +649,7 @@ bunqueue is the **first job queue with native MCP support**. AI agents get a ful
 # so install bunqueue first, then connect Claude Code:
 bun add bunqueue
 # Since v2.8.0 the MCP SDK is an optional peer dependency. Queue-only users skip it entirely:
-# a clean install drops from 93 MB / 117 packages to 8.2 MB / 7 packages (−91%, 3.8x faster).
+# a clean install drops from 93 MB / 117 packages to 5.4 MB / 7 packages (−94%, up to ~5× faster on a cold install).
 # bunx --package=bunqueue does NOT auto-install optional peers, so install the SDK once to run the MCP server:
 bun add @modelcontextprotocol/sdk
 claude mcp add bunqueue -- bunx bunqueue-mcp

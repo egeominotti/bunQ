@@ -54,12 +54,11 @@ https://api.example.com/webhooks/failures  *        job.failed,job.stalled
 
 ### Enable/Disable Webhook
 
-```bash
-# Disable a webhook without removing it
-bunqueue webhook set-enabled wh_abc123 false
+Toggling a webhook's enabled state is not a CLI command (the CLI supports `webhook list`, `add`, `remove`). Use the TCP protocol command `SetWebhookEnabled`, the HTTP API, or the MCP tool:
 
-# Re-enable the webhook
-bunqueue webhook set-enabled wh_abc123 true
+```text
+# MCP tool
+bunqueue_set_webhook_enabled({ id: "wh_abc123", enabled: false })
 ```
 
 Disabling a webhook stops event delivery but preserves the configuration. This is useful for temporarily pausing webhook notifications during maintenance.

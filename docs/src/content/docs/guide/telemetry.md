@@ -58,21 +58,13 @@ histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m]))
 histogram_quantile(0.50, rate(bunqueue_pull_duration_ms_bucket[5m]))
 ```
 
-### Programmatic Access
+### Accessing latency
 
-```typescript
-import { latencyTracker } from 'bunqueue/application/latencyTracker';
+Latency averages and percentiles are exposed via the `/stats` and `/prometheus` HTTP endpoints. The internal `latencyTracker` is not a public package export, so consume it over HTTP:
 
-// Get averages
-const avg = latencyTracker.getAverages();
-// { pushMs: 0.08, pullMs: 0.12, ackMs: 0.05 }
-
-// Get percentiles
-const pct = latencyTracker.getPercentiles();
-// { push: { p50: 0.05, p95: 0.25, p99: 1.0 }, pull: {...}, ack: {...} }
-
-// Reset histograms
-latencyTracker.push.reset();
+```bash
+curl http://localhost:6790/stats        # avgLatencyMs, avgProcessingMs
+curl http://localhost:6790/prometheus    # bunqueue_push_duration_ms_bucket, ...
 ```
 
 ## Throughput Tracking
@@ -108,14 +100,9 @@ curl http://localhost:6790/stats
 }
 ```
 
-### Programmatic Access
+### Accessing rates
 
-```typescript
-import { throughputTracker } from 'bunqueue/application/throughputTracker';
-
-const rates = throughputTracker.getRates();
-// { pushPerSec: 12500, pullPerSec: 12480, completePerSec: 12400, failPerSec: 3 }
-```
+Rates are included in the `/stats` response shown above (`pushPerSec`, `pullPerSec`) and in the `/prometheus` output. The internal `throughputTracker` is not a public package export — read the rates over HTTP.
 
 ## Per-Queue Metrics
 
@@ -188,14 +175,9 @@ LOG_LEVEL=debug bun run src/main.ts
 LOG_LEVEL=warn LOG_FORMAT=json bun run src/main.ts
 ```
 
-### Runtime Change
+### Changing the level
 
-```typescript
-import { Logger } from 'bunqueue/shared/logger';
-
-Logger.setLevel('debug');  // Enable verbose logging
-Logger.setLevel('error');  // Only errors
-```
+Configure the log level with the `LOG_LEVEL` environment variable (and `LOG_FORMAT`) shown above. The internal `Logger` is not a public package export, so set logging via env vars rather than importing it at runtime.
 
 ## Integrations
 

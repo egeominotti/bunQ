@@ -37,11 +37,11 @@ bunqueue concurrency clear emails
 
 ## Embedded Mode
 
-:::note[Server-Side Feature]
-Rate limiting (`setRateLimit`) and concurrency limiting (`setConcurrency`) are **server-side features** available only via CLI or HTTP API. They are not available in embedded mode.
+:::note[Works in embedded mode]
+Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes** — in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`) also works embedded.
 :::
 
-In embedded mode, control throughput using worker concurrency:
+In embedded mode you can call `queue.setGlobalRateLimit(max, duration?)` / `queue.setGlobalConcurrency(n)` directly, use a per-worker `limiter`, or control throughput with worker concurrency:
 
 ```typescript
 const queue = new Queue('emails', { embedded: true });
@@ -53,7 +53,7 @@ const worker = new Worker('emails', processor, {
 });
 ```
 
-For time-based rate limiting in embedded mode, implement it in your processor:
+For custom time-based rate limiting beyond the built-in options, you can also implement it in your processor:
 
 ```typescript
 import { Ratelimit } from '@upstash/ratelimit'; // or similar

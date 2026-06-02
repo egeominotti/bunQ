@@ -123,11 +123,8 @@ const job = await queue.add('job-name', data, {
   priority: 10,           // Higher = processed first
   delay: 5000,            // Delay in ms before processing
   attempts: 5,            // Max retry attempts (default: 3)
-  backoff: 2000,          // Backoff between retries (default: 1000ms, jitter applied)
-  backoffConfig: {        // Advanced backoff configuration
-    type: 'exponential',  // 'fixed' or 'exponential'
-    delay: 2000,          // Base delay in ms
-  },
+  backoff: 2000,          // Backoff in ms (default: 1000ms, jitter applied)
+  // OR object form: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
   timeout: 30000,         // Job timeout in ms
   jobId: 'custom-id',     // Custom job ID for deduplication (BullMQ-style)
   removeOnComplete: true, // Remove job data after completion
@@ -751,8 +748,7 @@ Jobs with `durable: true` are always sent as individual `PUSH` commands and are 
 | `priority` | `number` | `0` | Higher = processed first |
 | `delay` | `number` | `0` | Delay in ms before processing |
 | `attempts` | `number` | `3` | Max retry attempts |
-| `backoff` | `number` | `1000` | Backoff base in ms (exponential, jitter applied) |
-| `backoffConfig` | `object` | - | Advanced backoff: `{ type, delay }` |
+| `backoff` | `number \| { type, delay }` | `1000` | Backoff base in ms, or `{ type: 'fixed' \| 'exponential', delay }` |
 | `timeout` | `number` | - | Processing timeout in ms |
 | `jobId` | `string` | - | Custom ID for deduplication (BullMQ-style idempotent) |
 | `deduplication` | `object` | - | Advanced deduplication config (`ttl`, `extend`, `replace`) |

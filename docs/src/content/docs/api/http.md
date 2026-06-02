@@ -111,7 +111,7 @@ HTTP requests are rate-limited per client IP using a **sliding window** algorith
 | Variable | Default | Description |
 |---|---|---|
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Sliding window duration in milliseconds |
-| `RATE_LIMIT_MAX_REQUESTS` | `Infinity` | Maximum requests per window per IP. Set to `0` to disable. |
+| `RATE_LIMIT_MAX_REQUESTS` | `10000` | Maximum requests per window per IP. |
 | `RATE_LIMIT_CLEANUP_MS` | `60000` | Interval for cleaning up expired rate limit entries |
 
 When rate limited, the server responds with:

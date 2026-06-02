@@ -107,13 +107,13 @@ const worker = new Worker('etl', async (job) => {
       return { rows: raw.length, data: raw };
 
     case 'transform':
-      const parent = await queue.getJob(job.parentId!);
-      const transformed = parent?.result?.data.map(transformRow);
+      const parent = await queue.getJob(job.parent!.id);
+      const transformed = (parent?.returnvalue as any)?.data.map(transformRow);
       return { rows: transformed.length, data: transformed };
 
     case 'load':
-      const parentResult = await queue.getJob(job.parentId!);
-      await insertIntoDB(parentResult?.result?.data);
+      const parentJob = await queue.getJob(job.parent!.id);
+      await insertIntoDB((parentJob?.returnvalue as any)?.data);
       return { loaded: true };
   }
 }, { embedded: true, concurrency: 3 });
@@ -135,11 +135,11 @@ await flow.add({
   }],
 });
 
-// Or use chain for sequential steps
-await flow.addChain('etl', [
-  { name: 'extract', data: { source: 'api' } },
-  { name: 'transform', data: { format: 'csv' } },
-  { name: 'load', data: { table: 'reports' } },
+// Or use chain for sequential steps — single array, each step carries its own queueName
+await flow.addChain([
+  { name: 'extract', queueName: 'etl', data: { source: 'api' } },
+  { name: 'transform', queueName: 'etl', data: { format: 'csv' } },
+  { name: 'load', queueName: 'etl', data: { table: 'reports' } },
 ]);
 ```
 

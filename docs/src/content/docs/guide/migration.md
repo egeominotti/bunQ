@@ -105,11 +105,8 @@ const worker = new Worker('emails', async (job) => {
 }, {
   embedded: true,
   concurrency: 5,
-  // Rate limiting is set on queue via server mode, not worker
+  limiter: { max: 100, duration: 1000 }, // per-worker rate limit (BullMQ-compatible, works embedded)
 });
-
-// Rate limiting is configured via CLI or TCP server
-// bunqueue rate-limit set emails 100
 ```
 
 ## Step 5: Update Events
@@ -185,10 +182,10 @@ bunqueue supports both `fixed` and `exponential` backoff types, matching BullMQ'
 **Fixed** (`type: 'fixed'`):
 - Every retry waits approximately the same delay (e.g., ~5000ms each time, ±20% jitter)
 
-All delays include automatic **jitter** to prevent thundering herd when many jobs retry simultaneously. Delays are capped at 1 hour by default (configurable via `maxDelay`).
+All delays include automatic **jitter** to prevent thundering herd when many jobs retry simultaneously. Delays are capped at 1 hour by default.
 
 ```typescript
-backoff: { type: 'exponential', delay: 1000, maxDelay: 300000 } // Cap at 5 min
+backoff: { type: 'exponential', delay: 1000 } // 'fixed' | 'exponential' + base delay
 ```
 
 You can also pass a plain number as shorthand for exponential backoff with that base delay.
@@ -202,13 +199,15 @@ new Worker('queue', processor, {
   limiter: { max: 100, duration: 1000 }
 });
 
-// bunqueue (server mode only - via CLI or TCP)
-// Rate limiting is not available in embedded mode
-bunqueue rate-limit set my-queue 100
+// bunqueue (same per-worker limiter, works in embedded mode)
+new Worker('queue', processor, {
+  embedded: true,
+  limiter: { max: 100, duration: 1000 }
+});
 ```
 
 :::note
-Rate limiting in bunqueue is a server-side feature, configured via CLI or TCP protocol. It's not available when using embedded mode directly.
+bunqueue supports BullMQ's per-worker `limiter: { max, duration }` (works embedded). You can also set a queue-level limit with `queue.setGlobalRateLimit(max, duration?)`.
 :::
 
 ### Sandboxed Processors
@@ -293,7 +292,7 @@ bunqueue implements the full BullMQ v5 job state machine:
 | Sandboxed processors | ✅ | ✅ | Use `SandboxedWorker` (experimental — Bun Workers) |
 | Redis Cluster | ✅ | ❌ | Single instance |
 | Redis Streams | ✅ | ❌ | SQLite storage |
-| Rate limit per worker | ✅ | ❌ | Queue-level rate limit |
+| Rate limit per worker | ✅ | ✅ | `WorkerOptions.limiter: { max, duration }` (BullMQ v5 compatible) |
 
 ## Migration Checklist
 

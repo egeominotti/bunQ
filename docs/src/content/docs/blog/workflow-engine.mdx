@@ -67,14 +67,13 @@ const order = new Workflow('order-pipeline')
   });
 ```
 
-Start the engine and run it:
+Register the workflow and start a run:
 
 ```typescript
 const engine = new Engine({ embedded: true });
 engine.register(order);
-await engine.start();
 
-const run = await engine.run('order-pipeline', { orderId: 'ORD-1' });
+const run = await engine.start('order-pipeline', { orderId: 'ORD-1' });
 ```
 
 That is the entire setup. No YAML, no JSON state machines, no separate orchestrator process.

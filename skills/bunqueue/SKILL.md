@@ -463,7 +463,7 @@ queue.pause();       // Stop processing
 queue.resume();      // Resume processing
 queue.drain();       // Remove all waiting jobs
 queue.obliterate();  // Delete everything
-queue.clean('completed', 3600000); // Clean old completed jobs
+queue.clean(3600000, 1000, 'completed'); // remove up to 1000 completed jobs older than 1h
 ```
 
 ## Queue + Worker: Auto-Batching (TCP)
@@ -514,19 +514,13 @@ billing.obliterateAll();
 Receive HTTP notifications on job events. SSRF-protected, with HMAC signing and retry.
 
 ```typescript
-// Via SDK (TCP mode)
-await queue.addWebhook({
-  url: 'https://api.example.com/hooks/jobs',
-  events: ['job.completed', 'job.failed'],
-  queue: 'emails',       // null = all queues
-  secret: 'hmac-secret', // optional, enables X-Webhook-Signature header
-});
+// Webhooks are managed via CLI, MCP, or the TCP/HTTP API — there is no queue.addWebhook() SDK method.
 
 // Via CLI
-// bunqueue webhook add https://api.example.com/hooks --events job.completed,job.failed
+// bunqueue webhook add https://api.example.com/hooks/jobs --events job.completed,job.failed
 
-// Via MCP
-// bunqueue_add_webhook
+// Via MCP tool
+// bunqueue_add_webhook({ url: '...', events: ['job.completed','job.failed'], queue: 'emails', secret: 'hmac-secret' })
 ```
 
 Events: `job.pushed`, `job.started`, `job.completed`, `job.failed`, `job.progress`, `job.stalled`

@@ -38,11 +38,9 @@ Limit how many jobs are processed per time window:
 ```typescript
 const queue = new Queue('api-calls', { embedded: true });
 
-// Max 100 jobs per minute
-queue.setGlobalRateLimit(100, 60_000);
-
-// Max 10 jobs per second
-queue.setGlobalRateLimit(10, 1_000);
+// Token bucket: capacity = limit, refills at `limit` tokens per second
+queue.setGlobalRateLimit(100); // ~100 jobs/second
+queue.setGlobalRateLimit(10);  // ~10 jobs/second
 ```
 
 When the rate limit is hit, workers automatically pause and resume when the window resets. No jobs are lost - they just wait in the queue.

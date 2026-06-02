@@ -35,8 +35,8 @@ await queue.addBulk(jobs: { name: string, data: TData, opts?: JobOptions }[]): P
 // Query
 await queue.getJob(id: string): Promise<Job | null>
 await queue.getJobState(id: string): Promise<string>
-await queue.getJobCounts(): Promise<Record<string, number>>
-await queue.getJobs(state: string, start?: number, end?: number): Promise<Job[]>
+queue.getJobCounts(): Record<string, number>   // sync (getJobCountsAsync() for TCP)
+queue.getJobs(opts?: { state?: string | string[]; start?: number; end?: number; asc?: boolean }): Job[]   // sync (getJobsAsync() for TCP)
 await queue.count(): Promise<number>
 
 // Control
@@ -44,7 +44,7 @@ queue.pause(): void
 queue.resume(): void
 queue.drain(): void
 queue.obliterate(): void
-queue.clean(state: string, gracePeriod: number): void
+queue.clean(grace: number, limit: number, type?: string): number  // grace ms, max jobs, optional state
 
 // DLQ (embedded only)
 queue.setDlqConfig(config: DlqConfig): void
@@ -132,25 +132,30 @@ interface Job<TData = any> {
   id: string;
   name: string;
   data: TData;
-  queue: string;
+  queueName: string;
   priority: number;
   delay: number;
-  attempts: number;
-  maxAttempts: number;
-  state: 'waiting' | 'active' | 'completed' | 'failed' | 'delayed';
+  attemptsMade: number;
+  attemptsStarted: number;
   progress: number;
-  result?: any;
-  error?: string;
-  createdAt: number;
-  processedAt?: number;
-  completedAt?: number;
-  parentId?: string;
+  returnvalue?: unknown;        // result of the job
+  failedReason?: string;
+  timestamp: number;            // created at
+  processedOn?: number;         // started at
+  finishedOn?: number;          // completed/failed at
+  parent?: { id: string; queueQualifiedName: string };
+  parentKey?: string;
+  opts: JobOptions;
 
   // Methods (available during processing)
-  updateProgress(progress: number): Promise<void>
+  updateProgress(progress: number, message?: string): Promise<void>
   log(message: string): Promise<void>
-  moveToDelayed(delay: number): Promise<void>
-  updateData(data: Partial<TData>): Promise<void>
+  getState(): Promise<JobStateType>            // state is a method, not a field
+  getChildrenValues<R = unknown>(): Promise<Record<string, R>>
+  moveToDelayed(timestamp: number): Promise<void>   // absolute timestamp
+  updateData(data: TData): Promise<void>
+  remove(): Promise<void>
+  retry(): Promise<void>
 }
 ```
 
@@ -557,20 +562,18 @@ await flow.add({
   ],
 });
 
-// Chain (sequential: A -> B -> C)
-await flow.addChain('pipeline', [
-  { name: 'step-1', data: { n: 1 } },
-  { name: 'step-2', data: { n: 2 } },
-  { name: 'step-3', data: { n: 3 } },
+// Chain (sequential: A -> B -> C) — single array, each step carries its own queueName
+await flow.addChain([
+  { name: 'step-1', queueName: 'pipeline', data: { n: 1 } },
+  { name: 'step-2', queueName: 'pipeline', data: { n: 2 } },
+  { name: 'step-3', queueName: 'pipeline', data: { n: 3 } },
 ]);
 
-// Bulk fan-out (one parent, many children)
-await flow.addBulkThen('pipeline', {
-  name: 'aggregate', data: {},
-}, [
-  { name: 'fetch-1', data: { url: 'a' } },
-  { name: 'fetch-2', data: { url: 'b' } },
-]);
+// Bulk fan-out (many children, then one parent) — parallel steps first, final step second
+await flow.addBulkThen([
+  { name: 'fetch-1', queueName: 'pipeline', data: { url: 'a' } },
+  { name: 'fetch-2', queueName: 'pipeline', data: { url: 'b' } },
+], { name: 'aggregate', queueName: 'pipeline', data: {} });
 
 await flow.close();
 ```
@@ -578,19 +581,21 @@ await flow.close();
 ## QueueGroup (Multiple Queues)
 
 ```typescript
-const group = new QueueGroup({
-  embedded: true,
-  concurrency: { emails: 5, images: 10 },
-  handlers: {
-    emails: async (job) => { /* send email */ },
-    images: async (job) => { /* resize image */ },
-  },
-});
+const group = new QueueGroup('media');   // namespace; queues become media:emails, media:images
 
-await group.add('emails', 'welcome', { userId: 1 });
-await group.add('images', 'resize', { path: 'photo.jpg' });
+// Per-name queues + workers
+const emails = group.getQueue('emails');
+group.getWorker('emails', async (job) => { /* send email */ }, { concurrency: 5 });
+group.getWorker('images', async (job) => { /* resize image */ }, { concurrency: 10 });
 
-await group.close();
+await emails.add('welcome', { userId: 1 });
+await group.getQueue('images').add('resize', { path: 'photo.jpg' });
+
+// Group-wide control
+group.pauseAll();
+group.resumeAll();
+group.drainAll();
+group.obliterateAll();
 ```
 
 ## Environment Variables

@@ -447,11 +447,12 @@ Read-only context available at any time.
 A complete Claude Code session connected to a remote bunqueue server via TCP:
 
 ```bash
-# Connect MCP to your running server
-$ claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp \
+# Connect MCP to your running server (env vars must come BEFORE the -- separator)
+$ claude mcp add bunqueue \
     --env BUNQUEUE_MODE=tcp \
     --env BUNQUEUE_HOST=your-server.com \
-    --env BUNQUEUE_PORT=6789
+    --env BUNQUEUE_PORT=6789 \
+    -- bunx --package=bunqueue bunqueue-mcp
 
 $ claude
 

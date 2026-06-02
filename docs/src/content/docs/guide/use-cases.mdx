@@ -873,16 +873,16 @@ console.log(tenantA.group.listQueues()); // ['emails', 'reports', 'webhooks']
 
 ## Rate-Limited API Calls
 
-<Aside type="note" title="Server Mode Feature">
-Rate limiting via `setRateLimit()` is only available in **server mode**. In embedded mode, control throughput using worker `concurrency` and job `backoff` options.
+<Aside type="note" title="Works in embedded mode too">
+Rate limiting works in **both embedded and server mode**. Use `queue.setGlobalRateLimit(max, duration?)`, a per-worker `limiter: { max, duration }` in `WorkerOptions`, or control throughput with worker `concurrency` and job `backoff`.
 </Aside>
 
 <div class="rl-modes">
   <div class="rl-mode">
-    <span class="rl-tag rl-tag-server">Server Mode</span>
-    <code>setRateLimit(100, 60000)</code>
+    <span class="rl-tag rl-tag-server">Queue-level</span>
+    <code>setGlobalRateLimit(100)</code>
     <span class="rl-arrow">→</span>
-    <span class="rl-desc">Token bucket algorithm</span>
+    <span class="rl-desc">Token bucket (~100/sec)</span>
   </div>
   <div class="rl-mode">
     <span class="rl-tag rl-tag-embedded">Embedded Mode</span>
@@ -952,7 +952,7 @@ Rate limiting via `setRateLimit()` is only available in **server mode**. In embe
 
 External APIs impose rate limits, and exceeding them results in 429 errors, temporary bans, or degraded service. When your application needs to make thousands of API calls (syncing inventory, importing data, sending notifications), you need controlled throughput.
 
-bunqueue provides two levels of rate control. In embedded mode, worker concurrency acts as a parallel limit — setting `concurrency: 10` means at most 10 API calls happen simultaneously. The worker also handles 429 responses by throwing an error, which triggers bunqueue's automatic retry with backoff. In server mode, `setRateLimit()` provides precise per-second rate limiting using a token bucket algorithm.
+bunqueue provides two levels of rate control. In embedded mode, worker concurrency acts as a parallel limit — setting `concurrency: 10` means at most 10 API calls happen simultaneously. The worker also handles 429 responses by throwing an error, which triggers bunqueue's automatic retry with backoff. For per-second rate limiting, `queue.setGlobalRateLimit(max)` uses a token bucket that refills at `max` tokens per second — and works in both embedded and server mode.
 
 ```typescript
 interface ApiJob {
@@ -1072,8 +1072,8 @@ const batchFlow = await flow.addBulkThen(
 // Workers can access parent results
 const mergeWorker = new Worker('processing', async (job) => {
   if (job.name === 'merge-results') {
-    const childResults = await flow.getParentResults(job);
-    // childResults = [{ chunk: 1, result: ... }, { chunk: 2, result: ... }, ...]
+    const childResults = await job.getChildrenValues();
+    // { 'processing:<childId>': { chunk: 1, ... }, ... }  (Record<jobKey, returnValue>)
     return combineResults(childResults);
   }
   // Process individual chunk

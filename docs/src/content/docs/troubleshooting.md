@@ -193,7 +193,7 @@ const counts = queue.getJobCounts();
 console.log(counts);
 
 // Check rate limit
-const config = queue.getRateLimit();
+const config = queue.getGlobalRateLimit();
 ```
 
 ### Jobs failing immediately

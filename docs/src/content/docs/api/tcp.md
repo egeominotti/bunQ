@@ -1173,11 +1173,12 @@ Get high-level server statistics.
 {
   ok: true,
   stats: {
-    queued: number,       // Waiting jobs
-    processing: number,   // Active jobs
+    waiting: number,      // Waiting jobs
+    active: number,       // Active jobs
     delayed: number,      // Delayed jobs
     dlq: number,          // Dead-letter queue size
     completed: number,    // Completed count
+    failed: number,       // Failed (totalFailed) count
     uptime: number,       // Server uptime in ms
     pushPerSec: number,   // Push throughput
     pullPerSec: number    // Pull throughput

@@ -232,17 +232,18 @@ Simple Mode also includes circuit breaker, batch processing, TTL, priority aging
 bunqueue includes a native MCP server with 73 tools. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language — no code needed.
 
 ```bash
-# Claude Code
+# Claude Code — bunqueue-mcp is a binary bundled with bunqueue, so install it first
+bun add bunqueue
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 ```json
-// Claude Desktop / Cursor / Windsurf
+// Claude Desktop / Cursor / Windsurf — --package=bunqueue resolves the bundled binary, no install needed
 {
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }

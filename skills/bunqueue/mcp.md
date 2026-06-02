@@ -4,14 +4,16 @@ bunqueue includes a native MCP (Model Context Protocol) server for AI agent inte
 
 ## Setup
 
+> `bunqueue-mcp` is a binary bundled inside the `bunqueue` package — there is no standalone `bunqueue-mcp` package on npm. `bunx --package=bunqueue bunqueue-mcp` tells `bunx` which package provides the binary (running it as a bare `bunx bunqueue-mcp`/`npx bunqueue-mcp` without first installing `bunqueue` yields `404 bunqueue-mcp`). Alternatively `bun add -g bunqueue` once, then `bunx bunqueue-mcp`.
+
 ### Claude Code (claude_desktop_config.json or .mcp.json)
 
 ```json
 {
   "mcpServers": {
     "bunqueue": {
-      "command": "npx",
-      "args": ["bunqueue-mcp"],
+      "command": "bunx",
+      "args": ["--package=bunqueue", "bunqueue-mcp"],
       "env": {
         "BUNQUEUE_MODE": "embedded",
         "DATA_PATH": "./data/bunq.db"
@@ -27,8 +29,8 @@ bunqueue includes a native MCP (Model Context Protocol) server for AI agent inte
 {
   "mcpServers": {
     "bunqueue": {
-      "command": "npx",
-      "args": ["bunqueue-mcp"],
+      "command": "bunx",
+      "args": ["--package=bunqueue", "bunqueue-mcp"],
       "env": {
         "BUNQUEUE_MODE": "tcp",
         "BUNQUEUE_HOST": "localhost",

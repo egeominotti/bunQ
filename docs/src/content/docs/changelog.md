@@ -10,6 +10,17 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.7.21] - 2026-06-02
+
+### Fixed (docs — `bunx bunqueue-mcp` 404, #91)
+
+`bunqueue-mcp` is a binary **bundled inside** the `bunqueue` package, not a standalone npm package. Running `bunx bunqueue-mcp` (or `npx bunqueue-mcp`) without `bunqueue` installed made the launcher try to download a package named `bunqueue-mcp`, which doesn't exist → `error: GET https://registry.npmjs.org/bunqueue-mcp - 404`. The runtime is unchanged; this is a docs/invocation fix.
+
+- **MCP setup docs now make the install step explicit** — every guide (README, MCP guide, quickstart, server, cron, use-cases) shows `bun add bunqueue` (or `bun add -g bunqueue`) before `bunx bunqueue-mcp`, and a caution box explains the 404.
+- **All JSON MCP configs switched to `args: ["--package=bunqueue", "bunqueue-mcp"]`** — copy-paste safe: `bunx` resolves the bundled binary straight from the `bunqueue` package with no separate install. The skill configs use the same form; `npx` was replaced with `bunx` (the MCP entry's shebang is `#!/usr/bin/env bun`).
+- **Removed the misleading `bunx bunqueue-mcp --help`** from troubleshooting — the MCP entry doesn't parse CLI args (it starts the stdio server immediately).
+- **Repo `.mcp.json` now runs the local source** (`bun run src/mcp/index.ts`) instead of fetching from npm.
+
 ## [2.7.20] - 2026-05-31
 
 ### Fixed (live full-feature E2E audit — 3 bugs surfaced by hands-on testing)

@@ -575,8 +575,8 @@ For full setup and tool list, see [mcp.md](mcp.md)
 {
   "mcpServers": {
     "bunqueue": {
-      "command": "npx",
-      "args": ["bunqueue-mcp"],
+      "command": "bunx",
+      "args": ["--package=bunqueue", "bunqueue-mcp"],
       "env": { "BUNQUEUE_MODE": "embedded" }
     }
   }

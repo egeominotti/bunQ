@@ -15,7 +15,7 @@
  *   "mcpServers": {
  *     "bunqueue": {
  *       "command": "bunx",
- *       "args": ["bunqueue-mcp"],
+ *       "args": ["--package=bunqueue", "bunqueue-mcp"],
  *       "env": { "DATA_PATH": "./data/bunq.db" }
  *     }
  *   }
@@ -28,7 +28,7 @@
  *   "mcpServers": {
  *     "bunqueue": {
  *       "command": "bunx",
- *       "args": ["bunqueue-mcp"],
+ *       "args": ["--package=bunqueue", "bunqueue-mcp"],
  *       "env": {
  *         "BUNQUEUE_MODE": "tcp",
  *         "BUNQUEUE_HOST": "localhost",

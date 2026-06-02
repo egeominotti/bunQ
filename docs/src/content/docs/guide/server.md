@@ -149,17 +149,18 @@ AI agents connect to a running bunqueue server via the MCP server. The MCP serve
 # Start bunqueue server
 bunqueue start --data-path ./data/queue.db
 
-# In another terminal, connect Claude Code
+# In another terminal, install bunqueue (ships the bunqueue-mcp binary) then connect Claude Code
+bun add bunqueue
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 ```json
-// Claude Desktop / Cursor / Windsurf — add to MCP config
+// Claude Desktop / Cursor / Windsurf — --package=bunqueue resolves the bundled binary, no install needed
 {
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }

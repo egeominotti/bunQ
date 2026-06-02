@@ -16,11 +16,13 @@ bunqueue ships with a native MCP server — AI agents get full queue control out
 
 | Client | Setup | Guide |
 |--------|-------|-------|
-| Claude Code | `claude mcp add bunqueue -- bunx bunqueue-mcp` | [MCP Server](/guide/mcp/) |
+| Claude Code | `claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp` | [MCP Server](/guide/mcp/) |
 | Claude Desktop | Add to `claude_desktop_config.json` | [MCP Server](/guide/mcp/) |
 | Cursor | Add to MCP settings | [MCP Server](/guide/mcp/) |
 | Windsurf | Add to MCP settings | [MCP Server](/guide/mcp/) |
-| Any MCP client | `bunx bunqueue-mcp` (stdio transport) | [MCP Server](/guide/mcp/) |
+| Any MCP client | `bunx --package=bunqueue bunqueue-mcp` (stdio transport) | [MCP Server](/guide/mcp/) |
+
+> `bunqueue-mcp` is a binary bundled inside the `bunqueue` package (not a standalone npm package). `--package=bunqueue` tells `bunx` which package provides it; alternatively run `bun add -g bunqueue` once and use `bunx bunqueue-mcp` directly.
 
 73 tools, 5 resources, 3 prompts. Agents can add jobs, manage crons, retry failures, set rate limits, register HTTP handlers, and monitor everything.
 

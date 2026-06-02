@@ -54,7 +54,8 @@ When an agent connects to bunqueue via MCP (Model Context Protocol), it gains th
 - **Control flow** — pause/resume queues, set rate limits per second, manage concurrency limits
 
 ```bash
-# One command to connect any MCP-compatible AI client
+# bunqueue-mcp is a binary bundled with bunqueue — install it first, then connect Claude Code
+bun add bunqueue
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 

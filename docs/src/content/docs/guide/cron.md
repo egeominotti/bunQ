@@ -112,6 +112,7 @@ AI agents can create, list, and delete cron jobs via natural language using the 
 - *"Delete the daily-report cron"*
 
 ```bash
+bun add bunqueue          # bunqueue-mcp is a binary bundled with bunqueue
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 

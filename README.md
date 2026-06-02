@@ -626,17 +626,20 @@ bunqueue is the **first job queue with native MCP support**. AI agents get a ful
 - **HTTP handlers** — register a URL, bunqueue auto-processes jobs via HTTP calls
 
 ```bash
-# One command to connect Claude Code
+# bunqueue-mcp is a binary bundled inside the bunqueue package (not a standalone npm package),
+# so install bunqueue first, then connect Claude Code:
+bun add bunqueue
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 ```json
-// Claude Desktop / Cursor / Windsurf — add to MCP config
+// Claude Desktop / Cursor / Windsurf — --package=bunqueue lets bunx resolve the bundled
+// bunqueue-mcp binary without a separate install:
 {
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }

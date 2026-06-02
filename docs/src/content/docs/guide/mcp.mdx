@@ -49,10 +49,12 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 ## Quick Start
 
 <Steps>
-1. **Install bunqueue**
+1. **Install bunqueue** — the MCP server (`bunqueue-mcp`) ships as a binary *inside* the `bunqueue` package. There is no standalone `bunqueue-mcp` package on npm, so `bunqueue` must be installed first.
 
    ```bash
-   bun add bunqueue
+   bun add bunqueue          # in your project — for Claude Code
+   # or, for Claude Desktop / Cursor / Windsurf (they start the server outside your project):
+   bun add -g bunqueue       # global install, puts bunqueue-mcp on your PATH
    ```
 
 2. **Connect your AI client**
@@ -65,6 +67,10 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 
    Ask your agent: *"Add a job to the emails queue"* — it works immediately. The MCP server starts as a child process, communicates via stdio, and the agent can call any of the 73 tools.
 </Steps>
+
+<Aside type="caution" title="bunx bunqueue-mcp returns a 404?">
+  `bunqueue-mcp` is **not** a standalone npm package — it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
+</Aside>
 
 <Aside type="tip">
   That's all. No server to start, no database to configure. In embedded mode, bunqueue creates a local SQLite database automatically. Your agent can immediately add jobs, create cron schedules, set rate limits, register HTTP handlers, and monitor everything.
@@ -92,9 +98,14 @@ The server supports two backend modes: **embedded** (direct SQLite access in the
 
 ## Configuration
 
+<Aside type="note">
+  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package — no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead.
+</Aside>
+
 ### Claude Code
 
 ```bash
+# one-time: bun add bunqueue   (installs the bundled bunqueue-mcp binary)
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
@@ -108,7 +119,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }
@@ -121,7 +132,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }
@@ -134,7 +145,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }
@@ -149,7 +160,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"]
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
     }
   }
 }
@@ -164,7 +175,7 @@ Connect to a running bunqueue server instead of local SQLite:
   "mcpServers": {
     "bunqueue": {
       "command": "bunx",
-      "args": ["bunqueue-mcp"],
+      "args": ["--package=bunqueue", "bunqueue-mcp"],
       "env": {
         "BUNQUEUE_MODE": "tcp",
         "BUNQUEUE_HOST": "your-server.com",
@@ -437,7 +448,7 @@ A complete Claude Code session connected to a remote bunqueue server via TCP:
 
 ```bash
 # Connect MCP to your running server
-$ claude mcp add bunqueue -- bunx bunqueue-mcp \
+$ claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp \
     --env BUNQUEUE_MODE=tcp \
     --env BUNQUEUE_HOST=your-server.com \
     --env BUNQUEUE_PORT=6789
@@ -576,8 +587,8 @@ Not-found responses for `get_job`, `get_job_by_custom_id`, `get_progress`, and `
 ### MCP server not connecting
 
 ```bash
-# Verify installation
-bunx bunqueue-mcp --help
+# Verify bunqueue is installed (bunqueue-mcp is a binary bundled with it)
+bun pm ls | grep bunqueue || bun add -g bunqueue
 
 # Check Bun is in PATH
 which bun
@@ -602,5 +613,5 @@ bun run worker.ts
 
 1. Restart Claude Desktop or Claude Code
 2. Check config file syntax (valid JSON)
-3. Verify `bunqueue-mcp` path is correct
-4. Run `bunx bunqueue-mcp` manually to check for errors
+3. Verify `bunqueue` is installed so the `bunqueue-mcp` binary resolves (`bun add -g bunqueue`)
+4. Run `bunx bunqueue-mcp` manually to check for errors (a `404` for `bunqueue-mcp` means `bunqueue` isn't installed yet)

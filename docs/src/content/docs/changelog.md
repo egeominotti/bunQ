@@ -10,7 +10,9 @@ head:
 
 All notable changes to bunqueue are documented here.
 
-## [2.8.0] - 2026-06-02
+## [2.8.1] - 2026-06-02
+
+> Released as 2.8.1 because 2.8.0 was already taken on npm (an earlier accidental publish, since deprecated). Same changes as intended for 2.8.0.
 
 ### Slimmer install: −91% `node_modules` for queue users (MCP SDK is now an optional peer dependency)
 

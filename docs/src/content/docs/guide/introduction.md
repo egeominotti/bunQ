@@ -13,7 +13,7 @@ head:
 ## Why bunqueue?
 
 - **Native Bun** - Built from the ground up for Bun, leveraging `bun:sqlite` for maximum performance
-- **Zero Redis** - No external dependencies. SQLite provides persistence with WAL mode for concurrent access
+- **Zero Redis** - No external infrastructure. SQLite provides persistence with WAL mode for concurrent access. Only 2 runtime dependencies (croner + msgpackr): `bun add bunqueue` installs 7 packages in 8.2 MB
 - **BullMQ-Compatible API** - Familiar patterns if you're migrating from BullMQ
 - **Production Ready** - Stall detection, DLQ, rate limiting, webhooks, and S3 backups
 - **MCP Server for AI Agents** - 73 MCP tools included. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language

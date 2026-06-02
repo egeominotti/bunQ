@@ -57,19 +57,40 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
    bun add -g bunqueue       # global install, puts bunqueue-mcp on your PATH
    ```
 
-2. **Connect your AI client**
+2. **Install the MCP SDK** — since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
+
+   ```bash
+   bun add @modelcontextprotocol/sdk
+   ```
+
+3. **Connect your AI client**
 
    ```bash
    claude mcp add bunqueue -- bunx bunqueue-mcp
    ```
 
-3. **Start using it**
+4. **Start using it**
 
    Ask your agent: *"Add a job to the emails queue"* — it works immediately. The MCP server starts as a child process, communicates via stdio, and the agent can call any of the 73 tools.
 </Steps>
 
 <Aside type="caution" title="bunx bunqueue-mcp returns a 404?">
   `bunqueue-mcp` is **not** a standalone npm package — it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
+</Aside>
+
+<Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.0+)">
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **8.2 MB of `node_modules` instead of 93 MB** — a **91% smaller install** that's also 3.8× faster to install cold (0.72s vs 2.73s). The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
+
+  ```bash
+  bun add @modelcontextprotocol/sdk
+  ```
+
+  `bunx --package=bunqueue bunqueue-mcp` does **not** auto-install optional peer dependencies, so add the SDK explicitly in the project or environment where the server starts. If it's missing, the launcher exits with code 1 and prints:
+
+  ```text
+  [bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk" (an optional peer dependency).
+  Install it with:  bun add @modelcontextprotocol/sdk
+  ```
 </Aside>
 
 <Aside type="tip">
@@ -99,7 +120,7 @@ The server supports two backend modes: **embedded** (direct SQLite access in the
 ## Configuration
 
 <Aside type="note">
-  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package — no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead.
+  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package — no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead. Either way, install the optional peer dependency once with `bun add @modelcontextprotocol/sdk` (see the note above) — `bunx` won't pull it in automatically.
 </Aside>
 
 ### Claude Code
@@ -615,4 +636,5 @@ bun run worker.ts
 1. Restart Claude Desktop or Claude Code
 2. Check config file syntax (valid JSON)
 3. Verify `bunqueue` is installed so the `bunqueue-mcp` binary resolves (`bun add -g bunqueue`)
-4. Run `bunx bunqueue-mcp` manually to check for errors (a `404` for `bunqueue-mcp` means `bunqueue` isn't installed yet)
+4. Install the optional MCP SDK peer dependency: `bun add @modelcontextprotocol/sdk` (since v2.8.0 it's not bundled; a missing-SDK launch exits with `[bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk"`)
+5. Run `bunx bunqueue-mcp` manually to check for errors (a `404` for `bunqueue-mcp` means `bunqueue` isn't installed yet)

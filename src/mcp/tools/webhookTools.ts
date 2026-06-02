@@ -13,7 +13,7 @@ export function registerWebhookTools(server: McpServer, backend: McpBackend) {
     'bunqueue_add_webhook',
     'Add a webhook to receive notifications for job events.',
     {
-      url: z.url().describe('Webhook URL to receive POST requests'),
+      url: z.string().url().describe('Webhook URL to receive POST requests'),
       events: z
         .array(
           z.enum([

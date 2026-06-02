@@ -80,6 +80,22 @@ head:
           },
           {
             "@type": "Question",
+            "name": "How many dependencies does bunqueue have?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 8.2 MB and completes in about 0.72s on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to install anything extra to use the MCP server?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, one package. The bunqueue-mcp bin and the bunqueue/mcp export still ship with bunqueue, but as of v2.8.0 the MCP SDK is an optional peer dependency that is not downloaded automatically. Install it once with 'bun add @modelcontextprotocol/sdk'. If it is missing when you launch the server, the launcher prints an install message and exits. Queue-only users never need this."
+            }
+          },
+          {
+            "@type": "Question",
             "name": "What is the Workflow Engine?",
             "acceptedAnswer": {
               "@type": "Answer",
@@ -151,6 +167,22 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 # Homebrew
 brew install oven-sh/bun/bun
 ```
+
+### How many dependencies does bunqueue have?
+
+bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 8.2 MB** and completes in about **0.72s** on a cold cache.
+
+As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency — both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
+
+### Do I need to install anything extra to use the MCP server?
+
+Yes, one package. The `bunqueue-mcp` bin and the `bunqueue/mcp` export still ship with bunqueue, but as of v2.8.0 the MCP SDK is an optional peer dependency that isn't downloaded automatically. Install it once:
+
+```bash
+bun add @modelcontextprotocol/sdk
+```
+
+If it's missing when you launch the server, the launcher prints a message telling you to install it and exits. Queue-only users never need this.
 
 ## Architecture
 

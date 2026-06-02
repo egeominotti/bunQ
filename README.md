@@ -602,6 +602,7 @@ https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116
 - **MCP server included** — 73 tools, 5 resources, 3 prompts. AI agents get full control out of the box
 - **BullMQ-compatible API** — Same `Queue`, `Worker`, `QueueEvents`
 - **Zero dependencies** — No Redis, no MongoDB
+- **Tiny footprint** — 8.2 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
 - **SQLite persistence** — Survives restarts, WAL mode for concurrent access
 - **Up to 286K ops/sec** — [Verified benchmarks](https://bunqueue.dev/guide/benchmarks/)
 
@@ -629,12 +630,17 @@ bunqueue is the **first job queue with native MCP support**. AI agents get a ful
 # bunqueue-mcp is a binary bundled inside the bunqueue package (not a standalone npm package),
 # so install bunqueue first, then connect Claude Code:
 bun add bunqueue
+# Since v2.8.0 the MCP SDK is an optional peer dependency. Queue-only users skip it entirely:
+# a clean install drops from 93 MB / 117 packages to 8.2 MB / 7 packages (−91%, 3.8x faster).
+# bunx --package=bunqueue does NOT auto-install optional peers, so install the SDK once to run the MCP server:
+bun add @modelcontextprotocol/sdk
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 ```json
 // Claude Desktop / Cursor / Windsurf — --package=bunqueue lets bunx resolve the bundled
-// bunqueue-mcp binary without a separate install:
+// bunqueue-mcp binary without a separate install (the @modelcontextprotocol/sdk optional
+// peer dependency must still be installed once: bun add @modelcontextprotocol/sdk):
 {
   "mcpServers": {
     "bunqueue": {

@@ -234,8 +234,13 @@ bunqueue includes a native MCP server with 73 tools. AI agents can schedule task
 ```bash
 # Claude Code — bunqueue-mcp is a binary bundled with bunqueue, so install it first
 bun add bunqueue
+bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
+
+:::note
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 8.2 MB instead of 117 and 93 MB, a 91% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+:::
 
 ```json
 // Claude Desktop / Cursor / Windsurf — --package=bunqueue resolves the bundled binary, no install needed

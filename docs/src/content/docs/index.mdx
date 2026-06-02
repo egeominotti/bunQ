@@ -102,7 +102,7 @@ worker.on('failed', (job, error) => {
 <div class="hp-bento">
   <div class="hp-bento-card hp-bento-wide">
     <h3>Zero External Dependencies</h3>
-    <p>No Redis, no RabbitMQ, no Kafka. Just Bun's native SQLite with WAL mode. Deploy anywhere in seconds &mdash; your entire queue infrastructure is a single file.</p>
+    <p>No Redis, no RabbitMQ, no Kafka. Just Bun's native SQLite with WAL mode. Only 2 runtime dependencies (croner + msgpackr) &mdash; <code>bun add bunqueue</code> installs 7 packages in 8.2 MB. Deploy anywhere in seconds; your entire queue infrastructure is a single file.</p>
   </div>
   <div class="hp-bento-card">
     <h3>Blazing Fast</h3>

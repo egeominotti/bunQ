@@ -113,8 +113,13 @@ AI agents can create, list, and delete cron jobs via natural language using the 
 
 ```bash
 bun add bunqueue          # bunqueue-mcp is a binary bundled with bunqueue
+bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
+
+:::note
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 8.2 MB instead of 117 and 93 MB, a 91% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
+:::
 
 :::tip[Related Guides]
 - [Queue API](/guide/queue/) - Job options for cron-created jobs

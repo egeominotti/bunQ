@@ -224,6 +224,10 @@ const run = await engine.start('validated', { email: 'user@test.com' });
 const unsub = engine.subscribe(run.id, (e) => console.log(e.type));
 ```
 
+<Aside type="note">
+  bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you bring your own — `bun add zod` (used above), ArkType, Valibot, or anything with a compatible `.parse()` method. As of 2.8.0, bunqueue's only runtime dependencies are `croner` and `msgpackr`.
+</Aside>
+
 ## Cleanup & Archival
 
 Archive old executions to keep your SQLite lean:

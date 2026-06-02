@@ -5,6 +5,8 @@ bunqueue includes a native MCP (Model Context Protocol) server for AI agent inte
 ## Setup
 
 > `bunqueue-mcp` is a binary bundled inside the `bunqueue` package — there is no standalone `bunqueue-mcp` package on npm. `bunx --package=bunqueue bunqueue-mcp` tells `bunx` which package provides the binary (running it as a bare `bunx bunqueue-mcp`/`npx bunqueue-mcp` without first installing `bunqueue` yields `404 bunqueue-mcp`). Alternatively `bun add -g bunqueue` once, then `bunx bunqueue-mcp`.
+>
+> **MCP SDK (v2.8.0+):** `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (and its zod + HTTP transitive deps), and `bunx --package=bunqueue` does not auto-install it. As of v2.8.0 a clean `bun add bunqueue` pulls only 7 packages / 8.2 MB into `node_modules` (down from 117 packages / 93 MB). To run the MCP server, install the SDK once: `bun add @modelcontextprotocol/sdk`. If it's missing, the launcher exits with code 1 and prints `[bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk" (an optional peer dependency). Install it with:  bun add @modelcontextprotocol/sdk`.
 
 ### Claude Code (claude_desktop_config.json or .mcp.json)
 

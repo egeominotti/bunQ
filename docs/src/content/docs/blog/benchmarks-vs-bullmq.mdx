@@ -47,8 +47,8 @@ Both use TCP connections (bunqueue TCP mode, BullMQ via Redis TCP). Embedded mod
   <Card title="1.7x Faster Processing" icon="open-book">
     **17,300 vs 10,200 ops/sec** - Full push-process-complete cycle
   </Card>
-  <Card title="Zero Dependencies" icon="laptop">
-    No Redis server required
+  <Card title="91% Smaller Install" icon="laptop">
+    **8.2 MB vs 93 MB** — 7 packages, no Redis server required
   </Card>
 </CardGrid>
 
@@ -145,6 +145,18 @@ bun run bench
 <Aside type="tip">
   The only honest benchmark is one you run on your own hardware. Results vary significantly based on CPU, disk speed, and OS configuration. We encourage you to verify these numbers yourself.
 </Aside>
+
+## Install Footprint
+
+Throughput is one axis; what you ship is another. We measured `bun add bunqueue` in a clean project as of 2.8.0:
+
+| Metric | bunqueue | Before 2.8.0 | Change |
+|--------|----------|--------------|--------|
+| `node_modules` size | 8.2 MB | 93 MB | **−91%** |
+| packages installed | 7 | 117 | **−94%** |
+| cold install time | 0.72 s | 2.73 s | **3.8x faster** |
+
+The savings come from making `@modelcontextprotocol/sdk` an optional peer dependency (loaded lazily only by the `bunqueue-mcp` bin), dropping `zod` and the HTTP stack from the install path, and removing `bun` from `peerDependencies`. Queue and worker users now download just two runtime dependencies: `croner` and `msgpackr`.
 
 ## What the Numbers Mean
 

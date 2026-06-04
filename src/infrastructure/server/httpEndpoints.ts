@@ -6,6 +6,7 @@ import type { QueueManager } from '../../application/queueManager';
 import { VERSION } from '../../shared/version';
 import { throughputTracker } from '../../application/throughputTracker';
 import { latencyTracker } from '../../application/latencyTracker';
+import { pausedView } from '../../shared/pausedView';
 
 /** JSON response helper */
 export function jsonResponse(data: unknown, status = 200, corsOrigins?: Set<string>): Response {
@@ -328,8 +329,17 @@ export function dashboardQueueDetailEndpoint(
   includeJobs: boolean,
   corsOrigins?: Set<string>
 ): Response {
-  const counts = queueManager.getQueueJobCounts(queue);
+  const rawCounts = queueManager.getQueueJobCounts(queue);
   const paused = queueManager.isPaused(queue);
+  // Keep counts consistent with the per-state lists below (#92): a paused queue
+  // reports ready jobs under `paused`, not `waiting`/`prioritized`.
+  const pv = pausedView(rawCounts.waiting, rawCounts.prioritized, paused);
+  const counts = {
+    ...rawCounts,
+    waiting: pv.waiting,
+    prioritized: pv.prioritized,
+    paused: pv.paused,
+  };
   const dlqJobs = queueManager.getDlq(queue, 10);
   const priorityCounts = queueManager.getCountsPerPriority(queue);
 
@@ -351,9 +361,12 @@ export function dashboardQueueDetailEndpoint(
   };
 
   if (includeJobs) {
+    // When paused, ready jobs surface under `paused` (waiting is empty) — match
+    // the counts above (#92).
     const waiting = queueManager.getJobs(queue, { state: 'waiting', end: 10 });
     const active = queueManager.getJobs(queue, { state: 'active', end: 10 });
     const delayed = queueManager.getJobs(queue, { state: 'delayed', end: 10 });
+    const pausedJobs = paused ? queueManager.getJobs(queue, { state: 'paused', end: 10 }) : [];
     const toSummary = (j: {
       id: string;
       priority: number;
@@ -373,6 +386,7 @@ export function dashboardQueueDetailEndpoint(
       waiting: waiting.map(toSummary),
       active: active.map(toSummary),
       delayed: delayed.map(toSummary),
+      paused: pausedJobs.map(toSummary),
     };
   }
 

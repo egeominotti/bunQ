@@ -7,6 +7,7 @@ import type { Command } from '../../../domain/types/command';
 import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { jobId } from '../../../domain/types/job';
+import { pausedView } from '../../../shared/pausedView';
 import type { HandlerContext } from '../types';
 
 /** Handle GetJob command */
@@ -51,16 +52,19 @@ export function handleGetJobCounts(
   // Get queue-specific counts
   const counts = ctx.queueManager.getQueueJobCounts(cmd.queue);
   const isPaused = ctx.queueManager.isPaused(cmd.queue);
+  // When paused, ready jobs (waiting + prioritized) are reported under `paused` —
+  // not in their own buckets, which would double-count (#92, BullMQ semantics).
+  const pv = pausedView(counts.waiting, counts.prioritized, isPaused);
   return resp.counts(
     {
-      waiting: counts.waiting,
-      prioritized: counts.prioritized,
+      waiting: pv.waiting,
+      prioritized: pv.prioritized,
       delayed: counts.delayed,
       active: counts.active,
       completed: counts.completed,
       failed: counts.failed,
       'waiting-children': counts['waiting-children'],
-      paused: isPaused ? counts.waiting : 0,
+      paused: pv.paused,
     },
     reqId
   );

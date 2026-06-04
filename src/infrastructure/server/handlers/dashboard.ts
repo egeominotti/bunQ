@@ -10,6 +10,7 @@ import * as resp from '../../../domain/types/response';
 import type { HandlerContext } from '../types';
 import { throughputTracker } from '../../../application/throughputTracker';
 import { latencyTracker } from '../../../application/latencyTracker';
+import { pausedView } from '../../../shared/pausedView';
 
 /** Dashboard overview - single call for all dashboard data */
 export function handleDashboardOverview(
@@ -118,8 +119,17 @@ export function handleDashboardQueue(
   reqId?: string
 ): Response {
   const queue = cmd.queue;
-  const counts = ctx.queueManager.getQueueJobCounts(queue);
+  const rawCounts = ctx.queueManager.getQueueJobCounts(queue);
   const paused = ctx.queueManager.isPaused(queue);
+  // Keep the counts consistent with the per-state lists below (#92): a paused
+  // queue reports ready jobs under `paused`, not `waiting`/`prioritized`.
+  const pv = pausedView(rawCounts.waiting, rawCounts.prioritized, paused);
+  const counts = {
+    ...rawCounts,
+    waiting: pv.waiting,
+    prioritized: pv.prioritized,
+    paused: pv.paused,
+  };
   const dlqJobs = ctx.queueManager.getDlq(queue, 10);
   const priorityCounts = ctx.queueManager.getCountsPerPriority(queue);
 
@@ -139,13 +149,19 @@ export function handleDashboardQueue(
 
   if (cmd.includeJobs) {
     const limit = Math.min(cmd.jobsLimit ?? 10, 50);
+    // When paused, ready jobs surface under `paused` (waiting/prioritized are
+    // empty) — match the counts above (#92).
     const waiting = ctx.queueManager.getJobs(queue, { state: 'waiting', end: limit });
     const active = ctx.queueManager.getJobs(queue, { state: 'active', end: limit });
     const delayed = ctx.queueManager.getJobs(queue, { state: 'delayed', end: limit });
+    const pausedJobs = paused
+      ? ctx.queueManager.getJobs(queue, { state: 'paused', end: limit })
+      : [];
     result.jobs = {
       waiting: waiting.map(jobSummary),
       active: active.map(jobSummary),
       delayed: delayed.map(jobSummary),
+      paused: pausedJobs.map(jobSummary),
     };
   }
 

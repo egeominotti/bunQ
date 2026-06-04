@@ -218,9 +218,12 @@ describe('QueueGroup Advanced - Embedded', () => {
     expect(processedB).toEqual(['b']);
     expect(processedC).toEqual(['c']);
 
-    // Group A should still be paused with its job waiting
+    // Group A should still be paused with its job queued. BullMQ semantics (#92):
+    // a paused queue reports its job under `paused`, not `waiting`.
     expect(qA.isPaused()).toBe(true);
-    expect(qA.getJobCounts().waiting).toBe(1);
+    const countsA = qA.getJobCounts();
+    expect(countsA.waiting).toBe(0);
+    expect(countsA.paused).toBe(1);
   }, 20000);
 
   test('getWorker creates worker for prefixed queue', async () => {

@@ -27,7 +27,11 @@ const prevQueueWaiting = new Map<string, { waiting: number; timestamp: number }>
 
 // ─── Heavy data collectors (called every ~90s) ───
 
-/** All job states (BullMQ v5 compatible) */
+/** All job states (BullMQ v5 compatible).
+ * 'paused' yields jobs only when the queue is actually paused (where 'waiting' /
+ * 'prioritized' are suppressed), so a paused queue's ready jobs still appear in
+ * the snapshot — under `paused` — instead of vanishing (#92). No double-collect:
+ * a job is returned by exactly one of waiting/prioritized/paused. */
 const ALL_STATES = [
   'waiting',
   'active',
@@ -35,6 +39,7 @@ const ALL_STATES = [
   'failed',
   'completed',
   'prioritized',
+  'paused',
   'waiting-children',
 ] as const;
 

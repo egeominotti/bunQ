@@ -334,9 +334,11 @@ describe('Pause/Resume Patterns - Embedded', () => {
       await queue.add(`job-${i}`, { index: i });
     }
 
-    // Verify all 10 are in waiting state
+    // Verify all 10 are queued. BullMQ semantics (#92): a paused queue reports
+    // its ready jobs under `paused`, not `waiting` (no double-count).
     const counts = queue.getJobCounts();
-    expect(counts.waiting).toBe(10);
+    expect(counts.waiting).toBe(0);
+    expect(counts.paused).toBe(10);
     expect(counts.active).toBe(0);
 
     // Verify none are processed

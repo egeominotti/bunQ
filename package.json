@@ -1,6 +1,6 @@
 {
   "name": "bunqueue",
-  "version": "2.8.3",
+  "version": "2.8.4",
   "description": "High-performance job queue for Bun & AI agents. SQLite persistence, cron scheduling, priorities, retries, DLQ, webhooks, native MCP server. Zero external dependencies.",
   "type": "module",
   "main": "dist/main.js",
@@ -12,22 +12,32 @@
   "exports": {
     ".": {
       "types": "./dist/main.d.ts",
+      "bun": "./dist/main.js",
+      "node": "./dist/bun-only.js",
       "import": "./dist/main.js"
     },
     "./client": {
       "types": "./dist/client/index.d.ts",
+      "bun": "./dist/client/index.js",
+      "node": "./dist/bun-only.js",
       "import": "./dist/client/index.js"
     },
     "./queue": {
       "types": "./dist/application/queueManager.d.ts",
+      "bun": "./dist/application/queueManager.js",
+      "node": "./dist/bun-only.js",
       "import": "./dist/application/queueManager.js"
     },
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
+      "bun": "./dist/mcp/index.js",
+      "node": "./dist/bun-only.js",
       "import": "./dist/mcp/index.js"
     },
     "./workflow": {
       "types": "./dist/client/workflow/index.d.ts",
+      "bun": "./dist/client/workflow/index.js",
+      "node": "./dist/bun-only.js",
       "import": "./dist/client/workflow/index.js"
     },
     "./package.json": "./package.json"
@@ -137,7 +147,6 @@
   },
   "homepage": "https://bunqueue.dev",
   "engines": {
-    "node": ">=18.0.0",
     "bun": ">=1.3.9"
   }
 }

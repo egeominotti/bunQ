@@ -17,6 +17,9 @@
  * ```
  */
 
+// Bun-only runtime guard — must evaluate before any module touching Bun.* globals.
+import '../../require-bun';
+
 export { Workflow } from './workflow';
 export { Engine } from './engine';
 export { WorkflowEmitter } from './emitter';

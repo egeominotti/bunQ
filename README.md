@@ -25,6 +25,14 @@
 
 ---
 
+## Requirements
+
+bunqueue is **Bun-only** (`bun >= 1.3.9`). The client, TCP transport and persistence
+rely on Bun's runtime APIs (`Bun.connect`, `Bun.file`, `Bun.hash`, …) and ship as
+ESM with extensionless specifiers, so they do **not** run under Node.js. Importing
+the package from Node fails fast with a clear error pointing here rather than a
+cryptic resolver crash. Install Bun from [bun.sh](https://bun.sh) and run with `bun`.
+
 ## Quickstart
 
 ```bash
@@ -451,6 +459,27 @@ app.pause();           // pause queue + worker
 app.resume();          // resume both
 await app.close();     // graceful shutdown
 await app.close(true); // force shutdown
+```
+
+### Inspecting jobs & counts
+
+`getJobCounts()` and the per-state lists follow BullMQ semantics:
+
+```typescript
+const counts = await queue.getJobCountsAsync();
+// { waiting, prioritized, active, completed, failed, delayed, paused }
+
+// Failed jobs (those that exhausted their attempts) are enumerable by state —
+// the failed list reflects the same jobs that `failed` counts.
+const failed = await queue.getFailedAsync(0, 50);
+const alsoFailed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
+
+// Paused queue: ready jobs are reported under `paused`, never double-counted as
+// `waiting`. While paused, getJobCounts() returns waiting:0 / paused:N, and the
+// jobs are listed by `getJobsAsync({ state: 'paused' })` (not by `waiting`).
+queue.pause();
+const c = await queue.getJobCountsAsync(); // waiting: 0, paused: N
+const pausedJobs = await queue.getJobsAsync({ state: 'paused', start: 0, end: 50 });
 ```
 
 ### Full Example

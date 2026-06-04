@@ -370,11 +370,12 @@ async function main() {
     // Wait for jobs to be persisted
     await Bun.sleep(300);
 
-    // Verify all 10 are in waiting state via async counts
+    // Verify all 10 are queued via async counts. BullMQ semantics (#92): a paused
+    // queue reports its ready jobs under `paused`, not `waiting` (no double-count).
     const counts = await q.getJobCountsAsync();
 
-    if (counts.waiting < 10) {
-      fail(`Jobs not queued properly: waiting=${counts.waiting}, expected 10`);
+    if (counts.paused < 10 || counts.waiting !== 0) {
+      fail(`Jobs not queued properly: waiting=${counts.waiting}, paused=${counts.paused}, expected paused=10/waiting=0`);
     } else {
       // Verify none are processed
       if (processed.length > 0) {
@@ -391,7 +392,7 @@ async function main() {
 
         if (processed.length >= 10) {
           const unique = new Set(processed);
-          ok(`Jobs queued while paused: waiting=${counts.waiting}, processed=${processed.length}, unique=${unique.size}`);
+          ok(`Jobs queued while paused: paused=${counts.paused}, processed=${processed.length}, unique=${unique.size}`);
         } else {
           fail(`Not all queued jobs processed: ${processed.length}/10`);
         }

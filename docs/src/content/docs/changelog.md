@@ -10,6 +10,51 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.4] - 2026-06-05
+
+### Fixed — `getJobCounts()` / per-state lists now agree with the real state (#92)
+
+Two ways the counts and the per-state lists could disagree:
+
+- **Failed jobs were not enumerable on the storage path.** A job that exhausts its
+  attempts is moved to the `dlq` table and its `jobs` row is removed, so
+  `getJobs({ state: 'failed' })` / `getFailedAsync()` ran `SELECT … FROM jobs WHERE
+  state='failed'` and came back empty — even though `failed` counted it, `getJobState()`
+  returned `'failed'`, and `getJob(id)` found it (standalone server, and embedded with a
+  `dataPath`). The storage path now also reads the DLQ for `'failed'`, mirroring the
+  in-memory path. The unfiltered `getJobs()` likewise includes failed jobs.
+
+- **`pause()` double-counted.** A single ready job was reported under **both** `waiting`
+  and `paused`, while `getJobs({ state: 'paused' })` returned `[]`. Now follows BullMQ
+  semantics: a paused queue reports its ready jobs (waiting **and** prioritized) under
+  `paused`, with `waiting: 0` / `prioritized: 0`, and lists them via
+  `getJobs({ state: 'paused' })`. A job is never counted in two buckets at once. Applied
+  consistently across the client SDK, the TCP `GetJobCounts` handler, and the dashboard
+  detail endpoint (which also gains a `paused` job list).
+
+Also fixed a pagination defect surfaced by the DLQ merge: offset-unaware sources (DLQ,
+paused/waiting-children views) are now gathered from index 0, merged, and sliced once, so
+paged queries no longer duplicate or drop rows.
+
+**Behavior change:** `getJobCounts()` on a paused queue previously returned the waiting
+count under *both* `waiting` and `paused`; it now returns `waiting: 0, paused: N`. The
+monitoring aggregate `getStats()` (and `/stats` / Prometheus) keeps reporting physical
+counts and is unaffected.
+
+### Fixed — honest Bun-only packaging with a clear Node error (#93)
+
+`package.json` declared `engines.node >= 18`, but the client cannot run on Node: the
+published ESM uses directory/extensionless specifiers (Node's resolver rejects them with
+`ERR_UNSUPPORTED_DIR_IMPORT`) and the TCP transport relies on Bun globals (`Bun.connect`,
+`Bun.file`, `Bun.hash`, …) with no Node fallback.
+
+- Dropped `node` from `engines` (now `bun >= 1.3.9` only).
+- Added a `"bun"` export condition (the real entry) and a `"node"` condition pointing at a
+  single self-contained stub on every subpath (`.`, `./client`, `./queue`, `./mcp`,
+  `./workflow`). Importing from Node now fails fast with a clear *"bunqueue is Bun-only…"*
+  error instead of a cryptic resolver crash; Bun resolves the real entry unchanged.
+- Added a runtime guard for the bundled path (browser/neutral-target bundle run on Node).
+
 ## [2.8.3] - 2026-06-03
 
 ### Fixed — expose `./package.json` in `exports`

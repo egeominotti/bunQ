@@ -51,8 +51,10 @@ describe('Issue #56: getJobCounts should include delayed and paused', () => {
     queue.pause();
     const counts = queue.getJobCounts();
 
-    // When paused, paused count should equal waiting count
+    // BullMQ semantics (#92): when paused, ready jobs are reported under `paused`
+    // and `waiting` drops to 0 (a job is never counted in both at once).
     expect((counts as any).paused).toBe(2);
+    expect(counts.waiting).toBe(0);
 
     queue.resume();
   });

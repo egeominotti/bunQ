@@ -280,6 +280,50 @@ function collectWaitingChildrenFromShard(shard: Shard, queue: string, max: numbe
   return wcJobs;
 }
 
+interface StateNeeds {
+  waiting: boolean;
+  prioritized: boolean;
+  delayed: boolean;
+  paused: boolean;
+  active: boolean;
+  failed: boolean;
+  completed: boolean;
+  waitingChildren: boolean;
+}
+
+/**
+ * Resolve which sources to collect for a state filter.
+ *
+ * When the queue is paused, an EXPLICIT waiting/prioritized query returns nothing:
+ * those jobs are reported under 'paused' instead (BullMQ semantics, #92). An
+ * unfiltered query (states === null) still lists them by their temporal state.
+ */
+function resolveStateNeeds(states: string[] | null, paused: boolean): StateNeeds {
+  const want = (s: string): boolean => !states || states.includes(s);
+  const suppressReady = !!states && paused;
+  return {
+    waiting: want('waiting') && !suppressReady,
+    prioritized: want('prioritized') && !suppressReady,
+    delayed: want('delayed'),
+    paused: !!states && states.includes('paused') && paused,
+    active: want('active'),
+    failed: want('failed'),
+    completed: want('completed'),
+    waitingChildren: want('waiting-children'),
+  };
+}
+
+/** When paused, the queue's ready jobs (waiting + prioritized) ARE the paused set (#92). */
+function collectPausedJobs(shard: Shard, queue: string, maxPerSource: number): Job[] {
+  const pausedJobs = collectTemporalJobs(
+    shard,
+    queue,
+    { waiting: true, prioritized: true, delayed: false },
+    maxPerSource
+  );
+  return tagState(pausedJobs, 'paused');
+}
+
 function collectJobsByState(
   queue: string,
   shardIdx: number,
@@ -289,31 +333,32 @@ function collectJobsByState(
 ): Job[] {
   const shard = ctx.shards[shardIdx];
   const jobs: Job[] = [];
-  const needWaiting = !states || states.includes('waiting');
-  const needPrioritized = !states || states.includes('prioritized');
-  const needDelayed = !states || states.includes('delayed');
+  const need = resolveStateNeeds(states, shard.getState(queue).paused);
 
-  if (needWaiting || needPrioritized || needDelayed) {
+  if (need.waiting || need.prioritized || need.delayed) {
     const temporal = collectTemporalJobs(
       shard,
       queue,
-      { waiting: needWaiting, prioritized: needPrioritized, delayed: needDelayed },
+      { waiting: need.waiting, prioritized: need.prioritized, delayed: need.delayed },
       maxPerSource
     );
     tagTemporalState(temporal);
     jobs.push(...temporal);
   }
-  if (!states || states.includes('active')) {
+  if (need.paused) {
+    jobs.push(...collectPausedJobs(shard, queue, maxPerSource));
+  }
+  if (need.active) {
     jobs.push(...tagState(collectActiveJobs(queue, shardIdx, ctx, maxPerSource), 'active'));
   }
-  if (!states || states.includes('failed')) {
+  if (need.failed) {
     const dlq = shard.getDlq(queue);
     jobs.push(...tagState(maxPerSource < dlq.length ? dlq.slice(0, maxPerSource) : dlq, 'failed'));
   }
-  if (!states || states.includes('completed')) {
+  if (need.completed) {
     jobs.push(...tagState(collectCompletedJobs(queue, ctx, maxPerSource), 'completed'));
   }
-  if (!states || states.includes('waiting-children')) {
+  if (need.waitingChildren) {
     jobs.push(
       ...tagState(collectWaitingChildrenFromShard(shard, queue, maxPerSource), 'waiting-children')
     );
@@ -369,6 +414,15 @@ function querySqliteWithPriority(
   return jobs.slice(0, opts.limit);
 }
 
+/** Merge SQL rows with in-memory extras (each gathered from index 0), sort by
+ *  createdAt, and paginate [start, end) once — so offset-unaware extras don't
+ *  duplicate or drop rows across pages (#92). */
+function mergePage(sqlJobs: Job[], extras: Job[], start: number, end: number, asc: boolean): Job[] {
+  const merged = sqlJobs.concat(extras);
+  merged.sort((a, b) => (asc ? a.createdAt - b.createdAt : b.createdAt - a.createdAt));
+  return merged.slice(start, end);
+}
+
 /** Get jobs from queue with filters */
 export function getJobs(
   queue: string,
@@ -394,34 +448,75 @@ export function getJobs(
   const limit = end - start;
 
   if (ctx.storage) {
+    const shard = ctx.shards[shardIdx];
+    const isPaused = shard.getState(queue).paused;
+    const maxPerSource = end + 1;
+
+    // Derived sources are NOT offset-aware (the DLQ and the paused/waiting-children
+    // views come from in-memory maps). When any contributes, we must gather [0, end)
+    // from EVERY source, merge, sort, then slice [start, end) exactly once — pushing
+    // `offset` into the SQL query would drop rows and duplicate across pages (#92).
     if (!states) {
-      return ctx.storage.queryJobs(queue, { limit, offset: start, asc });
+      const dlq = tagState(shard.getDlq(queue), 'failed');
+      if (dlq.length === 0) {
+        return ctx.storage.queryJobs(queue, { limit, offset: start, asc });
+      }
+      const all = ctx.storage.queryJobs(queue, { limit: end, offset: 0, asc });
+      return mergePage(all, dlq, start, end, asc);
     }
 
-    const hasWaitingChildren = states.includes('waiting-children');
-    const sqlFilteredStates = states.filter((s) => s !== 'waiting-children');
-
-    // Only waiting-children: collect from in-memory
-    if (hasWaitingChildren && sqlFilteredStates.length === 0) {
-      const jobs = collectWaitingChildrenJobs(ctx.shards[shardIdx], queue);
-      jobs.sort((a, b) => (asc ? a.createdAt - b.createdAt : b.createdAt - a.createdAt));
-      return jobs.slice(start, end);
+    // States with no jobs-table row are collected from in-memory sources:
+    //  - 'failed'           -> DLQ (the failed job lives in the dlq table) (#92)
+    //  - 'waiting-children' -> deps/children maps
+    //  - 'paused'           -> when paused, the would-be-waiting jobs ARE the paused set (#92)
+    const extras: Job[] = [];
+    if (states.includes('failed')) {
+      extras.push(...tagState(shard.getDlq(queue), 'failed'));
+    }
+    if (states.includes('waiting-children')) {
+      extras.push(...collectWaitingChildrenJobs(shard, queue));
+    }
+    if (states.includes('paused') && isPaused) {
+      const pausedJobs = collectTemporalJobs(
+        shard,
+        queue,
+        { waiting: true, prioritized: true, delayed: false },
+        maxPerSource
+      );
+      extras.push(...tagState(pausedJobs, 'paused'));
     }
 
-    const jobs =
-      sqlFilteredStates.length > 0
+    // jobs-table states. A paused queue reports its waiting/prioritized jobs under
+    // 'paused', so they must not also surface in the waiting/prioritized lists (#92).
+    const sqlFilteredStates = states.filter(
+      (s) =>
+        s !== 'failed' &&
+        s !== 'waiting-children' &&
+        s !== 'paused' &&
+        !(isPaused && (s === 'waiting' || s === 'prioritized'))
+    );
+
+    // Fast path: only jobs-table states, no derived sources — SQL paginates directly.
+    if (extras.length === 0) {
+      return sqlFilteredStates.length > 0
         ? querySqliteWithPriority(ctx.storage, queue, sqlFilteredStates, {
             limit,
             offset: start,
             asc,
           })
         : [];
+    }
 
-    if (!hasWaitingChildren) return jobs;
+    const sqlJobs =
+      sqlFilteredStates.length > 0
+        ? querySqliteWithPriority(ctx.storage, queue, sqlFilteredStates, {
+            limit: end,
+            offset: 0,
+            asc,
+          })
+        : [];
 
-    const merged = jobs.concat(collectWaitingChildrenJobs(ctx.shards[shardIdx], queue));
-    merged.sort((a, b) => (asc ? a.createdAt - b.createdAt : b.createdAt - a.createdAt));
-    return merged.slice(0, limit);
+    return mergePage(sqlJobs, extras, start, end, asc);
   }
 
   // In-memory path (embedded mode only)

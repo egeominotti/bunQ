@@ -19,6 +19,9 @@
  * ```
  */
 
+// Bun-only runtime guard — must evaluate before any module touching Bun.* globals.
+import '../require-bun';
+
 export { defineConfig } from '../config';
 export type { BunqueueConfig } from '../config';
 export { Queue } from './queue';

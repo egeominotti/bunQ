@@ -6,6 +6,7 @@
 
 import { getSharedManager } from '../../manager';
 import type { TcpConnectionPool } from '../../tcpPool';
+import { pausedView } from '../../../shared/pausedView';
 
 interface CountsContext {
   name: string;
@@ -41,14 +42,17 @@ export function getJobCounts(ctx: CountsContext): JobCounts {
   // Use queue-specific counts
   const counts = manager.getQueueJobCounts(ctx.name);
   const isPaused = manager.isPaused(ctx.name);
+  // When paused, ready jobs (waiting + prioritized) are reported under `paused` —
+  // not in their own buckets, which would double-count (#92, BullMQ semantics).
+  const pv = pausedView(counts.waiting, counts.prioritized, isPaused);
   return {
-    waiting: counts.waiting,
-    prioritized: counts.prioritized,
+    waiting: pv.waiting,
+    prioritized: pv.prioritized,
     active: counts.active,
     completed: counts.completed,
     failed: counts.failed,
     delayed: counts.delayed,
-    paused: isPaused ? counts.waiting : 0,
+    paused: pv.paused,
   };
 }
 

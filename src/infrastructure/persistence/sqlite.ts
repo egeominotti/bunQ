@@ -64,7 +64,18 @@ export class SqliteStorage {
 
   constructor(config: SqliteConfig) {
     this.db = new Database(config.path, { create: true });
-    this.db.run(PRAGMA_SETTINGS);
+    // PRAGMA settings are performance/optimization hints, not correctness
+    // requirements. A transient filesystem IOERR (e.g. SQLITE_IOERR_FSTAT from
+    // `mmap_size` calling fstat() on the fd during a restart/cleanup race) must
+    // NOT propagate out of the constructor — in a deferred/async context Bun
+    // reports it as an "Unhandled error between tests" and tears down CI.
+    try {
+      this.db.run(PRAGMA_SETTINGS);
+    } catch (err) {
+      storageLog.error('Failed to apply PRAGMA settings', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     this.migrate();
     this.statements = prepareStatements(this.db);
     this._onCriticalLoss = config.onCriticalLoss;
@@ -79,11 +90,23 @@ export class SqliteStorage {
         if (isSqliteFullError(err)) {
           this.setDiskFull(err.message);
         }
-        storageLog.error('Write buffer flush failed', {
-          jobCount,
-          error: err.message,
-          diskFull: this._diskFull,
-        });
+        // A constraint violation (e.g. duplicate jobs.id) is a PERMANENT per-row
+        // rejection that the WriteBuffer isolated and dropped — sibling valid jobs
+        // in the same flush were still persisted. Log it distinctly from a
+        // transient flush failure (and never route it to the DLQ, which would
+        // resurrect a duplicate).
+        if (/constraint failed/i.test(err.message)) {
+          storageLog.error('Write buffer rejected jobs (constraint violation, dropped)', {
+            rejectedJobCount: jobCount,
+            error: err.message,
+          });
+        } else {
+          storageLog.error('Write buffer flush failed', {
+            jobCount,
+            error: err.message,
+            diskFull: this._diskFull,
+          });
+        }
       },
       (jobs, lastError, attempts) => {
         this.handleCriticalLoss(jobs, lastError, attempts);

@@ -153,6 +153,8 @@ export class ContextFactory {
       shards: this.deps.shards,
       shardLocks: this.deps.shardLocks,
       completedJobs: this.deps.completedJobs,
+      completedJobsData: this.deps.completedJobsData,
+      jobResults: this.deps.jobResults,
       customIdMap: this.deps.customIdMap,
       jobIndex: this.deps.jobIndex,
       totalPushed: this.deps.metrics.totalPushed,

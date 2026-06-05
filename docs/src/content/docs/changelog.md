@@ -10,6 +10,44 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.5] - 2026-06-05
+
+### Fixed — write buffer no longer drops unrelated jobs on a duplicate id (data loss)
+
+A duplicate `jobs.id` (the global PRIMARY KEY) poisoned the entire atomic write-buffer
+flush: the failing batch rolled back as a whole, was retried, and after exhausting
+retries **every job in that flush window was dropped — including unrelated, valid jobs**
+that merely happened to be batched together. Silent, unrecoverable, and triggerable by a
+single duplicated custom `jobId`. Two ways to hit it:
+
+- the **same custom `jobId` in two different queues** sharing one database, or
+- **reusing a custom `jobId` after its job completed** — `markCompleted` UPDATEs the row
+  (it survives), so the reused, deterministic id collided with it.
+
+Fixes:
+
+- **Per-row isolation on flush.** When the fast atomic batch INSERT fails, the buffer now
+  re-inserts row by row: valid jobs persist, a constraint violation (e.g. duplicate id) is
+  isolated and dropped (it can never succeed, so it is no longer retried — which is what
+  poisoned every subsequent flush), and genuinely transient failures (disk I/O, full) are
+  retried exactly as before. The success path is unchanged (a single transaction).
+- **Completed-id reuse evicts the stale job.** Re-adding a completed custom `jobId` now
+  evicts the old completed record (row, result, in-memory state) so the new job starts
+  fresh as `waiting` instead of colliding (and `getJobState` no longer returns `completed`
+  for the brand-new job).
+
+Note: when the same global `jobs.id` is genuinely duplicated across queues, the losing
+duplicate is dropped from disk (it cannot be persisted twice) — it still lives in memory
+until restart. This is the correct trade-off and is strictly safer than the previous
+behavior, which dropped the unrelated jobs instead.
+
+### Fixed — transient SQLite IOERR during PRAGMA setup no longer crashes startup
+
+Optimization PRAGMAs (e.g. `mmap_size`, which calls `fstat()` on the fd) are applied with
+error handling: a transient filesystem `SQLITE_IOERR` during a restart/cleanup race is now
+caught and logged instead of propagating out of the `SqliteStorage` constructor (where, in
+a deferred context, it surfaced as an "Unhandled error between tests" and tore down CI).
+
 ## [2.8.4] - 2026-06-05
 
 ### Fixed — `getJobCounts()` / per-state lists now agree with the real state (#92)

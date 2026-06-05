@@ -27,6 +27,8 @@ export interface PushContext {
   shards: Shard[];
   shardLocks: RWLock[];
   completedJobs: SetLike<JobId>;
+  completedJobsData: MapLike<JobId, Job>;
+  jobResults: MapLike<JobId, unknown>;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
   totalPushed: { value: bigint };
@@ -57,23 +59,31 @@ function handleCustomId(input: JobInput, shard: Shard, ctx: PushContext): Custom
   const id = jobId(input.customId);
   const existing = ctx.customIdMap.get(input.customId);
 
-  // No existing mapping - register and proceed
-  if (!existing) {
-    ctx.customIdMap.set(input.customId, id);
-    return { skip: false, id };
+  // If the existing job is still queued, the add is idempotent — return it.
+  if (existing) {
+    const location = ctx.jobIndex.get(existing);
+    const existingJob =
+      location?.type === 'queue' ? shard.getQueue(location.queueName).find(existing) : null;
+    if (existingJob) {
+      return { skip: true, existingJob };
+    }
   }
 
-  // Check if existing job is still in queue
-  const location = ctx.jobIndex.get(existing);
-  const existingJob =
-    location?.type === 'queue' ? shard.getQueue(location.queueName).find(existing) : null;
-
-  if (existingJob) {
-    return { skip: true, existingJob };
+  // Reuse path: the id is free in the queue (no mapping, or the prior job is
+  // processing/completed). If the prior job COMPLETED, its row survives on disk
+  // (markCompleted does an UPDATE, not a DELETE) and it is still in completedJobs.
+  // Reusing the same deterministic id would then (a) make getJobState return
+  // 'completed' for the brand-new job and (b) collide on the `jobs.id` PRIMARY KEY
+  // at flush time. Evict the stale completed job so the reused id starts fresh as
+  // 'waiting' (#92). Checked regardless of customIdMap state — the mapping may have
+  // been cleared on completion, which would otherwise skip this path entirely.
+  if (ctx.completedJobs.has(id)) {
+    ctx.completedJobs.delete(id);
+    ctx.completedJobsData.delete(id);
+    ctx.jobResults.delete(id);
+    ctx.jobIndex.delete(id);
+    ctx.storage?.deleteJob(id); // removes the surviving row + result + any buffered insert
   }
-
-  // Job gone (processing/completed) - allow reuse of customId
-  ctx.customIdMap.delete(input.customId);
   ctx.customIdMap.set(input.customId, id);
   return { skip: false, id };
 }

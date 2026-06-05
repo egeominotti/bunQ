@@ -7,6 +7,32 @@ import type { Database } from 'bun:sqlite';
 import type { Job } from '../../domain/types/job';
 import { pack } from './sqliteSerializer';
 
+const COLS_PER_ROW = 24;
+// SQLite has a limit of ~999 variables, so batch in chunks
+const MAX_ROWS_PER_INSERT = Math.floor(999 / COLS_PER_ROW);
+
+/**
+ * A constraint violation (e.g. a duplicate `jobs.id` PRIMARY KEY) is PERMANENT
+ * for that row — retrying never succeeds. It must be isolated from the rest of
+ * the batch, otherwise one bad row poisons the whole atomic flush and drops
+ * unrelated valid jobs (data loss, #92-class). Everything else (disk I/O, busy,
+ * full) is treated as transient and retried.
+ */
+function isConstraintError(err: Error): boolean {
+  const code = (err as { code?: string }).code ?? '';
+  return code.startsWith('SQLITE_CONSTRAINT') || /constraint failed/i.test(err.message);
+}
+
+/** Outcome of a batch insert after isolating per-row failures. */
+export interface BatchInsertResult {
+  /** Jobs that hit a transient (non-constraint) error — caller should retry. */
+  transient: Job[];
+  /** Jobs rejected by a permanent constraint (e.g. duplicate id) — drop, never retry. */
+  conflicts: Job[];
+  /** The originating error from the fast-path failure, for logging. */
+  error?: Error;
+}
+
 /** Batch insert manager with prepared statement caching */
 export class BatchInsertManager {
   private readonly db: Database;
@@ -16,21 +42,50 @@ export class BatchInsertManager {
     this.db = db;
   }
 
-  /** Insert batch of jobs using multi-row INSERT for 50-100x speedup */
-  insertJobsBatch(jobs: Job[]): void {
-    if (jobs.length === 0) return;
+  /**
+   * Insert a batch of jobs using a single multi-row INSERT (50-100x speedup).
+   * On the common path every row succeeds and an empty result is returned.
+   *
+   * If the atomic batch fails (e.g. a single duplicate `jobs.id`), the rows are
+   * re-inserted ONE AT A TIME so a single bad row can no longer drop the rest:
+   * valid jobs persist, constraint violations are isolated as `conflicts` (drop,
+   * never retry — they would poison every future flush), and any transient
+   * failures are returned so the caller can retry just those. Never throws.
+   */
+  insertJobsBatch(jobs: Job[]): BatchInsertResult {
+    if (jobs.length === 0) return { transient: [], conflicts: [] };
 
     const now = Date.now();
-    const COLS_PER_ROW = 24;
-    // SQLite has a limit of ~999 variables, so batch in chunks
-    const MAX_ROWS_PER_INSERT = Math.floor(999 / COLS_PER_ROW);
 
-    this.db.transaction(() => {
-      for (let offset = 0; offset < jobs.length; offset += MAX_ROWS_PER_INSERT) {
-        const chunk = jobs.slice(offset, offset + MAX_ROWS_PER_INSERT);
-        this.insertJobsChunk(chunk, now);
+    try {
+      this.db.transaction(() => {
+        for (let offset = 0; offset < jobs.length; offset += MAX_ROWS_PER_INSERT) {
+          const chunk = jobs.slice(offset, offset + MAX_ROWS_PER_INSERT);
+          this.insertJobsChunk(chunk, now);
+        }
+      })();
+      return { transient: [], conflicts: [] };
+    } catch (err) {
+      const batchError = err instanceof Error ? err : new Error(String(err));
+      return this.insertRowByRow(jobs, now, batchError);
+    }
+  }
+
+  /** Fallback path: insert each job independently, isolating per-row failures. */
+  private insertRowByRow(jobs: Job[], now: number, batchError: Error): BatchInsertResult {
+    const transient: Job[] = [];
+    const conflicts: Job[] = [];
+    for (const job of jobs) {
+      try {
+        // Single-row INSERT, auto-committed: succeeds/fails independently.
+        this.insertJobsChunk([job], now);
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        if (isConstraintError(err)) conflicts.push(job);
+        else transient.push(job);
       }
-    })();
+    }
+    return { transient, conflicts, error: batchError };
   }
 
   /** Get or create cached prepared statement for batch insert */
@@ -171,7 +226,16 @@ export class WriteBuffer {
     }
   }
 
-  /** Flush buffer to disk using double-buffering. Returns number of jobs flushed. */
+  /**
+   * Flush buffer to disk using double-buffering. Returns number of jobs persisted.
+   *
+   * Per-row isolation (see BatchInsertManager.insertJobsBatch): valid jobs are
+   * persisted even if a sibling row violates a constraint. Constraint conflicts
+   * (e.g. duplicate id) are dropped+reported and NEVER re-buffered — re-buffering
+   * them would poison every future flush and silently drop unrelated valid jobs
+   * (the #92-class data-loss bug). Transient failures are re-buffered and retried
+   * with exponential backoff, exactly as before.
+   */
   flush(): number {
     // Prevent flush after stop or concurrent flushes
     if (this.stopped || this.flushing) return 0;
@@ -186,64 +250,69 @@ export class WriteBuffer {
     const jobCount = this.flushBuffer.length;
 
     try {
-      this.batchManager.insertJobsBatch(this.flushBuffer);
-      this.flushBuffer = []; // Clear after successful write
+      // BatchInsertManager.insertJobsBatch isolates per-row failures and never
+      // throws. Stay defensive: a manager that throws (or returns nothing) is
+      // treated as a transient failure of the whole batch, preserving the
+      // re-buffer/retry/critical-loss semantics.
+      let result: BatchInsertResult;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive against a non-conforming batch manager (e.g. a test double returning undefined)
+        result = this.batchManager.insertJobsBatch(this.flushBuffer) ?? {
+          transient: [],
+          conflicts: [],
+        };
+      } catch (err) {
+        result = {
+          transient: this.flushBuffer,
+          conflicts: [],
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
+      const { transient, conflicts, error } = result;
+      this.flushBuffer = [];
 
-      // Reset retry state on success
+      // Permanent constraint conflicts: drop + report once, never retry.
+      if (conflicts.length > 0) {
+        this.onError(error ?? new Error('Constraint violation'), conflicts.length);
+      }
+
+      // Transient failures: re-buffer just those and retry with backoff.
+      if (transient.length > 0) {
+        const error2 = error ?? new Error('Write buffer flush failed');
+        this.lastError = error2;
+        this.retryCount++;
+        // Prepend failed jobs back to active buffer (failed first, then new).
+        this.activeBuffer = transient.concat(this.activeBuffer);
+
+        if (this.retryCount >= this.maxRetries) {
+          const lostJobs = [...this.activeBuffer];
+          this.activeBuffer = [];
+          if (this.onCriticalError) this.onCriticalError(lostJobs, error2, this.retryCount);
+          this.onError(error2, lostJobs.length, {
+            retryCount: this.retryCount,
+            nextBackoffMs: 0,
+            maxRetries: this.maxRetries,
+          });
+          this.retryCount = 0;
+          this.currentBackoffMs = this.initialBackoffMs;
+          this.lastError = null;
+        } else {
+          const nextBackoffMs = Math.min(this.currentBackoffMs * 2, this.maxBackoffMs);
+          this.onError(error2, transient.length, {
+            retryCount: this.retryCount,
+            nextBackoffMs,
+            maxRetries: this.maxRetries,
+          });
+          this.scheduleBackoffRetry();
+        }
+        return jobCount - transient.length - conflicts.length;
+      }
+
+      // Success (or success-modulo-dropped-conflicts): reset retry state.
       this.retryCount = 0;
       this.currentBackoffMs = this.initialBackoffMs;
       this.lastError = null;
-
-      return jobCount;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      this.lastError = error;
-      this.retryCount++;
-
-      // On failure, prepend failed jobs back to active buffer
-      // This preserves order: failed jobs first, then new jobs
-      this.activeBuffer = this.flushBuffer.concat(this.activeBuffer);
-      this.flushBuffer = [];
-
-      // Check if we've exceeded max retries
-      if (this.retryCount >= this.maxRetries) {
-        // Move jobs to dead letter / emit critical error
-        const lostJobs = [...this.activeBuffer];
-        this.activeBuffer = [];
-
-        if (this.onCriticalError) {
-          this.onCriticalError(lostJobs, error, this.retryCount);
-        }
-
-        // Also call onError with retry info for logging
-        this.onError(error, lostJobs.length, {
-          retryCount: this.retryCount,
-          nextBackoffMs: 0, // No more retries
-          maxRetries: this.maxRetries,
-        });
-
-        // Reset retry state
-        this.retryCount = 0;
-        this.currentBackoffMs = this.initialBackoffMs;
-        this.lastError = null;
-
-        throw err;
-      }
-
-      // Calculate next backoff with exponential increase
-      const nextBackoffMs = Math.min(this.currentBackoffMs * 2, this.maxBackoffMs);
-
-      // Call error callback with retry information
-      this.onError(error, jobCount, {
-        retryCount: this.retryCount,
-        nextBackoffMs: nextBackoffMs,
-        maxRetries: this.maxRetries,
-      });
-
-      // Schedule backoff retry
-      this.scheduleBackoffRetry();
-
-      throw err;
+      return jobCount - conflicts.length;
     } finally {
       this.flushing = false;
     }
@@ -366,6 +435,9 @@ export class WriteBuffer {
         const flushed = this.flush();
         clearTimeout(timeout);
         this.stopped = true;
+        // flush() no longer throws on transient failure (it re-buffers); report
+        // anything that could not be persisted so it isn't silently lost.
+        if (this.pendingCount > 0) this.reportLostJobs();
         resolve(flushed);
       } catch {
         // Flush failed - clear any backoff timer that flush() scheduled

@@ -262,6 +262,35 @@ client.on('error', async () => {
 });
 ```
 
+### Worker stalls on a half-open connection (throughput drops to 0)
+
+A worker's TCP socket can go **half-open** — the peer vanishes with no FIN/RST (host
+suspended/hibernated, NAT or load-balancer silently dropping an idle connection). Writes
+still succeed and no `close` event fires, so the symptom is: every command rejects with
+`Command timeout`, `consecutiveErrors` climbs, jobs pile up in `waiting` with `active=0`,
+and throughput sits at 0.
+
+bunqueue detects this and reconnects automatically via two signals: the health-check ping
+(`maxPingFailures`) **and** consecutive command timeouts (`maxCommandTimeouts`, default 3).
+With default timings (`pingInterval`/`commandTimeout` = 30s) recovery takes up to ~120s.
+For faster recovery, tighten the detection cadence:
+
+```typescript
+const worker = new Worker('q', handler, {
+  connection: {
+    host, port,
+    pingInterval: 10_000,    // health-check every 10s (0 disables)
+    commandTimeout: 5_000,   // fail a command after 5s
+    maxCommandTimeouts: 3,   // 3 consecutive timeouts → reconnect (0 disables)
+  },
+});
+```
+
+This recovers in ~tens of seconds and works even with the ping disabled. If a *fresh*
+connection also can't be established (e.g. the server is genuinely unreachable — a firewall
+dropping inbound SYNs, not just an idle drop), no client can reconnect until connectivity
+returns; auto-reconnect with infinite attempts resumes on its own once it does.
+
 ### Authentication failures
 
 ```bash

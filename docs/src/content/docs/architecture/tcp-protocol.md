@@ -71,10 +71,12 @@ const queue = new Queue('my-queue', {
   connection: {
     host: 'localhost',
     port: 6789,
-    pipelining: true,      // Enable pipelining (default: true)
-    maxInFlight: 100,      // Max concurrent commands (default: 100)
-    poolSize: 32,          // Connection pool size
-    commandTimeout: 30000  // Timeout per command (ms)
+    pipelining: true,        // Enable pipelining (default: true)
+    maxInFlight: 100,        // Max concurrent commands (default: 100)
+    poolSize: 32,            // Connection pool size
+    commandTimeout: 30000,   // Timeout per command (ms)
+    pingInterval: 30000,     // Health-check ping interval (ms, 0 disables)
+    maxCommandTimeouts: 3    // Consecutive command timeouts → reconnect (0 disables)
   }
 });
 ```
@@ -85,6 +87,8 @@ const queue = new Queue('my-queue', {
 | `maxInFlight` | `100` | Max commands in flight per connection |
 | `poolSize` | `4` | Number of TCP connections |
 | `commandTimeout` | `30000` | Command timeout (ms) |
+| `pingInterval` | `30000` | Health-check ping interval (ms, `0` disables) |
+| `maxCommandTimeouts` | `3` | Consecutive command timeouts (no intervening success) before the link is concluded dead and reconnect is forced (`0` disables) |
 
 ## Protocol Version Negotiation
 
@@ -123,6 +127,28 @@ Protocol v2 supports pipelining. Older clients without `Hello` default to v1 (se
 - Max delay: 30s
 - Backoff: exponential (2x each attempt)
 - Jitter: ±30%
+
+**Dead-link detection (half-open sockets):**
+
+A socket can go **half-open** — the peer vanishes with no FIN/RST (suspended host,
+NAT/load-balancer silently dropping an idle connection). Writes still succeed and no
+`close`/`error` event fires, so the client must detect it actively. Two independent
+signals conclude the link is dead and trigger `forceReconnect()`:
+
+1. **Health-check ping** — after `maxPingFailures` (3) consecutive failed pings.
+2. **Command timeouts** — after `maxCommandTimeouts` (3) consecutive command timeouts
+   with no intervening success. This is the path that recovers a worker whose `PULL`s
+   keep timing out, without waiting for the slower ping cycle (and it works even when the
+   ping is disabled). The counter resets on any successful response.
+
+On detection the socket is torn down, all in-flight commands are rejected immediately
+(`Connection lost`) so callers unblock at once, and the reconnect/backoff loop above
+re-establishes a fresh connection. `SO_KEEPALIVE` is also enabled so the OS can surface a
+dead peer on its own rather than lingering until `tcp_retries2` (~15 min).
+
+For *fast* recovery, lower `pingInterval` / `commandTimeout` — e.g.
+`{ pingInterval: 10000, commandTimeout: 5000 }` recovers in ~tens of seconds vs ~120s on
+defaults (each default timeout is 30s, so timeout-based detection is inherently coarse).
 
 ## Authentication
 

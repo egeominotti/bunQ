@@ -9,13 +9,22 @@ import type { ConnectionHealth } from './types';
 export interface HealthConfig {
   pingInterval: number;
   maxPingFailures: number;
+  /**
+   * Consecutive command timeouts before the link is concluded dead (0 = off).
+   * Optional for backward compatibility; defaults to 3 when omitted.
+   */
+  maxCommandTimeouts?: number;
 }
+
+/** Default consecutive command-timeout threshold when not configured. */
+const DEFAULT_MAX_COMMAND_TIMEOUTS = 3;
 
 /**
  * Tracks connection health metrics
  */
 export class HealthTracker {
   private consecutivePingFailures = 0;
+  private consecutiveCommandTimeouts = 0;
   private lastSuccessAt: number | null = null;
   private lastErrorAt: number | null = null;
   private connectedAt: number | null = null;
@@ -32,6 +41,9 @@ export class HealthTracker {
   recordSuccess(latencyMs: number): void {
     this.lastSuccessAt = Date.now();
     this.totalCommands++;
+    // A real response proves the link is alive: the prior timeouts were not a
+    // sustained run, so reset the dead-link counter ("consecutive" must mean it).
+    this.consecutiveCommandTimeouts = 0;
     this.recordLatency(latencyMs);
   }
 
@@ -50,11 +62,14 @@ export class HealthTracker {
   recordConnected(): void {
     this.connectedAt = Date.now();
     this.consecutivePingFailures = 0;
+    this.consecutiveCommandTimeouts = 0;
   }
 
   /** Record ping success */
   recordPingSuccess(latencyMs: number): void {
+    // A successful ping is also proof the link is alive — clear both suspicions.
     this.consecutivePingFailures = 0;
+    this.consecutiveCommandTimeouts = 0;
     this.recordLatency(latencyMs);
   }
 
@@ -64,6 +79,20 @@ export class HealthTracker {
     this.lastErrorAt = Date.now();
     this.totalErrors++;
     return this.consecutivePingFailures >= this.config.maxPingFailures;
+  }
+
+  /**
+   * Record a command timeout. Returns true when the configured consecutive
+   * threshold is reached (and the feature is enabled), signalling the caller to
+   * force a reconnect. Any intervening success resets the counter, so this only
+   * fires on a sustained run of timeouts — the signature of a dead/half-open
+   * socket where writes succeed but no response ever comes back.
+   */
+  recordCommandTimeout(): boolean {
+    const max = this.config.maxCommandTimeouts ?? DEFAULT_MAX_COMMAND_TIMEOUTS;
+    if (max <= 0) return false;
+    this.consecutiveCommandTimeouts++;
+    return this.consecutiveCommandTimeouts >= max;
   }
 
   /** Get current health metrics */
@@ -80,6 +109,7 @@ export class HealthTracker {
       lastErrorAt: this.lastErrorAt,
       avgLatencyMs: Math.round(avgLatency * 100) / 100,
       consecutivePingFailures: this.consecutivePingFailures,
+      consecutiveCommandTimeouts: this.consecutiveCommandTimeouts,
       totalCommands: this.totalCommands,
       totalErrors: this.totalErrors,
       uptimeMs: this.connectedAt ? Date.now() - this.connectedAt : 0,

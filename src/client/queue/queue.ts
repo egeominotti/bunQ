@@ -85,6 +85,7 @@ export class Queue<T = unknown> {
           poolSize,
           pingInterval: connOpts.pingInterval,
           commandTimeout: connOpts.commandTimeout,
+          maxCommandTimeouts: connOpts.maxCommandTimeouts,
           pipelining: connOpts.pipelining,
           maxInFlight: connOpts.maxInFlight,
         });
@@ -97,6 +98,7 @@ export class Queue<T = unknown> {
           poolSize,
           pingInterval: connOpts.pingInterval,
           commandTimeout: connOpts.commandTimeout,
+          maxCommandTimeouts: connOpts.maxCommandTimeouts,
           pipelining: connOpts.pipelining,
           maxInFlight: connOpts.maxInFlight,
         });

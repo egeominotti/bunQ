@@ -110,6 +110,7 @@ export class TcpClient extends EventEmitter {
     this.health = new HealthTracker({
       pingInterval: this.options.pingInterval,
       maxPingFailures: this.options.maxPingFailures,
+      maxCommandTimeouts: this.options.maxCommandTimeouts,
     });
     this.reconnect = new ReconnectManager({
       maxReconnectAttempts: this.options.maxReconnectAttempts,
@@ -306,14 +307,43 @@ export class TcpClient extends EventEmitter {
     }
   }
 
+  /**
+   * A command timed out. On a half-open socket (peer gone, no FIN/RST) writes
+   * keep succeeding but no response ever returns — every command times out
+   * while the socket still looks "connected". The health-check ping is one way
+   * to notice, but it can be disabled or slower than real traffic, leaving a
+   * worker's PULL loop to time out forever without ever reconnecting (#94).
+   * Treat a sustained run of timeouts as a dead link and force a reconnect.
+   */
+  private handleCommandTimeout(): void {
+    if (this.health.recordCommandTimeout()) {
+      this.emit('health', { type: 'unhealthy', reason: 'max_command_timeouts' });
+      this.forceReconnect();
+    }
+  }
+
   private forceReconnect(): void {
     if (this.reconnect.isClosed()) return;
     if (this.socket) {
-      this.socket.end();
+      // end() can throw on an already-errored/half-dead socket. Swallow it:
+      // failing to close the corpse must NOT abort the reconnect path below,
+      // or the connection would stay wedged forever (the #94 failure mode).
+      try {
+        this.socket.end();
+      } catch {
+        /* socket already torn down */
+      }
       this.socket = null;
     }
     this.connected = false;
     this.health.stopPing();
+    // Settle every in-flight/queued command NOW. Otherwise their per-command
+    // timeouts keep ticking and fire AFTER the fresh socket is up — each stale
+    // timeout bumps the new connection's dead-link counter and can re-trigger
+    // forceReconnect in a loop (a reconnect storm that never stabilises). It
+    // also unblocks awaiting callers (e.g. a Worker's PULL) immediately instead
+    // of making them wait out the full commandTimeout on a corpse.
+    this.commands.rejectAll(new Error('Connection lost'));
     if (this.reconnect.canReconnect()) this.reconnect.scheduleReconnect(() => this.connect());
   }
 
@@ -399,6 +429,8 @@ export class TcpClient extends EventEmitter {
         if (removed) {
           this.health.recordError();
           next.reject(new Error('Command timeout'));
+          // In-flight command got no response: count it toward dead-link detection.
+          this.handleCommandTimeout();
         }
       }, this.options.commandTimeout);
 
@@ -426,17 +458,20 @@ export class TcpClient extends EventEmitter {
     let pendingRef!: PendingCommand;
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        // Try to remove from queue first
+        // Try to remove from queue first. A still-queued command never reached
+        // the socket (e.g. waiting on connect), so it is NOT evidence of a dead
+        // link — reject it but don't count it toward dead-link detection.
         if (this.commands.remove(id)) {
           this.health.recordError();
           reject(new Error('Command timeout'));
           return;
         }
-        // Try to remove from in-flight
+        // Try to remove from in-flight: this one WAS sent and got no response.
         const removed = this.commands.removeByReqId(reqId);
         if (removed) {
           this.health.recordError();
           reject(new Error('Command timeout'));
+          this.handleCommandTimeout();
         }
       }, this.options.commandTimeout);
 

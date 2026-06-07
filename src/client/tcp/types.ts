@@ -27,6 +27,14 @@ export interface ConnectionOptions {
   pingInterval?: number;
   /** Max consecutive ping failures before forcing reconnect (default: 3) */
   maxPingFailures?: number;
+  /**
+   * Max consecutive command timeouts (with no intervening success) before the
+   * connection is concluded dead and reconnect is forced (default: 3, 0 to
+   * disable). This is the recovery path for a half-open socket when the
+   * health-check ping is disabled or slower than real traffic — a worker whose
+   * PULLs keep timing out no longer stalls forever waiting on the ping. See #94.
+   */
+  maxCommandTimeouts?: number;
   /** Enable pipelining - multiple commands in flight (default: true) */
   pipelining?: boolean;
   /** Max commands in flight when pipelining (default: 100) */
@@ -47,6 +55,8 @@ export interface ConnectionHealth {
   avgLatencyMs: number;
   /** Consecutive ping failures */
   consecutivePingFailures: number;
+  /** Consecutive command timeouts with no intervening success */
+  consecutiveCommandTimeouts: number;
   /** Total commands sent */
   totalCommands: number;
   /** Total errors */
@@ -68,6 +78,7 @@ export const DEFAULT_CONNECTION: Required<ConnectionOptions> = {
   autoReconnect: true,
   pingInterval: 30000,
   maxPingFailures: 3,
+  maxCommandTimeouts: 3,
   pipelining: true,
   maxInFlight: 100,
 };

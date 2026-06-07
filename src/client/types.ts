@@ -408,6 +408,12 @@ export interface ConnectionOptions {
   pingInterval?: number;
   /** Command timeout in ms (default: 30000) */
   commandTimeout?: number;
+  /**
+   * Consecutive command timeouts (no intervening success) before the connection
+   * is concluded dead and a reconnect is forced (default: 3, 0 to disable).
+   * Recovery path for a half-open socket independent of the health-check ping. See #94.
+   */
+  maxCommandTimeouts?: number;
   /** Enable TCP pipelining (default: true) */
   pipelining?: boolean;
   /** Max commands in flight per connection (default: 100) */

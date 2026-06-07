@@ -53,6 +53,7 @@ function createTcpPool(opts: WorkerOptions, concurrency: number): TcpConnectionP
     poolSize,
     pingInterval: connOpts.pingInterval,
     commandTimeout: connOpts.commandTimeout,
+    maxCommandTimeouts: connOpts.maxCommandTimeouts,
     pipelining: connOpts.pipelining,
     maxInFlight: connOpts.maxInFlight,
   });

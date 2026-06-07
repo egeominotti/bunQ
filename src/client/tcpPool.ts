@@ -40,6 +40,7 @@ export class TcpConnectionPool {
       autoReconnect: options.autoReconnect ?? true,
       pingInterval: options.pingInterval ?? 30000,
       maxPingFailures: options.maxPingFailures ?? 3,
+      maxCommandTimeouts: options.maxCommandTimeouts ?? 3,
       pipelining: options.pipelining ?? true,
       maxInFlight: options.maxInFlight ?? 100,
     };
@@ -58,6 +59,7 @@ export class TcpConnectionPool {
         autoReconnect: this.options.autoReconnect,
         pingInterval: this.options.pingInterval,
         maxPingFailures: this.options.maxPingFailures,
+        maxCommandTimeouts: this.options.maxCommandTimeouts,
       });
       this.clients.push(client);
     }

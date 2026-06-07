@@ -78,6 +78,18 @@ export async function createConnection(
       },
       open(sock: Socket<unknown>) {
         cleanup();
+        // Enable TCP keepalive so the OS probes idle connections and surfaces a
+        // dead peer (suspended host, NAT/LB drop) via an error/close event,
+        // instead of a half-open socket lingering until tcp_retries2 (~15 min).
+        // Best-effort: not all platforms honor the delay, and older Bun builds
+        // may lack the method — never let it abort connection setup. See #94.
+        try {
+          (
+            sock as unknown as { setKeepAlive?: (enable: boolean, delayMs?: number) => void }
+          ).setKeepAlive?.(true, 15000);
+        } catch {
+          /* keepalive unsupported on this platform/runtime */
+        }
         socketData.write = (d: Uint8Array | string) => sock.write(d);
         socketData.end = () => sock.end();
         connectionResolved = true;

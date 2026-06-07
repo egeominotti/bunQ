@@ -10,6 +10,40 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.6] - 2026-06-07
+
+### Fixed — half-open TCP connections now recover off command timeouts, not just the ping (#94)
+
+A TCP worker whose socket goes **half-open** — the peer vanishes with no FIN/RST
+(suspended host, NAT/load-balancer silently dropping an idle connection) — had only
+**one** path back to health: the periodic health-check ping. Every PULL the worker
+issued timed out (`Command timeout`), `consecutiveErrors` climbed, jobs piled up with
+`active=0`, and none of those command timeouts ever concluded the link was dead. With
+default settings the dead socket wasn't torn down until the ping path had failed
+`maxPingFailures` times — roughly **two minutes** — and if the ping was disabled
+(`pingInterval: 0`) or slower than real traffic, the worker could stall **indefinitely**.
+
+Fixes:
+
+- **Command timeouts now drive reconnection.** `maxCommandTimeouts` consecutive
+  in-flight command timeouts with no intervening success (default 3, `0` disables) now
+  conclude the connection is dead and trigger the existing reconnect/backoff path.
+  Recovery no longer depends solely on the health-check ping. The counter resets on any
+  successful response, so it only fires on a sustained run of timeouts — the signature of
+  a dead/half-open socket. Configurable via `connection.maxCommandTimeouts`.
+- **`forceReconnect()` now settles in-flight commands immediately.** Previously the
+  per-command timers kept ticking after the socket was torn down and could fire against
+  the freshly re-established connection (a reconnect storm); it also made awaiting callers
+  (e.g. a worker's PULL) wait out the full `commandTimeout` on a corpse. They are now
+  rejected at once with `Connection lost`.
+- **`SO_KEEPALIVE` enabled** on client sockets so the OS surfaces a dead peer on its own
+  rather than waiting out `tcp_retries2` (~15 min). Best-effort, platform-dependent.
+- Hardened `socket.end()` in the reconnect path against throwing on an already-dead socket.
+
+Note: with a default `commandTimeout` of 30s, timeout-based detection is still inherently
+coarse (each timeout is 30s). For fast recovery, lower `connection.pingInterval` /
+`connection.commandTimeout`; the new path also makes recovery work when the ping is off.
+
 ## [2.8.5] - 2026-06-05
 
 ### Fixed — write buffer no longer drops unrelated jobs on a duplicate id (data loss)

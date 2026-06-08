@@ -46,8 +46,14 @@ export function handleAddLog(cmd: AddLogCommand, ctx: HandlerContext, reqId?: st
 
 export function handleGetLogs(cmd: GetLogsCommand, ctx: HandlerContext, reqId?: string): Response {
   const jid = jobId(cmd.id);
-  const logs = ctx.queueManager.getLogs(jid);
-  return resp.data({ logs }, reqId);
+  const all = ctx.queueManager.getLogs(jid);
+  // Honor optional pagination (start/end inclusive) the client already sends.
+  const total = all.length;
+  const logs =
+    cmd.start === undefined && cmd.end === undefined
+      ? all
+      : all.slice(cmd.start ?? 0, (cmd.end ?? total - 1) + 1);
+  return resp.data({ logs, count: total }, reqId);
 }
 
 // ============ Worker Heartbeat ============

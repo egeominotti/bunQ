@@ -49,6 +49,7 @@ export function handleCron(
         repeatEvery: cron.repeatEvery,
         nextRun: cron.nextRun,
         timezone: cron.timezone,
+        priority: cron.priority,
       },
       reqId,
     } as Response;

@@ -185,7 +185,8 @@ function moveFailedJobToDlq(
 export async function failJob(
   jobId: JobId,
   error: string | undefined,
-  ctx: AckContext
+  ctx: AckContext,
+  unrecoverable = false
 ): Promise<void> {
   const procIdx = processingShardIndex(jobId);
 
@@ -213,7 +214,7 @@ export async function failJob(
     const shard = ctx.shards[idx];
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
 
-    if (canRetry(job)) {
+    if (!unrecoverable && canRetry(job)) {
       const now = Date.now();
       job.runAt = now + calculateBackoff(job);
       shard.getQueue(job.queue).push(job);

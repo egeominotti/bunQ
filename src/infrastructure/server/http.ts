@@ -92,6 +92,17 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
 
   // Helper to get CORS origin string
   const getCorsOrigin = () => (corsOrigins.has('*') ? '*' : Array.from(corsOrigins).join(', '));
+  // Attach CORS to responses built outside the routeRequest pipeline (health,
+  // ready, prometheus, debug) so browser dashboards can read them cross-origin
+  // (audit #16-20). Response headers are mutable for normally-constructed
+  // Responses; this never overwrites an existing value set by the endpoint.
+  const withCors = async (r: Response | Promise<Response>): Promise<Response> => {
+    const res = await r;
+    if (!res.headers.has('Access-Control-Allow-Origin')) {
+      res.headers.set('Access-Control-Allow-Origin', getCorsOrigin());
+    }
+    return res;
+  };
 
   // Fetch handler
   const fetch = async (req: Request, server: Server<WsData>) => {
@@ -105,25 +116,25 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
 
     // Health endpoints (no auth, no rate limit)
     if (path === '/health') {
-      return healthEndpoint(queueManager, wsHandler.size, sseHandler.size);
+      return withCors(healthEndpoint(queueManager, wsHandler.size, sseHandler.size));
     }
     if (path === '/healthz' || path === '/live') {
-      return new Response('OK', { status: 200 });
+      return withCors(new Response('OK', { status: 200 }));
     }
     if (path === '/ready') {
-      return jsonResponse({ ok: true, ready: true });
+      return jsonResponse({ ok: true, ready: true }, 200, corsOrigins);
     }
 
     // Debug endpoints (require auth)
     if (path === '/gc' && req.method === 'POST') {
       const denied = checkAuth(req, authTokens);
       if (denied) return denied;
-      return gcEndpoint(queueManager);
+      return withCors(gcEndpoint(queueManager));
     }
     if (path === '/heapstats' && req.method === 'GET') {
       const denied = checkAuth(req, authTokens);
       if (denied) return denied;
-      return heapStatsEndpoint(queueManager);
+      return withCors(heapStatsEndpoint(queueManager));
     }
 
     // Rate limiting
@@ -168,7 +179,10 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
         if (denied) return denied;
       }
       return new Response(queueManager.getPrometheusMetrics(), {
-        headers: { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' },
+        headers: {
+          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+          'Access-Control-Allow-Origin': getCorsOrigin(),
+        },
       });
     }
 

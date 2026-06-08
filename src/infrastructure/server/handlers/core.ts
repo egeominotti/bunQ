@@ -246,7 +246,7 @@ export async function handleFail(
 ): Promise<Response> {
   try {
     const jid = jobId(cmd.id);
-    await ctx.queueManager.fail(jid, cmd.error, cmd.token);
+    await ctx.queueManager.fail(jid, cmd.error, cmd.token, cmd.unrecoverable);
     // Unregister job from client tracking
     ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
     return resp.ok(undefined, reqId);

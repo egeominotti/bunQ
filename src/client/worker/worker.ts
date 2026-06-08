@@ -483,10 +483,13 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       cmd: 'ExtendLocks',
       ids: jobIds,
       tokens,
-      duration,
+      // Protocol expects a per-id `durations` array, and the handler returns
+      // `count` (not `extended`). Sending `duration`/reading `extended` made
+      // batch lock renewal silently keep the old TTL.
+      durations: jobIds.map(() => duration),
     });
 
-    const extended = response.extended as number | undefined;
+    const extended = response.count as number | undefined;
     return extended ?? 0;
   }
 
@@ -852,6 +855,7 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       workerId: this.workerId,
       useLocks: this.opts.useLocks,
       pollTimeout: this.opts.pollTimeout,
+      lockDuration: this.opts.lockDuration,
     };
   }
 

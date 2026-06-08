@@ -13,6 +13,8 @@ export interface PullConfig {
   readonly workerId: string;
   readonly useLocks: boolean;
   readonly pollTimeout: number;
+  /** Lock TTL in ms to request from the server on a lock-based pull. */
+  readonly lockDuration?: number;
 }
 
 export async function pullEmbedded(
@@ -21,17 +23,24 @@ export async function pullEmbedded(
 ): Promise<Array<{ job: InternalJob; token: string | null }>> {
   const manager = getSharedManager();
 
-  // Use lock-based pull only when useLocks is enabled
+  // Use lock-based pull only when useLocks is enabled. Pass lockDuration so the
+  // configured lock TTL is honored in embedded mode too (undefined → server default).
   if (config.useLocks) {
     if (count === 1) {
-      const { job, token } = await manager.pullWithLock(config.name, config.workerId, 0);
+      const { job, token } = await manager.pullWithLock(
+        config.name,
+        config.workerId,
+        0,
+        config.lockDuration
+      );
       return job ? [{ job, token }] : [];
     }
     const { jobs, tokens } = await manager.pullBatchWithLock(
       config.name,
       count,
       config.workerId,
-      0
+      0,
+      config.lockDuration
     );
     return jobs.map((job, i) => ({ job, token: tokens[i] || null }));
   }
@@ -53,17 +62,21 @@ export async function pullTcp(
 ): Promise<Array<{ job: InternalJob; token: string | null }>> {
   if (closing) return [];
 
-  // Build pull command - only request locks if useLocks is enabled
+  // Build pull command - only request locks if useLocks is enabled.
+  // `count` belongs to the batch PULLB; a single PULL doesn't need it.
   const cmd: Record<string, unknown> = {
     cmd: count === 1 ? 'PULL' : 'PULLB',
     queue: config.name,
     timeout: config.pollTimeout,
-    count,
   };
+  if (count > 1) cmd.count = count;
 
   // Only request lock ownership when useLocks is enabled
   if (config.useLocks) {
     cmd.owner = config.workerId;
+    // Propagate the configured lock TTL so the server doesn't always fall back
+    // to its 30s default (WorkerOptions.lockDuration was previously ignored).
+    if (config.lockDuration !== undefined) cmd.lockTtl = config.lockDuration;
   }
 
   const response = await tcp.send(cmd);

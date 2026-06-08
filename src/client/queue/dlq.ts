@@ -71,7 +71,7 @@ export function getDlqStats(ctx: DlqContext): DlqStats {
 /** Retry DLQ entries */
 export function retryDlq(ctx: DlqContext, id?: string): number {
   if (ctx.embedded) return dlqOps.retryDlqEmbedded(ctx.name, id);
-  if (ctx.tcp) void ctx.tcp.send({ cmd: 'RetryDlq', queue: ctx.name, id });
+  if (ctx.tcp) void ctx.tcp.send({ cmd: 'RetryDlq', queue: ctx.name, jobId: id });
   return 0;
 }
 

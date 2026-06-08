@@ -37,8 +37,23 @@ export async function routeQueueConfigRoutes(
   const dlqMatch = path.match(RE_QUEUE_DLQ);
   if (dlqMatch && method === 'GET') {
     const queue = decodeURIComponent(dlqMatch[1]);
-    const entries = ctx.queueManager.getDlqEntries(queue);
-    return jsonResponse({ ok: true, entries }, 200, cors);
+    const all = ctx.queueManager.getDlqEntries(queue);
+    // Optional pagination so a dashboard can page large DLQs. Non-numeric params
+    // are ignored (treated as absent) rather than producing an empty/garbage slice.
+    const params = new URL(req.url).searchParams;
+    const toInt = (v: string | null): number | undefined => {
+      if (v === null) return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.trunc(n) : undefined;
+    };
+    const limit = toInt(params.get('limit'));
+    const offset = toInt(params.get('offset'));
+    const start = Math.max(0, offset ?? 0);
+    const entries =
+      limit === undefined && offset === undefined
+        ? all
+        : all.slice(start, start + (limit !== undefined ? Math.max(0, limit) : all.length));
+    return jsonResponse({ ok: true, entries, total: all.length }, 200, cors);
   }
 
   // POST /queues/:queue/dlq/retry
@@ -98,7 +113,8 @@ export async function routeQueueConfigRoutes(
       {
         cmd: 'SetConcurrency',
         queue,
-        limit: body['limit'] as number,
+        // Accept the natural `concurrency` field for this endpoint as well as `limit`.
+        limit: (body['concurrency'] ?? body['limit']) as number,
       },
       ctx
     );

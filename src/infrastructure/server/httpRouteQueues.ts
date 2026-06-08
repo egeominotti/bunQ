@@ -125,7 +125,19 @@ async function routeJobOps(
   if (listMatch && method === 'GET') {
     const queue = decodeURIComponent(listMatch[1]);
     const url = new URL(req.url);
-    const stateValues = url.searchParams.getAll('state');
+    // Accept `state`, `status` (dashboard/REST convention), and `states` as
+    // aliases, each repeatable and comma-separated. Previously only `state` was
+    // read, so `?status=failed` silently fell through to an unfiltered list and
+    // returned the whole queue (#95). A state name never contains a comma, so
+    // splitting is safe.
+    const stateValues = [
+      ...url.searchParams.getAll('state'),
+      ...url.searchParams.getAll('status'),
+      ...url.searchParams.getAll('states'),
+    ]
+      .flatMap((v) => v.split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
     const state =
       stateValues.length === 0
         ? undefined

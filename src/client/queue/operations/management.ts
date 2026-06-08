@@ -102,7 +102,8 @@ export async function cleanAsync(
     queue: ctx.name,
     grace,
     limit,
-    type,
+    // Handler reads `state`; sending `type` made the state filter a no-op.
+    state: type,
   });
 
   if (!response.ok) return [];
@@ -137,7 +138,8 @@ export async function promoteJobs(
   });
 
   if (!response.ok) return 0;
-  return (response.promoted ?? 0) as number;
+  // Handler returns `count`; reading `promoted` always yielded 0.
+  return (response.count ?? 0) as number;
 }
 
 /** Promote a single job */

@@ -9,6 +9,47 @@ import * as resp from '../../../domain/types/response';
 import { jobId } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 
+/**
+ * Coerce a value to a finite number, or return undefined if it can't be.
+ * Guards config endpoints against non-numeric input (e.g. `"abc"`) that would
+ * otherwise reach numeric comparisons as NaN and silently break behaviour
+ * (a string `stallInterval` disabled stall detection entirely).
+ */
+function toFiniteNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Sanitize the numeric fields of a config object: coerce numeric strings, drop
+ * non-numeric garbage (so the manager's merge keeps the existing/default value
+ * instead of storing NaN). Booleans and unknown keys pass through untouched.
+ */
+function sanitizeConfigNumbers<T extends Record<string, unknown>>(
+  config: T,
+  numericKeys: readonly string[]
+): T {
+  if (!config || typeof config !== 'object') return config;
+  const numeric = new Set<string>(numericKeys);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (!numeric.has(key)) {
+      out[key] = value; // booleans / unknown keys pass through untouched
+      continue;
+    }
+    if (value === null) {
+      out[key] = null; // valid for nullable fields (e.g. dlq maxAge)
+      continue;
+    }
+    const n = toFiniteNumber(value);
+    // coerce numeric strings; omit non-numeric garbage so the manager's merge
+    // keeps the existing/default value instead of storing NaN
+    if (n !== undefined) out[key] = n;
+  }
+  return out as T;
+}
+
 // ============ Job Management ============
 
 /** Handle Update command - update job data */
@@ -193,8 +234,10 @@ export function handleRateLimit(
   ctx: HandlerContext,
   reqId?: string
 ): Response {
-  ctx.queueManager.setRateLimit(cmd.queue, cmd.limit);
-  ctx.queueManager.emitDashboardEvent('ratelimit:set', { queue: cmd.queue, max: cmd.limit });
+  const limit = toFiniteNumber(cmd.limit);
+  if (limit === undefined) return resp.error('limit must be a finite number', reqId);
+  ctx.queueManager.setRateLimit(cmd.queue, limit);
+  ctx.queueManager.emitDashboardEvent('ratelimit:set', { queue: cmd.queue, max: limit });
   return resp.ok(undefined, reqId);
 }
 
@@ -215,10 +258,12 @@ export function handleSetConcurrency(
   ctx: HandlerContext,
   reqId?: string
 ): Response {
-  ctx.queueManager.setConcurrency(cmd.queue, cmd.limit);
+  const limit = toFiniteNumber(cmd.limit);
+  if (limit === undefined) return resp.error('limit must be a finite number', reqId);
+  ctx.queueManager.setConcurrency(cmd.queue, limit);
   ctx.queueManager.emitDashboardEvent('concurrency:set', {
     queue: cmd.queue,
-    concurrency: cmd.limit,
+    concurrency: limit,
   });
   return resp.ok(undefined, reqId);
 }
@@ -242,10 +287,11 @@ export function handleSetStallConfig(
   ctx: HandlerContext,
   reqId?: string
 ): Response {
-  ctx.queueManager.setStallConfig(cmd.queue, cmd.config);
+  const config = sanitizeConfigNumbers(cmd.config, ['stallInterval', 'maxStalls', 'gracePeriod']);
+  ctx.queueManager.setStallConfig(cmd.queue, config);
   ctx.queueManager.emitDashboardEvent('config:stall-changed', {
     queue: cmd.queue,
-    config: cmd.config,
+    config,
   });
   return resp.ok(undefined, reqId);
 }
@@ -266,10 +312,16 @@ export function handleSetDlqConfig(
   ctx: HandlerContext,
   reqId?: string
 ): Response {
-  ctx.queueManager.setDlqConfig(cmd.queue, cmd.config);
+  const config = sanitizeConfigNumbers(cmd.config, [
+    'autoRetryInterval',
+    'maxAutoRetries',
+    'maxAge',
+    'maxEntries',
+  ]);
+  ctx.queueManager.setDlqConfig(cmd.queue, config);
   ctx.queueManager.emitDashboardEvent('config:dlq-changed', {
     queue: cmd.queue,
-    config: cmd.config,
+    config,
   });
   return resp.ok(undefined, reqId);
 }

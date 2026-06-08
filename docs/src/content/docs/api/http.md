@@ -863,16 +863,18 @@ GET /queues
 Paginated listing of jobs in a specific queue, filtered by state.
 
 ```
-GET /queues/:queue/jobs/list[?state=waiting&limit=10&offset=0]
+GET /queues/:queue/jobs/list[?status=waiting&limit=10&offset=0]
 ```
 
 ```bash
-curl "http://localhost:6790/queues/emails/jobs/list?state=waiting&limit=20&offset=0"
+curl "http://localhost:6790/queues/emails/jobs/list?status=waiting&limit=20&offset=0"
+# multiple states (comma-separated or repeated):
+curl "http://localhost:6790/queues/emails/jobs/list?status=failed,completed"
 ```
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `state` | `string` | all | Filter: `waiting`, `delayed`, `active` |
+| `status` | `string` | all | State filter: `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed`, `waiting-children`. Aliases: `state`, `states`. Repeatable and comma-separated for multiple states. |
 | `limit` | `number` | all | Max jobs to return |
 | `offset` | `number` | `0` | Skip first N jobs |
 
@@ -902,7 +904,7 @@ GET /queues/:queue/counts
 ```json
 {
   "ok": true,
-  "counts": {"waiting": 150, "active": 12, "delayed": 30, "completed": 5000, "failed": 3}
+  "counts": {"waiting": 150, "prioritized": 0, "active": 12, "delayed": 30, "completed": 5000, "failed": 3, "waiting-children": 4, "paused": 0}
 }
 ```
 
@@ -1079,19 +1081,27 @@ Jobs that exhaust all retry attempts or are explicitly discarded land in the DLQ
 ### List DLQ Jobs
 
 ```
-GET /queues/:queue/dlq[?count=100]
+GET /queues/:queue/dlq[?limit=100&offset=0]
 ```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | `number` | all | Max entries to return |
+| `offset` | `number` | `0` | Skip first N entries |
+
+Returns full DLQ entries (original job + failure metadata) under `entries`, plus the `total` count for pagination:
 
 ```json
 {
   "ok": true,
-  "jobs": [
-    {"id": "...", "data": {...}, "attempts": 3, "createdAt": 1700000000000}
-  ]
+  "entries": [
+    {"job": {"id": "...", "data": {...}, "attempts": 3}, "reason": "max attempts", "enteredAt": 1700000000000}
+  ],
+  "total": 1
 }
 ```
 
-Default count: 100.
+Omit `limit`/`offset` to return all entries.
 
 ---
 
@@ -1166,8 +1176,10 @@ PUT /queues/:queue/concurrency
 ```
 
 ```json
-{ "limit": 5 }
+{ "concurrency": 5 }
 ```
+
+Accepts either `concurrency` (natural for this endpoint) or `limit`. A non-numeric value is rejected.
 
 **Broadcasts:** `concurrency:set` event.
 

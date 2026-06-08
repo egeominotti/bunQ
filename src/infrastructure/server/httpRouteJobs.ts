@@ -98,6 +98,7 @@ async function routeJobManagement(
         cmd: 'ChangePriority',
         id: priorityMatch[1],
         priority: body['priority'] as number,
+        lifo: body['lifo'] as boolean | undefined,
       },
       ctx
     );
@@ -315,7 +316,15 @@ export async function routeJobRoutes(
   if (ackMatch && method === 'POST') {
     const body = await parseJsonBody(req, cors);
     if (body instanceof Response) return body;
-    const r = await handleCommand({ cmd: 'ACK', id: ackMatch[1], result: body['result'] }, ctx);
+    const r = await handleCommand(
+      {
+        cmd: 'ACK',
+        id: ackMatch[1],
+        result: body['result'],
+        token: body['token'] as string | undefined,
+      },
+      ctx
+    );
     return jsonResponse(r, r.ok ? 200 : 400, cors);
   }
 
@@ -325,7 +334,13 @@ export async function routeJobRoutes(
     const body = await parseJsonBody(req, cors);
     if (body instanceof Response) return body;
     const r = await handleCommand(
-      { cmd: 'FAIL', id: failMatch[1], error: body['error'] as string | undefined },
+      {
+        cmd: 'FAIL',
+        id: failMatch[1],
+        error: body['error'] as string | undefined,
+        token: body['token'] as string | undefined,
+        unrecoverable: body['unrecoverable'] as boolean | undefined,
+      },
       ctx
     );
     return jsonResponse(r, r.ok ? 200 : 400, cors);

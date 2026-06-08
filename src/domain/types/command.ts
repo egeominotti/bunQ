@@ -101,6 +101,8 @@ export interface FailCommand extends BaseCommand {
   readonly id: string;
   readonly error?: string;
   readonly token?: string; // Lock token for ownership verification
+  /** Skip all remaining retries and fail terminally (UnrecoverableError over TCP). */
+  readonly unrecoverable?: boolean;
 }
 
 // ============ Query Commands ============
@@ -365,6 +367,8 @@ export interface AddLogCommand extends BaseCommand {
 export interface GetLogsCommand extends BaseCommand {
   readonly cmd: 'GetLogs';
   readonly id: string;
+  readonly start?: number;
+  readonly end?: number;
 }
 
 // ============ Heartbeat & Workers ============

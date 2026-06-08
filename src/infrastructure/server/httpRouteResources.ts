@@ -6,6 +6,7 @@
 import { handleCommand } from './handler';
 import type { HandlerContext } from './types';
 import { jsonResponse, parseJsonBody } from './httpEndpoints';
+import type { CronJobOptions } from '../../domain/types/cron';
 
 type Body = Record<string, unknown>;
 
@@ -54,6 +55,10 @@ export async function routeResourceRoutes(
         uniqueKey: body['uniqueKey'] as string | undefined,
         dedup: body['dedup'] as { ttl?: number; extend?: boolean; replace?: boolean } | undefined,
         skipMissedOnRestart: body['skipMissedOnRestart'] as boolean | undefined,
+        immediately: body['immediately'] as boolean | undefined,
+        skipIfNoWorker: body['skipIfNoWorker'] as boolean | undefined,
+        preventOverlap: body['preventOverlap'] as boolean | undefined,
+        jobOptions: body['jobOptions'] as CronJobOptions | undefined,
       },
       ctx
     );

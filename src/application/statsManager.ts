@@ -6,6 +6,15 @@
 import { SHARD_COUNT, shardIndex } from '../shared/hash';
 import type { StatsContext } from './types';
 
+/** Count jobs belonging to `queueName` across one or more job iterables. */
+function countByQueue(sources: Array<Iterable<{ queue: string }>>, queueName: string): number {
+  let count = 0;
+  for (const src of sources) {
+    for (const job of src) if (job.queue === queueName) count++;
+  }
+  return count;
+}
+
 export interface QueueStats {
   waiting: number;
   prioritized: number;
@@ -70,7 +79,10 @@ export function getStats(
     delayed += shardStats.delayedJobs;
     dlq += shardStats.dlqJobs;
     active += ctx.processingShards[i].size;
-    waitingChildren += ctx.shards[i].waitingChildren.size;
+    // getJobState reports BOTH waitingChildren (flow parents) and waitingDeps
+    // (jobs blocked on dependsOn) as state 'waiting-children', and getJobs lists
+    // both — so the count must include both or it undercounts vs state/list (#95 class).
+    waitingChildren += ctx.shards[i].waitingChildren.size + ctx.shards[i].waitingDeps.size;
 
     // Scan queues to split waiting vs prioritized (BullMQ v5 compat)
     for (const queue of ctx.shards[i].queues.values()) {
@@ -260,13 +272,13 @@ export function getQueueJobCounts(
   // Count failed (DLQ) jobs for this queue
   const failed = shard.getDlq(queueName).length;
 
-  // Count waiting-children jobs (parents waiting for child completion)
-  let waitingChildrenCount = 0;
-  for (const job of shard.waitingChildren.values()) {
-    if (job.queue === queueName) {
-      waitingChildrenCount++;
-    }
-  }
+  // Count waiting-children jobs. getJobState/getJobs treat BOTH waitingChildren
+  // (flow parents) and waitingDeps (jobs blocked on dependsOn) as 'waiting-children',
+  // so count both to stay consistent with state/list (#95 class).
+  const waitingChildrenCount = countByQueue(
+    [shard.waitingChildren.values(), shard.waitingDeps.values()],
+    queueName
+  );
 
   // Per-queue cumulative counters
   const perQueue = ctx.perQueueMetrics?.get(queueName);

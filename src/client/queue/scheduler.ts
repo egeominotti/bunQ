@@ -121,6 +121,9 @@ export async function upsertJobScheduler(
   const dedupFields = buildCronDedup(jobTemplate);
   const jobOptions = buildCronJobOptions(ctx.defaultJobOptions, jobTemplate);
   const cronName = toCronName(ctx, schedulerId);
+  // Priority of spawned jobs: carried on the top-level Cron field (the handler
+  // reads cmd.priority), which buildCronJobOptions does not cover.
+  const priority = jobTemplate?.opts?.priority ?? ctx.defaultJobOptions?.priority;
 
   if (ctx.embedded) {
     const manager = getSharedManager();
@@ -130,6 +133,7 @@ export async function upsertJobScheduler(
       data,
       schedule: cronPattern,
       repeatEvery,
+      priority,
       timezone: repeatOpts.timezone ?? 'UTC',
       skipMissedOnRestart: repeatOpts.skipMissedOnRestart,
       immediately: repeatOpts.immediately,
@@ -152,6 +156,7 @@ export async function upsertJobScheduler(
     data,
     schedule: cronPattern,
     repeatEvery,
+    priority,
     timezone: repeatOpts.timezone,
     skipMissedOnRestart: repeatOpts.skipMissedOnRestart,
     immediately: repeatOpts.immediately,

@@ -149,6 +149,7 @@ export default defineConfig({
           label: 'Production',
           items: [
             { label: 'Deployment Guide', link: '/guide/deployment/' },
+            { label: 'Native TLS', link: '/guide/tls/' },
             { label: 'Monitoring', link: '/guide/monitoring/' },
             { label: 'Telemetry', link: '/guide/telemetry/' },
           ],
@@ -159,6 +160,7 @@ export default defineConfig({
             { label: 'Overview', link: '/guide/integrations/' },
             { label: 'Hono', link: '/guide/hono/' },
             { label: 'Elysia', link: '/guide/elysia/' },
+            { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
           ],
         },
         {

@@ -56,6 +56,7 @@ import {
   resolveServerConfig,
   resolveCloudConfig,
   resolveBackupConfig,
+  resolveTlsServerOptions,
 } from './config';
 import type { ResolvedConfig } from './config';
 export { defineConfig } from './config';
@@ -97,6 +98,7 @@ ${dim}────────────────────────�
   ${green}●${reset} HTTP   ${httpDisplay}
   ${yellow}●${reset} Socket ${socketDisplay}
   ${yellow}●${reset} Data   ${config.dataPath ?? 'in-memory'}
+  ${yellow}●${reset} TLS    ${config.tlsCertFile ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
   ${yellow}●${reset} Auth   ${config.authTokens.length > 0 ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
   ${yellow}●${reset} S3 Backup ${config.s3BackupEnabled ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
   ${yellow}●${reset} Cloud  ${cloudUrl ? `${green}enabled${reset} ${dim}→ ${cloudUrl}${reset}` : `${dim}disabled${reset}`}
@@ -125,6 +127,15 @@ async function startServer(): Promise<void> {
   // Resolve cloud config
   const cloudConfig = resolveCloudConfig(fileConfig, config.dataPath);
 
+  // Resolve TLS config — fail fast on partial cert/key before binding anything
+  let tlsConfig: ReturnType<typeof resolveTlsServerOptions>;
+  try {
+    tlsConfig = resolveTlsServerOptions(config);
+  } catch (err) {
+    serverLog.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
   printBanner(config, cloudConfig?.url);
 
   // Create queue manager
@@ -137,6 +148,7 @@ async function startServer(): Promise<void> {
     port: config.tcpPort,
     hostname: config.hostname,
     authTokens: config.authTokens,
+    ...(tlsConfig && { tls: tlsConfig }),
   });
 
   // Start HTTP server
@@ -146,6 +158,7 @@ async function startServer(): Promise<void> {
     authTokens: config.authTokens,
     corsOrigins: config.corsOrigins,
     requireAuthForMetrics: config.requireAuthForMetrics,
+    ...(tlsConfig && { tls: tlsConfig }),
   });
 
   // Initialize S3 backup manager

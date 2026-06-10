@@ -158,6 +158,8 @@ AUTH_TOKENS=token1,token2  CORS_ALLOW_ORIGIN=*
 METRICS_AUTH=false          # Require auth for /metrics endpoint
 TCP_SOCKET_PATH=           # Unix socket for TCP (overrides host/port)
 HTTP_SOCKET_PATH=          # Unix socket for HTTP
+TLS_CERT_FILE=             # PEM cert — native TLS on TCP+HTTP (with TLS_KEY_FILE)
+TLS_KEY_FILE=              # PEM private key (both or neither; partial = startup error)
 
 # Data path (priority: BUNQUEUE_DATA_PATH > BQ_DATA_PATH > DATA_PATH > SQLITE_PATH)
 # Or set programmatically: new Queue('q', { embedded: true, dataPath: './data/q.db' })
@@ -327,6 +329,11 @@ import { Queue, Worker } from 'bunqueue/client';
 
 // Queue (TCP mode)
 const queue = new Queue<T>('emails', { connection: { port: 6789 } });
+
+// Queue (TCP + TLS): tls: true (system CAs) | { caFile } | { rejectUnauthorized: false }
+const tlsQueue = new Queue<T>('emails', {
+  connection: { host: 'queue.example.com', port: 6789, tls: { caFile: './ca.pem' } },
+});
 
 // Queue (embedded mode — programmatic dataPath, no env var needed)
 const embeddedQueue = new Queue<T>('emails', {

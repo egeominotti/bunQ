@@ -11,6 +11,10 @@ export interface BunqueueConfig {
     host?: string;
     tcpSocketPath?: string;
     httpSocketPath?: string;
+    /** Path to PEM certificate file — enables native TLS on TCP + HTTP (with tlsKeyFile) */
+    tlsCertFile?: string;
+    /** Path to PEM private key file — enables native TLS on TCP + HTTP (with tlsCertFile) */
+    tlsKeyFile?: string;
   };
   auth?: {
     tokens?: string[];

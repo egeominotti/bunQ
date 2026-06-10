@@ -74,8 +74,8 @@ HOST=127.0.0.1 bunqueue start
 # Or in bunqueue.config.ts:
 # server: { host: '127.0.0.1' }
 
-# Use behind a reverse proxy
-# nginx, Caddy, or cloud load balancer
+# Native TLS (TCP + HTTP) — see the TLS guide
+bunqueue start --tls-cert ./cert.pem --tls-key ./key.pem
 ```
 
 ## Best Practices
@@ -92,8 +92,13 @@ HOST=127.0.0.1 bunqueue start
    HOST=127.0.0.1 bunqueue start
    ```
 
-3. **Use a reverse proxy**
+3. **Enable TLS** (native, or via reverse proxy)
+   ```bash
+   # Native TLS — no proxy needed
+   TLS_CERT_FILE=./cert.pem TLS_KEY_FILE=./key.pem bunqueue start
+   ```
    ```nginx
+   # Alternative: nginx/Caddy in front
    server {
      listen 443 ssl;
      location / {

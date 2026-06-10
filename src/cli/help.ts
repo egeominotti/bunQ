@@ -101,6 +101,9 @@ GLOBAL OPTIONS:
   -H, --host <host>               Server host (default: localhost)
   -p, --port <port>               TCP port (default: 6789)
   -t, --token <token>             Authentication token (env: BQ_TOKEN, BUNQUEUE_TOKEN)
+  --tls                           Connect with TLS (verify with system CAs)
+  --tls-ca <file>                 Trust a custom CA cert (implies --tls)
+  --tls-no-verify                 TLS without cert verification (self-signed, dev only)
   --json                          Output as JSON
   --help                          Show help
   --version                       Show version
@@ -129,6 +132,8 @@ Options:
   --host <host>           Bind address (default: 0.0.0.0, env: HOST)
   --data-path <path>      SQLite database path (env: DATA_PATH)
   --auth-tokens <list>    Comma-separated auth tokens (env: AUTH_TOKENS)
+  --tls-cert <file>       PEM certificate for native TLS (env: TLS_CERT_FILE)
+  --tls-key <file>        PEM private key for native TLS (env: TLS_KEY_FILE)
   --help                  Show this help
 
 Examples:

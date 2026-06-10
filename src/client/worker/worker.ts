@@ -50,6 +50,7 @@ function createTcpPool(opts: WorkerOptions, concurrency: number): TcpConnectionP
     host: connOpts.host ?? 'localhost',
     port: connOpts.port ?? 6789,
     token,
+    tls: connOpts.tls,
     poolSize,
     pingInterval: connOpts.pingInterval,
     commandTimeout: connOpts.commandTimeout,

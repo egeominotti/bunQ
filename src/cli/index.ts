@@ -17,6 +17,8 @@ interface GlobalOptions {
   host: string;
   port: number;
   token?: string;
+  /** TLS to the server: true = verify with system CAs, object = custom CA / no-verify */
+  tls?: boolean | { rejectUnauthorized?: boolean; caFile?: string };
   json: boolean;
   help: boolean;
   version: boolean;
@@ -48,6 +50,67 @@ function resolveEnvHost(currentHost: string): string {
   return Bun.env.HOST ?? Bun.env.BUNQUEUE_HOST ?? Bun.env.BQ_HOST ?? currentHost;
 }
 
+/** Accumulator for client TLS flags while scanning argv */
+interface TlsFlagState {
+  enabled: boolean;
+  noVerify: boolean;
+  caFile?: string;
+}
+
+/**
+ * Handle a `--tls*` global client flag and return the index to continue
+ * scanning from. Flags that are NOT client TLS flags (e.g. the server's
+ * --tls-cert/--tls-key) are passed through to `commandArgs`.
+ */
+function applyTlsFlag(
+  arg: string,
+  allArgs: string[],
+  i: number,
+  state: TlsFlagState,
+  commandArgs: string[]
+): number {
+  if (arg === '--tls') {
+    state.enabled = true;
+    return i;
+  }
+  if (arg === '--tls-no-verify') {
+    state.noVerify = true;
+    return i;
+  }
+  if (arg === '--tls-ca') {
+    const nextArg = allArgs[i + 1];
+    // A following flag is not a path: don't swallow it (--tls-ca --json ...)
+    if (nextArg === undefined || nextArg.startsWith('-')) {
+      console.warn('Warning: --tls-ca requires a file path. Option ignored.');
+      return i;
+    }
+    state.caFile = nextArg;
+    return i + 1;
+  }
+  if (arg.startsWith('--tls-ca=')) {
+    const val = arg.slice(9);
+    if (!val) {
+      console.warn('Warning: --tls-ca= requires a file path. Option ignored.');
+    } else {
+      state.caFile = val;
+    }
+    return i;
+  }
+  commandArgs.push(arg); // --tls-cert / --tls-key etc. → server flags, pass through
+  return i;
+}
+
+/** Build the GlobalOptions.tls value: --tls-ca / --tls-no-verify imply TLS */
+function buildTlsOption(state: TlsFlagState): GlobalOptions['tls'] {
+  if (state.noVerify || state.caFile !== undefined) {
+    return {
+      ...(state.noVerify && { rejectUnauthorized: false }),
+      ...(state.caFile !== undefined && { caFile: state.caFile }),
+    };
+  }
+  return state.enabled ? true : undefined;
+}
+
 /** Parse global options from process.argv */
 export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: string[] } {
   const allArgs = process.argv.slice(2);
@@ -61,6 +124,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   let version = false;
   let hostExplicit = false;
   let portExplicit = false;
+  const tlsState: TlsFlagState = { enabled: false, noVerify: false };
 
   const commandArgs: string[] = [];
   let i = 0;
@@ -88,6 +152,8 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
       } else {
         token = allArgs[++i];
       }
+    } else if (arg.startsWith('--tls')) {
+      i = applyTlsFlag(arg, allArgs, i, tlsState, commandArgs);
     } else if (arg === '--json') {
       json = true;
     } else if (arg === '--help' || arg === '-h') {
@@ -145,7 +211,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   if (!hostExplicit) host = resolveEnvHost(host);
 
   return {
-    options: { host, port, token, json, help, version },
+    options: { host, port, token, tls: buildTlsOption(tlsState), json, help, version },
     commandArgs,
   };
 }
@@ -244,6 +310,7 @@ export async function main(): Promise<void> {
       host: options.host,
       port: options.port,
       token: options.token,
+      tls: options.tls,
       json: options.json,
     });
   } catch (err) {

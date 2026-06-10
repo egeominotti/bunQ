@@ -10,6 +10,35 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.8] - 2026-06-10
+
+### Added — Native TLS (TCP + HTTP) and MQTT bridge example
+
+**Native TLS termination** — no reverse proxy needed. Opt-in and fully
+backward compatible: without cert/key config, both servers behave exactly as
+before (plaintext).
+
+- **Server**: `bunqueue start --tls-cert ./cert.pem --tls-key ./key.pem`, or
+  `TLS_CERT_FILE`/`TLS_KEY_FILE` env vars, or `server.tlsCertFile`/`tlsKeyFile`
+  in `bunqueue.config.ts`. One cert pair covers the TCP server (msgpack
+  protocol, unchanged) and the HTTP server (`https://`/`wss://`).
+- **Fail fast**: missing cert/key file or a partial config (cert without key)
+  is a startup error — the server never silently falls back to plaintext.
+- **Client SDK**: `connection.tls` on `Queue`/`Worker` — `true` (system CAs),
+  `{ caFile }` (private CA / self-signed with full verification), or
+  `{ rejectUnauthorized: false }` (dev only). TLS and plaintext pools to the
+  same host:port are never shared.
+- **CLI client**: `--tls`, `--tls-ca <file>`, `--tls-no-verify` global flags.
+- Pooled TCP clients no longer crash the process on socket-level errors
+  (e.g. a plaintext client hitting a TLS server): the error is observed and
+  pending commands settle through the close/timeout paths.
+- New guide: [Native TLS](/guide/tls/).
+
+**MQTT → bunqueue bridge example** (`examples/mqtt-bridge/`) — IoT/edge
+recipe: MQTT messages become persisted jobs with retries, DLQ and offline
+buffering on an edge gateway (embedded SQLite queue), with optional TLS
+forwarding to a central server.
+
 ## [2.8.7] - 2026-06-07
 
 ### Fixed — API audit: HTTP routes and TCP commands now honor every documented parameter (#95 + full audit)

@@ -392,6 +392,13 @@ export interface JobOptions {
   debounce?: DebounceOptions;
 }
 
+/**
+ * TLS options for client connections — single definition lives in tcp/types
+ * to prevent drift between the public and internal ConnectionOptions.
+ */
+export type { ClientTlsOptions } from './tcp/types';
+import type { ClientTlsOptions } from './tcp/types';
+
 /** Connection options for TCP mode */
 export interface ConnectionOptions {
   /** Server host (default: localhost, ignored if socketPath is set) */
@@ -400,6 +407,8 @@ export interface ConnectionOptions {
   port?: number;
   /** Unix socket path (takes priority over host/port) */
   socketPath?: string;
+  /** Enable TLS to the server: true (system CAs) or custom options (default: off) */
+  tls?: boolean | ClientTlsOptions;
   /** Auth token */
   token?: string;
   /** Connection pool size for parallel operations (default: 1, set >1 to enable pooling) */

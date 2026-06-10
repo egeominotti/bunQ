@@ -82,6 +82,7 @@ export class Queue<T = unknown> {
         this.tcpPool = getSharedPool({
           host: connOpts.host,
           port: connOpts.port,
+          tls: connOpts.tls,
           poolSize,
           pingInterval: connOpts.pingInterval,
           commandTimeout: connOpts.commandTimeout,
@@ -95,6 +96,7 @@ export class Queue<T = unknown> {
           host: connOpts.host ?? 'localhost',
           port: connOpts.port ?? 6789,
           token,
+          tls: connOpts.tls,
           poolSize,
           pingInterval: connOpts.pingInterval,
           commandTimeout: connOpts.commandTimeout,

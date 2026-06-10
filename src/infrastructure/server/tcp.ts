@@ -21,6 +21,7 @@ import { getRateLimiter } from './rateLimiter';
 import { pack, unpack } from 'msgpackr';
 import { Semaphore, withSemaphore } from '../../shared/semaphore';
 import { SocketWriteQueue } from './socketWriteQueue';
+import { loadTlsOptions, type TlsServerOptions } from './tls';
 
 /** Max concurrent commands per connection for pipelining */
 const MAX_CONCURRENT_PER_CONNECTION = 50;
@@ -98,6 +99,11 @@ export interface TcpServerConfig {
    * Mainly for tests.
    */
   maxWriteQueueBytes?: number;
+  /**
+   * Native TLS termination. When set, the server only accepts TLS clients —
+   * the msgpack protocol is unchanged, only the transport is wrapped.
+   */
+  tls?: TlsServerOptions;
 }
 
 /** Per-connection data */
@@ -316,10 +322,13 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     },
   };
 
-  // Create TCP server
+  // Create TCP server (validate TLS files BEFORE binding the port, so a bad
+  // path doesn't leave a half-started listener behind)
+  const tlsOptions = config.tls ? loadTlsOptions(config.tls) : undefined;
   const server: TCPSocketListener<ConnectionData> = Bun.listen<ConnectionData>({
     hostname: config.hostname ?? '0.0.0.0',
     port: config.port ?? 6789,
+    ...(tlsOptions && { tls: tlsOptions }),
     socket: socketHandlers,
   });
   return {

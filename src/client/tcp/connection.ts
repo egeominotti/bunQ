@@ -4,7 +4,7 @@
  */
 
 import type { Socket } from 'bun';
-import type { SocketWrapper, PendingCommand } from './types';
+import type { SocketWrapper, PendingCommand, ClientTlsOptions } from './types';
 import { FrameParser, FrameSizeError } from '../../infrastructure/server/protocol';
 
 /** Connection events */
@@ -26,6 +26,23 @@ export interface ConnectionTarget {
   host?: string;
   /** TCP port */
   port?: number;
+  /** Enable TLS: true (system CAs) or per-connection TLS options */
+  tls?: boolean | ClientTlsOptions;
+}
+
+/**
+ * Map client TLS options to the `tls` value accepted by Bun.connect.
+ * Returns undefined when TLS is disabled (plaintext, the default).
+ */
+export function buildClientTls(
+  tls: boolean | ClientTlsOptions | undefined
+): true | Record<string, unknown> | undefined {
+  if (!tls) return undefined;
+  if (tls === true) return true;
+  return {
+    ...(tls.rejectUnauthorized !== undefined && { rejectUnauthorized: tls.rejectUnauthorized }),
+    ...(tls.caFile !== undefined && { ca: Bun.file(tls.caFile) }),
+  };
 }
 
 /**
@@ -120,11 +137,23 @@ export async function createConnection(
       },
     };
 
-    // Connect via TCP
-    void Bun.connect({
+    // Connect via TCP (optionally wrapped in TLS — protocol is unchanged)
+    const tlsValue = buildClientTls(target.tls);
+    void (Bun.connect as (opts: unknown) => Promise<unknown>)({
       hostname: target.host ?? 'localhost',
       port: target.port ?? 6789,
+      ...(tlsValue !== undefined && { tls: tlsValue }),
       socket: socketHandlers,
+    }).catch((error: unknown) => {
+      // Bun.connect rejects (instead of firing connectError) for some failure
+      // modes, e.g. a TLS handshake refused synchronously. Route it through the
+      // same rejection path so callers never hang until the connect timeout.
+      if (!connectionResolved) {
+        connectionResolved = true;
+        cleanup();
+        const message = error instanceof Error ? error.message : String(error);
+        reject(new Error(`Failed to connect to ${targetDesc}: ${message}`));
+      }
     });
 
     timeoutId = setTimeout(() => {

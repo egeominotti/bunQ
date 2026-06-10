@@ -26,6 +26,7 @@ import {
   dashboardQueueDetailEndpoint,
 } from './httpEndpoints';
 import { routeJobRoutes } from './httpRouteJobs';
+import { loadTlsOptions, type TlsServerOptions } from './tls';
 import { routeQueueRoutes } from './httpRouteQueues';
 import { routeQueueConfigRoutes } from './httpRouteQueueConfig';
 import { routeResourceRoutes } from './httpRouteResources';
@@ -63,6 +64,8 @@ export interface HttpServerConfig {
   authTokens?: string[];
   corsOrigins?: string[];
   requireAuthForMetrics?: boolean;
+  /** Native TLS termination (https/wss). Protocol and routes are unchanged. */
+  tls?: TlsServerOptions;
 }
 
 /**
@@ -243,14 +246,21 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
     },
   };
 
-  // Create server
+  // Create server (validate TLS files BEFORE binding, fail fast on bad paths)
+  const tlsOptions = config.tls ? loadTlsOptions(config.tls) : undefined;
   let server: Server<WsData>;
   if (config.socketPath) {
-    server = Bun.serve<WsData>({ unix: config.socketPath, fetch, websocket });
+    server = Bun.serve<WsData>({
+      unix: config.socketPath,
+      ...(tlsOptions && { tls: tlsOptions }),
+      fetch,
+      websocket,
+    });
   } else {
     server = Bun.serve<WsData>({
       hostname: config.hostname ?? '0.0.0.0',
       port: config.port ?? 6790,
+      ...(tlsOptions && { tls: tlsOptions }),
       fetch,
       websocket,
     });

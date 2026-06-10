@@ -6,7 +6,12 @@
 import { parseArgs } from 'node:util';
 import { printServerHelp } from '../help';
 import { VERSION } from '../../shared/version';
-import { loadConfigFile, resolveServerConfig, resolveCloudConfig } from '../../config';
+import {
+  loadConfigFile,
+  resolveServerConfig,
+  resolveCloudConfig,
+  resolveTlsServerOptions,
+} from '../../config';
 import type { BunqueueConfig } from '../../config';
 
 /** Server start options (CLI flags only — merged with config file later) */
@@ -17,6 +22,8 @@ interface CliFlags {
   dataPath?: string;
   authTokens?: string[];
   configPath?: string;
+  tlsCertFile?: string;
+  tlsKeyFile?: string;
 }
 
 /** Validate port number */
@@ -39,6 +46,8 @@ function parseCliFlags(args: string[]): CliFlags {
       host: { type: 'string' },
       'data-path': { type: 'string' },
       'auth-tokens': { type: 'string' },
+      'tls-cert': { type: 'string' },
+      'tls-key': { type: 'string' },
       config: { type: 'string', short: 'c' },
     },
     allowPositionals: false,
@@ -61,6 +70,12 @@ function parseCliFlags(args: string[]): CliFlags {
   if (values['auth-tokens']) {
     flags.authTokens = (values['auth-tokens'] as string).split(',').filter(Boolean);
   }
+  if (values['tls-cert']) {
+    flags.tlsCertFile = values['tls-cert'] as string;
+  }
+  if (values['tls-key']) {
+    flags.tlsKeyFile = values['tls-key'] as string;
+  }
   if (values.config) {
     flags.configPath = values.config as string;
   }
@@ -75,7 +90,9 @@ function applyCliFlags(fileConfig: BunqueueConfig | null, flags: CliFlags): Bunq
     flags.httpPort !== undefined ||
     flags.host !== undefined ||
     flags.dataPath !== undefined ||
-    flags.authTokens !== undefined;
+    flags.authTokens !== undefined ||
+    flags.tlsCertFile !== undefined ||
+    flags.tlsKeyFile !== undefined;
   if (!hasFlags && !fileConfig) return null;
 
   const base: BunqueueConfig = fileConfig ?? {};
@@ -86,6 +103,8 @@ function applyCliFlags(fileConfig: BunqueueConfig | null, flags: CliFlags): Bunq
       ...(flags.tcpPort !== undefined && { tcpPort: flags.tcpPort }),
       ...(flags.httpPort !== undefined && { httpPort: flags.httpPort }),
       ...(flags.host !== undefined && { host: flags.host }),
+      ...(flags.tlsCertFile !== undefined && { tlsCertFile: flags.tlsCertFile }),
+      ...(flags.tlsKeyFile !== undefined && { tlsKeyFile: flags.tlsKeyFile }),
     },
     storage: {
       ...base.storage,
@@ -113,6 +132,15 @@ export async function runServer(args: string[], showHelp: boolean): Promise<void
   const config = resolveServerConfig(mergedConfig);
   const cloudConfig = resolveCloudConfig(mergedConfig, config.dataPath);
 
+  // Resolve TLS — fail fast on partial cert/key before binding anything
+  let tlsConfig: ReturnType<typeof resolveTlsServerOptions>;
+  try {
+    tlsConfig = resolveTlsServerOptions(config);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
   // Import and start the server components
   const { QueueManager } = await import('../../application/queueManager');
   const { createTcpServer } = await import('../../infrastructure/server/tcp');
@@ -135,12 +163,14 @@ export async function runServer(args: string[], showHelp: boolean): Promise<void
       port: config.tcpPort,
       hostname: config.hostname,
       authTokens,
+      ...(tlsConfig && { tls: tlsConfig }),
     });
 
     httpServer = createHttpServer(qm, {
       port: config.httpPort,
       hostname: config.hostname,
       authTokens,
+      ...(tlsConfig && { tls: tlsConfig }),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -189,6 +219,7 @@ ${dim}────────────────────────�
   ${green}●${reset} TCP    ${tcpDisplay}
   ${green}●${reset} HTTP   ${httpDisplay}
   ${yellow}●${reset} Data   ${config.dataPath ?? 'in-memory'}
+  ${yellow}●${reset} TLS    ${tlsConfig ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
   ${yellow}●${reset} Auth   ${authTokens ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
   ${yellow}●${reset} Cloud  ${cloudConfig ? `${green}enabled${reset} ${dim}→ ${cloudConfig.url}${reset}` : `${dim}disabled${reset}`}
 

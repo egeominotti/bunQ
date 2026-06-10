@@ -85,6 +85,30 @@ Unix socket path for HTTP server (alternative to HTTP_PORT).
 HTTP_SOCKET_PATH=/var/run/bunqueue-http.sock bunqueue start
 ```
 
+### `TLS_CERT_FILE`
+
+Path to a PEM certificate file. Together with `TLS_KEY_FILE`, enables native
+TLS on both the TCP and HTTP servers. Setting only one of the two is a
+startup error (fail fast — never silent plaintext).
+
+| Type | Default | Example |
+|------|---------|---------|
+| string | (none) | `/etc/bunqueue/cert.pem` |
+
+```bash
+TLS_CERT_FILE=./cert.pem TLS_KEY_FILE=./key.pem bunqueue start
+```
+
+### `TLS_KEY_FILE`
+
+Path to the PEM private key file matching `TLS_CERT_FILE`.
+
+| Type | Default | Example |
+|------|---------|---------|
+| string | (none) | `/etc/bunqueue/key.pem` |
+
+See the [TLS guide](/guide/tls/) for client options and self-signed setup.
+
 ### `DATA_PATH`
 
 Path to SQLite database file.

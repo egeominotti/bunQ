@@ -16,6 +16,8 @@ export interface ResolvedConfig {
   hostname: string;
   tcpSocketPath: string | undefined;
   httpSocketPath: string | undefined;
+  tlsCertFile: string | undefined;
+  tlsKeyFile: string | undefined;
   authTokens: string[];
   dataPath: string | undefined;
   corsOrigins: string[];
@@ -36,6 +38,8 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
     hostname: fc?.server?.host ?? Bun.env.HOST ?? '0.0.0.0',
     tcpSocketPath: fc?.server?.tcpSocketPath ?? Bun.env.TCP_SOCKET_PATH,
     httpSocketPath: fc?.server?.httpSocketPath ?? Bun.env.HTTP_SOCKET_PATH,
+    tlsCertFile: fc?.server?.tlsCertFile ?? Bun.env.TLS_CERT_FILE,
+    tlsKeyFile: fc?.server?.tlsKeyFile ?? Bun.env.TLS_KEY_FILE,
     authTokens: fc?.auth?.tokens ?? Bun.env.AUTH_TOKENS?.split(',').filter(Boolean) ?? [],
     dataPath:
       fc?.storage?.dataPath ??
@@ -52,6 +56,30 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
       fc?.timeouts?.shutdown ?? parseInt(Bun.env.SHUTDOWN_TIMEOUT_MS ?? '30000', 10),
     statsIntervalMs: fc?.timeouts?.stats ?? parseInt(Bun.env.STATS_INTERVAL_MS ?? '300000', 10),
   };
+}
+
+/**
+ * Resolve server TLS options from resolved config. Returns null when TLS is
+ * not configured; throws when only one of cert/key is set (fail fast at
+ * startup rather than serving plaintext when the operator expected TLS).
+ */
+export function resolveTlsServerOptions(config: {
+  tlsCertFile?: string;
+  tlsKeyFile?: string;
+}): { certFile: string; keyFile: string } | null {
+  const { tlsCertFile, tlsKeyFile } = config;
+  if (!tlsCertFile && !tlsKeyFile) return null;
+  if (!tlsKeyFile) {
+    throw new Error(
+      'TLS misconfigured: tlsCertFile is set but tlsKeyFile (TLS_KEY_FILE) is missing'
+    );
+  }
+  if (!tlsCertFile) {
+    throw new Error(
+      'TLS misconfigured: tlsKeyFile is set but tlsCertFile (TLS_CERT_FILE) is missing'
+    );
+  }
+  return { certFile: tlsCertFile, keyFile: tlsKeyFile };
 }
 
 /** Resolve cloud config: config file > env vars. Returns null if disabled. */

@@ -3,6 +3,18 @@
  * Type definitions for TCP connection management
  */
 
+/**
+ * TLS options for client connections.
+ * `true` enables TLS with system CA verification; the object form allows
+ * trusting a custom CA (self-signed server cert) or disabling verification.
+ */
+export interface ClientTlsOptions {
+  /** Verify the server certificate (default: true). Set false for self-signed in dev. */
+  rejectUnauthorized?: boolean;
+  /** Path to a PEM CA certificate to trust (e.g. the self-signed server cert) */
+  caFile?: string;
+}
+
 /** Connection options */
 export interface ConnectionOptions {
   /** Server host */
@@ -11,6 +23,8 @@ export interface ConnectionOptions {
   port: number;
   /** Auth token */
   token?: string;
+  /** Enable TLS: true (system CAs) or per-connection TLS options (default: false) */
+  tls?: boolean | ClientTlsOptions;
   /** Max reconnection attempts (default: Infinity) */
   maxReconnectAttempts?: number;
   /** Initial reconnect delay in ms (default: 100) */
@@ -70,6 +84,7 @@ export const DEFAULT_CONNECTION: Required<ConnectionOptions> = {
   host: 'localhost',
   port: 6789,
   token: '',
+  tls: false,
   maxReconnectAttempts: Infinity,
   reconnectDelay: 100,
   maxReconnectDelay: 30000,

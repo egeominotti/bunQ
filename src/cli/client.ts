@@ -8,6 +8,8 @@ import { formatOutput, formatError } from './output';
 import { pack, unpack } from 'msgpackr';
 import { FrameParser, FrameSizeError } from '../infrastructure/server/protocol';
 import { CommandError } from './commands/types';
+import { buildClientTls } from '../client/tcp/connection';
+import type { ClientTlsOptions } from '../client/tcp/types';
 
 /** Client options */
 export interface ClientOptions {
@@ -17,6 +19,8 @@ export interface ClientOptions {
   port: number;
   /** Auth token */
   token?: string;
+  /** TLS to the server (true = system CAs, object = custom CA / no-verify) */
+  tls?: boolean | ClientTlsOptions;
   /** Output as JSON */
   json: boolean;
 }
@@ -76,9 +80,12 @@ async function connect(options: ClientOptions): Promise<{
         } catch (err) {
           if (err instanceof FrameSizeError) {
             if (socketData.reject) {
+              // A plaintext client reading a TLS handshake sees garbage that
+              // parses as an absurd frame size — hint at the likely cause.
               socketData.reject(
                 new Error(
-                  `Frame too large: ${err.requestedSize} bytes exceeds maximum ${err.maxSize}`
+                  `Frame too large: ${err.requestedSize} bytes exceeds maximum ${err.maxSize}` +
+                    ' (is the server running with TLS? try --tls, --tls-ca or --tls-no-verify)'
                 )
               );
               socketData.resolve = null;
@@ -131,11 +138,18 @@ async function connect(options: ClientOptions): Promise<{
       },
     };
 
-    // Connect via TCP
-    void Bun.connect({
+    // Connect via TCP (optionally wrapped in TLS)
+    const tlsValue = buildClientTls(options.tls);
+    void (Bun.connect as (opts: unknown) => Promise<unknown>)({
       hostname: options.host,
       port: options.port,
+      ...(tlsValue !== undefined && { tls: tlsValue }),
       socket: socketHandlers,
+    }).catch((err: unknown) => {
+      // Bun.connect can reject directly (e.g. TLS handshake refused) instead of
+      // firing connectError — surface it instead of waiting out the timeout.
+      const message = err instanceof Error ? err.message : String(err);
+      reject(new Error(`Failed to connect to ${targetDesc}: ${message}`));
     });
 
     // Handle connection timeout

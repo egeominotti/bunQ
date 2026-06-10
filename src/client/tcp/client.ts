@@ -173,6 +173,7 @@ export class TcpClient extends EventEmitter {
       {
         host: this.options.host,
         port: this.options.port,
+        tls: this.options.tls,
       },
       this.options.connectTimeout,
       {

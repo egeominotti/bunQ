@@ -31,6 +31,7 @@ export class TcpConnectionPool {
       host: options.host ?? 'localhost',
       port: options.port ?? 6789,
       token: options.token ?? '',
+      tls: options.tls ?? false,
       poolSize,
       maxReconnectAttempts: options.maxReconnectAttempts ?? Infinity,
       reconnectDelay: options.reconnectDelay ?? 100,
@@ -51,6 +52,7 @@ export class TcpConnectionPool {
         host: this.options.host,
         port: this.options.port,
         token: this.options.token,
+        tls: this.options.tls,
         maxReconnectAttempts: this.options.maxReconnectAttempts,
         reconnectDelay: this.options.reconnectDelay,
         maxReconnectDelay: this.options.maxReconnectDelay,
@@ -61,6 +63,11 @@ export class TcpConnectionPool {
         maxPingFailures: this.options.maxPingFailures,
         maxCommandTimeouts: this.options.maxCommandTimeouts,
       });
+      // Socket-level errors (e.g. TLS handshake failures, protocol garbage) are
+      // emitted as 'error' events; without a listener EventEmitter would throw
+      // and crash the process. Commands are still settled via the close/timeout
+      // paths, so observing the error here is enough.
+      client.on('error', () => {});
       this.clients.push(client);
     }
   }
@@ -213,7 +220,10 @@ function getPoolKey(options?: PoolOptions): string {
   const token = options?.token ?? '';
   // Include poolSize and token hash to prevent sharing pools with different configs
   const tokenHash = token ? String(Number(Bun.hash(token)) & 0xffff) : '0';
-  return `${host}:${port}:${poolSize}:${tokenHash}`;
+  // TLS config must differentiate pools too: a TLS pool and a plaintext pool
+  // to the same host:port are NOT interchangeable.
+  const tlsKey = options?.tls ? JSON.stringify(options.tls) : '0';
+  return `${host}:${port}:${poolSize}:${tokenHash}:${tlsKey}`;
 }
 
 /** Get or create shared connection pool */

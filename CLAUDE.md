@@ -335,6 +335,17 @@ const tlsQueue = new Queue<T>('emails', {
   connection: { host: 'queue.example.com', port: 6789, tls: { caFile: './ca.pem' } },
 });
 
+// Store-and-forward (edge → central): drains local jobs to a remote server.
+// Remote failure → local retry/DLQ (nothing lost); deterministic remote jobId
+// fwd:<queue>:<localId> dedupes re-forwards within the server's custom-id
+// retention window (bounded LRU; removeOnComplete evicts). Source: src/client/forwarder.ts
+const fwd = embeddedQueue.forward({
+  to: { host: 'central', port: 6789, tls: true },
+  queue: 'ingest', // optional remote name
+});
+fwd.on('forwarded', (info) => {});
+await fwd.close();
+
 // Queue (embedded mode — programmatic dataPath, no env var needed)
 const embeddedQueue = new Queue<T>('emails', {
   embedded: true,

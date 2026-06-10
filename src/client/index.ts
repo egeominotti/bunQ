@@ -43,6 +43,8 @@ export type {
   BunqueueDlqConfig,
 } from './bunqueue';
 export { SandboxedWorker } from './sandboxedWorker';
+export { Forwarder } from './forwarder';
+export type { ForwardOptions, ForwardedInfo } from './forwarder';
 export { QueueEvents } from './events';
 export { QueueGroup } from './queueGroup';
 export { FlowProducer } from './flow';

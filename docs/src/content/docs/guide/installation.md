@@ -28,6 +28,27 @@ bun install
 bun run build
 ```
 
+## Single binary (no Bun required)
+
+Each release ships self-contained executables — useful on servers and edge
+gateways (Raspberry Pi 4/5, ARM64 boxes) where you don't want to install a
+runtime:
+
+```bash
+# Pick your platform: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64
+curl -fsSLO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-linux-arm64.tar.gz
+tar -xzf bunqueue-linux-arm64.tar.gz
+./bunqueue-linux-arm64 --version
+sudo mv bunqueue-linux-arm64 /usr/local/bin/bunqueue
+
+bunqueue start --data-path /var/lib/bunqueue/queue.db
+```
+
+Checksums: `SHA256SUMS` is attached to every release.
+
+The binary is the full server + CLI. For the client SDK in your app code you
+still install the package (`bun add bunqueue`).
+
 ## Verify Installation
 
 ### Embedded Mode

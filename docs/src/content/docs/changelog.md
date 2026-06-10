@@ -10,6 +10,35 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.9] - 2026-06-10
+
+### Added — `queue.forward()` store-and-forward + prebuilt binaries
+
+**`queue.forward()`** — built-in store-and-forward from a local (edge) queue
+to a remote bunqueue server. The IoT/edge pattern as a one-liner:
+
+```typescript
+const fwd = localQueue.forward({
+  to: { host: 'central.example.com', port: 6789, tls: true, token },
+  queue: 'ingest', // optional remote name
+});
+```
+
+- Remote failure → the job fails **locally** (retry with backoff → local DLQ):
+  nothing is lost while the uplink is down; `retryDlq()` re-enqueues when it
+  returns.
+- Deduped re-forwards: forwarded jobs carry the deterministic remote jobId
+  `fwd:<queue>:<localId>`, deduped server-side within the custom-id retention
+  window (bounded LRU; remote `removeOnComplete` evicts the entry — for strict
+  exactly-once across long outages, dedupe downstream).
+- Preserves job name, data and priority; optional `durable: true` for
+  per-job fsync server-side; `forwarded`/`error` events.
+
+**Prebuilt binaries** — every release now attaches self-contained executables
+(no Bun install needed): `linux-x64`, `linux-arm64`, `darwin-x64`,
+`darwin-arm64` + `SHA256SUMS`. Built for edge gateways (Raspberry Pi 4/5,
+ARM64 boxes): download, untar, run.
+
 ## [2.8.8] - 2026-06-10
 
 ### Added — Native TLS (TCP + HTTP) and MQTT bridge example

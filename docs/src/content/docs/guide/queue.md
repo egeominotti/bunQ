@@ -756,6 +756,29 @@ const queue = new Queue('tasks', {
 Jobs with `durable: true` are always sent as individual `PUSH` commands and are never batched, ensuring immediate disk persistence.
 :::
 
+## Store-and-Forward: `queue.forward()`
+
+Drain this queue's jobs to a remote bunqueue server — the edge/IoT pattern
+(local embedded queue as offline buffer, central server as destination):
+
+```typescript
+const forwarder = queue.forward({
+  to: { host: 'queue.example.com', port: 6789, tls: true, token: process.env.BQ_TOKEN },
+  queue: 'central-name', // optional remote queue name (default: same)
+  concurrency: 4,        // parallel forwards (default: 4)
+  durable: false,        // fsync each job server-side
+});
+
+forwarder.on('forwarded', ({ id, remoteId, name }) => {});
+forwarder.on('error', (err) => {});
+await forwarder.close();
+```
+
+Remote failures leave jobs local (retry → DLQ); forwarded jobs carry a
+deterministic remote jobId (`fwd:<queue>:<localId>`), deduped server-side
+within the custom-id retention window (bounded LRU; remote `removeOnComplete`
+evicts it). Full guide: [IoT & Edge](/guide/iot-edge/).
+
 ## Job Options Reference
 
 | Option | Type | Default | Description |

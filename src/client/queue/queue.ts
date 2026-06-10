@@ -22,6 +22,7 @@ import type {
 } from '../types';
 import { FORCE_EMBEDDED } from './helpers';
 import { AddBatcher } from './addBatcher';
+import { Forwarder, type ForwardOptions, type RemoteQueueCtor } from '../forwarder';
 import { resolveToken } from '../resolveToken';
 import { getSharedManager } from '../manager';
 
@@ -577,6 +578,29 @@ export class Queue<T = unknown> {
   }
   getMetrics(type: 'completed' | 'failed', start?: number, end?: number) {
     return workersOps.getMetrics(this.ctx, type, start, end);
+  }
+
+  // ============ Forwarding ============
+  /**
+   * Drain this queue's jobs to a remote bunqueue server (store-and-forward).
+   * Typical edge pattern: embedded local queue as offline buffer, forwarded
+   * to a central server over TCP/TLS. Remote failures leave jobs local
+   * (retry → DLQ) — nothing is lost while the uplink is down. Forwarded jobs
+   * carry a deterministic remote jobId so re-forwards never duplicate.
+   */
+  forward(options: ForwardOptions): Forwarder {
+    return new Forwarder(
+      {
+        name: this.name,
+        queueKey: this.queueKey,
+        prefixKey: this.prefixKey || undefined,
+        embedded: this.embedded,
+        dataPath: this.opts.dataPath,
+        connection: this.opts.connection,
+      },
+      options,
+      Queue as unknown as RemoteQueueCtor
+    );
   }
 
   // ============ Connection ============

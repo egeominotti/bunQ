@@ -124,9 +124,38 @@ bunqueue start \
   --data-path /var/lib/bunqueue/queue.db
 ```
 
-A common hybrid: embedded queue on the gateway as the offline buffer, plus a
-small forwarder worker that drains it into the central TLS queue when the
-uplink is healthy. Each hop keeps its own retry/DLQ semantics.
+### Built-in store-and-forward: `queue.forward()`
+
+The recommended hybrid — embedded queue on the gateway as the offline buffer,
+drained to the central server when the uplink is healthy — is a one-liner:
+
+```typescript
+const local = new Queue('telemetry', { embedded: true, dataPath: './edge.db' });
+
+const forwarder = local.forward({
+  to: { host: 'queue.example.com', port: 6789, tls: true, token: Bun.env.BQ_TOKEN },
+  queue: 'telemetry-ingest', // optional remote name (default: same)
+  concurrency: 4,
+});
+
+forwarder.on('forwarded', ({ id, remoteId }) => console.log(`→ ${id} as ${remoteId}`));
+forwarder.on('error', (err) => console.error('uplink:', err.message));
+
+// later: await forwarder.close();
+```
+
+Semantics:
+
+- **Nothing lost offline**: a remote failure fails the job locally → local
+  retry with backoff → local DLQ after `attempts`. When the uplink returns,
+  `local.retryDlq()` re-enqueues buffered readings.
+- **Dedup on re-forward**: each forwarded job carries the deterministic
+  remote jobId `fwd:<queue>:<localId>`; the server dedupes custom jobIds, so
+  a re-forward after a crash or retry is idempotent **within the server's
+  retention window** (custom-id map is a bounded LRU, and `removeOnComplete`
+  on the remote evicts the entry). For strict exactly-once across long
+  outages, keep `removeOnComplete: false` remotely or dedupe downstream.
+- Priority is preserved; pass `durable: true` to fsync each job server-side.
 
 ## Cron aggregations on the gateway
 

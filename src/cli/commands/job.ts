@@ -185,7 +185,12 @@ function buildWaitJob(args: string[]): Record<string, unknown> {
   };
 
   const timeout = parseNumberArg(values.timeout as string | undefined, 'timeout');
-  if (timeout !== undefined) cmd.timeout = timeout;
+  if (timeout !== undefined) {
+    if (timeout < 0) {
+      throw new CommandError(`Invalid timeout: ${timeout}. Must be >= 0 ms`);
+    }
+    cmd.timeout = timeout;
+  }
 
   return cmd;
 }

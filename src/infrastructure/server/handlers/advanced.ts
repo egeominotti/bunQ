@@ -8,6 +8,7 @@ import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { jobId } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
+import { validateNumericField } from '../protocol';
 
 /**
  * Coerce a value to a finite number, or return undefined if it can't be.
@@ -146,6 +147,12 @@ export async function handleWaitJob(
   reqId?: string
 ): Promise<Response> {
   const jid = jobId(cmd.id);
+  // Bounded like PULL (which caps at 60s); waiting for completion is
+  // legitimately longer, so the cap here is 10 min. validateNumericField also
+  // rejects NaN/Infinity from hostile clients (a hand-rolled <0/>max check
+  // would let NaN through and resolve instantly as a false "not completed").
+  const timeoutError = validateNumericField(cmd.timeout, 'timeout', { min: 0, max: 600000 });
+  if (timeoutError) return resp.error(timeoutError, reqId);
   const timeout = cmd.timeout ?? 30000;
 
   // First check if job exists and is already completed

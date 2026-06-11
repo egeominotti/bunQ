@@ -66,13 +66,27 @@ function buildCronAdd(args: string[]): Record<string, unknown> {
   if (values.schedule) cmd.schedule = values.schedule;
 
   const every = parseNumberArg(values.every as string | undefined, 'every');
-  if (every !== undefined) cmd.repeatEvery = every;
+  if (every !== undefined) {
+    // <= 0 would compute a nextRun that is always in the past: the scheduler
+    // would fire the cron on every tick, indefinitely.
+    if (every <= 0) {
+      throw new CommandError(`Invalid every: ${every}. Must be a positive interval in ms`);
+    }
+    cmd.repeatEvery = every;
+  }
 
   const priority = parseNumberArg(values.priority as string | undefined, 'priority');
   if (priority !== undefined) cmd.priority = priority;
 
   const maxLimit = parseNumberArg(values['max-limit'] as string | undefined, 'max-limit');
-  if (maxLimit !== undefined) cmd.maxLimit = maxLimit;
+  if (maxLimit !== undefined) {
+    if (maxLimit < 0) {
+      throw new CommandError(`Invalid max-limit: ${maxLimit}. Must be >= 0 (0 = unlimited)`);
+    }
+    // 0 = unlimited: omit the field so the server stores null (no limit).
+    // Sending 0 would make isAtLimit treat the cron as already exhausted.
+    if (maxLimit > 0) cmd.maxLimit = maxLimit;
+  }
 
   if (values.timezone) cmd.timezone = values.timezone;
 

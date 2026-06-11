@@ -256,12 +256,13 @@ describe('Protocol gaps: Missing CLI commands', () => {
 // Server startup error handling
 // =============================================================================
 describe('Server startup error handling', () => {
-  test('server.ts has try/catch around server creation', async () => {
+  test('server bootstrap has try/catch around server creation', async () => {
+    // Server creation moved into the shared bootstrap (used by BOTH entry
+    // points) — that is where bind errors must be handled.
     const source = await Bun.file(
-      new URL('../src/cli/commands/server.ts', import.meta.url).pathname
+      new URL('../src/infrastructure/server/bootstrap.ts', import.meta.url).pathname
     ).text();
 
-    // Should have error handling around createTcpServer / createHttpServer
     const hasTryCatch =
       source.includes('try {') || source.includes('try{') || source.includes('.catch(');
 

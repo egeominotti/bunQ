@@ -6,7 +6,7 @@
 
 import { runServer } from './commands/server';
 import { executeCommand } from './client';
-import { printHelp, printVersion } from './help';
+import { printHelp, printVersion, printPushHelp, printCronAddHelp } from './help';
 import { isBackupCommand, executeBackupCommand } from './commands/backup';
 import { runDoctor } from './commands/doctor';
 import { VERSION } from '../shared/version';
@@ -111,19 +111,111 @@ function buildTlsOption(state: TlsFlagState): GlobalOptions['tls'] {
   return state.enabled ? true : undefined;
 }
 
+/**
+ * Exactly two subcommands define their own short `-t` (--timeout):
+ * `pull` and `job wait`. ONLY there `-t` is passed through instead of being
+ * consumed as the global token flag — every other command keeps `-t TOKEN`
+ * working anywhere on the line. The long form `--token` is global everywhere.
+ */
+function commandOwnsShortT(commandArgs: string[]): boolean {
+  return commandArgs[0] === 'pull' || (commandArgs[0] === 'job' && commandArgs[1] === 'wait');
+}
+
+/**
+ * Handle `--token` / global `-t` and return the index to continue scanning
+ * from. When the command already parsed owns short `-t` (pull / job wait),
+ * the flag is passed through to the subcommand instead of being consumed.
+ */
+function applyTokenFlag(
+  arg: string,
+  allArgs: string[],
+  i: number,
+  state: { token?: string },
+  commandArgs: string[]
+): number {
+  if (arg === '-t' && commandOwnsShortT(commandArgs)) {
+    commandArgs.push(arg); // pull / job wait own -t (timeout): pass through
+    return i;
+  }
+  const nextArg = allArgs[i + 1];
+  // A following flag is not a token: don't swallow it (--token --json ...)
+  if (nextArg === undefined || nextArg.startsWith('-')) {
+    console.warn('Warning: --token requires a value. Token not set.');
+    return i;
+  }
+  state.token = nextArg;
+  return i + 1;
+}
+
+/** Mutable host/port accumulator while scanning argv */
+interface HostPortState {
+  host: string;
+  port: number;
+  hostExplicit: boolean;
+  portExplicit: boolean;
+}
+
+/** Handle `--host`/`-H <value>`; refuses to swallow a following flag. */
+function applyHostFlag(allArgs: string[], i: number, state: HostPortState): number {
+  const nextArg = allArgs[i + 1];
+  if (nextArg === undefined || nextArg.startsWith('-')) {
+    console.warn('Warning: --host requires a value. Using localhost.');
+    return i;
+  }
+  state.host = nextArg;
+  state.hostExplicit = true;
+  return i + 1;
+}
+
+/** Handle `--port`/`-p <value>`; refuses to swallow a following flag. */
+function applyPortFlag(allArgs: string[], i: number, state: HostPortState): number {
+  const nextArg = allArgs[i + 1];
+  if (nextArg === undefined || nextArg.startsWith('-')) {
+    console.warn('Warning: --port requires a value. Using default port 6789.');
+    return i;
+  }
+  const parsed = parseInt(nextArg, 10);
+  if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    console.warn(`Warning: Invalid port "${nextArg}". Using default port 6789.`);
+    state.port = 6789;
+  } else {
+    state.port = parsed;
+    state.portExplicit = true;
+  }
+  return i + 1;
+}
+
+/**
+ * Attached-value short flags (-p10, -Hfoo) shadowing a global flag letter are
+ * silently mis-parsed downstream (strict:false expands them to garbage
+ * booleans — e.g. push -p10 dropped the priority and pushed anyway). Warn so
+ * the user switches to the separated/long form. Exception: -t<value> after
+ * pull/job wait, where parseArgs handles the attached form correctly.
+ */
+function warnAmbiguousAttachedShort(arg: string, commandArgs: string[]): void {
+  if (!/^-[Hpthv][^-\s]/.test(arg)) return;
+  if (arg.startsWith('-t') && commandOwnsShortT(commandArgs)) return;
+  console.warn(
+    `Warning: "${arg}" looks like a short flag with an attached value; ` +
+      `use the separated form ("${arg.slice(0, 2)} ${arg.slice(2)}") or the long form.`
+  );
+}
+
 /** Parse global options from process.argv */
 export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: string[] } {
   const allArgs = process.argv.slice(2);
 
   // Extract global options manually to preserve subcommand flags
-  let host = 'localhost';
-  let port = 6789;
-  let token: string | undefined;
+  const hp: HostPortState = {
+    host: 'localhost',
+    port: 6789,
+    hostExplicit: false,
+    portExplicit: false,
+  };
+  const tokenState: { token?: string } = {};
   let json = false;
   let help = false;
   let version = false;
-  let hostExplicit = false;
-  let portExplicit = false;
   const tlsState: TlsFlagState = { enabled: false, noVerify: false };
 
   const commandArgs: string[] = [];
@@ -132,55 +224,49 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   while (i < allArgs.length) {
     const arg = allArgs[i];
 
+    if (arg === '--') {
+      // Separator: everything after -- is opaque to the global parser
+      commandArgs.push(...allArgs.slice(i + 1));
+      break;
+    }
     if (arg === '--host' || arg === '-H') {
-      host = allArgs[++i] ?? 'localhost';
-      hostExplicit = true;
+      i = applyHostFlag(allArgs, i, hp);
     } else if (arg === '--port' || arg === '-p') {
-      const raw = allArgs[++i] ?? '6789';
-      const parsed = parseInt(raw, 10);
-      if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
-        console.warn(`Warning: Invalid port "${raw}". Using default port 6789.`);
-        port = 6789;
-      } else {
-        port = parsed;
-        portExplicit = true;
-      }
+      i = applyPortFlag(allArgs, i, hp);
     } else if (arg === '--token' || arg === '-t') {
-      const nextArg = allArgs[i + 1];
-      if (nextArg === undefined) {
-        console.warn('Warning: --token requires a value. Token not set.');
-      } else {
-        token = allArgs[++i];
-      }
+      i = applyTokenFlag(arg, allArgs, i, tokenState, commandArgs);
     } else if (arg.startsWith('--tls')) {
       i = applyTlsFlag(arg, allArgs, i, tlsState, commandArgs);
     } else if (arg === '--json') {
       json = true;
-    } else if (arg === '--help' || arg === '-h') {
+    } else if (arg === '--help' || (arg === '-h' && commandArgs.length === 0)) {
+      // Short -h is global help ONLY before the command: after it, a typo of
+      // -H (host) must not suppress execution with a false-success exit 0.
       help = true;
-    } else if (arg === '--version' || arg === '-v') {
+    } else if (arg === '--version' || (arg === '-v' && commandArgs.length === 0)) {
       version = true;
     } else if (arg.startsWith('--host=')) {
-      host = arg.slice(7);
-      hostExplicit = true;
+      hp.host = arg.slice(7);
+      hp.hostExplicit = true;
     } else if (arg.startsWith('--port=')) {
       const raw = arg.slice(7);
       const parsed = parseInt(raw, 10);
       if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
         console.warn(`Warning: Invalid port "${raw}". Using default port 6789.`);
-        port = 6789;
+        hp.port = 6789;
       } else {
-        port = parsed;
-        portExplicit = true;
+        hp.port = parsed;
+        hp.portExplicit = true;
       }
     } else if (arg.startsWith('--token=')) {
       const val = arg.slice(8);
       if (!val) {
         console.warn('Warning: --token= requires a value. Token not set.');
       } else {
-        token = val;
+        tokenState.token = val;
       }
     } else {
+      warnAmbiguousAttachedShort(arg, commandArgs);
       // Not a global option, pass to command
       commandArgs.push(arg);
     }
@@ -195,20 +281,20 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
   // so they reach parseServerArgs in runServer().
   // Global -p/--port maps to --tcp-port for the server command.
   if (isServerMode) {
-    if (hostExplicit) {
-      commandArgs.push('--host', host);
+    if (hp.hostExplicit) {
+      commandArgs.push('--host', hp.host);
     }
-    if (portExplicit) {
-      commandArgs.push('--tcp-port', String(port));
+    if (hp.portExplicit) {
+      commandArgs.push('--tcp-port', String(hp.port));
     }
   }
 
   // Fall back to environment variables for token if not set via CLI flag
   // Priority: --token flag > BQ_TOKEN > BUNQUEUE_TOKEN
-  token = resolveToken(token);
+  const token = resolveToken(tokenState.token);
 
-  if (!portExplicit) port = resolveEnvPort(port);
-  if (!hostExplicit) host = resolveEnvHost(host);
+  const port = hp.portExplicit ? hp.port : resolveEnvPort(hp.port);
+  const host = hp.hostExplicit ? hp.host : resolveEnvHost(hp.host);
 
   return {
     options: { host, port, token, tls: buildTlsOption(tlsState), json, help, version },
@@ -263,8 +349,9 @@ export async function main(): Promise<void> {
 
   // Help for specific command
   if (options.help) {
-    // Could add command-specific help here
-    printHelp();
+    if (command === 'push') printPushHelp();
+    else if (command === 'cron') printCronAddHelp();
+    else printHelp();
     process.exit(0);
   }
 

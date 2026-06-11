@@ -101,6 +101,8 @@ GLOBAL OPTIONS:
   -H, --host <host>               Server host (default: localhost)
   -p, --port <port>               TCP port (default: 6789)
   -t, --token <token>             Authentication token (env: BQ_TOKEN, BUNQUEUE_TOKEN)
+                                  Note: after \`pull\` / \`job wait\`, -t is their --timeout;
+                                  use --token there
   --tls                           Connect with TLS (verify with system CAs)
   --tls-ca <file>                 Trust a custom CA cert (implies --tls)
   --tls-no-verify                 TLS without cert verification (self-signed, dev only)
@@ -130,7 +132,7 @@ Options:
   --tcp-port <port>       TCP server port (default: 6789, env: TCP_PORT)
   --http-port <port>      HTTP server port (default: 6790, env: HTTP_PORT)
   --host <host>           Bind address (default: 0.0.0.0, env: HOST)
-  --data-path <path>      SQLite database path (env: DATA_PATH)
+  --data-path <path>      SQLite database path (env: BUNQUEUE_DATA_PATH, DATA_PATH)
   --auth-tokens <list>    Comma-separated auth tokens (env: AUTH_TOKENS)
   --tls-cert <file>       PEM certificate for native TLS (env: TLS_CERT_FILE)
   --tls-key <file>        PEM private key for native TLS (env: TLS_KEY_FILE)

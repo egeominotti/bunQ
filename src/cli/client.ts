@@ -32,17 +32,32 @@ interface SocketData {
   reject: ((error: Error) => void) | null;
 }
 
+/**
+ * Client-side timeout for a command: base 30s; ONLY the long-poll commands
+ * (PULL/WaitJob, where `timeout` means "how long the server may hold the
+ * request") get the server-side timeout plus a 10s network buffer so the
+ * client never gives up first. On every other command a `timeout` field has
+ * a different meaning (e.g. PUSH: job execution timeout) and must not
+ * stretch the client wait.
+ */
+export function clientTimeoutFor(cmd: Record<string, unknown>): number {
+  const isLongPoll = cmd.cmd === 'PULL' || cmd.cmd === 'WaitJob';
+  const cmdTimeout = isLongPoll && typeof cmd.timeout === 'number' ? cmd.timeout : 0;
+  return Math.max(30000, cmdTimeout + 10000);
+}
+
 /** Send a command and wait for response */
 async function sendCommand(
   socket: { write: (data: Uint8Array) => void; data: SocketData },
-  command: Record<string, unknown>
+  command: Record<string, unknown>,
+  timeoutMs = 30000
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       socket.data.resolve = null;
       socket.data.reject = null;
       reject(new Error('Command timeout'));
-    }, 30000);
+    }, timeoutMs);
 
     socket.data.resolve = (value) => {
       clearTimeout(timeoutId);
@@ -170,6 +185,14 @@ export async function executeCommand(
   let connection: Awaited<ReturnType<typeof connect>> | null = null;
 
   try {
+    // Build the command first: unknown commands and parse errors must be
+    // reported without requiring a reachable server.
+    const cmd = await buildCommand(command, args);
+    if (!cmd) {
+      console.error(formatError(`Unknown command: ${command}`, options.json));
+      process.exit(1);
+    }
+
     connection = await connect(options);
 
     // Authenticate if token provided
@@ -186,15 +209,8 @@ export async function executeCommand(
       }
     }
 
-    // Build the command
-    const cmd = await buildCommand(command, args);
-    if (!cmd) {
-      console.error(formatError(`Unknown command: ${command}`, options.json));
-      process.exit(1);
-    }
-
     // Execute command
-    const response = await sendCommand(connection.socket, cmd);
+    const response = await sendCommand(connection.socket, cmd, clientTimeoutFor(cmd));
 
     // Extract subcommand (first positional arg) so the formatter can pick the
     // right verb for batch-id responses (queue drain → "Drained", dlq retry
@@ -204,6 +220,19 @@ export async function executeCommand(
 
     if (!response.ok) {
       console.error(formatOutput(response, command, options.json, subcommand));
+      process.exit(1);
+    }
+
+    // `job wait` that ran out of time replies ok:true + completed:false —
+    // for scripts that is a failure, not an "OK": exit 1 with a clear message.
+    if (cmd.cmd === 'WaitJob' && response.completed === false) {
+      console.error(formatError('Job not completed within timeout', options.json));
+      process.exit(1);
+    }
+    // GetState replies ok:true + state:'unknown' for a missing job — align
+    // with `job get` (Job not found, exit 1) instead of a false success.
+    if (cmd.cmd === 'GetState' && response.state === 'unknown') {
+      console.error(formatError('Job not found', options.json));
       process.exit(1);
     }
     console.log(formatOutput(response, command, options.json, subcommand));

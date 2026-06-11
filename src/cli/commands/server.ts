@@ -1,18 +1,15 @@
 /**
  * Server Command Handler
- * Starts the bunQ server
+ * Parses `bunqueue start` flags and boots the SAME full server as the bare
+ * `bunqueue` entry point (shared bootstrap — S3 backup, cloud agent, stats,
+ * crash handlers and graceful shutdown included).
  */
 
 import { parseArgs } from 'node:util';
 import { printServerHelp } from '../help';
-import { VERSION } from '../../shared/version';
-import {
-  loadConfigFile,
-  resolveServerConfig,
-  resolveCloudConfig,
-  resolveTlsServerOptions,
-} from '../../config';
+import { loadConfigFile, resolveServerConfig } from '../../config';
 import type { BunqueueConfig } from '../../config';
+import { bootServer } from '../../infrastructure/server/bootstrap';
 
 /** Server start options (CLI flags only — merged with config file later) */
 interface CliFlags {
@@ -130,117 +127,7 @@ export async function runServer(args: string[], showHelp: boolean): Promise<void
   const fileConfig = await loadConfigFile(flags.configPath);
   const mergedConfig = applyCliFlags(fileConfig, flags);
   const config = resolveServerConfig(mergedConfig);
-  const cloudConfig = resolveCloudConfig(mergedConfig, config.dataPath);
 
-  // Resolve TLS — fail fast on partial cert/key before binding anything
-  let tlsConfig: ReturnType<typeof resolveTlsServerOptions>;
-  try {
-    tlsConfig = resolveTlsServerOptions(config);
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-
-  // Import and start the server components
-  const { QueueManager } = await import('../../application/queueManager');
-  const { createTcpServer } = await import('../../infrastructure/server/tcp');
-  const { createHttpServer } = await import('../../infrastructure/server/http');
-  const { serverLog } = await import('../../shared/logger');
-
-  // Initialize
-  const qm = new QueueManager({
-    dataPath: config.dataPath,
-  });
-
-  const authTokens = config.authTokens.length > 0 ? config.authTokens : undefined;
-
-  // Start TCP and HTTP servers
-  let tcpServer: ReturnType<typeof createTcpServer>;
-  let httpServer: ReturnType<typeof createHttpServer>;
-
-  try {
-    tcpServer = createTcpServer(qm, {
-      port: config.tcpPort,
-      hostname: config.hostname,
-      authTokens,
-      ...(tlsConfig && { tls: tlsConfig }),
-    });
-
-    httpServer = createHttpServer(qm, {
-      port: config.httpPort,
-      hostname: config.hostname,
-      authTokens,
-      ...(tlsConfig && { tls: tlsConfig }),
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error(`Failed to start server: ${msg}`);
-    qm.shutdown();
-    process.exit(1);
-  }
-
-  serverLog.info('bunqueue server started', {
-    tcpPort: config.tcpPort,
-    httpPort: config.httpPort,
-    host: config.hostname,
-    dataPath: config.dataPath ?? 'in-memory',
-    auth: authTokens ? 'enabled' : 'disabled',
-  });
-
-  // Initialize bunqueue Cloud agent (remote dashboard telemetry)
-  const { CloudAgent } = await import('../../infrastructure/cloud/cloudAgent');
-  const cloudAgent = cloudConfig ? CloudAgent.createFromConfig(qm, cloudConfig) : null;
-  if (cloudAgent) {
-    cloudAgent.setServerHandles({
-      getConnectionCount: () => tcpServer.getConnectionCount(),
-      getWsClientCount: () => httpServer.getWsClientCount(),
-      getSseClientCount: () => httpServer.getSseClientCount(),
-    });
-  }
-
-  const dim = '\x1b[2m';
-  const reset = '\x1b[0m';
-  const bold = '\x1b[1m';
-  const magenta = '\x1b[35m';
-  const green = '\x1b[32m';
-  const yellow = '\x1b[33m';
-
-  // Format endpoint display
-  const tcpDisplay = `${bold}${config.hostname}:${config.tcpPort}${reset}`;
-  const httpDisplay = `${bold}${config.hostname}:${config.httpPort}${reset}`;
-
-  console.log(`
-${magenta}        (\\(\\        ${reset}
-${magenta}        ( -.-)      ${bold}bunqueue${reset} ${dim}v${VERSION}${reset}
-${magenta}        o_(")(")    ${reset}${dim}High-performance job queue for Bun${reset}
-
-${dim}─────────────────────────────────────────────────${reset}
-
-  ${green}●${reset} TCP    ${tcpDisplay}
-  ${green}●${reset} HTTP   ${httpDisplay}
-  ${yellow}●${reset} Data   ${config.dataPath ?? 'in-memory'}
-  ${yellow}●${reset} TLS    ${tlsConfig ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
-  ${yellow}●${reset} Auth   ${authTokens ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
-  ${yellow}●${reset} Cloud  ${cloudConfig ? `${green}enabled${reset} ${dim}→ ${cloudConfig.url}${reset}` : `${dim}disabled${reset}`}
-
-${dim}─────────────────────────────────────────────────${reset}
-
-  ${dim}Press ${bold}Ctrl+C${reset}${dim} to stop${reset}
-`);
-
-  // Handle shutdown
-  const shutdown = () => {
-    serverLog.info('Shutting down...');
-    const doStop = async () => {
-      if (cloudAgent) await cloudAgent.stop();
-      tcpServer.stop();
-      httpServer.stop();
-      qm.shutdown();
-      process.exit(0);
-    };
-    void doStop();
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  // Same full server as the bare `bunqueue` entry (shared bootstrap)
+  bootServer(mergedConfig, config);
 }

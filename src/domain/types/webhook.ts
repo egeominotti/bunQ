@@ -7,14 +7,25 @@ import { uuid } from '../../shared/hash';
 /** Webhook ID type */
 export type WebhookId = string;
 
-/** Webhook event types */
-export type WebhookEvent =
-  | 'job.pushed'
-  | 'job.started'
-  | 'job.completed'
-  | 'job.failed'
-  | 'job.progress'
-  | 'job.stalled';
+/**
+ * Canonical list of webhook events the server actually triggers — single
+ * source of truth for CLI/TCP/HTTP/MCP validation. job.pushed/started/
+ * completed/failed flow through eventsManager.mapEventToWebhook; job.progress
+ * is triggered directly by updateProgress (jobManagement).
+ */
+export const WEBHOOK_EVENTS = [
+  'job.pushed',
+  'job.started',
+  'job.completed',
+  'job.failed',
+  'job.progress',
+] as const;
+
+/**
+ * Webhook event types. Includes 'job.stalled' for backward compatibility with
+ * stored webhooks, but it is never emitted and not accepted on new ones.
+ */
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | 'job.stalled';
 
 /** Webhook configuration */
 export interface Webhook {

@@ -94,7 +94,9 @@ export function createCronJob(input: CronJobInput, nextRun: number): CronJob {
     timezone: input.timezone ?? null,
     nextRun,
     executions: 0,
-    maxLimit: input.maxLimit ?? null,
+    // 0/negative mean "no limit" on every surface (CLI/HTTP/TCP/MCP): storing
+    // 0 would make isAtLimit treat the cron as already exhausted (0 >= 0).
+    maxLimit: input.maxLimit !== undefined && input.maxLimit > 0 ? input.maxLimit : null,
     uniqueKey: input.uniqueKey ?? null,
     dedup: input.dedup ?? null,
     skipMissedOnRestart: input.skipMissedOnRestart ?? true,

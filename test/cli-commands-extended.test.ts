@@ -37,15 +37,15 @@ describe('CLI Extended', () => {
 
     test('should build AddWebhook command with http URL', async () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
-      const cmd = buildWebhookCommand(['add', 'http://localhost:3000/webhook', '-e', 'job.active']);
+      const cmd = buildWebhookCommand(['add', 'http://localhost:3000/webhook', '-e', 'job.pushed']);
       expect(cmd.cmd).toBe('AddWebhook');
       expect(cmd.url).toBe('http://localhost:3000/webhook');
-      expect(cmd.events).toEqual(['job.active']);
+      expect(cmd.events).toEqual(['job.pushed']);
     });
 
     test('should build AddWebhook without optional queue and secret', async () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
-      const cmd = buildWebhookCommand(['add', 'https://example.com/hook', '-e', 'job.progress']);
+      const cmd = buildWebhookCommand(['add', 'https://example.com/hook', '-e', 'job.started']);
       expect(cmd.cmd).toBe('AddWebhook');
       expect(cmd.queue).toBeUndefined();
       expect(cmd.secret).toBeUndefined();
@@ -112,11 +112,10 @@ describe('CLI Extended', () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
       const cmd = buildWebhookCommand([
         'add', 'https://example.com/hook', '-e',
-        'job.completed,job.failed,job.progress,job.active,job.waiting,job.delayed',
+        'job.pushed,job.started,job.completed,job.failed',
       ]);
       expect(cmd.events).toEqual([
-        'job.completed', 'job.failed', 'job.progress',
-        'job.active', 'job.waiting', 'job.delayed',
+        'job.pushed', 'job.started', 'job.completed', 'job.failed',
       ]);
     });
   });

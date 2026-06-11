@@ -154,6 +154,16 @@ function formatStats(stats: Record<string, unknown>): string {
     lines.push(`  Total Failed:    ${str(stats.totalFailed)}`);
   }
 
+  if (stats.uptime !== undefined) {
+    lines.push('', `  ${color('Uptime:', colors.cyan)}      ${str(stats.uptime)}s`);
+  }
+  if (stats.pushPerSec !== undefined) {
+    lines.push(`  Push/sec:    ${str(stats.pushPerSec)}`);
+  }
+  if (stats.pullPerSec !== undefined) {
+    lines.push(`  Pull/sec:    ${str(stats.pullPerSec)}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -183,7 +193,17 @@ function formatCronJobs(jobs: Record<string, unknown>[]): string {
       job.schedule !== null && job.schedule !== undefined
         ? str(job.schedule)
         : `every ${str(job.repeatEvery)}ms`;
-    return `  ${color(str(job.name), colors.bold)}\n    Queue: ${str(job.queue)}\n    Schedule: ${schedule}\n    Executions: ${str(job.executions)}`;
+    let out = `  ${color(str(job.name), colors.bold)}\n    Queue: ${str(job.queue)}\n    Schedule: ${schedule}\n    Executions: ${str(job.executions)}`;
+    if (typeof job.nextRun === 'number') {
+      out += `\n    Next run: ${new Date(job.nextRun).toISOString()}`;
+    }
+    if (job.maxLimit !== null && job.maxLimit !== undefined) {
+      out += `\n    Max: ${str(job.maxLimit)}`;
+    }
+    if (job.timezone !== null && job.timezone !== undefined) {
+      out += `\n    Timezone: ${str(job.timezone)}`;
+    }
+    return out;
   });
 
   return lines.join('\n\n');
@@ -196,10 +216,24 @@ function formatWorkers(workers: Record<string, unknown>[]): string {
   }
 
   return workers
-    .map(
-      (w) =>
-        `  ${color(str(w.id), colors.bold)}: ${str(w.name)} (${Array.isArray(w.queues) ? (w.queues as string[]).join(', ') : 'none'})`
-    )
+    .map((w) => {
+      const queues = Array.isArray(w.queues) ? (w.queues as string[]).join(', ') : 'none';
+      // status matters operationally: a stale worker must be visible
+      const status =
+        w.status === 'stale'
+          ? color('[stale]', colors.red)
+          : w.status !== undefined
+            ? color(`[${str(w.status)}]`, colors.green)
+            : '';
+      const extra: string[] = [];
+      if (w.concurrency !== undefined) extra.push(`concurrency=${str(w.concurrency)}`);
+      if (w.activeJobs !== undefined) extra.push(`active=${str(w.activeJobs)}`);
+      if (w.processedJobs !== undefined) {
+        extra.push(`processed=${str(w.processedJobs)}/failed=${str(w.failedJobs, '0')}`);
+      }
+      const extraStr = extra.length > 0 ? `\n    ${extra.join(' ')}` : '';
+      return `  ${color(str(w.id), colors.bold)}: ${str(w.name)} ${status} (${queues})${extraStr}`;
+    })
     .join('\n');
 }
 
@@ -210,10 +244,16 @@ function formatWebhooks(webhooks: Record<string, unknown>[]): string {
   }
 
   return webhooks
-    .map(
-      (w) =>
-        `  ${color(str(w.id), colors.bold)}: ${str(w.url)}\n    Events: ${(w.events as string[]).join(', ')}`
-    )
+    .map((w) => {
+      const events = Array.isArray(w.events) ? (w.events as string[]).join(', ') : 'none';
+      const enabled = w.enabled === false ? ` ${color('[disabled]', colors.yellow)}` : '';
+      const queue = w.queue !== null && w.queue !== undefined ? `\n    Queue: ${str(w.queue)}` : '';
+      const counters =
+        w.successCount !== undefined || w.failureCount !== undefined
+          ? `\n    Delivered: ${str(w.successCount, '0')} ok / ${str(w.failureCount, '0')} failed`
+          : '';
+      return `  ${color(str(w.id), colors.bold)}: ${str(w.url)}${enabled}\n    Events: ${events}${queue}${counters}`;
+    })
     .join('\n\n');
 }
 
@@ -341,6 +381,15 @@ function formatSuccess(
 
   // Worker registered
   if ('workerId' in r) return color(`Worker registered: ${str(r.workerId)}`, colors.green);
+  // Webhook added — show the id, it is needed for `webhook remove`
+  if ('webhookId' in r) return color(`Webhook added: ${str(r.webhookId)}`, colors.green);
+  // Cron scheduled — surface nextRun
+  if ('cron' in r && r.cron !== null && typeof r.cron === 'object') {
+    const c = r.cron as Record<string, unknown>;
+    const next =
+      typeof c.nextRun === 'number' ? ` (next run: ${new Date(c.nextRun).toISOString()})` : '';
+    return color(`Cron scheduled: ${str(c.name)}${next}`, colors.green);
+  }
   // State
   if ('state' in r) return `State: ${str(r.state)}`;
   // Result. undefined → no result stored yet (job not completed or removeOnComplete).

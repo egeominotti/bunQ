@@ -22,13 +22,14 @@ export async function executeBackupCommand(args: string[]): Promise<BackupComman
   const subcommand = args[0];
   const subArgs = args.slice(1);
 
-  // Get database path from env
-  const dataPath = Bun.env.DATA_PATH ?? Bun.env.SQLITE_PATH;
+  // Get database path from env — canonical priority (see config/resolve.ts)
+  const dataPath =
+    Bun.env.BUNQUEUE_DATA_PATH ?? Bun.env.BQ_DATA_PATH ?? Bun.env.DATA_PATH ?? Bun.env.SQLITE_PATH;
 
   if (!dataPath) {
     return {
       success: false,
-      message: 'DATA_PATH not set. Backup requires persistent storage.',
+      message: 'BUNQUEUE_DATA_PATH not set. Backup requires persistent storage.',
     };
   }
 

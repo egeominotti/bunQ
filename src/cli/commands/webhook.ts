@@ -5,16 +5,10 @@
 
 import { parseArgs } from 'node:util';
 import { CommandError, requireArg } from './types';
+import { WEBHOOK_EVENTS } from '../../domain/types/webhook';
 
-/** Valid webhook events */
-const VALID_EVENTS = [
-  'job.completed',
-  'job.failed',
-  'job.progress',
-  'job.active',
-  'job.waiting',
-  'job.delayed',
-];
+/** Valid webhook events — canonical list shared with server/MCP validation */
+const VALID_EVENTS: readonly string[] = WEBHOOK_EVENTS;
 
 /** Build a webhook subcommand */
 export function buildWebhookCommand(args: string[]): Record<string, unknown> {

@@ -279,8 +279,10 @@ describe('HTTP Resource Endpoints', () => {
 
   describe('Webhooks', () => {
     test('add, list, toggle, and remove webhook', async () => {
+      // 'job.completed' (canonical): bare 'completed' was never triggered by
+      // the server and is now rejected by AddWebhook event validation.
       const add = await handleCommand({
-        cmd: 'AddWebhook', url: 'https://example.com/hook', events: ['completed'],
+        cmd: 'AddWebhook', url: 'https://example.com/hook', events: ['job.completed'],
       } as Parameters<typeof handleCommand>[0], ctx);
       expect(add.ok).toBe(true);
       const webhookId = (add as { data: { webhookId: string } }).data.webhookId;

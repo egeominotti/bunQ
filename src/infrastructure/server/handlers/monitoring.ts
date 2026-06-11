@@ -30,6 +30,7 @@ import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import type { HandlerContext } from '../types';
 import { validateWebhookUrl } from '../protocol';
+import { WEBHOOK_EVENTS } from '../../../domain/types/webhook';
 
 // ============ Job Logs ============
 
@@ -223,6 +224,18 @@ export function handleAddWebhook(
   // Validate webhook URL to prevent SSRF
   const urlError = validateWebhookUrl(cmd.url);
   if (urlError) return resp.error(urlError, reqId);
+
+  // Reject events that are never triggered — a webhook subscribed to a dead
+  // event would be created "ok" and then never fire (silent failure).
+  const invalidEvents = cmd.events.filter(
+    (e) => !(WEBHOOK_EVENTS as readonly string[]).includes(e)
+  );
+  if (invalidEvents.length > 0) {
+    return resp.error(
+      `Invalid webhook event(s): ${invalidEvents.join(', ')}. Valid: ${WEBHOOK_EVENTS.join(', ')}`,
+      reqId
+    );
+  }
 
   const webhook = ctx.queueManager.webhookManager.add(cmd.url, cmd.events, cmd.queue, cmd.secret);
   ctx.queueManager.emitDashboardEvent('webhook:added', {

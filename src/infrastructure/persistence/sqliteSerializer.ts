@@ -130,6 +130,9 @@ export function rowToJob(row: DbJob): Job {
     timeline: row.timeline
       ? unpack<JobTimelineEntry[]>(row.timeline, [], `${jobContext}:timeline`)
       : [],
+    stacktrace: row.stacktrace
+      ? unpack<string[] | null>(row.stacktrace, null, `${jobContext}:stacktrace`)
+      : null,
   };
 
   // Stamp a collision-proof corruption marker (non-enumerable Symbol, never
@@ -170,6 +173,8 @@ export function reconstructDlqEntry(entry: DlqEntry): DlqEntry {
       dependsOn: entry.job.dependsOn.map((id) => brandId(id)),
       parentId: entry.job.parentId !== null ? brandId(entry.job.parentId) : null,
       childrenIds: entry.job.childrenIds.map((id) => brandId(id)),
+      // Pre-#74 blobs have no stacktrace field — restore the domain invariant
+      stacktrace: entry.job.stacktrace ?? null,
     },
   };
 }

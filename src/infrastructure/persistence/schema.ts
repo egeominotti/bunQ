@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     remove_on_fail INTEGER DEFAULT 0,
     stall_timeout INTEGER,
     last_heartbeat INTEGER,
-    timeline BLOB
+    timeline BLOB,
+    stacktrace BLOB
 );
 
 -- Indexes for common queries
@@ -136,7 +137,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -187,5 +188,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
   // Migration 12: Add per-cron job options (retry/cleanup policy, issue #86)
   12: `
 ALTER TABLE cron_jobs ADD COLUMN job_options BLOB;
+`,
+  // Migration 13: Persist the last failure's stacktrace on jobs (issue #74)
+  13: `
+ALTER TABLE jobs ADD COLUMN stacktrace BLOB;
 `,
 };

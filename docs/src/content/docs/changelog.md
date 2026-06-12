@@ -10,6 +10,35 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.11] - 2026-06-12
+
+### Fixed — job stacktrace persisted server-side (#74 follow-up)
+
+The 2.6.110 fix populated `job.stacktrace` only on the worker's in-process
+`failed` event object. The stack never reached the server: `FAIL` carried just
+the error message, so `queue.getJob(id).stacktrace` was always `null` (the
+TCP job proxy even hardcoded it), DLQ entries had no stack, and any process
+other than the failing worker could never see it. Reported again on #74
+("I need the stacktrace").
+
+- **`FAIL` now carries the stack** (`stack: string[]`, optional — old clients
+  unaffected). The worker sends the failure's stack lines alongside the error
+  message in both TCP and embedded mode.
+- **Persisted on the job**: the last failure's stack is stored on the domain
+  job (trimmed lines, capped at `stackTraceLimit`, default 10), survives
+  retries and server restarts (new `jobs.stacktrace` column, migration 13),
+  and rides into the DLQ entry when attempts are exhausted.
+- **Readable everywhere**: `queue.getJob()` / `getJobs()` now return the real
+  `stacktrace` (TCP + embedded — the proxy no longer hardcodes `null`), DLQ
+  entries expose it via `entry.job.stacktrace`, and fetched jobs also reflect
+  `failedReason` (derived from the persisted timeline).
+- HTTP `POST /jobs/:id/fail` accepts the same optional `stack` array.
+- Defensive caps along the wire: client sends at most 50 lines, server accepts
+  at most 100, the job's own `stackTraceLimit` is authoritative.
+- The worker `failed` event behavior is unchanged (and now covered by
+  regression tests replicating the exact reporter scenario: TCP + auth +
+  cron scheduler + preventOverlap/skipIfNoWorker).
+
 ## [2.8.10] - 2026-06-11
 
 ### Fixed — CLI audit: top findings (2 critical + 4 high)

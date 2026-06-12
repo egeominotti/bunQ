@@ -246,7 +246,19 @@ export async function handleFail(
 ): Promise<Response> {
   try {
     const jid = jobId(cmd.id);
-    await ctx.queueManager.fail(jid, cmd.error, cmd.token, cmd.unrecoverable);
+    // #74: the wire is not type-safe — accept stack only as string[], cap at
+    // 100 elements before it reaches the domain (authoritative cap happens in
+    // failJob at job.stackTraceLimit).
+    const stack = Array.isArray(cmd.stack)
+      ? cmd.stack.filter((line): line is string => typeof line === 'string').slice(0, 100)
+      : undefined;
+    await ctx.queueManager.fail(
+      jid,
+      cmd.error,
+      cmd.token,
+      cmd.unrecoverable,
+      stack && stack.length > 0 ? stack : undefined
+    );
     // Unregister job from client tracking
     ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
     return resp.ok(undefined, reqId);

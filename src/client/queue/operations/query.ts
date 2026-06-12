@@ -19,14 +19,33 @@ import type { Job as InternalJob } from '../../../domain/types/job';
 import { createSimpleJob } from '../jobProxy';
 import { buildJobOpts } from '../../jobHelpers';
 
-/** Build reflection meta (priority/delay/opts) from an internal job shape */
+/** Last failure's error message from the job timeline (#74) */
+function lastFailedError(timeline: InternalJob['timeline'] | undefined): string | undefined {
+  if (!timeline) return undefined;
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const entry = timeline[i];
+    if (entry.state === 'failed' && entry.error) return entry.error;
+  }
+  return undefined;
+}
+
+/** Build reflection meta (priority/delay/opts/stacktrace) from an internal job shape */
 function metaFromJob(job: InternalJob): {
   priority: number;
   delay: number;
   opts: ReturnType<typeof buildJobOpts>;
+  stacktrace: string[] | null;
+  failedReason: string | undefined;
 } {
   const opts = buildJobOpts(job);
-  return { priority: job.priority ?? 0, delay: opts.delay ?? 0, opts };
+  return {
+    priority: job.priority ?? 0,
+    delay: opts.delay ?? 0,
+    opts,
+    // Persisted server-side on FAIL (#74); absent on pre-#74 servers
+    stacktrace: job.stacktrace ?? null,
+    failedReason: lastFailedError(job.timeline),
+  };
 }
 
 interface QueryContext {

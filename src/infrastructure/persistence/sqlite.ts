@@ -424,12 +424,15 @@ export class SqliteStorage {
   updateForRetry(job: Job): void {
     this.safeWrite(() => {
       this.db
-        .prepare('UPDATE jobs SET attempts = ?, run_at = ?, state = ?, timeline = ? WHERE id = ?')
+        .prepare(
+          'UPDATE jobs SET attempts = ?, run_at = ?, state = ?, timeline = ?, stacktrace = ? WHERE id = ?'
+        )
         .run(
           job.attempts,
           job.runAt,
           'waiting',
           job.timeline.length > 0 ? pack(job.timeline) : null,
+          job.stacktrace && job.stacktrace.length > 0 ? pack(job.stacktrace) : null,
           job.id
         );
     });

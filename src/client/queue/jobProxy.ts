@@ -28,6 +28,10 @@ export interface JobReflectionMeta {
   delay?: number;
   opts?: JobOptions;
   timestamp?: number;
+  /** Persisted stacktrace of the last failure, from the server/manager job (#74) */
+  stacktrace?: string[] | null;
+  /** Last failure's error message, derived from the job timeline (#74) */
+  failedReason?: string;
 }
 
 /** Fields derived from the requested options. Mirrors the embedded path
@@ -42,6 +46,8 @@ interface ReflectedFields {
   parentKey: string | undefined;
   parent: { id: string; queueQualifiedName: string } | undefined;
   repeatJobKey: string | undefined;
+  stacktrace: string[] | null;
+  failedReason: string | undefined;
 }
 
 function reflectFields(id: string, queueName: string, meta?: JobReflectionMeta): ReflectedFields {
@@ -57,6 +63,8 @@ function reflectFields(id: string, queueName: string, meta?: JobReflectionMeta):
     parentKey: p ? `${p.queue}:${p.id}` : undefined,
     parent: p ? { id: p.id, queueQualifiedName: p.queue } : undefined,
     repeatJobKey: repeat ? `${queueName}:${id}:${pattern}` : undefined,
+    stacktrace: meta?.stacktrace ?? null,
+    failedReason: meta?.failedReason,
   };
 }
 
@@ -83,7 +91,8 @@ export function createJobProxy<T>(
     delay: r.delay,
     processedOn: undefined,
     finishedOn: undefined,
-    stacktrace: null,
+    stacktrace: r.stacktrace,
+    failedReason: r.failedReason,
     stalledCounter: 0,
     priority: r.priority,
     parent: r.parent,
@@ -156,7 +165,8 @@ export function createJobProxy<T>(
       delay: r.delay,
       timestamp: ts,
       attemptsMade: 0,
-      stacktrace: null,
+      stacktrace: r.stacktrace,
+      failedReason: r.failedReason,
       queueQualifiedName: `bull:${queueName}`,
       parentKey: r.parentKey,
     }),
@@ -169,7 +179,8 @@ export function createJobProxy<T>(
       delay: String(r.delay),
       timestamp: String(ts),
       attemptsMade: '0',
-      stacktrace: null,
+      stacktrace: r.stacktrace ? JSON.stringify(r.stacktrace) : null,
+      failedReason: r.failedReason,
       parentKey: r.parentKey,
     }),
 
@@ -298,7 +309,8 @@ export function createSimpleJob<T>(
     delay: r.delay,
     processedOn: undefined,
     finishedOn: undefined,
-    stacktrace: null,
+    stacktrace: r.stacktrace,
+    failedReason: r.failedReason,
     stalledCounter: 0,
     priority: r.priority,
     parent: r.parent,
@@ -402,7 +414,8 @@ export function createSimpleJob<T>(
       delay: r.delay,
       timestamp,
       attemptsMade: 0,
-      stacktrace: null,
+      stacktrace: r.stacktrace,
+      failedReason: r.failedReason,
       queueQualifiedName: `bull:${queueName}`,
       parentKey: r.parentKey,
     }),
@@ -415,7 +428,8 @@ export function createSimpleJob<T>(
       delay: String(r.delay),
       timestamp: String(timestamp),
       attemptsMade: '0',
-      stacktrace: null,
+      stacktrace: r.stacktrace ? JSON.stringify(r.stacktrace) : null,
+      failedReason: r.failedReason,
       parentKey: r.parentKey,
     }),
 

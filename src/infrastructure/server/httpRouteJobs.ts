@@ -340,6 +340,8 @@ export async function routeJobRoutes(
         error: body['error'] as string | undefined,
         token: body['token'] as string | undefined,
         unrecoverable: body['unrecoverable'] as boolean | undefined,
+        // Validated (string[] only, capped) in handleFail (#74)
+        stack: body['stack'] as string[] | undefined,
       },
       ctx
     );

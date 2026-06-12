@@ -255,15 +255,27 @@ async function handleJobFailure<T, R>(
     (internalJob as { attempts: number }).attempts = 0;
   }
 
+  // Bug #74: stack lines computed BEFORE the send so the server can persist
+  // them. The wire copy is capped at 50 lines as a bandwidth guard; the
+  // authoritative cap (job.stackTraceLimit) is applied server-side in failJob.
+  const stackLines = err.stack
+    ? err.stack
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+    : [];
+  const wireStack = stackLines.length > 0 ? stackLines.slice(0, 50) : undefined;
+
   try {
     if (embedded) {
       const manager = getSharedManager();
-      await manager.fail(internalJob.id, err.message, token ?? undefined);
+      await manager.fail(internalJob.id, err.message, token ?? undefined, undefined, wireStack);
     } else if (tcp) {
       await tcp.send({
         cmd: 'FAIL',
         id: internalJob.id,
         error: err.message,
+        ...(wireStack ? { stack: wireStack } : {}),
         ...(token ? { token } : {}),
         ...(err instanceof UnrecoverableError ? { unrecoverable: true } : {}),
       });
@@ -278,14 +290,10 @@ async function handleJobFailure<T, R>(
 
   (job as { failedReason?: string }).failedReason = err.message;
 
-  // Bug #74: populate stacktrace from the error's stack
+  // Bug #74: populate stacktrace on the local `failed` event object
   if (err.stack) {
     const limit = internalJob.stackTraceLimit;
-    const lines = err.stack
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-    (job as { stacktrace: string[] | null }).stacktrace = lines.slice(0, limit);
+    (job as { stacktrace: string[] | null }).stacktrace = stackLines.slice(0, limit);
   }
 
   config.onOutcome?.(false);

@@ -8,6 +8,7 @@ import {
   type JobId,
   calculateBackoff,
   canRetry,
+  normalizeStacktrace,
   MAX_TIMELINE_ENTRIES,
 } from '../../domain/types/job';
 import { type JobLocation, EventType } from '../../domain/types/queue';
@@ -186,7 +187,8 @@ export async function failJob(
   jobId: JobId,
   error: string | undefined,
   ctx: AckContext,
-  unrecoverable = false
+  unrecoverable = false,
+  stack?: string[]
 ): Promise<void> {
   const procIdx = processingShardIndex(jobId);
 
@@ -203,6 +205,12 @@ export async function failJob(
   }
 
   job.attempts++;
+  // #74: persist the LAST failure's stack on the job (authoritative cap at
+  // stackTraceLimit) BEFORE branching, so both the retried job and the DLQ
+  // entry carry it. An absent stack (old clients) leaves any previous one intact.
+  if (stack) {
+    job.stacktrace = normalizeStacktrace(stack, job.stackTraceLimit);
+  }
   const failNow = Date.now();
   if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
     job.timeline.push({ state: 'failed', timestamp: failNow, error, attempt: job.attempts });

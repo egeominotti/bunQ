@@ -115,6 +115,7 @@ export interface DbJob {
   stall_timeout: number | null;
   last_heartbeat: number | null;
   timeline: Uint8Array | null;
+  stacktrace: Uint8Array | null; // MessagePack BLOB (#74)
 }
 
 /** Database row type for cron jobs */

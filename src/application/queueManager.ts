@@ -429,7 +429,13 @@ export class QueueManager {
     }
   }
 
-  async fail(jobId: JobId, error?: string, token?: string, unrecoverable = false): Promise<void> {
+  async fail(
+    jobId: JobId,
+    error?: string,
+    token?: string,
+    unrecoverable = false,
+    stack?: string[]
+  ): Promise<void> {
     const lockCtx = this.contextFactory.getLockContext();
     if (token && !lockMgr.verifyLock(jobId, token, lockCtx)) {
       this.throwIfOwnershipConflict(jobId, lockCtx);
@@ -437,7 +443,7 @@ export class QueueManager {
       if (loc?.type !== 'processing') return;
     }
     try {
-      await failJob(jobId, error, this.contextFactory.getAckContext(), unrecoverable);
+      await failJob(jobId, error, this.contextFactory.getAckContext(), unrecoverable, stack);
     } catch (err) {
       // Job removed from processing by stall detection. The stall retry
       // already handles requeuing, so the fail is redundant — return silently.

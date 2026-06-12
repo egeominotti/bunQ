@@ -34,8 +34,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 12', () => {
-    expect(SCHEMA_VERSION).toBe(12);
+  test('schema version is 13', () => {
+    expect(SCHEMA_VERSION).toBe(13);
   });
 
   test('idx_jobs_state_started index exists (stall detection)', () => {

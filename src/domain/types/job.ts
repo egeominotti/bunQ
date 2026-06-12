@@ -121,6 +121,10 @@ export interface Job {
   progress: number;
   progressMessage: string | null;
 
+  // Failure info
+  /** Last failure's stack trace lines (trimmed, capped at stackTraceLimit). Null until a FAIL carries a stack. (#74) */
+  stacktrace: string[] | null;
+
   // Cleanup config
   readonly removeOnComplete: boolean;
   readonly removeOnFail: boolean;
@@ -392,6 +396,7 @@ export function createJob(
     tags: input.tags ?? [],
     progress: 0,
     progressMessage: null,
+    stacktrace: null,
     repeat: parseRepeatConfig(input.repeat),
     lastHeartbeat: createdAt,
     stallCount: 0,
@@ -400,6 +405,26 @@ export function createJob(
     ...v5Opts,
     timeline: [],
   };
+}
+
+/**
+ * Normalize raw stack lines for persistence: keep only strings, trim, drop
+ * empties, cap at `limit` (job.stackTraceLimit). Returns null when nothing
+ * remains (e.g. stackTraceLimit: 0), matching the 2.6.110 event semantics. (#74)
+ */
+export function normalizeStacktrace(
+  lines: readonly unknown[] | undefined,
+  limit: number
+): string[] | null {
+  if (!lines || lines.length === 0) return null;
+  const out: string[] = [];
+  for (const line of lines) {
+    if (out.length >= limit) break;
+    if (typeof line !== 'string') continue;
+    const trimmed = line.trim();
+    if (trimmed) out.push(trimmed);
+  }
+  return out.length > 0 ? out : null;
 }
 
 /** Check if job is delayed */

@@ -66,7 +66,8 @@ export function buildJobProperties<T>(
     delay: job.runAt > job.createdAt ? job.runAt - job.createdAt : 0,
     processedOn: job.startedAt ?? undefined,
     finishedOn: job.completedAt ?? undefined,
-    stacktrace: stacktrace ?? null,
+    // Fall back to the stack persisted on the internal job at FAIL time (#74)
+    stacktrace: stacktrace ?? job.stacktrace ?? null,
     stalledCounter: job.stallCount,
     priority: job.priority,
     parentKey: buildParentKey(job),
@@ -127,6 +128,8 @@ export function buildSerializationMethods<T>(
   jobOpts: JobOptions,
   stacktrace?: string[] | null
 ): Pick<Job<T>, 'toJSON' | 'asJSON'> {
+  // Fall back to the stack persisted on the internal job at FAIL time (#74)
+  const stack = stacktrace ?? job.stacktrace ?? null;
   return {
     toJSON: () => ({
       id,
@@ -137,7 +140,7 @@ export function buildSerializationMethods<T>(
       delay: job.runAt > job.createdAt ? job.runAt - job.createdAt : 0,
       timestamp: job.createdAt,
       attemptsMade: job.attempts,
-      stacktrace: stacktrace ?? null,
+      stacktrace: stack,
       returnvalue: undefined,
       failedReason: undefined,
       finishedOn: job.completedAt ?? undefined,
@@ -154,7 +157,7 @@ export function buildSerializationMethods<T>(
       delay: String(job.runAt > job.createdAt ? job.runAt - job.createdAt : 0),
       timestamp: String(job.createdAt),
       attemptsMade: String(job.attempts),
-      stacktrace: stacktrace ? JSON.stringify(stacktrace) : null,
+      stacktrace: stack ? JSON.stringify(stack) : null,
       returnvalue: undefined,
       failedReason: undefined,
       finishedOn: job.completedAt ? String(job.completedAt) : undefined,

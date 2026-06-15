@@ -138,6 +138,27 @@ export function createRemoveUnprocessedChildrenHandler(
   };
 }
 
+/**
+ * Bug #74: split an Error's stack into trimmed, non-empty lines.
+ * `wireStack` is the bandwidth-capped copy sent to the server (50 lines); the
+ * authoritative cap (job.stackTraceLimit) is applied server-side in failJob.
+ * Shared by the natural-throw path (handleJobFailure) and the explicit
+ * moveToFailed() path so both persist the stack identically.
+ */
+export function computeStackLines(err: Error): {
+  stackLines: string[];
+  wireStack: string[] | undefined;
+} {
+  const stackLines = err.stack
+    ? err.stack
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+    : [];
+  const wireStack = stackLines.length > 0 ? stackLines.slice(0, 50) : undefined;
+  return { stackLines, wireStack };
+}
+
 /** Issue #82: Create moveToFailed handler for use inside processor */
 export function createMoveToFailedHandler(
   embedded: boolean,
@@ -147,14 +168,19 @@ export function createMoveToFailedHandler(
   onCalled: (error: Error) => void
 ): (id: string, error: Error, _lockToken?: string) => Promise<void> {
   return async (_id: string, error: Error, _lockToken?: string) => {
+    // Bug #74 follow-up: carry the stack on explicit moveToFailed() too. The
+    // natural-throw path already does; @arthurvanl's repro showed the manual
+    // path lost it. Compute before the send so the server can persist it.
+    const { wireStack } = computeStackLines(error);
     if (embedded) {
       const manager = getSharedManager();
-      await manager.fail(internalJob.id, error.message, token ?? undefined);
+      await manager.fail(internalJob.id, error.message, token ?? undefined, undefined, wireStack);
     } else if (tcp) {
       await tcp.send({
         cmd: 'FAIL',
         id: internalJob.id,
         error: error.message,
+        ...(wireStack ? { stack: wireStack } : {}),
         ...(token ? { token } : {}),
       });
     }

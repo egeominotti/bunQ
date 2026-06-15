@@ -39,6 +39,7 @@ import {
   createGetDependenciesHandler,
   createGetDependenciesCountHandler,
   createRemoveDeduplicationKeyHandler,
+  computeStackLines,
 } from './processorHandlers';
 
 /** Processor configuration */
@@ -137,7 +138,7 @@ export async function processJob<T, R>(
     const result = await processor(job);
 
     // Issue #82: If moveToFailed/moveToCompleted was called, skip auto-ACK
-    if (handleManualMove(manualMove, job, config)) return;
+    if (handleManualMove(manualMove, job, config, internalJob)) return;
 
     // Normal path: auto-ACK
     try {
@@ -166,7 +167,7 @@ export async function processJob<T, R>(
     emitter.emit('completed', job, result);
   } catch (error) {
     // Issue #82: If moveToFailed was already called, skip normal failure handling
-    if (handleManualMove(manualMove, job, config)) return;
+    if (handleManualMove(manualMove, job, config, internalJob)) return;
     await handleJobFailure(internalJob, error, config, { job, jobIdStr, token });
   }
 }
@@ -175,11 +176,22 @@ export async function processJob<T, R>(
 function handleManualMove<T extends FlowJobData>(
   manualMove: { result: { type: 'completed' | 'failed'; value?: unknown; error?: Error } | null },
   job: Job<T>,
-  config: { onOutcome?: (succeeded: boolean) => void; emitter: EventEmitter }
+  config: { onOutcome?: (succeeded: boolean) => void; emitter: EventEmitter },
+  internalJob: InternalJob
 ): boolean {
   if (manualMove.result?.type === 'failed') {
     const err = manualMove.result.error ?? new Error('Job manually moved to failed');
     (job as { failedReason?: string }).failedReason = err.message;
+    // Bug #74 follow-up: populate stacktrace on the local `failed` event for the
+    // explicit moveToFailed() path too, mirroring handleJobFailure. The stack is
+    // persisted server-side by createMoveToFailedHandler's FAIL/manager.fail call.
+    if (err.stack) {
+      const { stackLines } = computeStackLines(err);
+      (job as { stacktrace: string[] | null }).stacktrace = stackLines.slice(
+        0,
+        internalJob.stackTraceLimit
+      );
+    }
     config.onOutcome?.(false);
     config.emitter.emit('failed', job, err);
     return true;
@@ -258,13 +270,7 @@ async function handleJobFailure<T, R>(
   // Bug #74: stack lines computed BEFORE the send so the server can persist
   // them. The wire copy is capped at 50 lines as a bandwidth guard; the
   // authoritative cap (job.stackTraceLimit) is applied server-side in failJob.
-  const stackLines = err.stack
-    ? err.stack
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-    : [];
-  const wireStack = stackLines.length > 0 ? stackLines.slice(0, 50) : undefined;
+  const { stackLines, wireStack } = computeStackLines(err);
 
   try {
     if (embedded) {

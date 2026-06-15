@@ -10,6 +10,31 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.13] - 2026-06-15
+
+### Fixed — explicit `job.moveToFailed(err)` now carries the stacktrace (#74 follow-up)
+
+The 2.8.11 fix wired the failure stack through the **natural-throw** path only: a
+processor that `throw`s gets its stack sent on `FAIL` (persisted server-side) and set
+on the local `failed` event's `job.stacktrace`. A processor that catches the error and
+reports it explicitly with `await job.moveToFailed(err)` went through a different code
+path that never touched the stack, so — as @arthurvanl's repro showed — `job.stacktrace`
+was `null` on the `failed` event and `queue.getJob(id).stacktrace` stayed `null`, while
+an equivalent natural throw populated both.
+
+- **`moveToFailed()` sends the stack.** The explicit handler now computes the stack
+  lines and includes them on `FAIL` (`stack`, TCP) / `manager.fail(..., wireStack)`
+  (embedded), so the server persists them exactly like the throw path — visible via
+  `getJob()` and in DLQ entries.
+- **Local `failed` event populated.** The manual-move handler now sets
+  `job.stacktrace` (capped at `job.stackTraceLimit`) on the emitted job, matching the
+  natural-throw behavior.
+- The stack-splitting logic is now a single shared `computeStackLines()` helper used by
+  both paths, so they can't drift apart again.
+
+Reproduced in both modes with `test/repro-issue74-movetofailed-stacktrace.test.ts`
+(local event + server-side `getJob()` persistence, embedded and TCP).
+
 ## [2.8.12] - 2026-06-15
 
 ### Fixed — Worker no longer overshoots `concurrency` under bursty completions (#96)

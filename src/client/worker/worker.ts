@@ -615,6 +615,19 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       }
 
       if (item) {
+        // Issue #96: re-check the concurrency gate before starting. poll()
+        // checked it, but `await doPullBatch()` above — or a setImmediate path
+        // that bypasses poll() — may have filled the slots since. This check is
+        // atomic with startJob()'s activeJobs++ (no await between here and the
+        // increment), so it cannot overshoot. If full, requeue the job (we still
+        // own it via pulledJobIds/jobTokens) and let a freed slot pick it up.
+        if (this.activeJobs >= this.opts.concurrency) {
+          this.requeueItem(item);
+          this.pollTimer = setTimeout(() => {
+            this.poll();
+          }, 10);
+          return;
+        }
         this.consecutiveErrors = 0;
         this.startJob(item.job, item.token);
       } else {
@@ -663,6 +676,15 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       this.pendingJobsHead = 0;
     }
     return item;
+  }
+
+  /** Put an item back at the front of the pending buffer (Issue #96). */
+  private requeueItem(item: { job: InternalJob; token: string | null }): void {
+    if (this.pendingJobsHead > 0) {
+      this.pendingJobs[--this.pendingJobsHead] = item;
+    } else {
+      this.pendingJobs.unshift(item);
+    }
   }
 
   /**

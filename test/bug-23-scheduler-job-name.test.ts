@@ -57,8 +57,9 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
     // Wait for the cron to fire
     await Bun.sleep(200);
 
+    let worker: Worker | undefined;
     const receivedName = await new Promise<string>((resolve) => {
-      const worker = new Worker(
+      worker = new Worker(
         'test-job-name',
         async (job) => {
           resolve(job.name);
@@ -67,6 +68,11 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
         { embedded: true }
       );
     });
+    // Close the worker — otherwise it keeps polling forever (leaked across the
+    // whole suite) and a stray poll during another test's disk-IO injection
+    // surfaces as an "Unhandled error between tests" (emit('error') with no
+    // listener). See CI failure on 2.8.14.
+    await worker?.close();
 
     expect(receivedName).toBe('send-newsletter');
   });

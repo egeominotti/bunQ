@@ -8,7 +8,7 @@ import type { JobLogEntry } from '../domain/types/worker';
 import type { Shard } from '../domain/queue/shard';
 import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 import type { RWLock } from '../shared/lock';
-import type { LRUMap, BoundedSet, BoundedMap, SetLike } from '../shared/lru';
+import type { LRUMap, BoundedSet, BoundedMap, SetLike, MapLike } from '../shared/lru';
 import type { EventsManager } from './eventsManager';
 import type { WebhookManager } from './webhookManager';
 import type { WorkerManager } from './workerManager';
@@ -88,7 +88,7 @@ export interface QueueManagerState {
   readonly startTime: number;
 
   // Per-queue metrics
-  readonly perQueueMetrics: Map<string, { totalCompleted: bigint; totalFailed: bigint }>;
+  readonly perQueueMetrics: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
 }
 
 /** Context for lock operations */
@@ -117,6 +117,9 @@ export interface BackgroundContext extends QueueManagerState {
   monitoringState: MonitoringState;
   // Completed-job full data (for recovery of post-restart cleanup)
   completedJobsData: BoundedMap<JobId, Job>;
+  // Bare completion ids of removeOnComplete jobs (no payload) — lets dependent
+  // jobs unblock even though the parent's full record was dropped.
+  depCompletions?: BoundedSet<JobId>;
 }
 
 /** Context for stats operations */
@@ -139,5 +142,5 @@ export interface StatsContext {
     totalFailed: { value: bigint };
   };
   startTime: number;
-  perQueueMetrics?: Map<string, { totalCompleted: bigint; totalFailed: bigint }>;
+  perQueueMetrics?: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
 }

@@ -166,6 +166,10 @@ interface MaxStallsOptions {
 /** Move job to DLQ when max stalls exceeded */
 function handleMaxStallsExceeded(opts: MaxStallsOptions): void {
   const { jobId, job, lock, shard, ctx, now } = opts;
+  // Release the concurrency slot (+group+uniqueKey) acquired at pull before
+  // moving to DLQ — otherwise the slot leaks (mirrors
+  // stallDetection.moveStalliedJobToDlq).
+  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
   shard.addToDlq(job, FailureReason.Stalled, `Lock expired after ${lock.renewalCount} renewals`);
   ctx.jobIndex.set(jobId, { type: 'dlq', queueName: job.queue });
 
@@ -193,6 +197,10 @@ interface RequeueOptions {
 function requeueExpiredJob(opts: RequeueOptions): void {
   const { jobId, job, queue, idx, ctx, now } = opts;
   const shard = ctx.shards[idx];
+  // Release the concurrency slot (+group+uniqueKey) acquired at pull before
+  // re-pushing — otherwise the slot leaks and the queue wedges (mirrors
+  // stallDetection.retryStalliedJob).
+  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
   queue.push(job);
   const isDelayed = job.runAt > now;
   shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);

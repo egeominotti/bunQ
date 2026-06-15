@@ -10,6 +10,21 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.14] - 2026-06-15
+
+### Fixed — 8 stability bugs from an end-to-end audit + destruction test (each with a RED→GREEN reproduction test)
+
+The data plane was already bulletproof under the destruction test (exactly-once held through a SIGKILL flood, zero corruption, lossless crash recovery, bad-input isolation). These fixes close feature-conditional defects in the control plane and resource hygiene. No change to data correctness or process stability for the default producer/consumer path.
+
+- **Concurrency slot leak on lock expiry** (`lockManager.ts`): `requeueExpiredJob` / `handleMaxStallsExceeded` now call `shard.releaseJobResources()` before re-queue/DLQ, mirroring the stall-detection paths. Previously a queue with `setConcurrency(N)` permanently wedged (throughput → 0) after N lock expiries under worker churn.
+- **Dependency children orphaned** (`ack.ts`, `ackHelpers.ts`, `dependencyProcessor.ts`, `push.ts`, `backgroundTasks.ts`, `sqlite.ts`): a child `dependsOn` a parent that returned `undefined` (across a restart) or had `removeOnComplete: true` was silently never run and dropped after 1h. Added a bounded `depCompletions` set for removeOnComplete parents and made dependency recovery recognize `state='completed'` rows (not only `job_results`). Fixes late-dependent ordering too.
+- **`addBulk` / PUSHB ignored `durable`** (`push.ts`, `sqlite.ts`): durable batch jobs sat in the 10ms write buffer instead of being written immediately like a single durable push. `insertJobsBatch(jobs, durable)` now writes the durable subset to disk atomically (single transaction), bypassing the buffer.
+- **Pool socket drop re-dispatched in-flight jobs** (`clientTracking.ts`, `worker.ts`): with `poolSize > 1`, dropping the connection that pulled a job re-queued a job a live worker was still running (double execution). `releaseClientJobs` now skips jobs whose lock was renewed (`renewalCount > 0`); the worker renews just-pulled locks immediately so the window cannot open.
+- **`Worker.close()` hang on buffered jobs** (`worker.ts`): a graceful close with group-limited buffered jobs hung forever; `close(true)` could not pre-empt it. Buffered (pulled-but-unstarted) jobs are now requeued on close, the drain waits only on genuinely in-flight jobs, and a force close pre-empts an in-progress graceful close.
+- **Worker not re-registered after a TCP reconnect** (`tcpPool.ts`, `worker.ts`): after a transient drop the worker vanished from `ListWorkers` / `getForQueue` while still consuming jobs. The pool now exposes `onReconnect()` and the worker re-registers on reconnect. (Visibility only — no data loss.)
+- **`moveToWaitingChildren` stranded the job** (`queryOperations.ts`, `jobManagement.ts`): a job moved to waiting-children was invisible to `getJob` and uncancellable. `getJob` / `getJobByCustomId` / `cancelJob` now consult `waitingChildren`.
+- **`perQueueMetrics` unbounded growth** (`queueManager.ts`, `cleanupTasks.ts`): the per-queue metrics map grew one permanent entry per distinct queue name and was not freed by `obliterate()`. It is now LRU-bounded and freed by `obliterate()`; cumulative counters survive a transient drain.
+
 ## [2.8.13] - 2026-06-15
 
 ### Fixed — explicit `job.moveToFailed(err)` now carries the stacktrace (#74 follow-up)

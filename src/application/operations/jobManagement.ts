@@ -43,6 +43,16 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         ctx.storage?.deleteJob(jobId);
         return { success: true, queueName: location.queueName };
       }
+      // Not in the run queue — it may be parked in waitingChildren (moved via
+      // moveToWaitingChildren, which already released its resources and does not
+      // track it in the queued counter, so do NOT decrement/release here).
+      const parked = shard.waitingChildren.get(jobId);
+      if (parked) {
+        shard.waitingChildren.delete(jobId);
+        ctx.jobIndex.delete(jobId);
+        ctx.storage?.deleteJob(jobId);
+        return { success: true, queueName: location.queueName };
+      }
       return { success: false, queueName: location.queueName };
     });
 

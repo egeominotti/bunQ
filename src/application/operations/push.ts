@@ -28,6 +28,8 @@ export interface PushContext {
   shardLocks: RWLock[];
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
+  /** Bare completion ids for removeOnComplete jobs so dependents start ready */
+  depCompletions?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
@@ -178,7 +180,11 @@ function insertJobToShard(
   ctx: PushContext
 ): void {
   const hasDeps = job.dependsOn.length > 0;
-  const needsWaiting = hasDeps && !job.dependsOn.every((depId) => ctx.completedJobs.has(depId));
+  const needsWaiting =
+    hasDeps &&
+    !job.dependsOn.every(
+      (depId) => ctx.completedJobs.has(depId) || (ctx.depCompletions?.has(depId) ?? false)
+    );
 
   const now = Date.now();
   if (needsWaiting) {
@@ -279,6 +285,10 @@ export async function pushJobBatch(
   const idx = shardIndex(queue);
   const resultIds: JobId[] = [];
   const jobsToInsert: Job[] = [];
+  // Jobs flagged durable must bypass the 10ms write buffer (immediate fsync
+  // path), exactly like a single durable push — otherwise addBulk silently
+  // downgrades the documented "durable" guarantee.
+  const durableJobs: Job[] = [];
 
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
@@ -303,6 +313,7 @@ export async function pushJobBatch(
       // Insert to shard
       insertJobToShard(job, queue, shard, idx, ctx);
       jobsToInsert.push(job);
+      if (input.durable) durableJobs.push(job);
       resultIds.push(job.id);
     }
 
@@ -312,7 +323,16 @@ export async function pushJobBatch(
   });
 
   if (jobsToInsert.length > 0) {
-    ctx.storage?.insertJobsBatch(jobsToInsert);
+    if (durableJobs.length === 0) {
+      ctx.storage?.insertJobsBatch(jobsToInsert);
+    } else {
+      // Durable jobs bypass the write buffer (immediate disk write); the rest
+      // still go through the batched buffer for throughput.
+      const durableSet = new Set(durableJobs);
+      const buffered = jobsToInsert.filter((j) => !durableSet.has(j));
+      if (buffered.length > 0) ctx.storage?.insertJobsBatch(buffered);
+      ctx.storage?.insertJobsBatch(durableJobs, true);
+    }
     ctx.totalPushed.value += BigInt(jobsToInsert.length);
     throughputTracker.pushRate.increment(jobsToInsert.length);
 

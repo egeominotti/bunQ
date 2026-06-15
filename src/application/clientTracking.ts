@@ -62,6 +62,17 @@ export async function releaseClientJobs(clientId: string, ctx: LockContext): Pro
     const loc = ctx.jobIndex.get(jobId);
     if (loc?.type !== 'processing') continue;
 
+    // A job whose lock has been renewed since pull (renewalCount > 0) is being
+    // actively heartbeated by a live worker. With a pooled client, heartbeats
+    // travel on a DIFFERENT connection than the one that pulled, so THIS socket
+    // closing does not mean the worker died — re-queuing here would re-dispatch
+    // (double-execute) a job the worker still holds. Leave it; lock expiry /
+    // stall detection reclaims it if the worker truly stops heartbeating.
+    // A never-renewed lock (renewalCount === 0) keeps the original fast-recovery
+    // behavior: requeue immediately on disconnect.
+    const lock = ctx.jobLocks.get(jobId);
+    if (lock && lock.renewalCount > 0) continue;
+
     const procIdx = loc.shardIdx;
     const job = ctx.processingShards[procIdx].get(jobId);
     if (!job) continue;

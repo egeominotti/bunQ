@@ -61,6 +61,10 @@ export class QueueManager {
   private readonly jobIndex = new Map<JobId, JobLocation>();
   private readonly completedJobs!: BoundedSet<JobId>;
   private readonly completedJobsData!: BoundedMap<JobId, Job>;
+  // Bare completion ids of removeOnComplete jobs — kept ONLY so dependent jobs
+  // can unblock (no payload, not surfaced in state/stats). Bounded like
+  // completedJobs; entries are pruned by the dependency processor once consumed.
+  private readonly depCompletions!: BoundedSet<JobId>;
   private readonly jobResults!: LRUMap<JobId, unknown>;
   private readonly customIdMap!: LRUMap<string, JobId>;
   private readonly jobLogs!: LRUMap<JobId, JobLogEntry[]>;
@@ -110,10 +114,16 @@ export class QueueManager {
     totalCompleted: { value: 0n },
     totalFailed: { value: 0n },
   };
-  private readonly perQueueMetrics = new Map<
+  // LRU-bounded so high-cardinality / dynamically-named queues cannot grow it
+  // without bound. Live queues stay resident (recently accessed on every
+  // ack/fail); only long-idle ephemeral names are evicted. obliterate() also
+  // deletes the entry explicitly. Reclaiming on a transient drain is avoided
+  // on purpose so cumulative per-queue counters survive idle periods.
+  // Assigned in the constructor (needs this.config).
+  private readonly perQueueMetrics!: LRUMap<
     string,
     { totalCompleted: bigint; totalFailed: bigint }
-  >();
+  >;
   private readonly startTime = Date.now();
 
   // Background task handles
@@ -137,6 +147,10 @@ export class QueueManager {
       this.jobIndex.delete(jobId);
       this.completedJobsData.delete(jobId);
     });
+    this.depCompletions = new BoundedSet<JobId>(this.config.maxCompletedJobs);
+    this.perQueueMetrics = new LRUMap<string, { totalCompleted: bigint; totalFailed: bigint }>(
+      this.config.maxCustomIds
+    );
     this.jobResults = new LRUMap<JobId, unknown>(this.config.maxJobResults);
     this.customIdMap = new LRUMap<string, JobId>(this.config.maxCustomIds);
     this.jobLogs = new LRUMap<JobId, JobLogEntry[]>(this.config.maxJobLogs);
@@ -202,6 +216,7 @@ export class QueueManager {
       jobIndex: this.jobIndex,
       completedJobs: this.completedJobs,
       completedJobsData: this.completedJobsData,
+      depCompletions: this.depCompletions,
       jobResults: this.jobResults,
       customIdMap: this.customIdMap,
       jobLogs: this.jobLogs,
@@ -804,6 +819,12 @@ export class QueueManager {
       if (toDrop.has(jid)) customIdsToDelete.push(cid);
     }
     for (const cid of customIdsToDelete) this.customIdMap.delete(cid);
+
+    // Per-queue cumulative counters are keyed by queue name and never expire on
+    // their own; obliterate is the documented way to reclaim ALL state for a
+    // queue, so drop its metrics entry too (prevents unbounded growth for
+    // ephemeral/dynamically-named queues).
+    this.perQueueMetrics.delete(queue);
 
     this.unregisterQueueName(queue);
     this.dashboardEmit?.('queue:obliterated', { queue });
@@ -1707,6 +1728,7 @@ export class QueueManager {
     this.jobIndex.clear();
     this.completedJobs.clear();
     this.completedJobsData.clear();
+    this.depCompletions.clear();
     this.jobResults.clear();
     this.jobLogs.clear();
     this.customIdMap.clear();

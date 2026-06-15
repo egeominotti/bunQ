@@ -157,11 +157,13 @@ export interface FinalizeContext {
   storage: SqliteStorage | null;
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
+  /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
+  depCompletions?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
   jobIndex: Map<JobId, JobLocation>;
   customIdMap?: MapLike<string, JobId>;
   totalCompleted: { value: bigint };
-  perQueueMetrics?: Map<string, { totalCompleted: bigint; totalFailed: bigint }>;
+  perQueueMetrics?: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
   broadcast: (event: {
     eventType: EventType;
     queue: string;
@@ -241,6 +243,11 @@ export function finalizeBatchAck<T>(
     } else {
       ctx.jobIndex.delete(jobId);
       if (hasStorage) storage.deleteJob(jobId);
+      // removeOnComplete drops the full job to bound memory, but dependents gate
+      // readiness on completedJobs.has(parentId). Record the bare completion id
+      // (no payload) so dependent jobs still unblock, without surfacing the job
+      // in state/stats queries.
+      ctx.depCompletions?.add(jobId);
     }
   }
 

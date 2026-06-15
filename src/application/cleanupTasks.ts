@@ -247,6 +247,11 @@ function cleanEmptyQueues(ctx: BackgroundContext): void {
       shard.clearQueueLimiters(queueName);
       shard.stallConfig.delete(queueName);
       shard.dlqConfig.delete(queueName);
+      // NOTE: perQueueMetrics is intentionally NOT pruned here — it is an
+      // LRU-bounded map and these counters are cumulative, so they must survive
+      // a transient drain (a busy queue momentarily empty must not reset to 0).
+      // obliterate() reclaims it explicitly; the LRU cap bounds growth for
+      // ephemeral/dynamically-named queues.
       ctx.dashboardEmit?.('queue:removed', { queue: queueName });
       ctx.unregisterQueueName(queueName);
     }

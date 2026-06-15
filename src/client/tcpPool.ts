@@ -122,6 +122,18 @@ export class TcpConnectionPool {
     return Promise.all(promises);
   }
 
+  /**
+   * Invoke `cb` whenever a pooled connection (re)establishes. TcpClient emits
+   * 'connected' on every successful connect, including reconnects. Used by
+   * Worker to re-register after a reconnect (the server drops registration when
+   * the registering connection closes and each reconnect gets a fresh clientId).
+   */
+  onReconnect(cb: () => void): void {
+    for (const client of this.clients) {
+      client.on('connected', cb);
+    }
+  }
+
   /** Check if any connection is ready */
   isConnected(): boolean {
     return this.clients.some((c) => c.isConnected());

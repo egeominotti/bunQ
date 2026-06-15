@@ -17,7 +17,7 @@ import { parseJobFromResponse } from './jobParser';
 import { processJob } from './processor';
 import { WorkerRateLimiter } from './workerRateLimiter';
 import { GroupConcurrencyLimiter } from './groupConcurrency';
-import { startHeartbeat, type HeartbeatDeps } from './workerHeartbeat';
+import { startHeartbeat, sendHeartbeat, type HeartbeatDeps } from './workerHeartbeat';
 import { pullEmbedded, pullTcp, type PullConfig } from './workerPull';
 import { resolveToken } from '../resolveToken';
 
@@ -83,6 +83,9 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
   private running = false;
   private paused = false;
   private _closing = false;
+  // Set when a force close is requested — allows close(true) to pre-empt an
+  // in-progress graceful close(false) by breaking out of its drain loop.
+  private _forceClose = false;
   private _closingPromise: Promise<void> | null = null;
   private closed = false;
   private activeJobs = 0;
@@ -189,6 +192,16 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       this.tcpPool = createTcpPool(opts, this.opts.concurrency);
       this.tcp = this.tcpPool;
       this.ackBatcher.setTcp(this.tcp);
+      // The server drops worker registration when the registering connection
+      // closes, and each pooled reconnect gets a fresh server clientId. Re-send
+      // RegisterWorker on reconnect so the worker stays visible in
+      // WorkerManager (ListWorkers / getForQueue / skipIfNoWorker) while it
+      // keeps consuming jobs. Only acts once we were actually registered.
+      this.tcpPool.onReconnect(() => {
+        if (this.closed || this._closing || !this.registered) return;
+        this.registered = false;
+        this.registerWithServer();
+      });
     }
 
     if (this.opts.autorun) this.run();
@@ -200,6 +213,7 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
     this.running = true;
     this.paused = false;
     this._closing = false;
+    this._forceClose = false;
     this._closingPromise = null;
     // Defer the 'ready' emit so listeners attached synchronously after
     // construction (e.g. `new Worker(...).on('ready', ...)`) still receive it.
@@ -498,7 +512,15 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
 
   async close(force = false): Promise<void> {
     if (this.closed) return;
-    if (this._closingPromise) return this._closingPromise;
+    // A force close must be able to pre-empt an in-progress graceful close:
+    // the graceful drain only waits on genuinely in-flight jobs, but a caller
+    // asking to force-close wants to stop waiting now. Flip the force flag so
+    // the running _doClose's drain loop exits, and return the same promise.
+    if (this._closingPromise) {
+      if (force) this._forceClose = true;
+      return this._closingPromise;
+    }
+    this._forceClose = force;
     this._closingPromise = this._doClose(force);
     return this._closingPromise;
   }
@@ -520,9 +542,20 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       this.workerHeartbeatTimer = null;
     }
 
+    // Release buffered pulled-but-unstarted jobs back to the queue. During
+    // _closing every code path that would advance the buffer (poll/tryProcess/
+    // the startJob().finally re-poll) early-returns, so a buffered job is never
+    // started — yet it holds a server-side lock and sits in `active` state.
+    // Without this, a graceful drain that waited on the buffer would hang
+    // forever (e.g. group-limited jobs buffered behind a max:1 limiter). We
+    // requeue them (Active -> Waiting) so they are re-pullable and not lost.
+    await this.releaseBufferedJobs();
+
     if (!force) {
-      const bufferSize = () => this.pendingJobs.length - this.pendingJobsHead;
-      while (this.activeJobs > 0 || bufferSize() > 0) {
+      // Wait only on genuinely in-flight jobs. The buffer was released above,
+      // so it must NOT be part of the drain condition. A concurrent force
+      // close (this._forceClose) breaks out immediately.
+      while (this.activeJobs > 0 && !this._forceClose) {
         await Bun.sleep(50);
       }
     }
@@ -560,6 +593,42 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
     this.closed = true;
     this._closing = false;
     this.emit('closed');
+  }
+
+  /**
+   * Release all buffered (pulled-but-unstarted) jobs back to the queue on close.
+   * These jobs are `active` server-side holding a lock; moving them back to
+   * `waiting` makes them re-pullable so nothing is lost, and removes them from
+   * the close drain (which would otherwise hang on a buffer that can never be
+   * advanced while `_closing` is set). Best-effort: a job that can't be
+   * released (e.g. already completed/stall-retried) is simply dropped from the
+   * local buffer — its server-side lock will expire and requeue it.
+   */
+  private async releaseBufferedJobs(): Promise<void> {
+    const buffered = this.pendingJobs.slice(this.pendingJobsHead);
+    this.pendingJobs = [];
+    this.pendingJobsHead = 0;
+    if (buffered.length === 0) return;
+
+    for (const { job, token } of buffered) {
+      const id = String(job.id);
+      try {
+        if (this.embedded) {
+          const manager = getSharedManager();
+          await manager.moveActiveToWait(jobId(id));
+          // moveActiveToWait re-queues the job (active -> waiting); release the
+          // lock token we still hold so it is fully owner-free and re-pullable.
+          if (this.opts.useLocks) manager.releaseLock(jobId(id), token ?? undefined);
+        } else if (this.tcp) {
+          await this.tcp.send({ cmd: 'MoveToWait', id });
+        }
+      } catch {
+        // Best-effort: lock expiration will requeue anything we couldn't release.
+      } finally {
+        this.pulledJobIds.delete(id);
+        this.jobTokens.delete(id);
+      }
+    }
   }
 
   // ============ Processing Pipeline ============
@@ -664,6 +733,18 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       if (this.opts.useLocks && pulledItem.token) {
         this.jobTokens.set(jobIdStr, pulledItem.token);
       }
+    }
+    // Renew the just-pulled locks immediately (fire-and-forget). With a pooled
+    // client (poolSize > 1), the PULL and subsequent heartbeats travel on
+    // different connections; the server only releases an in-flight job on
+    // connection drop if its lock was never renewed (renewalCount === 0). The
+    // periodic heartbeat timer does not fire until one interval later, leaving a
+    // window where a dropped pulling-socket would re-dispatch a job the worker
+    // is actively running. An immediate renew closes that window. Only needed
+    // for multi-connection lock-based workers (poolSize 1 keeps pull+heartbeat
+    // on the same socket, so there is nothing to protect against).
+    if (this.opts.useLocks && items.length > 0 && this.tcpPool && this.tcpPool.getPoolSize() > 1) {
+      void sendHeartbeat(this.getHeartbeatDeps());
     }
   }
 

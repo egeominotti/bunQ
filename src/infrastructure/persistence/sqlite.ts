@@ -289,35 +289,40 @@ export class SqliteStorage {
   /** Insert job immediately (bypass buffer) */
   insertJobImmediate(job: Job): void {
     this.safeWrite(() => {
-      this.statements
-        .get('insertJob')!
-        .run(
-          job.id,
-          job.queue,
-          pack(job.data),
-          job.priority,
-          job.createdAt,
-          job.runAt,
-          job.attempts,
-          job.maxAttempts,
-          job.backoff,
-          job.ttl,
-          job.timeout,
-          job.uniqueKey,
-          job.customId,
-          job.dependsOn.length > 0 ? pack(job.dependsOn) : null,
-          job.parentId,
-          job.childrenIds.length > 0 ? pack(job.childrenIds) : null,
-          job.tags.length > 0 ? pack(job.tags) : null,
-          job.runAt > Date.now() ? 'delayed' : 'waiting',
-          job.lifo ? 1 : 0,
-          job.groupId,
-          job.removeOnComplete ? 1 : 0,
-          job.removeOnFail ? 1 : 0,
-          job.stallTimeout,
-          job.timeline.length > 0 ? pack(job.timeline) : null
-        );
+      this.runInsertJobStmt(job);
     });
+  }
+
+  /** Run the insertJob statement for one job (no safeWrite/transaction wrapper). */
+  private runInsertJobStmt(job: Job): void {
+    this.statements
+      .get('insertJob')!
+      .run(
+        job.id,
+        job.queue,
+        pack(job.data),
+        job.priority,
+        job.createdAt,
+        job.runAt,
+        job.attempts,
+        job.maxAttempts,
+        job.backoff,
+        job.ttl,
+        job.timeout,
+        job.uniqueKey,
+        job.customId,
+        job.dependsOn.length > 0 ? pack(job.dependsOn) : null,
+        job.parentId,
+        job.childrenIds.length > 0 ? pack(job.childrenIds) : null,
+        job.tags.length > 0 ? pack(job.tags) : null,
+        job.runAt > Date.now() ? 'delayed' : 'waiting',
+        job.lifo ? 1 : 0,
+        job.groupId,
+        job.removeOnComplete ? 1 : 0,
+        job.removeOnFail ? 1 : 0,
+        job.stallTimeout,
+        job.timeline.length > 0 ? pack(job.timeline) : null
+      );
   }
 
   /**
@@ -535,13 +540,38 @@ export class SqliteStorage {
   /** Load all completed job IDs (for dependency recovery) */
   loadCompletedJobIds(): Set<JobId> {
     const rows = this.db.query<{ job_id: string }, []>('SELECT job_id FROM job_results').all();
-    return new Set(rows.map((r) => r.job_id as JobId));
+    const ids = new Set(rows.map((r) => r.job_id as JobId));
+    // A job acked with no/undefined result has state='completed' but NO job_results
+    // row. Include state='completed' ids so dependency recovery still sees it as
+    // done and unblocks dependents (instead of parking them forever).
+    const stateRows = this.db
+      .query<{ id: string }, []>("SELECT id FROM jobs WHERE state = 'completed'")
+      .all();
+    for (const r of stateRows) ids.add(r.id as JobId);
+    return ids;
   }
 
   // ============ Bulk Operations ============
 
-  /** Insert batch of jobs (adds to buffer) */
-  insertJobsBatch(jobs: Job[]): void {
+  /**
+   * Insert batch of jobs. By default the jobs go through the write buffer.
+   * When `durable` is true they bypass the buffer and are written to disk
+   * immediately (matching single-push durable semantics) — used for addBulk
+   * jobs flagged `durable: true`.
+   */
+  insertJobsBatch(jobs: Job[], durable?: boolean): void {
+    if (durable) {
+      // Atomic immediate write: every row hits disk in ONE transaction, so a
+      // mid-batch failure rolls back the whole batch (no partial on-disk state)
+      // — bypassing the write buffer to honor the durable contract.
+      this.safeWrite(() => {
+        const tx = this.db.transaction((batch: Job[]) => {
+          for (const job of batch) this.runInsertJobStmt(job);
+        });
+        tx(jobs);
+      });
+      return;
+    }
     this.writeBuffer.addBatch(jobs);
   }
 

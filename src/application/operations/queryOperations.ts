@@ -46,7 +46,10 @@ export async function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | nul
       return await withReadLock(ctx.shardLocks[location.shardIdx], () => {
         const shard = ctx.shards[location.shardIdx];
         return (
-          shard.getQueue(location.queueName).find(jobId) ?? shard.waitingDeps.get(jobId) ?? null
+          shard.getQueue(location.queueName).find(jobId) ??
+          shard.waitingDeps.get(jobId) ??
+          shard.waitingChildren.get(jobId) ??
+          null
         );
       });
     }
@@ -86,7 +89,12 @@ export function getJobByCustomId(customId: string, ctx: QueryContext): Job | nul
 
   if (location.type === 'queue') {
     const shard = ctx.shards[location.shardIdx];
-    return shard.getQueue(location.queueName).find(jobId) ?? shard.waitingDeps.get(jobId) ?? null;
+    return (
+      shard.getQueue(location.queueName).find(jobId) ??
+      shard.waitingDeps.get(jobId) ??
+      shard.waitingChildren.get(jobId) ??
+      null
+    );
   }
   if (location.type === 'processing') {
     return ctx.processingShards[location.shardIdx].get(jobId) ?? null;

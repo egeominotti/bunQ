@@ -46,10 +46,16 @@ export async function processPendingDependencies(ctx: BackgroundContext): Promis
         const shard = ctx.shards[i];
         const jobsToPromote: Job[] = [];
 
-        // Check which jobs have all dependencies satisfied (inside lock)
+        // Check which jobs have all dependencies satisfied (inside lock).
+        // A removeOnComplete parent is not in completedJobs (its full record was
+        // dropped to bound memory), so also honor its bare-id depCompletions entry.
         for (const jobId of jobIdsToCheck) {
           const job = shard.waitingDeps.get(jobId);
-          if (job?.dependsOn.every((dep) => ctx.completedJobs.has(dep))) {
+          if (
+            job?.dependsOn.every(
+              (dep) => ctx.completedJobs.has(dep) || (ctx.depCompletions?.has(dep) ?? false)
+            )
+          ) {
             jobsToPromote.push(job);
           }
         }
@@ -61,6 +67,12 @@ export async function processPendingDependencies(ctx: BackgroundContext): Promis
       });
     })
   );
+
+  // NOTE: depCompletions is intentionally NOT pruned here. It is a FIFO
+  // BoundedSet (same cap as completedJobs), so it self-bounds. Pruning eagerly
+  // once "no waiters remain" would orphan a dependent pushed AFTER a
+  // removeOnComplete parent completed — exactly the symmetry completedJobs
+  // provides for normal parents (readiness holds for the whole bounded window).
 }
 
 /** Move jobs from waitingDeps to the active queue */

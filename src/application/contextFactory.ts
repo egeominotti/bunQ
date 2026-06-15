@@ -8,7 +8,7 @@ import type { JobLogEntry } from '../domain/types/worker';
 import type { Shard } from '../domain/queue/shard';
 import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 import type { RWLock } from '../shared/lock';
-import type { LRUMap, BoundedSet, BoundedMap } from '../shared/lru';
+import type { LRUMap, BoundedSet, BoundedMap, MapLike } from '../shared/lru';
 import type { WebhookManager } from './webhookManager';
 import type { WorkerManager } from './workerManager';
 import type { EventsManager } from './eventsManager';
@@ -34,6 +34,7 @@ export interface ContextDependencies {
   jobIndex: Map<JobId, JobLocation>;
   completedJobs: BoundedSet<JobId>;
   completedJobsData: BoundedMap<JobId, Job>;
+  depCompletions?: BoundedSet<JobId>;
   jobResults: LRUMap<JobId, unknown>;
   customIdMap: LRUMap<string, JobId>;
   jobLogs: LRUMap<JobId, JobLogEntry[]>;
@@ -55,7 +56,7 @@ export interface ContextDependencies {
   };
   startTime: number;
   maxLogsPerJob: number;
-  perQueueMetrics: Map<string, { totalCompleted: bigint; totalFailed: bigint }>;
+  perQueueMetrics: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
 }
 
 /** Callbacks needed for some contexts */
@@ -105,6 +106,7 @@ export class ContextFactory {
       processingLocks: this.deps.processingLocks,
       jobIndex: this.deps.jobIndex,
       completedJobs: this.deps.completedJobs,
+      depCompletions: this.deps.depCompletions,
       jobResults: this.deps.jobResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
@@ -154,6 +156,7 @@ export class ContextFactory {
       shardLocks: this.deps.shardLocks,
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
+      depCompletions: this.deps.depCompletions,
       jobResults: this.deps.jobResults,
       customIdMap: this.deps.customIdMap,
       jobIndex: this.deps.jobIndex,
@@ -186,6 +189,7 @@ export class ContextFactory {
       processingLocks: this.deps.processingLocks,
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
+      depCompletions: this.deps.depCompletions,
       jobResults: this.deps.jobResults,
       jobIndex: this.deps.jobIndex,
       customIdMap: this.deps.customIdMap,

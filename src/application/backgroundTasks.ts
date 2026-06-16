@@ -138,7 +138,7 @@ function getLockContext(ctx: BackgroundContext): LockContext {
 
 // ============ Job Timeouts ============
 
-function checkJobTimeouts(ctx: BackgroundContext): void {
+export function checkJobTimeouts(ctx: BackgroundContext): void {
   const now = Date.now();
   for (const procShard of ctx.processingShards) {
     for (const [jobId, job] of procShard) {
@@ -148,6 +148,11 @@ function checkJobTimeouts(ctx: BackgroundContext): void {
           queue: job.queue,
           timeout: job.timeout,
         });
+        // Mark as timed-out BEFORE requeuing for retry, so a late ACK from the
+        // (still-hung) worker that exceeded the deadline is discarded instead of
+        // phantom-completing the job and skipping the retry. See ack-recovery in
+        // queueManager.ack (timedOutJobs guard).
+        ctx.timedOutJobs?.add(jobId);
         ctx.fail(jobId, 'Job timeout exceeded').catch((err: unknown) => {
           queueLog.error('Failed to mark timed out job as failed', {
             jobId: String(jobId),

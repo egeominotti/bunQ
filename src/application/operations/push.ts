@@ -30,6 +30,8 @@ export interface PushContext {
   completedJobsData: MapLike<JobId, Job>;
   /** Bare completion ids for removeOnComplete jobs so dependents start ready */
   depCompletions?: SetLike<JobId>;
+  /** Timeout markers — cleared on custom-id reuse so a recycled id starts clean */
+  timedOutJobs?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
@@ -86,6 +88,12 @@ function handleCustomId(input: JobInput, shard: Shard, ctx: PushContext): Custom
     ctx.jobIndex.delete(id);
     ctx.storage?.deleteJob(id); // removes the surviving row + result + any buffered insert
   }
+  // A recycled custom id may carry a stale timeout marker from a prior job (which
+  // may have DLQ'd, so it is NOT in completedJobs above). Clear it so the new
+  // job's stall-retry recovery is not wrongly discarded — otherwise the
+  // timeout-resurrection guard would reintroduce #33/#75 duplicate execution for
+  // reused ids.
+  ctx.timedOutJobs?.delete(id);
   ctx.customIdMap.set(input.customId, id);
   return { skip: false, id };
 }

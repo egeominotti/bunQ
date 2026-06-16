@@ -35,6 +35,7 @@ export interface ContextDependencies {
   completedJobs: BoundedSet<JobId>;
   completedJobsData: BoundedMap<JobId, Job>;
   depCompletions?: BoundedSet<JobId>;
+  timedOutJobs?: BoundedSet<JobId>;
   jobResults: LRUMap<JobId, unknown>;
   customIdMap: LRUMap<string, JobId>;
   jobLogs: LRUMap<JobId, JobLogEntry[]>;
@@ -107,6 +108,7 @@ export class ContextFactory {
       jobIndex: this.deps.jobIndex,
       completedJobs: this.deps.completedJobs,
       depCompletions: this.deps.depCompletions,
+      timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
@@ -157,6 +159,7 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       depCompletions: this.deps.depCompletions,
+      timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
       customIdMap: this.deps.customIdMap,
       jobIndex: this.deps.jobIndex,

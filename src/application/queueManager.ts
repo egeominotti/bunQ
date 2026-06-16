@@ -65,6 +65,12 @@ export class QueueManager {
   // can unblock (no payload, not surfaced in state/stats). Bounded like
   // completedJobs; entries are pruned by the dependency processor once consumed.
   private readonly depCompletions!: BoundedSet<JobId>;
+  // Ids of jobs failed by the timeout sweep. A late ACK whose lock token no
+  // longer matches (the job was requeued for retry) is discarded for these,
+  // instead of phantom-completing the job and skipping the retry. Bounded;
+  // never needs explicit clearing because a legit retry ACK carries a valid
+  // current token and bypasses the stale-token recovery path entirely.
+  private readonly timedOutJobs!: BoundedSet<JobId>;
   private readonly jobResults!: LRUMap<JobId, unknown>;
   private readonly customIdMap!: LRUMap<string, JobId>;
   private readonly jobLogs!: LRUMap<JobId, JobLogEntry[]>;
@@ -148,6 +154,7 @@ export class QueueManager {
       this.completedJobsData.delete(jobId);
     });
     this.depCompletions = new BoundedSet<JobId>(this.config.maxCompletedJobs);
+    this.timedOutJobs = new BoundedSet<JobId>(this.config.maxCompletedJobs);
     this.perQueueMetrics = new LRUMap<string, { totalCompleted: bigint; totalFailed: bigint }>(
       this.config.maxCustomIds
     );
@@ -217,6 +224,7 @@ export class QueueManager {
       completedJobs: this.completedJobs,
       completedJobsData: this.completedJobsData,
       depCompletions: this.depCompletions,
+      timedOutJobs: this.timedOutJobs,
       jobResults: this.jobResults,
       customIdMap: this.customIdMap,
       jobLogs: this.jobLogs,
@@ -351,6 +359,13 @@ export class QueueManager {
         // Job may have been stall-retried to queue while we processed it.
         // Complete it from queue to prevent duplicate execution (Issue #33).
         if (loc?.type === 'queue') {
+          // BUT a job failed by the timeout sweep is requeued for RETRY — a late
+          // ACK from the timed-out worker must not complete it (that would skip
+          // the retry and silently override the timeout). Discard it gracefully.
+          if (this.timedOutJobs.has(jobId)) {
+            lockMgr.releaseLock(jobId, lockCtx, token);
+            return;
+          }
           await this.completeStallRetriedJob(jobId, result);
           lockMgr.releaseLock(jobId, lockCtx, token);
         }
@@ -366,6 +381,12 @@ export class QueueManager {
       // Without token: only if job was stall-retried (attempts > 0), to avoid
       // completing freshly-pushed jobs that were never pulled.
       if (err instanceof Error && err.message.includes('not found')) {
+        // A timeout-failed job requeued for retry must not be completed by a
+        // stale ACK from the timed-out worker — discard it so the retry wins.
+        if (this.timedOutJobs.has(jobId)) {
+          if (token) lockMgr.releaseLock(jobId, lockCtx, token);
+          return;
+        }
         const shouldRecover = token ?? this.isStallRetried(jobId);
         if (shouldRecover && (await this.completeStallRetriedJob(jobId, result))) {
           if (token) lockMgr.releaseLock(jobId, lockCtx, token);
@@ -391,7 +412,11 @@ export class QueueManager {
           // from the queue to prevent duplicate execution.
           const loc = this.jobIndex.get(jobIds[i]);
           if (loc?.type === 'queue') {
-            await this.completeStallRetriedJob(jobIds[i], undefined);
+            // Skip completion for a timeout-requeued job (retry must win); else
+            // recover the stall-retried job to prevent duplicate execution (#75).
+            if (!this.timedOutJobs.has(jobIds[i])) {
+              await this.completeStallRetriedJob(jobIds[i], undefined);
+            }
             lockMgr.releaseLock(jobIds[i], lockCtx, t);
           }
           continue;
@@ -429,7 +454,11 @@ export class QueueManager {
         // from the queue to prevent duplicate execution.
         const loc = this.jobIndex.get(item.id);
         if (loc?.type === 'queue') {
-          await this.completeStallRetriedJob(item.id, item.result);
+          // Skip completion for a timeout-requeued job (retry must win); else
+          // recover the stall-retried job to prevent duplicate execution (#75).
+          if (!this.timedOutJobs.has(item.id)) {
+            await this.completeStallRetriedJob(item.id, item.result);
+          }
           lockMgr.releaseLock(item.id, lockCtx, item.token);
         }
         continue;
@@ -1736,6 +1765,7 @@ export class QueueManager {
     this.completedJobs.clear();
     this.completedJobsData.clear();
     this.depCompletions.clear();
+    this.timedOutJobs.clear();
     this.jobResults.clear();
     this.jobLogs.clear();
     this.customIdMap.clear();

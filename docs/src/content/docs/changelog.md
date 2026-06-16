@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.16] - 2026-06-16
+
+### Fixed — stale-ACK timeout resurrection (defect 3 from the destruction-validation audit; RED→GREEN reproduction)
+
+- **A late ACK from a timed-out worker could phantom-complete a retrying job, silently skipping the retry** (`src/application/queueManager.ts`, `src/application/backgroundTasks.ts`): for a job with a per-job `timeout` and `attempts > 1`, the timeout sweep requeued it for retry, but the still-hung worker's late ACK hit the stall-retry recovery path (Issue #33) and completed it anyway — overriding the timeout and skipping the retry. `isStallRetried()` could not distinguish a timeout-requeue from a stall-retry (both are `attempts > 0` in queue). The timeout sweep now records the job in a bounded `timedOutJobs` set; the ACK recovery paths (`ack`, `ackBatch`, `ackBatchWithResults`) discard a stale ACK for such a job (graceful no-op) so the retry proceeds. A legitimate ACK of the retry attempt carries a valid current lock token and bypasses the stale-token recovery path, so it still completes normally. The marker is cleared when a custom id is recycled, so idempotency-key reuse cannot inherit a stale marker.
+
 ## [2.8.15] - 2026-06-16
 
 ### Fixed — 2 pre-existing defects surfaced by the post-2.8.14 destruction-validation test (each with a RED→GREEN reproduction)

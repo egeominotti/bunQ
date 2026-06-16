@@ -120,6 +120,9 @@ export interface BackgroundContext extends QueueManagerState {
   // Bare completion ids of removeOnComplete jobs (no payload) — lets dependent
   // jobs unblock even though the parent's full record was dropped.
   depCompletions?: BoundedSet<JobId>;
+  // Ids of jobs failed by the timeout sweep — a late ACK from the timed-out
+  // worker is discarded (not phantom-completed) so the retry proceeds.
+  timedOutJobs?: BoundedSet<JobId>;
 }
 
 /** Context for stats operations */

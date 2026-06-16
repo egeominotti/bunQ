@@ -44,7 +44,12 @@ export async function handlePush(
       const depJobId = jobId(depId);
       const exists =
         ctx.queueManager.getJobIndex().has(depJobId) ||
-        ctx.queueManager.getCompletedJobs().has(depJobId);
+        ctx.queueManager.getCompletedJobs().has(depJobId) ||
+        // A removeOnComplete parent that completed is recorded only here (its row
+        // is deleted and it leaves jobIndex/completedJobs). The readiness path and
+        // dependency processor already honor depCompletions; the gate must too, or
+        // a late dependent is wrongly rejected with "Dependency job not found".
+        ctx.queueManager.getDepCompletions().has(depJobId);
       if (!exists) {
         return resp.error(`Dependency job not found: ${depId}`, reqId);
       }

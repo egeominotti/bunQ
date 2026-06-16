@@ -77,7 +77,7 @@ async function testQueueBasicOps(): Promise<void> {
     }
 
     // getJobCounts()
-    const counts = queue.getJobCounts();
+    const counts = await queue.getJobCounts();
     if (counts.waiting >= 0 && counts.active >= 0) {
       pass(`getJobCounts() - waiting: ${counts.waiting}, active: ${counts.active}`);
     } else {
@@ -93,7 +93,7 @@ async function testQueueBasicOps(): Promise<void> {
     // drain()
     queue.drain();
     await sleep(100);
-    const afterDrain = queue.getJobCounts();
+    const afterDrain = await queue.getJobCounts();
     if (afterDrain.waiting === 0) {
       pass('drain() - queue emptied');
     } else {

@@ -1235,6 +1235,13 @@ export class QueueManager {
     return this.completedJobs;
   }
 
+  // Bare completion ids of removeOnComplete jobs. The PUSH gate consults this so a
+  // late dependent on an evicted removeOnComplete parent is admitted (same window
+  // the readiness path / dependency processor already honor).
+  getDepCompletions(): SetLike<JobId> {
+    return this.depCompletions;
+  }
+
   getShards(): Shard[] {
     return this.shards;
   }

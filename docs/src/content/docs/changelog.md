@@ -10,6 +10,13 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.15] - 2026-06-16
+
+### Fixed — 2 pre-existing defects surfaced by the post-2.8.14 destruction-validation test (each with a RED→GREEN reproduction)
+
+- **`Queue.getJobCounts()` silently returned all zeros in TCP mode** (`src/client/queue/operations/counts.ts`): the sync `getJobCounts()` hardcoded `{waiting:0,…}` for the non-embedded branch, so a TCP client got zeros while the server held the real counts. It now delegates to the async path for TCP (returns an awaitable `Promise<JobCounts>` with the real counts); embedded mode stays synchronous. (`getDelayedCount()` was already async/correct.)
+- **PUSH of a late dependent on an evicted `removeOnComplete` parent was wrongly rejected** (`src/infrastructure/server/handlers/core.ts`): the TCP push dependency-existence gate checked `jobIndex`/`completedJobs` but not `depCompletions`, so a child depending on a completed `removeOnComplete` parent was rejected with "Dependency job not found" even though the readiness path and dependency processor already honored it. The gate now also consults `depCompletions` (new `QueueManager.getDepCompletions()` accessor).
+
 ## [2.8.14] - 2026-06-15
 
 ### Fixed — 8 stability bugs from an end-to-end audit + destruction test (each with a RED→GREEN reproduction test)

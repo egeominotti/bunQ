@@ -24,18 +24,15 @@ export interface JobCounts {
   paused: number;
 }
 
-/** Get job counts (sync, embedded only) */
-export function getJobCounts(ctx: CountsContext): JobCounts {
+/**
+ * Get job counts.
+ * Embedded mode returns synchronously. TCP mode delegates to the async path so
+ * callers receive the REAL server-side counts (awaitable Promise) instead of
+ * hardcoded zeros — defect: getjobcounts-tcp-zero.
+ */
+export function getJobCounts(ctx: CountsContext): JobCounts | Promise<JobCounts> {
   if (!ctx.embedded) {
-    return {
-      waiting: 0,
-      prioritized: 0,
-      active: 0,
-      completed: 0,
-      failed: 0,
-      delayed: 0,
-      paused: 0,
-    };
+    return getJobCountsAsync(ctx);
   }
 
   const manager = getSharedManager();

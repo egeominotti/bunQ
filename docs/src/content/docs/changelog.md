@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.18] - 2026-06-16
+
+### Fixed — Worker over-pulled (leased) jobs past `concurrency` (#98; RED→GREEN reproduction)
+
+- **A Worker leased more jobs than `concurrency`, inflating the broker's `active` count and starving other workers** (`src/client/worker/worker.ts`): the #96 fix capped *execution* (`activeJobs`) at `concurrency`, but `doPullBatch()` computed free slots as `concurrency - activeJobs` and then awaited the pull with no reservation. Two leaks compounded: (1) several concurrent `finally → poll → tryProcess` runs each read the same stale `activeJobs` and each pulled a full batch; (2) a job just pulled by one run sat in the local `pendingJobs` buffer — leased and kept alive by the heartbeat (which renews locks for *all* `pulledJobIds`, not just running ones) — but not yet in `activeJobs`, so an overlapping pull never saw it. With `concurrency: 3` the worker held 5-6 jobs leased (3 running + buffered). `doPullBatch()` now caps the **leased** count (running + buffered + in-flight pulls): a new `pendingPull` counter reserves slots before the await (released in `finally`), and free slots are computed from `pulledJobIds.size` (the true leased set) instead of `activeJobs`. Group pull-ahead is preserved: when a group limiter is set and the buffer holds only group-blocked jobs, the worker still pulls ahead to find runnable jobs from other groups (verified by a liveness regression guard — no deadlock/starvation). Execution concurrency was already correct (no data loss); this fixes lease hoarding, the inflated `active` count, and head-of-line fairness across workers.
+
 ## [2.8.17] - 2026-06-16
 
 ### Fixed — retry of a lock-expiry failure threw `UNIQUE constraint failed: jobs.id` (#97; RED→GREEN reproduction)

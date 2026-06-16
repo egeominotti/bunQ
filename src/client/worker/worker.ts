@@ -114,6 +114,9 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
   private pendingJobs: Array<{ job: InternalJob; token: string | null }> = [];
   private pendingJobsHead = 0;
   private processingScheduled = false; // Prevent multiple setImmediate calls
+  // Slots reserved by in-flight doPullBatch() calls (Issue #98). Subtracted from
+  // free slots so overlapping pulls see each other and do not over-lease.
+  private pendingPull = 0;
 
   // Drained event tracking
   private lastDrainedEmit = 0;
@@ -801,14 +804,46 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
   }
 
   private async doPullBatch(): Promise<Array<{ job: InternalJob; token: string | null }>> {
-    const slots = this.opts.concurrency - this.activeJobs;
+    // Issue #98: cap the LEASED count (running + buffered + in-flight pulls) at
+    // `concurrency`, not just the running count. The old `concurrency - activeJobs`
+    // was read once and the pull leases jobs on the broker across an await, so:
+    //   1. several concurrent finally->poll->tryProcess runs each read the same
+    //      stale count and each pull a full batch, and
+    //   2. a job just pulled by one run sits in `pendingJobs` (leased, counted by
+    //      the heartbeat) but not yet in `activeJobs`, so an overlapping pull does
+    //      not see it.
+    // Both leak: with concurrency=3 the worker ends up holding 5-6 jobs leased.
+    // `pulledJobIds.size` is the true leased count (active + buffered; a job is
+    // removed only on completion), and `pendingPull` reserves slots for pulls
+    // still in flight whose jobs are not yet registered.
+    //
+    // Exception — group pull-ahead: when a group limiter is set AND the buffer is
+    // non-empty here (this branch is reached only after getNextEligibleJob() found
+    // nothing runnable, so those buffered jobs are group-blocked), the worker must
+    // pull ahead to discover jobs from other, runnable groups — otherwise it would
+    // wedge on a buffer full of one blocked group. In that case the blocked
+    // buffered jobs are not counted (only the running ones are). This preserves the
+    // existing group behavior; the reported over-pull (no group limiter) always
+    // uses the strict leased cap.
+    const groupBlockedBuffer =
+      this.groupLimiter !== null && this.pendingJobsHead < this.pendingJobs.length;
+    const leased = groupBlockedBuffer ? this.activeJobs : this.pulledJobIds.size;
+    const slots = this.opts.concurrency - leased - this.pendingPull;
     const batchSize = Math.min(this.opts.batchSize, slots, 1000);
     if (batchSize <= 0) return [];
 
     const config = this.getPullConfig();
-    return this.embedded
-      ? pullEmbedded(config, batchSize)
-      : pullTcp(config, this.tcp as NonNullable<typeof this.tcp>, batchSize, this._closing);
+    this.pendingPull += batchSize;
+    try {
+      return this.embedded
+        ? await pullEmbedded(config, batchSize)
+        : await pullTcp(config, this.tcp as NonNullable<typeof this.tcp>, batchSize, this._closing);
+    } finally {
+      // Release the reservation. The pulled jobs are now registered/buffered (or
+      // the pull failed); either way the reservation has served its purpose for
+      // the duration of the in-flight pull.
+      this.pendingPull -= batchSize;
+    }
   }
 
   private startJob(job: InternalJob, token: string | null): void {

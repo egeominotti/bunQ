@@ -114,6 +114,12 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
   private pendingJobs: Array<{ job: InternalJob; token: string | null }> = [];
   private pendingJobsHead = 0;
   private processingScheduled = false; // Prevent multiple setImmediate calls
+  // Slots reserved by in-flight doPullBatch() calls. Subtracted from free-slot
+  // accounting so overlapping pulls see each other and never collectively lease
+  // more than `concurrency` jobs (running + buffered + in-flight pull). Without
+  // this, each concurrent pull computes slots from the same stale `activeJobs`
+  // and over-pulls into the buffer, inflating the broker's `active` count.
+  private pendingPull = 0;
 
   // Drained event tracking
   private lastDrainedEmit = 0;
@@ -801,14 +807,32 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
   }
 
   private async doPullBatch(): Promise<Array<{ job: InternalJob; token: string | null }>> {
-    const slots = this.opts.concurrency - this.activeJobs;
+    // Free slots = concurrency minus everything already leased or about to be:
+    //   - activeJobs            : jobs currently executing
+    //   - buffered              : pulled-but-unstarted jobs sitting in pendingJobs
+    //                             (e.g. group-limited jobs awaiting a free slot)
+    //   - pendingPull           : slots reserved by other in-flight pulls
+    // Reserving pendingPull across the await is what closes the over-pull race
+    // described in the report: a second concurrent pull now sees this one's
+    // reservation and pulls fewer (or zero) jobs, so the worker never leases
+    // more than `concurrency` jobs at once (server `active` <= concurrency).
+    const buffered = this.pendingJobs.length - this.pendingJobsHead;
+    const slots = this.opts.concurrency - this.activeJobs - buffered - this.pendingPull;
     const batchSize = Math.min(this.opts.batchSize, slots, 1000);
     if (batchSize <= 0) return [];
 
-    const config = this.getPullConfig();
-    return this.embedded
-      ? pullEmbedded(config, batchSize)
-      : pullTcp(config, this.tcp as NonNullable<typeof this.tcp>, batchSize, this._closing);
+    this.pendingPull += batchSize;
+    try {
+      const config = this.getPullConfig();
+      return await (this.embedded
+        ? pullEmbedded(config, batchSize)
+        : pullTcp(config, this.tcp as NonNullable<typeof this.tcp>, batchSize, this._closing));
+    } finally {
+      // Release the reservation: pulled jobs are now buffered/started (counted
+      // by activeJobs/pendingJobs), and a pull that returned fewer than asked
+      // must not leave phantom reservations that throttle later pulls.
+      this.pendingPull -= batchSize;
+    }
   }
 
   private startJob(job: InternalJob, token: string | null): void {

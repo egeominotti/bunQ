@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.17] - 2026-06-16
+
+### Fixed — worker over-pulls jobs past `concurrency` (server `active` > concurrency); Issue #96 follow-up (RED→GREEN reproduction)
+
+- **A worker leased more jobs than its `concurrency` even though it never ran more than `concurrency` processors** (`src/client/worker/worker.ts`): the Issue #96 fix added a concurrency re-check before `startJob()`, which correctly caps *execution*, but `doPullBatch()` still computed free slots from a stale `activeJobs` read *before* the pull `await`, with no reservation. Overlapping `tryProcess()` runs (poll timer, every `finally`→`poll`, the `setImmediate` self-feed) therefore each pulled a batch against the same stale count and buffered the surplus into `pendingJobs`. Those buffered jobs are leased (locked + heartbeated), so the broker kept counting them as `active` — a worker with `concurrency: 3` reported `active: 5`/`6`, hoarded jobs it wasn't running, and starved other workers. `doPullBatch()` now reserves slots in a `pendingPull` counter held across the `await` and also subtracts already-buffered jobs, so `activeJobs + buffered + in-flight pull ≤ concurrency`; a second concurrent pull sees the reservation and pulls fewer (or zero) jobs. Server `active` now tracks `concurrency`.
+
 ## [2.8.16] - 2026-06-16
 
 ### Fixed — stale-ACK timeout resurrection (defect 3 from the destruction-validation audit; RED→GREEN reproduction)

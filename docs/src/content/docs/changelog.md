@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.17] - 2026-06-16
+
+### Fixed — retry of a lock-expiry failure threw `UNIQUE constraint failed: jobs.id` (#97; RED→GREEN reproduction)
+
+- **Retrying a job that reached `failed` through the lock-expiry path failed with `UNIQUE constraint failed: jobs.id`** (`src/application/lockManager.ts`): `handleMaxStallsExceeded` moved the job to the DLQ using only in-memory state (`shard.addToDlq` + `jobIndex.set`). Unlike its three sibling paths — `ack.moveFailedJobToDlq` (max attempts), `stallDetection.moveStalliedJobToDlq` (heartbeat stall), and the startup recovery in `backgroundTasks` — it never called `storage.saveDlqEntry(entry)` nor `storage.deleteJob(jobId)`. So the `jobs` row survived in SQLite as an orphan (state `active`) and the DLQ entry lived only in memory. On retry, `dlqManager.retryDlqJob` re-INSERTs the job with its original id via the plain `INSERT INTO jobs` statement (not `INSERT OR REPLACE` like `insertResult`/`insertCron`), and the surviving orphan row raised the UNIQUE violation, failing the retry; a restart in that window also re-recovered the stale `active` row. The lock-expiry DLQ move now persists like its siblings (capture the `DlqEntry`, then `saveDlqEntry` + `deleteJob`), restoring the single-table-residency invariant. `deleteJob` also evicts the id from the write buffer, so a non-durable job cannot later flush a stale INSERT and re-orphan.
+
 ## [2.8.16] - 2026-06-16
 
 ### Fixed — stale-ACK timeout resurrection (defect 3 from the destruction-validation audit; RED→GREEN reproduction)

@@ -170,8 +170,19 @@ function handleMaxStallsExceeded(opts: MaxStallsOptions): void {
   // moving to DLQ — otherwise the slot leaks (mirrors
   // stallDetection.moveStalliedJobToDlq).
   shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
-  shard.addToDlq(job, FailureReason.Stalled, `Lock expired after ${lock.renewalCount} renewals`);
+  const entry = shard.addToDlq(
+    job,
+    FailureReason.Stalled,
+    `Lock expired after ${lock.renewalCount} renewals`
+  );
   ctx.jobIndex.set(jobId, { type: 'dlq', queueName: job.queue });
+  // Persist the DLQ move like the sibling paths (ack.moveFailedJobToDlq,
+  // stallDetection.moveStalliedJobToDlq, backgroundTasks startup-recovery).
+  // Without these two writes the jobs row survives in SQLite as an orphan and
+  // the DLQ entry lives only in memory — a later retry then re-INSERTs the
+  // surviving row and throws `UNIQUE constraint failed: jobs.id` (#97).
+  ctx.storage?.saveDlqEntry(entry);
+  ctx.storage?.deleteJob(jobId);
 
   ctx.eventsManager.broadcast({
     eventType: EventType.Failed,

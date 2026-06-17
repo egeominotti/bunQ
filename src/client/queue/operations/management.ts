@@ -25,7 +25,10 @@ export function remove(ctx: ManagementContext, id: string): void {
 /** Remove a job (async) */
 export async function removeAsync(ctx: ManagementContext, id: string): Promise<void> {
   if (ctx.embedded) {
-    getSharedManager().cancel(jobId(id));
+    // Must await: cancel() does the removal inside an async write-lock, so without
+    // the await the returned promise resolves before the job is actually removed
+    // (and any cancel error is swallowed) — inconsistent with the TCP path below.
+    await getSharedManager().cancel(jobId(id));
     return;
   }
   await ctx.tcp!.send({ cmd: 'Cancel', id });

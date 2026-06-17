@@ -10,6 +10,12 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.20] - 2026-06-17
+
+### Fixed — embedded `job.remove()` / `removeAsync()` did not await the cancellation (RED→GREEN reproduction)
+
+- **`Queue.removeAsync()` (which backs the BullMQ-style `job.remove()`) returned before the job was actually removed, on the embedded path** (`src/client/queue/operations/management.ts`): the embedded branch fired `getSharedManager().cancel(id)` as a floating promise and `return`ed immediately, while the TCP branch correctly `await`ed its `Cancel` send. Because `cancel()` performs the removal inside an async write-lock (`cancelJob` → `await withWriteLock(...)`), `await job.remove()` could resolve before the job was gone (and any cancel error was swallowed as an unhandled rejection) — inconsistent with the TCP path and a hazard under lock contention. The embedded path now `await`s `cancel()`. Surfaced by the new Biome `noFloatingPromises` lint (the old code was hidden behind a file-level `eslint-disable no-floating-promises`). Deterministic repro via lock contention in `test/repro-removeasync-floating-cancel.test.ts`. The synchronous `remove()` remains intentionally fire-and-forget.
+
 ## [2.8.19] - 2026-06-17
 
 ### Fixed — a successful completion was lost when the lock expired mid-processing (#101; RED→GREEN reproduction)

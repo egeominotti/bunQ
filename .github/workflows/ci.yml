@@ -118,13 +118,43 @@ jobs:
         run: bun scripts/websocket/run-all-tests.ts
 
   # ============================================
-  # Build Binaries (only on main)
+  # Version gate — only build binaries / cut a release when package.json
+  # version is NEW (avoids rebuilding 5×~90MB binaries + a fresh release on
+  # every docs/chore commit to main, which never bumps the version).
+  # ============================================
+  version-gate:
+    name: Version gate
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, test-websocket]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      should_release: ${{ steps.gate.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether this version is already released
+        id: gate
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION already released — skipping binary build, docker push, and release."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION is new — building binaries and cutting a release."
+          fi
+
+  # ============================================
+  # Build Binaries (only on a new version)
   # ============================================
   build:
     name: Build (${{ matrix.target }})
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, test-websocket]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version-gate]
+    if: needs.version-gate.outputs.should_release == 'true'
     strategy:
       matrix:
         include:
@@ -172,8 +202,8 @@ jobs:
   docker:
     name: Docker
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, test-websocket]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version-gate]
+    if: needs.version-gate.outputs.should_release == 'true'
     permissions:
       contents: read
       packages: write
@@ -220,18 +250,18 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [build, docker]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version-gate, build, docker]
+    # Explicit gate (not just implicit success() propagation from build/docker):
+    # only cut a release for a NEW version.
+    if: needs.version-gate.outputs.should_release == 'true'
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version from package.json
+      - name: Resolve version
         id: version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        run: echo "version=${{ needs.version-gate.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -242,20 +272,34 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          set -euo pipefail
           mkdir -p release
           ls -la artifacts/
 
-          # Copy all binaries to release folder
-          cp artifacts/bunqueue-linux-x64 release/ 2>/dev/null || cp artifacts/*/bunqueue-linux-x64 release/ 2>/dev/null || true
-          cp artifacts/bunqueue-linux-arm64 release/ 2>/dev/null || cp artifacts/*/bunqueue-linux-arm64 release/ 2>/dev/null || true
-          cp artifacts/bunqueue-darwin-x64 release/ 2>/dev/null || cp artifacts/*/bunqueue-darwin-x64 release/ 2>/dev/null || true
-          cp artifacts/bunqueue-darwin-arm64 release/ 2>/dev/null || cp artifacts/*/bunqueue-darwin-arm64 release/ 2>/dev/null || true
-          cp artifacts/bunqueue-windows-x64.exe release/ 2>/dev/null || cp artifacts/*/bunqueue-windows-x64.exe release/ 2>/dev/null || true
+          # Collect binaries (artifacts may be nested one level depending on the
+          # upload-artifact version), keeping the canonical names.
+          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-darwin-x64 bunqueue-darwin-arm64 bunqueue-windows-x64.exe; do
+            cp "artifacts/$name" release/ 2>/dev/null || cp "artifacts/$name/$name" release/ 2>/dev/null || true
+          done
 
-          # Make executables
-          chmod +x release/bunqueue-linux-x64 release/bunqueue-linux-arm64 release/bunqueue-darwin-x64 release/bunqueue-darwin-arm64 2>/dev/null || true
+          # Compress each binary before upload: a Bun --compile binary embeds the
+          # whole runtime (~60–94MB) but compresses ~55–65%, so the DOWNLOAD drops
+          # to ~30–40MB. Unix → .tar.gz (preserves the +x bit), Windows → .zip.
+          cd release
+          for name in bunqueue-linux-x64 bunqueue-linux-arm64 bunqueue-darwin-x64 bunqueue-darwin-arm64; do
+            [ -f "$name" ] || continue
+            chmod +x "$name"
+            tar -czf "$name.tar.gz" "$name"
+            rm "$name"
+          done
+          if [ -f bunqueue-windows-x64.exe ]; then
+            zip -9 bunqueue-windows-x64.zip bunqueue-windows-x64.exe
+            rm bunqueue-windows-x64.exe
+          fi
 
-          ls -la release/
+          # Checksums of the published (compressed) artifacts.
+          sha256sum bunqueue-* > SHA256SUMS
+          ls -la
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -267,11 +311,12 @@ jobs:
           prerelease: false
           make_latest: true
           files: |
-            release/bunqueue-linux-x64
-            release/bunqueue-linux-arm64
-            release/bunqueue-darwin-x64
-            release/bunqueue-darwin-arm64
-            release/bunqueue-windows-x64.exe
+            release/bunqueue-linux-x64.tar.gz
+            release/bunqueue-linux-arm64.tar.gz
+            release/bunqueue-darwin-x64.tar.gz
+            release/bunqueue-darwin-arm64.tar.gz
+            release/bunqueue-windows-x64.zip
+            release/SHA256SUMS
           body: |
             ## Installation
 
@@ -284,16 +329,20 @@ jobs:
 
             ### Binary
 
+            Compressed downloads (~30–40MB; extract to get the standalone
+            executable, which embeds the Bun runtime). Verify with `SHA256SUMS`.
+
             | Platform | Architecture | Download |
             |----------|-------------|----------|
-            | Linux | x64 | `bunqueue-linux-x64` |
-            | Linux | arm64 | `bunqueue-linux-arm64` |
-            | macOS | x64 (Intel) | `bunqueue-darwin-x64` |
-            | macOS | arm64 (Apple Silicon) | `bunqueue-darwin-arm64` |
-            | Windows | x64 | `bunqueue-windows-x64.exe` |
+            | Linux | x64 | `bunqueue-linux-x64.tar.gz` |
+            | Linux | arm64 | `bunqueue-linux-arm64.tar.gz` |
+            | macOS | x64 (Intel) | `bunqueue-darwin-x64.tar.gz` |
+            | macOS | arm64 (Apple Silicon) | `bunqueue-darwin-arm64.tar.gz` |
+            | Windows | x64 | `bunqueue-windows-x64.zip` |
 
             ```bash
             # Example: Linux x64
+            tar -xzf bunqueue-linux-x64.tar.gz
             chmod +x bunqueue-linux-x64
             ./bunqueue-linux-x64
             ```

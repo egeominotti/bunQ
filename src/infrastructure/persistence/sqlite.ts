@@ -519,10 +519,9 @@ export class SqliteStorage {
   /** Get latest DLQ entry for a job (used for getJob fallback after restart) */
   getDlqEntry(jobId: JobId): DlqEntry | null {
     const row = this.db
-      .query<
-        { entry: Uint8Array },
-        [string]
-      >('SELECT entry FROM dlq WHERE job_id = ? ORDER BY entered_at DESC LIMIT 1')
+      .query<{ entry: Uint8Array }, [string]>(
+        'SELECT entry FROM dlq WHERE job_id = ? ORDER BY entered_at DESC LIMIT 1'
+      )
       .get(String(jobId));
     if (!row) return null;
     const entry = unpack<DlqEntry | null>(row.entry, null, `getDlqEntry:${String(jobId)}`);
@@ -597,24 +596,21 @@ export class SqliteStorage {
     if (options.states && options.states.length > 0) {
       const placeholders = options.states.map(() => '?').join(',');
       rows = this.db
-        .query<
-          DbJob,
-          (string | number)[]
-        >(`SELECT * FROM jobs WHERE queue = ? AND state IN (${placeholders}) ORDER BY created_at ${order} LIMIT ? OFFSET ?`)
+        .query<DbJob, (string | number)[]>(
+          `SELECT * FROM jobs WHERE queue = ? AND state IN (${placeholders}) ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+        )
         .all(queue, ...options.states, options.limit, options.offset);
     } else if (options.state) {
       rows = this.db
-        .query<
-          DbJob,
-          [string, string, number, number]
-        >(`SELECT * FROM jobs WHERE queue = ? AND state = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`)
+        .query<DbJob, [string, string, number, number]>(
+          `SELECT * FROM jobs WHERE queue = ? AND state = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+        )
         .all(queue, options.state, options.limit, options.offset);
     } else {
       rows = this.db
-        .query<
-          DbJob,
-          [string, number, number]
-        >(`SELECT * FROM jobs WHERE queue = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`)
+        .query<DbJob, [string, number, number]>(
+          `SELECT * FROM jobs WHERE queue = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+        )
         .all(queue, options.limit, options.offset);
     }
 
@@ -629,10 +625,9 @@ export class SqliteStorage {
    */
   loadPendingJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
-      .query<
-        DbJob,
-        [number, number]
-      >("SELECT * FROM jobs WHERE state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC LIMIT ? OFFSET ?")
+      .query<DbJob, [number, number]>(
+        "SELECT * FROM jobs WHERE state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC LIMIT ? OFFSET ?"
+      )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));
   }
@@ -644,10 +639,9 @@ export class SqliteStorage {
    */
   loadActiveJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
-      .query<
-        DbJob,
-        [number, number]
-      >("SELECT * FROM jobs WHERE state = 'active' ORDER BY started_at ASC LIMIT ? OFFSET ?")
+      .query<DbJob, [number, number]>(
+        "SELECT * FROM jobs WHERE state = 'active' ORDER BY started_at ASC LIMIT ? OFFSET ?"
+      )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));
   }
@@ -660,10 +654,9 @@ export class SqliteStorage {
    */
   loadCompletedJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
-      .query<
-        DbJob,
-        [number, number]
-      >("SELECT * FROM jobs WHERE state = 'completed' ORDER BY completed_at DESC LIMIT ? OFFSET ?")
+      .query<DbJob, [number, number]>(
+        "SELECT * FROM jobs WHERE state = 'completed' ORDER BY completed_at DESC LIMIT ? OFFSET ?"
+      )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));
   }
@@ -673,10 +666,9 @@ export class SqliteStorage {
    */
   countPendingJobs(): number {
     const result = this.db
-      .query<
-        { count: number },
-        []
-      >("SELECT COUNT(*) as count FROM jobs WHERE state IN ('waiting', 'delayed')")
+      .query<{ count: number }, []>(
+        "SELECT COUNT(*) as count FROM jobs WHERE state IN ('waiting', 'delayed')"
+      )
       .get();
     return result?.count ?? 0;
   }

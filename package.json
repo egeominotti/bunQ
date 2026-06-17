@@ -62,12 +62,13 @@
     "bench:latency": "bun run bench/latency.ts",
     "bench:internal": "bun run benchmarks/index.ts",
     "bench:compare": "bun run bench/comparison/run.ts",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "lint": "biome lint src",
+    "lint:fix": "biome lint --write src",
+    "format": "biome format --write src",
+    "format:check": "biome format src",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun run lint && bun run format:check",
+    "check:biome": "biome check src",
+    "check": "bun run typecheck && biome check src",
     "prepublishOnly": "bun run build:lib"
   },
   "dependencies": {
@@ -75,17 +76,13 @@
     "msgpackr": "^1.11.8"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@biomejs/biome": "^2.5.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/bun": "^1.3.9",
     "bullmq": "^5.70.1",
     "elysia": "^1.4.25",
-    "eslint": "^10.0.1",
-    "eslint-config-prettier": "^10.1.8",
     "ioredis": "^5.9.3",
-    "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "8.56.1",
     "zod": "^4.3.6"
   },
   "peerDependencies": {

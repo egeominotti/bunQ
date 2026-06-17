@@ -47,14 +47,17 @@ bun test --coverage
 
 ### Code Style
 
-We use ESLint and Prettier:
+We use [Biome](https://biomejs.dev) (one tool for linting + formatting):
 
 ```bash
-# Check linting
+# Lint
 bun run lint
 
 # Format code
 bun run format
+
+# Lint + format check in one pass (what CI / the pre-commit hook run)
+bun run check:biome
 ```
 
 ## Making Changes

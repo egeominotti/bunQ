@@ -10,19 +10,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Lint
-echo "🔎 ESLint check..."
-bun run lint
+# Lint + format (Biome, one pass)
+echo "🔎 Biome check (lint + format)..."
+bun run check:biome
 if [ $? -ne 0 ]; then
-  echo "❌ ESLint errors found. Commit aborted."
-  exit 1
-fi
-
-# Format check
-echo "✨ Prettier check..."
-bun run format:check
-if [ $? -ne 0 ]; then
-  echo "❌ Formatting issues found. Run 'bun run format' to fix."
+  echo "❌ Biome errors found. Run 'bun run lint:fix && bun run format' to fix."
   exit 1
 fi
 

@@ -9,7 +9,13 @@ import type { Job, JobId, JobTimelineEntry } from '../../domain/types/job';
 import type { CronJob } from '../../domain/types/cron';
 import { type DlqEntry, FailureReason, createDlqEntry } from '../../domain/types/dlq';
 import { PRAGMA_SETTINGS, SCHEMA, MIGRATION_TABLE, SCHEMA_VERSION, MIGRATIONS } from './schema';
-import { prepareStatements, type StatementName, type DbJob, type DbCron } from './statements';
+import {
+  prepareStatements,
+  type StatementName,
+  type DbJob,
+  type DbCron,
+  type DbQueueState,
+} from './statements';
 import { pack, unpack, rowToJob, reconstructDlqEntry } from './sqliteSerializer';
 import { BatchInsertManager, WriteBuffer } from './sqliteBatch';
 import { storageLog } from '../../shared/logger';
@@ -748,6 +754,48 @@ export class SqliteStorage {
   updateCron(name: string, executions: number, nextRun: number): void {
     this.safeWrite(() => {
       this.statements.get('updateCron')!.run(executions, nextRun, name);
+    });
+  }
+
+  // ============ Queue Control-State (#100) ============
+
+  /**
+   * Persist a queue's control-state (paused / rate-limit / concurrency) so it
+   * survives a server restart. Write-through on every pause/resume/limit change.
+   */
+  saveQueueState(
+    name: string,
+    paused: boolean,
+    rateLimit: number | null,
+    concurrencyLimit: number | null
+  ): void {
+    this.safeWrite(() => {
+      this.statements
+        .get('upsertQueueState')!
+        .run(name, paused ? 1 : 0, rateLimit, concurrencyLimit);
+    });
+  }
+
+  /** Load all persisted queue control-state rows (used by recover() on boot). */
+  loadQueueState(): Array<{
+    name: string;
+    paused: boolean;
+    rateLimit: number | null;
+    concurrencyLimit: number | null;
+  }> {
+    const rows = this.statements.get('loadQueueState')!.all() as DbQueueState[];
+    return rows.map((row) => ({
+      name: row.name,
+      paused: row.paused === 1,
+      rateLimit: row.rate_limit,
+      concurrencyLimit: row.concurrency_limit,
+    }));
+  }
+
+  /** Drop a queue's persisted control-state (e.g. on obliterate). */
+  deleteQueueState(name: string): void {
+    this.safeWrite(() => {
+      this.statements.get('deleteQueueState')!.run(name);
     });
   }
 

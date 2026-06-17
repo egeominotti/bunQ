@@ -20,7 +20,10 @@ export type StatementName =
   | 'deleteDlqEntry'
   | 'clearDlqQueue'
   | 'insertCron'
-  | 'updateCron';
+  | 'updateCron'
+  | 'upsertQueueState'
+  | 'loadQueueState'
+  | 'deleteQueueState';
 
 /** SQL statements */
 export const SQL_STATEMENTS: Record<StatementName, string> = {
@@ -69,6 +72,14 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
   `,
 
   updateCron: 'UPDATE cron_jobs SET executions = ?, next_run = ? WHERE name = ?',
+
+  // Queue control-state persistence (#100): paused / rate-limit / concurrency.
+  upsertQueueState:
+    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit) VALUES (?, ?, ?, ?)',
+
+  loadQueueState: 'SELECT name, paused, rate_limit, concurrency_limit FROM queue_state',
+
+  deleteQueueState: 'DELETE FROM queue_state WHERE name = ?',
 };
 
 /** Prepare all statements */
@@ -136,4 +147,12 @@ export interface DbCron {
   skip_if_no_worker: number;
   prevent_overlap: number;
   job_options: Uint8Array | null; // MessagePack BLOB
+}
+
+/** Database row type for queue control-state (#100) */
+export interface DbQueueState {
+  name: string;
+  paused: number;
+  rate_limit: number | null;
+  concurrency_limit: number | null;
 }

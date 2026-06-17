@@ -349,7 +349,14 @@ export class QueueManager {
 
   async ack(jobId: JobId, result?: unknown, token?: string): Promise<void> {
     const lockCtx = this.contextFactory.getLockContext();
-    if (token && !lockMgr.verifyLock(jobId, token, lockCtx)) {
+    if (
+      token &&
+      !lockMgr.verifyLock(jobId, token, lockCtx) &&
+      !this.isExpiredButOwned(jobId, token, lockCtx)
+    ) {
+      // #101: if the lock is expired but still OURS and the job is still in
+      // `processing`, isExpiredButOwned() short-circuits this block so the
+      // completion falls through to ackJob() rather than being lost.
       this.throwIfOwnershipConflict(jobId, lockCtx);
       // No ownership conflict. If job is still in processing (dedup case
       // from Issue #33: lock removed but job still there), proceed with ACK.
@@ -405,7 +412,11 @@ export class QueueManager {
     if (tokens?.length === jobIds.length) {
       for (let i = 0; i < jobIds.length; i++) {
         const t = tokens[i];
-        if (t && !lockMgr.verifyLock(jobIds[i], t, lockCtx)) {
+        if (
+          t &&
+          !lockMgr.verifyLock(jobIds[i], t, lockCtx) &&
+          !this.isExpiredButOwned(jobIds[i], t, lockCtx)
+        ) {
           this.throwIfOwnershipConflict(jobIds[i], lockCtx);
           // Recover stall-retried job (#75): lock expired and job was
           // re-queued by lock expiration or stall detection. Complete it
@@ -421,6 +432,8 @@ export class QueueManager {
           }
           continue;
         }
+        // #101 grace window: an expired-but-still-ours lock on a still-processing
+        // job is accepted (isExpiredButOwned), not lost.
         validJobIds.push(jobIds[i]);
         if (validTokens) validTokens.push(t);
       }
@@ -447,7 +460,11 @@ export class QueueManager {
     const lockCtx = this.contextFactory.getLockContext();
     const validItems: typeof items = [];
     for (const item of items) {
-      if (item.token && !lockMgr.verifyLock(item.id, item.token, lockCtx)) {
+      if (
+        item.token &&
+        !lockMgr.verifyLock(item.id, item.token, lockCtx) &&
+        !this.isExpiredButOwned(item.id, item.token, lockCtx)
+      ) {
         this.throwIfOwnershipConflict(item.id, lockCtx);
         // Recover stall-retried job (#75): lock expired and job was
         // re-queued by lock expiration or stall detection. Complete it
@@ -463,6 +480,9 @@ export class QueueManager {
         }
         continue;
       }
+      // #101 grace window (isExpiredButOwned true): the lock TTL elapsed while
+      // the handler ran, but the lock is still OURS and the job is still in
+      // `processing` — accept the completion instead of losing the work.
       validItems.push(item);
     }
     if (validItems.length > 0) {
@@ -511,6 +531,48 @@ export class QueueManager {
     if (loc?.type === 'processing' && lockCtx.jobLocks.has(jobId)) {
       throw new Error(`Invalid or expired lock token for job ${jobId}`);
     }
+  }
+
+  /**
+   * Issue #101 grace window: decide whether an ACK whose lock failed
+   * verification (because the TTL expired) should still be honored.
+   *
+   * Returns true ONLY when ALL hold:
+   *   1. the job is still in `processing`,
+   *   2. the lock entry's token still matches the presenting worker, and
+   *   3. the lock belongs to the CURRENT processing instance — its `createdAt`
+   *      is not older than the job's `startedAt`.
+   *
+   * Condition 3 is the re-lease guard. A lock-expiry re-lease (checkExpiredLocks)
+   * deletes the stale lock, so a new lease installs a NEW token and condition 2
+   * already fails. But the STALL path (stallDetection retry/moveToDlq) requeues
+   * the job WITHOUT deleting the lock — the original (now-expired) lock lingers
+   * with the original token. If another worker then re-pulls the job, its
+   * `startedAt` is reset to a newer time than the lingering lock's `createdAt`,
+   * so condition 3 fails and the timed-out worker's late ack is rejected
+   * (preventing a double-completion the skeptic confirmed). In the genuine #101
+   * case — the same worker finishing just after its lock expired, no re-pull —
+   * `startedAt` is unchanged and `createdAt >= startedAt`, so the grace is granted
+   * and the successful completion is recorded instead of being lost to a stall.
+   *
+   * Without this, a successful completion arriving just after lock expiry is
+   * rejected as "Invalid or expired lock token", the client drops it, and the
+   * job stalls to `failed` despite having been processed correctly.
+   */
+  private isExpiredButOwned(
+    jobId: JobId,
+    token: string,
+    lockCtx: { jobLocks: Map<JobId, JobLock> }
+  ): boolean {
+    const loc = this.jobIndex.get(jobId);
+    if (loc?.type !== 'processing') return false;
+    const lock = lockCtx.jobLocks.get(jobId);
+    if (lock?.token !== token) return false;
+    // Re-lease guard: a re-pulled job has a startedAt newer than the lingering
+    // lock's createdAt → the lock no longer owns the current processing instance.
+    const job = this.processingShards[loc.shardIdx].get(jobId);
+    if (job && job.startedAt !== null && job.startedAt > lock.createdAt) return false;
+    return true;
   }
 
   /** Check if a queued job was stall-retried (has been processed before). */
@@ -769,6 +831,7 @@ export class QueueManager {
 
   pause(queue: string): void {
     queueControl.pauseQueue(queue, this.contextFactory.getQueueControlContext());
+    this.persistQueueState(queue);
     this.dashboardEmit?.('queue:paused', { queue });
     this.eventsManager.broadcast({
       eventType: EventType.Paused,
@@ -780,6 +843,7 @@ export class QueueManager {
 
   resume(queue: string): void {
     queueControl.resumeQueue(queue, this.contextFactory.getQueueControlContext());
+    this.persistQueueState(queue);
     this.dashboardEmit?.('queue:resumed', { queue });
     this.eventsManager.broadcast({
       eventType: EventType.Resumed,
@@ -853,11 +917,22 @@ export class QueueManager {
     // their own; obliterate is the documented way to reclaim ALL state for a
     // queue, so drop its metrics entry too (prevents unbounded growth for
     // ephemeral/dynamically-named queues).
-    this.perQueueMetrics.delete(queue);
+    this.purgeQueueMetadata(queue);
 
     this.unregisterQueueName(queue);
     this.dashboardEmit?.('queue:obliterated', { queue });
     this.dashboardEmit?.('queue:removed', { queue });
+  }
+
+  /**
+   * Drop per-queue metadata that obliterate is responsible for reclaiming:
+   * cumulative metrics (keyed by name, never self-expiring) and the persisted
+   * control-state row (#100 — so a stale pause/limit can't resurrect on the
+   * next restart).
+   */
+  private purgeQueueMetadata(queue: string): void {
+    this.perQueueMetrics.delete(queue);
+    this.storage?.deleteQueueState(queue);
   }
 
   listQueues(): string[] {
@@ -940,18 +1015,41 @@ export class QueueManager {
 
   setRateLimit(queue: string, limit: number): void {
     this.shards[shardIndex(queue)].setRateLimit(queue, limit);
+    this.persistQueueState(queue);
   }
 
   clearRateLimit(queue: string): void {
     this.shards[shardIndex(queue)].clearRateLimit(queue);
+    this.persistQueueState(queue);
   }
 
   setConcurrency(queue: string, limit: number): void {
     this.shards[shardIndex(queue)].setConcurrency(queue, limit);
+    this.persistQueueState(queue);
   }
 
   clearConcurrency(queue: string): void {
     this.shards[shardIndex(queue)].clearConcurrency(queue);
+    this.persistQueueState(queue);
+  }
+
+  /**
+   * Issue #100: write-through the current control-state (paused / rate-limit /
+   * concurrency) to the `queue_state` table so it survives a server restart.
+   * Reads the post-mutation state from the owning shard and UPSERTs the row.
+   */
+  private persistQueueState(queue: string): void {
+    if (!this.storage) return;
+    const state = this.shards[shardIndex(queue)].getState(queue);
+    // When control-state returns fully to default (not paused, no limits), drop
+    // the row instead of persisting an all-default placeholder. Keeps the table
+    // free of noise rows for ephemeral queues that only ever call resume/clear*,
+    // and recovers identically (absent row → default state).
+    if (!state.paused && state.rateLimit === null && state.concurrencyLimit === null) {
+      this.storage.deleteQueueState(queue);
+      return;
+    }
+    this.storage.saveQueueState(queue, state.paused, state.rateLimit, state.concurrencyLimit);
   }
 
   /** Get rate limit and concurrency limit for a queue */

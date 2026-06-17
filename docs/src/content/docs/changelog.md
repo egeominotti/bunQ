@@ -10,6 +10,16 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.19] - 2026-06-17
+
+### Fixed — a successful completion was lost when the lock expired mid-processing (#101; RED→GREEN reproduction)
+
+- **A job that was processed successfully could be recorded as `failed` when its lock token expired while the handler was running** (`src/application/queueManager.ts`): when `lockDuration` elapsed without renewal (e.g. a half-open TCP storm forcing a worker rebuild on a fresh connection), the handler still finished, but the completion ACK carried the now-expired token. The server rejected it (`Invalid or expired lock token`), the client `AckBatcher` burned its transient retries against this *permanent* error and dropped the completion, and the job re-pulled → stalled → landed in `failed` despite having been processed correctly every time (observed ~350 jobs and 695× `acks lost` on one production queue). The ACK paths (`ack`, `ackBatch`, `ackBatchWithResults`) now apply a **grace window**: a completion is accepted when the job is still in `processing`, the lock entry's token still matches the presenting worker, and the lock belongs to the *current* processing instance (`lock.createdAt >= job.startedAt`). The third condition is a **re-lease guard**: the stall path requeues a job without deleting its lock (the lingering lock is load-bearing — the Worker dedups re-pulls via `activeJobIds`, and the lock preserves the original owner's recovery path), so if another worker re-pulls the job its `startedAt` is reset to a newer time than the lingering lock's `createdAt`, the guard denies the grace, and the timed-out worker's late ACK is rejected — preventing a double-completion. In the genuine case (same worker finishing just after its own lock expired, no re-pull) the completion is recorded instead of being lost to a stall. At-least-once delivery already protected the data; this fixes the queue's accounting (success recorded as success).
+
+### Fixed — queue control-state (paused / rate-limit / concurrency) was never persisted (#100; RED→GREEN reproduction)
+
+- **A deliberately paused queue silently resumed itself after a server restart, and rate-limit / concurrency overrides reset to defaults** (`src/application/queueManager.ts`, `src/application/backgroundTasks.ts`, `src/infrastructure/persistence/`): the `paused` / `rateLimit` / `concurrencyLimit` state lived only in `LimiterManager`'s in-memory Map. The schema declared a `queue_state` table for exactly this, but nothing read or wrote it — so any restart reset operator intent with no error or warning (a correctness/safety bug: a queue paused for maintenance, or to stop a misbehaving consumer, quietly resumed and processed jobs). The already-declared table is now wired: `pause`/`resume`/`setRateLimit`/`clearRateLimit`/`setConcurrency`/`clearConcurrency` **write through** to `queue_state` (UPSERT; an all-default state deletes the row instead of persisting a placeholder), `obliterate` drops the row, and `recover()` **loads** `queue_state` on boot and applies it to the owning shard. Control-state now survives restarts/upgrades/crashes.
+
 ## [2.8.18] - 2026-06-16
 
 ### Fixed — Worker over-pulled (leased) jobs past `concurrency` (#98; RED→GREEN reproduction)

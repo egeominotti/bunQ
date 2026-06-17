@@ -847,6 +847,9 @@ describe('SQL_STATEMENTS', () => {
       'clearDlqQueue',
       'insertCron',
       'updateCron',
+      'upsertQueueState',
+      'loadQueueState',
+      'deleteQueueState',
     ];
 
     test('should have all required statement definitions', () => {

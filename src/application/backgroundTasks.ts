@@ -382,6 +382,19 @@ export function recover(ctx: BackgroundContext): void {
     ctx.registerQueueName(queue);
   }
 
+  // === Restore queue control-state (#100) ===
+  // paused / rate-limit / concurrency live only in LimiterManager's in-memory
+  // Map; without this load every queue silently un-pauses and loses its limits
+  // on restart. Applied directly to the owning shard (in-memory only — these
+  // setters do not re-persist, so there is no write-back loop).
+  for (const qs of ctx.storage.loadQueueState()) {
+    const shard = ctx.shards[shardIndex(qs.name)];
+    if (qs.paused) shard.pause(qs.name);
+    if (qs.rateLimit !== null) shard.setRateLimit(qs.name, qs.rateLimit);
+    if (qs.concurrencyLimit !== null) shard.setConcurrency(qs.name, qs.concurrencyLimit);
+    ctx.registerQueueName(qs.name);
+  }
+
   // === PHASE 3: Recover completed jobs ===
   // Required for clean('completed'), stats.completed, and in-memory lookups
   // on jobs that completed before a server restart (issue #84).

@@ -378,9 +378,12 @@ Mark a job as failed. The job will be retried with exponential backoff if it has
   cmd: 'FAIL',
   id: string,            // Job ID
   error?: string,        // Error message
+  stack?: string[],      // Failure stack trace lines — persisted server-side, capped at job.stackTraceLimit (#74)
   token?: string         // Lock token (required if pulled with owner)
 }
 ```
+
+The optional `stack` is stored on the job and surfaced by `GetJob` and on DLQ entries, so a failed job's stack trace survives a restart.
 
 **Response:**
 
@@ -1007,7 +1010,19 @@ Create or update a cron/repeating job schedule.
   repeatEvery?: number,     // Repeat interval in ms (alternative to schedule)
   priority?: number,        // Job priority
   maxLimit?: number,        // Max executions
-  timezone?: string         // IANA timezone (e.g., 'Europe/Rome', 'America/New_York')
+  timezone?: string,        // IANA timezone (e.g., 'Europe/Rome', 'America/New_York')
+  immediately?: boolean,    // Fire once on creation, then continue on schedule (default false)
+  skipIfNoWorker?: boolean, // Skip a tick when no worker is registered (default false)
+  preventOverlap?: boolean, // Skip a tick while the previous run is still pending/active (default true)
+  jobOptions?: {            // Per-job options applied to every generated job
+    maxAttempts?: number,
+    backoff?: number | { type: 'fixed' | 'exponential', delay: number },
+    timeout?: number,
+    delay?: number,
+    stallTimeout?: number,
+    removeOnComplete?: boolean,
+    removeOnFail?: boolean
+  }
 }
 ```
 

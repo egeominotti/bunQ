@@ -1321,6 +1321,10 @@ curl -X POST http://localhost:6790/crons \
 | `timezone` | `string` | No | IANA timezone (default: `UTC`). Affects cron scheduling. |
 | `priority` | `number` | No | Priority for generated jobs. |
 | `maxLimit` | `number` | No | Max total executions. Cron is removed after reaching this count. |
+| `immediately` | `boolean` | No | Fire once on creation, then continue on schedule (default `false`). |
+| `skipIfNoWorker` | `boolean` | No | Skip a tick when no worker is registered for the queue (default `false`). |
+| `preventOverlap` | `boolean` | No | Deduplicate overlapping runs — a tick is skipped while the previous generated job is still pending/active (default `true`). |
+| `jobOptions` | `object` | No | Per-job options applied to every generated job: `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. |
 
 \* Either `schedule` or `repeatEvery` is required (not both).
 

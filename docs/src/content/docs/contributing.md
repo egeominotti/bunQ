@@ -19,7 +19,7 @@ Be respectful and inclusive. We welcome contributors of all backgrounds and expe
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) v1.0+
+- [Bun](https://bun.sh) v1.3.9+
 - Git
 - A GitHub account
 

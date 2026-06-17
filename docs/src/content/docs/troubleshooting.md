@@ -13,9 +13,13 @@ Solutions to common issues when using bunqueue.
 
 ## Installation Issues
 
-### "bunqueue requires Bun runtime"
+### "bunqueue is Bun-only and requires the Bun runtime"
 
-bunqueue only works with Bun, not Node.js.
+Running under Node.js throws:
+
+> bunqueue is Bun-only and requires the Bun runtime (https://bun.sh). Node.js is not supported: install Bun and run your program with `bun`.
+
+bunqueue only works with Bun (v1.3.9+), not Node.js — run your program with `bun`, not `node`.
 
 ```bash
 # Check if Bun is installed

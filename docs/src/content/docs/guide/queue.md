@@ -227,7 +227,11 @@ Use `durable: true` for:
 
 ### Job Deduplication (BullMQ-style)
 
-Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` already exists, **the existing job is returned** instead of creating a duplicate. This works in both **embedded** and **TCP** modes (including auto-batched operations). This is BullMQ-compatible idempotent behavior.
+Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` is **still queued** (`waiting` / `delayed` / `prioritized`), **the existing job is returned** instead of creating a duplicate. This works in both **embedded** and **TCP** modes (including auto-batched operations). This is BullMQ-compatible idempotent behavior.
+
+:::note[Completed or processing ids are reused, not returned]
+Deduplication only collapses an add onto a job that is still pending. If the prior job with that `jobId` has already **completed** (or is currently **processing**), re-adding the same `jobId` starts a **fresh `waiting` job** under that id — the stale completed record and its result are evicted first (so `getJobState` reports the new run, not the old `completed`). This is what makes a `jobId` safe to reuse across runs (e.g. a daily `report-2026-06-17`): you get idempotency within a run and a clean re-run afterwards, never a permanently-stuck `completed` lookup.
+:::
 
 ```typescript
 // Basic deduplication with jobId (BullMQ-style idempotency)
@@ -448,6 +452,12 @@ While a queue is paused, its ready jobs are reported under `paused`, never under
 listed by `getJobs({ state: 'paused' })`. This mirrors BullMQ: a job is never
 counted in both `waiting` and `paused` at once. Delayed and active jobs keep
 their own state; on `resume()` the jobs return to `waiting`.
+
+**Pause is durable** (since 2.8.19): with SQLite persistence enabled, `pause`
+state — along with `setRateLimit` and `setConcurrency` overrides — is written
+through to the `queue_state` table and restored on restart. A queue you paused
+for maintenance stays paused across a server restart/upgrade/crash; it does not
+silently resume.
 :::
 
 ## Queue Control

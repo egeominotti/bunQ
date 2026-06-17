@@ -139,7 +139,7 @@ Yes. bunqueue includes:
 
 ### What are the system requirements?
 
-- **Bun**: Version 1.0 or higher
+- **Bun**: Version 1.3.9 or higher (enforced via `engines`)
 - **OS**: macOS, Linux, Windows (WSL)
 - **Memory**: Minimum 512MB recommended
 - **Disk**: SSD recommended for best performance

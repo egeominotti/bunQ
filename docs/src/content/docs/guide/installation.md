@@ -11,7 +11,7 @@ head:
 
 ## Requirements
 
-- [Bun](https://bun.sh) v1.0 or later
+- [Bun](https://bun.sh) v1.3.9 or later (enforced via `engines`)
 
 ## Install from npm
 

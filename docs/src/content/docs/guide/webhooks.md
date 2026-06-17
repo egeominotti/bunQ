@@ -49,7 +49,7 @@ bunqueue webhook list
 URL                                        QUEUE    EVENTS
 https://api.example.com/webhooks/bunqueue  *        all
 https://api.example.com/webhooks/emails    emails   all
-https://api.example.com/webhooks/failures  *        job.failed,job.stalled
+https://api.example.com/webhooks/failures  *        job.failed,job.started
 ```
 
 ### Enable/Disable Webhook
@@ -72,14 +72,20 @@ bunqueue webhook remove wh_abc123
 
 ## Event Types
 
+These are the only valid webhook events — the canonical set
+(`job.pushed`, `job.started`, `job.completed`, `job.failed`, `job.progress`)
+shared by the CLI, TCP, HTTP, and MCP. Subscribing to any other event (e.g.
+`job.active`, `job.waiting`, `job.delayed`, `job.stalled`) is **rejected** at
+registration time with `Invalid webhook event(s): … Valid: job.pushed,
+job.started, job.completed, job.failed, job.progress`.
+
 | Event | Description | When Triggered |
 |-------|-------------|----------------|
+| `job.pushed` | Job added to queue | After `queue.add()` / `push` |
+| `job.started` | Job picked up for processing | Worker leases the job |
 | `job.completed` | Job finished successfully | Worker completes job |
 | `job.failed` | Job failed | Worker throws error |
 | `job.progress` | Progress updated | `job.updateProgress()` |
-| `job.active` | Job started processing | Worker picks up job |
-| `job.waiting` | Job added to queue | After `queue.add()` |
-| `job.delayed` | Job scheduled for later | Job with delay added |
 
 ## Webhook Payload
 

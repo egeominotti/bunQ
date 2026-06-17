@@ -33,11 +33,14 @@ export function createMonitoringState(): MonitoringState {
 }
 
 /** Config from env vars */
-const QUEUE_IDLE_THRESHOLD_MS = parseInt(process.env.QUEUE_IDLE_THRESHOLD_MS ?? '30000');
-const QUEUE_SIZE_THRESHOLD = parseInt(process.env.QUEUE_SIZE_THRESHOLD ?? '0'); // 0 = disabled
-const MEMORY_WARNING_MB = parseInt(process.env.MEMORY_WARNING_MB ?? '0'); // 0 = disabled
-const STORAGE_WARNING_MB = parseInt(process.env.STORAGE_WARNING_MB ?? '0'); // 0 = disabled
-const WORKER_OVERLOAD_THRESHOLD_MS = parseInt(process.env.WORKER_OVERLOAD_THRESHOLD_MS ?? '30000');
+const QUEUE_IDLE_THRESHOLD_MS = parseInt(process.env.QUEUE_IDLE_THRESHOLD_MS ?? '30000', 10);
+const QUEUE_SIZE_THRESHOLD = parseInt(process.env.QUEUE_SIZE_THRESHOLD ?? '0', 10); // 0 = disabled
+const MEMORY_WARNING_MB = parseInt(process.env.MEMORY_WARNING_MB ?? '0', 10); // 0 = disabled
+const STORAGE_WARNING_MB = parseInt(process.env.STORAGE_WARNING_MB ?? '0', 10); // 0 = disabled
+const WORKER_OVERLOAD_THRESHOLD_MS = parseInt(
+  process.env.WORKER_OVERLOAD_THRESHOLD_MS ?? '30000',
+  10
+);
 
 export interface MonitoringContext {
   queueNamesCache: Set<string>;

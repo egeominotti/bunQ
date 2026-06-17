@@ -26,7 +26,7 @@ interface CliFlags {
 /** Validate port number */
 function validatePort(value: string, name: string, defaultPort: number): number {
   const port = parseInt(value, 10);
-  if (isNaN(port) || port < 1 || port > 65535) {
+  if (Number.isNaN(port) || port < 1 || port > 65535) {
     console.warn(`Warning: Invalid ${name} "${value}". Using default ${defaultPort}.`);
     return defaultPort;
   }

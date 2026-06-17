@@ -305,10 +305,10 @@ async function routeRequest(
   if (path === '/dashboard/queues' && method === 'GET') {
     const url = new URL(req.url);
     const limit = Math.min(
-      Math.max(parseInt(url.searchParams.get('limit') ?? '100') || 100, 1),
+      Math.max(parseInt(url.searchParams.get('limit') ?? '100', 10) || 100, 1),
       500
     );
-    const offset = Math.max(parseInt(url.searchParams.get('offset') ?? '0') || 0, 0);
+    const offset = Math.max(parseInt(url.searchParams.get('offset') ?? '0', 10) || 0, 0);
     return dashboardQueuesEndpoint(ctx.queueManager, limit, offset, corsOrigins);
   }
   const dashQueueMatch = path.match(RE_DASHBOARD_QUEUE_DETAIL);

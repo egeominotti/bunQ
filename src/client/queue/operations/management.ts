@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-floating-promises, @typescript-eslint/no-unnecessary-condition */
 /**
  * Queue Management Operations
  * remove, retry, clean, promote, updateProgress, logs
@@ -16,10 +15,11 @@ interface ManagementContext {
 
 // ============ Remove Operations ============
 
-/** Remove a job (sync) */
+/** Remove a job (sync, fire-and-forget; use removeAsync to await the removal) */
 export function remove(ctx: ManagementContext, id: string): void {
-  if (ctx.embedded) getSharedManager().cancel(jobId(id));
-  else ctx.tcp!.send({ cmd: 'Cancel', id });
+  // `void`: the cancellation is intentionally not awaited here (sync API).
+  if (ctx.embedded) void getSharedManager().cancel(jobId(id));
+  else void ctx.tcp!.send({ cmd: 'Cancel', id });
 }
 
 /** Remove a job (async) */

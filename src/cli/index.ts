@@ -35,7 +35,7 @@ function resolveEnvPort(currentPort: number): number {
   const envPort = Bun.env.TCP_PORT ?? Bun.env.BUNQUEUE_TCP_PORT ?? Bun.env.BQ_TCP_PORT;
   if (!envPort) return currentPort;
   const parsed = parseInt(envPort, 10);
-  if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
     console.warn(`Warning: Invalid env port "${envPort}". Using ${currentPort}.`);
     return currentPort;
   }
@@ -175,7 +175,7 @@ function applyPortFlag(allArgs: string[], i: number, state: HostPortState): numb
     return i;
   }
   const parsed = parseInt(nextArg, 10);
-  if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
     console.warn(`Warning: Invalid port "${nextArg}". Using default port 6789.`);
     state.port = 6789;
   } else {
@@ -251,7 +251,7 @@ export function parseGlobalOptions(): { options: GlobalOptions; commandArgs: str
     } else if (arg.startsWith('--port=')) {
       const raw = arg.slice(7);
       const parsed = parseInt(raw, 10);
-      if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+      if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
         console.warn(`Warning: Invalid port "${raw}". Using default port 6789.`);
         hp.port = 6789;
       } else {

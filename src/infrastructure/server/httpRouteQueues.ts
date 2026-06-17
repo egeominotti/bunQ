@@ -73,7 +73,7 @@ async function routeJobOps(
     }
 
     if (method === 'GET') {
-      const timeout = parseInt(new URL(req.url).searchParams.get('timeout') ?? '0');
+      const timeout = parseInt(new URL(req.url).searchParams.get('timeout') ?? '0', 10);
       const r = await handleCommand({ cmd: 'PULL', queue, timeout }, ctx);
       return jsonResponse(r, 200, cors);
     }
@@ -146,8 +146,8 @@ async function routeJobOps(
           : stateValues;
     const limitParam = url.searchParams.get('limit');
     const offsetParam = url.searchParams.get('offset');
-    const limit = limitParam ? parseInt(limitParam) : undefined;
-    const offset = offsetParam ? parseInt(offsetParam) : undefined;
+    const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+    const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
     const r = await handleCommand(
       {
         cmd: 'GetJobs',

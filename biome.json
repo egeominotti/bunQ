@@ -31,7 +31,7 @@
     "enabled": true,
     "rules": {
       "preset": "none",
-      "nursery": { "noFloatingPromises": "warn" },
+      "nursery": { "noFloatingPromises": "error" },
       "complexity": {
         "noAdjacentSpacesInRegex": "error",
         "noExtraBooleanCast": "error",
@@ -63,7 +63,8 @@
         "noUnsafeFinally": "error",
         "noUnsafeOptionalChaining": "error",
         "noUnusedLabels": "error",
-        "noUnusedPrivateClassMembers": "warn",
+        "noUnusedPrivateClassMembers": "error",
+        "useParseIntRadix": "error",
         "noUnusedVariables": "error",
         "useIsNan": "error",
         "useValidForDirection": "error",
@@ -95,6 +96,8 @@
         "noControlCharactersInRegex": "error",
         "noDebugger": "error",
         "noDoubleEquals": "error",
+        "noGlobalIsNan": "error",
+        "useIterableCallbackReturn": "error",
         "noDuplicateCase": "error",
         "noDuplicateClassMembers": "error",
         "noDuplicateElseIf": "error",
@@ -183,7 +186,10 @@
       "linter": {
         "rules": {
           "complexity": { "useMaxParams": "off" },
-          "style": { "noNonNullAssertion": "off" }
+          "correctness": { "useParseIntRadix": "off" },
+          "nursery": { "noFloatingPromises": "off" },
+          "style": { "noNonNullAssertion": "off" },
+          "suspicious": { "useIterableCallbackReturn": "off" }
         }
       }
     },

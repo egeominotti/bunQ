@@ -32,7 +32,6 @@ export class CloudAgent {
   private statsUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribeEvents: (() => void) | null = null;
   private sequenceId = 0;
-  private snapshotCount = 0;
   private stopped = false;
   private serverHandles?: ServerHandles;
   /** Event buffer — flushed into each HTTP snapshot */
@@ -184,8 +183,6 @@ export class CloudAgent {
   /** Collect and send a snapshot via HTTP */
   private async sendSnapshot(_forceHeavy = false): Promise<void> {
     try {
-      this.snapshotCount++;
-
       const snapshot = await collectSnapshot({
         queueManager: this.queueManager,
         instanceId: this.instanceId,

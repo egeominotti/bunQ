@@ -147,6 +147,13 @@ export class SseHandler {
 
   /** Broadcast job event to matching clients (with typed SSE event field) */
   broadcast(event: JobEvent): void {
+    // No clients => nothing to send, and nothing to buffer that anyone could
+    // replay. Mirrors wsHandler.broadcast. Without this, every job event still
+    // paid JSON.stringify + encode + ring buffer + an O(queue size) per-event
+    // getQueueJobCounts, turning a bulk push into O(N²) even with no dashboard
+    // attached (the common high-throughput case).
+    if (this.clients.size === 0) return;
+
     const id = ++this.eventId;
     const eventName = EVENT_MAP[event.eventType] ?? `job:${event.eventType}`;
 

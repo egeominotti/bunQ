@@ -33,8 +33,18 @@ export class TemporalManager {
    * Ordered by createdAt for efficient cleanQueue range queries
    * Uses equality check on jobId to prevent duplicate entries for the same job
    */
+  // Total-order comparator: createdAt first, then jobId as a tie-break. Without
+  // the tie-break, a batch of jobs sharing one createdAt (the addBulk case —
+  // `now` is captured once) makes every node compare-equal, which (a) turns
+  // SkipList.insert's duplicate-check scan into O(n) per insert => O(n²) for the
+  // batch, and (b) makes SkipList.delete remove the WRONG same-createdAt node
+  // (it stops at the first compare-equal node). A total order fixes both: the
+  // dedup scan and delete both resolve to the exact (createdAt, jobId) node in
+  // O(log n). jobId is a string (UUIDv7 by default, or any custom id), so its
+  // lexicographic comparison is a valid total order in every case. Equality is
+  // still by jobId (now reached only for a true duplicate).
   private readonly temporalIndex = new SkipList<TemporalEntry>(
-    (a, b) => a.createdAt - b.createdAt,
+    (a, b) => a.createdAt - b.createdAt || (a.jobId < b.jobId ? -1 : a.jobId > b.jobId ? 1 : 0),
     16,
     0.5,
     (a, b) => a.jobId === b.jobId

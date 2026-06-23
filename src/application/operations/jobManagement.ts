@@ -53,6 +53,20 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         ctx.storage?.deleteJob(jobId);
         return { success: true, queueName: location.queueName };
       }
+      // Or parked in waitingDeps (flow-chain dependent inserted by push.ts while
+      // its predecessors are unresolved). These are NOT counted in the queued
+      // counter (insertJobToShard skips incrementQueued when needsWaiting), so do
+      // NOT decrement — but they DO hold their uniqueKey reservation and register
+      // entries in the dependency index, both of which must be released here.
+      const waiting = shard.waitingDeps.get(jobId);
+      if (waiting) {
+        shard.waitingDeps.delete(jobId);
+        shard.unregisterDependencies(jobId, waiting.dependsOn);
+        if (waiting.uniqueKey) shard.releaseUniqueKey(location.queueName, waiting.uniqueKey);
+        ctx.jobIndex.delete(jobId);
+        ctx.storage?.deleteJob(jobId);
+        return { success: true, queueName: location.queueName };
+      }
       return { success: false, queueName: location.queueName };
     });
 

@@ -10,6 +10,14 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.22] - 2026-06-23
+
+### Fixed — `cancel()` / `removeAsync()` did not remove flow-chain jobs parked in `waitingDeps` ([#102](https://github.com/egeominotti/bunqueue/issues/102))
+
+A dependent job created by `FlowProducer.addChain()` (e.g. `B` and `C` in a chain `A → B → C`) is parked in `shard.waitingDeps` (state `waiting-children`) until its predecessors complete. Its `jobIndex` location is `{ type: 'queue' }`, but `cancelJob()` only inspected the run queue and the `waitingChildren` map — it never checked `waitingDeps`. So `Queue.removeAsync(id)` (and `job.remove()`) on such a job returned `false`, **never called `storage.deleteJob()`**, and left the row in SQLite: the job reappeared after a server restart, leaking the dependency-index entry and its `uniqueKey` reservation too.
+
+`cancelJob()` now handles the `waitingDeps` case: it deletes the job from `waitingDeps`, unregisters its dependency-index entries, releases any held `uniqueKey`, drops it from `jobIndex`, and calls `storage.deleteJob()` (which also evicts a still-buffered job from the write buffer). It does **not** touch the queued counter — `waitingDeps` jobs are never counted there. RED→GREEN reproduction in `test/issue-102-cancel-waitingdeps.test.ts`: a `QueueManager` + real SQLite restart proving the row is gone and does not reappear, a `uniqueKey`-reuse-after-cancel case, and a faithful `FlowProducer.addChain` + `removeAsync` embedded repro.
+
 ## [2.8.21] - 2026-06-23
 
 ### Performance — eliminated two O(n²) hot paths in batch push (`addBulk` up to 32× faster over TCP)

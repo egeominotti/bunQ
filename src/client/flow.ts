@@ -245,13 +245,17 @@ export class FlowProducer extends EventEmitter {
         __flowParentIds: parallelIds,
         ...(final.data as object),
       };
-      const finalId = await pushJob(
-        this.pushCtx,
-        final.queueName,
-        finalData,
-        final.opts ?? {},
-        parallelIds
-      );
+      // pushJobWithParent (not pushJob) so the final job records childrenIds =
+      // parallelIds: this keeps the same dependsOn ordering (waits for all
+      // parallel jobs) AND lets the merge step read their results via
+      // getChildrenValues()/getDependencies(), like a BullMQ fan-in parent.
+      const finalId = await pushJobWithParent(this.pushCtx, {
+        queueName: final.queueName,
+        data: finalData,
+        opts: final.opts ?? {},
+        parentRef: null,
+        childIds: parallelIds,
+      });
 
       return { parallelIds, finalId };
     } catch (error) {

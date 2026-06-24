@@ -769,16 +769,20 @@ export class QueueManager {
     const childJob = await this.getJob(childJobId);
     if (!childJob) return;
 
+    const parentJob = await this.getJob(parentJobId);
+
     // Update domain parentId field (cast to bypass readonly for flow linkage)
     (childJob as { parentId: JobId | null }).parentId = parentJobId;
 
-    // Update the job's data to include parent reference
+    // Update the job's data to include parent reference. __parentQueue must be
+    // the PARENT's queue — it feeds buildParentKey/extractParent/buildParentOpts
+    // for child→parent navigation (Job.parent, .parentKey, .opts.parent, toJSON).
+    // Using the child's own queue corrupted cross-queue flows (audit #102 follow-up).
     const jobData = childJob.data as Record<string, unknown>;
     jobData.__parentId = parentJobId;
-    jobData.__parentQueue = childJob.queue;
+    jobData.__parentQueue = parentJob?.queue ?? jobData.__parentQueue ?? childJob.queue;
 
     // Also add this child to parent's childrenIds
-    const parentJob = await this.getJob(parentJobId);
     if (parentJob) {
       if (!parentJob.childrenIds) {
         parentJob.childrenIds = [];

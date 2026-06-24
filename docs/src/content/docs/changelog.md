@@ -10,6 +10,18 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.23] - 2026-06-24
+
+### Fixed — FlowProducer audit: two real defects (cross-queue parent linkage + `addBulkThen` result access)
+
+An adversarial audit of every `FlowProducer` feature (new suite `test/flow-producer-audit.test.ts`, 15 tests) confirmed 13 behaviors correct and surfaced two genuine bugs, both fixed RED→GREEN:
+
+- **`updateJobParent` corrupted a child's `__parentQueue`** (`src/application/queueManager.ts`). It set `data.__parentQueue = childJob.queue` — the **child's own** queue — instead of the parent's. For a **cross-queue** flow (`add({ queueName: 'P', children: [{ queueName: 'C' }] })`) the child's `Queue.getJob(...).parent.queueQualifiedName`, `.parentKey`, `.opts.parent.queue`, and `toJSON()/asJSON().parentKey` all reported `C` instead of `P`, breaking child→parent navigation. (Execution, `getChildrenValues`, `getFlow`, and `failParentOnFailure` were unaffected — they key off the domain `parentId`, which was already correct, so same-queue flows masked the bug.) Now set from `parentJob.queue`. `Queue.add({ parent })` already did this correctly (`add.ts`); `updateJobParent` was the lone divergence.
+
+- **`addBulkThen` produced a merge job that could not read its predecessors** (`src/client/flow.ts`). The `final` job was pushed via `pushJob` with `dependsOn = parallelIds` but **no `childrenIds`**, so `getChildrenValues(finalId)` returned `{}` — incompatible with BullMQ fan-in and with `add()`. It now pushes the final job via `pushJobWithParent` (children = the parallel ids): identical `dependsOn` ordering (still waits for all parallel jobs), but the merge step can now read their results via `getChildrenValues()` / `getDependencies()`. Note the linkage side effect: the parallel jobs now have the final job as their `parentId`, so a parallel step carrying `failParentOnFailure: true` will now fail the merge job (previously a silent no-op, since the parallel jobs had no parent).
+
+Two further audit candidates were investigated and **deliberately not changed** because they are not bugs: `getParentResult` returning `undefined` when a predecessor used `removeOnComplete: true` is an intentional memory-bounding trade-off (dependents still unblock via `depCompletions`), and the embedded-vs-TCP `customId`/`deduplication.id` fallback difference is not FlowProducer-specific — it mirrors the direct `Queue.add` paths. Regression-checked across 101 existing flow tests + all three suites (unit 5680, TCP 59/59, embedded 36/36).
+
 ## [2.8.22] - 2026-06-23
 
 ### Fixed — `cancel()` / `removeAsync()` did not remove flow-chain jobs parked in `waitingDeps` ([#102](https://github.com/egeominotti/bunqueue/issues/102))

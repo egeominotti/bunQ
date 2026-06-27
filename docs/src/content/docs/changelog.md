@@ -27,7 +27,7 @@ All notable changes to bunqueue are documented here.
 
 ### Docs — benchmarks page re-measured and corrected
 
-Re-ran every published benchmark on an Apple M1 Max (Bun 1.3.14) and updated `guide/benchmarks`. Embedded numbers reproduce (and are higher than before: bulk push peaks ~656K ops/sec). The **TCP “Process” figures were corrected**: the old 20–34K ops/sec single-worker numbers predate the lease-bounding over-pull fix and no longer reproduce — a single worker at `concurrency:10` is bounded by per-job pull round-trip latency (~182 ops/sec), scaling to ~5,100 ops/sec at `concurrency:50`. The page now explains this and notes the `BUNQUEUE_EMBEDDED` env caveat when running `bench/comprehensive.ts`.
+Re-ran every published benchmark on an Apple M1 Max (Bun 1.3.14), reporting the **median of 3 runs** per cell, and updated `guide/benchmarks`. Embedded numbers reproduce (and are higher than before: bulk push peaks ~630K ops/sec). The **TCP “Process” figures were corrected**: the old 20–34K ops/sec single-worker numbers predate the lease-bounding over-pull fix and no longer reproduce — a single worker at `concurrency:10` is bounded by per-job pull round-trip latency (~182 ops/sec), scaling to ~4,900 ops/sec at `concurrency:50`. The methodology section now also documents that the TCP “Push” column issues 100 concurrent adds per batch (not sequential) and notes the `BUNQUEUE_EMBEDDED` env caveat when running `bench/comprehensive.ts`.
 
 ## [2.8.23] - 2026-06-24
 

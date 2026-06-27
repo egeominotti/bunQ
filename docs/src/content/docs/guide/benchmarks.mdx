@@ -1,6 +1,6 @@
 ---
-title: "Bunqueue Performance Benchmarks: 286K Ops/Sec on Bun"
-description: Bunqueue benchmarks show 286K ops/sec embedded, 149K ops/sec TCP. Real-world throughput tests at 1K to 50K job scales on Bun runtime.
+title: "Bunqueue Performance Benchmarks: 656K Ops/Sec on Bun"
+description: Bunqueue benchmarks show up to 656K ops/sec bulk push embedded, 90K ops/sec TCP. Real-world throughput tests at 1K to 50K job scales on Bun runtime.
 head:
   - tag: meta
     attrs:
@@ -13,26 +13,26 @@ import { Tabs, TabItem, Card, CardGrid, Aside, Code } from '@astrojs/starlight/c
 bunqueue supports two deployment modes: **Embedded** (direct SQLite) and **TCP** (network + SQLite). This page shows real benchmark results comparing both modes at scale.
 
 <Aside type="tip">
-The only honest benchmark is one you run on your own hardware. Clone the repo and run `bun run bench/comprehensive.ts` to verify these results.
+The only honest benchmark is one you run on your own hardware. Clone the repo and run `bun run bench/comprehensive.ts` to verify these results. The numbers below were re-measured on an Apple M1 Max (Bun 1.3.14) and supersede older figures.
 </Aside>
 
 ## Summary
 
 <CardGrid>
   <Card title="Embedded Mode" icon="rocket">
-    **Up to 286K ops/sec**
+    **Up to 656K ops/sec**
 
-    Direct SQLite access, zero network overhead
+    Bulk push, direct SQLite access, zero network overhead
   </Card>
   <Card title="TCP Mode" icon="laptop">
-    **Up to 149K ops/sec**
+    **Up to 91K ops/sec**
 
-    Network client/server for distributed systems
+    Bulk push over the network for distributed systems
   </Card>
   <Card title="Embedded Advantage" icon="star">
-    **2-4x Faster**
+    **3-8x Faster**
 
-    Depending on operation type
+    On push/bulk; far higher on the per-job process loop
   </Card>
   <Card title="Scale Tested" icon="open-book">
     **50,000 Jobs**
@@ -67,7 +67,7 @@ Embedded mode uses direct SQLite access with no network overhead. Ideal for sing
 
 <div style={{ textAlign: 'center', margin: '2rem 0' }}>
   <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[86248,187256,177098,204913],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[221365,278587,279640,286616],backgroundColor:'rgba(168,85,247,0.85)'},{label:'Process',data:[47538,64716,77713,74772],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
+    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[51865,164759,186992,247103],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[161879,398479,655637,608815],backgroundColor:'rgba(168,85,247,0.85)'},{label:'Process',data:[33376,68854,81540,85215],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
     alt="Embedded mode throughput chart"
     style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
   />
@@ -75,13 +75,13 @@ Embedded mode uses direct SQLite access with no network overhead. Ideal for sing
 
 | Scale | Push | Bulk Push | Process |
 |-------|------|-----------|---------|
-| **1,000** | 86,248 ops/sec | 221,365 ops/sec | 47,538 ops/sec |
-| **5,000** | 187,256 ops/sec | 278,587 ops/sec | 64,716 ops/sec |
-| **10,000** | 177,098 ops/sec | 279,640 ops/sec | 77,713 ops/sec |
-| **50,000** | 204,913 ops/sec | 286,616 ops/sec | 74,772 ops/sec |
+| **1,000** | 51,865 ops/sec | 161,879 ops/sec | 33,376 ops/sec |
+| **5,000** | 164,759 ops/sec | 398,479 ops/sec | 68,854 ops/sec |
+| **10,000** | 186,992 ops/sec | 655,637 ops/sec | 81,540 ops/sec |
+| **50,000** | 247,103 ops/sec | 608,815 ops/sec | 85,215 ops/sec |
 
 <Aside>
-Embedded mode shows consistent performance scaling. Bulk push reaches nearly **287K ops/sec** at 50K jobs.
+Embedded mode scales cleanly: single push climbs to **247K ops/sec** and bulk push peaks around **656K ops/sec** at 10K jobs. The first (1K) row reflects cold-start/warmup; throughput stabilizes from 5K up.
 </Aside>
 
 ---
@@ -92,21 +92,33 @@ TCP mode connects clients to a bunqueue server over the network. Required for di
 
 <div style={{ textAlign: 'center', margin: '2rem 0' }}>
   <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[28633,49284,54562,51827],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[96635,142152,149218,131897],backgroundColor:'rgba(168,85,247,0.85)'},{label:'Process',data:[20195,34098,34679,32544],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'TCP Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
+    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[37728,57531,75042,89850],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[28939,91306,81176,79933],backgroundColor:'rgba(168,85,247,0.85)'}]},options:{plugins:{title:{display:true,text:'TCP Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
     alt="TCP mode throughput chart"
     style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
   />
 </div>
 
-| Scale | Push | Bulk Push | Process |
+| Scale | Push | Bulk Push | Process (1 worker, c=10) |
 |-------|------|-----------|---------|
-| **1,000** | 28,633 ops/sec | 96,635 ops/sec | 20,195 ops/sec |
-| **5,000** | 49,284 ops/sec | 142,152 ops/sec | 34,098 ops/sec |
-| **10,000** | 54,562 ops/sec | 149,218 ops/sec | 34,679 ops/sec |
-| **50,000** | 51,827 ops/sec | 131,897 ops/sec | 32,544 ops/sec |
+| **1,000** | 37,728 ops/sec | 28,939 ops/sec | 182 ops/sec |
+| **5,000** | 57,531 ops/sec | 91,306 ops/sec | 183 ops/sec |
+| **10,000** | 75,042 ops/sec | 81,176 ops/sec | 183 ops/sec |
+| **50,000** | 89,850 ops/sec | 79,933 ops/sec | 186 ops/sec |
 
 <Aside>
-TCP mode with pipelining achieves **149K ops/sec** bulk push at 10K jobs. Network overhead is amortized with connection pooling (32 connections).
+TCP push scales to **90K ops/sec** at 50K jobs and bulk push peaks around **91K ops/sec**, amortized with connection pooling (32 connections).
+</Aside>
+
+<Aside type="caution">
+**Read the Process column carefully.** It measures a *single* worker process at `concurrency: 10` draining the queue over the network. Each job's lock lease is bounded by the worker's free concurrency slots (the over‑pull guard), so in steady state the worker issues roughly one pull round‑trip per freed slot — the per‑job network latency, not server throughput, is the bottleneck. Throughput therefore scales with worker concurrency and the number of worker processes, **not** with queue depth:
+
+| Worker concurrency | TCP process (ops/sec) |
+|--------------------|-----------------------|
+| 10 (default in the bench) | ~182 |
+| 50 | ~5,100 |
+| 100 | ~4,700 |
+
+Real distributed deployments run many workers and/or higher concurrency, so per‑node processing throughput is in the thousands of ops/sec; for maximum single‑process throughput use **embedded mode** (no network round‑trip per pull). Earlier versions of this page reported much higher single‑worker TCP process numbers that predate the lease‑bounding correctness fix and no longer reproduce.
 </Aside>
 
 ---
@@ -117,21 +129,21 @@ How much faster is Embedded mode compared to TCP mode?
 
 <div style={{ textAlign: 'center', margin: '2rem 0' }}>
   <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K Jobs','5K Jobs','10K Jobs','50K Jobs'],datasets:[{label:'Push',data:[3.0,3.8,3.2,4.0],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[2.3,2.0,1.9,2.2],backgroundColor:'rgba(168,85,247,0.85)'},{label:'Process',data:[2.4,1.9,2.2,2.3],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded vs TCP Speedup (times faster)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Speedup (x times)'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
+    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K Jobs','5K Jobs','10K Jobs','50K Jobs'],datasets:[{label:'Push',data:[1.4,2.9,2.5,2.8],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[5.6,4.4,8.1,7.6],backgroundColor:'rgba(168,85,247,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded vs TCP Speedup — Push & Bulk (times faster)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Speedup (x times)'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
     alt="Embedded vs TCP comparison chart"
     style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
   />
 </div>
 
-| Scale | Push | Bulk Push | Process |
+| Scale | Push | Bulk Push | Process¹ |
 |-------|------|-----------|---------|
-| **1,000** | 3.0x faster | 2.3x faster | 2.4x faster |
-| **5,000** | 3.8x faster | 2.0x faster | 1.9x faster |
-| **10,000** | 3.2x faster | 1.9x faster | 2.2x faster |
-| **50,000** | 4.0x faster | 2.2x faster | 2.3x faster |
+| **1,000** | 1.4x faster | 5.6x faster | 183x faster |
+| **5,000** | 2.9x faster | 4.4x faster | 376x faster |
+| **10,000** | 2.5x faster | 8.1x faster | 446x faster |
+| **50,000** | 2.8x faster | 7.6x faster | 458x faster |
 
 <Aside type="tip">
-Embedded mode is **2-4x faster** than TCP mode across all operations and scales. Use embedded mode when your workers run in the same process as the queue.
+For **push/bulk**, embedded is roughly **3–8x faster** than a single TCP worker — it skips the per-call network round-trip. The huge **Process** ratio (¹) is not a server-throughput difference: it reflects the single-worker, `concurrency:10` TCP pull-latency bound described above. Raise TCP worker concurrency (or add workers) to close most of that gap; use embedded mode when your workers run in the same process as the queue.
 </Aside>
 
 ---
@@ -140,7 +152,7 @@ Embedded mode is **2-4x faster** than TCP mode across all operations and scales.
 
 <div style={{ textAlign: 'center', margin: '2rem 0' }}>
   <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['Push','Bulk Push','Process'],datasets:[{label:'Embedded',data:[204913,286616,77713],backgroundColor:'rgba(236,72,153,0.85)'},{label:'TCP',data:[54562,149218,34679],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Peak Throughput Comparison (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=600&height=400&backgroundColor=white"
+    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['Push','Bulk Push'],datasets:[{label:'Embedded',data:[247103,655637],backgroundColor:'rgba(236,72,153,0.85)'},{label:'TCP',data:[89850,91306],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Peak Push Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=600&height=400&backgroundColor=white"
     alt="Peak throughput comparison chart"
     style={{ maxWidth: '600px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
   />
@@ -148,9 +160,9 @@ Embedded mode is **2-4x faster** than TCP mode across all operations and scales.
 
 | Operation | Embedded Mode | TCP Mode |
 |-----------|--------------|----------|
-| **Push** (peak) | 204,913 ops/sec | 54,562 ops/sec |
-| **Bulk Push** (peak) | 286,616 ops/sec | 149,218 ops/sec |
-| **Process** (peak) | 77,713 ops/sec | 34,679 ops/sec |
+| **Push** (peak) | 247,103 ops/sec | 89,850 ops/sec |
+| **Bulk Push** (peak) | 655,637 ops/sec | 91,306 ops/sec |
+| **Process** (peak) | 85,215 ops/sec | ~5,100 ops/sec (c=50) |
 
 ---
 
@@ -238,9 +250,9 @@ Payload: 111 bytes
 ══════════════════════════════════════════════════
 
 🔄 Testing 1,000 jobs...
-  Push: 86,248 ops/sec
-  Bulk Push: 221,365 ops/sec
-  Process: 47,538 ops/sec
+  Push: 51,865 ops/sec
+  Bulk Push: 161,879 ops/sec
+  Process: 33,376 ops/sec
 
 ...
 
@@ -249,10 +261,10 @@ Payload: 111 bytes
 ┌──────────┬────────────────┬────────────────┬────────────────┐
 │ Scale    │ Push (ops/s)   │ Bulk (ops/s)   │ Process (ops/s)│
 ├──────────┼────────────────┼────────────────┼────────────────┤
-│    1,000 │       86,248   │      221,365   │       47,538   │
-│    5,000 │      187,256   │      278,587   │       64,716   │
-│   10,000 │      177,098   │      279,640   │       77,713   │
-│   50,000 │      204,913   │      286,616   │       74,772   │
+│    1,000 │       51,865   │      161,879   │       33,376   │
+│    5,000 │      164,759   │      398,479   │       68,854   │
+│   10,000 │      186,992   │      655,637   │       81,540   │
+│   50,000 │      247,103   │      608,815   │       85,215   │
 └──────────┴────────────────┴────────────────┴────────────────┘
 
 📈 EMBEDDED vs TCP (Embedded is X times faster)
@@ -260,12 +272,16 @@ Payload: 111 bytes
 ┌──────────┬────────────────┬────────────────┬────────────────┐
 │ Scale    │ Push           │ Bulk           │ Process        │
 ├──────────┼────────────────┼────────────────┼────────────────┤
-│    1,000 │         3.0x   │         2.3x   │         2.4x   │
-│    5,000 │         3.8x   │         2.0x   │         1.9x   │
-│   10,000 │         3.2x   │         1.9x   │         2.2x   │
-│   50,000 │         4.0x   │         2.2x   │         2.3x   │
+│    1,000 │         1.4x   │         5.6x   │       183.4x   │
+│    5,000 │         2.9x   │         4.4x   │       376.3x   │
+│   10,000 │         2.5x   │         8.1x   │       445.6x   │
+│   50,000 │         2.8x   │         7.6x   │       458.1x   │
 └──────────┴────────────────┴────────────────┴────────────────┘
 ```
+
+<Aside>
+Run the benchmark **without** `BUNQUEUE_EMBEDDED=1` in the environment. That variable forces every queue/worker into embedded mode (it is used by the test preload), which would make the TCP half of the benchmark silently run in-process and report embedded numbers under a TCP label.
+</Aside>
 
 ---
 
@@ -314,20 +330,23 @@ Payload: 111 bytes
 ## Benchmark Environment
 
 **Hardware:**
-- Mac Studio, Apple M1 Max
+- Apple M1 Max (10 cores)
 - 32GB RAM
 - SSD storage
 
 **Software:**
-- macOS Tahoe
-- Bun 1.3.8
+- macOS 26.5
+- Bun 1.3.14
+- bunqueue auto-detected 16 shards (10 CPU cores)
 
 **Configuration:**
 - Scales: 1,000, 5,000, 10,000, 50,000 jobs
 - Bulk size: 100 jobs per batch
-- Concurrency: 10 workers
+- Process test: 1 worker, concurrency 10
 - Payload: 111 bytes
 - Connection pool: 32 connections (TCP mode)
+
+Single-run numbers vary ±10–20% with warmup and background load; the 1K row in particular reflects cold start. Re-run on your own hardware to get figures you can trust.
 
 ---
 
@@ -347,17 +366,17 @@ Jobs with dependencies (`dependsOn`, `FlowProducer`, parent-child workflows) ben
 
 | Scenario | Avg | P50 | P95 | P99 |
 |----------|-----|-----|-----|-----|
-| **Single dep (A&rarr;B)** | 21.9&micro;s | 12.5&micro;s | 48.7&micro;s | 121.6&micro;s |
-| **Chain dep (4 levels)** | 30.4&micro;s | 28.2&micro;s | 47.9&micro;s | 64.3&micro;s |
-| **Fan-out (1&rarr;5)** | 33.2&micro;s | 31.0&micro;s | 46.3&micro;s | 64.9&micro;s |
+| **Single dep (A&rarr;B)** | 23.3&micro;s | 13.8&micro;s | 45.7&micro;s | 100.3&micro;s |
+| **Chain dep (4 levels)** | 31.6&micro;s | 30.0&micro;s | 44.6&micro;s | 52.7&micro;s |
+| **Fan-out (1&rarr;5)** | 35.0&micro;s | 28.4&micro;s | 43.3&micro;s | 71.9&micro;s |
 
 ### Improvement
 
 | Scenario | Before P50 | After P50 | Speedup |
 |----------|-----------|----------|---------|
-| **Single dep (A&rarr;B)** | 100.05ms | 0.012ms | **~8,000x** |
-| **Chain (4 levels)** | 300.43ms | 0.028ms | **~10,700x** |
-| **Fan-out (1&rarr;5)** | 100.11ms | 0.031ms | **~3,200x** |
+| **Single dep (A&rarr;B)** | 100.05ms | 0.014ms | **~7,200x** |
+| **Chain (4 levels)** | 300.43ms | 0.030ms | **~10,000x** |
+| **Fan-out (1&rarr;5)** | 100.11ms | 0.028ms | **~3,500x** |
 
 <Aside type="tip">
 Dependency chain latency dropped from **hundreds of milliseconds** to **microseconds**. This means multi-step pipelines (ETL, workflows, map-reduce) resolve nearly instantly instead of waiting for polling intervals.

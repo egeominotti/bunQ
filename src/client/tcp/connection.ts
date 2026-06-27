@@ -77,7 +77,10 @@ export async function createConnection(
       data(_sock: Socket<unknown>, data: Buffer) {
         let frames: Uint8Array[];
         try {
-          frames = socketData.frameParser.addData(new Uint8Array(data));
+          // `data` (Bun Buffer) is copied into addData's own buffer synchronously
+          // and never retained, so the `new Uint8Array(data)` wrapper was a
+          // redundant full copy per read on the client response path.
+          frames = socketData.frameParser.addData(data);
         } catch (err) {
           if (err instanceof FrameSizeError) {
             events.onError(

@@ -203,22 +203,28 @@ export class FrameParser {
    * @throws {FrameSizeError} if frame length exceeds maxFrameSize
    */
   addData(data: Uint8Array): Uint8Array[] {
-    // Concatenate buffers
-    const newBuffer = new Uint8Array(this.buffer.length + data.length);
-    newBuffer.set(this.buffer);
-    newBuffer.set(data, this.buffer.length);
-    this.buffer = newBuffer;
+    // Concatenate any buffered partial frame with the new data into a single
+    // owned buffer (one copy). `data` is fully copied here and never retained,
+    // so the caller may safely reuse its read buffer after this returns.
+    const buffer = new Uint8Array(this.buffer.length + data.length);
+    buffer.set(this.buffer);
+    buffer.set(data, this.buffer.length);
 
     const frames: Uint8Array[] = [];
+    // Read cursor. Previously the tail was resliced with `buffer.slice(4 + len)`
+    // after EVERY frame — O(tail) per frame, i.e. O(F²) when F frames arrive
+    // coalesced in a single read (deep pipelining / OS segment coalescing). The
+    // cursor advances in O(1) per frame, making the whole pass O(total bytes).
+    let offset = 0;
 
-    while (this.buffer.length >= 4) {
+    while (buffer.length - offset >= 4) {
       // Read length prefix (big-endian u32) using unsigned right shift to ensure positive value
       // Using >>> 0 at the end converts the result to an unsigned 32-bit integer
       const length =
-        ((this.buffer[0] << 24) |
-          (this.buffer[1] << 16) |
-          (this.buffer[2] << 8) |
-          this.buffer[3]) >>>
+        ((buffer[offset] << 24) |
+          (buffer[offset + 1] << 16) |
+          (buffer[offset + 2] << 8) |
+          buffer[offset + 3]) >>>
         0;
 
       // Validate frame size to prevent memory exhaustion DoS. A single frame's
@@ -233,16 +239,30 @@ export class FrameParser {
         throw new FrameSizeError(length, this.maxFrameSize);
       }
 
-      if (this.buffer.length < 4 + length) {
+      if (buffer.length - offset < 4 + length) {
         // Not enough data for this (legal, < maxFrameSize) frame yet. Keep the
         // partial bytes buffered until the rest of the frame arrives across
         // subsequent TCP segments.
         break;
       }
 
-      // Extract frame
-      frames.push(this.buffer.slice(4, 4 + length));
-      this.buffer = this.buffer.slice(4 + length);
+      // Extract frame. The body is copied out (slice) so it never aliases the
+      // retained tail buffer.
+      frames.push(buffer.slice(offset + 4, offset + 4 + length));
+      offset += 4 + length;
+    }
+
+    // Retain only the unconsumed tail. Three cases mirror the previous behavior
+    // without the per-frame reslice:
+    //  - fully drained: a fresh empty buffer (do not pin the read's ArrayBuffer)
+    //  - nothing consumed: keep the concat buffer as-is (no extra copy)
+    //  - partial leftover after ≥1 frame: copy the small tail (no aliasing)
+    if (offset >= buffer.length) {
+      this.buffer = new Uint8Array(0);
+    } else if (offset === 0) {
+      this.buffer = buffer;
+    } else {
+      this.buffer = buffer.slice(offset);
     }
 
     return frames;

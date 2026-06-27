@@ -10,6 +10,25 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.24] - 2026-06-27
+
+### Performance — TCP frame parser made linear (O(F²) → O(F)) under pipelining
+
+`FrameParser.addData` (`src/infrastructure/server/protocol.ts`), used by **both** the TCP server (incoming commands) and the TCP client (incoming responses), resliced the entire remaining buffer after **every** decoded frame: `this.buffer = this.buffer.slice(4 + len)`. When many frames arrive coalesced in a single TCP read — exactly what deep pipelining and OS segment coalescing produce for `PUSHB`/`ACKB` bursts — that is O(tail) per frame, i.e. **O(F²)** in the number of frames per read. Replaced with a read-offset cursor that advances in O(1) per frame and compacts the unconsumed tail once, making the pass **O(total bytes)**.
+
+- Deterministic micro-benchmark (`addData`, 111-byte frames coalesced into one read): F=1000 **2.78ms → 0.043ms (~65×)**, F=5000 **61.1ms → 0.21ms (~291×)**. Linear scaling restored (5× frames → ~5× time).
+- End-to-end (M1 Max, Bun 1.3.14): TCP push throughput **+20–36%** at 1K–5K-job scales where frame coalescing is heaviest, neutral at larger scales; `tcp-bench` round-trip latency **p50 48µs → 43µs (−10%)**. Embedded mode is unaffected (it does not use the wire framing).
+- Behavior is byte-for-byte identical: frame bodies are still returned as copies, partial-frame buffering, the 64MB `FrameSizeError` guard, and the slowloris `hasPartialFrame`/`bufferedBytes` getters are preserved. New E2E suite `scripts/tcp/test-frameparser-pipelining-e2e.ts` validates 2000-way pipelined coalescing, 256KB multi-segment frames, 5000-job exactly-once processing, and boundary-size payload integrity.
+
+### Performance — fewer copies and an O(Q²) background scan removed
+
+- **Dropped a redundant `new Uint8Array(data)` copy** in both TCP data handlers (`src/infrastructure/server/tcp.ts`, `src/client/tcp/connection.ts`). `addData` already copies the incoming bytes into its own buffer synchronously and never retains the caller's buffer, so the defensive wrapper was one full copy per read with no purpose.
+- **`cleanEmptyQueues` O(Q²) → O(Q)** (`src/application/cleanupTasks.ts`). The 10s background sweep called the `shard.dlq` getter — which rebuilds a `Map` of **every** queue's DLQ entries on each access — once per queue, making the per-shard sweep quadratic in the queue count. Replaced with the O(1) `shard.getDlqCount(queue)` counter lookup. Read-side only; no behavior change.
+
+### Docs — benchmarks page re-measured and corrected
+
+Re-ran every published benchmark on an Apple M1 Max (Bun 1.3.14) and updated `guide/benchmarks`. Embedded numbers reproduce (and are higher than before: bulk push peaks ~656K ops/sec). The **TCP “Process” figures were corrected**: the old 20–34K ops/sec single-worker numbers predate the lease-bounding over-pull fix and no longer reproduce — a single worker at `concurrency:10` is bounded by per-job pull round-trip latency (~182 ops/sec), scaling to ~5,100 ops/sec at `concurrency:50`. The page now explains this and notes the `BUNQUEUE_EMBEDDED` env caveat when running `bench/comprehensive.ts`.
+
 ## [2.8.23] - 2026-06-24
 
 ### Fixed — FlowProducer audit: two real defects (cross-queue parent linkage + `addBulkThen` result access)

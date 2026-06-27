@@ -206,7 +206,10 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
 
       let frames: Uint8Array[];
       try {
-        frames = frameParser.addData(new Uint8Array(data));
+        // `data` is a Bun Buffer (a Uint8Array). addData copies it into its own
+        // buffer synchronously and never retains it, so the previous defensive
+        // `new Uint8Array(data)` wrapper was a redundant full copy per read.
+        frames = frameParser.addData(data);
       } catch (err) {
         if (err instanceof FrameSizeError) {
           clearStallTimer(socket);

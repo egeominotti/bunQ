@@ -227,10 +227,12 @@ function cleanEmptyQueues(ctx: BackgroundContext): void {
     const emptyQueues: string[] = [];
 
     for (const [queueName, queue] of shard.queues) {
-      const dlqEntries = shard.dlq.get(queueName);
+      // `shard.dlq` is a getter that rebuilds a Map of EVERY queue's DLQ entries
+      // on each access — calling it once per queue in this loop was O(Q²) per
+      // shard per tick. getDlqCount(queueName) is an O(1) counter lookup.
       if (
         queue.size === 0 &&
-        (!dlqEntries || dlqEntries.length === 0) &&
+        shard.getDlqCount(queueName) === 0 &&
         !hasProcessingJobsForQueue(ctx, queueName) &&
         !hasWaitingDepsForQueue(ctx, queueName)
       ) {

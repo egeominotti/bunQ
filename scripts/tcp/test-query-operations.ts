@@ -228,6 +228,72 @@ async function main() {
     failed++;
   }
 
+  // Test 7: finishedOn / processedOn on completed jobs (issue #104, TCP path)
+  console.log('\n7. Testing finishedOn/processedOn over TCP (issue #104)...');
+  try {
+    const queue = makeQueue('tcp-qops-finishedon');
+    queue.obliterate();
+    await Bun.sleep(200);
+
+    const job = await queue.add('finishedon-test', { value: 7 });
+
+    const worker = new Worker('tcp-qops-finishedon', async () => ({ ok: true }), {
+      concurrency: 1,
+      connection: connOpts,
+      useLocks: false,
+    });
+
+    // Poll until completed (TCP, no shared in-process state)
+    let state = 'unknown';
+    for (let i = 0; i < 100; i++) {
+      state = await queue.getJobState(job.id);
+      if (state === 'completed') break;
+      await Bun.sleep(50);
+    }
+    await worker.close();
+
+    if (state !== 'completed') {
+      console.log(`   [FAIL] job never completed (state=${state})`);
+      failed++;
+    } else {
+      // List path (getJobsAsync TCP branch) — concern this test exists to cover
+      const fromList = (await queue.getJobsAsync({ state: 'completed', start: 0, end: 50 })).find(
+        (j) => j.id === job.id
+      );
+      // Single-fetch path (getJob TCP) — must agree (parity)
+      const single = await queue.getJob(job.id);
+
+      const listFinished = fromList?.finishedOn;
+      const listProcessed = fromList?.processedOn;
+      const singleFinished = single?.finishedOn;
+      const singleProcessed = single?.processedOn;
+
+      console.log(`   getJobs:  finishedOn=${listFinished} processedOn=${listProcessed}`);
+      console.log(`   getJob:   finishedOn=${singleFinished} processedOn=${singleProcessed}`);
+
+      const ok =
+        typeof listFinished === 'number' &&
+        listFinished > 0 &&
+        typeof listProcessed === 'number' &&
+        listProcessed > 0 &&
+        typeof singleFinished === 'number' &&
+        typeof singleProcessed === 'number' &&
+        listFinished === singleFinished &&
+        listProcessed === singleProcessed;
+
+      if (ok) {
+        console.log('   [PASS] finishedOn/processedOn populated and consistent over TCP');
+        passed++;
+      } else {
+        console.log('   [FAIL] finishedOn/processedOn missing or inconsistent over TCP');
+        failed++;
+      }
+    }
+  } catch (e) {
+    console.log(`   [FAIL] finishedOn/processedOn TCP test failed: ${e}`);
+    failed++;
+  }
+
   // Cleanup: obliterate all queues, then close
   for (const q of queues) {
     q.obliterate();

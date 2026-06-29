@@ -10,6 +10,16 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.25] - 2026-06-29
+
+### Fixed — `finishedOn`/`processedOn` always `undefined` on jobs from list queries (#104)
+
+`queue.getJobs()`, `getJobsAsync()`, and the `getCompleted()`/`getFailed()`/`getWaiting()`/`getDelayed()`/`getActive()` wrappers that delegate to them returned public job objects whose `finishedOn` and `processedOn` were always `undefined`, even for completed jobs — while the **same** job fetched via `getJob(id)` returned them correctly. Root cause: the list paths build jobs via `createSimpleJob`, which hardcodes `finishedOn: undefined`/`processedOn: undefined`, and never patched them from the internal job's `completedAt`/`startedAt` (unlike `progress`/`priority`/`attemptsMade`). `getJob(id)` worked only because it routes through `toPublicJob` → `buildJobProperties`.
+
+- Fixed in `src/client/queue/operations/query.ts` for **all three** affected sites: `getJobs` (embedded), `getJobsAsync` (TCP), **and** `getJob(id)` over TCP — the last was the inverse of the same gap (its TCP branch patched only `progress`, so post-fix it would have disagreed with `getJobs`). All now mirror `buildJobProperties`: a numeric timestamp maps through, `null` → `undefined` (guarded by `typeof === 'number'`).
+- The failure path is intentionally untouched: a failed job has no `completedAt` (only the success path sets it; `completedAt` doubles as a "completed" signal in cloud state classification and `waitUntilFinished`), so `finishedOn` stays `undefined` for failed jobs in **both** `getJob` and `getJobs` — consistent. A failed job's `processedOn` **is** populated (it was started), matching `getJob`.
+- Tests: `test/repro-issue104-getjobs-finishedon.test.ts` (6 embedded cases incl. parity with `getJob`, a populated failed-job `processedOn`, and a negative still-waiting case) and a new TCP integration case in `scripts/tcp/test-query-operations.ts` ("finishedOn/processedOn over TCP") exercising the real wire path for both `getJobsAsync` and `getJob(id)`.
+
 ## [2.8.24] - 2026-06-27
 
 ### Performance — TCP frame parser made linear (O(F²) → O(F)) under pipelining

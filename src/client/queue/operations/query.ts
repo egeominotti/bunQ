@@ -157,6 +157,11 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
     meta: metaFromJob(j),
   });
   if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
+  // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
+  if (typeof j.startedAt === 'number')
+    (result as { processedOn?: number }).processedOn = j.startedAt;
+  if (typeof j.completedAt === 'number')
+    (result as { finishedOn?: number }).finishedOn = j.completedAt;
   return result;
 }
 
@@ -225,7 +230,7 @@ export function getJobs<T>(ctx: QueryContext, options: GetJobsOptions = {}): Job
 
   return jobs.map((j) => {
     const name = (j.data as { name?: string })?.name ?? 'unknown';
-    return createSimpleJob(String(j.id), name, j.data as T, j.createdAt, {
+    const result = createSimpleJob(String(j.id), name, j.data as T, j.createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -234,6 +239,12 @@ export function getJobs<T>(ctx: QueryContext, options: GetJobsOptions = {}): Job
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
     });
+    // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
+    if (typeof j.startedAt === 'number')
+      (result as { processedOn?: number }).processedOn = j.startedAt;
+    if (typeof j.completedAt === 'number')
+      (result as { finishedOn?: number }).finishedOn = j.completedAt;
+    return result;
   });
 }
 
@@ -281,6 +292,11 @@ export async function getJobsAsync<T>(
     if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
     if (j.priority !== undefined) (result as { priority: number }).priority = j.priority;
     if (j.attempts !== undefined) (result as { attemptsMade: number }).attemptsMade = j.attempts;
+    // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
+    if (typeof j.startedAt === 'number')
+      (result as { processedOn?: number }).processedOn = j.startedAt;
+    if (typeof j.completedAt === 'number')
+      (result as { finishedOn?: number }).finishedOn = j.completedAt;
     return result;
   });
 }

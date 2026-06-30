@@ -107,10 +107,23 @@ export class WorkflowExecutor {
       clearTimeout(timer);
       this.timeoutTimers.delete(executionId);
     }
+    // Always record the payload (idempotent) and notify listeners. A signal that
+    // lands before the run parks at its waitFor is still consumed there, via the
+    // `signals[event] !== undefined` gate in runWaitFor.
     exec.signals[event] = payload;
+    this.emitter?.emitSignal('signal:received', exec.id, exec.workflowName, event, payload);
+    // Resume only a genuinely-parked run (state 'waiting'), and only once. The state
+    // check and the flip to 'running' are synchronous — no `await` between them — so a
+    // second concurrent/duplicate signal() (which can only run after the first yields
+    // at `await this.enqueue`, by which point `store.update` has persisted 'running')
+    // observes 'running' and returns early. This collapses duplicate/concurrent
+    // signals to a single resume, so every step after the waitFor runs exactly once.
+    if (exec.state !== 'waiting') {
+      this.store.update(exec);
+      return;
+    }
     exec.state = 'running';
     this.store.update(exec);
-    this.emitter?.emitSignal('signal:received', exec.id, exec.workflowName, event, payload);
     await this.enqueue(exec);
   }
 

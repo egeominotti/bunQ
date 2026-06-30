@@ -99,7 +99,9 @@ export const latencyTracker = new LatencyTracker();              // singleton, l
 | Command | Handler | Output |
 | --- | --- | --- |
 | `Stats` | `handleStats` (`handlers/management.ts:98`) | `StatsResponse` (`stats` payload: waiting/active/delayed/dlq/completed/failed/uptime/pushPerSec/pullPerSec) |
-| `Metrics` | `handleMetrics` (`handlers/management.ts:128`) | `MetricsResponse` (totals + avgLatencyMs/avgProcessingMs/memoryUsageMb) |
+| `Metrics` | `handleMetrics` (`handlers/management.ts:128`) | `MetricsResponse` — `{ ok, metrics: { totalCompleted, totalFailed, … } }` (totals + avgLatencyMs/avgProcessingMs/memoryUsageMb) |
+
+> The client SDK's `queue.getMetrics('completed'|'failed')` reads this `metrics` payload over TCP — `completed → metrics.totalCompleted`, `failed → metrics.totalFailed` (`client/queue/workers.ts`). It must **not** read `response.stats` (no such key on a `Metrics` reply — that always returned `0`).
 | `Prometheus` | `handlePrometheus` (`handlers/monitoring.ts:298`) | `data({ metrics })` — full Prometheus text |
 | `Ping` | `handlePing` (`handlers/monitoring.ts:116`) | `data({ pong: true, time: Date.now() })` |
 

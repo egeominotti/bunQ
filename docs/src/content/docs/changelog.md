@@ -10,6 +10,38 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.26] - 2026-07-01
+
+A correctness release from an exhaustive feature + extreme-stress audit (every subsystem, embedded **and** TCP). Seven fixes; all pre-existing, none data-loss in normal operation, each shipped with a RED→GREEN reproduction test.
+
+### Fixed — idempotent re-add of an unfinished `jobId`/customId (active & waiting-children)
+
+Re-adding a job with an existing `jobId` while the prior job was **active** (being processed) or **waiting-children** threw `UNIQUE constraint failed: jobs.id` for durable jobs, or silently dropped the colliding insert (leaving an in-memory duplicate) for buffered jobs — instead of the documented idempotent no-op. `handleCustomId` only handled the still-queued case; it now idempotent-skips for every unfinished state, gated so a **completed** id still recycles into a fresh job (#92). The customId twin of the uniqueKey fix #69.
+
+### Fixed — orphan `jobs` row no longer collides on the primary key (durable + buffered)
+
+A durable `jobs` row could outlive its in-memory tracking when `obliterate()` (fire-and-forget over TCP) or a write-buffer flush raced an in-flight insert, or when a completed customId job aged out of the 50k `completedJobs` window. Re-adding the same id then hit `UNIQUE constraint failed: jobs.id`. Both insert statements now use `INSERT … ON CONFLICT(id) DO UPDATE` (upsert): a brand-new id is a plain INSERT (zero hot-path cost), an orphan is overwritten in place. The `DO UPDATE SET` resets **all** non-id columns — including `started_at`/`completed_at`/`progress`/`progress_msg`/`last_heartbeat`/`stacktrace` — so a recycled id never inherits a prior life's `progress=100` or stale stacktrace. In the buffered batch path this also stops one stale collision from failing the whole flush and dropping every innocent job batched in the same window.
+
+### Fixed — Workflow `engine.signal()` double-executed steps after `waitFor`
+
+Two concurrent/duplicate signals (or a signal arriving before the run parked) re-enqueued the current node, so every step after the `waitFor` (e.g. a side-effecting `charge`) ran twice — an exactly-once violation. `signal()` now records the payload always but only resumes a genuinely-parked run (`state === 'waiting'`), flipping to `running` synchronously so duplicate signals collapse to a single resume.
+
+### Fixed — `moveToDelayed` was a silent no-op over TCP, and was not durable
+
+`Queue.moveJobToDelayed(id, timestamp)` / `job.moveToDelayed(timestamp)` over TCP left a waiting job waiting (no-op) and dropped the delay on an active job (re-queued as `waiting`). The client sent `{ timestamp }` but the command/handler read `delay` (→ `runAt = now + undefined = NaN`), and the server op only handled active jobs. The client now sends the relative `delay`, and `moveToDelayed` routes through `changeDelay` (handles in-queue + active). The new `run_at` is now **persisted** (`storage.updateRunAt`), so the delay survives a restart — previously `moveToDelayed`/`changeDelay` mutated only the in-memory heap and the delay was lost on recovery. Embedded was unaffected by the no-op bug.
+
+### Fixed — `deduplication.replace` / `extend` ignored in embedded mode
+
+With the documented API `add(name, data, { deduplication: { id, replace: true } })` (no explicit `jobId`), embedded set `customId = deduplication.id`, so `handleCustomId` short-circuited the re-add before the replace/extend strategy ran — the original job survived. The dedup id now rides only on `uniqueKey` (matching TCP); `customId` is set from an explicit `jobId` only. `deduplicationId` on the returned job is sourced from `customId ?? uniqueKey` so it still reflects the requested id (#90).
+
+### Fixed — `queue.getMetrics()` over TCP always returned `0`
+
+The TCP client read `response.stats.completed` / `.dlq`, but the `Metrics` handler returns `response.metrics.totalCompleted` / `.totalFailed`. The client now reads the correct fields.
+
+### Security — webhook SSRF guard now blocks IPv4-mapped/-compatible IPv6 and IPv6 private ranges
+
+`http://[::ffff:127.0.0.1]/…`, the deprecated IPv4-compatible `[::127.0.0.1]`, and IPv6 ULA (`fc00::/7`) / link-local (`fe80::/10`) / unspecified (`::`) hosts bypassed the webhook SSRF check (in both dotted and WHATWG hex-normalized forms). The validator now unwraps mapped/compatible addresses and blocks the IPv6 private ranges before delivery.
+
 ## [2.8.25] - 2026-06-29
 
 ### Fixed — `finishedOn`/`processedOn` always `undefined` on jobs from list queries (#104)

@@ -95,11 +95,29 @@ export class BatchInsertManager {
       const rowPlaceholder =
         '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       const placeholders = Array(size).fill(rowPlaceholder).join(', ');
+      // ON CONFLICT(id) DO UPDATE (upsert): a colliding id overwrites in place instead
+      // of failing the whole flush. Without it, one stale ORPHAN row (left when
+      // obliterate()/a flush raced an in-flight insert) makes the batch throw UNIQUE,
+      // and reportLostJobs() then drops EVERY innocent job batched in the same flush
+      // window. Per-row conflict resolution isolates the collision; new ids stay a
+      // plain INSERT (zero extra cost). jobs has no triggers/FKs → no cascade.
       const sql = `INSERT INTO jobs (
         id, queue, data, priority, created_at, run_at, attempts, max_attempts,
         backoff, ttl, timeout, unique_key, custom_id, depends_on, parent_id,
         children_ids, tags, state, lifo, group_id, remove_on_complete, remove_on_fail, stall_timeout, timeline
-      ) VALUES ${placeholders}`;
+      ) VALUES ${placeholders}
+      ON CONFLICT(id) DO UPDATE SET
+        queue=excluded.queue, data=excluded.data, priority=excluded.priority,
+        created_at=excluded.created_at, run_at=excluded.run_at, attempts=excluded.attempts,
+        max_attempts=excluded.max_attempts, backoff=excluded.backoff, ttl=excluded.ttl,
+        timeout=excluded.timeout, unique_key=excluded.unique_key, custom_id=excluded.custom_id,
+        depends_on=excluded.depends_on, parent_id=excluded.parent_id, children_ids=excluded.children_ids,
+        tags=excluded.tags, state=excluded.state, lifo=excluded.lifo, group_id=excluded.group_id,
+        remove_on_complete=excluded.remove_on_complete, remove_on_fail=excluded.remove_on_fail,
+        stall_timeout=excluded.stall_timeout, timeline=excluded.timeline,
+        started_at=excluded.started_at, completed_at=excluded.completed_at,
+        progress=excluded.progress, progress_msg=excluded.progress_msg,
+        last_heartbeat=excluded.last_heartbeat, stacktrace=excluded.stacktrace`;
       stmt = this.db.prepare(sql);
       // Cache statements for common batch sizes (1-100)
       if (size <= 100) {

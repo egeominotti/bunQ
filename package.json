@@ -1,6 +1,6 @@
 {
   "name": "bunqueue",
-  "version": "2.8.25",
+  "version": "2.8.26",
   "description": "High-performance job queue for Bun & AI agents. SQLite persistence, cron scheduling, priorities, retries, DLQ, webhooks, native MCP server. Zero external dependencies.",
   "type": "module",
   "main": "dist/main.js",

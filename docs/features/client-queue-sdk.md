@@ -56,7 +56,7 @@ Control (`queue.ts:313`): `pause()`, `resume()`, `drain()`, `obliterate()` (all 
 
 Management (`queue.ts:336`): `remove(id)` (sync) / `removeAsync(id)`, `retryJob(id)`, `retryJobs(opts?)`, `clean(grace, limit, type?)` / `cleanAsync(...)`, `promoteJobs(opts?)`, `promoteJob(id)`, `updateJobProgress`, `getJobLogs`, `addJobLog`, `clearJobLogs`, `updateJobData`, `changeJobDelay`, `changeJobPriority`, `extendJobLock`.
 
-Move / BullMQ-v5 (`queue.ts:502`): `moveJobToCompleted`, `moveJobToFailed`, `moveJobToWait`, `moveJobToDelayed`, `moveJobToWaitingChildren`, `waitJobUntilFinished`.
+Move / BullMQ-v5 (`queue.ts:502`): `moveJobToCompleted`, `moveJobToFailed`, `moveJobToWait`, `moveJobToDelayed`, `moveJobToWaitingChildren`, `waitJobUntilFinished`. `moveJobToDelayed(id, timestamp)` takes an **absolute** timestamp; embedded routes waiting/active jobs via `changeWaitingDelay`/`changeDelay`, while the TCP path (`jobMove.ts`) sends the `MoveToDelayed` command with a **relative** `delay = max(0, timestamp - now)` (not the raw timestamp) and surfaces a server `ok:false` as a thrown error. Works for both waiting and active jobs.
 
 Stall (`queue.ts:396`): `setStallConfig`, `getStallConfig`, `getStallConfigAsync`. DLQ, rate-limit, scheduler, dedup, dependency, BullMQ-compat (`getPrioritized`, `getWaitingChildren`, …), worker/metrics (`getWorkers`, `getWorkersCount`, `getMetrics`, `trimEvents`), `forward(options)`.
 

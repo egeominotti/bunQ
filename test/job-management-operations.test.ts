@@ -302,10 +302,13 @@ describe('Job Management Operations', () => {
       expect(state).toBe('delayed');
     });
 
-    test('should return false for waiting job', async () => {
-      const job = await qm.push('test-queue', { data: { msg: 'nope' } });
+    test('should move a waiting job to delayed', async () => {
+      const job = await qm.push('test-queue', { data: { msg: 'delay-waiting' } });
+      // In-queue (waiting/prioritized/delayed) jobs are routed through changeDelay
+      // so they become delayed rather than a silent no-op (matches embedded/TCP).
       const result = await qm.moveToDelayed(job.id, 5000);
-      expect(result).toBe(false);
+      expect(result).toBe(true);
+      expect(await qm.getJobState(job.id)).toBe('delayed');
     });
 
     test('should return false for non-existent job', async () => {

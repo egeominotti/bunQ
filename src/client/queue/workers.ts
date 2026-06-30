@@ -51,8 +51,10 @@ export async function getMetrics(
   const response = await ctx.tcp!.send({ cmd: 'Metrics' });
   if (!response.ok) return { meta: { count: 0 }, data: [] };
 
-  const stats = response.stats as { completed?: number; dlq?: number } | undefined;
-  const count = type === 'completed' ? (stats?.completed ?? 0) : (stats?.dlq ?? 0);
+  // The Metrics handler replies with { ok, metrics: { totalCompleted, totalFailed, ... } }
+  // (resp.metrics). Reading a non-existent `response.stats` always yielded 0.
+  const metrics = response.metrics as { totalCompleted?: number; totalFailed?: number } | undefined;
+  const count = type === 'completed' ? (metrics?.totalCompleted ?? 0) : (metrics?.totalFailed ?? 0);
   return { meta: { count }, data: [] };
 }
 

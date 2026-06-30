@@ -27,6 +27,12 @@ export type StatementName =
 
 /** SQL statements */
 export const SQL_STATEMENTS: Record<StatementName, string> = {
+  // ON CONFLICT(id) DO UPDATE (upsert): a brand-new id is a plain INSERT (zero extra
+  // cost); a colliding id overwrites the existing row in place. This makes durable
+  // inserts idempotent against ORPHAN rows — a jobs row that outlived its in-memory
+  // tracking when obliterate() or a buffer flush raced an in-flight insert — without
+  // any per-push delete on the hot path. jobs has no triggers/FKs, so DO UPDATE has
+  // no cascade side effects (unlike REPLACE = DELETE+INSERT).
   insertJob: `
     INSERT INTO jobs (
       id, queue, data, priority, created_at, run_at, attempts,
@@ -39,6 +45,22 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?
     )
+    ON CONFLICT(id) DO UPDATE SET
+      queue=excluded.queue, data=excluded.data, priority=excluded.priority,
+      created_at=excluded.created_at, run_at=excluded.run_at, attempts=excluded.attempts,
+      max_attempts=excluded.max_attempts, backoff=excluded.backoff, ttl=excluded.ttl,
+      timeout=excluded.timeout, unique_key=excluded.unique_key, custom_id=excluded.custom_id,
+      depends_on=excluded.depends_on, parent_id=excluded.parent_id, children_ids=excluded.children_ids,
+      tags=excluded.tags, state=excluded.state, lifo=excluded.lifo, group_id=excluded.group_id,
+      remove_on_complete=excluded.remove_on_complete, remove_on_fail=excluded.remove_on_fail,
+      stall_timeout=excluded.stall_timeout, timeline=excluded.timeline,
+      -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
+      -- resolves to each column's DEFAULT (NULL / 0) — i.e. the fresh-job value. Reset
+      -- them too, otherwise an upsert over an ORPHAN row would leave a brand-new job
+      -- carrying the prior life's progress=100 / completed_at / stacktrace etc.
+      started_at=excluded.started_at, completed_at=excluded.completed_at,
+      progress=excluded.progress, progress_msg=excluded.progress_msg,
+      last_heartbeat=excluded.last_heartbeat, stacktrace=excluded.stacktrace
   `,
 
   updateJobState: 'UPDATE jobs SET state = ?, started_at = ?, timeline = ? WHERE id = ?',

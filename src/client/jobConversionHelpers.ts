@@ -74,7 +74,11 @@ export function buildJobProperties<T>(
     opts: jobOpts,
     token,
     processedBy,
-    deduplicationId: job.customId ?? undefined,
+    // deduplicationId reflects the requested jobId OR deduplication.id. customId
+    // now holds ONLY an explicit jobId (the dedup id rides on uniqueKey since the
+    // dedup-replace fix), so fall back to uniqueKey — mirrors the TCP proxy's
+    // `opts.jobId ?? opts.deduplication?.id` (#90).
+    deduplicationId: job.customId ?? job.uniqueKey ?? undefined,
     repeatJobKey: buildRepeatJobKey(job),
     attemptsStarted: job.attempts,
   };

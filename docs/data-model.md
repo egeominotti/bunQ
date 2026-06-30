@@ -161,7 +161,16 @@ Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 | `active`      | `waiting-children`| `moveToWaitingChildren` (`jobStateTransitions.ts:81`)|
 | `active`      | `failed`→DLQ      | timeout / max stalls / max attempts                  |
 | `failed`(DLQ) | `waiting`         | `RetryDlq` / auto-retry                              |
-| `waiting`/`delayed` | `delayed`   | `ChangeDelay` / `MoveToDelayed`                      |
+| `waiting`/`prioritized`/`delayed` | `delayed` | `ChangeDelay` / `MoveToDelayed` (in-place `runAt`)   |
+| `active`      | `delayed`         | `ChangeDelay` / `MoveToDelayed` (two-phase re-queue)  |
+
+> `ChangeDelay` and `MoveToDelayed` both carry a **relative** `delay` (ms) on the
+> wire (`MoveToDelayedCommand.delay`); the client converts the public absolute
+> `moveToDelayed(id, timestamp)` to `delay = max(0, timestamp - now)`. In-queue
+> jobs route through `changeWaitingDelay`, active jobs through the two-phase
+> `moveJobToDelayed` — both share `QueueManager.moveToDelayed`/`changeDelay`
+> (`queueManager.ts:1171`), so `MoveToDelayed` works over TCP/HTTP/MCP for
+> waiting **and** active jobs (was previously a silent no-op for waiting jobs).
 
 Helper predicates: `isDelayed`, `isReady`, `isExpired`, `isTimedOut`,
 `canRetry` (`job.ts:431-479`).

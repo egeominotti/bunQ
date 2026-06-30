@@ -97,7 +97,7 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 - Job management: `Cancel`, `Progress`, `Promote`, `Discard`, `Update`, `ChangePriority`, `MoveToDelayed`, `ChangeDelay` (`handlers/management.ts`, `handlers/advanced.ts`).
 - Queue control: `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `Clean`, `ListQueues` (`handlers/management.ts`, `handlers/advanced.ts`).
 
-`ChangeDelay` is a manager-level dispatcher (`queueManager.ts:1175`): for jobs already queued it calls `changeWaitingDelay` (in-place `runAt` mutation); for active jobs it falls back to `moveJobToDelayed`.
+`ChangeDelay` and `MoveToDelayed` share one manager-level dispatcher (`queueManager.ts:1175`): for jobs already queued (`waiting`/`prioritized`/`delayed`) it calls `changeWaitingDelay` (in-place `runAt` mutation → the job becomes/stays `delayed`); for active (`processing`) jobs it falls back to the two-phase `moveJobToDelayed`. `QueueManager.moveToDelayed` (`queueManager.ts:1171`) delegates to `changeDelay` so the two stay in lock-step. Previously `moveToDelayed` only handled `processing` jobs, so a waiting job was a **silent no-op over TCP/HTTP/MCP** while the embedded SDK special-cased it; routing through `changeDelay` fixes parity for waiting **and** active jobs. Wire field: the public `moveToDelayed(id, timestamp)` API takes an **absolute** timestamp, but `MoveToDelayedCommand` carries a **relative** `delay` (ms) — the TCP client (`jobMove.ts`) converts `delay = max(0, timestamp - now)` before sending, matching the server op and the sibling `ChangeDelay` command (the HTTP route `POST /jobs/:id/move-to-delayed` already posts `{ delay }`).
 
 ### Events emitted
 
@@ -156,7 +156,7 @@ On success emits `Removed`. Returns `false` for active/completed/DLQ jobs.
 
 ### moveJobToDelayed (`jobManagement.ts:227`)
 
-Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Emits `Delayed`.
+Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
 
 ### discardJob (`jobManagement.ts:277`)
 

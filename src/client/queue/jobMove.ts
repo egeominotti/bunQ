@@ -125,7 +125,21 @@ export async function moveJobToDelayed(
       await manager.changeDelay(jobId(id), delay);
     }
   } else {
-    await ctx.tcp!.send({ cmd: 'MoveToDelayed', id, timestamp });
+    // The public API takes an ABSOLUTE timestamp, but the server works in relative
+    // delay (runAt = now + delay) and both MoveToDelayedCommand and
+    // handleMoveToDelayed read the wire field `delay`. Sending `timestamp` left
+    // `delay` undefined server-side → runAt = now + undefined = NaN (an active job
+    // was re-queued as `waiting` with the delay dropped) or a silent no-op (a
+    // waiting job). Convert to relative delay here so the wire field matches.
+    const delay = Math.max(0, timestamp - Date.now());
+    const response = await ctx.tcp!.send({ cmd: 'MoveToDelayed', id, delay });
+    // Surface server-side failures instead of silently ignoring the response
+    // (e.g. the job was completed/removed before the command arrived).
+    if (response.ok === false) {
+      throw new Error(
+        typeof response.error === 'string' ? response.error : 'Failed to move job to delayed'
+      );
+    }
   }
 }
 

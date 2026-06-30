@@ -197,11 +197,19 @@ describe('Job Management', () => {
       expect(stats.delayed).toBe(1);
     });
 
-    test('should return false for non-active job', async () => {
+    test('should move a waiting (non-active) job to delayed', async () => {
       const job = await qm.push('test-queue', { data: {} });
 
+      // moveToDelayed now routes in-queue jobs through changeDelay (parity with
+      // the embedded client / TCP path): a waiting job becomes delayed instead of
+      // being a silent no-op. Its runAt is pushed into the future, so the job
+      // reports state 'delayed' and is no longer pullable.
       const moved = await qm.moveToDelayed(job.id, 5000);
-      expect(moved).toBe(false);
+      expect(moved).toBe(true);
+
+      expect(await qm.getJobState(job.id)).toBe('delayed');
+      const next = await qm.pull('test-queue', 0);
+      expect(next).toBeNull();
     });
   });
 

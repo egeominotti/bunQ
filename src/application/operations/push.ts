@@ -46,7 +46,10 @@ export interface PushContext {
 }
 
 /** Result of checking custom ID */
-type CustomIdResult = { skip: true; existingJob: Job } | { skip: false; id: JobId };
+type CustomIdResult =
+  | { skip: true; existingJob: Job }
+  | { skip: true; existingId: JobId }
+  | { skip: false; id: JobId };
 
 /** Result of deduplication check */
 type DedupResult = { skip: true; existingId: JobId } | { skip: false };
@@ -63,13 +66,31 @@ function handleCustomId(input: JobInput, shard: Shard, ctx: PushContext): Custom
   const id = jobId(input.customId);
   const existing = ctx.customIdMap.get(input.customId);
 
-  // If the existing job is still queued, the add is idempotent — return it.
-  if (existing) {
+  // Re-adding an existing custom id while its job is UNFINISHED is an idempotent
+  // no-op (BullMQ parity): return the existing job, never a second insert of the
+  // same deterministic id (which would collide on the jobs.id PRIMARY KEY). Three
+  // unfinished states are covered:
+  //   • waiting/delayed/prioritized — live in the priority queue → return the job.
+  //   • waiting-children — tracked under 'queue' but held in shard.waitingDeps (its
+  //     row is already persisted) → idempotent skip via the existing id.
+  //   • active (processing) — popped from the queue, still running on a worker; its
+  //     row survives on disk → idempotent skip via the existing id.
+  // PushContext has no processingShards, so for the latter two we cannot fetch the
+  // live Job here; pushJob rebuilds a placeholder { ...job, id } after createJob,
+  // exactly like handleDeduplication's active path. Completed (#92) and DLQ jobs
+  // are terminal and fall through to the reuse path below.
+  if (existing && !ctx.completedJobs.has(id)) {
     const location = ctx.jobIndex.get(existing);
-    const existingJob =
-      location?.type === 'queue' ? shard.getQueue(location.queueName).find(existing) : null;
-    if (existingJob) {
-      return { skip: true, existingJob };
+    if (location?.type === 'queue') {
+      const existingJob = shard.getQueue(location.queueName).find(existing);
+      if (existingJob) {
+        return { skip: true, existingJob };
+      }
+      if (shard.waitingDeps.has(existing)) {
+        return { skip: true, existingId: id };
+      }
+    } else if (location?.type === 'processing') {
+      return { skip: true, existingId: id };
     }
   }
 
@@ -88,6 +109,13 @@ function handleCustomId(input: JobInput, shard: Shard, ctx: PushContext): Custom
     ctx.jobIndex.delete(id);
     ctx.storage?.deleteJob(id); // removes the surviving row + result + any buffered insert
   }
+  // NOTE on ORPHAN rows: a durable jobs row can outlive its in-memory tracking when
+  // obliterate() (fire-and-forget void over TCP) or a buffer flush races an in-flight
+  // durable insert. Reaching the reuse path with such a stale row no longer throws —
+  // the insert statements use ON CONFLICT(id) DO UPDATE (upsert), so the orphan is
+  // overwritten in place at insert time with ZERO per-push cost. We deliberately do
+  // NOT pre-delete here: deleteJob() is a synchronous DELETE + O(buffer) scan inside
+  // the shard lock and would halve customId push/addBulk throughput.
   // A recycled custom id may carry a stale timeout marker from a prior job (which
   // may have DLQ'd, so it is NOT in completedJobs above). Clear it so the new
   // job's stall-retry recovery is not wrongly discarded — otherwise the
@@ -232,7 +260,16 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
     // Check custom ID idempotency INSIDE lock to prevent race conditions
     const customIdResult = handleCustomId(input, shard, ctx);
     if (customIdResult.skip) {
-      result = { job: customIdResult.existingJob, persisted: false };
+      // Idempotent re-add: return the live queued job if we have it, otherwise
+      // (active / waiting-children) a placeholder carrying the existing id so the
+      // caller sees the right id without inserting a duplicate row.
+      result = {
+        job:
+          'existingJob' in customIdResult
+            ? customIdResult.existingJob
+            : createJob(customIdResult.existingId, queue, input, now),
+        persisted: false,
+      };
       return;
     }
 
@@ -305,7 +342,12 @@ export async function pushJobBatch(
       // Check custom ID idempotency
       const customIdResult = handleCustomId(input, shard, ctx);
       if (customIdResult.skip) {
-        resultIds.push(customIdResult.existingJob.id);
+        // Idempotent re-add (queued, active, or waiting-children) — no insert.
+        resultIds.push(
+          'existingJob' in customIdResult
+            ? customIdResult.existingJob.id
+            : customIdResult.existingId
+        );
         continue;
       }
 

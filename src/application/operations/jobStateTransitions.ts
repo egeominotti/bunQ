@@ -73,6 +73,9 @@ export async function changeWaitingDelay(
     if (!job) return false;
 
     q.updateRunAt(jobId, newRunAt);
+    // Persist so the delay survives a restart (otherwise recovery reloads the
+    // stale on-disk run_at and the job is immediately pullable again).
+    ctx.storage?.updateRunAt(jobId, newRunAt);
     return true;
   });
 }

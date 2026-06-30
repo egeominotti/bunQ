@@ -261,6 +261,12 @@ export async function moveJobToDelayed(
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
   });
 
+  // Persist the move so the delay survives a restart: the on-disk row was
+  // `state='active'` with the old run_at, which recovery would otherwise treat as a
+  // stalled active job. updateRunAt re-derives 'delayed' from the future run_at and
+  // clears started_at.
+  ctx.storage?.updateRunAt(jobId, job.runAt);
+
   // Emit delayed event (BullMQ v5)
   ctx.eventsManager.broadcast({
     eventType: EventType.Delayed,

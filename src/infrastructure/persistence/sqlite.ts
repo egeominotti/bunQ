@@ -475,6 +475,28 @@ export class SqliteStorage {
     });
   }
 
+  /**
+   * Persist a delay change (moveToDelayed / changeDelay) so the new `run_at`
+   * survives a restart. Without this the delay lives only in the in-memory heap:
+   * recovery reloads the stale on-disk `run_at` and the job is immediately
+   * pullable again. State is re-derived from `run_at` (future → 'delayed'),
+   * mirroring the insert convention; `started_at` is cleared because a job moved
+   * back to the queue from `active` is no longer running.
+   */
+  updateRunAt(jobId: JobId, runAt: number): void {
+    // Flush a still-buffered insert first (like markActive/markCompleted/markFailed)
+    // so the UPDATE lands on a real row — otherwise the delay would be lost across a
+    // restart when the job was added (non-durable) and re-delayed within the same
+    // ~10ms write-buffer window.
+    this.flushIfBuffered(jobId);
+    this.safeWrite(() => {
+      const state = runAt > Date.now() ? 'delayed' : 'waiting';
+      this.db
+        .prepare('UPDATE jobs SET run_at = ?, state = ?, started_at = NULL WHERE id = ?')
+        .run(runAt, state, jobId);
+    });
+  }
+
   /** Update a job's children_ids blob and parent_id */
   updateJobChildrenIds(jobId: JobId, childrenIds: JobId[]): void {
     this.safeWrite(() => {

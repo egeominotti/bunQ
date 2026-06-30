@@ -1169,7 +1169,15 @@ export class QueueManager {
   }
 
   async moveToDelayed(jobId: JobId, delay: number): Promise<boolean> {
-    return jobMgmt.moveJobToDelayed(jobId, delay, this.contextFactory.getJobMgmtContext());
+    // moveToDelayed and changeDelay share identical routing in this engine: a job
+    // already in the queue (waiting/prioritized/delayed) gets its runAt updated in
+    // place so it becomes (or stays) delayed; an active/processing job is moved back
+    // to the queue with the new delay. Delegate to changeDelay so the in-queue case
+    // is handled — previously moveJobToDelayed only handled `processing` jobs, making
+    // a WAITING job a silent no-op over TCP/HTTP/MCP. Mirrors the embedded client's
+    // moveJobToDelayed branching (changeWaitingDelay for in-queue, moveJobToDelayed
+    // for active). See src/client/queue/jobMove.ts.
+    return this.changeDelay(jobId, delay);
   }
 
   async changeDelay(jobId: JobId, delay: number): Promise<boolean> {

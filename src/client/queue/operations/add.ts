@@ -106,7 +106,12 @@ export async function add<T>(
       ttl: merged.ttl,
       timeout: merged.timeout,
       uniqueKey: merged.deduplication?.id,
-      customId: merged.jobId ?? merged.deduplication?.id,
+      // Only an explicit jobId becomes the customId. The dedup id is carried by
+      // `uniqueKey` above into handleDeduplication (suppress/replace/extend). If we
+      // also mirrored it into customId, handleCustomId would short-circuit the re-add
+      // as an idempotent no-op BEFORE replace/extend run — silently dropping them in
+      // embedded mode. TCP/bulk already use `customId: jobId` only; this matches them.
+      customId: merged.jobId,
       dependsOn: merged.dependsOn?.map((id: string) => jobId(id)),
       tags: merged.tags,
       groupId: merged.groupId,

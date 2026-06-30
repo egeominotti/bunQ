@@ -1451,14 +1451,16 @@ describe('Job Management - Not Found Paths', () => {
     expect(discarded).toBe(false);
   });
 
-  test('moveToDelayed on waiting job returns false', async () => {
+  test('moveToDelayed on waiting job moves it to delayed', async () => {
     const QUEUE = 'move-waiting-queue';
 
     const job = await qm.push(QUEUE, { data: { test: true } });
 
-    // Job is in waiting state, not processing
+    // A waiting (in-queue) job is now routed through changeDelay, so it becomes
+    // delayed instead of being a silent no-op (parity with the embedded/TCP path).
     const moved = await qm.moveToDelayed(job.id, 5000);
-    expect(moved).toBe(false);
+    expect(moved).toBe(true);
+    expect(await qm.getJobState(job.id)).toBe('delayed');
   });
 
   test('changePriority on active job returns false', async () => {

@@ -12,6 +12,18 @@ bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites
 
 Never commit without all three passing. No exceptions.
 
+**MANDATORY: Keep the technical documentation in `/docs` in sync with the code.**
+
+Any change to the code MUST update the corresponding technical documentation under `docs/` in the **same** change-set — never as a follow-up. This keeps the docs continuously aligned with the current state of the codebase.
+
+- The internal technical reference lives at `docs/README.md` (index), `docs/architecture.md`, `docs/data-model.md`, and `docs/features/<slug>.md` (one file per module).
+- When you touch a module, update its `docs/features/<slug>.md` (purpose, public interface, control flow, edge cases, config). New module → add a feature doc and link it from `docs/README.md` and `docs/architecture.md`.
+- Changing a type, SQLite table/index, TCP command, HTTP endpoint, env var, or default → update `docs/data-model.md` and/or the relevant feature doc.
+- Adding/removing a component or changing a data flow → update `docs/architecture.md` (component diagram, flows, module map).
+- The user-facing site (`docs/src/content/docs/**`, Astro) and `docs/src/content/docs/changelog.md` are separate; updating the internal `/docs` reference does not replace the changelog rule below.
+
+A code change is not complete until `/docs` reflects it. No exceptions.
+
 **MANDATORY: After every commit, ALWAYS:**
 
 1. Bump version in `package.json`

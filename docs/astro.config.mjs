@@ -149,6 +149,7 @@ export default defineConfig({
           label: 'Production',
           items: [
             { label: 'Deployment Guide', link: '/guide/deployment/' },
+            { label: 'Databases (Postgres/MySQL)', link: '/guide/databases/' },
             { label: 'Native TLS', link: '/guide/tls/' },
             { label: 'Monitoring', link: '/guide/monitoring/' },
             { label: 'Telemetry', link: '/guide/telemetry/' },

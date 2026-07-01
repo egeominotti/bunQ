@@ -109,6 +109,14 @@ head:
               "@type": "Answer",
               "text": "FlowProducer creates parent-child job dependencies (fan-out/fan-in). The Workflow Engine orchestrates multi-step processes with saga compensation, branching, parallel steps, retry, loops (doUntil/doWhile/forEach), map transforms, schema validation, nested workflows, and human approval gates. Use Flow for job DAGs, Workflow for business processes."
             }
+          },
+          {
+            "@type": "Question",
+            "name": "Does bunqueue support Postgres or MySQL?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. bunqueue is SQLite-only by design and has no Postgres or MySQL backend. Bun's bun:sql client is async-only while bunqueue's storage layer is built on synchronous bun:sqlite, and swapping the database would not add clustering to what is a single-process engine. To run on serverless or ephemeral filesystems, mount a persistent volume and point BUNQUEUE_DATA_PATH at it, or use store-and-forward to a central durable bunqueue server."
+            }
           }
         ]
       }
@@ -209,6 +217,12 @@ Jobs are stored in SQLite with WAL (Write-Ahead Logging) mode:
 - Reads don't block writes
 - Data survives process crashes
 - Automatic checkpointing
+
+### Does bunqueue support Postgres or MySQL?
+
+No. bunqueue is SQLite-only by design (zero external infrastructure). Bun's `bun:sql` client is async-only while bunqueue's storage layer is built on synchronous `bun:sqlite`, and swapping the database would not add clustering to what is a single-process engine.
+
+To run on serverless or ephemeral filesystems, mount a persistent volume and point `BUNQUEUE_DATA_PATH` at it, or use store-and-forward to a central durable server. See [Postgres, MySQL & Storage Backends](/guide/databases/).
 
 ## Performance
 

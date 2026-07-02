@@ -1,0 +1,36 @@
+---
+title: "bunqueue Blog: Job Queue Guides, Benchmarks & Deep Dives for Bun"
+description: "Articles on bunqueue: architecture deep dives, BullMQ benchmarks, workflow orchestration, reliable workers, deployment guides, and Bun job queue patterns."
+tableOfContents: false
+---
+
+Deep dives, guides, and benchmarks from the bunqueue team.
+
+## Start Here
+
+- **[Why bunqueue Replaces Redis with SQLite](/blog/why-bunqueue/)** — The design rationale: simpler deployments, zero dependencies, 100k jobs/sec.
+- **[Getting Started in 5 Minutes](/blog/getting-started-five-minutes/)** — Queues, jobs, and workers in embedded or TCP mode.
+
+## Architecture & Performance
+
+- **[Sharding Architecture Deep Dive](/blog/sharding-deep-dive/)** — Multi-core job distribution with FNV-1a hashing and power-of-2 shards.
+- **[bunqueue vs BullMQ Benchmarks](/blog/benchmarks-vs-bullmq/)** — Reproducible push, bulk, and end-to-end throughput comparisons.
+- **[Auto-Batching: 3x Throughput with Zero Code Changes](/blog/auto-batching/)** — How concurrent `add()` calls transparently batch into bulk operations.
+
+## Features
+
+- **[Workflow Engine: Orchestration Without Temporal or Inngest](/blog/workflow-engine/)** — Saga compensation, branching, and human-in-the-loop signals in pure TypeScript.
+- **[Job Pipelines with FlowProducer](/blog/job-pipelines-flows/)** — Parent-child workflows, fan-out patterns, and chain processing.
+- **[Cron Jobs & Scheduling](/blog/cron-scheduling/)** — Cron expressions, repeat intervals, and timezone support.
+- **[Dead Letter Queues](/blog/dead-letter-queues/)** — Catch, inspect, and retry failed jobs.
+- **[Rate Limiting & Concurrency](/blog/rate-limiting-concurrency/)** — Per-queue limits, global concurrency, and backpressure.
+
+## Reliability & Operations
+
+- **[Reliable Workers: Stall Detection and Heartbeats](/blog/reliable-workers/)** — Fault-tolerant workers with lock-based ownership.
+- **[Production Deployment: Docker, systemd, and PM2](/blog/production-deployment/)** — Health checks, resource limits, and monitoring.
+- **[S3 Backup & Disaster Recovery](/blog/s3-backup-recovery/)** — Backup scheduling, retention, and step-by-step recovery.
+
+## Integrations
+
+- **[bunqueue with Hono and Elysia](/blog/framework-integrations/)** — Queue jobs from HTTP handlers with graceful shutdown.

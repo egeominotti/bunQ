@@ -52,7 +52,11 @@ export default defineConfig({
       },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/egeominotti/bunqueue' },
+        { icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/bunqueue' },
       ],
+      components: {
+        Header: './src/components/Header.astro',
+      },
       editLink: {
         baseUrl: 'https://github.com/egeominotti/bunqueue/edit/main/docs/',
       },
@@ -175,6 +179,7 @@ export default defineConfig({
         {
           label: 'Blog',
           items: [
+            { label: 'All Posts', link: '/blog/' },
             { label: 'Why bunqueue: SQLite Over Redis', link: '/blog/why-bunqueue/' },
             { label: 'Getting Started in 5 Minutes', link: '/blog/getting-started-five-minutes/' },
             { label: 'Sharding Architecture Deep Dive', link: '/blog/sharding-deep-dive/' },

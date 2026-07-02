@@ -1,108 +1,125 @@
-# bunqueue - High-Performance Job Queue for Bun
-# https://bunqueue.dev/
+# bunqueue
 
-> bunqueue is a high-performance job queue written in TypeScript for the Bun runtime.
-> It uses SQLite for persistence instead of Redis, providing a BullMQ-compatible API.
+> bunqueue is a high-performance job queue for the Bun runtime, written in TypeScript. It uses SQLite (WAL mode) for persistence instead of Redis, offers a BullMQ-compatible API, and ships a native MCP server so AI agents can control queues directly. Zero external dependencies.
 
-## Overview
+Key facts:
+- Runs embedded (in-process, `bun:sqlite`) or as a standalone TCP/HTTP server (MessagePack binary protocol on port 6789, REST/WebSocket/SSE on 6790).
+- Production features: retries with backoff, priorities, delayed jobs, cron scheduling, Dead Letter Queue, stall detection, rate limiting, concurrency caps, webhooks (HMAC-signed), S3 backups, native TLS, OpenTelemetry.
+- Workflow engine: multi-step orchestration with saga compensation, branching, parallel steps, loops, signals (human-in-the-loop), nested sub-workflows.
+- Performance: up to ~630K ops/sec bulk push (embedded), ~90K ops/sec over TCP; ~1.3x faster push and ~3.2x faster bulk than BullMQ.
+- Install: `bun add bunqueue` — import from `bunqueue/client` (Queue, Worker, FlowProducer, Bunqueue) or `bunqueue/workflow` (Workflow, Engine).
 
-bunqueue provides:
-- Native Bun performance with bun:sqlite
-- Zero external dependencies (no Redis required)
-- BullMQ-compatible API for easy migration
-- SQLite persistence with WAL mode
-- Sandboxed workers for crash isolation
-- Production features: DLQ, stall detection, rate limiting, webhooks, S3 backups
+## Getting Started
 
-## Documentation Structure
+- [Introduction](https://bunqueue.dev/guide/introduction/): What bunqueue is, why SQLite instead of Redis, feature overview
+- [Installation](https://bunqueue.dev/guide/installation/): Install via npm/bun, TypeScript types included
+- [Quick Start](https://bunqueue.dev/guide/quickstart/): Create a queue, add jobs, process with a Worker in 5 minutes
+- [Configuration File](https://bunqueue.dev/guide/configuration/): Typed bunqueue.config.ts for server settings
+- [Environment Variables](https://bunqueue.dev/guide/env-vars/): Ports, data path, auth tokens, S3, timeouts, TLS
 
-/guide/introduction/ - What is bunqueue and why use it
-/guide/installation/ - How to install bunqueue
-/guide/quickstart/ - Get up and running quickly
+## Client SDK
 
-### Client SDK
-/guide/queue/ - Queue class API reference
-/guide/worker/ - Worker class API reference (includes SandboxedWorker)
-/guide/stall-detection/ - Automatic recovery of unresponsive jobs
-/guide/dlq/ - Dead Letter Queue for failed jobs
-/guide/flow/ - Parent-child job relationships (FlowProducer)
+- [Queue API](https://bunqueue.dev/guide/queue/): add/addBulk, priorities, delays, retries, deduplication, durable writes
+- [Worker API](https://bunqueue.dev/guide/worker/): Concurrency, heartbeats, batch pulling, lock-based ownership, sandboxed workers
+- [Simple Mode (Bunqueue class)](https://bunqueue.dev/guide/simple-mode/): Queue + Worker in one object with routes, middleware, and cron
+- [FlowProducer](https://bunqueue.dev/guide/flow/): Parent-child job dependencies, chains, parallel fan-out/merge
+- [Workflow Engine](https://bunqueue.dev/guide/workflow/): Saga compensation, branching, parallel steps, loops, signals, sub-workflows
+- [QueueGroup](https://bunqueue.dev/guide/queue-group/): Namespace-prefixed queues for multi-tenant apps
+- [Dead Letter Queue](https://bunqueue.dev/guide/dlq/): Auto-retry with backoff, expiration, filter by failure reason
+- [Stall Detection](https://bunqueue.dev/guide/stall-detection/): Auto-recover stuck jobs via heartbeats and grace periods
+- [Cron & Scheduled Jobs](https://bunqueue.dev/guide/cron/): Cron expressions, repeat intervals, IANA timezones
+- [Rate Limiting & Concurrency](https://bunqueue.dev/guide/rate-limiting/): Per-queue rate limits and concurrency caps
 
-### Server Mode
-/guide/server/ - Running bunqueue as a standalone server
-/guide/cli/ - Command-line interface reference
-/guide/env-vars/ - Environment variables configuration
-/api/http/ - REST API reference
-/api/tcp/ - Binary TCP protocol reference
+## Server Mode & APIs
 
-### Advanced Features
-/guide/cron/ - Schedule recurring jobs
-/guide/backup/ - Automated S3 backups
-/guide/rate-limiting/ - Control job processing rates
-/guide/webhooks/ - HTTP callbacks for job events
+- [Server Mode](https://bunqueue.dev/guide/server/): Standalone TCP+HTTP server, token auth, Docker, graceful shutdown
+- [CLI Reference](https://bunqueue.dev/guide/cli/): push/pull/ack, queue control, DLQ, cron, stats from the terminal
+- [HTTP REST API](https://bunqueue.dev/api/http/): 76 REST endpoints plus WebSocket and SSE real-time events
+- [TCP Protocol](https://bunqueue.dev/api/tcp/): MessagePack wire format, length-prefixed framing, full command reference
+- [TypeScript Types](https://bunqueue.dev/api/types/): Job, Queue, Worker, DLQ, and connection interfaces
+- [Native TLS](https://bunqueue.dev/guide/tls/): Encrypt TCP and HTTP traffic without a reverse proxy
+- [MCP Server for AI Agents](https://bunqueue.dev/guide/mcp/): 73 MCP tools for Claude Desktop, Claude Code, Cursor, Windsurf
 
-### Reference
-/api/types/ - Complete TypeScript type definitions
-/examples/ - Real-world examples and patterns
-/guide/migration/ - Migration guide from BullMQ
+## Operations & Production
 
-### Resources
-/faq/ - Frequently asked questions
-/troubleshooting/ - Common issues and solutions
-/changelog/ - Release notes and version history
-/security/ - Security policy and best practices
-/contributing/ - How to contribute
+- [Deployment Guide](https://bunqueue.dev/guide/deployment/): Docker, systemd, PM2, health checks, resource limits
+- [Monitoring](https://bunqueue.dev/guide/monitoring/): Prometheus metrics, Grafana dashboards, DLQ alerts
+- [OpenTelemetry](https://bunqueue.dev/guide/telemetry/): Distributed tracing, latency histograms, throughput tracking
+- [S3 Backup & Recovery](https://bunqueue.dev/guide/backup/): Automated backups to AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces
+- [Webhooks](https://bunqueue.dev/guide/webhooks/): HMAC-SHA256 signed HTTP callbacks on job events
+- [Security](https://bunqueue.dev/security/): Token auth, rate limiting, network config, vulnerability reporting
+- [Postgres, MySQL & Storage Backends](https://bunqueue.dev/guide/databases/): Why SQLite-only, and how to run on serverless/ephemeral platforms
+- [CPU-Intensive Workers over TCP](https://bunqueue.dev/guide/cpu-intensive-workers/): Ping intervals, command timeouts, yield patterns
+- [IoT & Edge](https://bunqueue.dev/guide/iot-edge/): Run on Raspberry Pi/ARM64 gateways, MQTT bridging, store-and-forward
+- [Troubleshooting](https://bunqueue.dev/troubleshooting/): SQLite locks, memory, connection timeouts, common fixes
 
-## Key Features
+## Integrations & Migration
 
-### Queue API
-- add(name, data, opts) - Add a single job
-- addBulk(jobs) - Add multiple jobs efficiently
-- getJob(id) - Get job by ID
-- getJobs(states) - List jobs by state
-- pause() / resume() - Control processing
-- drain() - Remove all waiting jobs
+- [Framework Integrations](https://bunqueue.dev/guide/integrations/): Embedded-mode setup and project structure for Bun web frameworks
+- [Hono](https://bunqueue.dev/guide/hono/): Background jobs in Hono apps with middleware and graceful shutdown
+- [Elysia](https://bunqueue.dev/guide/elysia/): Typed routes, plugin pattern, DLQ monitoring in Elysia apps
+- [Migrate from BullMQ](https://bunqueue.dev/guide/migration/): Keep the Queue/Worker API, drop Redis
+- [bunqueue vs BullMQ](https://bunqueue.dev/guide/comparison/): Performance and feature comparison
+- [Benchmarks](https://bunqueue.dev/guide/benchmarks/): Reproducible throughput tests, embedded and TCP modes
 
-### Worker API
-- new Worker(queue, processor, opts) - Create job processor
-- concurrency - Process multiple jobs in parallel
-- Events: completed, failed, progress, stalled
-- SandboxedWorker - Isolated worker processes for CPU-intensive tasks (experimental — depends on Bun Workers)
+## Architecture Internals
 
-### Job Options
-- priority - Higher priority = processed first
-- delay - Delay before processing (ms)
-- attempts - Maximum retry attempts
-- backoff - Delay between retries
-- timeout - Job timeout (ms)
-- removeOnComplete / removeOnFail - Cleanup options
+- [Architecture Overview](https://bunqueue.dev/architecture/): Auto-scaling shards, TCP protocol, SQLite WAL, background tasks
+- [Domain Layer](https://bunqueue.dev/architecture/domain-layer/): Sharding, 4-ary priority queues, job state machine
+- [Application Layer](https://bunqueue.dev/architecture/application-layer/): PUSH/PULL/ACK operations, stall detection, DLQ management
+- [Persistence](https://bunqueue.dev/architecture/persistence/): WAL mode, write buffering, read-through cache, durability guarantees
+- [TCP Protocol Internals](https://bunqueue.dev/architecture/tcp-protocol/): Wire format, pipelining, connection pooling
+- [Client SDK Internals](https://bunqueue.dev/architecture/client-sdk/): Connection pooling, embedded vs server mode, ACK batching
+- [Cron Scheduler Internals](https://bunqueue.dev/architecture/cron-scheduler/): MinHeap execution, lazy deletion, timezone handling
+- [Data Structures](https://bunqueue.dev/architecture/data-structures/): 4-ary MinHeap, skip lists, LRU cache, FNV-1a hashing
 
-## Code Example
+## Examples & Reference
+
+- [Code Examples](https://bunqueue.dev/examples/): Email queues, image processing, webhooks, ETL patterns
+- [Use Cases](https://bunqueue.dev/guide/use-cases/): AI agent workflows, payments, cron, multi-tenant queues
+- [FAQ](https://bunqueue.dev/faq/): Performance, scaling, SQLite vs Redis, migration questions
+- [Changelog](https://bunqueue.dev/changelog/): Version history and release notes
+- [Contributing](https://bunqueue.dev/contributing/): Dev setup, coding standards, PR workflow
+
+## Optional
+
+- [Interactive Simulator](https://bunqueue.dev/simulator/): Try bunqueue in the browser
+- [Blog: Why bunqueue](https://bunqueue.dev/blog/why-bunqueue/): SQLite instead of Redis, design rationale
+- [Blog: Getting Started in 5 Minutes](https://bunqueue.dev/blog/getting-started-five-minutes/): Embedded and TCP mode tutorial
+- [Blog: Workflow Engine](https://bunqueue.dev/blog/workflow-engine/): Multi-step orchestration without Temporal or Inngest
+- [Blog: Auto-Batching](https://bunqueue.dev/blog/auto-batching/): 3x throughput with zero code changes
+- [Blog: Sharding Deep Dive](https://bunqueue.dev/blog/sharding-deep-dive/): Multi-core job distribution via FNV-1a hashing
+- [Blog: Benchmarks vs BullMQ](https://bunqueue.dev/blog/benchmarks-vs-bullmq/): Reproducible comparison methodology
+- [Blog: Reliable Workers](https://bunqueue.dev/blog/reliable-workers/): Stall detection and heartbeat protocol
+- [Blog: Dead Letter Queues](https://bunqueue.dev/blog/dead-letter-queues/): Catch, inspect, retry failed jobs
+- [Blog: Cron Scheduling](https://bunqueue.dev/blog/cron-scheduling/): Recurring tasks for Bun applications
+- [Blog: Rate Limiting & Concurrency](https://bunqueue.dev/blog/rate-limiting-concurrency/): Backpressure and downstream protection
+- [Blog: Job Pipelines & Flows](https://bunqueue.dev/blog/job-pipelines-flows/): FlowProducer dependency trees
+- [Blog: Framework Integrations](https://bunqueue.dev/blog/framework-integrations/): Hono and Elysia patterns
+- [Blog: Production Deployment](https://bunqueue.dev/blog/production-deployment/): Docker, systemd, PM2
+- [Blog: S3 Backup & Recovery](https://bunqueue.dev/blog/s3-backup-recovery/): Disaster recovery walkthrough
+
+## Quick Example
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
-// Create a queue
-const queue = new Queue('emails');
+// Embedded mode — no server needed
+const queue = new Queue('emails', { embedded: true });
 
-// Add a job
-await queue.add('send-welcome', {
-  to: 'user@example.com',
-  subject: 'Welcome!'
+await queue.add('send-welcome', { to: 'user@example.com' }, {
+  attempts: 3,
+  backoff: 1000,
+  priority: 5,
 });
 
-// Process jobs
 const worker = new Worker('emails', async (job) => {
   await sendEmail(job.data);
   return { sent: true };
-});
+}, { concurrency: 10 });
+
+worker.on('completed', (job, result) => console.log(job.id, result));
 ```
-
-## Performance
-
-- 500,000+ operations per second
-- 32x faster than BullMQ for common operations
-- SQLite WAL mode for concurrent access
-- Minimal memory footprint
 
 ## Links
 

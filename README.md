@@ -626,13 +626,22 @@ await engine.signal(run.id, 'manager-approval', { approved: true });
 
 <p align="center">
   <strong>bunqueue Dashboard</strong><br/>
-  <sub>A visual interface for managing queues, jobs, workers and monitoring in real time. Currently in beta.</sub>
+  <sub>A web dashboard that fully drives your bunqueue server &mdash; queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot. Open source, currently in beta. Requires Bun.</sub>
 </p>
 
 https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116
 
+```bash
+bunx bunqueue-dashboard
+```
+
 <p align="center">
-  <sub>Want early access? Reach out at <b>egeominotti@gmail.com</b></sub>
+  <sub>
+    <a href="https://egeominotti.github.io/bunqueue-dashboard/">Live demo</a> &middot;
+    <a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">User guide</a> &middot;
+    <a href="https://github.com/egeominotti/bunqueue-dashboard">GitHub</a> &middot;
+    <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm: bunqueue-dashboard</a>
+  </sub>
 </p>
 
 ---

@@ -24,19 +24,32 @@ hero:
       link: https://www.npmjs.com/package/bunqueue
       icon: external
       variant: minimal
+    - text: Dashboard
+      link: https://egeominotti.github.io/bunqueue-dashboard/
+      icon: rocket
+      variant: minimal
 ---
 
 <div class="hp-section-header" style="margin-top: 2rem;">
-  <span class="hp-badge">Coming Soon</span>
+  <span class="hp-badge">Beta &middot; Open Source</span>
   <h2 class="hp-heading">bunqueue Dashboard</h2>
-  <p class="hp-subtitle">A visual interface for managing queues, jobs, workers, and monitoring in real time.</p>
+  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server &mdash; queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
 </div>
 
 <div class="hp-bento-card hp-bento-wide" style="max-width: 800px; margin: 0 auto 1.5rem; padding: 0; overflow: hidden;">
   <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" width="100%" controls autoplay loop muted playsinline style="display: block; margin: 0;"></video>
 </div>
 
-<p style="text-align: center; font-size: 0.95rem; color: var(--sl-color-gray-3); margin-bottom: 3rem;">Want early access? Reach out at <strong style="color: var(--sl-color-text);">egeominotti@gmail.com</strong></p>
+<div class="hp-install-wrap">
+  <div class="hp-install">
+    <span class="hp-install-dollar">$</span>
+    <span>bunx bunqueue-dashboard</span>
+  </div>
+</div>
+
+<p style="text-align: center; font-size: 0.95rem; color: var(--sl-color-gray-3); margin-bottom: 3rem;">
+  <a href="https://egeominotti.github.io/bunqueue-dashboard/">Live demo</a> &middot; <a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">User guide</a> &middot; <a href="https://github.com/egeominotti/bunqueue-dashboard">GitHub</a> &middot; <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a> &middot; Requires Bun
+</p>
 
 <div class="hp-install-wrap">
   <div class="hp-install">
@@ -131,6 +144,10 @@ worker.on('failed', (job, error) => {
   <div class="hp-bento-card">
     <h3>Simple Mode</h3>
     <p>Queue + Worker in one object. Routes, middleware, cron, circuit breaker, batch processing, deduplication &mdash; zero boilerplate.</p>
+  </div>
+  <div class="hp-bento-card hp-bento-wide">
+    <h3>Web Dashboard</h3>
+    <p>Monitor and control everything from the browser: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot. One command &mdash; <code>bunx bunqueue-dashboard</code> &mdash; or <a href="https://egeominotti.github.io/bunqueue-dashboard/">try the live demo</a>.</p>
   </div>
   <div class="hp-bento-card hp-bento-wide">
     <h3>Workflow Engine</h3>
@@ -254,6 +271,11 @@ worker.on('failed', (job, error) => {
     <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
     <strong>Auth &amp; SSRF Protection</strong>
     <span>Token auth, webhook URL validation</span>
+  </div>
+  <div class="hp-feature-item">
+    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 9l3 3 5-5"/></svg>
+    <strong>Web Dashboard</strong>
+    <span><code>bunx bunqueue-dashboard</code></span>
   </div>
 </div>
 

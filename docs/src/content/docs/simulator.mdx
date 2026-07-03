@@ -1,6 +1,7 @@
 ---
 title: "Interactive bunqueue Simulator: Try the Bun Job Queue in Your Browser"
-description: "Try bunqueue live in your browser. Explore sharding, priority processing, worker concurrency, dead letter queues, and queue controls."
+description: "Try bunqueue live in your browser. Watch jobs flow through priorities, retries with backoff, dead letter queues, sharding, rate limits, and worker concurrency."
+tableOfContents: false
 head:
   - tag: meta
     attrs:
@@ -12,62 +13,39 @@ import Simulator from '../../components/simulator/Simulator.tsx';
 
 # Interactive Simulator
 
-Experience bunqueue's features directly in your browser. This simulator implements the core queue functionality including:
+A faithful, in-browser model of the bunqueue engine. Push jobs and watch them move through the same lifecycle a real server runs: **waiting → active → completed**, with failures bouncing through **delayed** (exponential backoff) until they land in the **dead-letter lane**. Same FNV-1a shard mapping, same priority ordering, same controls.
 
-- **Sharding** - See how jobs are distributed across shards using FNV-1a hash
-- **Priority Queue** - Jobs with higher priority are processed first
-- **Delayed Jobs** - Schedule jobs to run after a delay
-- **Workers** - Start concurrent workers to process jobs
-- **DLQ (Dead Letter Queue)** - Failed jobs after max retries go to DLQ
-- **Queue Control** - Pause, resume, and drain queues
+Use the **scenario chips** for one-click demos, or drive everything by hand from the control panel. The transport bar pauses the simulation clock and runs it up to 4× speed.
 
-<div style={{ marginTop: '2rem' }}>
-  <Simulator client:load />
-</div>
+<Simulator client:load />
 
----
+## What you're looking at
 
-## How It Works
+- **Pipeline** — every job as a chip in its state lane. Active chips show live progress; retry chips carry their attempt count (`↻ 2/3`) and backoff countdown; dead letters show the failure reason.
+- **Shards** — bunqueue maps each queue to a shard with `fnv1aHash(queueName) & SHARD_MASK`. A cell flashes when a push lands on it. All jobs of one queue always share one shard.
+- **Throughput** — completions per second over the last 60 seconds of simulation time.
+- **Workers** — each card is one worker; the dots are its concurrency slots (filled = busy). Stopping a worker lets in-flight jobs finish first.
+- **Events** — the server log tail: pushes, completions, retries, dead letters, and every control action.
 
-### Sharding
+## Scenarios to try
 
-The simulator uses the same FNV-1a hash algorithm as bunqueue to distribute queues across shards:
+1. **Burst of 80** — bulk-push 80 jobs and watch four worker slots chew through the backlog.
+2. **Priorities win** — P9 jobs pushed *after* a P1 backlog still jump the whole line.
+3. **Scheduled jobs** — delayed jobs wait in their lane until the countdown expires.
+4. **Failure storm** — at 55% failure rate, retries back off exponentially (1.2s → 2.4s → DLQ). Hit **Retry DLQ** to give dead letters a fresh attempt budget.
+5. **Rate limited** — eight worker slots, but the queue releases only 4 jobs/sec: backpressure you can see.
 
-```typescript
-shardIndex = fnv1aHash(queueName) & SHARD_MASK
-```
+Then compose your own: pause a queue mid-burst, drain it, or crank the failure rate while a scenario runs — effects stack like they would on a real server.
 
-Each queue maps to exactly one shard, and all jobs in that queue share the same shard.
+## How it maps to real bunqueue
 
-### Job Lifecycle
+| Mechanic | Simulator | Real bunqueue |
+|----------|-----------|---------------|
+| Shard mapping | `fnv1aHash(queue) & 7`, 8 shards | Same hash, shard count auto-detected from CPU cores |
+| Priority order | Higher first, FIFO within a priority (4-ary min-heap) | Same |
+| Retries | Exponential backoff, DLQ after 3 attempts | Configurable `attempts`/`backoff` per job |
+| Rate limit | Token bucket, jobs/sec per queue | [`RateLimit`](/guide/rate-limiting/) command |
+| Storage | In-memory, resets on reload | SQLite WAL with [S3 backups](/guide/backup/) |
+| Workers | Simulated processing time (0.45–1.5s; the priority demo uses a slower 1.1–2s worker) | Your code, over TCP or [embedded](/guide/quickstart/) |
 
-```
-PUSH → waiting/delayed → PULL → active → ACK/FAIL → completed/retry/DLQ
-```
-
-1. **Push** - Job enters the queue in `waiting` state (or `delayed` if delay > 0)
-2. **Pull** - Worker pulls job, state becomes `active`
-3. **Ack** - Job completed successfully → `completed`
-4. **Fail** - Job failed, will retry or move to DLQ
-
-### Try These Scenarios
-
-1. **High Throughput**: Push 100 jobs with a running worker
-2. **Priority Processing**: Push jobs with different priorities (higher = sooner)
-3. **Delayed Jobs**: Add jobs with 5000ms delay, watch them become ready
-4. **Failure Handling**: Increase failure rate, observe retries and DLQ
-5. **Queue Control**: Pause a queue, push jobs, resume and watch processing
-
----
-
-## Differences from Real bunqueue
-
-| Feature | Simulator | Real bunqueue |
-|---------|-----------|---------------|
-| Storage | In-memory | SQLite |
-| Shards | 8 (configurable) | Auto-detected from CPU |
-| Workers | Simulated delays | Real processing |
-| Persistence | None (page refresh resets) | Full durability |
-| TCP Server | N/A | Full protocol |
-
-The simulator is designed for learning and demonstration purposes. For production workloads, use the real bunqueue server.
+Ready for the real thing? Start with the [quick start](/guide/quickstart/), then meet the [Queue](/guide/queue/) and [Worker](/guide/worker/) APIs.

@@ -1,35 +1,18 @@
-/**
- * FNV-1a Hash Implementation
- * Same algorithm used in bunqueue for consistent sharding
- */
+// FNV-1a — the same hash bunqueue uses to map a queue name to a shard.
+// shardIndex = fnv1aHash(queueName) & SHARD_MASK
 
-const FNV_PRIME = 0x01000193;
-const FNV_OFFSET = 0x811c9dc5;
+export const SHARD_COUNT = 8;
+export const SHARD_MASK = SHARD_COUNT - 1;
 
-export function fnv1a(str: string): number {
-  let hash = FNV_OFFSET;
+export function fnv1aHash(str: string): number {
+  let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);
-    hash = Math.imul(hash, FNV_PRIME);
+    hash = Math.imul(hash, 0x01000193);
   }
   return hash >>> 0;
 }
 
-export function calculateShardCount(cores: number = navigator.hardwareConcurrency || 4): number {
-  const clamped = Math.min(Math.max(cores, 1), 64);
-  let shards = 1;
-  while (shards < clamped && shards < 64) {
-    shards *= 2;
-  }
-  return shards;
-}
-
-export function shardIndex(key: string, shardMask: number): number {
-  return fnv1a(key) & shardMask;
-}
-
-export function generateId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 10);
-  return `${timestamp}-${random}`;
+export function shardIndexFor(queueName: string): number {
+  return fnv1aHash(queueName) & SHARD_MASK;
 }

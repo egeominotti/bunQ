@@ -1,0 +1,200 @@
+/* Pipeline board — the five job-lifecycle lanes and their chips. */
+
+.board {
+  padding: 0.75rem;
+}
+
+.board-lanes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+@media (max-width: 960px) {
+  .board {
+    overflow-x: auto;
+  }
+  .board-lanes {
+    grid-template-columns: repeat(5, minmax(150px, 1fr));
+    min-width: 780px;
+  }
+}
+
+.lane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--sim-border);
+  border-radius: 8px;
+  background: var(--sim-inset);
+  --lane-color: var(--st-completed);
+}
+
+.lane-waiting { --lane-color: var(--st-waiting); }
+.lane-delayed { --lane-color: var(--st-delayed); }
+.lane-active { --lane-color: var(--st-active); }
+.lane-completed { --lane-color: var(--st-completed); }
+.lane-dlq { --lane-color: var(--st-dlq); }
+
+.lane-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--sim-border);
+}
+
+.lane-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--lane-color);
+  flex-shrink: 0;
+}
+
+.lane-title {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sim-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lane-count {
+  margin-left: auto;
+  font-family: var(--sim-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--sim-ink);
+}
+
+.lane-body {
+  list-style: none;
+  margin: 0;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-height: 220px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.lane-empty,
+.lane-overflow {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--sim-ink-2);
+  text-align: center;
+  padding: 0.5rem 0.25rem;
+}
+
+.lane-overflow {
+  font-family: var(--sim-mono);
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────── */
+
+.chip {
+  position: relative;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--lane-color) 35%, var(--sim-border));
+  border-left: 3px solid var(--lane-color);
+  background: var(--sim-panel);
+  border-radius: 6px;
+  padding: 0.3rem 0.45rem 0.35rem;
+  animation: chip-in 220ms ease-out;
+  overflow: hidden;
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chip-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  min-width: 0;
+}
+
+.chip-id {
+  font-family: var(--sim-mono);
+  color: var(--sim-ink-2);
+  flex-shrink: 0;
+}
+
+.chip-name {
+  font-family: var(--sim-mono);
+  color: var(--sim-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chip-meta {
+  margin-left: auto;
+  font-family: var(--sim-mono);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--lane-color);
+  flex-shrink: 0;
+}
+
+.chip-completed .chip-name,
+.chip-completed .chip-id {
+  color: var(--sim-ink-2);
+}
+
+.chip-queue {
+  display: inline-block;
+  margin-top: 0.15rem;
+  font-family: var(--sim-mono);
+  font-size: 0.58rem;
+  color: var(--sim-ink-2);
+  border: 1px solid var(--sim-border);
+  border-radius: 99px;
+  padding: 0 0.35rem;
+}
+
+.chip-reason {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--sim-mono);
+  font-size: 0.6rem;
+  color: var(--st-failed);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* live progress under active chips */
+.chip-progress {
+  display: block;
+  margin-top: 0.28rem;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--st-active) 18%, transparent);
+  overflow: hidden;
+}
+
+.chip-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--st-active);
+  transition: width 130ms linear;
+}

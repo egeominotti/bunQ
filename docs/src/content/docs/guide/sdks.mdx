@@ -24,12 +24,48 @@ public method of the SDKs is covered by at least one real test.
 
 ```bash
 bunx bunqueue start
+# or, with Docker and persistent data:
+# docker run -d -p 6789:6789 -p 6790:6790 -v bunqueue-data:/app/data ghcr.io/egeominotti/bunqueue:latest
 ```
 
-That's it — the queue is listening on port 6789. (Docker and binary options
-in [Running the Server](/guide/server/).)
+That's it — the queue is listening on port 6789. (More options in
+[Running the Server](/guide/server/).)
 
-## 2. Add jobs
+## 2. Install the client
+
+<Tabs>
+<TabItem label="Node.js">
+
+```bash
+npm install bunqueue-client
+```
+
+</TabItem>
+<TabItem label="Bun">
+
+```bash
+bun add bunqueue-client
+```
+
+</TabItem>
+<TabItem label="Deno">
+
+```bash
+deno add npm:bunqueue-client
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```bash
+# PyPI release coming soon; install from the repo today:
+pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
+```
+
+</TabItem>
+</Tabs>
+
+## 3. Add jobs
 
 <Tabs>
 <TabItem label="Node / Deno / Bun">
@@ -56,7 +92,7 @@ queue.add("welcome", {"to": "user@example.com"})
 </TabItem>
 </Tabs>
 
-## 3. Process jobs
+## 4. Process jobs
 
 <Tabs>
 <TabItem label="Node / Deno / Bun">
@@ -87,6 +123,15 @@ Worker("emails", process, concurrency=10).run()
 
 </TabItem>
 </Tabs>
+
+Run either file with the runtime you already use:
+
+```bash
+node --experimental-strip-types app.ts    # Node 22+
+bun app.ts                                # Bun
+deno run -A app.ts                        # Deno 2+
+python app.py                             # Python
+```
 
 Done. The producer and the worker can be **different apps in different
 languages** — a Next.js API adding jobs, a Python service processing them.
@@ -185,6 +230,38 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 
 The only difference from the Bun original: `embedded: true` is not available
 (it needs the in-process Bun runtime) — connect to a server instead.
+
+## Cloudflare Workers
+
+The same client runs inside Workers — enable Node.js compatibility and add
+jobs straight from your fetch handlers:
+
+```toml
+# wrangler.toml
+compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2025-01-01"
+```
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+export default {
+  async fetch(req: Request, env: Env): Promise<Response> {
+    const queue = new Queue('signups', { host: env.BQ_HOST, port: 6789, token: env.BQ_TOKEN, tls: true });
+    const job = await queue.add('welcome', await req.json());
+    queue.close();
+    return Response.json({ queued: job.id });
+  },
+};
+```
+
+Workers are request-scoped, so there is no long-lived worker loop: **produce
+from fetch handlers, consume in batches from a
+[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)**
+(pull → process → ack, then return). Both patterns are covered by the SDK's
+16-scenario suite that runs inside workerd — including Simple Mode. Two
+requirements: your server must be reachable from the internet and TLS needs
+a publicly trusted certificate.
 
 ## Where it runs
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .connection import _compact
-from .errors import CommandError
+from .errors import CommandError, CommandTimeoutError
 from .job import Job
 
 
@@ -97,11 +97,26 @@ class QueueQueryOps:
         return {"progress": response.get("progress"), "message": response.get("message")}
 
     def wait_for_job(self, job_id: str, timeout_ms: int = 30000) -> Any:
-        """Block until the job finishes; returns its result."""
+        """Block until the job completes; returns its result.
+
+        The server's ``WaitJob`` waiter resolves only on completion, answering
+        ``{ok:true, completed:false}`` (no result) otherwise — so returning
+        ``None`` would be indistinguishable from a genuine ``None`` result. On
+        non-completion we probe the job state: a ``failed`` job raises
+        :class:`CommandError` (it will not complete), everything else raises
+        :class:`CommandTimeoutError`."""
         response = self.connection.call(
             {"cmd": "WaitJob", "id": job_id, "timeout": timeout_ms},
             timeout=timeout_ms / 1000 + 5,
         )
+        if not response.get("completed"):
+            try:
+                state = self.get_state(job_id)
+            except CommandError:
+                state = None
+            if state == "failed":
+                raise CommandError(f"job {job_id} failed before completion")
+            raise CommandTimeoutError(f"waitUntilFinished timed out after {timeout_ms}ms")
         return response.get("result")
 
     def wait_job_until_finished(

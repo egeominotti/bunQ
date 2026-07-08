@@ -277,7 +277,7 @@ Authentication uses server side tokens (`AUTH_TOKENS`). Transport security uses 
 | Area | Capabilities |
 |---|---|
 | Queue | `add`, `addBulk`, full `JobOptions`: priority, delay, attempts, backoff, ttl, timeout, jobId, deduplication, dependsOn, tags, groupId, lifo, removeOnComplete, removeOnFail, durable, repeat, debounce |
-| Query | `getJob`, `getJobByCustomId`, `getJobs` with per state helpers, state, result, progress, `waitForJob`, counts, counts per priority, children values, job logs |
+| Query | `getJob`, `getJobByCustomId`, `getJobs` with per state helpers, state, result, progress, `waitForJob` (throws on timeout, BullMQ contract), counts, counts per priority, children values, job logs |
 | Control | pause, resume, drain, obliterate, clean, remove, discard, promote, `retryJob`, `retryJobs`, move to wait or delayed, change priority or delay, update data, extend lock |
 | Dead letter queue | `getDlq`, `retryDlq`, `purgeDlq`, DLQ configuration |
 | Administration | rate limiting, global concurrency, stall configuration, webhooks, stats, metrics, `listQueues`, `getWorkers` |

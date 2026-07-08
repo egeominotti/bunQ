@@ -55,7 +55,9 @@ class Connection:
         self._sock: Optional[socket.socket] = None
         self._connected = False
         self._closed = False
-        self._conn_lock = threading.Lock()  # serializes connect/teardown
+        # Reentrant: connect() holds this while sending Auth via _send(), which
+        # may itself call _teardown() on a failed send — both need the lock.
+        self._conn_lock = threading.RLock()  # serializes connect/teardown
         self._write_lock = threading.Lock()
         self._pending_lock = threading.Lock()
         self._pending: Dict[str, Future] = {}
@@ -63,6 +65,10 @@ class Connection:
         self._generation = 0
         self._failed_attempts = 0
         self._next_attempt_at = 0.0
+        # Half-open recovery (#94): after this many consecutive command timeouts
+        # the socket is presumed dead and torn down so the next call reconnects.
+        self._max_command_timeouts = 3
+        self._consecutive_timeouts = 0
 
     # ------------------------------------------------------------- lifecycle
 
@@ -103,23 +109,33 @@ class Connection:
             self._failed_attempts = 0
             self._next_attempt_at = 0.0
             raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self._enable_keepalive(raw)
             ctx = _build_ssl_context(self.tls, self.host)
             if ctx is not None:
                 raw = ctx.wrap_socket(raw, server_hostname=self.host)
             raw.settimeout(None)  # reader thread blocks on recv
 
             self._sock = raw
-            self._connected = True
             self._generation += 1
+            self._consecutive_timeouts = 0
             reader = threading.Thread(target=self._read_loop, args=(raw,), daemon=True)
             reader.start()
 
-        if self.token:
-            try:
-                self.call({"cmd": "Auth", "token": self.token})
-            except CommandError as exc:
-                self._teardown()
-                raise AuthError(str(exc)) from exc
+            # Authenticate as the FIRST command, still holding the connection
+            # lock and BEFORE flipping _connected — otherwise a concurrent
+            # thread that observes _connected==True could send a command ahead
+            # of the Auth frame, which the server rejects ('Not authenticated').
+            if self.token:
+                try:
+                    self._send({"cmd": "Auth", "token": self.token})
+                except CommandError as exc:
+                    self._teardown()
+                    raise AuthError(str(exc)) from exc
+                except (CommandTimeoutError, ConnectionClosedError) as exc:
+                    self._teardown()
+                    raise ConnectionClosedError(f"auth failed: {exc}") from exc
+
+            self._connected = True
 
     def close(self) -> None:
         """Close the connection permanently; pending commands fail."""
@@ -140,7 +156,15 @@ class Connection:
         """
         if not self._connected:
             self.connect()
+        return self._send(command, timeout)
 
+    def _send(self, command: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Frame + write a command and await its response on the open socket.
+
+        Assumes the socket is up (used both by :meth:`call` and, during
+        :meth:`connect`, to send the initial Auth before ``_connected`` flips).
+        """
+        gen = self._generation  # snapshot: a timeout must not tear down a newer conn
         with self._pending_lock:
             self._req_counter = (self._req_counter + 1) & 0x7FFFFFFF
             req_id = str(self._req_counter)
@@ -169,13 +193,52 @@ class Connection:
         except FutureTimeoutError:
             with self._pending_lock:
                 self._pending.pop(req_id, None)
+            self._note_timeout(gen)
             raise CommandTimeoutError(f"no response for {command.get('cmd')} within timeout") from None
 
+        self._consecutive_timeouts = 0
         if isinstance(response, BaseException):
             raise response
         if not response.get("ok"):
             raise CommandError(str(response.get("error", "unknown server error")))
         return response
+
+    def _note_timeout(self, gen: int) -> None:
+        """Tear down after repeated timeouts so a dead/half-open link recovers.
+
+        On a link the peer dropped without FIN/RST, every command times out
+        while the socket still looks connected. Counting consecutive timeouts
+        and forcing a teardown lets the next :meth:`call` reconnect instead of
+        wedging until the OS abandons the writes (~tcp_retries2, minutes).
+
+        ``gen`` is the connection generation at send time: a timeout from an
+        already-replaced connection must not tear down (or miscount against)
+        the current one."""
+        if gen != self._generation:
+            return
+        self._consecutive_timeouts += 1
+        if self._consecutive_timeouts >= self._max_command_timeouts:
+            self._teardown()
+
+    @staticmethod
+    def _enable_keepalive(raw: socket.socket) -> None:
+        """Enable TCP keepalive (~15s idle) to surface half-open links fast."""
+        try:
+            raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except OSError:
+            return
+        for name, value in (
+            ("TCP_KEEPIDLE", 15),   # Linux: idle before first probe
+            ("TCP_KEEPINTVL", 5),   # Linux: interval between probes
+            ("TCP_KEEPCNT", 3),     # Linux: dead after this many failed probes
+            ("TCP_KEEPALIVE", 15),  # macOS: idle before first probe
+        ):
+            code = getattr(socket, name, None)
+            if code is not None:
+                try:
+                    raw.setsockopt(socket.IPPROTO_TCP, code, value)
+                except OSError:
+                    pass
 
     def ping(self) -> bool:
         try:

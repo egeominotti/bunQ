@@ -127,7 +127,9 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
     } catch (err) {
       this.failedCount += 1;
       const error = err instanceof Error ? err : new Error(String(err));
-      const stack = (error.stack ?? error.message).split('\n').slice(-MAX_STACK_LINES);
+      // Keep the FIRST lines: in a JS stack the message + throw site lead, so
+      // slice(0,N) preserves them (slice(-N) would drop them on long stacks).
+      const stack = (error.stack ?? error.message).split('\n').slice(0, MAX_STACK_LINES);
       await this.safeCall(
         compact({
           cmd: 'FAIL',

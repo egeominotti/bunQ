@@ -72,10 +72,18 @@ export class Queue<T = unknown> {
 
   /** Add many jobs in one round-trip; returns Job stubs. */
   async addBulk(jobs: BulkJobEntry<T>[]): Promise<Job<T>[]> {
-    const inputs = jobs.map((entry) => ({
-      data: jobPayload(entry.name, entry.data),
-      ...wireJobOptions(entry.opts),
-    }));
+    const inputs = jobs.map((entry) => {
+      const opts = wireJobOptions(entry.opts);
+      // PUSHB entries are JobInput, whose custom-id field is `customId` —
+      // unlike single PUSH which renames `jobId`->`customId` server-side.
+      // Without this the batch custom id is silently dropped (idempotency /
+      // getJobByCustomId broken).
+      if (opts.jobId !== undefined) {
+        opts.customId = opts.jobId;
+        delete opts.jobId;
+      }
+      return { data: jobPayload(entry.name, entry.data), ...opts };
+    });
     const response = await this.call({ cmd: 'PUSHB', queue: this.name, jobs: inputs });
     const ids = (response.ids ?? []) as string[];
     return ids.map(

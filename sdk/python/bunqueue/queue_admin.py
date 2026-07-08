@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from .connection import _compact
 from .errors import CommandError
+from .options import build_cron_job_options
 
 
 class QueueAdminOps:
@@ -19,8 +20,11 @@ class QueueAdminOps:
         return list(response.get("jobs") or response.get("data") or [])
 
     def retry_dlq(self, job_id: Optional[str] = None, count: Optional[int] = None) -> int:
+        # `count` is accepted for signature parity but not sent: the server has
+        # no partial RetryDlq — it retries one `jobId`, else the whole DLQ.
+        del count
         response = self.connection.call(
-            _compact({"cmd": "RetryDlq", "queue": self.name, "jobId": job_id, "count": count})
+            _compact({"cmd": "RetryDlq", "queue": self.name, "jobId": job_id})
         )
         return int(response.get("count", 0))
 
@@ -92,8 +96,12 @@ class QueueAdminOps:
                 "immediately": repeat.get("immediately"),
                 "maxLimit": repeat.get("limit"),
                 "skipIfNoWorker": repeat.get("skip_if_no_worker"),
+                "skipMissedOnRestart": repeat.get("skip_missed_on_restart"),
                 "preventOverlap": repeat.get("prevent_overlap"),
-                "jobOptions": template.get("opts"),
+                # Map Pythonic template opts (attempts, remove_on_complete, ...)
+                # to the wire CronJobOptions, else the server silently drops
+                # them and cron-spawned jobs fall back to JOB_DEFAULTS.
+                "jobOptions": build_cron_job_options(template.get("opts")),
             }
         )
         self.connection.call(command)

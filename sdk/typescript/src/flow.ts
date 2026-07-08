@@ -5,6 +5,7 @@
  */
 
 import { Connection } from './connection.js';
+import { CommandError } from './errors.js';
 import type {
   FlowJob,
   FlowProducerOptions,
@@ -54,7 +55,12 @@ export class FlowProducer {
 
   /** Fetch a flow tree starting from a job id (recursive over childrenIds). */
   getFlow<T = unknown>(opts: GetFlowOptions): Promise<JobNode<T> | null> {
-    return this.fetchNode<T>(opts.id, opts.depth ?? Number.POSITIVE_INFINITY, opts.maxChildren);
+    return this.fetchNode<T>(
+      opts.id,
+      opts.depth ?? Number.POSITIVE_INFINITY,
+      opts.maxChildren,
+      new Set()
+    );
   }
 
   /** Add a sequential chain: step[0] → step[1] → ... via dependsOn. */
@@ -205,9 +211,23 @@ export class FlowProducer {
   private async fetchNode<T>(
     id: string,
     depth: number,
-    maxChildren?: number
+    maxChildren: number | undefined,
+    visited: Set<string>
   ): Promise<JobNode<T> | null> {
-    const response = await this.connection.call({ cmd: 'GetJob', id });
+    if (visited.has(id)) return null; // cycle guard: id already on the current path
+    visited.add(id);
+    // A missing job — the root, or a child removed via removeOnComplete/cancel
+    // (childrenIds is a static push-time list, never pruned) — yields null and
+    // is skipped, returning the surviving partial tree instead of throwing.
+    let response: Awaited<ReturnType<Connection['call']>>;
+    try {
+      response = await this.connection.call({ cmd: 'GetJob', id });
+    } catch (err) {
+      // Only 'Job not found' means a removed node; a real server error must not
+      // masquerade as a missing child and yield a misleading partial tree.
+      if (err instanceof CommandError && /not found/i.test(err.message)) return null;
+      throw err;
+    }
     const raw = response.job as Record<string, unknown> | null;
     if (!raw) return null;
     const job = new Job<T>(raw, this.connection);
@@ -216,7 +236,7 @@ export class FlowProducer {
     const limit = maxChildren ?? job.childrenIds.length;
     const children: JobNode<T>[] = [];
     for (const childId of job.childrenIds.slice(0, limit)) {
-      const child = await this.fetchNode<T>(childId, depth - 1, maxChildren);
+      const child = await this.fetchNode<T>(childId, depth - 1, maxChildren, visited);
       if (child) children.push(child);
     }
     return { job, children: children.length > 0 ? children : undefined };

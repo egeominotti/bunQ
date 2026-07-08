@@ -55,7 +55,14 @@ class Queue(QueueQueryOps, QueueAdminOps):
             entry = dict(entry)
             name = entry.pop("name")
             data = entry.pop("data", None)
-            inputs.append({"data": job_payload(name, data), **job_options(**entry)})
+            opts = job_options(**entry)
+            # PUSHB entries are typed JobInput, whose custom-id field is
+            # `customId` — unlike single PUSH which renames `jobId`->`customId`
+            # server-side. Without this rename the batch custom id is dropped
+            # (idempotency/getJobByCustomId broken).
+            if "jobId" in opts:
+                opts["customId"] = opts.pop("jobId")
+            inputs.append({"data": job_payload(name, data), **opts})
         response = self.connection.call({"cmd": "PUSHB", "queue": self.name, "jobs": inputs})
         return [str(job_id) for job_id in response.get("ids", [])]
 
@@ -106,9 +113,12 @@ class Queue(QueueQueryOps, QueueAdminOps):
         self.connection.call({"cmd": "MoveToWait", "id": job_id})
 
     def retry_jobs(self, state: str = "failed", count: Optional[int] = None) -> int:
+        # `count` accepted for parity but not sent: the server retries the whole
+        # DLQ (BullMQ semantics), it has no partial-count RetryDlq.
+        del count
         if state == "failed":
             response = self.connection.call(
-                _compact({"cmd": "RetryDlq", "queue": self.name, "count": count})
+                {"cmd": "RetryDlq", "queue": self.name}
             )
         elif state == "completed":
             response = self.connection.call({"cmd": "RetryCompleted", "queue": self.name})

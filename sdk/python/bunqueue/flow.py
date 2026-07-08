@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence
 
 from .connection import Connection, TlsOption, _compact
+from .errors import CommandError
 from .job import Job
 from .options import job_options, job_payload
 
@@ -114,17 +115,39 @@ class FlowProducer:
             self._cleanup(parallel_ids)
             raise
 
-    def get_flow(self, job_id: str, depth: int = 10) -> Optional[FlowNode]:
-        """Reconstruct a flow tree from a root job id (GetJob recursion)."""
-        response = self.connection.call({"cmd": "GetJob", "id": job_id})
+    def get_flow(self, job_id: str, depth: Optional[int] = None) -> Optional[FlowNode]:
+        """Reconstruct a flow tree from a root job id (GetJob recursion).
+
+        ``depth`` limits recursion; ``None`` means unlimited (parity with the
+        TS client's ``Number.POSITIVE_INFINITY`` default). A missing job — the
+        root or any child removed via removeOnComplete/cancel — yields ``None``
+        and is skipped, returning the surviving partial tree instead of raising.
+        A ``visited`` set guards against cycles in ``childrenIds`` so unlimited
+        depth cannot recurse forever.
+        """
+        return self._get_flow(job_id, depth, set())
+
+    def _get_flow(
+        self, job_id: str, depth: Optional[int], visited: set
+    ) -> Optional[FlowNode]:
+        if job_id in visited:
+            return None  # cycle guard: childrenIds already on the current path
+        visited.add(job_id)
+        try:
+            response = self.connection.call({"cmd": "GetJob", "id": job_id})
+        except CommandError as exc:
+            if "not found" in str(exc).lower():
+                return None  # root or a since-removed child -> skip
+            raise  # a real server error must not masquerade as a missing child
         raw = response.get("job")
         if not raw:
             return None
         job = Job(raw, self.connection)
         children: List[FlowNode] = []
-        if depth > 0:
+        if depth is None or depth > 0:
+            next_depth = None if depth is None else depth - 1
             for child_id in job.children_ids:
-                child = self.get_flow(child_id, depth - 1)
+                child = self._get_flow(child_id, next_depth, visited)
                 if child:
                     children.append(child)
         return FlowNode(job, children)

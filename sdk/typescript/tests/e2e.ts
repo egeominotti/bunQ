@@ -19,6 +19,7 @@ import './e2e-api.ts';
 import './e2e-simple.ts';
 import './e2e-simple-extras.ts';
 import './e2e-auth.ts';
+import './e2e-audit-fixes.ts';
 
 import { runSuite } from './harness.ts';
 

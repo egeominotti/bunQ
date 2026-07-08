@@ -3,7 +3,7 @@
  * Methods are merged onto Queue.prototype by queue.ts.
  */
 
-import { CommandError } from './errors.js';
+import { CommandError, CommandTimeoutError } from './errors.js';
 import { compact } from './frame.js';
 import { Job } from './job.js';
 import type { Queue } from './queue.js';
@@ -66,7 +66,9 @@ export const queryMethods = {
   },
 
   getWaiting<T = unknown>(this: Ctx, start?: number, end?: number): Promise<Job<T>[]> {
-    return this.getJobs({ state: ['waiting', 'prioritized'], start, end });
+    // Only the 'waiting' bucket — prioritized jobs live in a separate bucket
+    // (getPrioritized), matching BullMQ and the Python SDK / reference client.
+    return this.getJobs({ state: 'waiting', start, end });
   },
 
   getDelayed<T = unknown>(this: Ctx, start?: number, end?: number): Promise<Job<T>[]> {
@@ -125,9 +127,26 @@ export const queryMethods = {
     await this.call({ cmd: 'RemoveUnprocessedChildren', id });
   },
 
-  /** Block until the job finishes; returns its result. */
+  /**
+   * Block until the job completes; returns its result.
+   * The server's WaitJob waiter resolves only on completion, replying
+   * `{ok:true, completed:false}` (no result) otherwise — so returning undefined
+   * would be indistinguishable from a genuine undefined result. On
+   * non-completion we probe the state: a `failed` job throws CommandError (it
+   * will not complete), everything else throws CommandTimeoutError.
+   */
   async waitForJob<R = unknown>(this: Ctx, id: string, ttlMs = 30_000): Promise<R> {
     const response = await this.call({ cmd: 'WaitJob', id, timeout: ttlMs }, ttlMs + 5000);
+    if (response.completed !== true) {
+      let state: string | undefined;
+      try {
+        state = await this.getJobState(id);
+      } catch {
+        /* ignore probe failure; fall through to timeout */
+      }
+      if (state === 'failed') throw new CommandError(`job ${id} failed before completion`);
+      throw new CommandTimeoutError(`waitUntilFinished timed out after ${ttlMs}ms`);
+    }
     return response.result as R;
   },
 
@@ -157,8 +176,9 @@ export const queryMethods = {
   },
 
   async getWaitingCount(this: Ctx): Promise<number> {
-    const counts = await this.getJobCounts();
-    return counts.waiting + counts.prioritized;
+    // 'waiting' only — prioritized jobs are counted by getPrioritizedCount,
+    // matching BullMQ and the Python SDK / reference client.
+    return (await this.getJobCounts()).waiting;
   },
 
   async getActiveCount(this: Ctx): Promise<number> {
@@ -197,8 +217,13 @@ export const queryMethods = {
 
   // --------------------------------------------------------------------- logs
 
-  async addJobLog(this: Ctx, id: string, message: string): Promise<void> {
-    await this.call({ cmd: 'AddLog', id, message });
+  async addJobLog(
+    this: Ctx,
+    id: string,
+    message: string,
+    level?: 'info' | 'warn' | 'error'
+  ): Promise<void> {
+    await this.call(compact({ cmd: 'AddLog', id, message, level }) as { cmd: string });
   },
 
   async getJobLogs(this: Ctx, id: string, start?: number, end?: number): Promise<string[]> {
@@ -209,7 +234,12 @@ export const queryMethods = {
     );
     const data = (response.data ?? {}) as Raw;
     const logs = (data.logs ?? response.logs ?? []) as unknown[];
-    return logs.map((row) => (typeof row === 'string' ? row : String((row as Raw).message ?? row)));
+    // Format as `[level] message` (reference client parity); never drop level.
+    return logs.map((row) => {
+      if (typeof row === 'string') return row;
+      const r = row as Raw;
+      return r.level ? `[${r.level}] ${r.message}` : String(r.message ?? row);
+    });
   },
 
   async clearJobLogs(this: Ctx, id: string, keepLogs?: number): Promise<void> {

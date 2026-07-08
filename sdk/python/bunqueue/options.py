@@ -18,6 +18,35 @@ def job_payload(name: str, data: Any) -> Dict[str, Any]:
     return {"name": name, "payload": data}
 
 
+def build_cron_job_options(job_opts: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Map a cron template's Pythonic job options to the wire ``CronJobOptions``.
+
+    Mirrors the TS reference ``buildCronJobOptions`` (issue #86): the server
+    reads only camelCase keys (``maxAttempts``/``removeOnComplete``/…), so
+    SDK-native names (``attempts``/``remove_on_complete``/…) must be renamed
+    or the cron-spawned jobs silently fall back to JOB_DEFAULTS. Returns
+    ``None`` when nothing relevant is set (server keeps its own defaults).
+    """
+    if not job_opts:
+        return None
+    out: Dict[str, Any] = {}
+    if job_opts.get("attempts") is not None:
+        out["maxAttempts"] = job_opts["attempts"]
+    if job_opts.get("backoff") is not None:
+        out["backoff"] = job_opts["backoff"]
+    if job_opts.get("timeout") is not None:
+        out["timeout"] = job_opts["timeout"]
+    if job_opts.get("delay") is not None:
+        out["delay"] = job_opts["delay"]
+    if job_opts.get("stall_timeout") is not None:
+        out["stallTimeout"] = job_opts["stall_timeout"]
+    if isinstance(job_opts.get("remove_on_complete"), bool):
+        out["removeOnComplete"] = job_opts["remove_on_complete"]
+    if isinstance(job_opts.get("remove_on_fail"), bool):
+        out["removeOnFail"] = job_opts["remove_on_fail"]
+    return out or None
+
+
 def job_options(
     *,
     priority: Optional[int] = None,

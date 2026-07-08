@@ -47,7 +47,8 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
   backoff, ttl, timeout, job_id, deduplication, depends_on, tags, group_id,
   lifo, remove_on_complete/fail, durable, repeat, debounce, …)
 - **Query**: `get_job`, `get_job_by_custom_id`, `get_jobs` (+ per-state
-  helpers), `get_state`, `get_result`, `get_progress`, `wait_for_job`,
+  helpers), `get_state`, `get_result`, `get_progress`, `wait_for_job`
+  (raises `CommandTimeoutError` on timeout, BullMQ contract),
   counts (+ per-priority), children values, job logs
 - **Control**: pause/resume/drain/obliterate/clean, remove, discard,
   promote (single/bulk), retry_job / retry_jobs, move to wait/delayed,

@@ -40,6 +40,10 @@ export class Connection {
   private connectGeneration = 0;
   private failedAttempts = 0;
   private nextAttemptAt = 0;
+  // Half-open recovery (#94): after this many consecutive command timeouts the
+  // socket is presumed dead and torn down so the next call reconnects.
+  private readonly maxCommandTimeouts = 3;
+  private consecutiveTimeouts = 0;
 
   constructor(options: ConnectionOptions = {}) {
     this.host = options.host ?? 'localhost';
@@ -96,6 +100,9 @@ export class Connection {
   private async doConnect(): Promise<void> {
     const socket = await openSocket(this.host, this.port, this.tls, this.connectTimeoutMs);
     socket.setNoDelay(true);
+    // TCP keepalive (~15s idle) surfaces a half-open link (cloud LB/NAT idle
+    // drop with no FIN/RST) in seconds instead of ~tcp_retries2 minutes.
+    socket.setKeepAlive(true, 15_000);
     this.parser.clear();
     this.socket = socket;
 
@@ -105,7 +112,14 @@ export class Connection {
 
     this.connected = true;
     this.connectGeneration += 1;
+    this.consecutiveTimeouts = 0;
 
+    // INVARIANT (H3): connected is flipped true before Auth, which is safe
+    // ONLY because call() writes the Auth frame synchronously — there is no
+    // `await` between this line and the Auth socket.write, so no concurrent
+    // call() can interleave a frame ahead of Auth on the wire. Do NOT insert
+    // an await here or before the Auth call, or a command could race ahead of
+    // Auth (the Python SDK guards this with a lock; JS relies on this ordering).
     if (this.token) {
       try {
         await this.call({ cmd: 'Auth', token: this.token });
@@ -129,16 +143,19 @@ export class Connection {
     this.reqCounter = (this.reqCounter + 1) & 0x7fffffff;
     const reqId = String(this.reqCounter);
     const payload = pack({ ...compact(command), reqId });
+    const gen = this.connectGeneration; // snapshot: a timeout must not tear down a newer conn
 
     return new Promise<Response>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(reqId);
+        this.noteTimeout(gen);
         reject(new CommandTimeoutError(`no response for ${command.cmd} within timeout`));
       }, timeoutMs ?? this.commandTimeoutMs);
 
       this.pending.set(reqId, {
         resolve: (response) => {
           clearTimeout(timer);
+          this.consecutiveTimeouts = 0; // any reply means the link is alive
           if (!response.ok) {
             reject(new CommandError(String(response.error ?? 'unknown server error')));
           } else {
@@ -214,6 +231,19 @@ export class Connection {
         entry.resolve(response);
       }
     }
+  }
+
+  /**
+   * A dead/half-open link makes every command time out while the socket still
+   * looks connected. After maxCommandTimeouts consecutive timeouts, tear down
+   * so the next call() reconnects instead of wedging (mirrors #94).
+   */
+  private noteTimeout(gen: number): void {
+    // A timeout from an already-replaced connection must not tear down (or
+    // miscount against) the current one.
+    if (gen !== this.connectGeneration) return;
+    this.consecutiveTimeouts += 1;
+    if (this.consecutiveTimeouts >= this.maxCommandTimeouts) this.teardown();
   }
 
   private teardown(): void {

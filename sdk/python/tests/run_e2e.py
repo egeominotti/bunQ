@@ -18,6 +18,7 @@ import e2e_flow  # noqa: F401
 import e2e_admin  # noqa: F401
 import e2e_simple  # noqa: F401
 import e2e_simple_extras  # noqa: F401
+import e2e_audit_fixes  # noqa: F401
 from e2e_auth import run_auth_tests
 
 
@@ -30,8 +31,9 @@ def main() -> int:
         server.stop()
 
     failed += run_auth_tests()
+    failed += e2e_audit_fixes.run_standalone_audit_tests()
 
-    total = len(harness.TESTS) + 3
+    total = len(harness.TESTS) + 3 + 3  # +3 standalone audit checks
     print(f"\n{total - failed}/{total} passed")
     return 1 if failed else 0
 

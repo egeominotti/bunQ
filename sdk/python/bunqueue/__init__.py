@@ -33,7 +33,7 @@ from .queue import Queue
 from .simple import Bunqueue, CancellationManager, CancelSignal
 from .worker import Worker
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "AuthError",

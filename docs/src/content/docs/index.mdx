@@ -8,7 +8,7 @@ head:
       property: 'og:image'
       content: 'https://bunqueue.dev/og-image.png'
 hero:
-  tagline: "The job queue that ships with everything.<br/><strong>No Redis. No infrastructure. Built for AI agents.</strong>"
+  tagline: "The job queue that ships with everything.<br/><strong>No Redis. No infrastructure. Clients for Node.js, Deno, Python and Cloudflare Workers.</strong>"
   image:
     file: ../../assets/hero.svg
   actions:
@@ -33,7 +33,7 @@ hero:
 <div class="hp-section-header" style="margin-top: 2rem;">
   <span class="hp-badge">Beta &middot; Open Source</span>
   <h2 class="hp-heading">bunqueue Dashboard</h2>
-  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server &mdash; queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
+  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
 </div>
 
 <div class="hp-bento-card hp-bento-wide" style="max-width: 800px; margin: 0 auto 1.5rem; padding: 0; overflow: hidden;">
@@ -108,14 +108,14 @@ worker.on('failed', (job, error) => {
 
 <div class="hp-section-header" style="margin-top: 5rem;">
   <span class="hp-badge">Why bunqueue</span>
-  <h2 class="hp-heading">Built different</h2>
-  <p class="hp-subtitle">Everything you need for production workloads. Nothing you don't.</p>
+  <h2 class="hp-heading">Engineered for production</h2>
+  <p class="hp-subtitle">Everything production workloads require, nothing they do not.</p>
 </div>
 
 <div class="hp-bento">
   <div class="hp-bento-card hp-bento-wide">
     <h3>Zero External Dependencies</h3>
-    <p>No Redis, no RabbitMQ, no Kafka. Just Bun's native SQLite with WAL mode. Only 2 runtime dependencies (croner + msgpackr) &mdash; <code>bun add bunqueue</code> installs 7 packages in 5.4 MB. Deploy anywhere in seconds; your entire queue infrastructure is a single file.</p>
+    <p>No Redis, no RabbitMQ, no Kafka. Just Bun's native SQLite with WAL mode. Only 2 runtime dependencies (croner + msgpackr): <code>bun add bunqueue</code> installs 7 packages in 5.4 MB. Deploy anywhere in seconds; your entire queue infrastructure is a single file.</p>
   </div>
   <div class="hp-bento-card">
     <h3>Blazing Fast</h3>
@@ -131,7 +131,11 @@ worker.on('failed', (job, error) => {
   </div>
   <div class="hp-bento-card hp-bento-wide">
     <h3>Drop-in BullMQ Replacement</h3>
-    <p>Familiar Queue and Worker API. Migrate from BullMQ in minutes, not days. Same patterns, same mental model, 32x better performance.</p>
+    <p>Familiar Queue and Worker API. Migrate from BullMQ in minutes, not days. Same patterns, same mental model, up to ~9x higher throughput on bulk operations in the <a href="/guide/benchmarks/">published benchmarks</a>.</p>
+  </div>
+  <div class="hp-bento-card hp-bento-wide">
+    <h3>One Queue, Any Language</h3>
+    <p>Official client SDKs speak the native TCP protocol with full feature parity: <a href="https://www.npmjs.com/package/bunqueue-client"><code>bunqueue-client</code></a> for Node.js, Deno, Bun and Cloudflare Workers, plus a Python client. Verified by 81 end to end scenarios per runtime and 16 inside workerd. <a href="/guide/sdks/">SDK guide</a>.</p>
   </div>
   <div class="hp-bento-card">
     <h3>Full TypeScript</h3>
@@ -143,15 +147,15 @@ worker.on('failed', (job, error) => {
   </div>
   <div class="hp-bento-card">
     <h3>Simple Mode</h3>
-    <p>Queue + Worker in one object. Routes, middleware, cron, circuit breaker, batch processing, deduplication &mdash; zero boilerplate.</p>
+    <p>Queue + Worker in one object. Routes, middleware, cron, circuit breaker, batch processing, deduplication, zero boilerplate.</p>
   </div>
   <div class="hp-bento-card hp-bento-wide">
     <h3>Web Dashboard</h3>
-    <p>Monitor and control everything from the browser: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot. One command &mdash; <code>bunx bunqueue-dashboard</code> &mdash; or <a href="https://egeominotti.github.io/bunqueue-dashboard/">try the live demo</a>.</p>
+    <p>Monitor and control everything from the browser: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot. One command, <code>bunx bunqueue-dashboard</code>, or <a href="https://egeominotti.github.io/bunqueue-dashboard/">try the live demo</a>.</p>
   </div>
   <div class="hp-bento-card hp-bento-wide">
     <h3>Workflow Engine</h3>
-    <p>Orchestrate multi-step processes with a fluent TypeScript DSL. Saga compensation, conditional branching, parallel steps, retry with backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, and typed observability events. No Temporal, no Inngest, no cloud service &mdash; just <code>bunqueue/workflow</code>.</p>
+    <p>Orchestrate multi-step processes with a fluent TypeScript DSL. Saga compensation, conditional branching, parallel steps, retry with backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, and typed observability events. No Temporal, no Inngest, no cloud service, just <code>bunqueue/workflow</code>.</p>
   </div>
 </div>
 
@@ -258,6 +262,11 @@ worker.on('failed', (job, error) => {
     <span>AI agent control</span>
   </div>
   <div class="hp-feature-item">
+    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg>
+    <strong>Polyglot SDKs</strong>
+    <span>Node.js, Deno, Python, Workers</span>
+  </div>
+  <div class="hp-feature-item">
     <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
     <strong>Simple Mode</strong>
     <span>All-in-one, zero boilerplate</span>
@@ -280,8 +289,8 @@ worker.on('failed', (job, error) => {
 </div>
 
 <div class="hp-cta">
-  <h2 class="hp-heading">Ready to ditch Redis?</h2>
-  <p class="hp-subtitle">Get started with bunqueue in under a minute.</p>
+  <h2 class="hp-heading">Run your queue without the infrastructure</h2>
+  <p class="hp-subtitle">From install to processing jobs in under a minute, on the runtime you already use.</p>
   <div class="hp-cta-actions">
     <a href="/guide/introduction/" class="hp-cta-primary">Get Started</a>
     <a href="/guide/comparison/" class="hp-cta-secondary">bunqueue vs BullMQ</a>

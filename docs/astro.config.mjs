@@ -68,6 +68,9 @@ export default defineConfig({
         },
       },
       customCss: [
+        '@fontsource-variable/bricolage-grotesque',
+        '@fontsource/ibm-plex-mono/400.css',
+        '@fontsource/ibm-plex-mono/500.css',
         '@fontsource/inter/400.css',
         '@fontsource/inter/500.css',
         '@fontsource/inter/600.css',

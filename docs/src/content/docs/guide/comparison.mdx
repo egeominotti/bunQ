@@ -12,6 +12,15 @@ import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
 
 Real benchmark results comparing bunqueue TCP server against BullMQ with Redis on identical workloads.
 
+:::note[Numbers vary across runs and versions]
+Benchmark figures depend on hardware, runtime and library versions; each page
+states its own dated methodology. A more recent run (2026-07-08, Apple M1 Max,
+Bun 1.3.14, BullMQ 5.79.3, Redis 8.8.0) measured bulk push at 85,700 vs 24,800
+ops/sec (3.5x) with single push at parity; it is summarized on the
+[home page](/) with its full methodology. Reproduce either run with
+`bun run bench/comparison/run.ts`.
+:::
+
 <Aside type="note">
 This is a **fair comparison**: both systems use network connections (bunqueue TCP vs Redis TCP). For embedded mode benchmarks (no network), bunqueue is significantly faster.
 </Aside>

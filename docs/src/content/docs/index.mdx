@@ -1,342 +1,323 @@
 ---
-title: High-Performance Job Queue for Bun & AI Agents
-description: "The fastest job queue for Bun with native MCP server for AI agents. SQLite persistence, cron jobs, DLQ, S3 backups. No Redis required."
+title: "The Queue Is a File: Zero-Infrastructure Job Queue"
+description: "bunqueue is a complete job queue in one process, persisted to a single SQLite file. No Redis, no broker. Priorities, retries, cron, DLQ, S3 backups, MCP for AI agents. Clients for Node.js, Deno, Bun, Python and Cloudflare Workers."
 template: splash
 head:
   - tag: meta
     attrs:
       property: 'og:image'
       content: 'https://bunqueue.dev/og-image.png'
-hero:
-  tagline: "The job queue that ships with everything.<br/><strong>No Redis. No infrastructure. Clients for Node.js, Deno, Python and Cloudflare Workers.</strong>"
-  image:
-    file: ../../assets/hero.svg
-  actions:
-    - text: Get Started
-      link: /guide/introduction/
-      icon: right-arrow
-      variant: minimal
-    - text: GitHub
-      link: https://github.com/egeominotti/bunqueue
-      icon: github
-      variant: minimal
-    - text: npm
-      link: https://www.npmjs.com/package/bunqueue
-      icon: external
-      variant: minimal
-    - text: Dashboard
-      link: https://egeominotti.github.io/bunqueue-dashboard/
-      icon: rocket
-      variant: minimal
+  - tag: meta
+    attrs:
+      property: 'og:type'
+      content: 'website'
+  - tag: meta
+    attrs:
+      name: 'twitter:card'
+      content: 'summary_large_image'
+  - tag: meta
+    attrs:
+      name: 'twitter:image'
+      content: 'https://bunqueue.dev/og-image.png'
+  - tag: meta
+    attrs:
+      name: 'keywords'
+      content: 'job queue, task queue, background jobs, bun, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
+  - tag: script
+    attrs:
+      type: 'application/ld+json'
+    content: '{"@context":"https://schema.org","@type":"SoftwareApplication","name":"bunqueue","description":"Zero-infrastructure job queue: a complete queue in one process, persisted to a single SQLite file. No Redis. Clients for Node.js, Deno, Bun, Python and Cloudflare Workers.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Windows","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://github.com/egeominotti/bunqueue/blob/main/LICENSE","url":"https://bunqueue.dev","downloadUrl":"https://www.npmjs.com/package/bunqueue","sameAs":["https://github.com/egeominotti/bunqueue","https://www.npmjs.com/package/bunqueue","https://www.npmjs.com/package/bunqueue-client"]}'
 ---
 
-<div class="hp-install-wrap">
-  <div class="hp-install">
-    <span class="hp-install-dollar">$</span>
-    <span>bun add bunqueue</span>
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">job queue · one process · zero infrastructure</span>
+  <h1 class="bq-hero-h1">The queue<br/>is <em>a file.</em></h1>
+  <p class="bq-hero-sub">bunqueue packs priorities, retries, cron, rate limits and a dead letter queue into one process, persisted to a single SQLite file. No Redis, no broker. Clients for TypeScript, Python and Cloudflare Workers speak its native protocol.</p>
+  <div class="bq-actions">
+    <a class="bq-btn" href="/guide/quickstart/">Get started</a>
+    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ Star on GitHub</a>
+    <span class="bq-hero-install">bunx bunqueue start</span>
+  </div>
+
+  <div class="bq-sim" aria-hidden="true">
+    <div class="bq-sim-lanes">
+      <div class="bq-sim-col" id="bq-waiting">
+        <div class="bq-sim-head"><span class="bq-dot" style="background: var(--bq-amber)"></span> waiting <span class="bq-count">0</span></div>
+      </div>
+      <div class="bq-sim-col" id="bq-active">
+        <div class="bq-sim-head"><span class="bq-dot" style="background: var(--bq-blue)"></span> active <span class="bq-count">0</span></div>
+      </div>
+      <div class="bq-sim-col" id="bq-done">
+        <div class="bq-sim-head"><span class="bq-dot" style="background: var(--bq-green)"></span> completed <span class="bq-count">0</span></div>
+      </div>
+    </div>
+    <div class="bq-sim-dlq">
+      <span class="bq-sim-dlq-label">dlq</span>
+      <span id="bq-dlq-slot"></span>
+    </div>
+  </div>
+  <p class="bq-pipeline-caption">live simulation: higher priority jobs jump the line, failures retry with backoff, exhausted retries land in the dead letter queue</p>
+
+  <script is:inline src="/bq-sim.js"></script>
+
+  <div class="bq-proof">
+    <span><b>150K+</b> ops/sec sustained</span>
+    <span>p99 under <b>1 ms</b></span>
+    <span><b>5.4 MB</b> install, 2 runtime deps</span>
+    <span><b>316</b> e2e scenarios across 5 runtimes</span>
   </div>
 </div>
 
-<div class="hp-stats">
-  <div class="hp-stat">
-    <div class="hp-stat-value">150K+</div>
-    <div class="hp-stat-label">ops/sec</div>
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">vs bullmq</span>
+  <h2 class="bq-h2">Same job, three fewer boxes.</h2>
+  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes the requirement: the queue lives in your process and persists to one file.</p>
+
+  <div class="bq-vs">
+    <div class="bq-vs-card">
+      <h3>Running BullMQ</h3>
+      <div class="bq-stack">
+        <div class="bq-box">your app <i>bullmq client</i></div>
+        <div class="bq-box">redis server <i>provision · secure · monitor</i></div>
+        <div class="bq-box">redis persistence <i>AOF / RDB tuning</i></div>
+        <div class="bq-box">redis upgrades <i>versions · memory limits</i></div>
+      </div>
+      <p class="bq-vs-sum">4 moving parts<small>one of them stateful, on call</small></p>
+    </div>
+    <div class="bq-vs-card">
+      <h3>Running bunqueue</h3>
+      <div class="bq-stack">
+        <div class="bq-box">your app <i>bunqueue / bunqueue-client</i></div>
+        <div class="bq-box bq-box-hero"><b>bunq.db</b> <i>the entire queue</i></div>
+      </div>
+      <p class="bq-vs-sum">1 file<small>cp to back up, sqlite3 to inspect</small></p>
+    </div>
   </div>
-  <div class="hp-stat-divider" />
-  <div class="hp-stat">
-    <div class="hp-stat-value">&lt;1ms</div>
-    <div class="hp-stat-label">p99 latency</div>
-  </div>
-  <div class="hp-stat-divider" />
-  <div class="hp-stat">
-    <div class="hp-stat-value">~50MB</div>
-    <div class="hp-stat-label">memory</div>
-  </div>
-  <div class="hp-stat-divider" />
-  <div class="hp-stat">
-    <div class="hp-stat-value">0</div>
-    <div class="hp-stat-label">external deps</div>
+
+  <div class="bq-bars">
+    <div class="bq-legend"><span><i class="bq-dot" style="background: var(--bq-brand)"></i> bunqueue</span><span><i class="bq-dot bq-dot-them"></i> BullMQ + Redis</span></div>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>bulk push, 100 jobs per batch: bunqueue 85,700 · BullMQ 24,800 ops/s</span><b>3.5x faster</b></div>
+      <div class="bq-bar" style="width: 100%"></div>
+      <div class="bq-bar bq-bar-them" style="width: 29%"></div>
+    </div>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>bulk push p99 latency: bunqueue 6.3 ms · BullMQ 11.1 ms, lower is better</span><b>1.8x lower</b></div>
+      <div class="bq-bar" style="width: 57%"></div>
+      <div class="bq-bar bq-bar-them" style="width: 100%"></div>
+    </div>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>single push: bunqueue 52,756 · BullMQ 56,736 ops/s</span><b class="bq-neutral">parity</b></div>
+      <div class="bq-bar" style="width: 93%"></div>
+      <div class="bq-bar bq-bar-them" style="width: 100%"></div>
+    </div>
+    <div class="bq-bars-foot">measured 2026-07-08 on Apple M1 Max, 32 GB RAM · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 · 10,000 iterations, TCP mode, identical workloads · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">bench/comparison/run.ts</a> · embedded mode, which needs no network at all, reaches 613K bulk ops/s on the same machine · <a href="/guide/benchmarks/">full benchmarks</a></div>
   </div>
 </div>
 
-```typescript title="app.ts"
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">polyglot clients</span>
+  <h2 class="bq-h2">One queue, any language.</h2>
+  <p class="bq-lede">The server owns every queue semantic, so clients stay thin. Official SDKs speak the native TCP protocol with full feature parity, verified by the same test suite on every runtime.</p>
+  <div class="bq-actions" style="margin-top: 1.4rem;">
+    <span class="bq-hero-install">npm install bunqueue-client</span>
+    <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
+    <a class="bq-btn-ghost" href="https://www.npmjs.com/package/bunqueue-client">npm</a>
+  </div>
+
+  <div class="bq-langs">
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-blue)"></span> TypeScript · Node, Deno, Bun</h3>
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+await queue.add('welcome', { to: 'a@b.co' });
+
+new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { concurrency: 10 });
+```
+
+      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 81 e2e scenarios per runtime</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails")
+queue.add("welcome", {"to": "a@b.co"}, attempts=3)
+
+def process(job):
+    send_email(job.data["to"])
+    return {"sent": True}
+
+Worker("emails", process, concurrency=10).run()
+```
+
+      <p><a href="/guide/sdks/">same API, snake_case</a> · 57 e2e scenarios</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+export default {
+  async fetch(req: Request, env: Env) {
+    const q = new Queue('signups', { host: env.HOST, tls: true });
+    const job = await q.add('welcome', await req.json());
+    q.close();
+    return Response.json({ queued: job.id });
+  },
+};
+```
+
+      <p><a href="/guide/sdks/">nodejs_compat flag, produce from fetch handlers</a> · 16 scenarios inside workerd</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-red)"></span> CLI &amp; AI agents</h3>
+
+```bash
+# push, watch, inspect from the terminal
+bunqueue push emails '{"to":"a@b.co"}' --priority 5
+bunqueue stats
+bunqueue dlq list emails
+
+# or let an agent drive it: 73 MCP tools
+claude mcp add bunqueue -- bunqueue-mcp
+```
+
+      <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
+    </div>
+  </div>
+</div>
+
+<div class="bq-wrap bq-section bq-dash">
+  <span class="bq-eyebrow">dashboard · beta</span>
+  <h2 class="bq-h2">See the queue move.</h2>
+  <p class="bq-lede">A web dashboard that fully drives your server: queues, jobs, DLQ, cron, webhooks, workers, live activity, a SQLite inspector and an AI copilot. One command: <code>bunx bunqueue-dashboard</code>.</p>
+  <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" controls autoplay loop muted playsinline></video>
+  <div class="bq-actions" style="margin-top: 1.2rem;">
+    <a class="bq-btn" href="https://egeominotti.github.io/bunqueue-dashboard/">Open the live demo</a>
+    <span class="bq-hero-install">bunx bunqueue-dashboard</span>
+  </div>
+  <p class="bq-dash-links"><a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">user guide</a> · <a href="https://github.com/egeominotti/bunqueue-dashboard">github</a> · <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a></p>
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">persistence</span>
+  <h2 class="bq-h2">One process. One file.</h2>
+  <div class="bq-file">
+    <p class="bq-lede">Everything the queue knows lives in <code>bunq.db</code>: jobs and their states, schedules, results, the dead letter queue. Back it up with <code>cp</code>, inspect it with <code>sqlite3</code>, ship it to S3 on a schedule. Your infrastructure diagram loses three boxes, and there is no version skew between the queue and its store.</p>
+    <pre class="bq-tree">production/
+├── app/                  <i>your services</i>
+└── data/
+    └── <b>bunq.db</b>           <i>the entire queue</i>
+        · jobs            <i>waiting · active · completed</i>
+        · cron            <i>schedules and repeatables</i>
+        · dlq             <i>failed jobs, kept</i>
+        · results         <i>return values</i></pre>
+  </div>
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">developer experience</span>
+  <h2 class="bq-h2">A queue and a worker, ten lines.</h2>
+  <p class="bq-lede">Familiar Queue and Worker API, end to end TypeScript, and 3.5x the bulk push throughput of BullMQ measured on identical workloads, methodology below. Migrating takes minutes, the mental model is the same.</p>
+
+  <div class="bq-terminal">
+    <div class="bq-terminal-bar">
+      <span class="bq-dot" style="background: var(--bq-red)"></span>
+      <span class="bq-dot" style="background: var(--bq-amber)"></span>
+      <span class="bq-dot" style="background: var(--bq-green)"></span>
+      <span style="margin-left: 0.5rem">app.ts</span>
+    </div>
+
+```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
 const queue = new Queue('emails', { embedded: true });
 
-await queue.add('welcome', {
-  to: 'user@example.com',
-  subject: 'Welcome aboard!',
-  template: 'onboarding',
-});
+await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
 
 const worker = new Worker('emails', async (job) => {
   await sendEmail(job.data);
-  await job.updateProgress(100);
   return { sent: true };
 }, { embedded: true, concurrency: 5 });
 
-worker.on('completed', (job, result) => {
-  console.log(`Done: ${job.id}`, result);
-});
-
-worker.on('failed', (job, error) => {
-  console.error(`Failed: ${job.id}`, error.message);
-});
+worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
 ```
 
-<div class="hp-section-header" style="margin-top: 5rem;">
-  <span class="hp-badge">Why bunqueue</span>
-  <h2 class="hp-heading">Engineered for production</h2>
-  <p class="hp-subtitle">Everything production workloads require, nothing they do not.</p>
-</div>
-
-<div class="hp-bento">
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>Zero External Dependencies</h3>
-    <p>No Redis, no RabbitMQ, no Kafka. Just Bun's native SQLite with WAL mode. Only 2 runtime dependencies (croner + msgpackr): <code>bun add bunqueue</code> installs 7 packages in 5.4 MB. Deploy anywhere in seconds; your entire queue infrastructure is a single file.</p>
-  </div>
-  <div class="hp-bento-card">
-    <h3>Blazing Fast</h3>
-    <p>150K+ ops/sec with sub-millisecond latency. Sharded priority queues scale with your CPU cores.</p>
-  </div>
-  <div class="hp-bento-card">
-    <h3>Production Ready</h3>
-    <p>Stall detection, dead letter queues, retries with backoff, rate limiting, S3 backups. All built-in.</p>
-  </div>
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>Native MCP Server for AI Agents</h3>
-    <p>73 MCP tools, 5 resources, 3 prompts. AI agents can schedule tasks, manage pipelines, monitor queues, and control everything via natural language. Works with Claude, Cursor, Windsurf, and any MCP client. HTTP handlers let agents process jobs without deploying workers.</p>
-  </div>
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>Drop-in BullMQ Replacement</h3>
-    <p>Familiar Queue and Worker API. Migrate from BullMQ in minutes, not days. Same patterns, same mental model, up to ~9x higher throughput on bulk operations in the <a href="/guide/benchmarks/">published benchmarks</a>.</p>
-  </div>
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>One Queue, Any Language</h3>
-    <p>Official client SDKs speak the native TCP protocol with full feature parity: <a href="https://www.npmjs.com/package/bunqueue-client"><code>bunqueue-client</code></a> for Node.js, Deno, Bun and Cloudflare Workers, plus a Python client. Verified by 81 end to end scenarios per runtime and 16 inside workerd. <a href="/guide/sdks/">SDK guide</a>.</p>
-  </div>
-  <div class="hp-bento-card">
-    <h3>Full TypeScript</h3>
-    <p>End-to-end type safety with comprehensive generics. Your IDE autocompletes everything.</p>
-  </div>
-  <div class="hp-bento-card">
-    <h3>Cron &amp; Scheduling</h3>
-    <p>Cron expressions, delayed jobs, repeatable tasks. Schedule anything with timezone support.</p>
-  </div>
-  <div class="hp-bento-card">
-    <h3>Simple Mode</h3>
-    <p>Queue + Worker in one object. Routes, middleware, cron, circuit breaker, batch processing, deduplication, zero boilerplate.</p>
-  </div>
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>Web Dashboard</h3>
-    <p>Monitor and control everything from the browser: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot. One command, <code>bunx bunqueue-dashboard</code>, or <a href="https://egeominotti.github.io/bunqueue-dashboard/">try the live demo</a>.</p>
-  </div>
-  <div class="hp-bento-card hp-bento-wide">
-    <h3>Workflow Engine</h3>
-    <p>Orchestrate multi-step processes with a fluent TypeScript DSL. Saga compensation, conditional branching, parallel steps, retry with backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, and typed observability events. No Temporal, no Inngest, no cloud service, just <code>bunqueue/workflow</code>.</p>
   </div>
 </div>
 
-<div class="hp-section-header" style="margin-top: 5rem;">
-  <span class="hp-badge">Deployment</span>
-  <h2 class="hp-heading">Two modes, one API</h2>
-  <p class="hp-subtitle">Run embedded in your process or as a standalone TCP server. Same code, different scale.</p>
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">capabilities</span>
+  <h2 class="bq-h2">Everything a production queue needs.</h2>
+  <ul class="bq-caps">
+    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Priorities &amp; delays</strong><span>critical jobs first, schedule for later</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Retries &amp; backoff</strong><span>fixed or exponential, per job</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>Dead letter queue</strong><span>failed jobs kept, retryable, never lost</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Cron &amp; schedulers</strong><span>patterns, intervals, timezones</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Flows</strong><span>parent and child jobs, chains, fan in</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Rate limiting</strong><span>per queue, plus global concurrency</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>Stall detection</strong><span>stuck jobs recovered automatically</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Workflow engine</strong><span>saga compensation, branching, signals</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Simple Mode</strong><span>queue + worker in one object, middleware, circuit breaker</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Webhooks &amp; events</strong><span>HTTP callbacks, SSE, WebSocket</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Prometheus &amp; probes</strong><span>metrics, health, readiness</span></div></li>
+    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>S3 backups</strong><span>scheduled, encrypted, restorable</span></div></li>
+  </ul>
 </div>
 
-<div class="hp-modes">
-  <div class="hp-mode-card">
-    <div class="hp-mode-tag">Embedded</div>
-    <h3>In-process queue</h3>
-    <p>Zero network overhead. Perfect for single-process apps, serverless, and prototyping.</p>
-    <ul>
-      <li>Zero config setup</li>
-      <li>No network latency</li>
-      <li>Microsecond operations</li>
-      <li>Single process only</li>
-    </ul>
-  </div>
-  <div class="hp-mode-card">
-    <div class="hp-mode-tag">TCP Server</div>
-    <h3>Standalone server</h3>
-    <p>Multi-client architecture over TCP. Built for microservices and distributed workers.</p>
-    <ul>
-      <li>Multiple client connections</li>
-      <li>HTTP + TCP APIs</li>
-      <li>CLI management</li>
-      <li>Horizontal scaling</li>
-    </ul>
-  </div>
-</div>
-
-
-<div class="hp-section-header" style="margin-top: 5rem;">
-  <span class="hp-badge">Trust</span>
-  <h2 class="hp-heading">Verified, secured, observable</h2>
-  <p class="hp-subtitle">Claims backed by tests that run against a real server, on every supported runtime.</p>
-</div>
-
-<div class="hp-modes">
-  <div class="hp-mode-card">
-    <div class="hp-mode-tag">Quality</div>
-    <h3>Tested on every runtime</h3>
-    <p>Each release runs the full end to end suites against a live server.</p>
-    <ul>
-      <li>81 e2e scenarios each on Node.js, Deno and Bun</li>
-      <li>16 scenarios inside workerd (Cloudflare Workers)</li>
-      <li>57 scenarios in Python</li>
-      <li>Every public SDK method covered</li>
-    </ul>
-  </div>
-  <div class="hp-mode-card">
-    <div class="hp-mode-tag">Security</div>
-    <h3>Hardened by default</h3>
-    <p>Token authentication, native TLS on both listeners, and honest defaults.</p>
-    <ul>
-      <li>Token auth across TCP and HTTP</li>
-      <li>Native TLS or Unix domain sockets</li>
-      <li>Webhook SSRF validation built in</li>
-      <li><a href="/security/">Security model and hardening guide</a></li>
-    </ul>
-  </div>
-  <div class="hp-mode-card">
-    <div class="hp-mode-tag">Operations</div>
-    <h3>Observable in production</h3>
-    <p>First class operational surface, no sidecar required.</p>
-    <ul>
-      <li>Prometheus metrics endpoint</li>
-      <li>Health and readiness probes</li>
-      <li>Webhooks, SSE and WebSocket events</li>
-      <li>S3 backups for disaster recovery</li>
-    </ul>
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">trust</span>
+  <h2 class="bq-h2">Verified, secured, observable.</h2>
+  <div class="bq-trust">
+    <div class="bq-trust-card">
+      <span class="bq-tag">quality</span>
+      <h3>Tested on every runtime</h3>
+      <ul>
+        <li>81 e2e scenarios each on Node.js, Deno, Bun</li>
+        <li>16 scenarios inside workerd</li>
+        <li>57 scenarios in Python</li>
+        <li>every public SDK method covered</li>
+      </ul>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">security</span>
+      <h3>Hardened by default</h3>
+      <ul>
+        <li>token auth across TCP and HTTP</li>
+        <li>native TLS or Unix domain sockets</li>
+        <li>webhook SSRF validation built in</li>
+        <li><a href="/security/">security model &amp; hardening guide</a></li>
+      </ul>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">operations</span>
+      <h3>Observable in production</h3>
+      <ul>
+        <li>Prometheus metrics endpoint</li>
+        <li>health and readiness probes</li>
+        <li>webhooks, SSE and WebSocket events</li>
+        <li>S3 backups for disaster recovery</li>
+      </ul>
+    </div>
   </div>
 </div>
 
-<div class="hp-section-header" style="margin-top: 5rem;">
-  <span class="hp-badge">Features</span>
-  <h2 class="hp-heading">Everything included</h2>
-</div>
-
-<div class="hp-features">
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h18l-2 14H5L3 4z"/><path d="M8 4V2h8v2"/><circle cx="12" cy="11" r="2"/></svg>
-    <strong>Priority Queues</strong>
-    <span>Process critical jobs first</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-    <strong>Delayed Jobs</strong>
-    <span>Schedule for later</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-    <strong>Retries &amp; Backoff</strong>
-    <span>Automatic error recovery</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/><path d="M2 20h20"/></svg>
-    <strong>Rate Limiting</strong>
-    <span>Per-queue throttling</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><circle cx="12" cy="16.5" r="0.5" fill="currentColor"/></svg>
-    <strong>Stall Detection</strong>
-    <span>Auto-recover stuck jobs</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M2 9h20"/><path d="M10 3v6"/><circle cx="12" cy="15" r="2"/><path d="M12 17v2"/></svg>
-    <strong>Dead Letter Queue</strong>
-    <span>Never lose a failed job</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>
-    <strong>Cron Jobs</strong>
-    <span>Recurring schedules</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
-    <strong>Parent-Child Flows</strong>
-    <span>Job dependencies</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-    <strong>Progress Tracking</strong>
-    <span>Real-time updates</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-    <strong>Webhooks</strong>
-    <span>HTTP event callbacks</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-    <strong>S3 Backup</strong>
-    <span>Disaster recovery</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-    <strong>Prometheus</strong>
-    <span>Built-in metrics</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>
-    <strong>MCP Server</strong>
-    <span>AI agent control</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></svg>
-    <strong>Polyglot SDKs</strong>
-    <span>Node.js, Deno, Python, Workers</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-    <strong>Simple Mode</strong>
-    <span>All-in-one, zero boilerplate</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M4 6l4 6-4 6M20 6l-4 6 4 6"/></svg>
-    <strong>Workflow Engine</strong>
-    <span>Saga, branching, parallel, retry, nested</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
-    <strong>Auth &amp; SSRF Protection</strong>
-    <span>Token auth, webhook URL validation</span>
-  </div>
-  <div class="hp-feature-item">
-    <svg class="hp-feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 9l3 3 5-5"/></svg>
-    <strong>Web Dashboard</strong>
-    <span><code>bunx bunqueue-dashboard</code></span>
-  </div>
-</div>
-
-<div class="hp-section-header" style="margin-top: 5rem;">
-  <span class="hp-badge">Beta &middot; Open Source</span>
-  <h2 class="hp-heading">bunqueue Dashboard</h2>
-  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
-</div>
-
-<div class="hp-bento-card hp-bento-wide" style="max-width: 800px; margin: 0 auto 1.5rem; padding: 0; overflow: hidden;">
-  <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" width="100%" controls autoplay loop muted playsinline style="display: block; margin: 0;"></video>
-</div>
-
-<div class="hp-install-wrap">
-  <div class="hp-install">
-    <span class="hp-install-dollar">$</span>
-    <span>bunx bunqueue-dashboard</span>
-  </div>
-</div>
-
-<p style="text-align: center; font-size: 0.95rem; color: var(--sl-color-gray-3); margin-bottom: 3rem;">
-  <a href="https://egeominotti.github.io/bunqueue-dashboard/">Live demo</a> &middot; <a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">User guide</a> &middot; <a href="https://github.com/egeominotti/bunqueue-dashboard">GitHub</a> &middot; <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a> &middot; Requires Bun
-</p>
-
-
-<div class="hp-cta">
-  <h2 class="hp-heading">Run your queue without the infrastructure</h2>
-  <p class="hp-subtitle">From install to processing jobs in under a minute, on the runtime you already use.</p>
-  <div class="hp-cta-actions">
-    <a href="/guide/introduction/" class="hp-cta-primary">Get Started</a>
-    <a href="/guide/comparison/" class="hp-cta-secondary">bunqueue vs BullMQ</a>
+<div class="bq-wrap bq-cta">
+  <h2 class="bq-h2">Start in under a minute.</h2>
+  <p class="bq-lede" style="margin: 0 auto;">Install the server, add a job, process it. On the runtime you already use.</p>
+  <div class="bq-actions">
+    <a class="bq-btn" href="/guide/quickstart/">Get started</a>
+    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ Star on GitHub</a>
+    <a class="bq-btn-ghost" href="/guide/comparison/">bunqueue vs BullMQ</a>
   </div>
 </div>

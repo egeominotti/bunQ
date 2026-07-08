@@ -15,6 +15,7 @@ import type {
 } from './flow-types.js';
 import { compact } from './frame.js';
 import { Job } from './job.js';
+import type { JobResponse, OkResponse } from './responses.js';
 import { type JobOptions, jobPayload, wireJobOptions } from './types.js';
 
 export class FlowProducer {
@@ -24,7 +25,14 @@ export class FlowProducer {
   constructor(opts: FlowProducerOptions = {}) {
     this.connection =
       opts.connection ??
-      new Connection({ host: opts.host, port: opts.port, token: opts.token, tls: opts.tls });
+      new Connection({
+        host: opts.host,
+        port: opts.port,
+        token: opts.token,
+        tls: opts.tls,
+        logger: opts.logger,
+        onTelemetry: opts.onTelemetry,
+      });
     this.ownsConnection = opts.connection === undefined;
   }
 
@@ -70,19 +78,19 @@ export class FlowProducer {
     let prevId: string | null = null;
     try {
       for (const step of steps) {
-        const data = compact({
+        const data: Record<string, unknown> = compact({
           ...jobPayload(step.name, step.data),
           __flowParentId: prevId ?? undefined,
         });
-        const response = await this.connection.call(
-          compact({
-            cmd: 'PUSH',
-            queue: step.queueName,
-            data,
-            ...wireJobOptions(step.opts),
-            dependsOn: prevId ? [prevId] : undefined,
-          }) as { cmd: string }
-        );
+        // Connection.call compacts internally, so no outer compact() is needed
+        // (nesting it confused generic inference of `data`/`response`).
+        const response: OkResponse = await this.connection.call<OkResponse>({
+          cmd: 'PUSH',
+          queue: step.queueName,
+          data,
+          ...wireJobOptions(step.opts),
+          dependsOn: prevId ? [prevId] : undefined,
+        });
         const id = String(response.id);
         jobIds.push(id);
         prevId = id;
@@ -103,7 +111,7 @@ export class FlowProducer {
     try {
       const results = await Promise.allSettled(
         parallel.map(async (step) => {
-          const response = await this.connection.call(
+          const response = await this.connection.call<OkResponse>(
             compact({
               cmd: 'PUSH',
               queue: step.queueName,
@@ -188,7 +196,7 @@ export class FlowProducer {
     parentRef: { id: string; queue: string } | null,
     childIds: string[]
   ): Promise<string> {
-    const response = await this.connection.call(
+    const response = await this.connection.call<OkResponse>(
       compact({
         cmd: 'PUSH',
         queue,
@@ -219,16 +227,16 @@ export class FlowProducer {
     // A missing job — the root, or a child removed via removeOnComplete/cancel
     // (childrenIds is a static push-time list, never pruned) — yields null and
     // is skipped, returning the surviving partial tree instead of throwing.
-    let response: Awaited<ReturnType<Connection['call']>>;
+    let response: JobResponse;
     try {
-      response = await this.connection.call({ cmd: 'GetJob', id });
+      response = await this.connection.call<JobResponse>({ cmd: 'GetJob', id });
     } catch (err) {
       // Only 'Job not found' means a removed node; a real server error must not
       // masquerade as a missing child and yield a misleading partial tree.
       if (err instanceof CommandError && /not found/i.test(err.message)) return null;
       throw err;
     }
-    const raw = response.job as Record<string, unknown> | null;
+    const raw = response.job;
     if (!raw) return null;
     const job = new Job<T>(raw, this.connection);
     if (depth <= 0 || job.childrenIds.length === 0) return { job };

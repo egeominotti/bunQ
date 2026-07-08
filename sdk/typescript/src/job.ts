@@ -3,7 +3,7 @@
  * Mirrors the official TS client's Job surface (TCP mode).
  */
 
-import type { Connection, Response } from './connection.js';
+import type { ConnectionLike, Response } from './connection-types.js';
 
 export type JobRaw = Record<string, unknown>;
 
@@ -12,10 +12,10 @@ export type ProgressHook = (job: Job, progress: number) => void;
 export class Job<T = unknown> {
   readonly raw: JobRaw;
   readonly token: string | undefined;
-  private readonly conn: Connection | undefined;
+  private readonly conn: ConnectionLike | undefined;
   private readonly onProgress: ProgressHook | undefined;
 
-  constructor(raw: JobRaw, connection?: Connection, token?: string, onProgress?: ProgressHook) {
+  constructor(raw: JobRaw, connection?: ConnectionLike, token?: string, onProgress?: ProgressHook) {
     this.raw = raw;
     this.conn = connection;
     this.token = token;

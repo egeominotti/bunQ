@@ -5,6 +5,7 @@
 
 import { compact } from './frame.js';
 import type { Queue } from './queue.js';
+import type { CountResponse, PausedResponse } from './responses.js';
 import type { JobStateName } from './types.js';
 
 type Ctx = Queue<unknown>;
@@ -19,8 +20,7 @@ export const controlMethods = {
   },
 
   async isPaused(this: Ctx): Promise<boolean> {
-    const response = await this.call({ cmd: 'IsPaused', queue: this.name });
-    return response.paused === true;
+    return (await this.call<PausedResponse>({ cmd: 'IsPaused', queue: this.name })).paused === true;
   },
 
   async drain(this: Ctx): Promise<void> {
@@ -33,10 +33,10 @@ export const controlMethods = {
 
   /** Remove old jobs; returns how many were removed. */
   async clean(this: Ctx, graceMs: number, limit?: number, state?: JobStateName): Promise<number> {
-    const response = await this.call(
+    const response = await this.call<CountResponse>(
       compact({ cmd: 'Clean', queue: this.name, grace: graceMs, limit, state }) as { cmd: string }
     );
-    return Number(response.count ?? 0);
+    return response.count ?? 0;
   },
 
   async remove(this: Ctx, id: string): Promise<void> {
@@ -53,10 +53,10 @@ export const controlMethods = {
 
   /** Promote delayed jobs to waiting; returns how many were promoted. */
   async promoteJobs(this: Ctx, opts: { count?: number } = {}): Promise<number> {
-    const response = await this.call(
+    const response = await this.call<CountResponse>(
       compact({ cmd: 'PromoteJobs', queue: this.name, count: opts.count }) as { cmd: string }
     );
-    return Number(response.count ?? 0);
+    return response.count ?? 0;
   },
 
   /** BullMQ contract: failed → waiting. */

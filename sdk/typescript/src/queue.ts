@@ -10,19 +10,29 @@
  */
 
 import { Connection, type Response, type TlsOption } from './connection.js';
+import { ConnectionPool } from './connection-pool.js';
+import type { ConnectionLike } from './connection-types.js';
 import { Job } from './job.js';
+import type { Observability } from './observability.js';
 import { adminMethods, type QueueAdminApi } from './queue-admin.js';
 import { controlMethods, type QueueControlApi } from './queue-control.js';
 import { type QueueQueryApi, queryMethods } from './queue-query.js';
 import { type JobOptions, jobPayload, wireJobOptions } from './types.js';
 
-export interface QueueOptions {
+export interface QueueOptions extends Observability {
   host?: string;
   port?: number;
   token?: string;
   tls?: TlsOption;
   connection?: Connection;
   commandTimeoutMs?: number;
+  /** Max in-flight commands before backpressure kicks in (0 = unbounded). */
+  maxInFlight?: number;
+  /**
+   * Fan producer commands across N connections (round-robin) for throughput.
+   * >1 builds a ConnectionPool; default 1 = a single connection.
+   */
+  poolSize?: number;
 }
 
 export interface BulkJobEntry<T = unknown> {
@@ -34,26 +44,35 @@ export interface BulkJobEntry<T = unknown> {
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: prototype-mixin composition — Object.assign at the bottom installs exactly the methods the merged interface declares
 export class Queue<T = unknown> {
   readonly name: string;
-  readonly connection: Connection;
+  readonly connection: ConnectionLike;
   private readonly ownsConnection: boolean;
 
   constructor(name: string, opts: QueueOptions = {}) {
     this.name = name;
+    const connOptions = {
+      host: opts.host,
+      port: opts.port,
+      token: opts.token,
+      tls: opts.tls,
+      commandTimeoutMs: opts.commandTimeoutMs,
+      maxInFlight: opts.maxInFlight,
+      logger: opts.logger,
+      onTelemetry: opts.onTelemetry,
+    };
     this.connection =
       opts.connection ??
-      new Connection({
-        host: opts.host,
-        port: opts.port,
-        token: opts.token,
-        tls: opts.tls,
-        commandTimeoutMs: opts.commandTimeoutMs,
-      });
+      (opts.poolSize && opts.poolSize > 1
+        ? new ConnectionPool(opts.poolSize, connOptions)
+        : new Connection(connOptions));
     this.ownsConnection = opts.connection === undefined;
   }
 
   /** Send a raw command on this queue's connection (used by area modules). */
-  call(command: Record<string, unknown> & { cmd: string }, timeoutMs?: number): Promise<Response> {
-    return this.connection.call(command, timeoutMs);
+  call<R = Response>(
+    command: Record<string, unknown> & { cmd: string },
+    timeoutMs?: number
+  ): Promise<R> {
+    return this.connection.call<R>(command, timeoutMs);
   }
 
   // ------------------------------------------------------------------ produce

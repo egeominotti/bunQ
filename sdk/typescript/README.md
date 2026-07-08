@@ -272,6 +272,49 @@ const queue = new Queue('emails', {
 
 Authentication uses server side tokens (`AUTH_TOKENS`). Transport security uses native TLS, with support for system certificate authorities, a custom CA bundle, or disabled verification for development environments.
 
+## Observability
+
+Inject a logger and a telemetry sink to bridge the client into your stack. There are no hard dependencies — you wire OpenTelemetry, Prometheus or your own logger. Defaults are silent.
+
+```typescript
+import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
+
+const queue = new Queue('emails', {
+  logger: consoleLogger('info'), // or your own { debug, info, warn, error }
+  onTelemetry: (e: TelemetryEvent) => {
+    // per-command latency, connect/disconnect/reconnect, auth, backpressure
+    if (e.type === 'command') metrics.observe(e.cmd, e.durationMs, e.ok);
+  },
+});
+
+// Connection is an EventEmitter for lifecycle hooks:
+queue.connection.on('reconnect_scheduled', (i) => log.warn('reconnecting', i));
+queue.connection.on('disconnect', () => log.warn('link down'));
+```
+
+## Throughput and resilience
+
+```typescript
+// Bound in-flight commands (backpressure) — parks callers instead of growing memory:
+const queue = new Queue('emails', { maxInFlight: 10_000 });
+
+// Fan producer commands across N connections (round-robin, producer-side):
+const pooled = new Queue('emails', { poolSize: 4 });
+
+// Batch worker ACKs into ACKB round-trips (opt-in) for high-volume consumers:
+const worker = new Worker('emails', process, {
+  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },
+});
+```
+
+Always attach a `worker.on('error', …)` listener: per Node `EventEmitter` semantics an unhandled `error` event throws. The worker frees each job's concurrency slot before emitting, so even a throwing listener cannot degrade throughput — but the error itself is yours to observe.
+
+Half-open links are detected via TCP keepalive and a consecutive-timeout teardown, so a silently dropped connection (cloud LB/NAT idle drop) recovers in seconds rather than minutes.
+
+## Typed responses
+
+`connection.call<R>()` and `queue.call<R>()` are generic over the exported response shapes (`JobResponse`, `PulledJobsResponse`, `JobCountsResponse`, `WaitJobResponse`, …), so raw command access is fully typed without casting.
+
 ## API surface
 
 | Area | Capabilities |

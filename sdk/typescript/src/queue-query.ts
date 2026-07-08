@@ -7,12 +7,23 @@ import { CommandError, CommandTimeoutError } from './errors.js';
 import { compact } from './frame.js';
 import { Job } from './job.js';
 import type { Queue } from './queue.js';
+import type {
+  CountResponse,
+  DataResponse,
+  JobCountsResponse,
+  JobResponse,
+  JobsResponse,
+  ProgressResponse,
+  ResultResponse,
+  StateResponse,
+  WaitJobResponse,
+} from './responses.js';
 import type { JobCounts } from './types.js';
 
 type Ctx = Queue<unknown>;
 type Raw = Record<string, unknown>;
 
-function unwrapValues<R>(response: Raw): Record<string, R> {
+function unwrapValues<R>(response: { data?: unknown; values?: unknown }): Record<string, R> {
   const data = (response.data ?? {}) as Raw;
   return (data.values ?? response.values ?? data ?? {}) as Record<string, R>;
 }
@@ -20,9 +31,8 @@ function unwrapValues<R>(response: Raw): Record<string, R> {
 export const queryMethods = {
   async getJob<T = unknown>(this: Ctx, id: string): Promise<Job<T> | null> {
     try {
-      const response = await this.call({ cmd: 'GetJob', id });
-      const raw = response.job as Raw | null;
-      return raw ? new Job<T>(raw, this.connection) : null;
+      const response = await this.call<JobResponse>({ cmd: 'GetJob', id });
+      return response.job ? new Job<T>(response.job, this.connection) : null;
     } catch (err) {
       if (err instanceof CommandError) return null; // server: 'Job not found'
       throw err;
@@ -31,9 +41,8 @@ export const queryMethods = {
 
   async getJobByCustomId<T = unknown>(this: Ctx, customId: string): Promise<Job<T> | null> {
     try {
-      const response = await this.call({ cmd: 'GetJobByCustomId', customId });
-      const raw = response.job as Raw | null;
-      return raw ? new Job<T>(raw, this.connection) : null;
+      const response = await this.call<JobResponse>({ cmd: 'GetJobByCustomId', customId });
+      return response.job ? new Job<T>(response.job, this.connection) : null;
     } catch (err) {
       if (err instanceof CommandError) return null;
       throw err;
@@ -52,7 +61,7 @@ export const queryMethods = {
   ): Promise<Job<T>[]> {
     const start = opts.start ?? 0;
     const end = opts.end !== undefined && opts.end >= 0 ? opts.end : 1000;
-    const response = await this.call(
+    const response = await this.call<JobsResponse>(
       compact({
         cmd: 'GetJobs',
         queue: this.name,
@@ -61,8 +70,7 @@ export const queryMethods = {
         limit: end - start,
       }) as { cmd: string }
     );
-    const jobs = (response.jobs ?? []) as Raw[];
-    return jobs.map((raw) => new Job<T>(raw, this.connection));
+    return (response.jobs ?? []).map((raw) => new Job<T>(raw, this.connection));
   },
 
   getWaiting<T = unknown>(this: Ctx, start?: number, end?: number): Promise<Job<T>[]> {
@@ -96,25 +104,27 @@ export const queryMethods = {
   },
 
   async getJobState(this: Ctx, id: string): Promise<string> {
-    const response = await this.call({ cmd: 'GetState', id });
-    return String(response.state);
+    return (await this.call<StateResponse>({ cmd: 'GetState', id })).state;
   },
 
   async getResult<R = unknown>(this: Ctx, id: string): Promise<R> {
-    const response = await this.call({ cmd: 'GetResult', id });
-    return response.result as R;
+    return (await this.call<ResultResponse<R>>({ cmd: 'GetResult', id })).result;
   },
 
   async getChildrenValues<R = unknown>(this: Ctx, id: string): Promise<Record<string, R>> {
-    return unwrapValues<R>(await this.call({ cmd: 'GetChildrenValues', id }));
+    return unwrapValues<R>(await this.call<DataResponse>({ cmd: 'GetChildrenValues', id }));
   },
 
   async getFailedChildrenValues(this: Ctx, id: string): Promise<Record<string, string>> {
-    return unwrapValues<string>(await this.call({ cmd: 'GetFailedChildrenValues', id }));
+    return unwrapValues<string>(
+      await this.call<DataResponse>({ cmd: 'GetFailedChildrenValues', id })
+    );
   },
 
   async getIgnoredChildrenFailures(this: Ctx, id: string): Promise<Record<string, string>> {
-    return unwrapValues<string>(await this.call({ cmd: 'GetIgnoredChildrenFailures', id }));
+    return unwrapValues<string>(
+      await this.call<DataResponse>({ cmd: 'GetIgnoredChildrenFailures', id })
+    );
   },
 
   /** Detach a child job from its parent's dependency list. */
@@ -136,7 +146,10 @@ export const queryMethods = {
    * will not complete), everything else throws CommandTimeoutError.
    */
   async waitForJob<R = unknown>(this: Ctx, id: string, ttlMs = 30_000): Promise<R> {
-    const response = await this.call({ cmd: 'WaitJob', id, timeout: ttlMs }, ttlMs + 5000);
+    const response = await this.call<WaitJobResponse<R>>(
+      { cmd: 'WaitJob', id, timeout: ttlMs },
+      ttlMs + 5000
+    );
     if (response.completed !== true) {
       let state: string | undefined;
       try {
@@ -161,18 +174,14 @@ export const queryMethods = {
   },
 
   async getProgress(this: Ctx, id: string): Promise<{ progress: number; message: string | null }> {
-    const response = await this.call({ cmd: 'GetProgress', id });
-    return {
-      progress: Number(response.progress ?? 0),
-      message: (response.message as string | null) ?? null,
-    };
+    const response = await this.call<ProgressResponse>({ cmd: 'GetProgress', id });
+    return { progress: response.progress ?? 0, message: response.message ?? null };
   },
 
   // ------------------------------------------------------------------- counts
 
   async getJobCounts(this: Ctx): Promise<JobCounts> {
-    const response = await this.call({ cmd: 'GetJobCounts', queue: this.name });
-    return response.counts as JobCounts;
+    return (await this.call<JobCountsResponse>({ cmd: 'GetJobCounts', queue: this.name })).counts;
   },
 
   async getWaitingCount(this: Ctx): Promise<number> {
@@ -206,8 +215,7 @@ export const queryMethods = {
   },
 
   async count(this: Ctx): Promise<number> {
-    const response = await this.call({ cmd: 'Count', queue: this.name });
-    return Number(response.count ?? 0);
+    return (await this.call<CountResponse>({ cmd: 'Count', queue: this.name })).count ?? 0;
   },
 
   async getCountsPerPriority(this: Ctx): Promise<Record<string, number>> {

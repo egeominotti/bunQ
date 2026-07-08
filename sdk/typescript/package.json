@@ -1,6 +1,6 @@
 {
   "name": "bunqueue-client",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Cross-runtime TypeScript client for the bunqueue job queue server \u2014 Node.js, Bun, Deno and Cloudflare Workers",
   "license": "MIT",
   "type": "module",

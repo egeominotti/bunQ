@@ -26,6 +26,8 @@ export type {
 } from './bunqueue/types.js';
 export type { Command, ConnectionOptions, Response, TlsOption } from './connection.js';
 export { Connection } from './connection.js';
+export { ConnectionPool } from './connection-pool.js';
+export type { ConnectionLike } from './connection-types.js';
 export {
   AuthError,
   BunqueueError,
@@ -45,9 +47,33 @@ export type {
 export { MAX_FRAME_SIZE, PROTOCOL_VERSION } from './frame.js';
 export type { JobRaw } from './job.js';
 export { Job } from './job.js';
+export type {
+  Logger,
+  LogLevel,
+  Observability,
+  TelemetryEvent,
+  TelemetryHandler,
+} from './observability.js';
+export { consoleLogger, noopLogger } from './observability.js';
 export type { BulkJobEntry, QueueOptions } from './queue.js';
 export { Queue } from './queue.js';
 export type { SchedulerOptions } from './queue-admin.js';
+export type {
+  BatchResponse,
+  CountResponse,
+  DataResponse,
+  JobCountsResponse,
+  JobResponse,
+  JobsResponse,
+  OkResponse,
+  PausedResponse,
+  ProgressResponse,
+  PulledJobResponse,
+  PulledJobsResponse,
+  ResultResponse,
+  StateResponse,
+  WaitJobResponse,
+} from './responses.js';
 export type {
   BackoffOptions,
   DeduplicationOptions,
@@ -57,6 +83,6 @@ export type {
   RepeatOptions,
 } from './types.js';
 export { Worker } from './worker.js';
-export type { Processor, WorkerOptions } from './worker-types.js';
+export type { AckBatchOptions, Processor, WorkerOptions } from './worker-types.js';
 
-export const __version__ = '0.1.2';
+export const __version__ = '0.1.6';

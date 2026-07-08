@@ -7,9 +7,11 @@
  */
 
 import { hostname } from 'node:os';
+import { AckBatcher } from './ack-batcher.js';
 import { CommandTimeoutError, ConnectionClosedError, UnrecoverableError } from './errors.js';
 import { compact } from './frame.js';
 import { Job } from './job.js';
+import type { PulledJobsResponse } from './responses.js';
 import { WorkerBase } from './worker-base.js';
 import {
   MAX_STACK_LINES,
@@ -21,11 +23,21 @@ import {
 
 export class Worker<T = unknown, R = unknown> extends WorkerBase {
   private readonly processor: Processor<T, R>;
+  private readonly ackBatcher: AckBatcher | null;
 
   constructor(queue: string, processor: Processor<T, R>, opts: WorkerOptions = {}) {
     super(queue, opts);
     this.processor = processor;
+    const ab = opts.ackBatch;
+    this.ackBatcher = ab?.enabled
+      ? new AckBatcher(this.connection, ab.maxSize ?? 50, ab.maxDelayMs ?? 5)
+      : null;
     if (opts.autorun !== false) this.run();
+  }
+
+  /** Flush batched ACKs before the base class drains in-flight jobs. */
+  protected override async beforeClose(): Promise<void> {
+    if (this.ackBatcher) await this.ackBatcher.flush();
   }
 
   /** Start the pull loop (no-op if already running). */
@@ -82,7 +94,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
       await this.register();
     }
 
-    const response = await this.connection.call(
+    const response = await this.connection.call<PulledJobsResponse>(
       {
         cmd: 'PULLB',
         queue: this.queue,
@@ -94,8 +106,8 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
       this.pollTimeoutMs + 10_000
     );
 
-    const jobs = (response.jobs ?? []) as Record<string, unknown>[];
-    const tokens = (response.tokens ?? []) as string[];
+    const jobs = response.jobs ?? [];
+    const tokens = response.tokens ?? [];
 
     if (jobs.length === 0) {
       if (this.wasBusy && this.active.size === 0) {
@@ -119,10 +131,34 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
     this.emit('active', job);
     try {
       const result = await this.processor(job);
+      if (this.ackBatcher) {
+        // Defer the ACK into a batch; the job stays active (lock renewed) until
+        // the ACKB settles. onSettled frees the slot FIRST — a throwing
+        // listener (e.g. an unhandled 'error' emit) must never leak the slot
+        // and permanently shrink the worker's effective concurrency.
+        this.ackBatcher.add({
+          id: job.id,
+          token,
+          result: result ?? undefined,
+          onSettled: (err) => {
+            this.finishJob(job.id);
+            if (err) {
+              this.emit('error', err);
+            } else {
+              this.processed += 1;
+              this.emit('completed', job, result);
+            }
+          },
+        });
+        return;
+      }
       this.processed += 1;
       await this.safeCall(
         compact({ cmd: 'ACK', id: job.id, token, result: result ?? undefined }) as { cmd: string }
       );
+      // Free the slot BEFORE emitting: a throwing 'completed' listener must
+      // not leak the active slot (same rationale as the batched path).
+      this.finishJob(job.id);
       this.emit('completed', job, result);
     } catch (err) {
       this.failedCount += 1;
@@ -140,11 +176,14 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
           unrecoverable: err instanceof UnrecoverableError ? true : undefined,
         }) as { cmd: string }
       );
+      this.finishJob(job.id);
       this.emit('failed', job, error);
-    } finally {
-      this.active.delete(job.id);
-      this.cancelledJobs.delete(job.id);
     }
+  }
+
+  private finishJob(id: string): void {
+    this.active.delete(id);
+    this.cancelledJobs.delete(id);
   }
 
   // --------------------------------------------------------------- heartbeat

@@ -5,6 +5,37 @@ All notable changes to `bunqueue-client` (TypeScript SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-07-09
+
+Enterprise-grade hardening. All additive and backward-compatible; defaults are
+unchanged (observability is silent, backpressure unbounded, ACK batching off).
+
+### Added
+
+- **Observability.** Every `Connection`/`Queue`/`Worker`/`FlowProducer` accepts
+  an injectable `logger` and an `onTelemetry` sink (zero hard deps — bridge it to
+  OpenTelemetry/Prometheus yourself). `TelemetryEvent` is a typed union covering
+  per-command latency, connect/disconnect/reconnect, auth and backpressure.
+  `Connection` is now an `EventEmitter` emitting `connect` / `disconnect` /
+  `reconnect_scheduled`. Ships `noopLogger` (default) and `consoleLogger`.
+- **Backpressure.** `maxInFlight` bounds concurrent in-flight commands; callers
+  park until a slot frees instead of growing memory unbounded under load.
+- **ACK batching.** Opt-in `Worker({ ackBatch: { enabled: true } })` coalesces
+  completed-job ACKs into `ACKB` round-trips for higher throughput; a job stays
+  active (lock renewed) until its batch is confirmed.
+- **Connection pool.** `Queue({ poolSize: N })` fans producer commands across N
+  round-robin connections (`ConnectionPool`, producer-side; workers stay single-
+  connection by design).
+- **Typed responses.** `call<R>()` is generic over the exported response shapes
+  (`JobResponse`, `PulledJobsResponse`, `JobCountsResponse`, …); internal
+  `as Record<string, unknown>` casts removed across the query/control/flow paths.
+
+### CI
+
+- GitHub Actions runs both SDK suites on every `sdk/`/`src/` change (TypeScript
+  on Bun + Node, Python 3.10/3.12); an npm release workflow publishes with
+  build provenance.
+
 ## [0.1.5] - 2026-07-08
 
 Protocol-coherence audit against the bunqueue server. Every fix ships with a

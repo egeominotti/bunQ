@@ -52,6 +52,8 @@ export class WorkerBase extends EventEmitter {
       port: opts.port,
       token: opts.token,
       tls: opts.tls,
+      logger: opts.logger,
+      onTelemetry: opts.onTelemetry,
     });
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
@@ -132,6 +134,7 @@ export class WorkerBase extends EventEmitter {
     if (this.closedFlag) return;
     this.stopped = true;
     if (this.loopPromise) await this.loopPromise;
+    await this.beforeClose(); // flush any batched ACKs before draining
     while (!force && this.active.size > 0) await sleep(20);
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -155,4 +158,7 @@ export class WorkerBase extends EventEmitter {
       this.emit('error', err);
     }
   }
+
+  /** Hook run during close() before draining in-flight jobs (see Worker). */
+  protected async beforeClose(): Promise<void> {}
 }

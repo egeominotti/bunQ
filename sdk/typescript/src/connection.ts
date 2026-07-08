@@ -6,8 +6,10 @@
  * builtins (net/tls), which Node, Bun and Deno all support.
  */
 
+import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
 import { pack, unpack } from 'msgpackr';
+import { Backpressure } from './backpressure.js';
 import type {
   Command,
   ConnectionOptions,
@@ -17,12 +19,19 @@ import type {
 } from './connection-types.js';
 import { AuthError, CommandError, CommandTimeoutError, ConnectionClosedError } from './errors.js';
 import { compact, FrameParser, frame, PROTOCOL_VERSION } from './frame.js';
+import { nowMs, Telemetry } from './observability.js';
 import { openSocket } from './socket-factory.js';
 
 export type { Command, ConnectionOptions, Response, TlsOption } from './connection-types.js';
 
-/** A single pipelined TCP connection to a bunqueue server. */
-export class Connection {
+/**
+ * A single pipelined TCP connection to a bunqueue server.
+ *
+ * Emits typed lifecycle events for observability: `connect`, `disconnect` and
+ * `reconnect_scheduled` (payloads mirror the telemetry events). Attach a
+ * telemetry sink via the `onTelemetry` option for per-command latency metrics.
+ */
+export class Connection extends EventEmitter {
   readonly host: string;
   readonly port: number;
   readonly token: string | undefined;
@@ -44,14 +53,22 @@ export class Connection {
   // socket is presumed dead and torn down so the next call reconnects.
   private readonly maxCommandTimeouts = 3;
   private consecutiveTimeouts = 0;
+  private readonly telemetry: Telemetry;
+  private readonly backpressure: Backpressure;
 
   constructor(options: ConnectionOptions = {}) {
+    super();
     this.host = options.host ?? 'localhost';
     this.port = options.port ?? 6789;
     this.token = options.token;
     this.tls = options.tls;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5000;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 10_000;
+    this.telemetry = new Telemetry(options, (event, payload) => this.emit(event, payload));
+    const maxInFlight = options.maxInFlight ?? 0;
+    this.backpressure = new Backpressure(maxInFlight, () =>
+      this.telemetry.backpressure(this.pending.size, maxInFlight)
+    );
   }
 
   get isConnected(): boolean {
@@ -89,6 +106,7 @@ export class Connection {
         this.failedAttempts += 1;
         const backoff = Math.min(500 * 2 ** (this.failedAttempts - 1), 5000);
         this.nextAttemptAt = Date.now() + backoff;
+        this.telemetry.reconnectScheduled(this.host, this.port, this.failedAttempts, backoff);
         throw err;
       })
       .finally(() => {
@@ -98,6 +116,7 @@ export class Connection {
   }
 
   private async doConnect(): Promise<void> {
+    const startMs = nowMs();
     const socket = await openSocket(this.host, this.port, this.tls, this.connectTimeoutMs);
     socket.setNoDelay(true);
     // TCP keepalive (~15s idle) surfaces a half-open link (cloud LB/NAT idle
@@ -113,6 +132,7 @@ export class Connection {
     this.connected = true;
     this.connectGeneration += 1;
     this.consecutiveTimeouts = 0;
+    this.telemetry.connected(this.host, this.port, this.connectGeneration, startMs);
 
     // INVARIANT (H3): connected is flipped true before Auth, which is safe
     // ONLY because call() writes the Auth frame synchronously — there is no
@@ -123,7 +143,9 @@ export class Connection {
     if (this.token) {
       try {
         await this.call({ cmd: 'Auth', token: this.token });
+        this.telemetry.auth(true);
       } catch (err) {
+        this.telemetry.auth(false);
         this.teardown();
         if (err instanceof CommandError) throw new AuthError(err.message);
         throw err;
@@ -135,19 +157,26 @@ export class Connection {
    * Send a command and await its response. Rejects with CommandError when
    * the server answers ok=false. Reconnects lazily if the link was lost.
    */
-  async call(command: Command, timeoutMs?: number): Promise<Response> {
+  async call<R = Response>(command: Command, timeoutMs?: number): Promise<R> {
     if (!this.connected) await this.connect();
+    // Backpressure: park here if too many commands are already in flight. The
+    // socket may be torn down while parked, so re-check after the gate.
+    const gate = this.backpressure.acquire(this.pending.size);
+    if (gate) await gate;
     const socket = this.socket;
-    if (!socket) throw new ConnectionClosedError('not connected');
+    if (!this.connected || !socket) throw new ConnectionClosedError('not connected');
 
     this.reqCounter = (this.reqCounter + 1) & 0x7fffffff;
     const reqId = String(this.reqCounter);
     const payload = pack({ ...compact(command), reqId });
     const gen = this.connectGeneration; // snapshot: a timeout must not tear down a newer conn
+    const startMs = nowMs();
 
-    return new Promise<Response>((resolve, reject) => {
+    return new Promise<R>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(reqId);
+        this.backpressure.release();
+        this.telemetry.timeout(command.cmd, reqId);
         this.noteTimeout(gen);
         reject(new CommandTimeoutError(`no response for ${command.cmd} within timeout`));
       }, timeoutMs ?? this.commandTimeoutMs);
@@ -156,10 +185,11 @@ export class Connection {
         resolve: (response) => {
           clearTimeout(timer);
           this.consecutiveTimeouts = 0; // any reply means the link is alive
+          this.telemetry.command(command.cmd, reqId, startMs, response.ok);
           if (!response.ok) {
             reject(new CommandError(String(response.error ?? 'unknown server error')));
           } else {
-            resolve(response);
+            resolve(response as R);
           }
         },
         reject: (err) => {
@@ -173,6 +203,7 @@ export class Connection {
         if (err) {
           const entry = this.pending.get(reqId);
           this.pending.delete(reqId);
+          this.backpressure.release();
           entry?.reject(new ConnectionClosedError(`send failed: ${err.message}`));
           this.teardown();
         }
@@ -228,6 +259,7 @@ export class Connection {
       const entry = this.pending.get(String(reqId));
       if (entry) {
         this.pending.delete(String(reqId));
+        this.backpressure.release();
         entry.resolve(response);
       }
     }
@@ -247,6 +279,8 @@ export class Connection {
   }
 
   private teardown(): void {
+    const wasConnected = this.socket !== null;
+    const gen = this.connectGeneration;
     this.connected = false;
     const socket = this.socket;
     this.socket = null;
@@ -260,5 +294,7 @@ export class Connection {
       clearTimeout(entry.timer);
       entry.reject(new ConnectionClosedError('connection lost'));
     }
+    this.backpressure.clear(); // release parked callers; they re-check + fail/reconnect
+    if (wasConnected) this.telemetry.disconnected(this.host, this.port, gen);
   }
 }

@@ -1,0 +1,45 @@
+name: SDK Release (npm)
+
+# Publishes the TypeScript SDK to npm with build provenance
+# (https://docs.npmjs.com/generating-provenance-statements). Trigger by pushing
+# a tag like `sdk-ts-v1.0.0`. Requires an NPM_TOKEN secret (automation token).
+
+on:
+  push:
+    tags: ['sdk-ts-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install server deps (for bun src/main.ts)
+        run: bun install --frozen-lockfile || bun install
+      - name: Build + verify SDK
+        working-directory: sdk/typescript
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run build
+          bun run check
+      - name: Test gate (never publish an untested tag)
+        working-directory: sdk/typescript
+        run: |
+          bun tests/integration.ts
+          bun tests/e2e.ts
+      - name: Publish with provenance
+        working-directory: sdk/typescript
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -2,6 +2,7 @@
 
 import type { Connection, TlsOption } from './connection.js';
 import type { Job } from './job.js';
+import type { Observability } from './observability.js';
 import type { JobOptions } from './types.js';
 
 export interface FlowJob<T = unknown> {
@@ -24,7 +25,7 @@ export interface FlowStep<T = unknown> {
   opts?: JobOptions;
 }
 
-export interface FlowProducerOptions {
+export interface FlowProducerOptions extends Observability {
   host?: string;
   port?: number;
   token?: string;

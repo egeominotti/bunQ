@@ -1,0 +1,82 @@
+name: SDK
+
+# CI for the polyglot client SDKs (sdk/typescript, sdk/python). Both spawn a
+# real server (bun src/main.ts) and run their e2e suites against it.
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['sdk/**', 'src/**', '.github/workflows/sdk.yml']
+  pull_request:
+    paths: ['sdk/**', 'src/**', '.github/workflows/sdk.yml']
+
+concurrency:
+  group: sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, node]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install server deps (for bun src/main.ts)
+        run: bun install --frozen-lockfile || bun install
+      - name: Install + build SDK
+        working-directory: sdk/typescript
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run build
+      - name: Lint (biome)
+        working-directory: sdk/typescript
+        run: bun run check
+      - name: Integration + e2e (bun)
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        run: |
+          bun tests/integration.ts
+          bun tests/e2e.ts
+      - name: Integration + e2e (node)
+        if: matrix.runtime == 'node'
+        working-directory: sdk/typescript
+        run: |
+          node --experimental-strip-types tests/integration.ts
+          node --experimental-strip-types tests/e2e.ts
+
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install server deps (for bun src/main.ts)
+        run: bun install --frozen-lockfile || bun install
+      - name: Set up venv + msgpack
+        working-directory: sdk/python
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --quiet msgpack
+      - name: Integration + e2e
+        working-directory: sdk/python
+        run: |
+          .venv/bin/python tests/test_integration.py
+          .venv/bin/python tests/run_e2e.py

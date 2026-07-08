@@ -1,26 +1,35 @@
 ---
-title: "Use bunqueue from Node.js, Deno, Python & Cloudflare Workers"
-description: "One queue, any language. Add jobs from any runtime, process them anywhere — the bunqueue SDKs speak the native TCP protocol with zero setup."
+title: "Client SDKs for Node.js, Deno, Python and Cloudflare Workers"
+description: "Official bunqueue client SDKs: one queue, any language. Produce and consume jobs from Node.js, Deno, Bun, Python and Cloudflare Workers over the native TCP protocol, with full feature parity and verified compatibility."
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-**One queue, any language.** The bunqueue server does all the heavy lifting —
-retries, priorities, scheduling, dead letter queue. Your apps just add jobs
-and process them, from whatever language they're written in.
+bunqueue ships official client SDKs that implement the native TCP protocol
+(msgpack, pipelined) with full feature parity with the built in Bun client.
+The server owns every queue semantic, retries with backoff, priorities,
+scheduling, stall detection, and the dead letter queue. Client applications
+only add jobs and process them, from whatever language they are written in,
+against the same queue: one queue, any language.
 
-| Where your code runs | What to install | Get it |
+## Supported platforms
+
+| Platform | Package | Distribution |
 |---|---|---|
-| Node.js, Deno, Bun, Cloudflare Workers | `npm install bunqueue-client` | [**npm →**](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
-| Python | `bunqueue-client` (PyPI coming soon) | [source + install →](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) |
-| Bun (same process, no server) | `bun add bunqueue` | [Quick Start](/guide/quickstart/) |
+| Node.js 20 or later, Bun, Deno 2 or later, Cloudflare Workers | `bunqueue-client` | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
+| Python 3.9 or later | `bunqueue-client` | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
+| Bun, embedded in process, no server | `bunqueue` | [Quick Start](/guide/quickstart/) |
 
-Everything on this page is verified by the SDK test suites against a real
-server: **81 e2e scenarios on each of Node.js, Deno and Bun**, plus **16 inside
-workerd** (the actual Cloudflare Workers runtime) and **57 in Python** — every
-public method of the SDKs is covered by at least one real test.
+Every claim on this page is verified against a real bunqueue server on every
+supported platform: 81 end to end scenarios each on Node.js, Deno and Bun,
+16 inside workerd, the actual Cloudflare Workers runtime, and 57 in Python.
+Every public method of the SDKs is covered by at least one test.
 
-## 1. Start the server
+## Getting started
+
+### 1. Run the server
+
+The server is the only component that requires [Bun](https://bun.sh).
 
 ```bash
 bunx bunqueue start
@@ -28,10 +37,11 @@ bunx bunqueue start
 # docker run -d -p 6789:6789 -p 6790:6790 -v bunqueue-data:/app/data ghcr.io/egeominotti/bunqueue:latest
 ```
 
-That's it — the queue is listening on port 6789. (More options in
-[Running the Server](/guide/server/).)
+Port 6789 serves the TCP protocol used by the SDKs, port 6790 serves the
+HTTP API with `/health` and `/metrics`. Additional deployment options are
+covered in [Running the Server](/guide/server/).
 
-## 2. Install the client
+### 2. Install the client
 
 <Tabs>
 <TabItem label="Node.js">
@@ -58,14 +68,14 @@ deno add npm:bunqueue-client
 <TabItem label="Python">
 
 ```bash
-# PyPI release coming soon; install from the repo today:
+# PyPI release upcoming; install from the repository today:
 pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
 ```
 
 </TabItem>
 </Tabs>
 
-## 3. Add jobs
+### 3. Produce jobs
 
 <Tabs>
 <TabItem label="Node / Deno / Bun">
@@ -92,7 +102,7 @@ queue.add("welcome", {"to": "user@example.com"})
 </TabItem>
 </Tabs>
 
-## 4. Process jobs
+### 4. Process jobs
 
 <Tabs>
 <TabItem label="Node / Deno / Bun">
@@ -127,48 +137,60 @@ Worker("emails", process, concurrency=10).run()
 Run either file with the runtime you already use:
 
 ```bash
-node --experimental-strip-types app.ts    # Node 22+
+node --experimental-strip-types app.ts    # Node 22 or later
 bun app.ts                                # Bun
-deno run -A app.ts                        # Deno 2+
+deno run -A app.ts                        # Deno 2 or later
 python app.py                             # Python
 ```
 
-Done. The producer and the worker can be **different apps in different
-languages** — a Next.js API adding jobs, a Python service processing them.
+The producer and the worker are typically separate services, often in
+different languages: a Next.js API adds jobs, a Python service processes
+them, against the same queue and the same protocol. Defaults are
+`host: 'localhost'` and `port: 6789`, so constructors need no options on a
+local setup.
 
-## Everything else is one line away
+## Core capabilities
 
-Failures retry automatically (3 attempts by default). After that, jobs land
-in the [dead letter queue](/guide/dlq/) — nothing is ever lost.
+Failures retry automatically, three attempts by default. Jobs that exhaust
+their retries land in the [dead letter queue](/guide/dlq/), nothing is lost.
 
 ```typescript
-// Priority, delay, custom retries
+// Priority, delay, custom retry policy
 await queue.add('report', data, { priority: 10, delay: 5000, attempts: 5 });
 
-// Run something every morning at 9:00
+// Scheduling: run every morning at 09:00
 await queue.addCron('daily-report', '0 9 * * *', { type: 'report' });
 
-// Give up immediately on bad input (straight to DLQ, no retries)
+// Terminal failures: skip retries, straight to the DLQ
 throw new UnrecoverableError('malformed payload');
 
-// Chain steps: extract → transform → load
+// Pipelines: extract, then transform, then load
 await flow.addChain([
   { name: 'extract', queueName: 'etl' },
   { name: 'transform', queueName: 'etl' },
   { name: 'load', queueName: 'etl' },
 ]);
 
-// Production: auth + TLS
-new Queue('emails', { host: 'queue.example.com', token: '...', tls: true });
+// Operations: counts, DLQ management, connected workers, statistics
+await queue.getJobCounts();
+await queue.retryDlq();
+await queue.getWorkers();
 ```
 
-Same one-liners in Python with snake_case names (`add_cron`, `add_chain`, …).
+The full surface is available in every SDK with identical semantics: queries
+with per state helpers, job control (promote, discard, move, update, change
+priority or delay), DLQ management and configuration, schedulers, rate
+limiting, global concurrency, stall configuration, webhooks, and metrics.
+Python exposes the same methods with snake_case names (`add_cron`,
+`add_chain`, `get_job_counts`).
 
-## Simple Mode, everywhere
+## Simple Mode
 
-Prefer everything in one object? [Simple Mode](/guide/simple-mode/) is in the
-SDKs too, 1:1 with the original: routes, middleware, in-process retry
-strategies, circuit breaker, batching, triggers, TTL, cancellation.
+`Bunqueue` bundles a Queue and a Worker in a single object, a 1:1 port of
+the official client's [Simple Mode](/guide/simple-mode/): routes, onion
+middleware, in process retry strategies, a circuit breaker, batch
+accumulation, event triggers, job TTL, priority aging, cooperative
+cancellation, and deduplication or debounce defaults.
 
 <Tabs>
 <TabItem label="Node / Deno / Bun">
@@ -228,13 +250,14 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 </TabItem>
 </Tabs>
 
-The only difference from the Bun original: `embedded: true` is not available
-(it needs the in-process Bun runtime) — connect to a server instead.
+The only difference from the Bun original: `embedded: true` is not
+available, it requires the in process Bun runtime. Connect to a server
+instead; the option raises a clear error.
 
 ## Cloudflare Workers
 
-The same client runs inside Workers — enable Node.js compatibility and add
-jobs straight from your fetch handlers:
+The same client runs inside Workers. Enable Node.js compatibility and add
+jobs directly from your fetch handlers:
 
 ```toml
 # wrangler.toml
@@ -255,36 +278,60 @@ export default {
 };
 ```
 
-Workers are request-scoped, so there is no long-lived worker loop: **produce
+Workers are request scoped, so there is no long lived worker loop: produce
 from fetch handlers, consume in batches from a
-[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)**
-(pull → process → ack, then return). Both patterns are covered by the SDK's
-16-scenario suite that runs inside workerd — including Simple Mode. Two
-requirements: your server must be reachable from the internet and TLS needs
-a publicly trusted certificate.
+[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/),
+pull, process, acknowledge, return. Both patterns are covered by the SDK's
+16 scenario suite that runs inside workerd, including Simple Mode. Two
+requirements: the server must be reachable from the internet, and TLS
+requires a publicly trusted certificate.
 
-## Where it runs
+## Security
 
-| Runtime | Works? |
+Authentication uses server side tokens, transport security uses native TLS.
+
+```typescript
+const queue = new Queue('emails', {
+  host: 'queue.example.com',
+  port: 6789,
+  token: process.env.BUNQUEUE_TOKEN,   // server started with AUTH_TOKENS=...
+  tls: true,                            // or { caFile: './ca.pem' } for a custom CA
+});
+```
+
+Start the server with `AUTH_TOKENS` to require authentication and with
+`TLS_CERT_FILE` and `TLS_KEY_FILE` for encrypted transport. The SDKs support
+system certificate authorities, a custom CA bundle, and disabled
+verification for development environments. Full hardening guidance lives in
+the [deployment guide](/guide/deployment/).
+
+## Quality assurance
+
+Every SDK release is validated against a real bunqueue server, spawned
+fresh for each run, on every supported runtime:
+
+| Runtime | Verification |
 |---|---|
-| Node.js ≥ 20 | ✅ |
-| Bun | ✅ |
-| Deno ≥ 2 | ✅ |
-| Python ≥ 3.9 | ✅ |
-| Cloudflare Workers | ✅ add jobs from your Workers (enable `nodejs_compat`); process with Cron Triggers |
-| Browser | ❌ — call your own API route, which adds the job |
+| Node.js | 81 e2e scenarios and 8 integration tests |
+| Bun | 81 e2e scenarios and 8 integration tests |
+| Deno | 81 e2e scenarios and 8 integration tests, identical test files |
+| Cloudflare Workers | 16 scenarios executed inside workerd, full API surface and Simple Mode |
+| Python | 57 e2e scenarios and 8 integration tests |
 
-Every ✅ is verified by the SDK test suites against a real server on every
-runtime — same tests, same results.
+Coverage includes payload limits, unicode integrity, pipelining under
+concurrency, server crash and restart with automatic reconnection, lock
+survival for jobs longer than the lock TTL, and a realistic multi queue
+production scenario with zero loss accounting. Browsers are not supported,
+raw TCP sockets are unavailable there: route through your own API instead.
 
-## Learn more
+## Resources
 
-- [`bunqueue-client` on npm](https://www.npmjs.com/package/bunqueue-client) — full step-by-step README, from `bunx bunqueue start` to production
-- [Queue API](/guide/queue/) — all job options explained
-- [Worker](/guide/worker/) — concurrency, events, graceful shutdown
-- [Simple Mode](/guide/simple-mode/) — everything in one object
-- [Flows](/guide/flow/) — pipelines, parent/child jobs, fan-in
-- [Cron Jobs](/guide/cron/) — schedules and repeatable jobs
-- [Dead Letter Queue](/guide/dlq/) — what happens when jobs fail
-- [Deployment guide](/guide/deployment/) — Docker, TLS, auth, monitoring
+- [`bunqueue-client` on npm](https://www.npmjs.com/package/bunqueue-client), the full step by step README, from server start to production
+- [Queue API](/guide/queue/), every job option explained
+- [Worker](/guide/worker/), concurrency, events, graceful shutdown
+- [Simple Mode](/guide/simple-mode/), everything in one object
+- [Flows](/guide/flow/), pipelines, parent and child jobs, fan in
+- [Cron Jobs](/guide/cron/), schedules and repeatable jobs
+- [Dead Letter Queue](/guide/dlq/), what happens when jobs fail
+- [Deployment guide](/guide/deployment/), Docker, TLS, authentication, monitoring
 - SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)

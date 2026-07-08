@@ -30,27 +30,6 @@ hero:
       variant: minimal
 ---
 
-<div class="hp-section-header" style="margin-top: 2rem;">
-  <span class="hp-badge">Beta &middot; Open Source</span>
-  <h2 class="hp-heading">bunqueue Dashboard</h2>
-  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
-</div>
-
-<div class="hp-bento-card hp-bento-wide" style="max-width: 800px; margin: 0 auto 1.5rem; padding: 0; overflow: hidden;">
-  <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" width="100%" controls autoplay loop muted playsinline style="display: block; margin: 0;"></video>
-</div>
-
-<div class="hp-install-wrap">
-  <div class="hp-install">
-    <span class="hp-install-dollar">$</span>
-    <span>bunx bunqueue-dashboard</span>
-  </div>
-</div>
-
-<p style="text-align: center; font-size: 0.95rem; color: var(--sl-color-gray-3); margin-bottom: 3rem;">
-  <a href="https://egeominotti.github.io/bunqueue-dashboard/">Live demo</a> &middot; <a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">User guide</a> &middot; <a href="https://github.com/egeominotti/bunqueue-dashboard">GitHub</a> &middot; <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a> &middot; Requires Bun
-</p>
-
 <div class="hp-install-wrap">
   <div class="hp-install">
     <span class="hp-install-dollar">$</span>
@@ -190,6 +169,49 @@ worker.on('failed', (job, error) => {
   </div>
 </div>
 
+
+<div class="hp-section-header" style="margin-top: 5rem;">
+  <span class="hp-badge">Trust</span>
+  <h2 class="hp-heading">Verified, secured, observable</h2>
+  <p class="hp-subtitle">Claims backed by tests that run against a real server, on every supported runtime.</p>
+</div>
+
+<div class="hp-modes">
+  <div class="hp-mode-card">
+    <div class="hp-mode-tag">Quality</div>
+    <h3>Tested on every runtime</h3>
+    <p>Each release runs the full end to end suites against a live server.</p>
+    <ul>
+      <li>81 e2e scenarios each on Node.js, Deno and Bun</li>
+      <li>16 scenarios inside workerd (Cloudflare Workers)</li>
+      <li>57 scenarios in Python</li>
+      <li>Every public SDK method covered</li>
+    </ul>
+  </div>
+  <div class="hp-mode-card">
+    <div class="hp-mode-tag">Security</div>
+    <h3>Hardened by default</h3>
+    <p>Token authentication, native TLS on both listeners, and honest defaults.</p>
+    <ul>
+      <li>Token auth across TCP and HTTP</li>
+      <li>Native TLS or Unix domain sockets</li>
+      <li>Webhook SSRF validation built in</li>
+      <li><a href="/security/">Security model and hardening guide</a></li>
+    </ul>
+  </div>
+  <div class="hp-mode-card">
+    <div class="hp-mode-tag">Operations</div>
+    <h3>Observable in production</h3>
+    <p>First class operational surface, no sidecar required.</p>
+    <ul>
+      <li>Prometheus metrics endpoint</li>
+      <li>Health and readiness probes</li>
+      <li>Webhooks, SSE and WebSocket events</li>
+      <li>S3 backups for disaster recovery</li>
+    </ul>
+  </div>
+</div>
+
 <div class="hp-section-header" style="margin-top: 5rem;">
   <span class="hp-badge">Features</span>
   <h2 class="hp-heading">Everything included</h2>
@@ -287,6 +309,28 @@ worker.on('failed', (job, error) => {
     <span><code>bunx bunqueue-dashboard</code></span>
   </div>
 </div>
+
+<div class="hp-section-header" style="margin-top: 5rem;">
+  <span class="hp-badge">Beta &middot; Open Source</span>
+  <h2 class="hp-heading">bunqueue Dashboard</h2>
+  <p class="hp-subtitle">A web dashboard that fully drives your bunqueue server: queues, jobs, DLQ, cron, webhooks, workers, live activity, SQLite inspector, and an AI Copilot.</p>
+</div>
+
+<div class="hp-bento-card hp-bento-wide" style="max-width: 800px; margin: 0 auto 1.5rem; padding: 0; overflow: hidden;">
+  <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" width="100%" controls autoplay loop muted playsinline style="display: block; margin: 0;"></video>
+</div>
+
+<div class="hp-install-wrap">
+  <div class="hp-install">
+    <span class="hp-install-dollar">$</span>
+    <span>bunx bunqueue-dashboard</span>
+  </div>
+</div>
+
+<p style="text-align: center; font-size: 0.95rem; color: var(--sl-color-gray-3); margin-bottom: 3rem;">
+  <a href="https://egeominotti.github.io/bunqueue-dashboard/">Live demo</a> &middot; <a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">User guide</a> &middot; <a href="https://github.com/egeominotti/bunqueue-dashboard">GitHub</a> &middot; <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a> &middot; Requires Bun
+</p>
+
 
 <div class="hp-cta">
   <h2 class="hp-heading">Run your queue without the infrastructure</h2>

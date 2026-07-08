@@ -3,6 +3,7 @@
  * Manages low-level socket connection and data handling (msgpack binary protocol)
  */
 
+import { readFileSync } from 'node:fs';
 import type { Socket } from 'bun';
 import type { SocketWrapper, PendingCommand, ClientTlsOptions } from './types';
 import { FrameParser, FrameSizeError } from '../../infrastructure/server/protocol';
@@ -33,6 +34,11 @@ export interface ConnectionTarget {
 /**
  * Map client TLS options to the `tls` value accepted by Bun.connect.
  * Returns undefined when TLS is disabled (plaintext, the default).
+ *
+ * The CA is read into bytes (not passed as a `Bun.file` handle): Bun computes
+ * the peer's `authorizationError` from this `ca`, and we enforce it in the
+ * `handshake` handler (see `tlsRequiresVerification` / #109) — Bun.connect
+ * itself never rejects an unauthorized peer on the client side.
  */
 export function buildClientTls(
   tls: boolean | ClientTlsOptions | undefined
@@ -41,8 +47,19 @@ export function buildClientTls(
   if (tls === true) return true;
   return {
     ...(tls.rejectUnauthorized !== undefined && { rejectUnauthorized: tls.rejectUnauthorized }),
-    ...(tls.caFile !== undefined && { ca: Bun.file(tls.caFile) }),
+    ...(tls.caFile !== undefined && { ca: readFileSync(tls.caFile) }),
   };
+}
+
+/**
+ * Whether the caller asked us to authenticate the server certificate.
+ * Verification is the default for any TLS connection; only an explicit
+ * `rejectUnauthorized: false` opts out (encryption-only). #109
+ */
+export function tlsRequiresVerification(tls: boolean | ClientTlsOptions | undefined): boolean {
+  if (!tls) return false;
+  if (tls === true) return true;
+  return tls.rejectUnauthorized !== false;
 }
 
 /**
@@ -62,6 +79,36 @@ export async function createConnection(
 
     let connectionResolved = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    // TLS server-certificate verification. Bun.connect never rejects an
+    // unauthorized peer on the client side, but it DOES compute the peer's
+    // authorizationError and hand it to the `handshake` callback — so we gate
+    // the connection on it ourselves. #109
+    //
+    // Crucially, once a `handshake` handler is registered, Bun fires `open`
+    // BEFORE the TLS handshake completes (without it, `open` fires only after).
+    // So for EVERY TLS connection we must resolve on `handshake`, not `open` —
+    // otherwise the pool writes its first command onto a socket whose handshake
+    // is still in flight and the bytes are lost. Plaintext has no handshake
+    // event, so it still resolves in `open`.
+    const tlsValue = buildClientTls(target.tls);
+    const isTls = tlsValue !== undefined;
+    const verifyTls = tlsRequiresVerification(target.tls);
+    let opened = false;
+    let handshakeOk = !isTls; // plaintext: nothing to wait for; TLS: wait for handshake
+    const maybeResolveOpen = () => {
+      if (opened && handshakeOk && !connectionResolved) {
+        connectionResolved = true;
+        // Clear the connect timeout only now that we are actually resolving.
+        // For TLS, `open` fires BEFORE `handshake`, so clearing the timeout in
+        // `open` would leave the handshake phase unbounded — a stalled/malicious
+        // peer that completes TCP but never drives the TLS handshake (no error,
+        // no close) would hang this promise forever. Keeping the timeout armed
+        // until resolve preserves connectTimeout as a bound over the handshake.
+        cleanup();
+        resolve({ socket: socketData, cleanup });
+      }
+    };
 
     const cleanup = () => {
       if (timeoutId) {
@@ -97,7 +144,9 @@ export async function createConnection(
         }
       },
       open(sock: Socket<unknown>) {
-        cleanup();
+        // NB: do NOT clear the connect timeout here. For TLS, `open` precedes
+        // `handshake`; the timeout must stay armed until `maybeResolveOpen`
+        // actually resolves (or a stalled handshake could hang forever). #109
         // Enable TCP keepalive so the OS probes idle connections and surfaces a
         // dead peer (suspended host, NAT/LB drop) via an error/close event,
         // instead of a half-open socket lingering until tcp_retries2 (~15 min).
@@ -112,8 +161,30 @@ export async function createConnection(
         }
         socketData.write = (d: Uint8Array | string) => sock.write(d);
         socketData.end = () => sock.end();
-        connectionResolved = true;
-        resolve({ socket: socketData, cleanup });
+        opened = true;
+        maybeResolveOpen();
+      },
+      handshake(sock: Socket<unknown>, success: boolean, authorizationError: Error | null) {
+        // Fires only for TLS. When verification is required, a failed handshake
+        // or any authorizationError (wrong/absent CA, self-signed, host
+        // mismatch) must abort — otherwise TLS is encryption-only and an active
+        // MITM can impersonate the broker and harvest the auth token. #109
+        if (verifyTls && (!success || authorizationError)) {
+          if (!connectionResolved) {
+            connectionResolved = true;
+            cleanup();
+            const why = authorizationError?.message ?? 'handshake failed';
+            reject(new Error(`TLS verification failed for ${targetDesc}: ${why}`));
+          }
+          try {
+            sock.end();
+          } catch {
+            /* already closing */
+          }
+          return;
+        }
+        handshakeOk = true;
+        maybeResolveOpen();
       },
       close() {
         if (!connectionResolved) {
@@ -140,8 +211,8 @@ export async function createConnection(
       },
     };
 
-    // Connect via TCP (optionally wrapped in TLS — protocol is unchanged)
-    const tlsValue = buildClientTls(target.tls);
+    // Connect via TCP (optionally wrapped in TLS — protocol is unchanged).
+    // `tlsValue`/`isTls` were computed above to drive handshake-gated resolve.
     void (Bun.connect as (opts: unknown) => Promise<unknown>)({
       hostname: target.host ?? 'localhost',
       port: target.port ?? 6789,

@@ -21,7 +21,7 @@ export interface PushCommand extends BaseCommand {
   readonly priority?: number;
   readonly delay?: number;
   readonly maxAttempts?: number;
-  readonly backoff?: number;
+  readonly backoff?: number | { type: 'fixed' | 'exponential'; delay: number };
   readonly ttl?: number;
   readonly timeout?: number;
   readonly uniqueKey?: string;
@@ -36,8 +36,25 @@ export interface PushCommand extends BaseCommand {
   readonly removeOnFail?: boolean;
   /** Force immediate persistence to disk (bypass write buffer) */
   readonly durable?: boolean;
-  /** Repeat configuration for recurring jobs */
-  readonly repeat?: { every?: number; limit?: number; count?: number };
+  /**
+   * Repeat configuration for recurring jobs. The wire object is preserved
+   * verbatim by `unpack` and consumed by the domain `parseRepeatConfig`, so
+   * the type mirrors `JobInput['repeat']` — under-declaring it (e.g. only
+   * `every`/`limit`/`count`) silently hid `pattern`/`tz`/dates from callers.
+   */
+  readonly repeat?: {
+    every?: number;
+    limit?: number;
+    pattern?: string;
+    count?: number;
+    startDate?: number;
+    endDate?: number;
+    tz?: string;
+    immediately?: boolean;
+    prevMillis?: number;
+    offset?: number;
+    jobId?: string;
+  };
   /** BullMQ v5 flow failure propagation options */
   readonly failParentOnFailure?: boolean;
   readonly removeDependencyOnFailure?: boolean;

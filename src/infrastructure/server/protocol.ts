@@ -100,6 +100,28 @@ export function validateNumericField(
   return null;
 }
 
+/**
+ * Validate the backoff field, which the public JobOptions type allows in two
+ * forms: a plain number (delay ms) or `{ type: 'fixed' | 'exponential', delay
+ * }`. Embedded mode already accepts both (domain parseBackoff); the TCP path
+ * must too, or the object form throws over the wire while working embedded.
+ */
+export function validateBackoffField(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (obj['type'] !== 'fixed' && obj['type'] !== 'exponential') {
+      return "backoff.type must be 'fixed' or 'exponential'";
+    }
+    return validateNumericField(obj['delay'], 'backoff.delay', {
+      min: 0,
+      max: 24 * 60 * 60 * 1000, // max 1 day
+      required: true,
+    });
+  }
+  return validateNumericField(value, 'backoff', { min: 0, max: 24 * 60 * 60 * 1000 }); // max 1 day
+}
+
 /** Validate job options numeric fields */
 export function validateJobOptions(options: Record<string, unknown>): string | null {
   const validations = [
@@ -107,7 +129,7 @@ export function validateJobOptions(options: Record<string, unknown>): string | n
     validateNumericField(options['delay'], 'delay', { min: 0, max: 365 * 24 * 60 * 60 * 1000 }), // max 1 year
     validateNumericField(options['timeout'], 'timeout', { min: 0, max: 24 * 60 * 60 * 1000 }), // max 1 day
     validateNumericField(options['maxAttempts'], 'maxAttempts', { min: 1, max: 1000 }),
-    validateNumericField(options['backoff'], 'backoff', { min: 0, max: 24 * 60 * 60 * 1000 }), // max 1 day
+    validateBackoffField(options['backoff']),
     validateNumericField(options['ttl'], 'ttl', { min: 0, max: 365 * 24 * 60 * 60 * 1000 }), // max 1 year
     validateNumericField(options['stallTimeout'], 'stallTimeout', {
       min: 0,

@@ -169,31 +169,48 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     }, idleTimeoutMs);
   }
 
+  /**
+   * Initialise the per-socket state. Idempotent: safe to call from both `open`
+   * and lazily from `data`. Under native TLS, Bun can deliver a `data` event
+   * BEFORE `open` has run (observed near-deterministically when a Worker boots
+   * its connections concurrently) — the handler would then destructure a null
+   * `socket.data` and the resulting TypeError escalates to the process-level
+   * unhandledRejection handler, taking the whole server down (a pre-auth remote
+   * DoS on an exposed TLS port). Initialising lazily preserves that first frame
+   * instead of dropping it; the guard makes a second `open` a no-op. See #108.
+   */
+  function initConnection(socket: Socket<ConnectionData>): void {
+    if (socket.data) return;
+    const clientId = uuid();
+    const state = createConnectionState(clientId);
+    const ctx: HandlerContext = {
+      queueManager,
+      authTokens,
+      authenticated: authTokens.size === 0, // Auto-auth if no tokens
+      clientId, // For job ownership tracking
+    };
+
+    socket.data = {
+      state,
+      frameParser: new FrameParser(),
+      ctx,
+      semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
+      writeQueue: new SocketWriteQueue(maxWriteQueueBytes),
+      stallTimer: null,
+    };
+
+    connections.set(clientId, socket);
+    queueManager.emitDashboardEvent('client:connected', { clientId, transport: 'tcp' });
+  }
+
   const socketHandlers = {
     open(socket: Socket<ConnectionData>) {
-      const clientId = uuid();
-      const state = createConnectionState(clientId);
-      const ctx: HandlerContext = {
-        queueManager,
-        authTokens,
-        authenticated: authTokens.size === 0, // Auto-auth if no tokens
-        clientId, // For job ownership tracking
-      };
-
-      socket.data = {
-        state,
-        frameParser: new FrameParser(),
-        ctx,
-        semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
-        writeQueue: new SocketWriteQueue(maxWriteQueueBytes),
-        stallTimer: null,
-      };
-
-      connections.set(clientId, socket);
-      queueManager.emitDashboardEvent('client:connected', { clientId, transport: 'tcp' });
+      initConnection(socket);
     },
 
     async data(socket: Socket<ConnectionData>, data: Buffer) {
+      // TLS may deliver `data` before `open` — ensure per-socket state exists. #108
+      initConnection(socket);
       const { frameParser, ctx, state, semaphore, writeQueue } = socket.data;
       const rateLimiter = getRateLimiter();
 
@@ -284,6 +301,9 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     },
 
     close(socket: Socket<ConnectionData>) {
+      // A socket can close before `open`/`data` ever initialised its state
+      // (e.g. TLS handshake aborted) — nothing to release. #108
+      if (!socket.data) return;
       const clientId = socket.data.state.clientId;
       // Cancel the slowloris stall timer and drop any buffered-but-unwritten
       // bytes; the socket is gone.
@@ -319,6 +339,8 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     },
 
     drain(socket: Socket<ConnectionData>) {
+      // Can fire before per-socket state is initialised under TLS. #108
+      if (!socket.data) return;
       // Socket is ready for more writes after backpressure: flush any unwritten
       // tail bytes buffered by short writes, preserving frame order.
       socket.data.writeQueue.flush(socket);
@@ -337,6 +359,13 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
   return {
     server,
     connections,
+
+    /**
+     * Raw Bun socket handlers. Exposed for tests that need to drive the socket
+     * lifecycle directly (e.g. a `data` event arriving before `open` under TLS,
+     * #108) — production code goes through Bun.listen above.
+     */
+    _socketHandlers: socketHandlers,
 
     /** Get connection count */
     getConnectionCount(): number {

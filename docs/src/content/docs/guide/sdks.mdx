@@ -5,12 +5,16 @@ description: "Official bunqueue client SDKs: one queue, any language. Produce an
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-bunqueue ships official client SDKs that implement the native TCP protocol
-(msgpack, pipelined) with full feature parity with the built in Bun client.
-The server owns every queue semantic, retries with backoff, priorities,
-scheduling, stall detection, and the dead letter queue. Client applications
-only add jobs and process them, from whatever language they are written in,
-against the same queue: one queue, any language.
+**One queue, any language.** bunqueue ships official client SDKs for
+Node.js, Deno, Bun, Python and Cloudflare Workers. Each one speaks the
+native TCP protocol (msgpack, pipelined) and has full feature parity with
+the built-in Bun client.
+
+The design is simple: the **server** owns every queue semantic — retries
+with backoff, priorities, scheduling, stall detection, the dead letter
+queue. Your **applications** only add jobs and process them. A Next.js API
+written in TypeScript can enqueue work that a Python service consumes, both
+against the same queue, with no shared runtime and no translation layer.
 
 ## Supported platforms
 
@@ -20,10 +24,10 @@ against the same queue: one queue, any language.
 | Python 3.9 or later | `bunqueue-client` | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
 | Bun, embedded in process, no server | `bunqueue` | [Quick Start](/guide/quickstart/) |
 
-Every claim on this page is verified against a real bunqueue server on every
-supported platform: 81 end to end scenarios each on Node.js, Deno and Bun,
-16 inside workerd, the actual Cloudflare Workers runtime, and 57 in Python.
-Every public method of the SDKs is covered by at least one test.
+Every claim on this page is verified against a real bunqueue server, on
+every supported platform: 81 end-to-end scenarios each on Node.js, Deno and
+Bun, 16 inside workerd (the actual Cloudflare Workers runtime), and 57 in
+Python. Every public method of every SDK is covered by at least one test.
 
 ## Getting started
 
@@ -143,16 +147,17 @@ deno run -A app.ts                        # Deno 2 or later
 python app.py                             # Python
 ```
 
-The producer and the worker are typically separate services, often in
-different languages: a Next.js API adds jobs, a Python service processes
-them, against the same queue and the same protocol. Defaults are
-`host: 'localhost'` and `port: 6789`, so constructors need no options on a
-local setup.
+Producer and worker are usually separate services, often in different
+languages — a Next.js API adds jobs, a Python service processes them,
+against the same queue and the same protocol. Constructors default to
+`host: 'localhost'` and `port: 6789`, so no options are needed for a local
+setup.
 
 ## Core capabilities
 
-Failures retry automatically, three attempts by default. Jobs that exhaust
-their retries land in the [dead letter queue](/guide/dlq/), nothing is lost.
+Failures retry automatically — three attempts by default. Jobs that exhaust
+their retries land in the [dead letter queue](/guide/dlq/), so nothing is
+ever silently lost.
 
 ```typescript
 // Priority, delay, custom retry policy
@@ -177,19 +182,19 @@ await queue.retryDlq();
 await queue.getWorkers();
 ```
 
-The full surface is available in every SDK with identical semantics: queries
-with per state helpers, job control (promote, discard, move, update, change
-priority or delay), DLQ management and configuration, schedulers, rate
-limiting, global concurrency, stall configuration, webhooks, and metrics.
-Python exposes the same methods with snake_case names (`add_cron`,
-`add_chain`, `get_job_counts`).
+The full surface is available in every SDK with identical semantics:
+per-state query helpers, job control (promote, discard, move, update,
+change priority or delay), DLQ management and configuration, schedulers,
+rate limiting, global concurrency, stall configuration, webhooks, and
+metrics. Python exposes the same methods with snake_case names —
+`add_cron`, `add_chain`, `get_job_counts`.
 
 ## Simple Mode
 
-`Bunqueue` bundles a Queue and a Worker in a single object, a 1:1 port of
-the official client's [Simple Mode](/guide/simple-mode/): routes, onion
-middleware, in process retry strategies, a circuit breaker, batch
-accumulation, event triggers, job TTL, priority aging, cooperative
+`Bunqueue` bundles a Queue and a Worker into a single object — a 1:1 port
+of the official client's [Simple Mode](/guide/simple-mode/). It brings
+routes, onion middleware, in-process retry strategies, a circuit breaker,
+batch accumulation, event triggers, job TTL, priority aging, cooperative
 cancellation, and deduplication or debounce defaults.
 
 <Tabs>
@@ -250,9 +255,9 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 </TabItem>
 </Tabs>
 
-The only difference from the Bun original: `embedded: true` is not
-available, it requires the in process Bun runtime. Connect to a server
-instead; the option raises a clear error.
+One difference from the Bun original: `embedded: true` is not available —
+it requires the in-process Bun runtime. Connect to a server instead; the
+option raises a clear error if you try.
 
 ## Cloudflare Workers
 
@@ -278,17 +283,17 @@ export default {
 };
 ```
 
-Workers are request scoped, so there is no long lived worker loop: produce
-from fetch handlers, consume in batches from a
-[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/),
-pull, process, acknowledge, return. Both patterns are covered by the SDK's
-16 scenario suite that runs inside workerd, including Simple Mode. Two
-requirements: the server must be reachable from the internet, and TLS
-requires a publicly trusted certificate.
+Workers are request-scoped, so there is no long-lived worker loop. Instead:
+produce from fetch handlers, and consume in batches from a
+[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+— pull, process, acknowledge, return. Both patterns (Simple Mode included)
+are covered by the SDK's 16-scenario suite that runs inside workerd. Two
+requirements apply: the server must be reachable from the internet, and TLS
+needs a publicly trusted certificate.
 
 ## Security
 
-Authentication uses server side tokens, transport security uses native TLS.
+Authentication uses server-side tokens; transport security uses native TLS.
 
 ```typescript
 const queue = new Queue('emails', {
@@ -299,11 +304,11 @@ const queue = new Queue('emails', {
 });
 ```
 
-Start the server with `AUTH_TOKENS` to require authentication and with
-`TLS_CERT_FILE` and `TLS_KEY_FILE` for encrypted transport. The SDKs support
-system certificate authorities, a custom CA bundle, and disabled
-verification for development environments. Full hardening guidance lives in
-the [deployment guide](/guide/deployment/).
+Start the server with `AUTH_TOKENS` to require authentication, and with
+`TLS_CERT_FILE` plus `TLS_KEY_FILE` for encrypted transport. The SDKs
+support system certificate authorities, a custom CA bundle, and disabled
+verification for development. Full hardening guidance lives in the
+[deployment guide](/guide/deployment/).
 
 ## Quality assurance
 
@@ -320,9 +325,10 @@ fresh for each run, on every supported runtime:
 
 Coverage includes payload limits, unicode integrity, pipelining under
 concurrency, server crash and restart with automatic reconnection, lock
-survival for jobs longer than the lock TTL, and a realistic multi queue
-production scenario with zero loss accounting. Browsers are not supported,
-raw TCP sockets are unavailable there: route through your own API instead.
+survival for jobs that outlast the lock TTL, and a realistic multi-queue
+production scenario with zero-loss accounting. Browsers are not supported —
+raw TCP sockets are unavailable there, so route through your own API
+instead.
 
 ## Resources
 

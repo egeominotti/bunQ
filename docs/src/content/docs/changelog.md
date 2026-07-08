@@ -10,6 +10,24 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.27] - 2026-07-08
+
+A security + correctness release. Two TLS fixes reported against 2.8.20 & 2.8.26 (thanks @assantech), plus a client-SDK parity fix. Each ships with a RED→GREEN reproduction test.
+
+### Security — TLS `data`-before-`open` could crash the whole server (#108)
+
+With native TLS enabled, Bun can deliver a socket `data` event before `open` has run (near-deterministic when a Worker boots its connections concurrently). The TCP `data` handler destructured `socket.data` — still null at that point — and the `TypeError` escalated to the process-level unhandledRejection handler, shutting the entire server down. Because the crash happens before authentication, any client that could reach an exposed TLS port could take the broker down (pre-auth remote DoS). Fix: per-socket state is now initialised lazily and idempotently from both `open` and `data` (`initConnection`), preserving that first frame; `close`/`drain` tolerate an uninitialised socket. Plaintext was never affected.
+
+### Security — TLS client never verified the server certificate (#109)
+
+The TCP client's `tls` option was encryption-only: `Bun.connect` does not reject an unauthorized peer client-side, so every variant — including a **wrong pinned CA with `rejectUnauthorized: true`** — still connected. An active MITM could impersonate the broker and harvest the auth token. Fix: verification is enforced in a `handshake` handler using the `authorizationError` Bun computes. Verification is now the default for any TLS connection; only an explicit `rejectUnauthorized: false` opts out (encryption-only). A wrong/absent CA, a self-signed cert under system CAs, or `tls: true` against a self-signed server now reject with `TLS verification failed`. Two implementation details: the pinned CA is read into bytes (not a `Bun.file` handle) so Bun verifies against it, and every TLS connection resolves on `handshake` rather than `open` (registering a `handshake` handler makes Bun fire `open` before the handshake completes).
+
+### Fixed — object-form `backoff` rejected over TCP
+
+`JobOptions.backoff` is typed `number | { type: 'fixed' | 'exponential'; delay }`, and embedded mode has always accepted both forms — but the TCP `PUSH` validator only allowed a plain number, so `queue.add(name, data, { backoff: { type: 'exponential', delay: 200 } })` failed over the wire with `backoff must be a number`. The server now validates and accepts the object form (`type` must be `fixed`/`exponential`, `delay` bounded like the numeric form), restoring embedded/TCP parity. Reported against the client SDKs; RED→GREEN reproduction test included.
+
+Also tightened the `PUSH` wire command type: `repeat` was under-declared (`every`/`limit`/`count` only) while the server consumes the full `JobInput['repeat']` shape (`pattern`, `tz`, `startDate`, `endDate`, …) — typing-only, no runtime change.
+
 ## [2.8.26] - 2026-07-01
 
 A correctness release from an exhaustive feature + extreme-stress audit (every subsystem, embedded **and** TCP). Seven fixes; all pre-existing, none data-loss in normal operation, each shipped with a RED→GREEN reproduction test.

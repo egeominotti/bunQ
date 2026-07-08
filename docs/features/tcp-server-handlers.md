@@ -150,7 +150,7 @@ Environment variables read directly within this module's files:
 
 Resolved-config fields consumed by `bootServer` (sourced from env/CLI/file via `../../config`): `tcpPort` (`TCP_PORT`, 6789), `httpPort` (`HTTP_PORT`, 6790), `hostname` (`HOST`), `authTokens` (`AUTH_TOKENS`), `corsOrigins` (`CORS_ALLOW_ORIGIN`), `requireAuthForMetrics` (`METRICS_AUTH`), `dataPath` (`BUNQUEUE_DATA_PATH`), `tcpSocketPath`/`httpSocketPath`, `tlsCertFile`/`tlsKeyFile` (`TLS_CERT_FILE`/`TLS_KEY_FILE`), `shutdownTimeoutMs` (`SHUTDOWN_TIMEOUT_MS`, 30000), `statsIntervalMs` (`STATS_INTERVAL_MS`), `s3BackupEnabled`. See [Configuration & Entrypoint](./configuration.md) and [Security: TLS, Auth, CORS](./security-tls-auth.md).
 
-Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`.
+Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`. `backoff` accepts either a number (ms) or the object form `{ type: 'fixed'|'exponential', delay }` (`validateBackoffField`) — `type` must be `fixed`/`exponential` and `delay` ≤1day, matching embedded parity; single `PUSH` validates it, `PUSHB` passes the object straight to `parseBackoff`.
 
 ## Related Docs
 

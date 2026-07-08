@@ -132,6 +132,12 @@ Key shapes defined by this layer:
 ### Connect path
 `doConnect` (`client.ts:171`) calls `createConnection` (msgpack over `Bun.connect`, TLS via `buildClientTls`), enables TCP keepalive (`setKeepAlive(true, 15000)`, best-effort, `connection.ts:106`), authenticates via `sendDirect({cmd:'Auth'})` when a token is set, then marks connected and `recordConnected()`. `connect` (`client.ts:130`) resets the reconnect counter, emits `connected`, starts the ping timer, and flushes the queue. Concurrent `connect()` calls dedupe through `waitForConnection` (`client.ts:156`).
 
+### TLS server-certificate verification (#109)
+
+`Bun.connect` does **not** reject an unauthorized peer on the client side — it completes the socket regardless of `ca`/`rejectUnauthorized`. It does, however, compute the peer's authorization result and pass it to the `handshake(socket, success, authorizationError)` callback. `createConnection` enforces it there: `tlsRequiresVerification` (`connection.ts`) treats verification as the default for any TLS connection and only an explicit `rejectUnauthorized: false` opts out (encryption-only). On a required-verification connection a non-null `authorizationError` (wrong/absent CA, self-signed, hostname mismatch) closes the socket and rejects with `TLS verification failed: <reason>`; otherwise the connection resolves.
+
+Two ordering facts drive the implementation: (1) `buildClientTls` reads `caFile` into **bytes** (`readFileSync`) rather than passing a `Bun.file` handle, so Bun computes `authorizationError` against the pinned CA; (2) once a `handshake` handler is registered, Bun fires `open` **before** the TLS handshake completes (without one, `open` fires only after). So for every TLS connection the resolve is gated on `handshake`, not `open` — resolving in `open` would let the pool write its first command onto a socket whose handshake is still in flight and lose the bytes. Plaintext has no handshake event and still resolves in `open`.
+
 ### Reconnect path
 On close/error/forced teardown, `scheduleReconnect` (`reconnect.ts:79`) increments `reconnectAttempts`, emits `maxReconnectAttemptsReached` (and stops) once it exceeds `maxReconnectAttempts`, else computes `baseDelay = min(reconnectDelay * 2^(attempt-1), maxReconnectDelay)` plus `Math.random()*0.3*baseDelay` jitter, emits `reconnecting`, and arms a single timer (guards against double-scheduling via `reconnectTimer`/`closed`).
 

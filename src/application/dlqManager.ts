@@ -16,7 +16,9 @@ import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 export interface DlqContext {
   shards: Shard[];
   jobIndex: Map<JobId, JobLocation>;
-  storage?: SqliteStorage | null;
+  // Required (nullable): see LockContext.storage — an optional field lets a
+  // builder silently drop persistence (#110-class bug).
+  storage: SqliteStorage | null;
 }
 
 /** Get jobs from DLQ (backward compatible) */

@@ -10,6 +10,18 @@ head:
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.28] - 2026-07-09
+
+### Fixed — lock-expiry DLQ move was never persisted to SQLite (#110, root cause of #97's re-repros)
+
+The #97 fix (2.8.17) added `saveDlqEntry` + `deleteJob` persistence to `handleMaxStallsExceeded`, but the periodic lock sweep — the **only** production caller of `checkExpiredLocks` — builds its context with a file-local `getLockContext` that omitted `storage`. Both persistence calls silently no-op'd through optional chaining (`ctx.storage?.…` with `storage: undefined`), so a job failed via lock expiry (frozen worker + `maxStalls` reached) left an orphan `state="active"` row in the `jobs` table while its DLQ entry existed only in memory. A restart between the failure and a retry lost the real DLQ entry (failure reason, timestamps, attempt history); startup recovery could only fabricate a generic stalled entry from the orphan row. This is why #97 kept re-reproducing across 2.8.18 → 2.8.27 despite the mover itself being correct — and it also no-op'd the orphan-row cleanup for expired `preventOverlap` cron jobs on the same path.
+
+Fix: `getLockContext` now carries `storage: ctx.storage` (one line — exactly as diagnosed in the issue report, which traced it to the line and validated the patch RED→GREEN against the installed dist; thank you). The regression test goes through the real background-interval path and asserts **SQLite residency** (the `dlq` row exists, the `jobs` row is gone) rather than the in-memory view that had masked the bug in the existing lock-expiration tests.
+
+### Fixed — embedded `retryDlqByFilter` never persisted (found by the #110 hardening)
+
+Making `storage` a **required (nullable)** field on `LockContext`/`DlqContext`/`QueueControlContext` — the reporter's third suggestion, so a forgotten dependency is a compile error instead of silent data loss — immediately surfaced a second instance of the same class: the embedded client's `getDlqContext` (`src/client/queue/helpers.ts`) also omitted `storage`. Embedded `queue.retryDlqByFilter(filter)` therefore re-queued jobs in memory only: the `dlq` row was never deleted (the job resurrected into the DLQ on restart) and the re-queued `jobs` row was never inserted (the retried job did not survive a restart). Both persistence calls now execute; regression test asserts SQLite residency through the public embedded API.
+
 ## [2.8.27] - 2026-07-08
 
 A security + correctness release. Two TLS fixes reported against 2.8.20 & 2.8.26 (thanks @assantech), plus a client-SDK parity fix. Each ships with a RED→GREEN reproduction test.

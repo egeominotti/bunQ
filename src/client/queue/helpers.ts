@@ -7,15 +7,17 @@ import type { getSharedManager } from '../manager';
 import { shardIndex } from '../../shared/hash';
 import type { Shard } from '../../domain/queue/shard';
 import type { DlqFilter, DlqConfig as DomainDlqConfig } from '../../domain/types/dlq';
+import type { SqliteStorage } from '../../infrastructure/persistence';
 import type { DlqFilter as ClientDlqFilter } from '../types';
 import type * as dlqOps from '../../application/dlqManager';
 
 /** Check if embedded mode should be forced (for tests) */
 export const FORCE_EMBEDDED = Bun.env.BUNQUEUE_EMBEDDED === '1';
 
-/** Internal type for accessing manager internals (shards is private) */
+/** Internal type for accessing manager internals (shards/storage are private) */
 interface ManagerInternals {
   shards: Shard[];
+  storage: SqliteStorage | null;
 }
 
 /** Extract shards from manager (embedded mode only, accesses private property) */
@@ -34,6 +36,10 @@ export function getDlqContext(manager: ReturnType<typeof getSharedManager>): dlq
   return {
     shards: getShards(manager),
     jobIndex: manager.getJobIndex(),
+    // #110-class: without storage, retryDlqByFilter's deleteDlqEntry/insertJob
+    // silently no-op — filtered retries were never persisted in embedded mode
+    // (dlq rows resurrected the jobs into the DLQ on restart).
+    storage: (manager as unknown as ManagerInternals).storage,
   };
 }
 

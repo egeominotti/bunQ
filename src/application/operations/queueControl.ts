@@ -18,7 +18,9 @@ export interface QueueControlContext {
   completedJobsData?: MapLike<JobId, Job>;
   jobResults?: MapLike<JobId, unknown>;
   jobLogs?: MapLike<JobId, unknown>;
-  storage?: SqliteStorage | null;
+  // Required (nullable): see LockContext.storage — an optional field lets a
+  // builder silently drop persistence (#110-class bug).
+  storage: SqliteStorage | null;
 }
 
 /** Pause a queue */

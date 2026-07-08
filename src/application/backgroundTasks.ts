@@ -133,6 +133,12 @@ function getLockContext(ctx: BackgroundContext): LockContext {
     shardLocks: ctx.shardLocks,
     eventsManager: ctx.eventsManager,
     dashboardEmit: ctx.dashboardEmit,
+    // #110: without storage, handleMaxStallsExceeded's saveDlqEntry/deleteJob
+    // (the #97 fix) silently no-op via optional chaining on the ONLY
+    // production path to checkExpiredLocks — the DLQ move never persists and
+    // SQLite keeps an orphan `active` row. LockContext.storage is optional,
+    // which is why this omission compiled unnoticed since 2.8.17.
+    storage: ctx.storage,
   };
 }
 

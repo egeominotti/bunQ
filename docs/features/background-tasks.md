@@ -137,7 +137,7 @@ The stall and lock-expiry intervals additionally drive `job:stalled` / `job:lock
 See [data-model](../data-model.md) for full definitions. The most relevant shapes:
 
 - `BackgroundContext` (`src/application/types.ts:109`) extends `QueueManagerState` and adds the callbacks/collections the tasks need: `fail(jobId, error?)`, `registerQueueName`/`unregisterQueueName`, `dashboardEmit`, `workerManager`, `monitoringState`, `completedJobsData: BoundedMap<JobId, Job>`, `depCompletions?: BoundedSet<JobId>` (bare ids of `removeOnComplete` parents), and `timedOutJobs?: BoundedSet<JobId>` (guard against late ACKs from timed-out workers).
-- `LockContext` (`src/application/types.ts:95`) — narrowed view passed to `checkExpiredLocks`, built by `getLockContext` (`backgroundTasks.ts:125`).
+- `LockContext` (`src/application/types.ts:95`) — narrowed view passed to `checkExpiredLocks`, built by `getLockContext` (`backgroundTasks.ts:125`). It MUST carry `storage: ctx.storage`: this is the only production path to `checkExpiredLocks`, and without it the `saveDlqEntry`/`deleteJob` persistence inside `handleMaxStallsExceeded` silently no-ops through optional chaining (issue #110 — the #97 fix never executed on this path from 2.8.17 to 2.8.27, leaving orphan `active` rows in SQLite and memory-only DLQ entries).
 - `DEFAULT_CONFIG` (`src/application/types.ts:33`) — the interval defaults (see [Configuration](#configuration)).
 - `Job` — fields read/written by these tasks: `timeout`, `startedAt`, `lastHeartbeat`, `stallCount`, `attempts`, `runAt`, `dependsOn`, `uniqueKey`, `customId`, `deduplicationTtl`, `timeline`.
 - `TaskErrorState` / `MonitoringState` — module-local tracking shapes shown above.

@@ -190,7 +190,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:88–96
    - Otherwise: `attempts++`, `startedAt = null`, `stallCount++`. If `stallCount >= maxStalls` → `handleMaxStallsExceeded` (DLQ), else `requeueExpiredJob`.
    - Delete the lock and emit `job:lock-expired`.
 
-`handleMaxStallsExceeded` (lockManager.ts:167) calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-INSERTs it, throwing `UNIQUE constraint failed: jobs.id` (#97, lockManager.ts:182–185). `requeueExpiredJob` (lockManager.ts:208) releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
+`handleMaxStallsExceeded` (lockManager.ts:167) calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-INSERTs it, throwing `UNIQUE constraint failed: jobs.id` (#97, lockManager.ts:182–185). Those two writes only execute if the caller's `LockContext` carries `storage`: the background sweep's `getLockContext` (backgroundTasks.ts) omitted it until #110, so the persistence silently no-op'd on the only production path (`LockContext.storage` is optional — the omission compiled unnoticed). `requeueExpiredJob` (lockManager.ts:208) releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
 
 ### `checkStalledJobs` (two-phase stall detection)
 

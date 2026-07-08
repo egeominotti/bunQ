@@ -102,7 +102,11 @@ export interface LockContext {
   shardLocks: RWLock[];
   eventsManager: EventsManager;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
-  storage?: SqliteStorage | null;
+  // REQUIRED (nullable), not optional: a forgotten `storage` in a context
+  // builder silently no-ops every `ctx.storage?.…` persistence call — exactly
+  // how #110 hid the #97 fix for ten releases. In-memory mode passes `null`
+  // explicitly; forgetting the field is now a compile error.
+  storage: SqliteStorage | null;
 }
 
 /** Context for background tasks */

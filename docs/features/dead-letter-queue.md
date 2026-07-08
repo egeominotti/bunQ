@@ -67,7 +67,7 @@ class DlqShard {
 
 ### Application functions (`src/application/dlqManager.ts`)
 
-`getDlqJobs`, `getDlqEntries`, `getDlqStats`, `retryDlqJob`, `retryDlqJobs`, `retryDlqByFilter`, `processAutoRetry`, `purgeExpiredDlq`, `purgeDlqJobs`, `configureDlq`, `getDlqConfig`, `retryCompletedJobs` — all take a `DlqContext { shards, jobIndex, storage }` (or `RetryCompletedContext`).
+`getDlqJobs`, `getDlqEntries`, `getDlqStats`, `retryDlqJob`, `retryDlqJobs`, `retryDlqByFilter`, `processAutoRetry`, `purgeExpiredDlq`, `purgeDlqJobs`, `configureDlq`, `getDlqConfig`, `retryCompletedJobs` — all take a `DlqContext { shards, jobIndex, storage }` (or `RetryCompletedContext`). `storage` is **required (nullable)**, not optional: every builder must pass it (or an explicit `null` for in-memory mode), because a forgotten field silently no-ops the `storage?.…` persistence calls — the embedded client's `getDlqContext` (`src/client/queue/helpers.ts`) omitted it until the #110 hardening, so embedded `retryDlqByFilter` never persisted (dlq row survived, requeued job unsaved).
 
 ### Domain helpers (`src/domain/types/dlq.ts`)
 

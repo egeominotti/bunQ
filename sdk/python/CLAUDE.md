@@ -33,6 +33,8 @@ by design: they require the in-process Bun runtime).
 | `worker.py` | Worker lifecycle: start/run/pause/close, events |
 | `worker_runtime.py` | Worker runtime mixin: poll loop, job execution, heartbeats, registry |
 | `flow.py` | FlowProducer: tree/chain/fan-in, UpdateParent, rollback |
+| `simple/app.py` + `simple/app_api.py` | `Bunqueue` Simple Mode: constructor + processing pipeline, API mixin |
+| `simple/{retry,circuit_breaker,batch,triggers,aging,cancellation,ttl,dedup_debounce}.py` | Simple Mode subsystems, 1:1 with `src/client/bunqueue/` |
 
 ## Wire protocol (VITAL gotchas)
 

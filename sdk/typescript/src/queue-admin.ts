@@ -206,7 +206,8 @@ export const adminMethods = {
   },
 
   async setWebhookEnabled(this: Ctx, webhookId: string, enabled: boolean): Promise<void> {
-    await this.call({ cmd: 'SetWebhookEnabled', webhookId, enabled });
+    // wire field is `id` (SetWebhookEnabledCommand), unlike RemoveWebhook's `webhookId`
+    await this.call({ cmd: 'SetWebhookEnabled', id: webhookId, enabled });
   },
 };
 

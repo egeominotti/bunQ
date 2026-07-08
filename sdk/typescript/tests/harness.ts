@@ -8,7 +8,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -79,12 +79,26 @@ function freePort(): Promise<number> {
   });
 }
 
+const tempDirs: string[] = [];
+
+/** Best-effort removal of every temp data dir created by startServer. */
+export function cleanTempDirs(): void {
+  for (const dir of tempDirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 export async function startServer(extraEnv: Record<string, string> = {}): Promise<{
   port: number;
   proc: ChildProcess;
 }> {
   const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), 'bunqueue-ts-e2e-'));
+  tempDirs.push(dataDir);
   const proc = spawn('bun', ['src/main.ts'], {
     cwd: REPO_ROOT,
     env: {
@@ -160,7 +174,25 @@ export async function runSuite(): Promise<void> {
     }
   } finally {
     proc.kill();
+    cleanTempDirs();
   }
   console.log(`\n${tests.length - failed}/${tests.length} passed`);
   process.exit(failed > 0 ? 1 : 0);
+}
+
+/** Raw PULL: returns the job id and its lock token (undefined on lingering-lock reuse). */
+export async function pullOne(
+  queue: InstanceType<typeof Queue>,
+  owner: string
+): Promise<{ id: string; token: string | undefined }> {
+  const response = await queue.connection.call({
+    cmd: 'PULL',
+    queue: queue.name,
+    owner,
+    timeout: 2000,
+  });
+  const job = response.job as { id: string } | null;
+  if (!job) throw new Error('expected a job from PULL');
+  const token = response.token == null ? undefined : String(response.token);
+  return { id: String(job.id), token };
 }

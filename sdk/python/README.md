@@ -63,6 +63,12 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
   `UnrecoverableError` to skip retries
 - **FlowProducer**: `add` (parent/child trees), `add_bulk`, `add_chain`
   (sequential), `add_bulk_then` (fan-in), `get_flow`, atomic rollback
+- **Simple Mode** (`Bunqueue`): Queue + Worker in one object — routes,
+  onion middleware, in-process retry (fixed/exponential/jitter/fibonacci/
+  custom + `retry_if`), circuit breaker, batch accumulation, event triggers,
+  job TTL, priority aging, cooperative cancellation (`get_signal`),
+  dedup/debounce defaults, cron shorthands — 1:1 with the official client
+  (TCP mode; `embedded` raises)
 - **Connection**: auth token, TLS (`tls=True`, `{"ca_file": ...}`,
   `{"verify": False}`), pipelining, lazy reconnect
 

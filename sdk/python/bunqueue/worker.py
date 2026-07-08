@@ -77,9 +77,24 @@ class Worker(EventEmitter, WorkerRuntime):
         self._run_thread: Optional[threading.Thread] = None
         self._processed = 0
         self._failed = 0
+        self._registered_generation = -1
 
         if autorun:
             self.start()
+
+    def on(self, event: str, listener) -> "Worker":  # type: ignore[override]
+        """Like EventEmitter.on, but replays 'ready' to late listeners.
+
+        With autorun the loop starts inside the constructor, so a listener
+        attached right after construction could otherwise miss the event.
+        """
+        if event == "ready" and self._ready.is_set():
+            try:
+                listener()
+            except Exception:  # noqa: BLE001 - listener errors must not propagate
+                pass
+        super().on(event, listener)
+        return self
 
     # -------------------------------------------------------------- lifecycle
 

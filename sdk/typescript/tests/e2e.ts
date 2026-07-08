@@ -15,6 +15,9 @@ import './e2e-flow.ts';
 import './e2e-admin.ts';
 import './e2e-edge.ts';
 import './e2e-scenario.ts';
+import './e2e-api.ts';
+import './e2e-simple.ts';
+import './e2e-simple-extras.ts';
 import './e2e-auth.ts';
 
 import { runSuite } from './harness.ts';

@@ -8,11 +8,11 @@ The bunqueue server runs on Bun, distributed as a binary or a Docker image. This
 
 | Runtime | Status | Notes |
 |---|---|---|
-| Node.js 20 or later | Supported, 58/58 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
-| Bun | Supported, 58/58 e2e and 8/8 integration tests | No additional configuration required |
-| Deno 2 or later | Supported, 58/58 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
+| Node.js 20 or later | Supported, 81/81 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
+| Bun | Supported, 81/81 e2e and 8/8 integration tests | No additional configuration required |
+| Deno 2 or later | Supported, 81/81 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
 | tsx, ts-node, vitest, jest | Supported | These environments execute on Node.js |
-| Cloudflare Workers | Supported, 11/11 e2e tests inside workerd | Requires the `nodejs_compat` compatibility flag. The runtime is request scoped, so long lived worker loops are not available: consume in batches from Cron Triggers or Durable Object alarms, a pattern covered by the test suite. TLS connections require a publicly trusted certificate |
+| Cloudflare Workers | Supported, 16/16 e2e tests inside workerd, including Simple Mode and the full API surface | Requires the `nodejs_compat` compatibility flag. The runtime is request scoped, so long lived worker loops are not available: consume in batches from Cron Triggers or Durable Object alarms, a pattern covered by the test suite. TLS connections require a publicly trusted certificate |
 | Browser | Not supported | Raw TCP sockets are unavailable. Use the server HTTP API instead |
 
 Portability is guaranteed by design: the client relies exclusively on `node:*` builtins (`net`, `tls`, `events`, `crypto`, `os`), uses no `Bun.*` globals and no runtime specific imports, and carries a single runtime dependency, `msgpackr`.
@@ -24,15 +24,37 @@ npm install bunqueue-client
 # or: bun add bunqueue-client / pnpm add bunqueue-client / deno add npm:bunqueue-client
 ```
 
-## Quick start
+## Quick start, step by step
 
-Sixty seconds from zero to a working queue. Step 1, start the server (requires [Bun](https://bun.sh), or use the Docker image):
+Every step from zero to a production ready queue.
+
+### Step 1. Run the bunqueue server
+
+The server is the only component that requires [Bun](https://bun.sh). Pick one:
 
 ```bash
+# Option A: one command, no install (requires Bun)
 bunx bunqueue start
+
+# Option B: Docker, with persistent data
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
 ```
 
-Step 2, create `app.ts`: add a job and process it, in the same file for the sake of the demo:
+Port 6789 is the TCP protocol (what this client uses), port 6790 is the HTTP API with `/health`, `/metrics`, and dashboard endpoints.
+
+### Step 2. Install the client
+
+```bash
+npm install bunqueue-client
+# or: bun add bunqueue-client / pnpm add bunqueue-client / deno add npm:bunqueue-client
+```
+
+### Step 3. Add your first job and process it
+
+Create `app.ts`, one file for the sake of the demo:
 
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
@@ -51,7 +73,7 @@ await queue.add('greet', { name: 'world' });
 queue.close();
 ```
 
-Step 3, run it with the runtime you already use:
+Run it with the runtime you already use:
 
 ```bash
 node --experimental-strip-types app.ts    # Node 22 or later
@@ -66,7 +88,53 @@ processing { name: 'world' }
 completed 019f40a5-... { greeted: 'world' }
 ```
 
-That is the whole model: the server owns state, retries, and scheduling, your code only adds and processes. In production the producer and the worker are separate services, often in different languages: the [Python client](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) speaks the same protocol against the same queue. Defaults are `host: 'localhost'`, `port: 6789`, so constructors need no options on a local setup.
+Defaults are `host: 'localhost'` and `port: 6789`, so constructors need no options on a local setup.
+
+### Step 4. Split producer and worker
+
+In production the producer and the worker are separate services, often in different languages. The producer is typically an API endpoint:
+
+```typescript
+// api-service: adds jobs, no processing
+import { Queue } from 'bunqueue-client';
+const queue = new Queue('emails', { host: 'queue.internal', port: 6789 });
+await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
+```
+
+The worker is a long running process:
+
+```typescript
+// worker-service: processes jobs, no HTTP
+import { Worker } from 'bunqueue-client';
+new Worker('emails', sendEmail, { host: 'queue.internal', port: 6789, concurrency: 10 });
+```
+
+The [Python client](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) speaks the same protocol against the same queue, so the worker can be a Python service instead.
+
+### Step 5. Observe and operate
+
+```typescript
+await queue.getJobCounts();      // { waiting, active, completed, failed, delayed, ... }
+await queue.getDlq();            // jobs that exhausted their retries
+await queue.retryDlq();          // send them back to the queue
+await queue.getWorkers();        // connected workers
+await queue.getStats();          // throughput and totals
+```
+
+Or hit the HTTP side: `curl http://localhost:6790/health`.
+
+### Step 6. Go to production
+
+```typescript
+const queue = new Queue('emails', {
+  host: 'queue.example.com',
+  port: 6789,
+  token: process.env.BUNQUEUE_TOKEN,   // server started with AUTH_TOKENS=...
+  tls: true,                            // or { caFile: './ca.pem' }
+});
+```
+
+Checklist: set `AUTH_TOKENS` on the server, enable TLS (`TLS_CERT_FILE`/`TLS_KEY_FILE`), mount a volume for the SQLite data path, monitor `/health` and `/metrics`, and size worker `concurrency` to your workload. Full guide: [bunqueue.dev/guide/deployment](https://bunqueue.dev/guide/deployment/).
 
 ## Producing jobs
 
@@ -142,6 +210,47 @@ const node = await flow.add({
 });
 ```
 
+## Simple Mode
+
+`Bunqueue` bundles a Queue and a Worker in one object, with routes, onion middleware, in process retry strategies, a circuit breaker, batch accumulation, event triggers, job TTL, priority aging, cooperative cancellation, and dedup or debounce defaults. It is a 1:1 port of the official client's Simple Mode, TCP only (the `embedded` option raises).
+
+```typescript
+import { Bunqueue, type Job } from 'bunqueue-client';
+
+const app = new Bunqueue('notifications', {
+  connection: { host: 'localhost', port: 6789 },
+  concurrency: 10,
+  routes: {
+    'send-email': async (job: Job<{ to: string }>) => ({ channel: 'email' }),
+    'send-sms': async (job: Job<{ to: string }>) => ({ channel: 'sms' }),
+  },
+  retry: { maxAttempts: 5, delay: 1000, strategy: 'jitter' },
+  circuitBreaker: { threshold: 5, resetTimeout: 30_000 },
+  ttl: { perName: { 'verify-otp': 60_000 } },
+  deduplication: { ttl: 5000 },
+});
+
+app.use(async (job, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${job.name}: ${Date.now() - start}ms`);
+  return result;
+});
+
+app.trigger({
+  on: 'send-email',
+  create: 'send-sms',
+  data: (result, job) => job.data,
+  condition: (result) => (result as { channel: string }).channel === 'email',
+});
+
+await app.cron('daily-digest', '0 9 * * *', { to: 'all' });
+await app.add('send-email', { to: 'alice@example.com' });
+// later: await app.close();
+```
+
+Use `processor` for a single handler, `routes` to dispatch by job name, or `batch` to accumulate N jobs into one call. Exactly one of the three is required.
+
 ## Scheduling
 
 ```typescript
@@ -173,6 +282,7 @@ Authentication uses server side tokens (`AUTH_TOKENS`). Transport security uses 
 | Dead letter queue | `getDlq`, `retryDlq`, `purgeDlq`, DLQ configuration |
 | Administration | rate limiting, global concurrency, stall configuration, webhooks, stats, metrics, `listQueues`, `getWorkers` |
 | Worker events | `ready`, `active`, `completed`, `failed`, `progress`, `drained`, `error`, `closed`, with automatic lock heartbeats so that jobs longer than the lock TTL survive |
+| Simple Mode | `Bunqueue`: routes, middleware, in process retry (fixed, exponential, jitter, fibonacci, custom), circuit breaker, batch accumulation, triggers, TTL, priority aging, cancellation via `getSignal`, dedup and debounce defaults, cron shorthands |
 
 The following features require the in process Bun runtime and are intentionally out of scope for this client: embedded mode, sandboxed workers, and `QueueEvents`. Use webhooks or the HTTP SSE and WebSocket endpoints for event streaming.
 

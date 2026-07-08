@@ -1,6 +1,6 @@
 {
   "name": "bunqueue-client",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Cross-runtime TypeScript client for the bunqueue job queue server \u2014 Node.js, Bun, Deno and Cloudflare Workers",
   "license": "MIT",
   "type": "module",
@@ -29,7 +29,7 @@
     "lint": "biome lint src tests",
     "format": "biome format --write src tests",
     "check": "biome check src tests",
-    "test:workers": "bun pm pack --destination tests/workers && cd tests/workers && mv bunqueue-client-*.tgz bunqueue-client.tgz && bun install && node run.mjs"
+    "test:workers": "bun pm pack --destination tests/workers && cd tests/workers && mv bunqueue-client-*.tgz bunqueue-client.tgz && rm -rf node_modules/bunqueue-client bun.lock && bun install --force && node run.mjs"
   },
   "keywords": [
     "queue",

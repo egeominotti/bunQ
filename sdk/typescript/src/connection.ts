@@ -6,9 +6,7 @@
  * builtins (net/tls), which Node, Bun and Deno all support.
  */
 
-import { readFileSync } from 'node:fs';
-import { connect as netConnect, type Socket } from 'node:net';
-import { type ConnectionOptions as TlsConnectOptions, connect as tlsConnect } from 'node:tls';
+import type { Socket } from 'node:net';
 import { pack, unpack } from 'msgpackr';
 import type {
   Command,
@@ -19,6 +17,7 @@ import type {
 } from './connection-types.js';
 import { AuthError, CommandError, CommandTimeoutError, ConnectionClosedError } from './errors.js';
 import { compact, FrameParser, frame, PROTOCOL_VERSION } from './frame.js';
+import { openSocket } from './socket-factory.js';
 
 export type { Command, ConnectionOptions, Response, TlsOption } from './connection-types.js';
 
@@ -38,6 +37,9 @@ export class Connection {
   private pending = new Map<string, Pending>();
   private reqCounter = 0;
   private parser = new FrameParser();
+  private connectGeneration = 0;
+  private failedAttempts = 0;
+  private nextAttemptAt = 0;
 
   constructor(options: ConnectionOptions = {}) {
     this.host = options.host ?? 'localhost';
@@ -52,19 +54,47 @@ export class Connection {
     return this.connected;
   }
 
+  /**
+   * Monotonic counter, incremented on every successful (re)connect. Consumers
+   * that hold per-connection server state (e.g. a Worker registration) compare
+   * it between operations and re-establish that state after a reconnect.
+   */
+  get generation(): number {
+    return this.connectGeneration;
+  }
+
   /** Open the socket (and authenticate) if not already connected. */
   async connect(): Promise<void> {
     if (this.connected) return;
     if (this.closed) throw new ConnectionClosedError('connection closed by client');
+    // Fast-fail while inside the reconnect backoff window: without this, a
+    // producer calling add() against a downed server pays the full connect
+    // timeout on EVERY call (reconnect storm).
+    if (Date.now() < this.nextAttemptAt) {
+      throw new ConnectionClosedError(
+        `server unreachable, retry in ${this.nextAttemptAt - Date.now()}ms`
+      );
+    }
     if (this.connecting) return this.connecting;
-    this.connecting = this.doConnect().finally(() => {
-      this.connecting = null;
-    });
+    this.connecting = this.doConnect()
+      .then(() => {
+        this.failedAttempts = 0;
+        this.nextAttemptAt = 0;
+      })
+      .catch((err) => {
+        this.failedAttempts += 1;
+        const backoff = Math.min(500 * 2 ** (this.failedAttempts - 1), 5000);
+        this.nextAttemptAt = Date.now() + backoff;
+        throw err;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
     return this.connecting;
   }
 
   private async doConnect(): Promise<void> {
-    const socket = await this.openSocket();
+    const socket = await openSocket(this.host, this.port, this.tls, this.connectTimeoutMs);
     socket.setNoDelay(true);
     this.parser.clear();
     this.socket = socket;
@@ -74,6 +104,7 @@ export class Connection {
     socket.on('close', () => this.teardown());
 
     this.connected = true;
+    this.connectGeneration += 1;
 
     if (this.token) {
       try {
@@ -84,45 +115,6 @@ export class Connection {
         throw err;
       }
     }
-  }
-
-  private openSocket(): Promise<Socket> {
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        socket.destroy();
-        reject(new ConnectionClosedError(`connect timeout to ${this.host}:${this.port}`));
-      }, this.connectTimeoutMs);
-
-      const onError = (err: Error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(new ConnectionClosedError(`connect failed: ${err.message}`));
-      };
-      const onReady = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        socket.off('error', onError);
-        resolve(socket);
-      };
-
-      let socket: Socket;
-      if (this.tls) {
-        const tlsOpts: TlsConnectOptions = { host: this.host, port: this.port };
-        if (typeof this.tls === 'object') {
-          if (this.tls.caFile) tlsOpts.ca = readFileSync(this.tls.caFile);
-          if (this.tls.rejectUnauthorized === false) tlsOpts.rejectUnauthorized = false;
-        }
-        socket = tlsConnect(tlsOpts, onReady);
-      } else {
-        socket = netConnect({ host: this.host, port: this.port }, onReady);
-      }
-      socket.on('error', onError);
-    });
   }
 
   /**

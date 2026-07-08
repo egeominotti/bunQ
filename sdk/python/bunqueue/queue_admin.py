@@ -154,7 +154,8 @@ class QueueAdminOps:
         return list(response.get("webhooks") or [])
 
     def set_webhook_enabled(self, webhook_id: str, enabled: bool) -> None:
-        self.connection.call({"cmd": "SetWebhookEnabled", "webhookId": webhook_id, "enabled": enabled})
+        # wire field is `id` (SetWebhookEnabledCommand), unlike RemoveWebhook's `webhookId`
+        self.connection.call({"cmd": "SetWebhookEnabled", "id": webhook_id, "enabled": enabled})
 
     # ------------------------------------------------------------- monitoring
 

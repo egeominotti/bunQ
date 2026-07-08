@@ -84,6 +84,19 @@ const CHECKS = {
   '/flows': (r) => r.chainLength === 3 && r.children === 2 && r.parentWaitsChildren === true,
   '/cron': (r) => r.listed === true && r.spawned >= 1 && r.removed === true,
   '/auth': (r) => r.authedAdd === true && r.unauthedRejected === true,
+  '/api-moves': (r) =>
+    r.failedState === 'failed' && r.completedState === 'completed' && r.dlqAfter === 0,
+  '/api-job-methods': (r) =>
+    r.delayed === 'delayed' && r.promotedOk === true && r.dataV === 2 && r.priority === 42,
+  '/api-children': (r) => r.surfaced >= 1 && r.childDetached === true,
+  '/api-admin-extras': (r) => r.schedulers === 1 && r.disabled === true,
+  '/simple-mode': (r) =>
+    r.settled === true &&
+    r.middlewareRan === true &&
+    r.receipt === 99 &&
+    r.retried === 3 &&
+    r.recovered === true &&
+    r.circuit === 'closed',
 };
 
 const main = await startServer();

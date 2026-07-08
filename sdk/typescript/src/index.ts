@@ -3,6 +3,27 @@
  * Works on Node.js ≥20, Bun and Deno ≥2 (uses only node: builtins + msgpackr).
  */
 
+// Simple Mode (Bunqueue): all-in-one Queue + Worker, 1:1 with the official client
+export { Bunqueue } from './bunqueue/bunqueue.js';
+export type { DlqFilter, DlqStats } from './bunqueue/dlq-rate-limit.js';
+export type {
+  BatchConfig,
+  BatchProcessor,
+  BunqueueConnection,
+  BunqueueDebounceConfig,
+  BunqueueDeduplicationConfig,
+  BunqueueDlqConfig,
+  BunqueueMiddleware,
+  BunqueueOptions,
+  CircuitBreakerConfig,
+  CircuitState,
+  JobTtlConfig,
+  PriorityAgingConfig,
+  RateLimiterOptions,
+  RetryConfig,
+  RetryStrategy,
+  TriggerRule,
+} from './bunqueue/types.js';
 export type { Command, ConnectionOptions, Response, TlsOption } from './connection.js';
 export { Connection } from './connection.js';
 export {
@@ -38,4 +59,4 @@ export type {
 export { Worker } from './worker.js';
 export type { Processor, WorkerOptions } from './worker-types.js';
 
-export const __version__ = '0.1.0';
+export const __version__ = '0.1.2';

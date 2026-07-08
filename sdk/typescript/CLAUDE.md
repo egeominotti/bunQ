@@ -38,9 +38,10 @@ by design: they require the in-process Bun runtime).
 | `src/queue-query.ts` / `src/queue-control.ts` / `src/queue-admin.ts` | Queue area modules merged onto the prototype |
 | `src/worker-base.ts` / `src/worker.ts` / `src/worker-types.ts` | Worker: lifecycle+cancel base, PULLB loop, heartbeats, events, options |
 | `src/flow.ts` / `src/flow-types.ts` | FlowProducer: tree/chain/fan-in, UpdateParent, rollback |
+| `src/bunqueue/*.ts` | Simple Mode (`Bunqueue`): 1:1 port of `src/client/bunqueue*` — core+api (prototype merge), retry, circuit-breaker, batch, triggers, aging, cancellation, ttl, dedup-debounce, dlq-rate-limit, rate-gate |
 | `tests/harness.ts` | Shared registry/asserts/server fixture/runner |
 | `tests/integration.ts` | Smoke suite (8 tests, own entrypoint) |
-| `tests/e2e.ts` | E2e entrypoint importing `e2e-{query,control,worker,flow,admin,auth}.ts` (47 tests) |
+| `tests/e2e.ts` | E2e entrypoint importing `e2e-{query,control,worker,flow,admin,edge,scenario,simple,simple-extras,auth}.ts` (72 tests) |
 
 ## Wire protocol (VITAL gotchas)
 

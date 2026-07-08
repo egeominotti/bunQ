@@ -2,6 +2,7 @@
  * Runs inside workerd (the real Cloudflare Workers runtime) via wrangler. */
 
 import { auth, consumeBatch, cron, dlqRoundtrip, flows } from './routes-advanced.ts';
+import { apiAdminExtras, apiChildren, apiJobMethods, apiMoves } from './routes-api.ts';
 import {
   addAndQuery,
   bigPayload,
@@ -11,6 +12,7 @@ import {
   pipeline,
   unicodePayload,
 } from './routes-basic.ts';
+import { simpleMode } from './routes-simple.ts';
 
 type Route = (env: Env) => Promise<Record<string, unknown>>;
 
@@ -26,6 +28,11 @@ const ROUTES: Record<string, Route> = {
   '/flows': flows,
   '/cron': cron,
   '/auth': auth,
+  '/api-moves': apiMoves,
+  '/api-job-methods': apiJobMethods,
+  '/api-children': apiChildren,
+  '/api-admin-extras': apiAdminExtras,
+  '/simple-mode': simpleMode,
 };
 
 export default {

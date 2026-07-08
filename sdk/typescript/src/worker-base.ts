@@ -31,8 +31,10 @@ export class WorkerBase extends EventEmitter {
   protected failedCount = 0;
   protected readyPromise: Promise<void>;
   protected readyResolve: (() => void) | null = null;
+  protected readyFired = false;
   protected loopPromise: Promise<void> | null = null;
   protected heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  protected registeredGeneration = -1;
 
   constructor(queue: string, opts: WorkerOptions = {}) {
     super();
@@ -81,6 +83,24 @@ export class WorkerBase extends EventEmitter {
   }
 
   /**
+   * 'ready' is replayed to listeners attached after it fired: with autorun the
+   * loop starts inside the constructor, so a plain once-only event could be
+   * missed by `new Worker(...).on('ready', ...)` patterns.
+   */
+  override on(event: string | symbol, listener: (...args: unknown[]) => void): this {
+    if (event === 'ready' && this.readyFired) listener();
+    return super.on(event, listener);
+  }
+
+  override once(event: string | symbol, listener: (...args: unknown[]) => void): this {
+    if (event === 'ready' && this.readyFired) {
+      listener();
+      return this;
+    }
+    return super.once(event, listener);
+  }
+
+  /**
    * Cooperative cancel of a locally active job (mirrors the official client):
    * marks the job and emits 'cancelled'; the processor is expected to check
    * isJobCancelled() and abort. Returns false if the job is not active here.
@@ -105,17 +125,23 @@ export class WorkerBase extends EventEmitter {
     return this.cancelledJobs.has(jobId);
   }
 
-  /** Graceful shutdown: stop pulling, wait for in-flight jobs. */
-  async close(): Promise<void> {
+  /** Graceful shutdown: stop pulling, wait for in-flight jobs.
+   * With `force` the wait for in-flight jobs is skipped (parity with the
+   * official client's `close(force)`). */
+  async close(force = false): Promise<void> {
     if (this.closedFlag) return;
     this.stopped = true;
     if (this.loopPromise) await this.loopPromise;
-    while (this.active.size > 0) await sleep(20);
+    while (!force && this.active.size > 0) await sleep(20);
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
-    await this.safeCall({ cmd: 'UnregisterWorker', workerId: this.workerId });
+    // Only unregister when the loop actually registered (autorun: false and
+    // never run() means the server does not know this worker).
+    if (this.registeredGeneration >= 0) {
+      await this.safeCall({ cmd: 'UnregisterWorker', workerId: this.workerId });
+    }
     this.connection.close();
     this.closedFlag = true;
     this.running = false;

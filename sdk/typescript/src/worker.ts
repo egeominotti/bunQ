@@ -42,6 +42,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
   private async loop(): Promise<void> {
     await this.register();
     this.readyResolve?.();
+    this.readyFired = true;
     this.emit('ready');
     this.startHeartbeat();
 
@@ -72,6 +73,13 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
     if (free <= 0) {
       await sleep(20);
       return;
+    }
+
+    // The registration is per-connection server state: after a reconnect the
+    // server no longer knows this worker (ListWorkers, skipIfNoWorker crons).
+    // Detect the new connection generation and re-register before pulling.
+    if (this.connection.isConnected && this.connection.generation !== this.registeredGeneration) {
+      await this.register();
     }
 
     const response = await this.connection.call(
@@ -170,5 +178,6 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
       pid: process.pid,
       startedAt: Date.now(),
     });
+    this.registeredGeneration = this.connection.generation;
   }
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -65,6 +66,7 @@ class Server:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
             self.proc = None
+        shutil.rmtree(self.data_dir, ignore_errors=True)
 
 
 # ------------------------------------------------------------------ registry

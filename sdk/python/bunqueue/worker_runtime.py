@@ -31,6 +31,15 @@ class WorkerRuntime:
             self._stop.wait(0.05)
             return
 
+        # The registration is per-connection server state: after a reconnect
+        # the server no longer knows this worker (ListWorkers, skipIfNoWorker
+        # crons). Detect the new connection generation and re-register.
+        if (
+            self.connection.connected
+            and self.connection.generation != self._registered_generation
+        ):
+            self._register()
+
         response = self.connection.call(
             {
                 "cmd": "PULLB",
@@ -124,6 +133,7 @@ class WorkerRuntime:
                 "startedAt": int(time.time() * 1000),
             }
         )
+        self._registered_generation = self.connection.generation
 
     def _safe_call(self, command: Dict[str, Any]) -> None:
         try:

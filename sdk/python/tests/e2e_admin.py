@@ -131,10 +131,14 @@ def webhooks_crud(server: Server) -> None:
         webhook_id = queue.add_webhook(webhook_url, ["job.completed"], queue=queue.name)
         hooks = queue.list_webhooks()
         assert any(h.get("url") == webhook_url for h in hooks), hooks
-        if webhook_id:
-            queue.remove_webhook(webhook_id)
-            hooks = queue.list_webhooks()
-            assert not any(h.get("id") == webhook_id for h in hooks)
+        assert webhook_id, "webhook id returned"
+        queue.set_webhook_enabled(webhook_id, False)
+        hooks = queue.list_webhooks()
+        disabled = next(h for h in hooks if h.get("id") == webhook_id)
+        assert disabled.get("enabled") is False, disabled
+        queue.remove_webhook(webhook_id)
+        hooks = queue.list_webhooks()
+        assert not any(h.get("id") == webhook_id for h in hooks)
 
 
 @test

@@ -30,13 +30,17 @@ from .events import EventEmitter
 from .flow import FlowNode, FlowProducer
 from .job import Job
 from .queue import Queue
+from .simple import Bunqueue, CancellationManager, CancelSignal
 from .worker import Worker
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AuthError",
+    "Bunqueue",
     "BunqueueError",
+    "CancelSignal",
+    "CancellationManager",
     "CommandError",
     "CommandTimeoutError",
     "Connection",

@@ -16,6 +16,8 @@ import e2e_control  # noqa: F401
 import e2e_worker  # noqa: F401
 import e2e_flow  # noqa: F401
 import e2e_admin  # noqa: F401
+import e2e_simple  # noqa: F401
+import e2e_simple_extras  # noqa: F401
 from e2e_auth import run_auth_tests
 
 

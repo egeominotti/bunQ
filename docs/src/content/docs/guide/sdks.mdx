@@ -9,11 +9,16 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 retries, priorities, scheduling, dead letter queue. Your apps just add jobs
 and process them, from whatever language they're written in.
 
-| Where your code runs | What to install |
-|---|---|
-| Node.js, Deno, Bun, Cloudflare Workers | `bunqueue-client` (npm) |
-| Python | `bunqueue-client` (PyPI coming soon, installable from the repo today) |
-| Bun (same process, no server) | `bunqueue` — see [Quick Start](/guide/quickstart/) |
+| Where your code runs | What to install | Get it |
+|---|---|---|
+| Node.js, Deno, Bun, Cloudflare Workers | `npm install bunqueue-client` | [**npm →**](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
+| Python | `bunqueue-client` (PyPI coming soon) | [source + install →](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) |
+| Bun (same process, no server) | `bun add bunqueue` | [Quick Start](/guide/quickstart/) |
+
+Everything on this page is verified by the SDK test suites against a real
+server: **81 e2e scenarios on each of Node.js, Deno and Bun**, plus **16 inside
+workerd** (the actual Cloudflare Workers runtime) and **57 in Python** — every
+public method of the SDKs is covered by at least one real test.
 
 ## 1. Start the server
 
@@ -114,6 +119,73 @@ new Queue('emails', { host: 'queue.example.com', token: '...', tls: true });
 
 Same one-liners in Python with snake_case names (`add_cron`, `add_chain`, …).
 
+## Simple Mode, everywhere
+
+Prefer everything in one object? [Simple Mode](/guide/simple-mode/) is in the
+SDKs too, 1:1 with the original: routes, middleware, in-process retry
+strategies, circuit breaker, batching, triggers, TTL, cancellation.
+
+<Tabs>
+<TabItem label="Node / Deno / Bun">
+
+```typescript
+import { Bunqueue } from 'bunqueue-client';
+
+const app = new Bunqueue('notifications', {
+  routes: {
+    'send-email': async (job) => ({ sent: true }),
+    'send-sms': async (job) => ({ sent: true }),
+  },
+  concurrency: 10,
+  retry: { maxAttempts: 5, strategy: 'jitter' },
+  circuitBreaker: { threshold: 5, resetTimeout: 30_000 },
+});
+
+app.use(async (job, next) => {
+  console.time(job.name);
+  const result = await next();
+  console.timeEnd(job.name);
+  return result;
+});
+
+await app.add('send-email', { to: 'alice@example.com' });
+await app.cron('daily-digest', '0 9 * * *', { to: 'all' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Bunqueue
+
+app = Bunqueue(
+    "notifications",
+    routes={
+        "send-email": lambda job: {"sent": True},
+        "send-sms": lambda job: {"sent": True},
+    },
+    concurrency=10,
+    retry={"max_attempts": 5, "strategy": "jitter"},
+    circuit_breaker={"threshold": 5, "reset_timeout": 30000},
+)
+
+def timing(job, next_fn):
+    result = next_fn()
+    print(f"{job.name} done")
+    return result
+
+app.use(timing)
+
+app.add("send-email", {"to": "alice@example.com"})
+app.cron("daily-digest", "0 9 * * *", {"to": "all"})
+```
+
+</TabItem>
+</Tabs>
+
+The only difference from the Bun original: `embedded: true` is not available
+(it needs the in-process Bun runtime) — connect to a server instead.
+
 ## Where it runs
 
 | Runtime | Works? |
@@ -130,9 +202,12 @@ runtime — same tests, same results.
 
 ## Learn more
 
+- [`bunqueue-client` on npm](https://www.npmjs.com/package/bunqueue-client) — full step-by-step README, from `bunx bunqueue start` to production
 - [Queue API](/guide/queue/) — all job options explained
 - [Worker](/guide/worker/) — concurrency, events, graceful shutdown
+- [Simple Mode](/guide/simple-mode/) — everything in one object
 - [Flows](/guide/flow/) — pipelines, parent/child jobs, fan-in
 - [Cron Jobs](/guide/cron/) — schedules and repeatable jobs
 - [Dead Letter Queue](/guide/dlq/) — what happens when jobs fail
-- SDK reference: `sdk/typescript/README.md` and `sdk/python/README.md` in the repo
+- [Deployment guide](/guide/deployment/) — Docker, TLS, auth, monitoring
+- SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)

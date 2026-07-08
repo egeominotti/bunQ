@@ -62,6 +62,11 @@ export class Job<T = unknown> {
     return this.raw.createdAt === undefined ? undefined : Number(this.raw.createdAt);
   }
 
+  /** Creation time in epoch ms (BullMQ-parity alias of createdAt). */
+  get timestamp(): number {
+    return this.createdAt ?? Date.now();
+  }
+
   get startedAt(): number | null {
     return this.raw.startedAt === undefined || this.raw.startedAt === null
       ? null

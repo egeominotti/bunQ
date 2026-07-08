@@ -13,6 +13,7 @@ from __future__ import annotations
 import socket
 import struct
 import threading
+import time
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any, Dict, Optional
@@ -59,8 +60,21 @@ class Connection:
         self._pending_lock = threading.Lock()
         self._pending: Dict[str, Future] = {}
         self._req_counter = 0
+        self._generation = 0
+        self._failed_attempts = 0
+        self._next_attempt_at = 0.0
 
     # ------------------------------------------------------------- lifecycle
+
+    @property
+    def generation(self) -> int:
+        """Monotonic counter bumped on every successful (re)connect.
+
+        Consumers holding per-connection server state (e.g. a Worker
+        registration) compare it between operations and re-establish that
+        state after a reconnect.
+        """
+        return self._generation
 
     def connect(self) -> None:
         """Open the socket (and authenticate) if not already connected."""
@@ -69,8 +83,25 @@ class Connection:
                 return
             if self._closed:
                 raise ConnectionClosedError("connection closed by client")
+            # Fast-fail inside the reconnect backoff window: without this a
+            # producer calling add() against a downed server pays the full
+            # connect timeout on EVERY call (reconnect storm).
+            now = time.monotonic()
+            if now < self._next_attempt_at:
+                remaining = int((self._next_attempt_at - now) * 1000)
+                raise ConnectionClosedError(f"server unreachable, retry in {remaining}ms")
 
-            raw = socket.create_connection((self.host, self.port), timeout=self.connect_timeout)
+            try:
+                raw = socket.create_connection(
+                    (self.host, self.port), timeout=self.connect_timeout
+                )
+            except OSError as exc:
+                self._failed_attempts += 1
+                backoff = min(0.5 * (2 ** (self._failed_attempts - 1)), 5.0)
+                self._next_attempt_at = time.monotonic() + backoff
+                raise ConnectionClosedError(f"connect failed: {exc}") from exc
+            self._failed_attempts = 0
+            self._next_attempt_at = 0.0
             raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             ctx = _build_ssl_context(self.tls, self.host)
             if ctx is not None:
@@ -79,6 +110,7 @@ class Connection:
 
             self._sock = raw
             self._connected = True
+            self._generation += 1
             reader = threading.Thread(target=self._read_loop, args=(raw,), daemon=True)
             reader.start()
 

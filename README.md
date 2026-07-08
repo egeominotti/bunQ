@@ -27,11 +27,15 @@
 
 ## Requirements
 
-bunqueue is **Bun-only** (`bun >= 1.3.9`). The client, TCP transport and persistence
-rely on Bun's runtime APIs (`Bun.connect`, `Bun.file`, `Bun.hash`, …) and ship as
-ESM with extensionless specifiers, so they do **not** run under Node.js. Importing
-the package from Node fails fast with a clear error pointing here rather than a
-cryptic resolver crash. Install Bun from [bun.sh](https://bun.sh) and run with `bun`.
+The bunqueue **server** (and the embedded mode) is **Bun-only** (`bun >= 1.3.9`):
+persistence and transport rely on Bun's runtime APIs. Install Bun from
+[bun.sh](https://bun.sh) and run with `bun`. Importing the `bunqueue` package from
+Node fails fast with a clear error rather than a cryptic resolver crash.
+
+**Your producers and workers don't have to run on Bun.** Official client SDKs
+connect to the server from **Node.js, Deno, Cloudflare Workers**
+([`bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) on npm) and
+**Python** (`bunqueue-client`, PyPI coming soon) — see [One Queue, Any Language](#one-queue-any-language-sdks).
 
 ## Quickstart
 
@@ -749,7 +753,9 @@ bunqueue is for when you **don't want to run Redis**. SQLite with WAL mode handl
 bun add bunqueue
 ```
 
-> Requires [Bun](https://bun.sh) runtime. Node.js is not supported.
+> The server and embedded mode require the [Bun](https://bun.sh) runtime. To
+> connect **clients** from Node.js, Deno, Cloudflare Workers or Python, use the
+> [SDKs](#one-queue-any-language-sdks) instead.
 
 ## Two Modes
 
@@ -812,6 +818,40 @@ const worker = new Worker(
 
 await queue.add('process', { data: 'hello' });
 ```
+
+## One Queue, Any Language (SDKs)
+
+The server does all the heavy lifting — retries, priorities, scheduling, DLQ.
+Official client SDKs speak the native TCP protocol (msgpack, pipelined) with
+full feature parity, so producers and workers can live anywhere in your stack:
+
+| Where your code runs | Install | Status |
+| -------------------- | ------- | ------ |
+| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) | 58/58 e2e per runtime + 11/11 inside workerd |
+| **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` | 44/44 e2e |
+
+```typescript
+// Node.js / Deno / Cloudflare Workers
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails', { host: 'localhost', port: 6789 });
+await queue.add('welcome', { to: 'user@example.com' });
+
+new Worker('emails', async (job) => ({ sent: true }), { concurrency: 10 });
+```
+
+```python
+# Python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails", host="localhost", port=6789)
+queue.add("welcome", {"to": "user@example.com"})
+
+Worker("emails", lambda job: {"sent": True}, concurrency=10).run()
+```
+
+Mix and match: a Next.js API adds jobs, a Python service processes them.
+Docs: [bunqueue.dev/guide/sdks](https://bunqueue.dev/guide/sdks/) · Sources: [`sdk/`](./sdk/)
 
 ### Simple Mode
 

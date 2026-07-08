@@ -1,0 +1,14 @@
+{
+  "name": "bunqueue-workers-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "bunqueue-client": "file:./bunqueue-client.tgz"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

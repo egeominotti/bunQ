@@ -1,0 +1,64 @@
+{
+  "name": "bunqueue-client",
+  "version": "0.1.2",
+  "description": "Cross-runtime TypeScript client for the bunqueue job queue server \u2014 Node.js, Bun, Deno and Cloudflare Workers",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "bun tests/e2e.ts",
+    "test:integration": "bun tests/integration.ts",
+    "lint": "biome lint src tests",
+    "format": "biome format --write src tests",
+    "check": "biome check src tests",
+    "test:workers": "bun pm pack --destination tests/workers && cd tests/workers && mv bunqueue-client-*.tgz bunqueue-client.tgz && bun install && node run.mjs"
+  },
+  "keywords": [
+    "queue",
+    "jobs",
+    "worker",
+    "bunqueue",
+    "task-queue",
+    "background-jobs",
+    "nodejs",
+    "deno",
+    "bun",
+    "cloudflare-workers"
+  ],
+  "dependencies": {
+    "msgpackr": "^1.11.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  },
+  "author": "Egeo Minotti",
+  "homepage": "https://bunqueue.dev/guide/sdks/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/egeominotti/bunqueue.git",
+    "directory": "sdk/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/egeominotti/bunqueue/issues"
+  },
+  "sideEffects": false
+}

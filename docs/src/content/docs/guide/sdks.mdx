@@ -1,0 +1,138 @@
+---
+title: "Use bunqueue from Node.js, Deno, Python & Cloudflare Workers"
+description: "One queue, any language. Add jobs from any runtime, process them anywhere — the bunqueue SDKs speak the native TCP protocol with zero setup."
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+**One queue, any language.** The bunqueue server does all the heavy lifting —
+retries, priorities, scheduling, dead letter queue. Your apps just add jobs
+and process them, from whatever language they're written in.
+
+| Where your code runs | What to install |
+|---|---|
+| Node.js, Deno, Bun, Cloudflare Workers | `bunqueue-client` (npm) |
+| Python | `bunqueue-client` (PyPI coming soon, installable from the repo today) |
+| Bun (same process, no server) | `bunqueue` — see [Quick Start](/guide/quickstart/) |
+
+## 1. Start the server
+
+```bash
+bunx bunqueue start
+```
+
+That's it — the queue is listening on port 6789. (Docker and binary options
+in [Running the Server](/guide/server/).)
+
+## 2. Add jobs
+
+<Tabs>
+<TabItem label="Node / Deno / Bun">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+await queue.add('welcome', { to: 'user@example.com' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("emails")
+
+queue.add("welcome", {"to": "user@example.com"})
+```
+
+</TabItem>
+</Tabs>
+
+## 3. Process jobs
+
+<Tabs>
+<TabItem label="Node / Deno / Bun">
+
+```typescript
+import { Worker } from 'bunqueue-client';
+
+const worker = new Worker('emails', async (job) => {
+  await sendEmail(job.data.to);
+  return { sent: true };
+});
+
+worker.on('completed', (job) => console.log('done:', job.id));
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Worker
+
+def process(job):
+    send_email(job.data["to"])
+    return {"sent": True}
+
+Worker("emails", process, concurrency=10).run()
+```
+
+</TabItem>
+</Tabs>
+
+Done. The producer and the worker can be **different apps in different
+languages** — a Next.js API adding jobs, a Python service processing them.
+
+## Everything else is one line away
+
+Failures retry automatically (3 attempts by default). After that, jobs land
+in the [dead letter queue](/guide/dlq/) — nothing is ever lost.
+
+```typescript
+// Priority, delay, custom retries
+await queue.add('report', data, { priority: 10, delay: 5000, attempts: 5 });
+
+// Run something every morning at 9:00
+await queue.addCron('daily-report', '0 9 * * *', { type: 'report' });
+
+// Give up immediately on bad input (straight to DLQ, no retries)
+throw new UnrecoverableError('malformed payload');
+
+// Chain steps: extract → transform → load
+await flow.addChain([
+  { name: 'extract', queueName: 'etl' },
+  { name: 'transform', queueName: 'etl' },
+  { name: 'load', queueName: 'etl' },
+]);
+
+// Production: auth + TLS
+new Queue('emails', { host: 'queue.example.com', token: '...', tls: true });
+```
+
+Same one-liners in Python with snake_case names (`add_cron`, `add_chain`, …).
+
+## Where it runs
+
+| Runtime | Works? |
+|---|---|
+| Node.js ≥ 20 | ✅ |
+| Bun | ✅ |
+| Deno ≥ 2 | ✅ |
+| Python ≥ 3.9 | ✅ |
+| Cloudflare Workers | ✅ add jobs from your Workers (enable `nodejs_compat`); process with Cron Triggers |
+| Browser | ❌ — call your own API route, which adds the job |
+
+Every ✅ is verified by the SDK test suites against a real server on every
+runtime — same tests, same results.
+
+## Learn more
+
+- [Queue API](/guide/queue/) — all job options explained
+- [Worker](/guide/worker/) — concurrency, events, graceful shutdown
+- [Flows](/guide/flow/) — pipelines, parent/child jobs, fan-in
+- [Cron Jobs](/guide/cron/) — schedules and repeatable jobs
+- [Dead Letter Queue](/guide/dlq/) — what happens when jobs fail
+- SDK reference: `sdk/typescript/README.md` and `sdk/python/README.md` in the repo

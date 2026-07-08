@@ -1,0 +1,11 @@
+name = "bunqueue-workers-e2e"
+main = "worker-app.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# BQ_* vars are injected by run.mjs at runtime via unstable_dev vars override.
+[vars]
+BQ_HOST = "127.0.0.1"
+BQ_PORT = "0"
+BQ_AUTH_PORT = "0"
+BQ_AUTH_TOKEN = "workers-secret"

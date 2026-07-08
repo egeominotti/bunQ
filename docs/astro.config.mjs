@@ -123,6 +123,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Polyglot SDKs',
+          items: [
+            { label: 'Python & TypeScript SDKs', link: '/guide/sdks/' },
+          ],
+        },
+        {
           label: 'Server Mode',
           items: [
             { label: 'Running the Server', link: '/guide/server/' },

@@ -47,10 +47,21 @@ describe('WorkerManager - cleanupStale', () => {
   test('worker exactly at the boundary is NOT removed', () => {
     const worker = manager.register('boundary-worker', ['queue1']);
 
-    // Set lastSeen exactly at threshold (not past it)
-    worker.lastSeen = Date.now() - STALE_THRESHOLD;
+    // Freeze Date.now so the test setup and cleanupStale() observe the SAME
+    // `now`. Otherwise the ms can tick between the two reads, making
+    // (now - lastSeen) drift from exactly STALE_THRESHOLD to > STALE_THRESHOLD
+    // and flakily removing the worker (seen intermittently under CI load).
+    const frozen = Date.now();
+    const origNow = Date.now;
+    Date.now = () => frozen;
+    try {
+      // Set lastSeen exactly at threshold (not past it)
+      worker.lastSeen = frozen - STALE_THRESHOLD;
 
-    (manager as any).cleanupStale();
+      (manager as any).cleanupStale();
+    } finally {
+      Date.now = origNow;
+    }
 
     // Should NOT be removed because condition is > not >=
     expect(manager.get(worker.id)).toBeDefined();

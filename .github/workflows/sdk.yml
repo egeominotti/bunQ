@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [bun, node]
+        runtime: [bun, node, deno]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -30,6 +30,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: denoland/setup-deno@v2
+        if: matrix.runtime == 'deno'
+        with:
+          deno-version: v2.x
       - name: Install server deps (for bun src/main.ts)
         run: bun install --frozen-lockfile || bun install
       - name: Install + build SDK
@@ -52,6 +56,12 @@ jobs:
         run: |
           node --experimental-strip-types tests/integration.ts
           node --experimental-strip-types tests/e2e.ts
+      - name: Integration + e2e (deno)
+        if: matrix.runtime == 'deno'
+        working-directory: sdk/typescript
+        run: |
+          deno run -A tests/integration.ts
+          deno run -A tests/e2e.ts
 
   python:
     name: Python ${{ matrix.python }}

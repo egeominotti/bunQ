@@ -33,8 +33,8 @@ unchanged (observability is silent, backpressure unbounded, ACK batching off).
 ### CI
 
 - GitHub Actions runs both SDK suites on every `sdk/`/`src/` change (TypeScript
-  on Bun + Node, Python 3.10/3.12); an npm release workflow publishes with
-  build provenance.
+  on Bun + Node + Deno, Python 3.10/3.12); an npm release workflow publishes
+  with build provenance, gated on the e2e suite.
 
 ## [0.1.5] - 2026-07-08
 

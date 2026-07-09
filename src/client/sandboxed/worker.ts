@@ -10,6 +10,7 @@ import { createPublicJob } from '../jobConversion';
 import type { Job } from '../types';
 import type { Job as DomainJob } from '../../domain/types/job';
 import { jobId } from '../../domain/types/job';
+import { buildFailCommand, failEmbeddedArgs } from '../queue/failWire';
 import {
   createProgressHandler,
   createLogHandler,
@@ -611,11 +612,12 @@ export class SandboxedWorker<T = unknown> extends EventEmitter {
       }
       return null;
     };
-    const moveToFailed = async (id: string, error: Error, _token?: string): Promise<void> => {
+    const moveToFailed = async (id: string, error: Error, token?: string): Promise<void> => {
+      // Forward stacktrace + UnrecoverableError (was dropped; #74/#111-class).
       if (embedded) {
-        await getSharedManager().fail(jobId(id), error.message);
+        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error, token));
       } else if (tcp) {
-        await tcp.send({ cmd: 'FAIL', id, error: error.message });
+        await tcp.send(buildFailCommand(id, error, token));
       }
     };
     return createPublicJob({

@@ -9,6 +9,7 @@ import type { TcpConnectionPool } from '../tcpPool';
 import type { JobStateType, ChangePriorityOpts } from '../types';
 import { getSharedManager } from '../manager';
 import { jobId } from '../../domain/types/job';
+import { buildFailCommand, failEmbeddedArgs } from './failWire';
 
 interface JobProxyContext {
   queueName: string;
@@ -190,7 +191,8 @@ export function createJobProxy<T>(
       return null;
     },
     moveToFailed: async (error) => {
-      await tcp.send({ cmd: 'FAIL', id, error: error.message });
+      // Forward stacktrace + UnrecoverableError (was dropped; #74/#111-class).
+      await tcp.send(buildFailCommand(id, error));
     },
     moveToWait: async () => {
       const res = await tcp.send({ cmd: 'MoveToWait', id });
@@ -442,11 +444,12 @@ export function createSimpleJob<T>(
       return null;
     },
     moveToFailed: async (error) => {
+      // Forward stacktrace + UnrecoverableError (was dropped; #74/#111-class).
       if (embedded) {
-        await getSharedManager().fail(jobId(id), error.message);
+        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error));
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'FAIL', id, error: error.message });
+      if (tcp) await tcp.send(buildFailCommand(id, error));
     },
     moveToWait: async () => {
       if (embedded) {

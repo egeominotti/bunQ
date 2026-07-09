@@ -20,11 +20,10 @@ class QueueAdminOps:
         return list(response.get("jobs") or response.get("data") or [])
 
     def retry_dlq(self, job_id: Optional[str] = None, count: Optional[int] = None) -> int:
-        # `count` is accepted for signature parity but not sent: the server has
-        # no partial RetryDlq — it retries one `jobId`, else the whole DLQ.
-        del count
+        # `count` caps how many DLQ entries are retried when no `job_id` is
+        # given (server >= 2.8.29); older servers ignore it (forward-compatible).
         response = self.connection.call(
-            _compact({"cmd": "RetryDlq", "queue": self.name, "jobId": job_id})
+            _compact({"cmd": "RetryDlq", "queue": self.name, "jobId": job_id, "count": count})
         )
         return int(response.get("count", 0))
 

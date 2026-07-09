@@ -117,9 +117,38 @@ export function retryDlqJob(queue: string, jobId: JobId, ctx: DlqContext): Job |
 }
 
 /** Retry jobs from DLQ (backward compatible) */
-export function retryDlqJobs(queue: string, ctx: DlqContext, jobId?: JobId): number {
+export function retryDlqJobs(
+  queue: string,
+  ctx: DlqContext,
+  jobId?: JobId,
+  limit?: number
+): number {
   if (jobId) {
     return retryDlqJob(queue, jobId, ctx) ? 1 : 0;
+  }
+
+  // Bounded retry (#111-class: `retryJobs({ state:'failed', count })`). Retry
+  // only the first `limit` DLQ entries, reusing the tested single-entry path so
+  // the remaining entries stay in the DLQ (memory + SQLite) instead of the
+  // clear-all fast path below wrongly draining the whole queue. Any provided
+  // `limit` engages the bounded path; a negative/NaN/fractional cap is clamped
+  // to a safe non-negative integer so it can never fall through to clear-all
+  // (skeptic: `limit >= 0` let `-1`/`NaN` drain the entire DLQ). `undefined`
+  // (no cap requested) still means "retry all" via the fast path below.
+  if (limit !== undefined) {
+    const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
+    const idx = shardIndex(queue);
+    const shard = ctx.shards[idx];
+    // Snapshot ids first: retryDlqJob mutates the DLQ as it goes.
+    const ids = shard
+      .getDlqEntries(queue)
+      .slice(0, cap)
+      .map((e) => e.job.id);
+    let retried = 0;
+    for (const id of ids) {
+      if (retryDlqJob(queue, id, ctx)) retried++;
+    }
+    return retried;
   }
 
   const idx = shardIndex(queue);

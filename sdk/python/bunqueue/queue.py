@@ -113,12 +113,11 @@ class Queue(QueueQueryOps, QueueAdminOps):
         self.connection.call({"cmd": "MoveToWait", "id": job_id})
 
     def retry_jobs(self, state: str = "failed", count: Optional[int] = None) -> int:
-        # `count` accepted for parity but not sent: the server retries the whole
-        # DLQ (BullMQ semantics), it has no partial-count RetryDlq.
-        del count
+        # `count` caps how many DLQ entries are retried (server >= 2.8.29);
+        # older servers ignore it and retry the whole DLQ (forward-compatible).
         if state == "failed":
             response = self.connection.call(
-                {"cmd": "RetryDlq", "queue": self.name}
+                _compact({"cmd": "RetryDlq", "queue": self.name, "count": count})
             )
         elif state == "completed":
             response = self.connection.call({"cmd": "RetryCompleted", "queue": self.name})

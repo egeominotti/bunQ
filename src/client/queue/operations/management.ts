@@ -68,7 +68,8 @@ export async function retryJobs(
 ): Promise<void> {
   if (ctx.embedded) {
     if (opts?.state === 'failed') {
-      getSharedManager().retryDlq(ctx.name);
+      // #111-class: forward the count cap (was ignored → retried the whole DLQ).
+      getSharedManager().retryDlq(ctx.name, undefined, opts?.count);
     }
     return;
   }

@@ -66,6 +66,8 @@ export interface SchedulerInfo {
   next: number;
   pattern?: string;
   every?: number;
+  /** Max number of times the scheduler will fire (RepeatOpts.limit). #111 */
+  limit?: number;
 }
 
 /** Build cron job data from template */
@@ -135,6 +137,8 @@ export async function upsertJobScheduler(
       repeatEvery,
       priority,
       timezone: repeatOpts.timezone ?? 'UTC',
+      // #111: forward the run cap; addCron ignores <=0/undefined (stored NULL).
+      maxLimit: repeatOpts.limit,
       skipMissedOnRestart: repeatOpts.skipMissedOnRestart,
       immediately: repeatOpts.immediately,
       skipIfNoWorker: repeatOpts.skipIfNoWorker,
@@ -146,6 +150,7 @@ export async function upsertJobScheduler(
       id: schedulerId,
       name: jobTemplate?.name ?? 'default',
       next: Date.now() + (repeatEvery ?? 60000),
+      limit: repeatOpts.limit && repeatOpts.limit > 0 ? repeatOpts.limit : undefined,
     };
   }
 
@@ -158,6 +163,8 @@ export async function upsertJobScheduler(
     repeatEvery,
     priority,
     timezone: repeatOpts.timezone,
+    // #111: forward the run cap on the TCP path too.
+    maxLimit: repeatOpts.limit,
     skipMissedOnRestart: repeatOpts.skipMissedOnRestart,
     immediately: repeatOpts.immediately,
     skipIfNoWorker: repeatOpts.skipIfNoWorker,
@@ -171,6 +178,7 @@ export async function upsertJobScheduler(
     id: schedulerId,
     name: jobTemplate?.name ?? 'default',
     next: (response.nextRun ?? Date.now()) as number,
+    limit: repeatOpts.limit && repeatOpts.limit > 0 ? repeatOpts.limit : undefined,
   };
 }
 
@@ -204,6 +212,7 @@ export async function getJobScheduler(
       next: cron.nextRun,
       pattern: cron.schedule ?? undefined,
       every: cron.repeatEvery ?? undefined,
+      limit: cron.maxLimit ?? undefined,
     };
   }
 
@@ -216,6 +225,7 @@ export async function getJobScheduler(
     nextRun: number;
     schedule?: string;
     repeatEvery?: number;
+    maxLimit?: number | null;
   };
   const crons = (response as { crons?: CronEntry[] }).crons;
   const cron = crons?.find(
@@ -229,6 +239,7 @@ export async function getJobScheduler(
     next: cron.nextRun,
     pattern: cron.schedule ?? undefined,
     every: cron.repeatEvery ?? undefined,
+    limit: cron.maxLimit ?? undefined,
   };
 }
 
@@ -249,6 +260,7 @@ export async function getJobSchedulers(
         next: c.nextRun,
         pattern: c.schedule ?? undefined,
         every: c.repeatEvery ?? undefined,
+        limit: c.maxLimit ?? undefined,
       }));
   }
 
@@ -261,6 +273,7 @@ export async function getJobSchedulers(
     nextRun: number;
     schedule?: string;
     repeatEvery?: number;
+    maxLimit?: number | null;
   };
   const crons = (response as { crons?: CronEntry[] }).crons ?? [];
 
@@ -272,6 +285,7 @@ export async function getJobSchedulers(
       next: c.nextRun,
       pattern: c.schedule ?? undefined,
       every: c.repeatEvery ?? undefined,
+      limit: c.maxLimit ?? undefined,
     }));
 }
 

@@ -232,11 +232,11 @@ export class Bunqueue<T = unknown, R = unknown> {
     id: string,
     pattern: string,
     data?: T,
-    opts?: { timezone?: string; jobOpts?: JobOptions }
+    opts?: { timezone?: string; limit?: number; jobOpts?: JobOptions }
   ): Promise<SchedulerInfo | null> {
     return this.queue.upsertJobScheduler(
       id,
-      { pattern, timezone: opts?.timezone },
+      { pattern, timezone: opts?.timezone, limit: opts?.limit },
       { name: id, data, opts: opts?.jobOpts }
     );
   }
@@ -245,11 +245,11 @@ export class Bunqueue<T = unknown, R = unknown> {
     id: string,
     intervalMs: number,
     data?: T,
-    opts?: { jobOpts?: JobOptions }
+    opts?: { limit?: number; jobOpts?: JobOptions }
   ): Promise<SchedulerInfo | null> {
     return this.queue.upsertJobScheduler(
       id,
-      { every: intervalMs },
+      { every: intervalMs, limit: opts?.limit },
       { name: id, data, opts: opts?.jobOpts }
     );
   }

@@ -26,7 +26,8 @@ export function handleRetryDlq(
   reqId?: string
 ): Response {
   const jid = cmd.jobId ? jobId(cmd.jobId) : undefined;
-  const count = ctx.queueManager.retryDlq(cmd.queue, jid);
+  // #111-class: honour the caller's `count` cap instead of retrying the whole DLQ.
+  const count = ctx.queueManager.retryDlq(cmd.queue, jid, cmd.count);
   if (count > 0) {
     const event = jid ? 'dlq:retried' : 'dlq:retry-all';
     const data: Record<string, unknown> = { queue: cmd.queue, count };

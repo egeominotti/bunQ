@@ -275,6 +275,8 @@ export interface RetryDlqCommand extends BaseCommand {
   readonly cmd: 'RetryDlq';
   readonly queue: string;
   readonly jobId?: string;
+  /** Cap the number of DLQ entries retried (omit = retry all). #111-class. */
+  readonly count?: number;
 }
 
 export interface PurgeDlqCommand extends BaseCommand {

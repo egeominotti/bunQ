@@ -96,7 +96,12 @@ describe('createJobProxy', () => {
     expect(await job.moveToCompleted({ success: true })).toBeNull();
     expect(calls[0]).toEqual({ cmd: 'ACK', id: 'j1', result: { success: true } });
     await job.moveToFailed(new Error('boom'));
-    expect(calls[1]).toEqual({ cmd: 'FAIL', id: 'j1', error: 'boom' });
+    // FAIL now carries the stacktrace (#74/#111-class fix): assert the core
+    // fields plus that the stack is forwarded, rather than an exact-shape match.
+    expect(calls[1].cmd).toBe('FAIL');
+    expect(calls[1].id).toBe('j1');
+    expect(calls[1].error).toBe('boom');
+    expect(Array.isArray(calls[1].stack)).toBe(true);
     expect(await job.moveToWait()).toBe(true);
     const ts = Date.now() + 5000;
     await job.moveToDelayed(ts);

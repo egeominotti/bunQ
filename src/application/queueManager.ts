@@ -1003,8 +1003,8 @@ export class QueueManager {
     return dlqOps.getDlqStats(queue, this.contextFactory.getDlqContext());
   }
 
-  retryDlq(queue: string, jobId?: JobId): number {
-    return dlqOps.retryDlqJobs(queue, this.contextFactory.getDlqContext(), jobId);
+  retryDlq(queue: string, jobId?: JobId, limit?: number): number {
+    return dlqOps.retryDlqJobs(queue, this.contextFactory.getDlqContext(), jobId, limit);
   }
 
   purgeDlq(queue: string): number {

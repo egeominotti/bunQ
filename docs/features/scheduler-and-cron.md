@@ -87,13 +87,13 @@ Queue.getJobSchedulers(start?, end?, asc?): Promise<SchedulerInfo[]>;
 Queue.getJobSchedulersCount(): Promise<number>;
 ```
 
-`RepeatOpts` (`scheduler.ts:39-55`): `pattern?`, `every?`, `limit?`, `immediately?`, `count?`, `prevMillis?`, `offset?`, `jobId?`, `timezone?`, `skipMissedOnRestart?`, `skipIfNoWorker?`, `preventOverlap?`. (`limit`, `count`, `prevMillis`, `offset`, `jobId` are accepted for BullMQ shape compatibility but not forwarded to the cron definition.)
+`RepeatOpts` (`scheduler.ts:39-55`): `pattern?`, `every?`, `limit?`, `immediately?`, `count?`, `prevMillis?`, `offset?`, `jobId?`, `timezone?`, `skipMissedOnRestart?`, `skipIfNoWorker?`, `preventOverlap?`. `limit` is forwarded to the cron definition as `maxLimit` (the run cap; see #111) and echoed back on `SchedulerInfo.limit`. (`count`, `prevMillis`, `offset`, `jobId` are still accepted for BullMQ shape compatibility but have no cron-side equivalent, so they are not forwarded.)
 
 ### Simple-mode helpers (`src/client/bunqueue.ts:231-262`)
 
 ```typescript
-Bunqueue.cron(id, pattern, data?, opts?: { timezone?; jobOpts? }): Promise<SchedulerInfo | null>;
-Bunqueue.every(id, intervalMs, data?, opts?: { jobOpts? }): Promise<SchedulerInfo | null>;
+Bunqueue.cron(id, pattern, data?, opts?: { timezone?; limit?; jobOpts? }): Promise<SchedulerInfo | null>;
+Bunqueue.every(id, intervalMs, data?, opts?: { limit?; jobOpts? }): Promise<SchedulerInfo | null>;
 Bunqueue.removeCron(id); Bunqueue.listCrons();
 ```
 
@@ -138,7 +138,7 @@ Canonical definition is `CronJob` (`src/domain/types/cron.ts:28-52`). See [data-
 | `preventOverlap` | `boolean` | default `true`. |
 | `jobOptions` | `CronJobOptions \| null` | per-cron retry/cleanup policy (issue #86). |
 
-`CronJobOptions` (`cron.ts:17-25`): `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo` (`scheduler.ts:63-69`): `{ id, name, next, pattern?, every? }`. The `cron_jobs` SQLite table is defined at `schema.ts:103-120` (migrations 6–11 added the dedup/skip/overlap/jobOptions columns).
+`CronJobOptions` (`cron.ts:17-25`): `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo` (`scheduler.ts:63-71`): `{ id, name, next, pattern?, every?, limit? }` (`limit` = the persisted `maxLimit` run cap, `undefined` when unlimited; #111). The `cron_jobs` SQLite table is defined at `schema.ts:103-120` (migrations 6–11 added the dedup/skip/overlap/jobOptions columns).
 
 ## Business Logic / Control Flow
 

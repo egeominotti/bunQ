@@ -72,9 +72,11 @@ export const controlMethods = {
       await this.call({ cmd: 'RetryCompleted', queue: this.name });
       return;
     }
-    // `count` is accepted for API parity but not sent: the server has no
-    // partial RetryDlq — it retries the whole DLQ (BullMQ semantics).
-    await this.call({ cmd: 'RetryDlq', queue: this.name });
+    // `count` caps how many DLQ entries are retried (server >= 2.8.29). Older
+    // servers ignore the field and retry the whole DLQ — forward-compatible.
+    await this.call(
+      compact({ cmd: 'RetryDlq', queue: this.name, count: opts.count }) as { cmd: string }
+    );
   },
 
   async retryCompleted(this: Ctx, id?: string): Promise<void> {

@@ -6,6 +6,7 @@
 import { getSharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
 import { jobId } from '../../domain/types/job';
+import { buildFailCommand, failEmbeddedArgs } from './failWire';
 
 interface JobMoveContext {
   name: string;
@@ -48,12 +49,16 @@ export async function moveJobToFailed(
   ctx: JobMoveContext,
   id: string,
   error: Error,
-  _token?: string
+  token?: string
 ): Promise<void> {
+  // Mirror the worker failure path: persist the stacktrace (#74) and honour
+  // UnrecoverableError so a job explicitly failed via the Queue reflection API
+  // is not silently retried and does not lose its stack. Previously both were
+  // dropped on this path (same silent-loss class as #111).
   if (ctx.embedded) {
-    await getSharedManager().fail(jobId(id), error.message);
+    await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error, token));
   } else {
-    await ctx.tcp!.send({ cmd: 'FAIL', id, error: error.message });
+    await ctx.tcp!.send(buildFailCommand(id, error, token));
   }
 }
 

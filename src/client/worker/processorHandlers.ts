@@ -16,6 +16,7 @@ import type {
 import type { Job as InternalJob } from '../../domain/types/job';
 import { jobId } from '../../domain/types/job';
 import { getSharedManager } from '../manager';
+import { UnrecoverableError } from '../errors';
 import type { AckBatcher } from './ackBatcher';
 
 export function createProgressHandler<T extends FlowJobData>(
@@ -172,9 +173,19 @@ export function createMoveToFailedHandler(
     // natural-throw path already does; @arthurvanl's repro showed the manual
     // path lost it. Compute before the send so the server can persist it.
     const { wireStack } = computeStackLines(error);
+    // Honour UnrecoverableError on the in-processor moveToFailed() path too, so
+    // it matches the natural-throw and Queue-reflection paths (skeptic: this was
+    // the one site still retrying an UnrecoverableError). #74/#82/#111-class.
+    const unrecoverable = error instanceof UnrecoverableError;
     if (embedded) {
       const manager = getSharedManager();
-      await manager.fail(internalJob.id, error.message, token ?? undefined, undefined, wireStack);
+      await manager.fail(
+        internalJob.id,
+        error.message,
+        token ?? undefined,
+        unrecoverable,
+        wireStack
+      );
     } else if (tcp) {
       await tcp.send({
         cmd: 'FAIL',
@@ -182,6 +193,7 @@ export function createMoveToFailedHandler(
         error: error.message,
         ...(wireStack ? { stack: wireStack } : {}),
         ...(token ? { token } : {}),
+        ...(unrecoverable ? { unrecoverable: true } : {}),
       });
     }
     onCalled(error);

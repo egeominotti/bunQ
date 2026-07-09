@@ -391,10 +391,15 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
     if (this.embedded) {
       const manager = getSharedManager();
       if (this.opts.useLocks) {
+        // Forward the configured lock duration; without it pullWithLock falls
+        // back to the server default and a custom `lockDuration` is silently
+        // ignored on this manual-acquire path (same class as #111). The main
+        // run-loop path (workerPull.ts) already forwards it.
         const { job, token: lockToken } = await manager.pullWithLock(
           this.queueKey,
           this.workerId,
-          0
+          0,
+          this.opts.lockDuration
         );
         if (job && lockToken) {
           const jobIdStr = String(job.id);
@@ -420,6 +425,9 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
     };
     if (this.opts.useLocks) {
       cmd.owner = this.workerId;
+      // Forward the configured lock TTL (mirrors workerPull.ts); otherwise the
+      // server applies its 30s default and a custom lockDuration is dropped.
+      if (this.opts.lockDuration !== undefined) cmd.lockTtl = this.opts.lockDuration;
       if (token) cmd.token = token;
     }
 

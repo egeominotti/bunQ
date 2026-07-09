@@ -6,6 +6,7 @@
 import type { Job, ChangePriorityOpts, JobStateType } from './types';
 import type { TcpConnectionPool } from './tcpPool';
 import { getSharedManager } from './manager';
+import { buildFailCommand, failEmbeddedArgs } from './queue/failWire';
 import { jobId } from '../domain/types/job';
 
 /** Callbacks for flow job mutation operations */
@@ -269,11 +270,12 @@ export function createFlowJobObject<T>(
       return null;
     },
     moveToFailed: async (error) => {
+      // Forward stacktrace + UnrecoverableError (was dropped; #74/#111-class).
       if (embedded) {
-        await getSharedManager().fail(jobId(id), error.message);
+        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error));
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'FAIL', id, error: error.message });
+      if (tcp) await tcp.send(buildFailCommand(id, error));
     },
     moveToWait: async () => {
       if (embedded) return await getSharedManager().moveActiveToWait(jobId(id));

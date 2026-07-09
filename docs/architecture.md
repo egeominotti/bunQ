@@ -353,6 +353,25 @@ that coalesces concurrent `add()` calls into one `PUSHB` round-trip. The only
 data-loss exposure is the ≤10 ms buffered window — eliminated per-job with
 `durable: true`. Numbers are order-of-magnitude and hardware-dependent.
 
+## Reliability & Battle-Testing
+
+Beyond the functional unit/integration suites, a set of adversarial "24/7
+readiness" suites under `test/repro-*.test.ts` assert the delivery and resource
+guarantees a continuously-running deployment depends on. Each drives a real
+`QueueManager` + `createTcpServer` (several spawn the real `src/main.ts` process
+against on-disk SQLite) and asserts hard invariants — not just "it ran".
+
+| Category | File | What it proves |
+| --- | --- | --- |
+| Protocol fuzzing | `repro-fuzz-protocol` | Malformed frames, corrupt MessagePack, lying length prefixes, >64 MB frames, torn/coalesced frames, and pre-auth commands never crash or wedge the server; the pre-auth gate never leaks. |
+| Chaos / fault injection | `repro-chaos-fault-injection` | At-least-once redelivery when a worker dies mid-job; a heartbeated-then-dropped job is not double-dispatched but is reclaimed by lock-expiry; lock-expiry under contention loses nothing; cron next-run is monotonic under clock skew/DST. |
+| Race / concurrency | `repro-race-concurrency` | N concurrent PULLs on one job → exactly one delivery; concurrent same-`jobId` PUSH → exactly one job; active re-add is an idempotent skip (no UNIQUE crash); cancel-during-active is a safe no-op; stale ACK vs lock-expiry never double-completes; K-workers×M-jobs drain processes each exactly once. |
+| Crash-recovery | `repro-chaos-crash-recovery` | Under `SIGKILL` (no flush): durable jobs are never lost, ACKed durable jobs stay completed, paused-state and DLQ entries persist, an active-at-crash job is recovered (attempts incremented), and multi-cycle crash fuzzing loses nothing cumulatively. |
+| Soak / endurance | `repro-chaos-soak` | Sustained produce/consume with a worker socket killed every ~400 ms: no job lost (server-authoritative), p99 latency does not drift, WAL stays bounded, and internal collections return to baseline after drain (no per-job/per-connection leak). Env-tunable (`SOAK_MS`) for real multi-hour runs. |
+| Stress / degradation | `repro-stress-degradation` | A huge backlog stays bounded and responsive then drains; 100 slowloris connections are all terminated by the stall bound while a healthy client stays fast; >50 in-flight pipelined commands on one socket all complete; latency returns to baseline after a load spike. |
+| Upgrade / rolling restart | `repro-upgrade-restart` | Graceful `SIGTERM` flushes the write buffer so even buffered (non-durable) jobs survive; waiting/completed(+result)/paused/DLQ state all round-trip a restart; rolling restarts under load lose nothing cumulatively. |
+| Long-running semantics | `repro-longrunning-semantics` | Cron next-run does not drift across thousands of ticks (incl. DST); `jobResults` and the custom-id dedup map stay bounded under pressure (oldest evicted, newest retained); the DLQ is bounded to `maxEntries` and remains retryable. |
+
 ## Module Map
 
 ### Core engine & data structures

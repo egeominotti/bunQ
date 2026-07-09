@@ -2,6 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import react from '@astrojs/react';
+import remarkGfm from 'remark-gfm';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -21,6 +22,14 @@ try {
 
 export default defineConfig({
   site: 'https://bunqueue.dev',
+
+  // GFM (tables, strikethrough, autolinks) for .mdx pages too: Starlight's
+  // internal MDX pipeline extends this markdown config, and without the
+  // explicit plugin GFM tables in .mdx files were emitted as literal |---|
+  // text (affected sdks/benchmarks/mcp/deployment/comparison).
+  markdown: {
+    remarkPlugins: [remarkGfm],
+  },
 
   // Performance optimizations
   compressHTML: true,

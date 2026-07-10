@@ -1,0 +1,63 @@
+---
+import { getCollection } from 'astro:content';
+
+/**
+ * Dynamic blog listing: reads every blog post from the docs collection,
+ * pulls the publish date and topic out of its frontmatter/body, computes
+ * reading time, and renders newest-first cards. New posts appear here
+ * with zero manual listing work.
+ */
+const entries = await getCollection('docs', (e) => e.id.startsWith('blog/') && e.id !== 'blog');
+
+type Post = {
+  href: string;
+  title: string;
+  description: string;
+  date: Date | null;
+  topic: string;
+  minutes: number;
+};
+
+function headContent(entry: any, property: string): string | undefined {
+  for (const h of entry.data.head ?? []) {
+    if (h.attrs?.property === property) return h.attrs.content;
+  }
+  return undefined;
+}
+
+const posts: Post[] = entries.map((e) => {
+  const body = e.body ?? '';
+  const topicMatch = body.match(/bq-eyebrow">blog(?:\s*·\s*([^<]+))?</);
+  const published = headContent(e, 'article:published_time');
+  const words = body.split(/\s+/).length;
+  return {
+    href: `/${e.id}/`,
+    title: String(e.data.title).replace(/^"|"$/g, ''),
+    description: String(e.data.description ?? ''),
+    date: published ? new Date(published) : null,
+    topic: (topicMatch?.[1] ?? 'engineering').trim(),
+    minutes: Math.max(2, Math.round(words / 230)),
+  };
+});
+
+posts.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
+
+const fmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+---
+
+<div class="bq-blog-grid">
+  {
+    posts.map((p) => (
+      <a class="bq-blog-card" href={p.href}>
+        <p class="bq-blog-meta">
+          <span class="bq-blog-topic">{p.topic}</span>
+          {p.date && <span>{fmt.format(p.date)}</span>}
+          <span>{p.minutes} min read</span>
+        </p>
+        <h2>{p.title}</h2>
+        <p class="bq-blog-desc">{p.description}</p>
+        <span class="bq-blog-more">Read the article →</span>
+      </a>
+    ))
+  }
+</div>

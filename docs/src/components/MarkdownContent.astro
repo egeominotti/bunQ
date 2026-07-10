@@ -1,0 +1,60 @@
+---
+import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+
+/**
+ * Wraps Starlight's MarkdownContent. On blog posts it adds a meta line
+ * above the article (back link, publish date, reading time) and a
+ * conversion footer below it, automatically for every current and
+ * future post.
+ */
+const { entry, id } = Astro.locals.starlightRoute;
+const isBlogPost = id.startsWith('blog/') && id !== 'blog';
+
+let dateLabel = '';
+let minutes = 0;
+if (isBlogPost) {
+  for (const h of entry.data.head ?? []) {
+    if (h.attrs?.property === 'article:published_time') {
+      dateLabel = new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(new Date(h.attrs.content));
+    }
+  }
+  const words = (entry.body ?? '').split(/\s+/).length;
+  minutes = Math.max(2, Math.round(words / 230));
+}
+---
+
+{
+  isBlogPost && (
+    <p class="bq-post-meta">
+      <a href="/blog/">← Blog</a>
+      {dateLabel && <span>{dateLabel}</span>}
+      <span>{minutes} min read</span>
+    </p>
+  )
+}
+
+<Default><slot /></Default>
+
+{
+  isBlogPost && (
+    <div class="bq-post-footer">
+      <p class="bq-post-footer-lede">Try what you just read. One install, zero infrastructure.</p>
+      <div class="bq-actions">
+        <button type="button" class="bq-hero-install" aria-label="Copy install command">
+          bun add bunqueue
+        </button>
+        <a class="bq-btn" href="/guide/quickstart/">
+          Read the quickstart
+        </a>
+        <a class="bq-btn-ghost" href="/blog/">
+          More articles
+        </a>
+      </div>
+      <script is:inline src="/bq-copy.js" />
+    </div>
+  )
+}

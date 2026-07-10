@@ -2348,6 +2348,130 @@ html {
   .bq-tools { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ── blog: dynamic index cards, post meta line, post footer ────────── */
+
+.bq-blog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.bq-blog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.35rem 1.5rem;
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.bq-blog-card:hover {
+  border-color: var(--bq-brand);
+  transform: translateY(-2px);
+}
+
+.bq-blog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  font-family: var(--bq-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: var(--sl-color-gray-3);
+  margin: 0;
+}
+
+.bq-blog-topic {
+  color: var(--bq-brand);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.bq-blog-card h2 {
+  font-family: var(--bq-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--sl-color-white);
+  margin: 0;
+}
+
+.bq-blog-desc {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--sl-color-gray-2);
+  margin: 0;
+}
+
+.bq-blog-more {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--bq-brand);
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+.bq-blog-rss {
+  font-family: var(--bq-mono);
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-3);
+  margin-top: 2rem;
+}
+
+.bq-blog-rss a {
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--bq-line);
+}
+
+.bq-blog-rss a:hover {
+  color: var(--sl-color-white);
+  border-bottom-color: var(--bq-brand);
+}
+
+@media (max-width: 56rem) {
+  .bq-blog-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.bq-post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  color: var(--sl-color-gray-3);
+  margin: 0 0 1.2rem;
+}
+
+.bq-post-meta a {
+  color: var(--bq-brand);
+  text-decoration: none;
+}
+
+.bq-post-meta a:hover {
+  color: var(--sl-color-white);
+}
+
+.bq-post-footer {
+  margin-top: 3.5rem;
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.6rem 1.8rem;
+}
+
+.bq-post-footer-lede {
+  font-family: var(--bq-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  margin: 0 0 1rem;
+}
+
 /* ── quickstart steps ──────────────────────────────────────────────── */
 
 #quickstart {

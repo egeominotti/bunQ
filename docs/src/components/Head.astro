@@ -71,6 +71,7 @@ if (segments.length > 0) {
 ---
 
 <Default><slot /></Default>
+<link rel="alternate" type="application/rss+xml" title="bunqueue blog" href="/rss.xml" />
 {
   scripts.map((data) => (
     <script type="application/ld+json" set:html={JSON.stringify(data).replace(/</g, '\\u003c')} />

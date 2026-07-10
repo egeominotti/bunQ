@@ -7,13 +7,13 @@
  */
 ---
 
-<div class="pf-wrap">
+<div class="pf-wrap" data-bq-interactive>
   <!-- Desktop horizontal flow -->
   <div class="pf-flow">
     <!-- Main pipeline row -->
     <div class="pf-main">
       <!-- Node 1: Order Checkout -->
-      <div class="pf-node pf-n1">
+      <div class="pf-node pf-n1" data-tip="Checkout enqueues the payment with the durable flag, so the job bypasses the write buffer and is persisted to SQLite before the request returns, a crash cannot lose the charge.">
         <div class="pf-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
@@ -31,7 +31,7 @@
       </div>
 
       <!-- Node 2: Queue -->
-      <div class="pf-node pf-n2">
+      <div class="pf-node pf-n2" data-tip="The payments queue holds the job with attempts 3, backoff 5000 ms and a 60 second timeout, transient failures retry automatically.">
         <div class="pf-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -50,7 +50,7 @@
       </div>
 
       <!-- Node 3: Worker (hero with glow) -->
-      <div class="pf-node pf-n3 pf-hero">
+      <div class="pf-node pf-n3 pf-hero" data-tip="The payment worker pulls the job, logs each stage with job.log and reports progress via updateProgress while it talks to the payment provider.">
         <div class="pf-glow"></div>
         <div class="pf-icon pf-icon-pink">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -70,7 +70,7 @@
       </div>
 
       <!-- Node 4: Idempotency Check (diamond) -->
-      <div class="pf-node pf-n4">
+      <div class="pf-node pf-n4" data-tip="Before charging, the worker looks up the idempotencyKey from the job data, so a retried or duplicate job can never charge the customer twice.">
         <div class="pf-diamond">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -90,7 +90,7 @@
           <div class="pf-branch-dot pf-bd-yes"></div>
         </div>
         <span class="pf-branch-tag pf-tag-green">yes</span>
-        <div class="pf-node pf-n-cached">
+        <div class="pf-node pf-n-cached" data-tip="The key was already processed, the stored result of the original charge is returned as the job result and Stripe is never called again.">
           <div class="pf-icon pf-icon-green">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -108,7 +108,7 @@
           <div class="pf-branch-dot pf-bd-no"></div>
         </div>
         <span class="pf-branch-tag pf-tag-blue">no</span>
-        <div class="pf-node pf-n-stripe">
+        <div class="pf-node pf-n-stripe" data-tip="A payment intent is created and confirmed, passing the same idempotency_key to Stripe, any non succeeded status throws and triggers a retry with backoff.">
           <div class="pf-icon pf-icon-blue">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
@@ -124,7 +124,7 @@
           <div class="pf-dot pf-d-stripe"></div>
         </div>
 
-        <div class="pf-node pf-n-record">
+        <div class="pf-node pf-n-record" data-tip="The completed transaction is written to the database and an audit log entry is created, giving every charge a durable paper trail.">
           <div class="pf-icon pf-icon-green">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -141,7 +141,7 @@
   </div>
 
   <!-- DLQ Warning Banner -->
-  <div class="pf-dlq">
+  <div class="pf-dlq" data-tip="After 3 failed attempts the job moves to the dead letter queue configured with autoRetry false, failed payments are kept 30 days for manual review instead of being recharged automatically.">
     <div class="pf-dlq-icon">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -154,7 +154,7 @@
 
   <!-- Mobile vertical layout -->
   <div class="pf-vertical">
-    <div class="pf-vrow">
+    <div class="pf-vrow" data-tip="Checkout enqueues the payment as durable, persisted to SQLite before the response returns.">
       <div class="pf-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
@@ -165,7 +165,7 @@
     </div>
     <div class="pf-vconn"><div class="pf-vline"></div><div class="pf-vdot pf-vd1"></div></div>
 
-    <div class="pf-vrow">
+    <div class="pf-vrow" data-tip="The payments queue retries up to 3 times with 5 second backoff and a 60 second timeout.">
       <div class="pf-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -176,7 +176,7 @@
     </div>
     <div class="pf-vconn"><div class="pf-vline"></div><div class="pf-vdot pf-vd2"></div></div>
 
-    <div class="pf-vrow pf-vhero">
+    <div class="pf-vrow pf-vhero" data-tip="The worker pulls the job, logs each stage and reports progress while charging.">
       <div class="pf-vicon pf-vicon-pink">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -186,13 +186,13 @@
     </div>
     <div class="pf-vconn"><div class="pf-vline"></div><div class="pf-vdot pf-vd3"></div></div>
 
-    <div class="pf-vrow pf-vdiamond-row">
+    <div class="pf-vrow pf-vdiamond-row" data-tip="Looks up the idempotencyKey so a retried or duplicate job never charges twice.">
       <div class="pf-vdiamond">?</div>
       <div><span class="pf-vlabel">Idempotency Check</span></div>
     </div>
 
     <div class="pf-vbranches">
-      <div class="pf-vbranch">
+      <div class="pf-vbranch" data-tip="Already processed, the cached result is returned and Stripe is not called again.">
         <span class="pf-branch-tag pf-tag-green">yes</span>
         <div class="pf-vicon pf-vicon-green">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -201,7 +201,7 @@
         </div>
         <span class="pf-vlabel">Return Cached</span>
       </div>
-      <div class="pf-vbranch">
+      <div class="pf-vbranch" data-tip="New payment, Stripe is charged with the idempotency key, then the transaction and audit log are recorded.">
         <span class="pf-branch-tag pf-tag-blue">no</span>
         <div class="pf-vicon pf-vicon-blue">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

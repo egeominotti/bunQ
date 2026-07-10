@@ -6,11 +6,11 @@
  */
 ---
 
-<div class="rp-wrap">
+<div class="rp-wrap" data-bq-interactive>
   <!-- Desktop horizontal layout -->
   <div class="rp-flow">
     <!-- Node 1: User Request -->
-    <div class="rp-node rp-n1">
+    <div class="rp-node rp-n1" data-tip="The user requests a report from the UI, the API enqueues a job and responds instantly instead of holding the connection open for minutes.">
       <div class="rp-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -29,7 +29,7 @@
     </div>
 
     <!-- Node 2: Queue -->
-    <div class="rp-node rp-n2">
+    <div class="rp-node rp-n2" data-tip="The reports queue holds the job with attempts 2 for transient database or storage failures and a 10 minute timeout so a stuck report never blocks the queue.">
       <div class="rp-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -48,7 +48,7 @@
     </div>
 
     <!-- Node 3: Worker (hero, wider) -->
-    <div class="rp-node rp-n3 rp-hero">
+    <div class="rp-node rp-n3 rp-hero" data-tip="The worker runs four phases, query the database, transform the data, generate the file, upload to S3, calling updateProgress at each one so the frontend shows a live progress bar.">
       <div class="rp-glow"></div>
       <div class="rp-icon rp-icon-active">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -92,7 +92,7 @@
     </div>
 
     <!-- Node 4: Notify -->
-    <div class="rp-node rp-n4">
+    <div class="rp-node rp-n4" data-tip="When the report is ready the worker emails the user a download link and returns the file URL, size and record count as the job result.">
       <div class="rp-icon rp-icon-green">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -106,7 +106,7 @@
 
   <!-- Mobile vertical layout -->
   <div class="rp-vertical">
-    <div class="rp-vrow">
+    <div class="rp-vrow" data-tip="The user triggers the report, the API enqueues a job and responds instantly.">
       <div class="rp-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
@@ -116,7 +116,7 @@
     </div>
     <div class="rp-vconn"><div class="rp-vline"></div><div class="rp-vdot rp-vd1"></div></div>
 
-    <div class="rp-vrow">
+    <div class="rp-vrow" data-tip="The reports queue holds the job with attempts 2 and a 10 minute timeout.">
       <div class="rp-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -127,7 +127,7 @@
     </div>
     <div class="rp-vconn"><div class="rp-vline"></div><div class="rp-vdot rp-vd2"></div></div>
 
-    <div class="rp-vrow rp-vhero">
+    <div class="rp-vrow rp-vhero" data-tip="The worker runs four phases, query, transform, generate, upload, reporting progress at each one.">
       <div class="rp-vicon rp-vicon-pink">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -145,7 +145,7 @@
     </div>
     <div class="rp-vconn"><div class="rp-vline"></div><div class="rp-vdot rp-vd3"></div></div>
 
-    <div class="rp-vrow">
+    <div class="rp-vrow" data-tip="The worker emails the user a download link and returns the file URL as the result.">
       <div class="rp-vicon rp-vicon-green">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>

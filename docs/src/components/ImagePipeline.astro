@@ -6,11 +6,11 @@
  */
 ---
 
-<div class="ip-wrap">
+<div class="ip-wrap" data-bq-interactive>
   <!-- Desktop horizontal layout -->
   <div class="ip-flow">
     <!-- Node 1: Upload S3 -->
-    <div class="ip-node ip-n1">
+    <div class="ip-node ip-n1" data-tip="The user uploads the original image to S3, the API pushes one job to the queue and responds without waiting for processing.">
       <div class="ip-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -30,7 +30,7 @@
     </div>
 
     <!-- Node 2: Queue -->
-    <div class="ip-node ip-n2">
+    <div class="ip-node ip-n2" data-tip="The images queue holds the job with 3 attempts and a 2 minute timeout so a stuck sharp or ffmpeg process never blocks the queue.">
       <div class="ip-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -49,7 +49,7 @@
     </div>
 
     <!-- Node 3: Worker (hero, wider) -->
-    <div class="ip-node ip-n3 ip-hero">
+    <div class="ip-node ip-n3 ip-hero" data-tip="A worker downloads the source and generates every variant with Sharp, thumb, card, full and og, updating job progress after each one.">
       <div class="ip-glow"></div>
       <div class="ip-icon ip-icon-active">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -92,7 +92,7 @@
     </div>
 
     <!-- Node 4: Upload CDN -->
-    <div class="ip-node ip-n4">
+    <div class="ip-node ip-n4" data-tip="Each finished variant is uploaded to the CDN and the resulting URLs are stored as the job result for the app to read.">
       <div class="ip-icon ip-icon-green">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
@@ -106,7 +106,7 @@
 
   <!-- Mobile vertical layout -->
   <div class="ip-vertical">
-    <div class="ip-vrow">
+    <div class="ip-vrow" data-tip="The original image lands in S3 and one job is queued, the upload endpoint returns immediately.">
       <div class="ip-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -117,7 +117,7 @@
     </div>
     <div class="ip-vconn"><div class="ip-vline"></div><div class="ip-vdot ip-vd1"></div></div>
 
-    <div class="ip-vrow">
+    <div class="ip-vrow" data-tip="The images queue holds the job with 3 attempts and a 2 minute timeout.">
       <div class="ip-vicon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -128,7 +128,7 @@
     </div>
     <div class="ip-vconn"><div class="ip-vline"></div><div class="ip-vdot ip-vd2"></div></div>
 
-    <div class="ip-vrow ip-vhero">
+    <div class="ip-vrow ip-vhero" data-tip="The worker generates all four variants with Sharp, reporting progress per variant.">
       <div class="ip-vicon ip-vicon-pink">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -148,7 +148,7 @@
     </div>
     <div class="ip-vconn"><div class="ip-vline"></div><div class="ip-vdot ip-vd3"></div></div>
 
-    <div class="ip-vrow">
+    <div class="ip-vrow" data-tip="All variants are uploaded to the CDN, URLs saved as the job result.">
       <div class="ip-vicon ip-vicon-green">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>

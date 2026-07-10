@@ -6,12 +6,12 @@
  */
 ---
 
-<div class="aa-wrap">
+<div class="aa-wrap" data-bq-interactive>
   <!-- Layer 1: TRIGGERS -->
   <div class="aa-layer aa-l1">
     <div class="aa-layer-label">TRIGGERS</div>
     <div class="aa-row">
-      <div class="aa-box aa-box-trigger">
+      <div class="aa-box aa-box-trigger" data-tip="API endpoints enqueue a job with queue.add() and return immediately, the slow work runs in the background instead of blocking the request.">
         <div class="aa-box-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -20,7 +20,7 @@
         </div>
         <span class="aa-box-label">API Handlers</span>
       </div>
-      <div class="aa-box aa-box-trigger">
+      <div class="aa-box aa-box-trigger" data-tip="The built-in cron scheduler enqueues recurring jobs from cron expressions or repeat intervals, nightly reports, hourly cleanups, no external scheduler needed.">
         <div class="aa-box-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -28,7 +28,7 @@
         </div>
         <span class="aa-box-label">Cron Scheduler</span>
       </div>
-      <div class="aa-box aa-box-trigger">
+      <div class="aa-box aa-box-trigger" data-tip="Incoming webhooks from external services are captured as jobs, the HTTP response is instant and the processing gets retries if it fails.">
         <div class="aa-box-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -37,7 +37,7 @@
         </div>
         <span class="aa-box-label">Webhooks Receiver</span>
       </div>
-      <div class="aa-box aa-box-trigger">
+      <div class="aa-box aa-box-trigger" data-tip="Domain events inside your app, user signup, order paid, file uploaded, enqueue follow-up work like emails, syncs and audits.">
         <div class="aa-box-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
@@ -60,19 +60,19 @@
   <div class="aa-layer aa-l2">
     <div class="aa-layer-label">QUEUE LAYER</div>
     <div class="aa-row">
-      <div class="aa-box aa-box-queue aa-pulse">
+      <div class="aa-box aa-box-queue aa-pulse" data-tip="Dedicated queue for outgoing email jobs, isolated so a newsletter burst never delays payments or reports.">
         <span class="aa-box-label">emails</span>
         <span class="aa-box-count">queue</span>
       </div>
-      <div class="aa-box aa-box-queue aa-pulse aa-p2">
+      <div class="aa-box aa-box-queue aa-pulse aa-p2" data-tip="Queue for long-running report generation, jobs carry progress updates and a timeout so a stuck report never blocks the rest.">
         <span class="aa-box-label">reports</span>
         <span class="aa-box-count">queue</span>
       </div>
-      <div class="aa-box aa-box-queue aa-pulse aa-p3">
+      <div class="aa-box aa-box-queue aa-pulse aa-p3" data-tip="Queue for outbound webhook deliveries, failed calls are retried with exponential backoff while the receiving endpoint is down.">
         <span class="aa-box-label">webhooks</span>
         <span class="aa-box-count">queue</span>
       </div>
-      <div class="aa-box aa-box-queue aa-pulse aa-p4">
+      <div class="aa-box aa-box-queue aa-pulse aa-p4" data-tip="Queue for payment operations, typically enqueued with durable true so the job is on disk before the API responds.">
         <span class="aa-box-label">payments</span>
         <span class="aa-box-count">queue</span>
       </div>
@@ -91,19 +91,19 @@
   <div class="aa-layer aa-l3">
     <div class="aa-layer-label">WORKER POOL</div>
     <div class="aa-row">
-      <div class="aa-box aa-box-worker">
+      <div class="aa-box aa-box-worker" data-tip="Three workers drain the emails queue concurrently, each pulls a job, processes it and acks or fails it.">
         <div class="aa-activity-dot"></div>
         <span class="aa-box-label">Worker x3</span>
       </div>
-      <div class="aa-box aa-box-worker">
+      <div class="aa-box aa-box-worker" data-tip="Two workers handle reports, low concurrency because each job is heavy and can run for minutes.">
         <div class="aa-activity-dot aa-ad2"></div>
         <span class="aa-box-label">Worker x2</span>
       </div>
-      <div class="aa-box aa-box-worker">
+      <div class="aa-box aa-box-worker" data-tip="Five workers deliver webhooks in parallel, higher concurrency suits IO-bound HTTP calls.">
         <div class="aa-activity-dot aa-ad3"></div>
         <span class="aa-box-label">Worker x5</span>
       </div>
-      <div class="aa-box aa-box-worker">
+      <div class="aa-box aa-box-worker" data-tip="Three workers process payments, concurrency tuned to the payment provider rate limits.">
         <div class="aa-activity-dot aa-ad4"></div>
         <span class="aa-box-label">Worker x3</span>
       </div>
@@ -121,7 +121,7 @@
   <div class="aa-layer aa-l4">
     <div class="aa-layer-label">OUTPUTS</div>
     <div class="aa-row aa-row-3">
-      <div class="aa-box aa-box-output aa-box-red">
+      <div class="aa-box aa-box-output aa-box-red" data-tip="Jobs that exhaust every retry attempt land in the dead letter queue, where they can be inspected, retried manually or auto-retried on a schedule.">
         <div class="aa-box-icon aa-oi-red">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -130,7 +130,7 @@
         </div>
         <span class="aa-box-label">DLQ</span>
       </div>
-      <div class="aa-box aa-box-output aa-box-blue">
+      <div class="aa-box aa-box-output aa-box-blue" data-tip="Every job, state change and result is persisted to SQLite in WAL mode, so a crash or restart loses nothing.">
         <div class="aa-box-icon aa-oi-blue">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -140,7 +140,7 @@
         </div>
         <span class="aa-box-label">SQLite</span>
       </div>
-      <div class="aa-box aa-box-output aa-box-green-out">
+      <div class="aa-box aa-box-output aa-box-green-out" data-tip="Completed, failed and progress events stream to listeners, webhooks and the dashboard in real time.">
         <div class="aa-box-icon aa-oi-green">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>

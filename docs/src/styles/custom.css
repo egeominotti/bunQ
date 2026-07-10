@@ -2096,6 +2096,59 @@ html {
   .bq-diag-row { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ── interactive diagram layer (use-case components) ───────────────── */
+
+.bq-tip {
+  position: absolute;
+  z-index: 999;
+  max-width: 20rem;
+  font-family: var(--bq-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--sl-color-text);
+  background: var(--sl-color-bg);
+  border: 1px solid var(--bq-brand);
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.8rem;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--bq-brand) 18%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.bq-tip-show {
+  opacity: 1;
+}
+
+[data-bq-interactive] [data-tip] {
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  border-radius: 0.55rem;
+}
+
+[data-bq-interactive] [data-tip]:focus-visible {
+  outline: 2px solid var(--bq-brand);
+  outline-offset: 3px;
+}
+
+[data-bq-interactive] .bq-tip-active {
+  transform: translateY(-3px);
+}
+
+[data-bq-interactive].bq-dimming [data-tip]:not(.bq-tip-active) {
+  opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-bq-interactive] [data-tip],
+  .bq-tip {
+    transition: none;
+  }
+  [data-bq-interactive] .bq-tip-active {
+    transform: none;
+  }
+}
+
 /* custom icon set */
 .bq-icon {
   flex: none;

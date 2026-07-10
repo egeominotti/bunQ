@@ -7,12 +7,12 @@
  */
 ---
 
-<div class="mt-wrap">
+<div class="mt-wrap" data-bq-interactive>
   <!-- Desktop layout -->
   <div class="mt-desktop">
     <div class="mt-tenants">
       <!-- Tenant A -->
-      <div class="mt-card mt-card-a">
+      <div class="mt-card mt-card-a" data-tip="QueueGroup with prefix tenant-a namespaces the emails, reports and webhooks queues for this tenant, pause, resume, drain, DLQ and rate limits are all scoped here and never touch tenant B.">
         <div class="mt-card-header">
           <span class="mt-card-title">TENANT A</span>
           <span class="mt-tag mt-tag-pink">isolated</span>
@@ -58,7 +58,7 @@
       </div>
 
       <!-- Tenant B -->
-      <div class="mt-card mt-card-b">
+      <div class="mt-card mt-card-b" data-tip="A second QueueGroup with prefix tenant-b owns the same queue names under its own namespace, a traffic burst or maintenance pause in tenant A has zero effect on these queues.">
         <div class="mt-card-header">
           <span class="mt-card-title">TENANT B</span>
           <span class="mt-tag mt-tag-blue">isolated</span>
@@ -116,7 +116,7 @@
 
     <!-- Shared infrastructure -->
     <div class="mt-shared">
-      <div class="mt-shared-inner">
+      <div class="mt-shared-inner" data-tip="All tenants share a single SQLite database, isolation comes from tenant-prefixed keys rather than separate storage, so onboarding a new tenant adds no extra infrastructure.">
         <div class="mt-shared-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -134,7 +134,7 @@
 
   <!-- Mobile vertical layout -->
   <div class="mt-mobile">
-    <div class="mt-mcard mt-mcard-a">
+    <div class="mt-mcard mt-mcard-a" data-tip="QueueGroup tenant-a, its own queue namespace, DLQ, rate limits and pause scope.">
       <div class="mt-card-header">
         <span class="mt-card-title">TENANT A</span>
         <span class="mt-tag mt-tag-pink">isolated</span>
@@ -154,7 +154,7 @@
       <div class="mt-mvdot mt-mvd-a"></div>
     </div>
 
-    <div class="mt-mshared">
+    <div class="mt-mshared" data-tip="One shared SQLite database, tenants stay isolated through prefixed keys.">
       <div class="mt-shared-icon">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -171,7 +171,7 @@
       <div class="mt-mvdot mt-mvd-b"></div>
     </div>
 
-    <div class="mt-mcard mt-mcard-b">
+    <div class="mt-mcard mt-mcard-b" data-tip="QueueGroup tenant-b, fully isolated from tenant A while sharing the same database.">
       <div class="mt-card-header">
         <span class="mt-card-title">TENANT B</span>
         <span class="mt-tag mt-tag-blue">isolated</span>

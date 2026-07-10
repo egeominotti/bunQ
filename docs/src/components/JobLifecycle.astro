@@ -7,13 +7,13 @@
  */
 ---
 
-<div class="jl-wrap">
+<div class="jl-wrap" data-bq-interactive>
   <!-- Desktop layout -->
   <div class="jl-flow">
     <!-- Happy path row -->
     <div class="jl-happy-row">
       <!-- QUEUED -->
-      <div class="jl-node jl-queued">
+      <div class="jl-node jl-queued" data-tip="The job is persisted and waiting in the queue, ordered by priority and delay, ready to be pulled by the next free worker.">
         <div class="jl-icon jl-icon-gray">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -30,7 +30,7 @@
       </div>
 
       <!-- ACTIVE -->
-      <div class="jl-node jl-active">
+      <div class="jl-node jl-active" data-tip="A worker has pulled the job and is running the processor, heartbeats and progress updates flow back while it works and stall detection watches for silence.">
         <div class="jl-active-glow"></div>
         <div class="jl-icon jl-icon-pink">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -50,7 +50,7 @@
       </div>
 
       <!-- COMPLETED -->
-      <div class="jl-node jl-completed">
+      <div class="jl-node jl-completed" data-tip="The worker acked the job, the return value is stored as the job result and completed events fire to listeners.">
         <div class="jl-icon jl-icon-green">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -72,7 +72,7 @@
       <!-- Failure row -->
       <div class="jl-fail-row">
         <!-- FAILED -->
-        <div class="jl-node jl-failed">
+        <div class="jl-node jl-failed" data-tip="The processor threw an error or timed out, the error message and stack trace are recorded on the job for inspection.">
           <div class="jl-icon jl-icon-red">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
@@ -91,7 +91,7 @@
         </div>
 
         <!-- RETRYING -->
-        <div class="jl-node jl-retrying">
+        <div class="jl-node jl-retrying" data-tip="The job is rescheduled with exponential backoff, each attempt waits longer before the job re-enters the queue, until attempts are exhausted.">
           <div class="jl-icon jl-icon-yellow">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="23 4 23 10 17 10"/>
@@ -123,7 +123,7 @@
             <div class="jl-vdot jl-vd-dlq jl-vdot-darkred"></div>
           </div>
           <span class="jl-branch-tag">max attempts</span>
-          <div class="jl-node jl-dlq">
+          <div class="jl-node jl-dlq" data-tip="After max attempts the job moves to the dead letter queue with its full history, where it can be inspected, retried manually or purged.">
             <div class="jl-icon jl-icon-darkred">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -139,32 +139,32 @@
 
   <!-- Mobile vertical layout -->
   <div class="jl-mobile">
-    <div class="jl-mnode jl-mnode-gray">
+    <div class="jl-mnode jl-mnode-gray" data-tip="Job persisted and waiting, ordered by priority, ready for the next free worker.">
       <span class="jl-mlabel">QUEUED</span>
     </div>
     <div class="jl-mvconn"><div class="jl-mvline"></div><div class="jl-mvdot jl-mvd1"></div></div>
-    <div class="jl-mnode jl-mnode-pink">
+    <div class="jl-mnode jl-mnode-pink" data-tip="A worker is running the processor, sending heartbeats and progress updates.">
       <span class="jl-mlabel">ACTIVE</span>
       <span class="jl-msub">processing</span>
     </div>
     <div class="jl-msplit">
       <div class="jl-msplit-path jl-msplit-happy">
         <div class="jl-mvconn"><div class="jl-mvline jl-mvline-green"></div><div class="jl-mvdot jl-mvd2 jl-mvdot-green"></div></div>
-        <div class="jl-mnode jl-mnode-green">
+        <div class="jl-mnode jl-mnode-green" data-tip="Job acked, its result is stored and completed events fire.">
           <span class="jl-mlabel">COMPLETED</span>
         </div>
       </div>
       <div class="jl-msplit-path jl-msplit-fail">
         <div class="jl-mvconn"><div class="jl-mvline jl-mvline-red"></div><div class="jl-mvdot jl-mvd3 jl-mvdot-red"></div></div>
-        <div class="jl-mnode jl-mnode-red">
+        <div class="jl-mnode jl-mnode-red" data-tip="The processor threw or timed out, error and stack are recorded on the job.">
           <span class="jl-mlabel">FAILED</span>
         </div>
         <div class="jl-mvconn"><div class="jl-mvline jl-mvline-red"></div><div class="jl-mvdot jl-mvd4 jl-mvdot-yellow"></div></div>
-        <div class="jl-mnode jl-mnode-yellow">
+        <div class="jl-mnode jl-mnode-yellow" data-tip="Rescheduled with exponential backoff, then back to the queue for another attempt.">
           <span class="jl-mlabel">RETRYING</span>
         </div>
         <div class="jl-mvconn"><div class="jl-mvline jl-mvline-red"></div><div class="jl-mvdot jl-mvd5 jl-mvdot-darkred"></div></div>
-        <div class="jl-mnode jl-mnode-darkred">
+        <div class="jl-mnode jl-mnode-darkred" data-tip="Attempts exhausted, the job moves to the dead letter queue for inspection or manual retry.">
           <span class="jl-mlabel">DLQ</span>
           <span class="jl-msub">max attempts</span>
         </div>

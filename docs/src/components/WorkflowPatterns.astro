@@ -8,7 +8,7 @@
  */
 ---
 
-<div class="wp-wrap">
+<div class="wp-wrap" data-bq-interactive>
   <!-- ===== Pattern 1: Parent-Child (Fan-in) ===== -->
   <div class="wp-section">
     <div class="wp-title">Parent-Child (Fan-in)</div>
@@ -16,7 +16,7 @@
     <!-- Desktop -->
     <div class="wp-p1-desktop">
       <!-- Parent node -->
-      <div class="wp-p1-parent">
+      <div class="wp-p1-parent" data-tip="FlowProducer adds the fulfill-order parent together with three children, the parent sits in waiting-children state until every child has completed.">
         <div class="wp-icon wp-icon-pink">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -41,7 +41,7 @@
 
       <!-- Children row -->
       <div class="wp-p1-children">
-        <div class="wp-node wp-p1-c1">
+        <div class="wp-node wp-p1-c1" data-tip="Child job on the inventory queue, dispatched immediately and processed in parallel with the other children.">
           <div class="wp-icon wp-icon-blue">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
@@ -52,7 +52,7 @@
           <span class="wp-sublabel">Child 1</span>
         </div>
 
-        <div class="wp-node wp-p1-c2">
+        <div class="wp-node wp-p1-c2" data-tip="Child job on the payments queue, runs independently with its own retry policy, its return value is stored for the parent to read.">
           <div class="wp-icon wp-icon-blue">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
@@ -63,7 +63,7 @@
           <span class="wp-sublabel">Child 2</span>
         </div>
 
-        <div class="wp-node wp-p1-c3">
+        <div class="wp-node wp-p1-c3" data-tip="Child job on the shipping queue, the third parallel child, children can finish in any order.">
           <div class="wp-icon wp-icon-blue">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="1" y="3" width="15" height="13"/>
@@ -91,7 +91,7 @@
       </div>
 
       <!-- Completion node -->
-      <div class="wp-p1-complete">
+      <div class="wp-p1-complete" data-tip="Once the last child finishes the parent is promoted and executes, getChildrenValues hands it every child result for the final fulfillment step.">
         <div class="wp-icon wp-icon-green">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -105,7 +105,7 @@
 
     <!-- Mobile -->
     <div class="wp-p1-mobile">
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="Parent job added via FlowProducer, waits in waiting-children until all three children finish.">
         <div class="wp-micon wp-micon-pink">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -115,12 +115,12 @@
       </div>
       <div class="wp-mconn"><div class="wp-mline"></div></div>
       <div class="wp-mchildren">
-        <div class="wp-mchild wp-mc-blue">Child 1: Validate Inventory</div>
-        <div class="wp-mchild wp-mc-blue">Child 2: Validate Payment</div>
-        <div class="wp-mchild wp-mc-blue">Child 3: Calculate Shipping</div>
+        <div class="wp-mchild wp-mc-blue" data-tip="Parallel child on the inventory queue.">Child 1: Validate Inventory</div>
+        <div class="wp-mchild wp-mc-blue" data-tip="Parallel child on the payments queue, its result is stored for the parent.">Child 2: Validate Payment</div>
+        <div class="wp-mchild wp-mc-blue" data-tip="Parallel child on the shipping queue, children finish in any order.">Child 3: Calculate Shipping</div>
       </div>
       <div class="wp-mconn"><div class="wp-mline"></div></div>
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="Parent runs last, reading every child result via getChildrenValues.">
         <div class="wp-micon wp-micon-green">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
@@ -140,7 +140,7 @@
 
     <!-- Desktop -->
     <div class="wp-p2-desktop">
-      <div class="wp-node wp-p2-n1">
+      <div class="wp-node wp-p2-n1" data-tip="First job of flow.addChain, reads the source CSV and returns the raw rows as its job result.">
         <div class="wp-icon wp-icon-yellow">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -160,7 +160,7 @@
         <div class="wp-hdot wp-hd1"></div>
       </div>
 
-      <div class="wp-node wp-p2-n2">
+      <div class="wp-node wp-p2-n2" data-tip="Starts only after Extract completes, receives the previous job result as its input and returns the cleaned dataset.">
         <div class="wp-icon wp-icon-blue">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="16 18 22 12 16 6"/>
@@ -178,7 +178,7 @@
         <div class="wp-hdot wp-hd2"></div>
       </div>
 
-      <div class="wp-node wp-p2-n3">
+      <div class="wp-node wp-p2-n3" data-tip="Final step of the chain, takes the transformed result and writes it into the warehouse, if it fails only this step retries.">
         <div class="wp-icon wp-icon-green">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -193,7 +193,7 @@
 
     <!-- Mobile -->
     <div class="wp-p2-mobile">
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="First chain job, reads the CSV, its result feeds the next step.">
         <div class="wp-micon wp-micon-yellow">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -203,7 +203,7 @@
         <div><span class="wp-mlabel">Extract</span><span class="wp-msub">CSV</span></div>
       </div>
       <div class="wp-mconn"><div class="wp-mline"></div><span class="wp-mconn-label">result</span></div>
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="Runs after Extract, cleans the data it received as input.">
         <div class="wp-micon wp-micon-blue">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
@@ -212,7 +212,7 @@
         <div><span class="wp-mlabel">Transform</span><span class="wp-msub">clean</span></div>
       </div>
       <div class="wp-mconn"><div class="wp-mline"></div><span class="wp-mconn-label">result</span></div>
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="Final chain step, writes the transformed result to the warehouse.">
         <div class="wp-micon wp-micon-green">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -235,7 +235,7 @@
     <!-- Desktop -->
     <div class="wp-p3-desktop">
       <div class="wp-p3-chunks">
-        <div class="wp-node wp-p3-ch1">
+        <div class="wp-node wp-p3-ch1" data-tip="One slice of the dataset, added with flow.addBulkThen and processed as an independent parallel job.">
           <div class="wp-icon wp-icon-pink">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
@@ -244,7 +244,7 @@
           </div>
           <span class="wp-label">Chunk 1</span>
         </div>
-        <div class="wp-node wp-p3-ch2">
+        <div class="wp-node wp-p3-ch2" data-tip="Second parallel chunk, runs concurrently on any available worker.">
           <div class="wp-icon wp-icon-blue">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
@@ -253,7 +253,7 @@
           </div>
           <span class="wp-label">Chunk 2</span>
         </div>
-        <div class="wp-node wp-p3-ch3">
+        <div class="wp-node wp-p3-ch3" data-tip="Third parallel chunk, chunks can complete in any order without blocking each other.">
           <div class="wp-icon wp-icon-yellow">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
@@ -281,7 +281,7 @@
       </div>
 
       <!-- Merge node -->
-      <div class="wp-p3-merge">
+      <div class="wp-p3-merge" data-tip="The then job of addBulkThen is the parent of all chunks, it runs once every chunk has completed and combines their results into the final output.">
         <div class="wp-icon wp-icon-green">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 3 21 3 21 9"/>
@@ -297,12 +297,12 @@
     <!-- Mobile -->
     <div class="wp-p3-mobile">
       <div class="wp-mchildren">
-        <div class="wp-mchild wp-mc-pink">Chunk 1</div>
-        <div class="wp-mchild wp-mc-blue">Chunk 2</div>
-        <div class="wp-mchild wp-mc-yellow">Chunk 3</div>
+        <div class="wp-mchild wp-mc-pink" data-tip="One slice of the dataset, processed as an independent parallel job.">Chunk 1</div>
+        <div class="wp-mchild wp-mc-blue" data-tip="Second chunk, runs concurrently with the others.">Chunk 2</div>
+        <div class="wp-mchild wp-mc-yellow" data-tip="Third chunk, completion order does not matter.">Chunk 3</div>
       </div>
       <div class="wp-mconn"><div class="wp-mline"></div></div>
-      <div class="wp-mrow">
+      <div class="wp-mrow" data-tip="Runs after every chunk completes and merges their results.">
         <div class="wp-micon wp-micon-green">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>

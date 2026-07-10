@@ -6,11 +6,11 @@
  */
 ---
 
-<div class="ep-wrap">
+<div class="ep-wrap" data-bq-interactive>
   <!-- Desktop horizontal flow -->
   <div class="ep-flow">
     <!-- Node 1: Request -->
-    <div class="ep-node ep-n1">
+    <div class="ep-node ep-n1" data-tip="An API call or cron trigger enqueues the email job and returns immediately, no SMTP connection or template rendering happens in the request.">
       <div class="ep-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -29,7 +29,7 @@
     </div>
 
     <!-- Node 2: Queue -->
-    <div class="ep-node ep-n2">
+    <div class="ep-node ep-n2" data-tip="The emails queue persists each job to SQLite, default options here set attempts 5 with exponential backoff and removeOnComplete.">
       <div class="ep-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -48,7 +48,7 @@
     </div>
 
     <!-- Node 3: Worker (hero) -->
-    <div class="ep-node ep-n3 ep-hero">
+    <div class="ep-node ep-n3 ep-hero" data-tip="The worker renders the template, downloads attachments and sends the message, calling updateProgress at each step so delivery is observable in real time.">
       <div class="ep-glow"></div>
       <div class="ep-icon ep-icon-pink">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -69,7 +69,7 @@
     </div>
 
     <!-- Node 4: SMTP/SendGrid -->
-    <div class="ep-node ep-n4">
+    <div class="ep-node ep-n4" data-tip="The actual delivery provider, a 5xx or network error here fails the job and triggers an automatic retry instead of losing the email.">
       <div class="ep-icon ep-icon-blue">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -88,7 +88,7 @@
         <div class="ep-bline ep-bline-green"></div>
         <div class="ep-bdot ep-bd1 ep-bdot-green"></div>
       </div>
-      <div class="ep-bnode ep-bnode-green">
+      <div class="ep-bnode ep-bnode-green" data-tip="On ack the result with messageId, provider and delivery time is stored and the delivery is logged on the job.">
         <div class="ep-bicon ep-bi-green">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -107,7 +107,7 @@
         <div class="ep-bline ep-bline-yellow"></div>
         <div class="ep-bdot ep-bd2 ep-bdot-yellow"></div>
       </div>
-      <div class="ep-bnode ep-bnode-yellow">
+      <div class="ep-bnode ep-bnode-yellow" data-tip="On failure the job is retried up to 5 times with exponential backoff, delays grow as 2s, 4s, 8s and so on, riding out provider outages.">
         <div class="ep-bicon ep-bi-yellow">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"/>
@@ -126,7 +126,7 @@
         <div class="ep-bline ep-bline-red"></div>
         <div class="ep-bdot ep-bd3 ep-bdot-red"></div>
       </div>
-      <div class="ep-bnode ep-bnode-red">
+      <div class="ep-bnode ep-bnode-red" data-tip="After all attempts fail the job lands in the dead letter queue with its error history, ready to alert on-call and be retried manually.">
         <div class="ep-bicon ep-bi-red">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -143,7 +143,7 @@
 
   <!-- Mobile vertical layout -->
   <div class="ep-mobile">
-    <div class="ep-mrow">
+    <div class="ep-mrow" data-tip="An API call or cron trigger enqueues the email job and returns immediately.">
       <div class="ep-micon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -153,7 +153,7 @@
       <div><span class="ep-mlabel">Request</span><span class="ep-msub">API / Cron</span></div>
     </div>
     <div class="ep-mvconn"><div class="ep-mvline"></div><div class="ep-mvdot ep-mvd1"></div></div>
-    <div class="ep-mrow">
+    <div class="ep-mrow" data-tip="The emails queue persists each job with attempts 5 and exponential backoff.">
       <div class="ep-micon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -163,7 +163,7 @@
       <div><span class="ep-mlabel">Queue</span><span class="ep-msub">emails</span></div>
     </div>
     <div class="ep-mvconn"><div class="ep-mvline"></div><div class="ep-mvdot ep-mvd2"></div></div>
-    <div class="ep-mrow ep-mhero">
+    <div class="ep-mrow ep-mhero" data-tip="The worker renders the template, handles attachments and sends, reporting progress at each step.">
       <div class="ep-micon ep-micon-pink">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -172,7 +172,7 @@
       <div><span class="ep-mlabel">Worker</span><span class="ep-msub">render + send</span></div>
     </div>
     <div class="ep-mvconn"><div class="ep-mvline"></div><div class="ep-mvdot ep-mvd3"></div></div>
-    <div class="ep-mrow">
+    <div class="ep-mrow" data-tip="The delivery provider, a 5xx or network error here triggers an automatic retry.">
       <div class="ep-micon ep-micon-blue">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -183,13 +183,13 @@
     </div>
     <div class="ep-mvconn"><div class="ep-mvline"></div></div>
     <div class="ep-moutcomes">
-      <div class="ep-mout ep-mout-green">
+      <div class="ep-mout ep-mout-green" data-tip="On ack the result with messageId and provider is stored and logged.">
         <span class="ep-mout-label">Success</span><span class="ep-mout-sub">logged</span>
       </div>
-      <div class="ep-mout ep-mout-yellow">
+      <div class="ep-mout ep-mout-yellow" data-tip="Failed sends retry up to 5 times with exponential backoff.">
         <span class="ep-mout-label">Retry</span><span class="ep-mout-sub">backoff</span>
       </div>
-      <div class="ep-mout ep-mout-red">
+      <div class="ep-mout ep-mout-red" data-tip="After all attempts fail the job lands in the dead letter queue for alerting and manual retry.">
         <span class="ep-mout-label">DLQ</span><span class="ep-mout-sub">alert</span>
       </div>
     </div>

@@ -530,6 +530,7 @@ hr {
 }
 
 .sl-markdown-content a {
+  word-break: break-word;
   overflow-wrap: anywhere;
 }
 
@@ -1482,8 +1483,11 @@ svg.hp-feature-icon {
   --bq-red: #e46a6a;
 }
 
-/* Splash page that carries the custom hero: suppress Starlight's own H1 */
-main:has(.bq-hero) .content-panel:first-of-type {
+/* Splash page that carries the custom hero: suppress Starlight's own H1.
+   The .bq-has-hero class is set by /bq-compat.js as a :has() fallback for
+   Safari 15.0-15.3 and Firefox 115-120. */
+main:has(.bq-hero) .content-panel:first-of-type,
+main.bq-has-hero .content-panel:first-of-type {
   display: none;
 }
 
@@ -1529,7 +1533,9 @@ main:has(.bq-hero) .content-panel:first-of-type {
 
 /* Splash pages that carry the custom home: let content run full width */
 main:has(.bq-hero) .content-panel,
-main:has(.bq-hero) .sl-container {
+main:has(.bq-hero) .sl-container,
+main.bq-has-hero .content-panel,
+main.bq-has-hero .sl-container {
   max-width: none;
   margin-inline: 0;
 }
@@ -1889,15 +1895,22 @@ html {
 }
 
 .bq-htrack {
-  background: color-mix(in srgb, var(--sl-color-text) 6%, transparent);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+  background: rgba(128, 128, 136, 0.12);
   border-radius: 999px;
   height: 0.8rem;
   overflow: hidden;
 }
 
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-htrack {
+    background: color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+    box-shadow: inset 0 1px 2px color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+  }
+}
+
 .bq-hfill {
   height: 100%;
+  background: var(--bq-brand);
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--bq-brand) 78%, var(--sl-color-black)),
@@ -1920,8 +1933,14 @@ html {
 }
 
 .bq-hfill-them {
-  background: color-mix(in srgb, var(--sl-color-text) 24%, transparent);
+  background: rgba(128, 128, 136, 0.35);
   box-shadow: none;
+}
+
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-hfill-them {
+    background: color-mix(in srgb, var(--sl-color-text) 24%, transparent);
+  }
 }
 
 .bq-hval {
@@ -1979,6 +1998,7 @@ html {
 
 .bq-diag-head > * {
   min-width: 0;
+  word-break: break-word;
   overflow-wrap: anywhere;
 }
 
@@ -1987,7 +2007,7 @@ html {
 .bq-diag-cell {
   border: 1px solid var(--bq-line);
   border-radius: 0.55rem;
-  background: color-mix(in srgb, var(--sl-color-text) 3%, transparent);
+  background: rgba(128, 128, 136, 0.06);
   padding: 0.65rem 0.95rem;
   font-size: 0.9rem;
   color: var(--sl-color-text);
@@ -2019,6 +2039,7 @@ html {
   line-height: 1.45;
   color: var(--sl-color-gray-4);
   min-width: 0;
+  word-break: break-word;
   overflow-wrap: anywhere;
 }
 
@@ -2070,6 +2091,13 @@ html {
   margin: 0.2rem 0 0;
 }
 
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-diag-layer,
+  .bq-diag-cell {
+    background: color-mix(in srgb, var(--sl-color-text) 3%, transparent);
+  }
+}
+
 /* horizontal flow: cells joined by inline arrows */
 .bq-diag-flow {
   display: flex;
@@ -2094,6 +2122,16 @@ html {
 /* very narrow phones: one diagram cell per row so long identifiers fit */
 @media (max-width: 26rem) {
   .bq-diag-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* iOS: no gray tap flash on custom interactive elements */
+[data-tip],
+.bq-hero-install,
+.bq-btn,
+.bq-btn-ghost,
+.bq-pill,
+.header-cta {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* ── interactive diagram layer (use-case components) ───────────────── */
@@ -2978,6 +3016,7 @@ html {
   border-radius: 999px;
   margin-bottom: 0.28rem;
   position: relative;
+  background: var(--bq-brand);
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--bq-brand) 78%, var(--sl-color-black)),
@@ -2993,8 +3032,14 @@ html {
 .bq-bar-row:nth-of-type(3) .bq-bar { animation-delay: 0.16s; }
 
 .bq-bar.bq-bar-them {
-  background: color-mix(in srgb, var(--sl-color-text) 22%, transparent);
+  background: rgba(128, 128, 136, 0.35);
   box-shadow: none;
+}
+
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-bar.bq-bar-them {
+    background: color-mix(in srgb, var(--sl-color-text) 22%, transparent);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

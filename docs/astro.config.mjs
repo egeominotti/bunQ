@@ -89,6 +89,7 @@ export default defineConfig({
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: true,
+        alt: 'bunqueue',
       },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/egeominotti/bunqueue' },
@@ -486,6 +487,14 @@ export default defineConfig({
           attrs: {
             rel: 'dns-prefetch',
             href: 'https://github.com',
+          },
+        },
+        // :has() fallback for older Safari/Firefox (adds .bq-has-hero on main)
+        {
+          tag: 'script',
+          attrs: {
+            src: '/bq-compat.js',
+            defer: true,
           },
         },
         // Preconnect to GitHub

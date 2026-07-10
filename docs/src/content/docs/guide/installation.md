@@ -8,6 +8,17 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · installation</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One dependency, <em>zero infrastructure.</em></h1>
+  <p class="bq-hero-sub">Install bunqueue from npm, build it from source, or drop a single self-contained binary on a server. No Redis, no broker, nothing else to provision.</p>
+
+  <div class="bq-proof">
+    <span><b>1</b> command: bun add bunqueue</span>
+    <span><b>5.4 MB</b> install, 7 packages</span>
+    <span><b>4</b> prebuilt binary platforms</span>
+  </div>
+</div>
 
 ## Requirements
 
@@ -30,7 +41,7 @@ bun run build
 
 ## Single binary (no Bun required)
 
-Each release ships self-contained executables — useful on servers and edge
+Each release ships self-contained executables, useful on servers and edge
 gateways (Raspberry Pi 4/5, ARM64 boxes) where you don't want to install a
 runtime:
 

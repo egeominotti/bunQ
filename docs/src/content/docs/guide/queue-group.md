@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/client-sdk.png
 ---
 
-`QueueGroup` provides namespace isolation for related queues. All queues in a group share a common prefix.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue-group</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Many queues, one <em>namespace.</em></h1>
+  <p class="bq-hero-sub">QueueGroup gives related queues namespace isolation behind a shared prefix. Ideal for multi-tenant apps and per-domain microservice queues.</p>
+</div>
 
 ## Basic Usage
 

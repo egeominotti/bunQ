@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
-
-Thank you for your interest in contributing to bunqueue! This guide will help you get started.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">project · contributing</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Make bunqueue <em>better.</em></h1>
+  <p class="bq-hero-sub">Dev environment setup, coding standards, testing guidelines and the pull request workflow. Everything you need to land a change, whatever your experience level.</p>
+</div>
 
 ## Code of Conduct
 

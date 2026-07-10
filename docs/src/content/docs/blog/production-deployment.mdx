@@ -22,7 +22,11 @@ head:
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-bunqueue is designed as a **single-instance** job queue. This simplifies deployment significantly - no clustering, no leader election, no split-brain concerns. Here's how to deploy it reliably.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · operations</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One instance, deployed <em>properly.</em></h1>
+  <p class="bq-hero-sub">bunqueue is a single-instance queue by design: no clustering, no leader election, no split-brain. That makes deployment simple, and this guide covers doing it reliably with Docker, systemd, and PM2.</p>
+</div>
 
 ## Docker Deployment
 

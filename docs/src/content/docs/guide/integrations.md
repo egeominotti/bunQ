@@ -8,11 +8,22 @@ head:
       content: https://bunqueue.dev/og/integrations.png
 ---
 
-Integrate bunqueue with AI agents and modern Bun-native frameworks.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · integrations</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Plays well with your <em>stack.</em></h1>
+  <p class="bq-hero-sub">Integrate bunqueue with AI agents over MCP and with modern Bun-native web frameworks. Setup tables, project structure, and graceful shutdown patterns.</p>
+
+  <div class="bq-proof">
+    <span><b>73</b> MCP tools</span>
+    <span><b>5</b> MCP resources</span>
+    <span><b>3</b> MCP prompts</span>
+    <span><b>2</b> framework guides, Hono and Elysia</span>
+  </div>
+</div>
 
 ## AI Agent Integrations (MCP)
 
-bunqueue ships with a native MCP server — AI agents get full queue control out of the box.
+bunqueue ships with a native MCP server, AI agents get full queue control out of the box.
 
 | Client | Setup | Guide |
 |--------|-------|-------|
@@ -24,7 +35,7 @@ bunqueue ships with a native MCP server — AI agents get full queue control out
 
 > `bunqueue-mcp` is a binary bundled inside the `bunqueue` package (not a standalone npm package). `--package=bunqueue` tells `bunx` which package provides it; alternatively run `bun add -g bunqueue` once and use `bunx bunqueue-mcp` directly.
 >
-> Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
+> Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
 
 73 tools, 5 resources, 3 prompts. Agents can add jobs, manage crons, retry failures, set rate limits, register HTTP handlers, and monitor everything.
 

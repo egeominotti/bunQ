@@ -3,9 +3,17 @@ title: "Native TLS"
 description: Encrypt bunqueue TCP and HTTP traffic with native TLS — no reverse proxy needed. Server cert/key setup, client options, CLI flags, self-signed certs.
 ---
 
-bunqueue terminates TLS natively on both the TCP (msgpack) and HTTP servers.
-No reverse proxy required. TLS is opt-in: without cert/key configuration the
-server behaves exactly as before (plaintext).
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · tls</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Encrypted, <em>both protocols.</em></h1>
+  <p class="bq-hero-sub">bunqueue terminates TLS natively on both the TCP (msgpack) and HTTP servers, no reverse proxy required. TLS is opt-in: without cert/key configuration the server behaves exactly as before, in plaintext.</p>
+
+  <div class="bq-proof">
+    <span><b>1</b> cert pair covers TCP and HTTP</span>
+    <span><b>0</b> reverse proxies needed</span>
+    <span><b>fail-fast</b> startup on partial config</span>
+  </div>
+</div>
 
 ## Server
 
@@ -34,7 +42,7 @@ One cert pair covers both servers: TCP (`:6789`) and HTTP/WebSocket/SSE
 (`:6790`, becomes `https://` / `wss://`).
 
 The server fails fast at startup if the cert or key file is missing, or if
-only one of the two is set — it never silently falls back to plaintext.
+only one of the two is set, it never silently falls back to plaintext.
 
 ## Client SDK
 
@@ -58,7 +66,7 @@ const queue3 = new Queue('jobs', {
 ```
 
 `Worker` accepts the same `connection.tls` options. The msgpack protocol is
-unchanged — TLS only wraps the transport.
+unchanged, TLS only wraps the transport.
 
 ## CLI client
 
@@ -78,7 +86,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 ```
 
 Clients then connect with `tls: { caFile: './cert.pem' }` (the self-signed
-cert acts as its own CA) — full verification, no `rejectUnauthorized: false`
+cert acts as its own CA), full verification, no `rejectUnauthorized: false`
 needed.
 
 ## Notes

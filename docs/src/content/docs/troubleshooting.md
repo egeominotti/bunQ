@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
-
-Solutions to common issues when using bunqueue.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">reference · troubleshooting</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">When something looks <em>wrong.</em></h1>
+  <p class="bq-hero-sub">Symptoms, causes and fixes for the issues people actually hit: SQLite locks, embedded mode misconfiguration, stuck jobs, half-open connections and backup failures.</p>
+</div>
 
 ## Installation Issues
 
@@ -19,7 +22,7 @@ Running under Node.js throws:
 
 > bunqueue is Bun-only and requires the Bun runtime (https://bun.sh). Node.js is not supported: install Bun and run your program with `bun`.
 
-bunqueue only works with Bun (v1.3.9+), not Node.js — run your program with `bun`, not `node`.
+bunqueue only works with Bun (v1.3.9+), not Node.js, run your program with `bun`, not `node`.
 
 ```bash
 # Check if Bun is installed
@@ -268,7 +271,7 @@ client.on('error', async () => {
 
 ### Worker stalls on a half-open connection (throughput drops to 0)
 
-A worker's TCP socket can go **half-open** — the peer vanishes with no FIN/RST (host
+A worker's TCP socket can go **half-open**, the peer vanishes with no FIN/RST (host
 suspended/hibernated, NAT or load-balancer silently dropping an idle connection). Writes
 still succeed and no `close` event fires, so the symptom is: every command rejects with
 `Command timeout`, `consecutiveErrors` climbs, jobs pile up in `waiting` with `active=0`,
@@ -291,7 +294,7 @@ const worker = new Worker('q', handler, {
 ```
 
 This recovers in ~tens of seconds and works even with the ping disabled. If a *fresh*
-connection also can't be established (e.g. the server is genuinely unreachable — a firewall
+connection also can't be established (e.g. the server is genuinely unreachable, a firewall
 dropping inbound SYNs, not just an idle drop), no client can reconnect until connectivity
 returns; auto-reconnect with infinite attempts resumes on its own once it does.
 
@@ -386,7 +389,7 @@ bunqueue backup restore <key> --force
 :::danger[SandboxedWorker is experimental]
 `SandboxedWorker` depends on [Bun Workers](https://bun.sh/docs/runtime/workers), which are **experimental**. Known issues include memory growth, thread duplication, and segfaults across Bun versions.
 
-**For production, use the standard `Worker` instead** — it provides the same API (events, concurrency, heartbeats, retries) without any experimental dependencies. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+**For production, use the standard `Worker` instead**, it provides the same API (events, concurrency, heartbeats, retries) without any experimental dependencies. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
 :::
 
 ### Segmentation fault when terminating workers
@@ -416,7 +419,7 @@ const worker = new Worker('queue', async (job) => {
 ```
 
 **If you must use SandboxedWorker:**
-- Pin your Bun version — behavior varies across releases
+- Pin your Bun version, behavior varies across releases
 - Use graceful shutdown (`await worker.stop()`) instead of force termination
 - Use longer timeout values to avoid frequent terminations
 - Monitor memory usage closely

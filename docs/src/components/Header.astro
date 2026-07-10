@@ -44,6 +44,7 @@ const { pathname } = Astro.url;
 		</div>
 		<ThemeSelect />
 		<LanguageSelect />
+		<a class="header-cta" href="/guide/quickstart/">Get started</a>
 	</div>
 </div>
 
@@ -96,6 +97,21 @@ const { pathname } = Astro.url;
 		.nav-links a:hover,
 		.nav-links a[aria-current='page'] {
 			color: var(--sl-color-white);
+		}
+
+		.header-cta {
+			font-size: var(--sl-text-sm);
+			font-weight: 600;
+			white-space: nowrap;
+			text-decoration: none;
+			color: #fff;
+			background: var(--bq-brand, var(--sl-color-accent));
+			padding: 0.45rem 0.95rem;
+			border-radius: 0.45rem;
+			transition: transform 0.12s ease;
+		}
+		.header-cta:hover {
+			transform: translateY(-1px);
 		}
 
 		@media (min-width: 50rem) {

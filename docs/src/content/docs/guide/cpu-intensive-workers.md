@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/worker.png
 ---
 
-When processing CPU-heavy jobs over TCP, synchronous work blocks the event loop and can cause the TCP connection to drop, losing all in-flight jobs. This guide explains the problem and how to avoid it.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · cpu-intensive-workers</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Heavy jobs, off the <em>event loop.</em></h1>
+  <p class="bq-hero-sub">Synchronous CPU-heavy work over TCP blocks the event loop, drops the connection, and requeues every in-flight job. This page explains why it happens and how to configure workers to avoid it.</p>
+</div>
 
 ## The Problem
 
@@ -86,7 +90,7 @@ async function findNthPrime(n: number): Promise<number> {
 
 ## Alternative: SandboxedWorker
 
-:::caution[Experimental — Bun Workers are not yet stable]
+:::caution[Experimental, Bun Workers are not yet stable]
 `SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are **experimental**. Known issues include memory growth and thread duplication across Bun versions. For production, prefer the yield-based approach above or use the standard `Worker`. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker) for details.
 :::
 

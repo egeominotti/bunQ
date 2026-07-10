@@ -10,7 +10,18 @@ head:
 
 import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
 
-This guide covers deploying bunqueue in production. bunqueue is designed as a **single-instance** job queue - it doesn't support clustering or horizontal scaling.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · deployment</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">From laptop to <em>production.</em></h1>
+  <p class="bq-hero-sub">How to run bunqueue in production as the single-instance job queue it is designed to be. Docker, systemd and PM2 setups, S3 backups, health checks, resource limits and disaster recovery.</p>
+
+  <div class="bq-proof">
+    <span><b>1M</b> jobs validated, 100% integrity</span>
+    <span><b>3</b> deployment options</span>
+    <span><b>S3</b> backups for disaster recovery</span>
+    <span><b>1</b> process, no clustering</span>
+  </div>
+</div>
 
 <Aside type="caution">
 bunqueue runs as a **single process**. There's no built-in clustering or multi-node support. Tested and validated up to **1 million jobs** with 100% data integrity.
@@ -18,34 +29,22 @@ bunqueue runs as a **single process**. There's no built-in clustering or multi-n
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Application                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Web App   │  │   API       │  │   Workers   │         │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
-│         │                │                │                 │
-│         └────────────────┼────────────────┘                 │
-│                          │                                  │
-│                          ▼                                  │
-│              ┌───────────────────────┐                     │
-│              │      bunqueue         │ ◄── Single instance │
-│              │   (embedded mode)     │                     │
-│              └───────────┬───────────┘                     │
-│                          │                                  │
-│                          ▼                                  │
-│              ┌───────────────────────┐                     │
-│              │   SQLite Database     │ ◄── Local file      │
-│              │   (./data/bunq.db)    │                     │
-│              └───────────────────────┘                     │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼ (optional)
-              ┌───────────────────────┐
-              │      S3 Backup        │
-              │  (disaster recovery)  │
-              └───────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">Your Application</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">Web App</div>
+      <div class="bq-diag-cell">API</div>
+      <div class="bq-diag-cell">Workers</div>
+    </div>
+    <div class="bq-diag-arrow">↓</div>
+    <div class="bq-diag-layer">bunqueue <i>embedded mode, single instance</i></div>
+    <div class="bq-diag-arrow">↓</div>
+    <div class="bq-diag-layer bq-diag-accent">SQLite Database <i>./data/bunq.db, local file</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">S3 Backup <i>optional, disaster recovery</i></div>
+</div>
 
 ## Deployment Options
 
@@ -332,7 +331,7 @@ curl http://localhost:6790/health | jq .version
 ```
 
 :::caution
-Always verify the running version with `curl /health` after restart. Simply running `bun update` does **not** restart the service — you must explicitly stop and start it with `systemctl`.
+Always verify the running version with `curl /health` after restart. Simply running `bun update` does **not** restart the service, you must explicitly stop and start it with `systemctl`.
 :::
 
 ## Building from Source
@@ -497,7 +496,7 @@ Do not use PM2 cluster mode (`instances > 1`). bunqueue is a single-instance que
 ## S3 Backup Configuration
 
 <Aside type="tip">
-Always enable S3 backups in production. SQLite is a single file - if it corrupts or the disk fails, you lose everything.
+Always enable S3 backups in production. SQLite is a single file, if it corrupts or the disk fails, you lose everything.
 </Aside>
 
 ### AWS S3
@@ -711,11 +710,23 @@ new Worker('tasks', processor, {
 
 ### Backup Strategy
 
-```
-Every 1 hour  → S3 backup
-Every 6 hours → Verify backup integrity
-Every day     → Test restore in staging
-```
+<div class="bq-diag">
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Every 1 hour</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">S3 backup</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Every 6 hours</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">Verify backup integrity</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Every day</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">Test restore in staging</div>
+  </div>
+</div>
 
 ### Recovery Steps
 

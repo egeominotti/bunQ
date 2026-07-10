@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-The bunqueue HTTP API runs on port `6790` by default (configurable via `HTTP_PORT` environment variable). All request and response bodies use JSON (`Content-Type: application/json`) unless otherwise noted.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">api reference · http</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every endpoint, <em>one page.</em></h1>
+  <p class="bq-hero-sub">The bunqueue HTTP API runs on port <code>6790</code> by default, configurable via the <code>HTTP_PORT</code> environment variable. All request and response bodies use JSON (<code>Content-Type: application/json</code>) unless otherwise noted.</p>
+</div>
 
 **Response contract:** Every response includes an `ok` boolean field. Successful responses return `"ok": true` with operation-specific data. Failed responses return `"ok": false` with an `"error"` string describing the failure reason.
 
@@ -132,35 +136,53 @@ This is HTTP-level rate limiting per client IP. For per-queue job throughput lim
 
 Understanding the job lifecycle is essential for using the API effectively. A job flows through these states:
 
-```
-push (priority=0) ──► waiting ──────────────┐
-push (priority>0) ──► prioritized ──────────┤
-push (delay>0) ────► delayed ───────────────┤
-                      │ (delay expires)      │
-                      ▼                      │
-                    waiting / prioritized ───┤
-                                             │ pull
-                                             ▼
-                  ┌── retry ◄────── active ──────────┐
-                  │                   │               │ fail (terminal)
-                  ▼              ack  │               ▼
-               waiting /     ┌───────▼──────┐   ┌────────┐
-               prioritized   │  completed   │   │ failed │
-                             └──────────────┘   └────────┘
-
-                     Flow dependencies:
-                     active ──► waiting-children ──► waiting
-                                 (all children complete)
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Job lifecycle</b><span>states and transitions</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>priority = 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">waiting</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>priority &gt; 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">prioritized</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>delay &gt; 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">delayed</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">waiting / prioritized <i>delay expires</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓ pull</div>
+  <div class="bq-diag-cell bq-diag-accent">active</div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">completed <i>ack</i></div>
+    <div class="bq-diag-cell">failed <i>fail (terminal)</i></div>
+    <div class="bq-diag-cell">waiting / prioritized <i>retry</i></div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">flow dependencies</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-cell">active</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">waiting-children</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">waiting <i>all children complete</i></div>
+    </div>
+  </div>
+</div>
 
 **States:**
-- **waiting** — Job is queued with priority = 0
-- **prioritized** — Job is queued with priority > 0 (processed before waiting jobs)
-- **delayed** — Job waiting for its delay to expire, then moves to waiting/prioritized
-- **active** — Job is being processed by a worker
-- **completed** — Job finished successfully
-- **failed** — Job failed after all retries (stored in DLQ with attempt history)
-- **waiting-children** — Parent job waiting for child flow jobs to complete
+- **waiting**, Job is queued with priority = 0
+- **prioritized**, Job is queued with priority > 0 (processed before waiting jobs)
+- **delayed**, Job waiting for its delay to expire, then moves to waiting/prioritized
+- **active**, Job is being processed by a worker
+- **completed**, Job finished successfully
+- **failed**, Job failed after all retries (stored in DLQ with attempt history)
+- **waiting-children**, Parent job waiting for child flow jobs to complete
 
 **Delayed jobs:** When `delay > 0` is set at push time, the job enters `delayed` state and becomes `waiting` (or `prioritized` if priority > 0) after the delay expires. A delayed job can be promoted immediately via the Promote endpoint.
 
@@ -188,7 +210,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
   }'
 ```
 
-**Request body** — only `data` is required:
+**Request body**, only `data` is required:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -233,7 +255,7 @@ The `id` is a UUID v7 (time-ordered, sortable). If `jobId` was provided and a jo
 
 ### Push Jobs in Bulk
 
-Push multiple jobs to a queue in a single round-trip. More efficient than individual pushes — all jobs are inserted in a single batch operation.
+Push multiple jobs to a queue in a single round-trip. More efficient than individual pushes, all jobs are inserted in a single batch operation.
 
 ```
 POST /queues/:queue/jobs/bulk
@@ -251,7 +273,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs/bulk \
   }'
 ```
 
-Each item in `jobs` supports all the same fields as a single push. The operation is **atomic** — either all jobs are pushed or none are (if validation fails for any job).
+Each item in `jobs` supports all the same fields as a single push. The operation is **atomic**, either all jobs are pushed or none are (if validation fails for any job).
 
 **Response** (`200`):
 
@@ -549,11 +571,30 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../fail \
 
 **Retry behavior:**
 
-```
-Attempt 1 fails → wait 1s (backoff) → retry
-Attempt 2 fails → wait 2s (backoff * 2) → retry
-Attempt 3 fails → wait 4s (backoff * 4) → move to DLQ
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Retry behavior</b><span>exponential backoff</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Attempt 1 fails</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">wait 1s <i>backoff</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">retry</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Attempt 2 fails</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">wait 2s <i>backoff * 2</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">retry</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Attempt 3 fails</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">wait 4s <i>backoff * 4</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">move to DLQ</div>
+  </div>
+</div>
 
 The retry delay is calculated as `min(backoff * 2^attempt, 24 hours)`.
 
@@ -609,7 +650,7 @@ POST /jobs/:id/promote
 curl -X POST http://localhost:6790/jobs/019ce9d7-.../promote
 ```
 
-**Error** (`400`): `{ "ok": false, "error": "Job not found or not delayed" }` — returned if the job doesn't exist, is already in `waiting` state, or is `active`.
+**Error** (`400`): `{ "ok": false, "error": "Job not found or not delayed" }`, returned if the job doesn't exist, is already in `waiting` state, or is `active`.
 
 **Broadcasts:** `job:promoted` event.
 
@@ -675,7 +716,7 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../discard
 
 ### Wait for Job Completion
 
-Long-poll until a job completes or the timeout expires. This is **event-driven** (not polling) — the server subscribes to the job's completion event internally and resolves immediately when the job finishes.
+Long-poll until a job completes or the timeout expires. This is **event-driven** (not polling), the server subscribes to the job's completion event internally and resolves immediately when the job finishes.
 
 ```
 POST /jobs/:id/wait
@@ -807,7 +848,7 @@ POST /jobs/extend-locks
 
 ### Job Logs
 
-Structured logging attached to individual jobs. Useful for debugging failed jobs — each log entry has a level and message.
+Structured logging attached to individual jobs. Useful for debugging failed jobs, each log entry has a level and message.
 
 **Add a log entry:**
 
@@ -956,7 +997,7 @@ GET /queues/:queue/paused
 
 ### Pause a Queue
 
-Stop processing new jobs from this queue. Active jobs continue to completion — only new pulls are blocked.
+Stop processing new jobs from this queue. Active jobs continue to completion, only new pulls are blocked.
 
 ```
 POST /queues/:queue/pause
@@ -980,7 +1021,7 @@ POST /queues/:queue/resume
 
 ### Drain a Queue
 
-Remove **all** `waiting` and `delayed` jobs from a queue. Active jobs are not affected — they continue processing normally. This is useful for clearing a backlog without affecting in-progress work.
+Remove **all** `waiting` and `delayed` jobs from a queue. Active jobs are not affected, they continue processing normally. This is useful for clearing a backlog without affecting in-progress work.
 
 ```
 POST /queues/:queue/drain
@@ -1012,7 +1053,7 @@ This is **irreversible**. All jobs in the queue are permanently deleted. The que
 
 ### Clean a Queue
 
-Remove jobs older than a grace period, optionally filtered by state. Useful for maintenance — cleaning up old waiting/delayed jobs that are no longer relevant.
+Remove jobs older than a grace period, optionally filtered by state. Useful for maintenance, cleaning up old waiting/delayed jobs that are no longer relevant.
 
 ```
 POST /queues/:queue/clean
@@ -1323,7 +1364,7 @@ curl -X POST http://localhost:6790/crons \
 | `maxLimit` | `number` | No | Max total executions. Cron is removed after reaching this count. |
 | `immediately` | `boolean` | No | Fire once on creation, then continue on schedule (default `false`). |
 | `skipIfNoWorker` | `boolean` | No | Skip a tick when no worker is registered for the queue (default `false`). |
-| `preventOverlap` | `boolean` | No | Deduplicate overlapping runs — a tick is skipped while the previous generated job is still pending/active (default `true`). |
+| `preventOverlap` | `boolean` | No | Deduplicate overlapping runs, a tick is skipped while the previous generated job is still pending/active (default `true`). |
 | `jobOptions` | `object` | No | Per-job options applied to every generated job: `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. |
 
 \* Either `schedule` or `repeatEvery` is required (not both).
@@ -1646,7 +1687,7 @@ ws://localhost:6790/ws
 ws://localhost:6790/ws/queues/:queue
 ```
 
-WebSocket supports **pub/sub subscriptions** with **50 event types** across 9 categories. Clients subscribe to specific events and receive only matching data — **zero polling needed**.
+WebSocket supports **pub/sub subscriptions** with **50 event types** across 9 categories. Clients subscribe to specific events and receive only matching data, **zero polling needed**.
 
 #### Event Format
 
@@ -1663,9 +1704,9 @@ Every pub/sub event follows this structure:
 }
 ```
 
-- `event` — event name (category:action)
-- `ts` — unix timestamp in milliseconds
-- `data` — event-specific payload
+- `event`, event name (category:action)
+- `ts`, unix timestamp in milliseconds
+- `data`, event-specific payload
 
 #### Subscribe / Unsubscribe
 
@@ -2087,7 +2128,7 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 | WebSocket | `/ws/queues/:q` | Queue-filtered pub/sub |
 
 :::tip[Related]
-- [TCP Protocol Reference](/api/tcp/) — binary TCP protocol (same 76 commands)
-- [TypeScript Types](/api/types/) — type definitions for all APIs
-- [Server Mode](/guide/server/) — run the HTTP API server
+- [TCP Protocol Reference](/api/tcp/), binary TCP protocol (same 76 commands)
+- [TypeScript Types](/api/types/), type definitions for all APIs
+- [Server Mode](/guide/server/), run the HTTP API server
 :::

@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/api-reference.png
 ---
 
-bunqueue is written in TypeScript and provides comprehensive type definitions. All public types are exported from `bunqueue/client`.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">api reference · types</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every type, <em>spelled out.</em></h1>
+  <p class="bq-hero-sub">bunqueue is written in TypeScript and provides comprehensive type definitions. All public types are exported from <code>bunqueue/client</code>.</p>
+</div>
 
 ## Job Types
 
@@ -29,26 +33,44 @@ type JobStateType =
 :::note[BullMQ v5 State Machine]
 bunqueue implements the full BullMQ v5 job state machine:
 
-```
-push (priority=0) ──► waiting ──────────┐
-push (priority>0) ──► prioritized ──────┤
-push (delay>0) ────► delayed ───────────┤
-                      │ (delay expires) │
-                      ▼                 │
-                    waiting/prioritized ┤
-                                        │ pull
-                                        ▼
-                 ┌── retry ◄── active ──────┐
-                 │              │            │ fail (terminal)
-                 ▼         ack  │            ▼
-              waiting/     ┌────▼─────┐  ┌──────┐
-              prioritized  │completed │  │failed│
-                           └──────────┘  └──────┘
-
-                    Flow dependencies:
-                    active ──► waiting-children ──► waiting
-                                (children complete)
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Job state machine</b><span>BullMQ v5</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>priority = 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">waiting</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>priority &gt; 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">prioritized</div>
+  </div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">push <i>delay &gt; 0</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">delayed</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">waiting / prioritized <i>delay expires</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓ pull</div>
+  <div class="bq-diag-cell bq-diag-accent">active</div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">completed <i>ack</i></div>
+    <div class="bq-diag-cell">failed <i>fail (terminal)</i></div>
+    <div class="bq-diag-cell">waiting / prioritized <i>retry</i></div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">flow dependencies</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-cell">active</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">waiting-children</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">waiting <i>children complete</i></div>
+    </div>
+  </div>
+</div>
 
 **Key differences from BullMQ v5:**
 - `failed` = BullMQ's failed state. Internally stored in DLQ with metadata (reason, attempt history).

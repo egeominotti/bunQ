@@ -1,0 +1,78 @@
+---
+import Default from '@astrojs/starlight/components/Head.astro';
+
+/**
+ * Extends Starlight's Head with structured data Starlight cannot emit
+ * per-route on its own:
+ *  - BlogPosting JSON-LD on every /blog/ post (headline, dates, author)
+ *  - BreadcrumbList JSON-LD on every page below the homepage
+ */
+const SITE = 'https://bunqueue.dev';
+const { entry, id } = Astro.locals.starlightRoute;
+
+const canonical = new URL(Astro.url.pathname, SITE).href;
+const heads = entry.data.head ?? [];
+const headContent = (property) =>
+  heads.find((h) => h.attrs?.property === property)?.attrs?.content;
+
+const scripts = [];
+
+const isBlogPost = id.startsWith('blog/') && id !== 'blog';
+if (isBlogPost) {
+  const published = headContent('article:published_time');
+  scripts.push({
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: entry.data.title,
+    description: entry.data.description,
+    url: canonical,
+    mainEntityOfPage: canonical,
+    image: headContent('og:image') ?? `${SITE}/og-image.png`,
+    ...(published ? { datePublished: published, dateModified: published } : {}),
+    author: {
+      '@type': 'Person',
+      name: 'Egeo Minotti',
+      url: 'https://github.com/egeominotti',
+    },
+    publisher: { '@type': 'Person', name: 'Egeo Minotti' },
+  });
+}
+
+const segments = Astro.url.pathname.split('/').filter(Boolean);
+if (segments.length > 0) {
+  const labels = {
+    guide: 'Guide',
+    api: 'API Reference',
+    architecture: 'Architecture',
+    blog: 'Blog',
+  };
+  // Sections with a real index page; /guide/ and /api/ have none, so an
+  // intermediate crumb for them would link to a 404 — skip those instead.
+  const sectionIndexExists = new Set(['architecture', 'blog']);
+  const items = [{ '@type': 'ListItem', position: 1, name: 'bunqueue', item: `${SITE}/` }];
+  let path = '';
+  segments.forEach((segment, i) => {
+    path += `/${segment}`;
+    const last = i === segments.length - 1;
+    if (!last && !sectionIndexExists.has(segment)) return;
+    items.push({
+      '@type': 'ListItem',
+      position: items.length + 1,
+      name: last ? entry.data.title : (labels[segment] ?? segment),
+      ...(last ? {} : { item: `${SITE}${path}/` }),
+    });
+  });
+  scripts.push({
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items,
+  });
+}
+---
+
+<Default><slot /></Default>
+{
+  scripts.map((data) => (
+    <script type="application/ld+json" set:html={JSON.stringify(data).replace(/</g, '\\u003c')} />
+  ))
+}

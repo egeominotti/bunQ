@@ -22,7 +22,11 @@ head:
 
 import { Aside } from '@astrojs/starlight/components';
 
-One of bunqueue's key design decisions is **sharding jobs across multiple priority queues**. Instead of a single global queue with a lock, bunqueue creates multiple independent shards that can be accessed concurrently. Here's how it works.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · architecture</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One queue per core, not one lock for <em>all.</em></h1>
+  <p class="bq-hero-sub">Instead of a single global queue behind a lock, bunqueue partitions jobs across independent shards with FNV-1a hashing, sized to your CPU cores. Here is how it works.</p>
+</div>
 
 ## Why Shard?
 

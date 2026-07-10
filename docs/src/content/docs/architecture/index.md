@@ -8,50 +8,57 @@ head:
       content: https://bunqueue.dev/og-image.png
 ---
 
-# Architecture Overview
-
-bunqueue is a high-performance job queue built for Bun with SQLite persistence. This section covers the internal architecture, data flows, and design decisions.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">architecture · overview</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">How the pieces <em>fit.</em></h1>
+  <p class="bq-hero-sub">bunqueue is a high-performance job queue built for Bun with SQLite persistence. This section covers the internal architecture, data flows, and design decisions.</p>
+</div>
 
 ## System Overview
 
-```
-                            ┌─────────────────────────────────────┐
-                            │            CLIENT LAYER              │
-                            │  Queue.add() ──────► Worker.process()│
-                            │       │                    ▲         │
-                            │       ▼                    │         │
-                            │   TcpPool ◄── msgpack ──► TcpPool   │
-                            └───────┬────────────────────┬─────────┘
-                                    │ TCP :6789          │
-                            ┌───────▼────────────────────▼─────────┐
-                            │            SERVER LAYER              │
-                            │                                      │
-                            │  ┌────────────────────────────────┐  │
-                            │  │         QueueManager           │  │
-                            │  │                                │  │
-                            │  │  ┌──────────────────────────┐  │  │
-                            │  │  │   N Shards (auto-detect) │  │  │
-                            │  │  │  ┌──────┬──────┬──────┐  │  │  │
-                            │  │  │  │Shard0│Shard1│ ...N │  │  │  │
-                            │  │  │  └──────┴──────┴──────┘  │  │  │
-                            │  │  └──────────────────────────┘  │  │
-                            │  │                                │  │
-                            │  │  jobIndex │ completedJobs      │  │
-                            │  │  customIdMap │ jobResults      │  │
-                            │  └────────────────────────────────┘  │
-                            │                  │                   │
-                            │  ┌───────────────▼───────────────┐   │
-                            │  │      PERSISTENCE LAYER        │   │
-                            │  │  WriteBuffer ──► SQLite (WAL) │   │
-                            │  └───────────────────────────────┘   │
-                            │                                      │
-                            │  ┌────────────────────────────────┐  │
-                            │  │     BACKGROUND TASKS           │  │
-                            │  │  Scheduler │ Stall Detection   │  │
-                            │  │  DLQ Maint │ Cleanup           │  │
-                            │  └────────────────────────────────┘  │
-                            └──────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>System overview</b><span>client, server, persistence</span></div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">client layer</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-cell">Queue.add() <i>TcpPool</i></div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">Worker.process() <i>TcpPool</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓ msgpack over TCP :6789</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">server layer</span>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">QueueManager</span>
+      <div class="bq-diag-layer bq-diag-accent">N shards <i>auto-detected: Shard 0, Shard 1, ... Shard N</i></div>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">jobIndex</div>
+        <div class="bq-diag-cell">completedJobs</div>
+        <div class="bq-diag-cell">customIdMap</div>
+        <div class="bq-diag-cell">jobResults</div>
+      </div>
+    </div>
+    <div class="bq-diag-arrow">↓</div>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">persistence layer</span>
+      <div class="bq-diag-flow">
+        <div class="bq-diag-cell">WriteBuffer</div>
+        <div class="bq-diag-arrow">→</div>
+        <div class="bq-diag-cell">SQLite <i>WAL mode</i></div>
+      </div>
+    </div>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">background tasks</span>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">Scheduler</div>
+        <div class="bq-diag-cell">Stall detection</div>
+        <div class="bq-diag-cell">DLQ maintenance</div>
+        <div class="bq-diag-cell">Cleanup</div>
+      </div>
+    </div>
+  </div>
+</div>
 
 ## Layered Architecture
 
@@ -107,12 +114,14 @@ Each shard contains a 4-ary heap instead of binary:
 
 Jobs batch before SQLite write:
 
-```
-┌─────────┐   10ms or    ┌───────────────────┐
-│ Buffer  │ ──────────►  │ Multi-row INSERT  │
-│ (100)   │   100 jobs   │ ~100k jobs/sec    │
-└─────────┘              └───────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">Buffer <i>100 jobs</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">Multi-row INSERT <i>~100k jobs/sec</i></div>
+  </div>
+  <p class="bq-diag-note">Flushes after 10ms or when 100 jobs are buffered, whichever comes first.</p>
+</div>
 
 - **Buffered**: ~100k jobs/sec, up to 10ms loss risk
 - **Durable**: ~10k jobs/sec, immediate persistence

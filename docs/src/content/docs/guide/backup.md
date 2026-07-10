@@ -8,8 +8,18 @@ head:
       content: https://bunqueue.dev/og/advanced.png
 ---
 
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · s3 backup</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The whole queue, shipped to <em>S3.</em></h1>
+  <p class="bq-hero-sub">Automated backups to any S3-compatible storage with gzip compression and SHA256 integrity verification. Works with AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces.</p>
 
-Automated backups to any S3-compatible storage with gzip compression and SHA256 integrity verification.
+  <div class="bq-proof">
+    <span><b>6h</b> default backup interval</span>
+    <span><b>7</b> backups retained by default</span>
+    <span><b>SHA256</b> checksum on every restore</span>
+    <span><b>4</b> S3-compatible providers documented</span>
+  </div>
+</div>
 
 ## Configuration
 
@@ -90,10 +100,10 @@ Each backup includes:
 
 ## How It Works
 
-1. **Compression** — The database is compressed with gzip before upload for efficient storage
-2. **Checksum** — A SHA256 hash of the original data is computed and stored in the metadata file
-3. **Upload** — The compressed backup and metadata are uploaded to S3 as separate files
-4. **Cleanup** — Old backups exceeding the retention limit are automatically deleted
+1. **Compression**, the database is compressed with gzip before upload for efficient storage
+2. **Checksum**, a SHA256 hash of the original data is computed and stored in the metadata file
+3. **Upload**, the compressed backup and metadata are uploaded to S3 as separate files
+4. **Cleanup**, old backups exceeding the retention limit are automatically deleted
 
 ## Scheduling
 

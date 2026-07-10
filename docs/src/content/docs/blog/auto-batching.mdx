@@ -22,7 +22,11 @@ head:
 
 import { Aside } from '@astrojs/starlight/components';
 
-When you call `queue.add()` multiple times concurrently in TCP mode, bunqueue doesn't send each as a separate network round-trip. It automatically **batches** them into a single `PUSHB` (push bulk) command. The result: up to 3x throughput with zero code changes.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · performance</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">3x throughput, zero code <em>changes.</em></h1>
+  <p class="bq-hero-sub">In TCP mode, bunqueue detects concurrent add() calls and transparently groups them into a single PUSHB bulk command. Sequential code pays nothing, concurrent code gets up to 3x throughput.</p>
+</div>
 
 ## The Problem: Network Round-Trips
 

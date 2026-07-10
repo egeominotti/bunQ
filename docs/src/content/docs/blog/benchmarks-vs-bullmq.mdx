@@ -20,9 +20,14 @@ head:
       content: "bunqueue vs bullmq, job queue benchmark, redis vs sqlite performance, bun queue throughput, bullmq alternative, queue performance comparison"
 ---
 
-import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import BqIcon from '@components/BqIcon.astro';
 
-Performance claims without numbers are just marketing. Here are real benchmark results comparing bunqueue's TCP server against BullMQ with Redis on identical workloads. Both systems use network connections for a fair comparison.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · benchmarks</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">bunqueue vs BullMQ, <em>measured.</em></h1>
+  <p class="bq-hero-sub">Performance claims without numbers are just marketing. These are reproducible benchmarks of bunqueue TCP against BullMQ with Redis on identical workloads, both over real network connections.</p>
+</div>
 
 ## Test Environment
 
@@ -37,20 +42,28 @@ Both use TCP connections (bunqueue TCP mode, BullMQ via Redis TCP). Embedded mod
 
 ## Results Summary
 
-<CardGrid>
-  <Card title="1.3x Faster Push" icon="rocket">
-    **54,140 vs 43,261 ops/sec** - Single job push operations
-  </Card>
-  <Card title="3.2x Faster Bulk" icon="star">
-    **139,200 vs 44,000 ops/sec** - Bulk push (100 jobs per batch)
-  </Card>
-  <Card title="1.7x Faster Processing" icon="open-book">
-    **17,300 vs 10,200 ops/sec** - Full push-process-complete cycle
-  </Card>
-  <Card title="94% Smaller Install" icon="laptop">
-    **5.4 MB vs 93 MB** — 7 packages, no Redis server required
-  </Card>
-</CardGrid>
+<div class="bq-cards">
+  <div class="bq-card">
+    <BqIcon name="speed" />
+    <h3>1.3x Faster Push</h3>
+    <p><b>54,140 vs 43,261 ops/sec</b> - Single job push operations</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="spark" />
+    <h3>3.2x Faster Bulk</h3>
+    <p><b>139,200 vs 44,000 ops/sec</b> - Bulk push (100 jobs per batch)</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="stack" />
+    <h3>1.7x Faster Processing</h3>
+    <p><b>17,300 vs 10,200 ops/sec</b> - Full push-process-complete cycle</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="file" />
+    <h3>94% Smaller Install</h3>
+    <p><b>5.4 MB vs 93 MB</b>, 7 packages, no Redis server required</p>
+  </div>
+</div>
 
 ## Push Throughput
 

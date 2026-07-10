@@ -33,25 +33,27 @@ import PaymentFlow from '../../../components/PaymentFlow.astro';
 import MultiTenantArch from '../../../components/MultiTenantArch.astro';
 import WorkflowPatterns from '../../../components/WorkflowPatterns.astro';
 
-Every non-trivial application needs background processing. API requests should return immediately while expensive operations — sending emails, processing images, charging payments, calling external APIs — happen asynchronously in the background.
-
-bunqueue provides the infrastructure for all of these patterns: persistent queues backed by SQLite, automatic retries with exponential backoff, dead letter queues for failed jobs, progress tracking, cron scheduling, rate limiting, and real-time monitoring. Each pattern below is production-ready and uses bunqueue's embedded mode (zero config, no external services).
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · use-cases</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">What teams run <em>on it.</em></h1>
+  <p class="bq-hero-sub">API requests should return immediately while emails, images, payments and external calls happen in the background. Every pattern below is production ready, runs in embedded mode with zero external services, and gets retries, DLQ, progress tracking and cron scheduling from the queue itself.</p>
+</div>
 
 ## AI Agent Workflows (MCP)
 
 AI agents are increasingly used to orchestrate complex automation tasks, but they lack the ability to schedule background work, manage retries, or run recurring operations. bunqueue solves this by exposing its entire queue engine as 73 MCP tools that any AI agent can call directly.
 
-When an agent connects to bunqueue via MCP (Model Context Protocol), it gains the ability to add jobs to queues, create cron schedules, set rate limits, monitor queue health, manage dead letter queues, and — with HTTP handlers — auto-process jobs by making HTTP requests without any external worker process.
+When an agent connects to bunqueue via MCP (Model Context Protocol), it gains the ability to add jobs to queues, create cron schedules, set rate limits, monitor queue health, manage dead letter queues, and, with HTTP handlers, auto-process jobs by making HTTP requests without any external worker process.
 
 <AiAgentWorkflow />
 
 **What AI agents can do with bunqueue:**
-- **Schedule tasks** — create cron jobs, delayed execution, recurring workflows with a single tool call
-- **Manage pipelines** — push jobs, monitor progress, retry failures, create sequential or parallel workflows
-- **Auto-process jobs via HTTP** — register an HTTP handler on a queue, and bunqueue calls the endpoint for every job. No external worker needed
-- **Consume jobs directly** — full pull/ack/fail cycle for inline job processing within the agent session
-- **Monitor everything** — server stats, memory, Prometheus metrics, DLQ entries, job logs, per-queue breakdowns
-- **Control flow** — pause/resume queues, set rate limits per second, manage concurrency limits
+- **Schedule tasks**, create cron jobs, delayed execution, recurring workflows with a single tool call
+- **Manage pipelines**, push jobs, monitor progress, retry failures, create sequential or parallel workflows
+- **Auto-process jobs via HTTP**, register an HTTP handler on a queue, and bunqueue calls the endpoint for every job. No external worker needed
+- **Consume jobs directly**, full pull/ack/fail cycle for inline job processing within the agent session
+- **Monitor everything**, server stats, memory, Prometheus metrics, DLQ entries, job logs, per-queue breakdowns
+- **Control flow**, pause/resume queues, set rate limits per second, manage concurrency limits
 
 ```bash
 # bunqueue-mcp is a binary bundled with bunqueue — install it first, then connect Claude Code
@@ -61,7 +63,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 <Aside type="note">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 </Aside>
 
 The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (local SQLite) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.
@@ -396,7 +398,7 @@ await imageQueue.add('product-image', {
 
 Exporting large datasets (hundreds of thousands of records) cannot happen in a single request. The data must be fetched in chunks, written to a temporary file, uploaded to storage, and then the user must be notified. This is a textbook background job.
 
-bunqueue's progress tracking shines here: each chunk updates the progress percentage, so the user sees real-time feedback on a potentially 30-minute export. The chunked approach prevents memory exhaustion — instead of loading all records into memory, the worker processes 10,000 records at a time. The 30-minute timeout accommodates large exports while preventing infinite hangs.
+bunqueue's progress tracking shines here: each chunk updates the progress percentage, so the user sees real-time feedback on a potentially 30-minute export. The chunked approach prevents memory exhaustion, instead of loading all records into memory, the worker processes 10,000 records at a time. The 30-minute timeout accommodates large exports while preventing infinite hangs.
 
 ```typescript
 interface ExportJob {
@@ -483,7 +485,7 @@ await exportQueue.add('accounting-export', {
 
 <NotificationFanout />
 
-Modern applications need to reach users through multiple channels: email, push notifications, SMS, and in-app messages. Each channel has its own API, failure modes, and rate limits. Processing notifications synchronously would make the triggering action (e.g. "order placed") extremely slow and fragile — a single SMS provider timeout would block the entire response.
+Modern applications need to reach users through multiple channels: email, push notifications, SMS, and in-app messages. Each channel has its own API, failure modes, and rate limits. Processing notifications synchronously would make the triggering action (e.g. "order placed") extremely slow and fragile, a single SMS provider timeout would block the entire response.
 
 By queuing notification jobs, the triggering action returns instantly while the worker fans out to all configured channels. User preferences are respected (some users opt out of SMS), and individual channel failures don't block other channels. High-priority notifications (like security alerts) use bunqueue's priority system to jump ahead of promotional messages in the queue.
 
@@ -569,7 +571,7 @@ await notificationQueue.add('security-alert', {
 
 Payment processing is the most critical background job in any e-commerce system. It must be reliable (never lose a charge), idempotent (never charge twice for the same order), and auditable (every action logged). Processing payments synchronously in the checkout flow is risky: a timeout or crash after the charge but before the database update results in a lost transaction.
 
-bunqueue handles this with the `durable: true` flag, which bypasses the write buffer and persists the job to SQLite immediately. This guarantees zero data loss even if the process crashes. The idempotency key pattern prevents duplicate charges, and the DLQ is configured with `autoRetry: false` because failed payments require manual review — you don't want to auto-retry a charge that failed due to insufficient funds.
+bunqueue handles this with the `durable: true` flag, which bypasses the write buffer and persists the job to SQLite immediately. This guarantees zero data loss even if the process crashes. The idempotency key pattern prevents duplicate charges, and the DLQ is configured with `autoRetry: false` because failed payments require manual review, you don't want to auto-retry a charge that failed due to insufficient funds.
 
 ```typescript
 interface PaymentJob {
@@ -957,7 +959,7 @@ Rate limiting works in **both embedded and server mode**. Use `queue.setGlobalRa
 
 External APIs impose rate limits, and exceeding them results in 429 errors, temporary bans, or degraded service. When your application needs to make thousands of API calls (syncing inventory, importing data, sending notifications), you need controlled throughput.
 
-bunqueue provides two levels of rate control. In embedded mode, worker concurrency acts as a parallel limit — setting `concurrency: 10` means at most 10 API calls happen simultaneously. The worker also handles 429 responses by throwing an error, which triggers bunqueue's automatic retry with backoff. For per-second rate limiting, `queue.setGlobalRateLimit(max)` uses a token bucket that refills at `max` tokens per second — and works in both embedded and server mode.
+bunqueue provides two levels of rate control. In embedded mode, worker concurrency acts as a parallel limit, setting `concurrency: 10` means at most 10 API calls happen simultaneously. The worker also handles 429 responses by throwing an error, which triggers bunqueue's automatic retry with backoff. For per-second rate limiting, `queue.setGlobalRateLimit(max)` uses a token bucket that refills at `max` tokens per second, and works in both embedded and server mode.
 
 ```typescript
 interface ApiJob {
@@ -1187,7 +1189,7 @@ await transcodeQueue.add('transcode-video', {
 
 In production, processes receive shutdown signals (SIGINT, SIGTERM) from container orchestrators, deployment scripts, or manual restarts. A naive shutdown kills workers immediately, leaving jobs in an active state with no acknowledgment. These orphaned jobs become "stalled" and must be recovered on restart.
 
-bunqueue's graceful shutdown pattern pauses all workers (stop accepting new jobs), waits for active jobs to complete (with a 30-second timeout), closes queue connections, and flushes the SQLite write buffer. This ensures no data loss and no orphaned jobs. If active jobs don't complete within the timeout, `worker.close(true)` forces an immediate stop — the stall detector will recover these jobs on restart.
+bunqueue's graceful shutdown pattern pauses all workers (stop accepting new jobs), waits for active jobs to complete (with a 30-second timeout), closes queue connections, and flushes the SQLite write buffer. This ensures no data loss and no orphaned jobs. If active jobs don't complete within the timeout, `worker.close(true)` forces an immediate stop, the stall detector will recover these jobs on restart.
 
 ```typescript
 import { Queue, Worker, shutdownManager } from 'bunqueue/client';

@@ -9,7 +9,11 @@ head:
 ---
 
 
-Control the rate at which jobs are processed.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · rate limiting</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Fast, but never <em>too fast.</em></h1>
+  <p class="bq-hero-sub">Cap jobs per time window or concurrent active jobs per queue to protect downstream services. Works from the CLI, over TCP, and in embedded mode.</p>
+</div>
 
 :::tip[Using AI agents?]
 AI agents connected via MCP can set and clear rate limits and concurrency caps via natural language using `bunqueue_set_rate_limit`, `bunqueue_clear_rate_limit`, `bunqueue_set_concurrency`, and `bunqueue_clear_concurrency` tools. See [MCP Server](/guide/mcp/).
@@ -38,7 +42,7 @@ bunqueue concurrency clear emails
 ## Embedded Mode
 
 :::note[Works in embedded mode]
-Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes** — in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`) also works embedded.
+Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes**, in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`) also works embedded.
 :::
 
 In embedded mode you can call `queue.setGlobalRateLimit(max, duration?)` / `queue.setGlobalConcurrency(n)` directly, use a per-worker `limiter`, or control throughput with worker concurrency:

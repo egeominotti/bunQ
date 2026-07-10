@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/elysia.png
 ---
 
-[Elysia](https://elysiajs.com) is an ergonomic framework for building backend servers. Here's the bunqueue integration.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · elysia</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Background jobs for <em>Elysia.</em></h1>
+  <p class="bq-hero-sub"><a href="https://elysiajs.com">Elysia</a> is an ergonomic framework for building backend servers. This guide shows the bunqueue integration: typed queues, workers, DLQ monitoring, and graceful shutdown, all embedded in one process.</p>
+</div>
 
 :::caution[Embedded Mode Required]
 All examples use `embedded: true` for in-process queues. Without it, bunqueue tries to connect to a TCP server.

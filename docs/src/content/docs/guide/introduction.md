@@ -8,7 +8,18 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
-**bunqueue** is a high-performance job queue written in TypeScript, designed specifically for the [Bun](https://bun.sh) runtime. Built for AI agents and agentic workflows with a native MCP server.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · introduction</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The queue that is <em>a file.</em></h1>
+  <p class="bq-hero-sub">bunqueue is a high-performance job queue written in TypeScript, designed specifically for the Bun runtime. SQLite persistence instead of Redis, a native MCP server for AI agents and agentic workflows.</p>
+
+  <div class="bq-proof">
+    <span><b>2</b> runtime dependencies</span>
+    <span><b>5.4 MB</b> install, 7 packages</span>
+    <span><b>73</b> MCP tools for AI agents</span>
+    <span><b>0</b> external infrastructure</span>
+  </div>
+</div>
 
 ## Why bunqueue?
 
@@ -20,20 +31,28 @@ head:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      bunqueue server                        │
-├─────────────────────────────────────────────────────────────┤
-│  HTTP API (Bun.serve)  │  TCP Protocol (Bun.listen)        │
-├─────────────────────────────────────────────────────────────┤
-│                     Core Engine                             │
-│  ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌─────────┐         │
-│  │ Queues  │ │ Workers │ │ Scheduler│ │   DLQ   │         │
-│  └─────────┘ └─────────┘ └──────────┘ └─────────┘         │
-├─────────────────────────────────────────────────────────────┤
-│   bun:sqlite (WAL mode)    │   S3 Backup (optional)        │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>bunqueue server</b><span>one process</span></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">HTTP API <i>Bun.serve</i></div>
+    <div class="bq-diag-cell">TCP protocol <i>Bun.listen</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">core engine</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">Queues</div>
+      <div class="bq-diag-cell">Workers</div>
+      <div class="bq-diag-cell">Scheduler</div>
+      <div class="bq-diag-cell">DLQ</div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell bq-diag-accent">bun:sqlite <i>WAL mode</i></div>
+    <div class="bq-diag-cell">S3 backup <i>optional</i></div>
+  </div>
+</div>
 
 ## Two Modes of Operation
 
@@ -112,7 +131,7 @@ Best for:
 
 ## Workflow Engine
 
-bunqueue includes a built-in workflow engine for multi-step orchestration. Define workflows with a fluent TypeScript DSL — saga compensation, conditional branching, parallel steps, step retry with backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, typed observability events, and cleanup/archival. No Temporal, no Inngest, no cloud service required.
+bunqueue includes a built-in workflow engine for multi-step orchestration. Define workflows with a fluent TypeScript DSL, saga compensation, conditional branching, parallel steps, step retry with backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, typed observability events, and cleanup/archival. No Temporal, no Inngest, no cloud service required.
 
 ```typescript
 import { Workflow, Engine } from 'bunqueue/workflow';

@@ -1446,7 +1446,7 @@ svg.hp-feature-icon {
   --bq-line-soft: color-mix(in srgb, var(--sl-color-text) 8%, transparent);
   --bq-surface: color-mix(in srgb, var(--sl-color-text) 4%, var(--sl-color-bg));
   --bq-chip-bg: var(--sl-color-bg);
-  --bq-display: 'Bricolage Grotesque Variable', var(--sl-font-system);
+  --bq-display: 'Inter', var(--sl-font-system);
   --bq-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 }
 
@@ -1464,12 +1464,38 @@ main:has(.bq-hero) .content-panel:first-of-type {
   display: none;
 }
 
+/* ── enterprise-grade reading size for docs body ───────────────────── */
+
+.sl-markdown-content {
+  font-size: 1.0625rem;
+  line-height: 1.75;
+}
+
+.sl-markdown-content :is(li, p) {
+  line-height: 1.75;
+}
+
+.sl-markdown-content :is(table) {
+  font-size: 0.95rem;
+}
+
+.sl-markdown-content :is(code):not(pre code) {
+  font-size: 0.92em;
+}
+
 /* ── shared primitives ─────────────────────────────────────────────── */
 
 .bq-wrap {
-  max-width: 72rem;
+  max-width: 85rem;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 2rem;
+}
+
+/* Splash pages that carry the custom home: let content run full width */
+main:has(.bq-hero) .content-panel,
+main:has(.bq-hero) .sl-container {
+  max-width: none;
+  margin-inline: 0;
 }
 
 .bq-eyebrow {
@@ -1484,19 +1510,19 @@ main:has(.bq-hero) .content-panel:first-of-type {
 
 .bq-h2 {
   font-family: var(--bq-display);
-  font-size: clamp(1.7rem, 3.4vw, 2.4rem);
-  font-weight: 640;
-  letter-spacing: -0.015em;
+  font-size: clamp(1.8rem, 3.4vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
   line-height: 1.08;
   margin: 0 0 0.7rem;
   color: var(--sl-color-white);
 }
 
 .bq-lede {
-  max-width: 46rem;
+  max-width: 48rem;
   color: var(--sl-color-gray-2);
-  font-size: 1.02rem;
-  line-height: 1.65;
+  font-size: 1.12rem;
+  line-height: 1.75;
   margin: 0;
 }
 
@@ -1519,12 +1545,105 @@ main:has(.bq-hero) .content-panel:first-of-type {
   text-align: left;
 }
 
+/* ── hero grid (copy + install left, benchmark card right) ─────────── */
+
+.bq-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 3.5rem;
+  align-items: center;
+}
+
+.bq-hero-grid .bq-hero-h1 {
+  font-size: clamp(2.4rem, 4.5vw, 3.8rem);
+}
+
+.bq-pill {
+  display: inline-block;
+  font-family: var(--bq-mono);
+  font-size: 0.84rem;
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+  border: 1px solid var(--bq-line);
+  border-radius: 999px;
+  padding: 0.38rem 0.95rem;
+  margin-bottom: 1.5rem;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.bq-pill:hover {
+  border-color: var(--bq-brand);
+  color: var(--sl-color-white);
+}
+
+.bq-install-label {
+  font-family: var(--bq-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--sl-color-white);
+  margin: 0 0 0.3rem;
+}
+
+.bq-hero-left .bq-actions {
+  margin-top: 1.6rem;
+}
+
+/* keep Starlight tabs compact inside the hero */
+.bq-hero-left starlight-tabs {
+  margin-top: 0;
+}
+
+.bq-bench-card {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.5rem 1.6rem 1.2rem;
+}
+
+.bq-bench-title {
+  font-family: var(--bq-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  margin: 0 0 0.15rem;
+}
+
+.bq-bench-sub {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-3);
+  margin: 0 0 1rem;
+}
+
+.bq-bench-card .bq-bar-row {
+  margin-bottom: 0.85rem;
+}
+
+.bq-bench-foot {
+  font-family: var(--bq-mono);
+  font-size: 0.78rem;
+  line-height: 1.7;
+  color: var(--sl-color-gray-3);
+  border-top: 1px solid var(--bq-line-soft);
+  padding-top: 0.8rem;
+  margin: 1.2rem 0 0;
+}
+
+@media (max-width: 64rem) {
+  .bq-hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+}
+
 .bq-hero-h1 {
   font-family: var(--bq-display);
-  font-size: clamp(2.9rem, 8vw, 5.4rem);
-  font-weight: 720;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 800;
   letter-spacing: -0.03em;
-  line-height: 0.98;
+  line-height: 1.05;
   margin: 0 0 1.4rem;
   color: var(--sl-color-white);
 }
@@ -1535,9 +1654,9 @@ main:has(.bq-hero) .content-panel:first-of-type {
 }
 
 .bq-hero-sub {
-  max-width: 44rem;
-  font-size: 1.13rem;
-  line-height: 1.65;
+  max-width: 46rem;
+  font-size: 1.2rem;
+  line-height: 1.7;
   color: var(--sl-color-gray-2);
   margin: 0 0 2rem;
 }
@@ -1588,15 +1707,556 @@ main:has(.bq-hero) .content-panel:first-of-type {
   font-family: var(--bq-mono);
   font-size: 0.92rem;
   color: var(--sl-color-gray-2);
+  background: transparent;
   border: 1px dashed var(--bq-line);
   border-radius: 0.45rem;
   padding: 0.72rem 1.1rem;
   user-select: all;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.bq-hero-install:hover {
+  border-color: var(--bq-brand);
+  color: var(--sl-color-white);
+}
+
+.bq-hero-install:focus-visible {
+  outline: 2px solid var(--bq-brand);
+  outline-offset: 2px;
+}
+
+.bq-hero-trust {
+  font-family: var(--bq-mono);
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-3);
+  margin-top: 1rem;
 }
 
 .bq-hero-install::before {
   content: '$ ';
   color: var(--bq-brand);
+}
+
+.bq-hero-install::after {
+  content: ' ⧉';
+  color: var(--sl-color-gray-4);
+}
+
+.bq-hero-install.bq-copied {
+  border-color: var(--bq-green);
+}
+
+.bq-hero-install.bq-copied::after {
+  content: ' ✓';
+  color: var(--bq-green);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+/* ── benchmark page: native horizontal bar charts ──────────────────── */
+
+.bq-bench-hero {
+  padding-bottom: 1rem;
+}
+
+.bq-bench-hero .bq-proof {
+  margin-top: 2.6rem;
+}
+
+.bq-bench-h1 {
+  margin-top: 1rem;
+}
+
+.bq-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2.2rem;
+}
+
+.bq-chart-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bq-chart {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.2rem 1.3rem 1.1rem;
+}
+
+.bq-chart-title {
+  font-family: var(--bq-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  margin: 0 0 1rem;
+}
+
+.bq-chart-title span {
+  display: block;
+  font-family: var(--bq-mono);
+  font-size: 0.76rem;
+  font-weight: 400;
+  color: var(--sl-color-gray-3);
+  margin-top: 0.2rem;
+}
+
+.bq-hrow {
+  display: grid;
+  grid-template-columns: minmax(2.6rem, auto) 1fr minmax(3.2rem, auto);
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.55rem;
+}
+
+.bq-hname {
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  color: var(--sl-color-gray-2);
+  white-space: nowrap;
+}
+
+.bq-htrack {
+  background: color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+  border-radius: 999px;
+  height: 0.8rem;
+  overflow: hidden;
+}
+
+.bq-hfill {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bq-brand) 78%, var(--sl-color-black)),
+    var(--bq-brand) 60%,
+    color-mix(in srgb, var(--bq-brand) 72%, #fff)
+  );
+  border-radius: 999px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--bq-brand) 45%, transparent);
+  transform-origin: left center;
+  animation: bq-grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.bq-hrow:nth-child(2) .bq-hfill { animation-delay: 0.08s; }
+.bq-hrow:nth-child(3) .bq-hfill { animation-delay: 0.16s; }
+.bq-hrow:nth-child(4) .bq-hfill { animation-delay: 0.24s; }
+.bq-hrow:nth-child(5) .bq-hfill { animation-delay: 0.32s; }
+
+@keyframes bq-grow {
+  from { transform: scaleX(0); }
+}
+
+.bq-hfill-them {
+  background: color-mix(in srgb, var(--sl-color-text) 24%, transparent);
+  box-shadow: none;
+}
+
+.bq-hval {
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--sl-color-white);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bq-hrow:hover .bq-htrack {
+  background: color-mix(in srgb, var(--sl-color-text) 11%, transparent);
+}
+
+.bq-hrow:hover .bq-hname {
+  color: var(--sl-color-white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bq-hfill { animation: none; }
+}
+
+/* ── custom diagram system (replaces ASCII box art) ────────────────── */
+
+.bq-diag {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.15rem 1.2rem;
+  margin: 1.6rem 0;
+  font-family: var(--bq-mono);
+}
+
+.bq-diag-head {
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--bq-line-soft);
+  margin-bottom: 0.35rem;
+}
+
+.bq-diag-head b {
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+.bq-diag-layer,
+.bq-diag-cell {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--sl-color-text) 3%, transparent);
+  padding: 0.65rem 0.95rem;
+  font-size: 0.9rem;
+  color: var(--sl-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.bq-diag-cell {
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.bq-diag-layer i,
+.bq-diag-cell i {
+  font-style: normal;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--sl-color-gray-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bq-diag-accent {
+  border-color: var(--bq-brand);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--bq-brand) 18%, transparent);
+}
+
+.bq-diag-accent > b:first-child,
+.bq-diag-layer.bq-diag-accent {
+  color: var(--sl-color-white);
+}
+
+.bq-diag-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.45rem;
+}
+
+.bq-diag-arrow {
+  text-align: center;
+  color: var(--sl-color-gray-4);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.1rem 0;
+  user-select: none;
+}
+
+.bq-diag-group {
+  border: 1px dashed var(--bq-line);
+  border-radius: 0.65rem;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.bq-diag-group-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.bq-diag-note {
+  font-size: 0.78rem;
+  color: var(--sl-color-gray-3);
+  margin: 0.2rem 0 0;
+}
+
+/* horizontal flow: cells joined by inline arrows */
+.bq-diag-flow {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.bq-diag-flow .bq-diag-cell {
+  flex: 1 1 7rem;
+}
+
+.bq-diag-flow .bq-diag-arrow {
+  flex: none;
+  padding: 0 0.1rem;
+}
+
+@media (max-width: 40rem) {
+  .bq-diag-row { grid-auto-flow: row; grid-auto-columns: unset; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* custom icon set */
+.bq-icon {
+  flex: none;
+  color: var(--sl-color-gray-2);
+}
+
+.bq-tool .bq-icon,
+.bq-card .bq-icon,
+.bq-trust-card .bq-icon {
+  display: block;
+  margin-bottom: 0.6rem;
+  color: var(--sl-color-white);
+}
+
+.bq-card {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.2rem 1.4rem;
+}
+
+.bq-card h3 {
+  font-family: var(--bq-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  margin: 0 0 0.4rem;
+}
+
+.bq-card p {
+  font-size: 0.97rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+  margin: 0;
+}
+
+.bq-card b {
+  color: var(--bq-brand);
+}
+
+.bq-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.6rem 0;
+}
+
+@media (max-width: 56rem) {
+  .bq-cards { grid-template-columns: minmax(0, 1fr); }
+}
+
+.bq-chart-note {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-3);
+  margin: 0.9rem 0 0;
+}
+
+.bq-chart-note b {
+  color: var(--bq-brand);
+}
+
+.bq-chart-foot {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-3);
+  margin-top: 1.1rem;
+}
+
+@media (max-width: 64rem) {
+  .bq-chart-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── tool cards (four tools, one file) ─────────────────────────────── */
+
+.bq-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2.2rem;
+}
+
+.bq-tool {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.3rem 1.5rem 1.4rem;
+}
+
+.bq-tool h3 {
+  font-family: var(--bq-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  margin: 0 0 0.35rem;
+}
+
+.bq-tool > p {
+  font-size: 0.98rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+  margin: 0 0 0.9rem;
+}
+
+.bq-tool-cmd {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-2);
+  background: var(--sl-color-black);
+  border: 1px solid var(--bq-line-soft);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.9rem;
+  margin: 0 0 1rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.bq-tool-cmd::before {
+  content: '$ ';
+  color: var(--bq-brand);
+}
+
+.bq-checks {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 1rem;
+  padding: 0;
+  margin: 0;
+}
+
+.bq-checks li {
+  font-size: 0.94rem;
+  color: var(--sl-color-gray-2);
+  padding-left: 1.25rem;
+  position: relative;
+}
+
+.bq-checks li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--bq-green);
+  font-weight: 600;
+}
+
+.bq-checks a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--bq-line);
+}
+
+.bq-checks a:hover {
+  color: var(--sl-color-white);
+  border-bottom-color: var(--bq-brand);
+}
+
+@media (max-width: 56rem) {
+  .bq-tools { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── quickstart steps ──────────────────────────────────────────────── */
+
+#quickstart {
+  scroll-margin-top: 6.5rem;
+}
+
+.bq-steps {
+  margin-top: 2.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  max-width: 46rem;
+}
+
+.bq-step {
+  position: relative;
+  padding-left: 3.1rem;
+}
+
+.bq-step::before {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  top: 2.4rem;
+  bottom: -1.6rem;
+  width: 1px;
+  background: var(--bq-line-soft);
+}
+
+.bq-step:last-child::before {
+  display: none;
+}
+
+.bq-step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.bq-step-num {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-family: var(--bq-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bq-brand);
+  border: 1px solid var(--bq-brand);
+  background: var(--bq-surface);
+}
+
+.bq-step-head h3 {
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--sl-color-white);
+  margin: 0;
+}
+
+.bq-step-head h3 code {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.bq-step-note {
+  font-size: 0.98rem;
+  line-height: 1.7;
+  color: var(--sl-color-gray-3);
+  margin: 0.7rem 0 0;
+}
+
+@media (max-width: 40rem) {
+  .bq-step { padding-left: 2.6rem; }
+  .bq-step-num { width: 1.7rem; height: 1.7rem; font-size: 0.78rem; }
 }
 
 /* ── the living queue: autonomous simulator (signature) ───────────── */
@@ -1739,7 +2399,7 @@ main:has(.bq-hero) .content-panel:first-of-type {
   border-bottom: 1px solid var(--bq-line-soft);
   padding: 1.05rem 0;
   font-family: var(--bq-mono);
-  font-size: 0.82rem;
+  font-size: 0.92rem;
   color: var(--sl-color-gray-2);
   display: flex;
   flex-wrap: wrap;
@@ -2136,15 +2796,31 @@ main:has(.bq-hero) .content-panel:first-of-type {
 }
 
 .bq-bar {
-  height: 1.05rem;
-  border-radius: 0.25rem;
+  height: 1rem;
+  border-radius: 999px;
   margin-bottom: 0.28rem;
   position: relative;
-  background: var(--bq-brand);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bq-brand) 78%, var(--sl-color-black)),
+    var(--bq-brand) 60%,
+    color-mix(in srgb, var(--bq-brand) 72%, #fff)
+  );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--bq-brand) 45%, transparent);
+  transform-origin: left center;
+  animation: bq-grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
+
+.bq-bar-row:nth-of-type(2) .bq-bar { animation-delay: 0.08s; }
+.bq-bar-row:nth-of-type(3) .bq-bar { animation-delay: 0.16s; }
 
 .bq-bar.bq-bar-them {
   background: color-mix(in srgb, var(--sl-color-text) 22%, transparent);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bq-bar { animation: none; }
 }
 
 .bq-bar span {

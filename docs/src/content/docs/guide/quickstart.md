@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
-
-This guide will get you up and running with bunqueue in 5 minutes.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · quickstart</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Working queue in <em>a minute.</em></h1>
+  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and wire up persistence. Everything on this page runs in a single Bun process with zero configuration.</p>
+</div>
 
 ## Choose Your Mode
 
@@ -256,7 +259,7 @@ installing anything, or read the
 
 ## Connect AI Agents (MCP)
 
-bunqueue includes a native MCP server with 73 tools. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language — no code needed.
+bunqueue includes a native MCP server with 73 tools. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language, no code needed.
 
 ```bash
 # Claude Code — bunqueue-mcp is a binary bundled with bunqueue, so install it first
@@ -266,7 +269,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 :::
 
 ```json
@@ -318,7 +321,7 @@ const run = await engine.start('order-pipeline', { orderId: 'ORD-1' });
 await engine.signal(run.id, 'manager-approval', { approved: true });
 ```
 
-Built on top of bunqueue's Queue and Worker — no new infrastructure. [Workflow Engine guide](/guide/workflow/) for the full reference.
+Built on top of bunqueue's Queue and Worker, no new infrastructure. [Workflow Engine guide](/guide/workflow/) for the full reference.
 
 ## Next Steps
 

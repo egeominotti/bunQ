@@ -20,9 +20,14 @@ head:
       content: "bunqueue, sqlite job queue, redis alternative, bun job queue, background jobs typescript, sqlite vs redis, job queue no redis"
 ---
 
-import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import BqIcon from '@components/BqIcon.astro';
 
-The Node.js ecosystem has relied on Redis-backed job queues for years. BullMQ, Bee-Queue, and others all share the same dependency: a running Redis server. We asked a simple question: **what if we didn't need Redis at all?**
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · design</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">A job queue without <em>Redis.</em></h1>
+  <p class="bq-hero-sub">BullMQ, Bee-Queue, and friends all assume a running Redis server. bunqueue moves the queue in-process on SQLite instead: simpler deployments, zero external services, and around 100k jobs/sec.</p>
+</div>
 
 ## The Redis Problem
 
@@ -39,20 +44,28 @@ For many applications, especially single-server deployments and small teams, thi
 
 SQLite runs in-process. There's no network hop, no connection pool, no separate service to manage.
 
-<CardGrid>
-  <Card title="Zero Dependencies" icon="rocket">
-    No Redis, no external services. Just your app and a file on disk. `bun add bunqueue` installs 7 packages (5.4 MB) — only `croner` and `msgpackr` at runtime.
-  </Card>
-  <Card title="In-Process Speed" icon="star">
-    Direct memory access instead of TCP round-trips to Redis.
-  </Card>
-  <Card title="Persistence by Default" icon="open-book">
-    WAL mode gives you crash-safe writes with read concurrency.
-  </Card>
-  <Card title="Simple Backups" icon="laptop">
-    Copy one file, or use built-in S3 backup.
-  </Card>
-</CardGrid>
+<div class="bq-cards">
+  <div class="bq-card">
+    <BqIcon name="file" />
+    <h3>Zero Dependencies</h3>
+    <p>No Redis, no external services. Just your app and a file on disk. <code>bun add bunqueue</code> installs 7 packages (5.4 MB), only <code>croner</code> and <code>msgpackr</code> at runtime.</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="speed" />
+    <h3>In-Process Speed</h3>
+    <p>Direct memory access instead of TCP round-trips to Redis.</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="shield" />
+    <h3>Persistence by Default</h3>
+    <p>WAL mode gives you crash-safe writes with read concurrency.</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="network" />
+    <h3>Simple Backups</h3>
+    <p>Copy one file, or use built-in S3 backup.</p>
+  </div>
+</div>
 
 ## Bun Makes It Possible
 
@@ -107,7 +120,7 @@ bunqueue is designed for **single-instance deployments**. It's the right choice 
 If you need multi-node clustering or Redis pub/sub features, BullMQ remains a solid choice. But for the majority of applications that run on a single server, bunqueue eliminates an entire layer of infrastructure.
 
 <Aside type="note" title="A genuinely small install">
-  Eliminating Redis isn't just an operational win — it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.4 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin — so queue and worker users never download it.
+  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.4 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
 </Aside>
 
 ## What's Next?

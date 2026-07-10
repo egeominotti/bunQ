@@ -22,7 +22,11 @@ head:
 
 import { Aside } from '@astrojs/starlight/components';
 
-A job queue is only as reliable as its workers. If a worker crashes mid-processing, what happens to the job? Without proper safeguards, it's either lost forever or stuck in an "active" state. bunqueue solves this with **stall detection** and **lock-based ownership**.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · reliability</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Workers crash. Jobs <em>survive.</em></h1>
+  <p class="bq-hero-sub">A queue is only as reliable as its workers. When one dies mid-processing, the job must not be lost or stuck active forever. bunqueue solves this with stall detection, heartbeats, and lock-based ownership.</p>
+</div>
 
 ## The Problem: Zombie Jobs
 

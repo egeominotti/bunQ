@@ -8,10 +8,14 @@ head:
       content: https://bunqueue.dev/og/queue.png
 ---
 
-The `Queue` class is used to add and manage jobs.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue api</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every job, exactly <em>where it belongs.</em></h1>
+  <p class="bq-hero-sub">The Queue class is used to add and manage jobs: priorities, delays, retries, bulk operations, deduplication, durable writes, and DLQ configuration, all from one API.</p>
+</div>
 
 :::tip[Using AI agents?]
-AI agents connected via MCP can perform all queue operations (add jobs, query state, pause/resume, manage DLQ) via natural language — no code needed. See [MCP Server](/guide/mcp/) for setup.
+AI agents connected via MCP can perform all queue operations (add jobs, query state, pause/resume, manage DLQ) via natural language, no code needed. See [MCP Server](/guide/mcp/) for setup.
 :::
 
 :::caution[Important]
@@ -95,18 +99,18 @@ const devWorker = new Worker('emails', processor, {
 - Counts, stats, and `isPaused`
 - `pause()` / `resume()` / `drain()` / `obliterate()`
 - Rate limits and global concurrency
-- **Cron schedulers** — two prefixes can use the same `schedulerId` without colliding on the global cron PRIMARY KEY (this fixes [#77](https://github.com/egeominotti/bunqueue/issues/77))
+- **Cron schedulers**, two prefixes can use the same `schedulerId` without colliding on the global cron PRIMARY KEY (this fixes [#77](https://github.com/egeominotti/bunqueue/issues/77))
 
 **Use cases:**
 
-- **Multi-environment** — `dev:` / `staging:` / `prod:` on a single broker, no port juggling
-- **Multi-tenant SaaS** — `tenant-${tenantId}:` per customer, queue names can be reused
-- **Monorepo** — each service prefixes its queues so two `process` queues from `service-a` and `service-b` don't collide
-- **Test isolation** — `test-${runId}:` to avoid `obliterate()` between parallel test runs
+- **Multi-environment**, `dev:` / `staging:` / `prod:` on a single broker, no port juggling
+- **Multi-tenant SaaS**, `tenant-${tenantId}:` per customer, queue names can be reused
+- **Monorepo**, each service prefixes its queues so two `process` queues from `service-a` and `service-b` don't collide
+- **Test isolation**, `test-${runId}:` to avoid `obliterate()` between parallel test runs
 
 **Notes:**
 
-- Backward compatible — without `prefixKey` behavior is identical to previous releases.
+- Backward compatible, without `prefixKey` behavior is identical to previous releases.
 - `Queue.name` always returns the **logical** name. The server-side key (`prefixKey + name`) is internal.
 - `Job.queueName` returned to processors will reflect the prefixed key (e.g. `dev:emails`). This is the only user-visible side effect.
 - Works in both embedded and TCP modes.
@@ -172,7 +176,7 @@ await queue.add('weekly', {}, {
 
 ### Updating Repeatable Job Data
 
-You can update the data for the next repeat execution using `updateData()`. This works even after the current execution completes — the update propagates to the successor job automatically.
+You can update the data for the next repeat execution using `updateData()`. This works even after the current execution completes, the update propagates to the successor job automatically.
 
 ```typescript
 const job = await queue.add('sync', { endpoint: '/api/v1' }, {
@@ -186,9 +190,9 @@ await job.updateData({ endpoint: '/api/v2' });
 
 :::tip[Timing]
 `updateData()` works at any point in the job lifecycle:
-- **Before processing** — updates the waiting/delayed job directly
-- **During processing** — updates the active job, and the next repeat inherits the new data
-- **After completion** — follows the repeat chain to update the next scheduled execution
+- **Before processing**, updates the waiting/delayed job directly
+- **During processing**, updates the active job, and the next repeat inherits the new data
+- **After completion**, follows the repeat chain to update the next scheduled execution
 :::
 
 ### Durable Jobs
@@ -230,7 +234,7 @@ Use `durable: true` for:
 Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` is **still queued** (`waiting` / `delayed` / `prioritized`), **the existing job is returned** instead of creating a duplicate. This works in both **embedded** and **TCP** modes (including auto-batched operations). This is BullMQ-compatible idempotent behavior.
 
 :::note[Completed or processing ids are reused, not returned]
-Deduplication only collapses an add onto a job that is still pending. If the prior job with that `jobId` has already **completed** (or is currently **processing**), re-adding the same `jobId` starts a **fresh `waiting` job** under that id — the stale completed record and its result are evicted first (so `getJobState` reports the new run, not the old `completed`). This is what makes a `jobId` safe to reuse across runs (e.g. a daily `report-2026-06-17`): you get idempotency within a run and a clean re-run afterwards, never a permanently-stuck `completed` lookup.
+Deduplication only collapses an add onto a job that is still pending. If the prior job with that `jobId` has already **completed** (or is currently **processing**), re-adding the same `jobId` starts a **fresh `waiting` job** under that id, the stale completed record and its result are evicted first (so `getJobState` reports the new run, not the old `completed`). This is what makes a `jobId` safe to reuse across runs (e.g. a daily `report-2026-06-17`): you get idempotency within a run and a clean re-run afterwards, never a permanently-stuck `completed` lookup.
 :::
 
 ```typescript
@@ -407,7 +411,7 @@ const delayed = await queue.getDelayedAsync(0, 10);
 :::note[Failed jobs]
 A job that exhausts its retry attempts is moved to the dead-letter queue. It is
 still counted by `failed`, retrievable with `getJob(id)`, and **enumerable** via
-`getFailed()` / `getJobs({ state: 'failed' })` — the failed list reflects the
+`getFailed()` / `getJobs({ state: 'failed' })`, the failed list reflects the
 same jobs that `failed` counts (in standalone-server and embedded modes alike).
 :::
 
@@ -443,18 +447,18 @@ const count = await queue.getWaitingChildrenCount();
 ```
 
 :::note[Prioritized State]
-In BullMQ v5, jobs with `priority > 0` have a distinct state called `'prioritized'`, separate from `'waiting'` (priority = 0). This affects `getJobState()`, `getJobCounts()`, and all state-based queries. Jobs in both states are pullable — prioritized jobs are dequeued before waiting jobs.
+In BullMQ v5, jobs with `priority > 0` have a distinct state called `'prioritized'`, separate from `'waiting'` (priority = 0). This affects `getJobState()`, `getJobCounts()`, and all state-based queries. Jobs in both states are pullable, prioritized jobs are dequeued before waiting jobs.
 :::
 
 :::note[Paused state]
 While a queue is paused, its ready jobs are reported under `paused`, never under
-`waiting` — `getJobCounts()` returns `waiting: 0, paused: N`, and the jobs are
+`waiting`, `getJobCounts()` returns `waiting: 0, paused: N`, and the jobs are
 listed by `getJobs({ state: 'paused' })`. This mirrors BullMQ: a job is never
 counted in both `waiting` and `paused` at once. Delayed and active jobs keep
 their own state; on `resume()` the jobs return to `waiting`.
 
 **Pause is durable** (since 2.8.19): with SQLite persistence enabled, `pause`
-state — along with `setRateLimit` and `setConcurrency` overrides — is written
+state, along with `setRateLimit` and `setConcurrency` overrides, is written
 through to the `queue_state` table and restored on restart. A queue you paused
 for maintenance stays paused across a server restart/upgrade/crash; it does not
 silently resume.
@@ -768,7 +772,7 @@ Jobs with `durable: true` are always sent as individual `PUSH` commands and are 
 
 ## Store-and-Forward: `queue.forward()`
 
-Drain this queue's jobs to a remote bunqueue server — the edge/IoT pattern
+Drain this queue's jobs to a remote bunqueue server, the edge/IoT pattern
 (local embedded queue as offline buffer, central server as destination):
 
 ```typescript

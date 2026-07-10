@@ -8,33 +8,37 @@ head:
       content: https://bunqueue.dev/og-image.png
 ---
 
-# Cron Scheduler Architecture
-
-The bunqueue Cron Scheduler uses a **MinHeap-based execution model** with generation-based lazy deletion for optimal performance.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">architecture · cron scheduler</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Time, <em>persisted.</em></h1>
+  <p class="bq-hero-sub">The bunqueue cron scheduler uses a MinHeap-based execution model with generation-based lazy deletion, timezone-aware schedules, and SQLite-backed state for recovery on restart.</p>
+</div>
 
 ## System Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CronScheduler                             │
-├─────────────────────────────────────────────────────────────┤
-│  cronJobs: Map<name, {cron, generation}>  ◄── O(1) lookup   │
-│  cronHeap: MinHeap<CronHeapEntry>         ◄── O(k log n)    │
-│  generation: number                        ◄── Lazy deletion │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     tick() every 1s                          │
-│  1. Pop due crons from heap (nextRun <= now)                │
-│  2. Check stale (generation mismatch) → skip                │
-│  3. Check execution limit → auto-remove if reached          │
-│  4. Push job to queue                                       │
-│  5. Persist state to SQLite                                 │
-│  6. Calculate new nextRun                                   │
-│  7. Re-insert with same generation                          │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>CronScheduler</b><span>heap plus generation map</span></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">cronJobs <i>Map&lt;name, {cron, generation}&gt;, O(1) lookup</i></div>
+    <div class="bq-diag-cell bq-diag-accent">cronHeap <i>MinHeap&lt;CronHeapEntry&gt;, O(k log n)</i></div>
+    <div class="bq-diag-cell">generation <i>number, lazy deletion</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">tick() every 1s</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">1. Pop due crons from heap <i>nextRun &lt;= now</i></div>
+      <div class="bq-diag-cell">2. Check stale <i>generation mismatch: skip</i></div>
+      <div class="bq-diag-cell">3. Check execution limit <i>auto-remove if reached</i></div>
+      <div class="bq-diag-cell">4. Push job to queue</div>
+    </div>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">5. Persist state to SQLite</div>
+      <div class="bq-diag-cell">6. Calculate new nextRun</div>
+      <div class="bq-diag-cell">7. Re-insert with same generation</div>
+    </div>
+  </div>
+</div>
 
 ## Core Data Structures
 
@@ -114,39 +118,18 @@ function getNextIntervalRun(intervalMs: number, lastRun: number): number {
 
 ## Execution Flow
 
-```
-tick() fires (every 1 second)
-     │
-     ▼
-┌──────────────────────────────┐
-│ while heap.peek().nextRun    │
-│       <= now                 │
-└──────────┬───────────────────┘
-           │
-           ▼
-┌──────────────────────────────┐
-│ entry = heap.pop()           │  O(log n)
-└──────────┬───────────────────┘
-           │
-           ▼
-┌──────────────────────────────┐
-│ Stale? (gen mismatch)        │──── Yes ──► Skip, continue
-└──────────┬───────────────────┘
-           │ No
-           ▼
-┌──────────────────────────────┐
-│ At execution limit?          │──── Yes ──► Auto-remove
-└──────────┬───────────────────┘
-           │ No
-           ▼
-┌──────────────────────────────┐
-│ 1. Push job to queue         │
-│ 2. Persist to SQLite         │
-│ 3. Update executions++       │
-│ 4. Calculate new nextRun     │
-│ 5. Re-insert to heap         │
-└──────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Execution flow</b><span>tick() fires every 1 second</span></div>
+  <div class="bq-diag-layer">while heap.peek().nextRun &lt;= now</div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">entry = heap.pop() <i>O(log n)</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">Stale? gen mismatch <i>yes: skip, continue</i></div>
+  <div class="bq-diag-arrow">↓ no</div>
+  <div class="bq-diag-layer">At execution limit? <i>yes: auto-remove</i></div>
+  <div class="bq-diag-arrow">↓ no</div>
+  <div class="bq-diag-layer bq-diag-accent">1. Push job to queue, 2. persist to SQLite, 3. update executions++, 4. calculate new nextRun, 5. re-insert to heap</div>
+</div>
 
 ## Persistence & Recovery
 

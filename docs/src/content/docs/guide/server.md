@@ -8,8 +8,18 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · standalone</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One process serves them <em>all.</em></h1>
+  <p class="bq-hero-sub">Run bunqueue as a standalone server with TCP and HTTP APIs. Any number of producers and workers connect over the wire, with token auth, Docker deployment, and graceful shutdown built in.</p>
 
-Run bunqueue as a standalone server with HTTP and TCP APIs.
+  <div class="bq-proof">
+    <span><b>:6789</b> TCP, msgpack protocol</span>
+    <span><b>:6790</b> HTTP, REST and metrics</span>
+    <span><b>73</b> MCP tools for AI agents</span>
+    <span><b>30s</b> graceful shutdown window</span>
+  </div>
+</div>
 
 ## Starting the Server
 
@@ -45,7 +55,7 @@ export default defineConfig({
 });
 ```
 
-Then just run `bunqueue start` — the config file is auto-discovered. See [Configuration File](/guide/configuration/) for the full reference.
+Then just run `bunqueue start`, the config file is auto-discovered. See [Configuration File](/guide/configuration/) for the full reference.
 
 :::tip[Priority Order]
 CLI flags > config file > environment variables > defaults
@@ -156,7 +166,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
 :::
 
 ```json
@@ -179,7 +189,7 @@ AUTH_TOKENS=my-secret bunqueue start
 
 The MCP server picks up the connection settings from environment variables (`TCP_PORT`, `HOST`, `AUTH_TOKENS`). Agents get 73 tools to add jobs, manage queues, schedule crons, retry failures, set rate limits, and monitor everything.
 
-For HTTP handlers (agent-only feature), agents register a URL endpoint and bunqueue auto-processes jobs via HTTP calls — no Worker deployment needed. See [MCP Server guide](/guide/mcp/) for the full reference.
+For HTTP handlers (agent-only feature), agents register a URL endpoint and bunqueue auto-processes jobs via HTTP calls, no Worker deployment needed. See [MCP Server guide](/guide/mcp/) for the full reference.
 
 :::tip[Related Guides]
 - [MCP Server](/guide/mcp/) - Full AI agent integration guide

@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/worker.png
 ---
 
-The `Worker` class processes jobs from a queue.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker api</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Pull, process, ack, <em>repeat.</em></h1>
+  <p class="bq-hero-sub">The Worker class processes jobs from a queue: concurrency, heartbeats, batch pulling, lock-based ownership, and sandboxed isolation for CPU-heavy work.</p>
+</div>
 
 :::tip[Using AI agents?]
 If you're using MCP-connected AI agents, you may not need a Worker at all. Agents can register **HTTP handlers** that let bunqueue auto-process jobs by calling your HTTP endpoint. See [MCP Server → HTTP Handlers](/guide/mcp/#http-handlers) for the agent-only alternative.
@@ -135,7 +139,7 @@ const worker = new Worker('queue', async (job) => {
 
 ## Events
 
-All events are fully typed — TypeScript will autocomplete event names and infer callback parameter types.
+All events are fully typed, TypeScript will autocomplete event names and infer callback parameter types.
 
 ```typescript
 worker.on('ready', () => {
@@ -313,7 +317,7 @@ const worker = new Worker('queue', processor, {
 ```
 
 :::tip[Batch push and worker wakeup]
-When jobs are pushed via `addBulk()` or `pushBatch`, each inserted job triggers a notification to waiting workers. This means if you push 100 jobs and 20 workers are idle with `pollTimeout`, all 20 workers wake up immediately — no need to wait for the poll timeout to expire.
+When jobs are pushed via `addBulk()` or `pushBatch`, each inserted job triggers a notification to waiting workers. This means if you push 100 jobs and 20 workers are idle with `pollTimeout`, all 20 workers wake up immediately, no need to wait for the poll timeout to expire.
 :::
 
 ## Error Handling
@@ -339,10 +343,10 @@ worker.on('failed', (job, error) => {
 
 ## SandboxedWorker
 
-:::danger[Experimental — Not recommended for production]
+:::danger[Experimental, not recommended for production]
 `SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are currently **experimental** in Bun. Known issues include unexpected memory growth, thread duplication, and inconsistent behavior across Bun versions.
 
-**For production workloads, use the standard `Worker` instead** — it provides the same API (events, concurrency, heartbeats, retries) and runs entirely in the main thread with zero dependency on experimental Bun APIs.
+**For production workloads, use the standard `Worker` instead**, it provides the same API (events, concurrency, heartbeats, retries) and runs entirely in the main thread with zero dependency on experimental Bun APIs.
 
 `SandboxedWorker` will become the recommended choice for CPU-intensive work once Bun stabilizes Worker threads.
 :::
@@ -452,14 +456,14 @@ export default async (job: {
 | **Concurrency, retries, heartbeats** | ✅ | ✅ Same behavior |
 
 :::tip[Production recommendation]
-Most workloads are I/O-bound (API calls, database queries, file operations). For these, **`Worker` is the right choice** — same concurrency, same events, same retries, zero risk from experimental APIs.
+Most workloads are I/O-bound (API calls, database queries, file operations). For these, **`Worker` is the right choice**, same concurrency, same events, same retries, zero risk from experimental APIs.
 
 Only consider `SandboxedWorker` if you need crash isolation for truly CPU-bound or untrusted code, and you accept the experimental status.
 :::
 
 ### SandboxedWorker Events
 
-SandboxedWorker supports 8 events. Note that `stalled`, `drained`, and `cancelled` are **not available** — these are only on the regular Worker.
+SandboxedWorker supports 8 events. Note that `stalled`, `drained`, and `cancelled` are **not available**, these are only on the regular Worker.
 
 ```typescript
 worker.on('ready', () => {

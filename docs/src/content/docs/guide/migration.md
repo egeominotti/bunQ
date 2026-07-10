@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/api-reference.png
 ---
 
-
-This guide helps you migrate from BullMQ to bunqueue with minimal code changes.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · migration</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">BullMQ code, minus <em>Redis.</em></h1>
+  <p class="bq-hero-sub">bunqueue keeps the BullMQ Queue and Worker API, so most migrations are an import change and a deleted Redis config. This guide walks every step and lists the real differences.</p>
+</div>
 
 ## Overview
 
@@ -289,7 +292,7 @@ bunqueue implements the full BullMQ v5 job state machine:
 
 | Feature | BullMQ | bunqueue | Notes |
 |---------|--------|----------|-------|
-| Sandboxed processors | ✅ | ✅ | Use `SandboxedWorker` (experimental — Bun Workers) |
+| Sandboxed processors | ✅ | ✅ | Use `SandboxedWorker` (experimental, Bun Workers) |
 | Redis Cluster | ✅ | ❌ | Single instance |
 | Redis Streams | ✅ | ❌ | SQLite storage |
 | Rate limit per worker | ✅ | ✅ | `WorkerOptions.limiter: { max, duration }` (BullMQ v5 compatible) |

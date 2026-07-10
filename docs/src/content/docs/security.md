@@ -8,9 +8,11 @@ head:
       content: https://bunqueue.dev/og/advanced.png
 ---
 
-This page describes the bunqueue security model, the defaults you get out of
-the box, the controls available to harden a deployment, and how to report
-vulnerabilities. Every statement on this page reflects the current codebase.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">reference · security</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Hardened by <em>default.</em></h1>
+  <p class="bq-hero-sub">The bunqueue security model: the defaults you get out of the box, the controls available to harden a deployment, and how to report vulnerabilities. Every statement on this page reflects the current codebase.</p>
+</div>
 
 ## Reporting vulnerabilities
 

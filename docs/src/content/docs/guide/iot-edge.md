@@ -3,10 +3,18 @@ title: "IoT & Edge: MQTT to Job Queue on a Gateway"
 description: Run bunqueue on edge gateways (Raspberry Pi, ARM64). Bridge MQTT sensors to a persisted job queue with retries, DLQ and offline buffering — no Redis.
 ---
 
-bunqueue fits where a Redis + BullMQ stack does not: a single Bun process with
-one SQLite file, running on an edge gateway next to your sensors. This guide
-covers the recommended IoT architecture, the MQTT bridge pattern, offline
-buffering, and secure forwarding to a central server with native TLS.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · iot &amp; edge</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Queue at the edge, drain to the <em>center.</em></h1>
+  <p class="bq-hero-sub">bunqueue fits where a Redis + BullMQ stack does not: a single Bun process with one SQLite file, running on an edge gateway next to your sensors. This guide covers the recommended IoT architecture, the MQTT bridge pattern, offline buffering, and secure forwarding to a central server with native TLS.</p>
+
+  <div class="bq-proof">
+    <span><b>~30</b> lines for the MQTT bridge</span>
+    <span><b>SQLite WAL</b> offline buffering</span>
+    <span><b>TLS</b> uplink to the central server</span>
+    <span><b>0</b> Redis containers</span>
+  </div>
+</div>
 
 ## Where bunqueue fits (and where it doesn't)
 
@@ -16,7 +24,7 @@ buffering, and secure forwarding to a central server with native TLS.
 | Backend telemetry ingestion (absorb bursts, retry, DLQ) | ✅ |
 | Offline-first buffering (flaky uplink) | ✅ SQLite WAL persistence |
 | Replacement for an MQTT broker | ❌ use Mosquitto/EMQX, bridge into bunqueue |
-| Directly on microcontrollers (ESP32, ARMv7 32-bit) | ❌ Bun requires ARM64/x64 — devices talk to the gateway |
+| Directly on microcontrollers (ESP32, ARMv7 32-bit) | ❌ Bun requires ARM64/x64, devices talk to the gateway |
 
 The pattern that works:
 
@@ -27,8 +35,8 @@ sensors ──MQTT──► broker (Mosquitto/EMQX) ──► bridge ──► b
                                                         backend / TSDB / alerts
 ```
 
-Devices keep speaking MQTT (their native protocol). The bridge — a ~30 line
-Bun script — subscribes to topics and turns each message into a persisted job.
+Devices keep speaking MQTT (their native protocol). The bridge, a ~30 line
+Bun script, subscribes to topics and turns each message into a persisted job.
 From there you get everything a queue gives you that a broker does not:
 retries with backoff, dead letter queue, priorities, delayed jobs, cron
 aggregations, and a durable buffer when the uplink is down.
@@ -95,7 +103,7 @@ write-buffer window, use durable mode per job:
 await queue.add('critical-alarm', data, { durable: true }); // immediate fsync
 ```
 
-Throughput trade-off: buffered ~100k jobs/sec, durable ~10k jobs/sec — both
+Throughput trade-off: buffered ~100k jobs/sec, durable ~10k jobs/sec, both
 far beyond typical sensor rates.
 
 ## Forwarding to a central server (TLS)
@@ -126,8 +134,8 @@ bunqueue start \
 
 ### Built-in store-and-forward: `queue.forward()`
 
-The recommended hybrid — embedded queue on the gateway as the offline buffer,
-drained to the central server when the uplink is healthy — is a one-liner:
+The recommended hybrid, embedded queue on the gateway as the offline buffer,
+drained to the central server when the uplink is healthy, is a one-liner:
 
 ```typescript
 const local = new Queue('telemetry', { embedded: true, dataPath: './edge.db' });
@@ -159,7 +167,7 @@ Semantics:
 
 ## Cron aggregations on the gateway
 
-Downsample locally before forwarding — cheaper uplink, less central load:
+Downsample locally before forwarding, cheaper uplink, less central load:
 
 ```typescript
 await queue.upsertJobScheduler('aggregate-5m', { every: 5 * 60 * 1000 }, {
@@ -172,15 +180,15 @@ await queue.upsertJobScheduler('aggregate-5m', { every: 5 * 60 * 1000 }, {
 
 - **Runtime**: Bun runs on Linux/macOS ARM64 and x64. Raspberry Pi 4/5 with a
   64-bit OS works; 32-bit ARMv7 boards (Pi Zero/2, most ESP-class hardware) do
-  not — those devices publish MQTT to the gateway instead.
+  not, those devices publish MQTT to the gateway instead.
 - **Footprint**: single process, no Redis container. SQLite file size is the
-  main disk consideration — bound it with `removeOnComplete`, DLQ `maxAge`/
+  main disk consideration, bound it with `removeOnComplete`, DLQ `maxAge`/
   `maxEntries`, and periodic `queue.clean(graceMs, limit)`.
 - **Reliability**: enable [S3 backup](/guide/backup/) on gateways with object
   storage access, or ship the SQLite file with your own sync.
 
 ## See also
 
-- [Native TLS](/guide/tls/) — cert setup, client options, self-signed certs
-- [`examples/mqtt-bridge/`](https://github.com/egeominotti/bunqueue/tree/main/examples/mqtt-bridge) — runnable bridge
-- [Stall Detection](/guide/stall-detection/) and [DLQ](/guide/dlq/) — what happens to stuck/poison readings
+- [Native TLS](/guide/tls/), cert setup, client options, self-signed certs
+- [`examples/mqtt-bridge/`](https://github.com/egeominotti/bunqueue/tree/main/examples/mqtt-bridge), runnable bridge
+- [Stall Detection](/guide/stall-detection/) and [DLQ](/guide/dlq/), what happens to stuck/poison readings

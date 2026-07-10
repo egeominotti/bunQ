@@ -8,11 +8,11 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-
-bunqueue includes a powerful CLI for server management and job operations. The CLI works in two modes:
-
-- **Server mode**: Start the bunqueue server
-- **Client mode**: Send commands to a running server
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · cli</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The queue from your <em>terminal.</em></h1>
+  <p class="bq-hero-sub">The bunqueue CLI works in two modes: server mode starts the bunqueue server, client mode sends commands to a running one. Push, pull, ack, DLQ, cron, backups, and monitoring, all scriptable with JSON output.</p>
+</div>
 
 ## Getting Started
 

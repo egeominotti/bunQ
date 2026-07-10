@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/client-sdk.png
 ---
 
-Create job flows with automatic dependency management: sequential chains, parallel execution with merge, and tree structures.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · flow</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Parents, children, <em>fan-in.</em></h1>
+  <p class="bq-hero-sub">FlowProducer creates job flows with automatic dependency management: sequential chains, parallel execution with a merge step, and hierarchical dependency trees.</p>
+</div>
 
 ## Basic Usage
 
@@ -96,7 +100,7 @@ When using FlowProducer, bunqueue automatically injects special properties into 
 - `__parentQueue` - Parent job queue name (BullMQ v5 compatible)
 - `__childrenIds` - Children job IDs (BullMQ v5 compatible)
 
-These allow child jobs to access parent results. All fields are fully typed via the `FlowJobData` interface — IntelliSense works automatically inside Worker processors.
+These allow child jobs to access parent results. All fields are fully typed via the `FlowJobData` interface, IntelliSense works automatically inside Worker processors.
 :::
 
 :::tip[Persistence]
@@ -189,7 +193,7 @@ FlowProducer also supports the BullMQ v5 flow API where children are processed *
 FlowProducer extends Node.js `EventEmitter` (BullMQ v5 compatible). The `close()` method returns `Promise<void>`, and the `closing` property tracks shutdown state.
 :::
 
-### `add(flow, opts?)` — Add a Flow Tree
+### `add(flow, opts?)`, Add a Flow Tree
 
 ```typescript
 const result = await flow.add({
@@ -235,7 +239,7 @@ const result = await flow.add(
 
 Per-job `opts` override `queuesOptions` defaults.
 
-### `addBulk(flows)` — Add Multiple Flows
+### `addBulk(flows)`, Add Multiple Flows
 
 ```typescript
 const results = await flow.addBulk([
@@ -246,7 +250,7 @@ const results = await flow.addBulk([
 
 **Atomicity:** If any flow in the batch fails, all jobs from all flows are rolled back.
 
-### `getFlow(opts)` — Retrieve a Flow Tree
+### `getFlow(opts)`, Retrieve a Flow Tree
 
 ```typescript
 const tree = await flow.getFlow({
@@ -264,7 +268,7 @@ if (tree) {
 
 ## failParentOnFailure
 
-When a child job fails terminally (no more retries) and has `failParentOnFailure: true`, the parent job is automatically moved to `failed` state — even if other children are still running.
+When a child job fails terminally (no more retries) and has `failParentOnFailure: true`, the parent job is automatically moved to `failed` state, even if other children are still running.
 
 ```typescript
 const result = await flow.add({
@@ -367,7 +371,7 @@ const worker = new Worker('reports', async (job) => {
 
 ## continueParentOnFailure
 
-When a child fails with `continueParentOnFailure: true`, the parent is **immediately** promoted to the waiting queue — even if other children are still pending. The parent worker can inspect failures and optionally cancel remaining unstarted children.
+When a child fails with `continueParentOnFailure: true`, the parent is **immediately** promoted to the waiting queue, even if other children are still pending. The parent worker can inspect failures and optionally cancel remaining unstarted children.
 
 ```typescript
 const result = await flow.add({

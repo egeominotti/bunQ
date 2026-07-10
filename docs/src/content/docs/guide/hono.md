@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og/hono.png
 ---
 
-[Hono](https://hono.dev) is an ultrafast web framework for the Edge. Here's how to integrate bunqueue.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · hono</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Background jobs for <em>Hono.</em></h1>
+  <p class="bq-hero-sub"><a href="https://hono.dev">Hono</a> is an ultrafast web framework for the Edge. This guide shows how to integrate bunqueue: API routes, background workers, a queue middleware pattern, and graceful shutdown.</p>
+</div>
 
 :::caution[Embedded Mode Required]
 All examples use `embedded: true` for in-process queues. Without it, bunqueue tries to connect to a TCP server.

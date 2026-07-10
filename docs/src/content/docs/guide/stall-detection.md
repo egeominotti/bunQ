@@ -8,8 +8,17 @@ head:
       content: https://bunqueue.dev/og/client-sdk.png
 ---
 
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · stall-detection</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Stuck jobs <em>come back.</em></h1>
+  <p class="bq-hero-sub">Stall detection automatically identifies jobs that stop sending heartbeats during processing and recovers them, retrying first and moving repeat offenders to the DLQ.</p>
 
-Stall detection automatically identifies and recovers jobs that become unresponsive during processing.
+  <div class="bq-proof">
+    <span><b>30s</b> without a heartbeat marks a job stalled</span>
+    <span><b>3</b> stalls before a job moves to the DLQ</span>
+    <span><b>5s</b> grace period after a job starts</span>
+  </div>
+</div>
 
 ## How It Works
 
@@ -143,9 +152,9 @@ const worker = new SandboxedWorker('heavy-jobs', {
 
 :::tip[Long-running SandboxedWorker jobs]
 If your jobs run longer than the default `stallInterval` (30s), you have three options:
-1. **Increase `stallInterval`** — `queue.setStallConfig({ stallInterval: 300000 })` (5 minutes)
-2. **Call `progress()` periodically** — Each call refreshes `lastHeartbeat`
-3. **Disable stall detection** — `queue.setStallConfig({ enabled: false })`
+1. **Increase `stallInterval`**, `queue.setStallConfig({ stallInterval: 300000 })` (5 minutes)
+2. **Call `progress()` periodically**, Each call refreshes `lastHeartbeat`
+3. **Disable stall detection**, `queue.setStallConfig({ enabled: false })`
 :::
 
 :::tip[Related Guides]

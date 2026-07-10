@@ -5,12 +5,20 @@ description: "Official bunqueue client SDKs: one queue, any language. Complete r
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-**One queue, any language.** bunqueue ships official client SDKs for
-Node.js, Deno, Bun, Python and Cloudflare Workers. Each one speaks the
-native TCP protocol (msgpack, pipelined) and has full feature parity with
-the built-in Bun client.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · sdks</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One protocol, every <em>runtime.</em></h1>
+  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, with full feature parity with the built-in Bun client.</p>
 
-The design is simple: the **server** owns every queue semantic — retries
+  <div class="bq-proof">
+    <span><b>100</b> e2e scenarios each on Node, Deno, Bun</span>
+    <span><b>66</b> e2e scenarios in Python</span>
+    <span><b>16</b> scenarios inside workerd</span>
+    <span><b>1</b> versioned wire protocol</span>
+  </div>
+</div>
+
+The design is simple: the **server** owns every queue semantic, retries
 with backoff, priorities, scheduling, stall detection, the dead letter
 queue. Your **applications** only add jobs and process them. A Next.js API
 written in TypeScript can enqueue work that a Python service consumes, both
@@ -31,7 +39,7 @@ negotiated via `Hello`), so a client keeps working across server upgrades.
 Every claim on this page is verified against a real bunqueue server, on
 every supported platform: **100 end-to-end scenarios each on Node.js, Deno
 and Bun**, 16 inside workerd (the actual Cloudflare Workers runtime), and
-**66 in Python** — enforced in CI on every change (runtime matrix: Bun,
+**66 in Python**, enforced in CI on every change (runtime matrix: Bun,
 Node and Deno for TypeScript; Python 3.10 and 3.12), with npm releases
 published with build provenance and gated on the full e2e suite.
 
@@ -155,7 +163,7 @@ python app.py                             # Python
 ```
 
 Producer and worker are usually separate services, often in different
-languages — a Next.js API adds jobs, a Python service processes them,
+languages, a Next.js API adds jobs, a Python service processes them,
 against the same queue and the same protocol. Constructors default to
 `host: 'localhost'` and `port: 6789`, so no options are needed for a local
 setup.
@@ -164,17 +172,17 @@ setup.
 
 Understanding four facts about the transport explains most SDK behavior:
 
-1. **Framing** — every message is a 4-byte big-endian length prefix
+1. **Framing**, every message is a 4-byte big-endian length prefix
    followed by a standard msgpack map. Maximum frame size is 64 MB;
    maximum job payload is 10 MB.
-2. **Pipelining** — every request carries a `reqId` the server echoes
+2. **Pipelining**, every request carries a `reqId` the server echoes
    back, so many commands are in flight on one socket concurrently. A
    single connection is usually all a service needs.
-3. **Authentication-first** — when a token is configured, `Auth` is
+3. **Authentication-first**, when a token is configured, `Auth` is
    guaranteed to be the first frame on every (re)connection. The TypeScript
    client enforces this through synchronous write ordering; the Python
    client through a connection lock (safe under free-threaded concurrency).
-4. **The job name travels inside `data`** — `add('welcome', {to})` is
+4. **The job name travels inside `data`**, `add('welcome', {to})` is
    encoded as `data: { name: 'welcome', to }`. Non-object payloads are
    wrapped as `{ name, payload }`.
 
@@ -224,9 +232,9 @@ dedicated failure-injection tests:
 | Lazy reconnect | A lost connection reconnects transparently on the next call; workers re-register automatically after every reconnect (generation counter) |
 | Reconnect backoff | Exponential 500 ms → 5 s with a fast-fail window, so a producer calling `add()` against a downed server does not pay the full connect timeout on every call |
 | TCP keepalive | Enabled at ~15 s idle: a half-open link (cloud NAT / load-balancer idle drop with no FIN/RST) is detected in seconds instead of the OS-level ~15 minutes |
-| Timeout-driven teardown | Three consecutive command timeouts tear the socket down so the next call reconnects — generation-guarded, so a stale timeout can never abort a freshly reconnected socket |
+| Timeout-driven teardown | Three consecutive command timeouts tear the socket down so the next call reconnects, generation-guarded, so a stale timeout can never abort a freshly reconnected socket |
 | Backpressure (TypeScript) | With `maxInFlight` set, callers park until an in-flight slot frees instead of growing memory without bound under a fast producer / slow server |
-| Auth ordering | No command can race ahead of the `Auth` frame on a reconnect — a dropped ACK caused by that race would otherwise resurface as a silent duplicate execution |
+| Auth ordering | No command can race ahead of the `Auth` frame on a reconnect, a dropped ACK caused by that race would otherwise resurface as a silent duplicate execution |
 
 ## Producing jobs
 
@@ -243,7 +251,7 @@ Every option is validated server-side; identical semantics in both SDKs
 | `backoff` | number \| `{ type, delay }` | 1000 | `type`: `'fixed'` or `'exponential'`; delay up to 1 day |
 | `ttl` | ms | — | Expires the job if not processed in time |
 | `timeout` | ms | — | Per-job processing timeout, up to 1 day |
-| `jobId` | string | — | Custom id; **idempotent** — re-adding an unfinished id is a no-op |
+| `jobId` | string | — | Custom id; **idempotent**, re-adding an unfinished id is a no-op |
 | `deduplication` | `{ id, ttl?, extend?, replace? }` | — | Dedup window keyed on `id` |
 | `debounce` | `{ id, ttl? }` | — | Collapses bursts to the last job |
 | `dependsOn` | string[] | — | Job ids that must complete first |
@@ -251,7 +259,7 @@ Every option is validated server-side; identical semantics in both SDKs
 | `tags` / `groupId` | string[] / string | — | Metadata; `groupId` also scopes group rate limits |
 | `lifo` | boolean | false | Orders only among LIFO jobs; mixed queues stay FIFO |
 | `removeOnComplete` / `removeOnFail` | boolean | false | Drop the job record at the terminal state |
-| `durable` | boolean | false | Bypass the server write buffer — fsync before the ACK returns |
+| `durable` | boolean | false | Bypass the server write buffer, fsync before the ACK returns |
 | `repeat` | `{ every }` or `{ pattern, tz? }` + `limit?` | — | Repeatable jobs (see [Cron](/guide/cron/)) |
 | `stallTimeout` | ms | — | Per-job stall detection override |
 | `stackTraceLimit` / `keepLogs` / `sizeLimit` | number | — | Failure stack cap, retained log lines, payload cap |
@@ -265,7 +273,7 @@ await queue.add('charge', payment, { jobId: `order-${orderId}`, durable: true })
 
 `jobId` makes `add` idempotent: re-adding an id whose job is still
 unfinished (waiting, active, waiting-children) returns the existing job
-instead of creating a duplicate. This holds for `addBulk` too — each bulk
+instead of creating a duplicate. This holds for `addBulk` too, each bulk
 entry's `jobId` is preserved on the wire, so an idempotent batch ingest can
 be re-run safely after a crash:
 
@@ -294,7 +302,7 @@ queue.add_bulk([
 ### Producer throughput
 
 For high-volume producers the TypeScript SDK can fan commands across a
-round-robin connection pool — one line, no API change:
+round-robin connection pool, one line, no API change:
 
 ```typescript
 const queue = new Queue('ingest', { poolSize: 4 });
@@ -324,7 +332,7 @@ A pulled job carries a **lock token**. The worker heartbeats every active
 job's lock on the heartbeat interval, so a job that legitimately runs
 longer than the lock TTL survives. If the worker dies, the lease expires
 and the server requeues the job (or moves it to the DLQ once `maxStalls`
-is exceeded) — at-least-once delivery, so make handlers idempotent.
+is exceeded), at-least-once delivery, so make handlers idempotent.
 
 ### Failures
 
@@ -352,7 +360,7 @@ the retry/backoff policy and eventually the [dead letter queue](/guide/dlq/).
 **Always attach an `error` listener.** Per Node `EventEmitter` semantics an
 unhandled `error` event throws. The worker frees each job's concurrency
 slot *before* emitting, so even a throwing listener cannot degrade
-throughput — but the error itself is yours to observe.
+throughput, but the error itself is yours to observe.
 
 ### ACK batching (high volume)
 
@@ -365,7 +373,7 @@ const worker = new Worker('ingest', process, {
 });
 ```
 
-Semantics are strict: a job stays *active* — its lock still heartbeated —
+Semantics are strict: a job stays *active*, its lock still heartbeated,
 until the server confirms the batch; the batch is flushed on `close()`;
 every job settles exactly once even if an event listener throws. Defaults
 are off, so nothing changes unless you enable it.
@@ -385,15 +393,15 @@ semantics (Python: same methods in snake_case).
 | Area | Methods |
 |---|---|
 | Query | `getJob`, `getJobByCustomId`, `getJobs` + per-state helpers (`getWaiting`, `getActive`, `getCompleted`, `getFailed`, `getDelayed`, `getPrioritized`, `getWaitingChildren`), `getJobState`, `getResult`, `getProgress`, counts + counts-per-priority, `getChildrenValues`, job logs |
-| Waiting | `waitForJob(id, ttlMs)` — resolves with the result; **throws** on timeout (`CommandTimeoutError`) and on a failed job (`CommandError`), never silently returns `undefined` |
+| Waiting | `waitForJob(id, ttlMs)`, resolves with the result; **throws** on timeout (`CommandTimeoutError`) and on a failed job (`CommandError`), never silently returns `undefined` |
 | Control | `pause` / `resume` / `isPaused`, `drain`, `obliterate`, `clean`, `remove`, `discard`, `promoteJob(s)`, `retryJob` (failed → waiting), `updateJobData`, `updateJobProgress`, `changeJobPriority`, `changeJobDelay`, `moveJobToWait/Delayed/Completed/Failed`, `extendJobLock` |
-| DLQ | `getDlq`, `retryDlq(id?)`, `retryDlqByFilter` (embedded), `purgeDlq`, `retryJobs` (**retries the whole DLQ** — BullMQ semantics; the server has no partial retry), DLQ configuration |
+| DLQ | `getDlq`, `retryDlq(id?)`, `retryDlqByFilter` (embedded), `purgeDlq`, `retryJobs` (**retries the whole DLQ**, BullMQ semantics; the server has no partial retry), DLQ configuration |
 | Schedulers | `upsertJobScheduler` (cron pattern or fixed interval, timezone, `skipIfNoWorker`, `preventOverlap`, per-scheduler job options), `removeJobScheduler`, `getJobScheduler(s)`, `addCron`, `every` |
 | Admin | rate limiting, global concurrency, stall configuration, webhooks, `getStats`, `getMetrics`, `listQueues`, `getWorkers` |
 
 Two behaviors worth knowing:
 
-- **Not-found is `null`/`None`**, never an exception — `getJob`,
+- **Not-found is `null`/`None`**, never an exception, `getJob`,
   `getJobByCustomId` and `getJobScheduler` map the server's not-found
   response for you.
 - **`updateJobProgress` requires an active job**; the server rejects
@@ -401,7 +409,7 @@ Two behaviors worth knowing:
 
 ## Flows
 
-Pipelines and parent/child trees with automatic ordering — children
+Pipelines and parent/child trees with automatic ordering, children
 complete before their parent, results are readable from the parent:
 
 ```typescript
@@ -431,14 +439,14 @@ await flow.addBulkThen(parts, { name: 'merge', queueName: 'orders' });
 
 Creation is transactional per call: if any push fails, every job already
 created by that call is cancelled (rollback). `getFlow(id)` reconstructs a
-tree from a root id — it returns `null` for a missing root, skips children
+tree from a root id, it returns `null` for a missing root, skips children
 that were since removed (`removeOnComplete`), and is cycle-safe, so it
 always returns the surviving partial tree instead of throwing.
 
 ## Observability
 
 The TypeScript SDK exposes a zero-dependency observability layer: you
-bring OpenTelemetry, Prometheus or your own logger — the SDK stays silent
+bring OpenTelemetry, Prometheus or your own logger, the SDK stays silent
 by default and consumer errors are isolated so a throwing sink can never
 break the transport.
 
@@ -466,7 +474,7 @@ scrape the HTTP `/metrics` endpoint (Prometheus format).
 
 ## Simple Mode
 
-`Bunqueue` bundles a Queue and a Worker into a single object — a 1:1 port
+`Bunqueue` bundles a Queue and a Worker into a single object, a 1:1 port
 of the official client's [Simple Mode](/guide/simple-mode/). It brings
 routes, onion middleware, in-process retry strategies, a circuit breaker,
 batch accumulation, event triggers, job TTL, priority aging, cooperative
@@ -534,7 +542,7 @@ Scheduler job options are honored end-to-end: `attempts`, `timeout`,
 `remove_on_complete` and the rest of the template are applied to every
 cron-spawned job, in both SDKs.
 
-One difference from the Bun original: `embedded: true` is not available —
+One difference from the Bun original: `embedded: true` is not available,
 it requires the in-process Bun runtime. Connect to a server instead; the
 option raises a clear error if you try.
 
@@ -564,8 +572,8 @@ export default {
 
 Workers are request-scoped, so there is no long-lived worker loop. Instead:
 produce from fetch handlers, and consume in batches from a
-[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
-— pull, process, acknowledge, return. Both patterns (Simple Mode included)
+[Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/),
+pull, process, acknowledge, return. Both patterns (Simple Mode included)
 are covered by the SDK's 16-scenario suite that runs inside workerd. Two
 requirements apply: the server must be reachable from the internet, and TLS
 needs a publicly trusted certificate.
@@ -602,7 +610,7 @@ queue = Queue(
 </TabItem>
 </Tabs>
 
-Certificate verification is **on by default** for every TLS connection —
+Certificate verification is **on by default** for every TLS connection,
 a wrong or missing CA rejects the connection instead of silently
 connecting; only an explicit `rejectUnauthorized: false` (TypeScript) or
 `{"verify": False}` (Python) opts into encryption-only mode for
@@ -619,26 +627,26 @@ precisely:
 | Error | Meaning |
 |---|---|
 | `ConnectionClosedError` | Link lost or server unreachable (in-flight commands reject; the next call reconnects) |
-| `CommandTimeoutError` | No response within the command timeout — also thrown by `waitForJob` on timeout |
+| `CommandTimeoutError` | No response within the command timeout, also thrown by `waitForJob` on timeout |
 | `CommandError` | The server answered `ok: false` (validation error, not-found on write ops, failed job in `waitForJob`) |
 | `AuthError` | Token rejected during the connection handshake |
 | `UnrecoverableError` | Thrown *by your processor* to skip retries and fail terminally |
 
 Delivery is **at-least-once**: a worker crash after processing but before
-the ACK means the job runs again — design handlers to be idempotent (the
+the ACK means the job runs again, design handlers to be idempotent (the
 `jobId` option helps on the producing side). Two numeric-precision rules:
 
 - **JavaScript** numbers are IEEE 754 doubles, exact up to 2⁵³. Pass larger
   64-bit identifiers (snowflake ids) as strings; never put `BigInt` in job
   data.
 - **Python** integers outside the int32 range are automatically encoded as
-  float64 on the wire (exact up to 2⁵³ — safe for millisecond timestamps);
+  float64 on the wire (exact up to 2⁵³, safe for millisecond timestamps);
   the same string rule applies to larger identifiers.
 
 ## Quality assurance
 
 Every SDK release is validated against a real bunqueue server, spawned
-fresh for each run, on every supported runtime — locally and in CI on every
+fresh for each run, on every supported runtime, locally and in CI on every
 change:
 
 | Runtime | Verification |
@@ -657,7 +665,7 @@ concurrency slot), lock survival for jobs that outlast the lock TTL, and a
 realistic multi-queue production scenario with zero-loss accounting. npm
 releases are published with build provenance and gated on the e2e suite.
 
-Browsers are not supported — raw TCP sockets are unavailable there, so
+Browsers are not supported, raw TCP sockets are unavailable there, so
 route through your own API instead.
 
 ## Resources

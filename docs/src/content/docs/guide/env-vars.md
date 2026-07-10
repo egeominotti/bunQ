@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-
-bunqueue can be configured through environment variables.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · environment</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every variable, <em>one page.</em></h1>
+  <p class="bq-hero-sub">The complete environment variable reference for bunqueue: server ports, SQLite path, auth tokens, TLS, S3 backup, timeouts, rate limiting, and logging, each with type, default, and a runnable example.</p>
+</div>
 
 :::tip[Prefer a config file?]
 You can use a typed `bunqueue.config.ts` file instead of environment variables. Full IntelliSense, all options in one place. See [Configuration File](/guide/configuration/). Environment variables still work as fallback.
@@ -89,7 +92,7 @@ HTTP_SOCKET_PATH=/var/run/bunqueue-http.sock bunqueue start
 
 Path to a PEM certificate file. Together with `TLS_KEY_FILE`, enables native
 TLS on both the TCP and HTTP servers. Setting only one of the two is a
-startup error (fail fast — never silent plaintext).
+startup error (fail fast, never silent plaintext).
 
 | Type | Default | Example |
 |------|---------|---------|

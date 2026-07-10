@@ -22,13 +22,17 @@ head:
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-Job queues handle individual tasks well, but real-world processes span multiple steps: charge payment, reserve inventory, send confirmation, notify shipping. When step three fails, you need to undo steps one and two. That is orchestration — and until now, it required a dedicated service like Temporal, Inngest, or Trigger.dev.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · workflows</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Orchestration without the <em>orchestra.</em></h1>
+  <p class="bq-hero-sub">Real processes span multiple steps, and when step three fails you must undo one and two. That is orchestration, and until now it meant Temporal, Inngest, or Trigger.dev. bunqueue 2.7 builds it into the queue you already run.</p>
+</div>
 
-**bunqueue 2.7 changes that.** The new Workflow Engine lets you define multi-step processes with a fluent TypeScript DSL, run saga compensation on failure, branch conditionally, and pause for human approval — all inside the same queue infrastructure you already use. Zero new services. Zero cloud dependencies.
+**The new Workflow Engine in bunqueue 2.7** lets you define multi-step processes (charge payment, reserve inventory, send confirmation, notify shipping) with a fluent TypeScript DSL, run saga compensation on failure, branch conditionally, and pause for human approval, all inside the same queue infrastructure you already use. Zero new services. Zero cloud dependencies.
 
 ## Why Build It In?
 
-Most teams reach a point where individual jobs are not enough. An order pipeline, a CI/CD deployment, an onboarding flow — these are sequences of jobs with dependencies, rollback logic, and sometimes human decisions in the middle.
+Most teams reach a point where individual jobs are not enough. An order pipeline, a CI/CD deployment, an onboarding flow, these are sequences of jobs with dependencies, rollback logic, and sometimes human decisions in the middle.
 
 The existing options all introduce significant complexity:
 
@@ -80,7 +84,7 @@ That is the entire setup. No YAML, no JSON state machines, no separate orchestra
 
 ## Saga Compensation
 
-The saga pattern is first-class. Each step can declare a `compensate` handler. When any step fails, bunqueue runs compensation handlers in reverse order — exactly like a distributed transaction rollback:
+The saga pattern is first-class. Each step can declare a `compensate` handler. When any step fails, bunqueue runs compensation handlers in reverse order, exactly like a distributed transaction rollback:
 
 ```
 step1 ✅ → step2 ✅ → step3 ❌
@@ -225,7 +229,7 @@ const unsub = engine.subscribe(run.id, (e) => console.log(e.type));
 ```
 
 <Aside type="note">
-  bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you bring your own — `bun add zod` (used above), ArkType, Valibot, or anything with a compatible `.parse()` method. As of 2.8.0, bunqueue's only runtime dependencies are `croner` and `msgpackr`.
+  bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you bring your own, `bun add zod` (used above), ArkType, Valibot, or anything with a compatible `.parse()` method. As of 2.8.0, bunqueue's only runtime dependencies are `croner` and `msgpackr`.
 </Aside>
 
 ## Cleanup & Archival
@@ -241,7 +245,7 @@ engine.cleanup(7 * 24 * 60 * 60 * 1000);  // Delete 7-day-old executions
 
 The workflow engine is built on top of bunqueue's existing Queue and Worker:
 
-1. **Workflow** is a pure data structure — a DAG of step definitions, branch conditions, and wait points
+1. **Workflow** is a pure data structure, a DAG of step definitions, branch conditions, and wait points
 2. **Engine** wraps a Queue and Worker pair, using them to schedule and process step jobs
 3. **Execution state** is stored in SQLite via `WorkflowStore`, tracking which steps completed, their results, and received signals
 4. Each step runs as a regular bunqueue job with retry, timeout, and stall detection
@@ -252,11 +256,11 @@ This means workflows get all of bunqueue's existing reliability features for fre
 
 The workflow engine is ideal for:
 
-- **E-commerce pipelines** — validate, charge, fulfill, notify with rollback on failure
-- **CI/CD deployments** — build, test, await approval, deploy
-- **Onboarding flows** — verify identity, score risk, branch by result
-- **Data pipelines** — extract, transform, load with per-step error handling
-- **Approval workflows** — any process that needs human sign-off mid-execution
+- **E-commerce pipelines**, validate, charge, fulfill, notify with rollback on failure
+- **CI/CD deployments**, build, test, await approval, deploy
+- **Onboarding flows**, verify identity, score risk, branch by result
+- **Data pipelines**, extract, transform, load with per-step error handling
+- **Approval workflows**, any process that needs human sign-off mid-execution
 
 For simple fire-and-forget jobs, retries, or cron schedules, the standard Queue + Worker API is still the right choice. The workflow engine adds value when you need **step dependencies, rollback, or human decisions**.
 
@@ -273,5 +277,5 @@ import { Workflow, Engine } from 'bunqueue/workflow';
 Read the full guide: [Workflow Engine Documentation](/guide/workflow/)
 
 <Aside type="tip" title="80+ workflow tests">
-The workflow engine ships with 80+ tests covering linear flows, branching, compensation, signals, timeouts, retry, parallel steps, nested workflows, loops, forEach, map, schema validation, subscribe, observability, and archival — in both embedded and TCP modes.
+The workflow engine ships with 80+ tests covering linear flows, branching, compensation, signals, timeouts, retry, parallel steps, nested workflows, loops, forEach, map, schema validation, subscribe, observability, and archival, in both embedded and TCP modes.
 </Aside>

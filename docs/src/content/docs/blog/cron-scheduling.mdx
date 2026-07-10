@@ -22,7 +22,11 @@ head:
 
 import { Aside } from '@astrojs/starlight/components';
 
-Background jobs aren't always triggered by user actions. Many tasks need to run on a schedule: daily reports, hourly cleanups, periodic syncs. bunqueue has a **built-in cron scheduler** that runs alongside your job queue with zero additional infrastructure.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · scheduling</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Cron, without the <em>crontab.</em></h1>
+  <p class="bq-hero-sub">Daily reports, hourly cleanups, periodic syncs. bunqueue ships a built-in cron scheduler with expressions, repeat intervals, timezones, and execution limits, running alongside your queue with zero extra infrastructure.</p>
+</div>
 
 ## Two Types of Scheduled Jobs
 

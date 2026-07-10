@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { readFileSync } from 'fs';
+import { execSync } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +19,36 @@ try {
   try {
     pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
   } catch {}
+}
+
+// Real per-page lastmod for the sitemap, from git history. A fake
+// `lastmod = new Date()` on every build teaches Google the field is
+// unreliable and hurts crawl prioritization; pages with no known date
+// simply omit lastmod. Keys are repo-relative paths.
+const gitLastmod = {};
+try {
+  const out = execSync('git log --format=%x00%cI --name-only -- src/content/docs', {
+    cwd: __dirname,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  let current = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('\x00')) current = line.slice(1).trim();
+    else if (line.trim() && !(line.trim() in gitLastmod)) gitLastmod[line.trim()] = current;
+  }
+} catch {
+  // shallow clone or no git: sitemap entries just omit lastmod
+}
+
+function lastmodForUrl(url) {
+  const rel = url.replace('https://bunqueue.dev', '').replace(/^\//, '').replace(/\/$/, '');
+  const base = rel === '' ? 'index' : rel;
+  for (const candidate of [`${base}.mdx`, `${base}.md`, `${rel}/index.mdx`, `${rel}/index.md`]) {
+    const date = gitLastmod[`docs/src/content/docs/${candidate}`];
+    if (date) return date;
+  }
+  return undefined;
 }
 
 export default defineConfig({
@@ -65,15 +96,25 @@ export default defineConfig({
       ],
       components: {
         Header: './src/components/Header.astro',
+        Head: './src/components/Head.astro',
       },
       editLink: {
         baseUrl: 'https://github.com/egeominotti/bunqueue/edit/main/docs/',
       },
       expressiveCode: {
-        themes: ['github-light', 'github-dark'],
+        themes: ['catppuccin-latte', 'catppuccin-mocha'],
         styleOverrides: {
-          borderRadius: '8px',
-          borderColor: '#e4e4e7',
+          borderRadius: '12px',
+          borderColor: 'var(--bq-line, #e4e4e7)',
+          codeFontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', monospace",
+          codeFontSize: '0.95rem',
+          codeLineHeight: '1.8',
+          codePaddingInline: '1.3rem',
+          codePaddingBlock: '1rem',
+          uiFontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          frames: {
+            frameBoxShadowCssValue: '0 6px 24px rgba(0, 0, 0, 0.08)',
+          },
         },
       },
       customCss: [
@@ -84,6 +125,7 @@ export default defineConfig({
         '@fontsource/inter/500.css',
         '@fontsource/inter/600.css',
         '@fontsource/inter/700.css',
+        '@fontsource/inter/800.css',
         './src/styles/custom.css',
       ],
       defaultLocale: 'root',
@@ -383,6 +425,16 @@ export default defineConfig({
             codeRepository: 'https://github.com/egeominotti/bunqueue',
             downloadUrl: 'https://www.npmjs.com/package/bunqueue',
             installUrl: 'https://www.npmjs.com/package/bunqueue',
+            url: 'https://bunqueue.dev',
+            softwareHelp: {
+              '@type': 'CreativeWork',
+              url: 'https://bunqueue.dev/guide/quickstart/',
+            },
+            sameAs: [
+              'https://github.com/egeominotti/bunqueue',
+              'https://www.npmjs.com/package/bunqueue',
+              'https://www.npmjs.com/package/bunqueue-client',
+            ],
             programmingLanguage: ['TypeScript', 'JavaScript'],
             runtimePlatform: 'Bun',
             keywords: ['job queue', 'message queue', 'bun', 'sqlite', 'typescript', 'bullmq alternative', 'ai agents', 'mcp server', 'agentic workflows', 'workflow engine', 'saga pattern', 'orchestration', 'temporal alternative', 'step functions alternative'],
@@ -452,8 +504,8 @@ export default defineConfig({
     }),
     sitemap({
       serialize(item) {
-        // Set lastmod for all pages
-        item.lastmod = new Date();
+        const lastmod = lastmodForUrl(item.url);
+        if (lastmod) item.lastmod = lastmod;
 
         const url = item.url.replace('https://bunqueue.dev', '');
 

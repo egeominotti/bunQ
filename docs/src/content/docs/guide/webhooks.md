@@ -9,7 +9,18 @@ head:
 ---
 
 
-Receive HTTP callbacks when job events occur. Webhooks enable real-time notifications to external systems without polling.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · webhooks</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The queue <em>calls you back.</em></h1>
+  <p class="bq-hero-sub">Receive HTTP callbacks when job events occur, real-time notifications to external systems without polling. HMAC-SHA256 signed payloads with automatic retry.</p>
+
+  <div class="bq-proof">
+    <span><b>5</b> event types</span>
+    <span><b>HMAC-SHA256</b> signatures</span>
+    <span><b>3</b> retries with backoff</span>
+    <span><b>10 s</b> delivery timeout</span>
+  </div>
+</div>
 
 ## Overview
 
@@ -72,7 +83,7 @@ bunqueue webhook remove wh_abc123
 
 ## Event Types
 
-These are the only valid webhook events — the canonical set
+These are the only valid webhook events, the canonical set
 (`job.pushed`, `job.started`, `job.completed`, `job.failed`, `job.progress`)
 shared by the CLI, TCP, HTTP, and MCP. Subscribing to any other event (e.g.
 `job.active`, `job.waiting`, `job.delayed`, `job.stalled`) is **rejected** at

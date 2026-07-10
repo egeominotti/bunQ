@@ -8,7 +8,11 @@ head:
       content: https://bunqueue.dev/og-image.png
 ---
 
-bunqueue uses a high-performance binary protocol over TCP with MessagePack serialization and optional pipelining.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">architecture · tcp protocol</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Frames on the <em>wire.</em></h1>
+  <p class="bq-hero-sub">bunqueue uses a high-performance binary protocol over TCP with MessagePack serialization and optional pipelining. This page covers the wire format, connection lifecycle, and command set.</p>
+</div>
 
 ## Wire Format
 
@@ -130,13 +134,13 @@ Protocol v2 supports pipelining. Older clients without `Hello` default to v1 (se
 
 **Dead-link detection (half-open sockets):**
 
-A socket can go **half-open** — the peer vanishes with no FIN/RST (suspended host,
+A socket can go **half-open**, the peer vanishes with no FIN/RST (suspended host,
 NAT/load-balancer silently dropping an idle connection). Writes still succeed and no
 `close`/`error` event fires, so the client must detect it actively. Two independent
 signals conclude the link is dead and trigger `forceReconnect()`:
 
-1. **Health-check ping** — after `maxPingFailures` (3) consecutive failed pings.
-2. **Command timeouts** — after `maxCommandTimeouts` (3) consecutive command timeouts
+1. **Health-check ping**, after `maxPingFailures` (3) consecutive failed pings.
+2. **Command timeouts**, after `maxCommandTimeouts` (3) consecutive command timeouts
    with no intervening success. This is the path that recovers a worker whose `PULL`s
    keep timing out, without waiting for the slower ping cycle (and it works even when the
    ping is disabled). The counter resets on any successful response.
@@ -146,7 +150,7 @@ On detection the socket is torn down, all in-flight commands are rejected immedi
 re-establishes a fresh connection. `SO_KEEPALIVE` is also enabled so the OS can surface a
 dead peer on its own rather than lingering until `tcp_retries2` (~15 min).
 
-For *fast* recovery, lower `pingInterval` / `commandTimeout` — e.g.
+For *fast* recovery, lower `pingInterval` / `commandTimeout`, e.g.
 `{ pingInterval: 10000, commandTimeout: 5000 }` recovers in ~tens of seconds vs ~120s on
 defaults (each default timeout is 30s, so timeout-based detection is inherently coarse).
 

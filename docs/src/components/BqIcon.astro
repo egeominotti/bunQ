@@ -1,0 +1,107 @@
+---
+/**
+ * bunqueue's own icon set. Every glyph is built from the same visual
+ * language as the queue simulator: chips (rounded rects), lanes (lines)
+ * and one brand-pink accent node per icon. Stroke inherits currentColor
+ * so icons follow text color in both themes.
+ */
+interface Props {
+  name: string;
+  size?: number;
+}
+const { name, size = 26 } = Astro.props;
+
+const ACCENT = 'var(--bq-brand)';
+
+const glyphs: Record<string, string> = {
+  // a chip racing down its lane, motion ticks behind
+  speed: `
+    <path d="M2.5 8.5h4M2.5 15.5h2.5" />
+    <path d="M4.5 12h5" />
+    <rect x="11" y="9" width="8.5" height="6" rx="2" fill="${ACCENT}" stroke="none" />
+    <path d="M21.5 12h.01" />`,
+  // four chips fanning out of one lane: bulk / burst
+  spark: `
+    <path d="M12 4.5v3.2M12 16.3v3.2M4.5 12h3.2M16.3 12h3.2" />
+    <rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1.6" fill="${ACCENT}" stroke="none" />`,
+  // one server chip, three clients on the wire
+  network: `
+    <rect x="9" y="3.5" width="6" height="5" rx="1.6" fill="${ACCENT}" stroke="none" />
+    <path d="M12 8.5v3M12 11.5l-6.5 3M12 11.5l6.5 3M12 11.5v4.5" />
+    <circle cx="4.5" cy="17" r="2" /><circle cx="12" cy="19" r="2" /><circle cx="19.5" cy="17" r="2" />`,
+  // two rails, two knobs: configuration
+  dials: `
+    <path d="M3.5 8h17M3.5 16h17" />
+    <circle cx="9" cy="8" r="2.4" fill="${ACCENT}" stroke="none" />
+    <circle cx="15.5" cy="16" r="2.4" />`,
+  // throughput bars growing: scale
+  stack: `
+    <path d="M4 18.5h6M4 13h10M4 7.5h13" />
+    <rect x="17.5" y="5.6" width="3.8" height="3.8" rx="1.2" fill="${ACCENT}" stroke="none" />`,
+  // a column of queued chips, head of the line accented
+  rows: `
+    <rect x="4" y="4" width="10" height="4.4" rx="1.5" fill="${ACCENT}" stroke="none" />
+    <rect x="4" y="10.5" width="13" height="4.4" rx="1.5" />
+    <rect x="4" y="17" width="16" height="4.4" rx="1.5" />`,
+  // one file that is the whole queue
+  file: `
+    <path d="M6 3.5h8l4 4v13h-12z" />
+    <path d="M14 3.5v4h4" />
+    <rect x="9" y="12" width="6" height="2.6" rx="1" fill="${ACCENT}" stroke="none" />
+    <path d="M9 17.5h6" />`,
+  // shard grid, one hot shard
+  shards: `
+    <rect x="4" y="4" width="7" height="7" rx="1.8" />
+    <rect x="13" y="4" width="7" height="7" rx="1.8" />
+    <rect x="4" y="13" width="7" height="7" rx="1.8" />
+    <rect x="13" y="13" width="7" height="7" rx="1.8" fill="${ACCENT}" stroke="none" />`,
+  // a chip caught by the dead-letter tray
+  dlq: `
+    <rect x="8.5" y="4" width="7" height="4.6" rx="1.5" fill="${ACCENT}" stroke="none" />
+    <path d="M12 9v4.5M12 13.5l-2.2-2.2M12 13.5l2.2-2.2" />
+    <path d="M4.5 15v3.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V15" />`,
+  // processed chip, check carved in
+  check: `
+    <rect x="3.5" y="6" width="17" height="12" rx="2.4" />
+    <path d="M8.5 12l2.6 2.6 4.6-5" />
+    <circle cx="17.5" cy="9.2" r="1.6" fill="${ACCENT}" stroke="none" />`,
+  // new chip entering the lane
+  push: `
+    <path d="M3.5 12h6M9.5 12l-2.3-2.3M9.5 12l-2.3 2.3" />
+    <rect x="13" y="8.8" width="7.5" height="6.4" rx="1.8" />
+    <circle cx="6.5" cy="5.5" r="1.6" fill="${ACCENT}" stroke="none" />`,
+  // live heartbeat over a lane
+  pulse: `
+    <path d="M3 13h4l2.2-5 3.6 8 2.2-4.5H21" />
+    <circle cx="15" cy="11.5" r="1.7" fill="${ACCENT}" stroke="none" />`,
+  // schedule ring, next tick accented
+  clock: `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+    <circle cx="18.2" cy="6" r="1.7" fill="${ACCENT}" stroke="none" />`,
+  // one lane branching into two paths
+  branch: `
+    <path d="M4 12h5c2 0 3-1.5 4-3s2-3 4-3h3M9 12c2 0 3 1.5 4 3s2 3 4 3h3" />
+    <rect x="3" y="10.2" width="3.6" height="3.6" rx="1.2" fill="${ACCENT}" stroke="none" />`,
+  // hardened chip
+  shield: `
+    <path d="M12 3.5l7 2.8v5.2c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6.3z" />
+    <rect x="9.4" y="9.5" width="5.2" height="4" rx="1.3" fill="${ACCENT}" stroke="none" />`,
+};
+
+const inner = glyphs[name] ?? glyphs.rows;
+---
+
+<svg
+  class="bq-icon"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.7"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  set:html={inner}
+/>

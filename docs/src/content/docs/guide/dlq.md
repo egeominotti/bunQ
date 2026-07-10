@@ -8,7 +8,17 @@ head:
       content: https://bunqueue.dev/og/client-sdk.png
 ---
 
-The Dead Letter Queue stores failed jobs with full metadata for debugging and recovery.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dlq</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Failures are kept, <em>never lost.</em></h1>
+  <p class="bq-hero-sub">The Dead Letter Queue stores failed jobs with full metadata for debugging and recovery. Inspect why a job died, retry it automatically or by hand, and expire old entries on a policy.</p>
+
+  <div class="bq-proof">
+    <span><b>6</b> tracked failure reasons</span>
+    <span><b>7 days</b> default retention before purge</span>
+    <span><b>10,000</b> max entries per queue</span>
+  </div>
+</div>
 
 :::tip[Using AI agents?]
 AI agents connected via MCP can inspect DLQ entries, retry failed jobs, and purge the queue via natural language using `bunqueue_get_dlq`, `bunqueue_retry_dlq`, and `bunqueue_purge_dlq` tools. See [MCP Server](/guide/mcp/).

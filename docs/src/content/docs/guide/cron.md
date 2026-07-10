@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/advanced.png
 ---
 
-
-Schedule jobs to run on a recurring basis using cron expressions or intervals.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · cron</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Schedules that <em>survive restarts.</em></h1>
+  <p class="bq-hero-sub">Schedule jobs to run on a recurring basis using cron expressions or plain intervals, with IANA timezone support. Schedules are persisted in SQLite, so they come back after a restart.</p>
+</div>
 
 ## Server Mode
 
@@ -29,15 +32,18 @@ bunqueue cron delete daily-report
 
 ## Cron Expressions
 
-```
-┌───────────── minute (0-59)
-│ ┌───────────── hour (0-23)
-│ │ ┌───────────── day of month (1-31)
-│ │ │ ┌───────────── month (1-12)
-│ │ │ │ ┌───────────── day of week (0-6, Sun=0)
-│ │ │ │ │
-* * * * *
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Cron expression</b><span>five fields, left to right</span></div>
+  <div class="bq-diag-layer bq-diag-accent"><code>* * * * *</code></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">minute <i>0-59</i></div>
+    <div class="bq-diag-cell">hour <i>0-23</i></div>
+    <div class="bq-diag-cell">day of month <i>1-31</i></div>
+    <div class="bq-diag-cell">month <i>1-12</i></div>
+    <div class="bq-diag-cell">day of week <i>0-6, Sun=0</i></div>
+  </div>
+</div>
 
 Examples:
 - `0 9 * * *` - Every day at 9:00 AM
@@ -118,7 +124,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** — queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
 :::
 
 :::tip[Related Guides]

@@ -21,22 +21,94 @@ head:
       content: 'https://bunqueue.dev/og-image.png'
   - tag: meta
     attrs:
+      name: 'twitter:title'
+      content: 'bunqueue, The Queue Is a File: Zero-Infrastructure Job Queue'
+  - tag: meta
+    attrs:
+      name: 'twitter:description'
+      content: 'A complete job queue in one process, persisted to a single SQLite file. No Redis. Install with bun add bunqueue, ten lines to your first worker.'
+  - tag: meta
+    attrs:
       name: 'keywords'
       content: 'job queue, task queue, background jobs, bun, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
-  - tag: script
-    attrs:
-      type: 'application/ld+json'
-    content: '{"@context":"https://schema.org","@type":"SoftwareApplication","name":"bunqueue","description":"Zero-infrastructure job queue: a complete queue in one process, persisted to a single SQLite file. No Redis. Clients for Node.js, Deno, Bun, Python and Cloudflare Workers.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Windows","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://github.com/egeominotti/bunqueue/blob/main/LICENSE","url":"https://bunqueue.dev","downloadUrl":"https://www.npmjs.com/package/bunqueue","sameAs":["https://github.com/egeominotti/bunqueue","https://www.npmjs.com/package/bunqueue","https://www.npmjs.com/package/bunqueue-client"]}'
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import VersionPill from '@components/VersionPill.astro';
+import BqIcon from '@components/BqIcon.astro';
+
 <div class="bq-wrap bq-hero">
-  <span class="bq-eyebrow">job queue · one process · zero infrastructure</span>
-  <h1 class="bq-hero-h1">The queue<br/>is <em>a file.</em></h1>
-  <p class="bq-hero-sub">bunqueue packs priorities, retries, cron, rate limits and a dead letter queue into one process, persisted to a single SQLite file. No Redis, no broker. Clients for TypeScript, Python and Cloudflare Workers speak its native protocol.</p>
-  <div class="bq-actions">
-    <a class="bq-btn" href="/guide/quickstart/">Get started</a>
-    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ Star on GitHub</a>
-    <span class="bq-hero-install">bunx bunqueue start</span>
+  <div class="bq-hero-grid">
+    <div class="bq-hero-left">
+      <VersionPill />
+      <h1 class="bq-hero-h1">The queue<br/>is <em>a file.</em></h1>
+      <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
+
+      <p class="bq-install-label">Install bunqueue</p>
+
+      <Tabs syncKey="runtime">
+        <TabItem label="Bun">
+
+```bash
+bun add bunqueue
+```
+
+        </TabItem>
+        <TabItem label="Node.js / Deno">
+
+```bash
+npm install bunqueue-client
+bunx bunqueue start   # the queue server, one command
+```
+
+        </TabItem>
+        <TabItem label="Workers">
+
+```bash
+npm install bunqueue-client   # produce jobs from fetch handlers
+```
+
+        </TabItem>
+        <TabItem label="Python">
+
+```bash
+pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
+```
+
+        </TabItem>
+      </Tabs>
+
+      <div class="bq-actions">
+        <a class="bq-btn" href="#quickstart">Get started in 60s</a>
+        <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
+      </div>
+      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python and Cloudflare Workers</p>
+    </div>
+
+    <div class="bq-hero-right">
+      <div class="bq-bench-card">
+        <p class="bq-bench-title">Pushing 100-job batches</p>
+        <p class="bq-bench-sub">throughput in ops/sec vs BullMQ + Redis, identical workloads</p>
+        <div class="bq-bar-row">
+          <div class="bq-bar-label"><span>bunqueue · 85,700 ops/s</span><b>3.5x</b></div>
+          <div class="bq-bar" style="width: 100%"></div>
+        </div>
+        <div class="bq-bar-row">
+          <div class="bq-bar-label"><span>BullMQ + Redis · 24,800 ops/s</span></div>
+          <div class="bq-bar bq-bar-them" style="width: 29%"></div>
+        </div>
+        <p class="bq-bench-title" style="margin-top: 1.6rem;">p99 push latency, lower is better</p>
+        <div class="bq-bar-row">
+          <div class="bq-bar-label"><span>bunqueue · 6.3 ms</span><b>1.8x lower</b></div>
+          <div class="bq-bar" style="width: 57%"></div>
+        </div>
+        <div class="bq-bar-row">
+          <div class="bq-bar-label"><span>BullMQ + Redis · 11.1 ms</span></div>
+          <div class="bq-bar bq-bar-them" style="width: 100%"></div>
+        </div>
+        <p class="bq-bench-foot">Apple M1 Max · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">methodology</a> · <a href="/guide/benchmarks/">all benchmarks →</a></p>
+      </div>
+    </div>
   </div>
 
   <div class="bq-sim" aria-hidden="true">
@@ -65,6 +137,43 @@ head:
     <span>p99 under <b>1 ms</b></span>
     <span><b>5.4 MB</b> install, 2 runtime deps</span>
     <span><b>316</b> e2e scenarios across 5 runtimes</span>
+    <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
+  </div>
+</div>
+
+<div class="bq-wrap bq-section" id="quickstart">
+  <span class="bq-eyebrow">quickstart</span>
+  <h2 class="bq-h2">Write ten lines. Run.</h2>
+  <p class="bq-lede">Nothing to provision: the queue starts inside your process and persists itself to a SQLite file. From install to a working queue and worker in under a minute.</p>
+
+  <div class="bq-steps">
+    <div class="bq-step">
+      <div class="bq-step-head"><span class="bq-step-num">1</span><h3>Write <code>app.ts</code>, a queue and a worker</h3></div>
+
+```typescript
+import { Queue, Worker } from 'bunqueue/client';
+
+const queue = new Queue('emails', { embedded: true });
+
+new Worker('emails', async (job) => {
+  console.log(`sending to ${job.data.to}`);
+  return { sent: true };
+}, { embedded: true });
+
+await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
+```
+
+    </div>
+    <div class="bq-step">
+      <div class="bq-step-head"><span class="bq-step-num">2</span><h3>Run</h3></div>
+
+```bash
+bun app.ts
+# sending to user@example.com
+```
+
+      <p class="bq-step-note">That's the whole setup. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>, everything persists to <code>bunq.db</code> automatically. Not on Bun? Same code with <code>bunqueue-client</code> against the server. <a href="/guide/quickstart/">Full quickstart</a></p>
+    </div>
   </div>
 </div>
 
@@ -94,24 +203,10 @@ head:
     </div>
   </div>
 
-  <div class="bq-bars">
-    <div class="bq-legend"><span><i class="bq-dot" style="background: var(--bq-brand)"></i> bunqueue</span><span><i class="bq-dot bq-dot-them"></i> BullMQ + Redis</span></div>
-    <div class="bq-bar-row">
-      <div class="bq-bar-label"><span>bulk push, 100 jobs per batch: bunqueue 85,700 · BullMQ 24,800 ops/s</span><b>3.5x faster</b></div>
-      <div class="bq-bar" style="width: 100%"></div>
-      <div class="bq-bar bq-bar-them" style="width: 29%"></div>
-    </div>
-    <div class="bq-bar-row">
-      <div class="bq-bar-label"><span>bulk push p99 latency: bunqueue 6.3 ms · BullMQ 11.1 ms, lower is better</span><b>1.8x lower</b></div>
-      <div class="bq-bar" style="width: 57%"></div>
-      <div class="bq-bar bq-bar-them" style="width: 100%"></div>
-    </div>
-    <div class="bq-bar-row">
-      <div class="bq-bar-label"><span>single push: bunqueue 52,756 · BullMQ 56,736 ops/s</span><b class="bq-neutral">parity</b></div>
-      <div class="bq-bar" style="width: 93%"></div>
-      <div class="bq-bar bq-bar-them" style="width: 100%"></div>
-    </div>
-    <div class="bq-bars-foot">measured 2026-07-08 on Apple M1 Max, 32 GB RAM · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 · 10,000 iterations, TCP mode, identical workloads · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">bench/comparison/run.ts</a> · embedded mode, which needs no network at all, reaches 613K bulk ops/s on the same machine · <a href="/guide/benchmarks/">full benchmarks</a></div>
+  <div class="bq-actions" style="margin-top: 2rem;">
+    <a class="bq-btn" href="/guide/migration/">Migrate from BullMQ in minutes</a>
+    <a class="bq-btn-ghost" href="/guide/comparison/">Full comparison</a>
+    <a class="bq-btn-ghost" href="/guide/benchmarks/">Benchmarks</a>
   </div>
 </div>
 
@@ -120,7 +215,7 @@ head:
   <h2 class="bq-h2">One queue, any language.</h2>
   <p class="bq-lede">The server owns every queue semantic, so clients stay thin. Official SDKs speak the native TCP protocol with full feature parity, verified by the same test suite on every runtime.</p>
   <div class="bq-actions" style="margin-top: 1.4rem;">
-    <span class="bq-hero-install">npm install bunqueue-client</span>
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
     <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
     <a class="bq-btn-ghost" href="https://www.npmjs.com/package/bunqueue-client">npm</a>
   </div>
@@ -204,7 +299,7 @@ claude mcp add bunqueue -- bunqueue-mcp
   <video src="https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116" controls autoplay loop muted playsinline></video>
   <div class="bq-actions" style="margin-top: 1.2rem;">
     <a class="bq-btn" href="https://egeominotti.github.io/bunqueue-dashboard/">Open the live demo</a>
-    <span class="bq-hero-install">bunx bunqueue-dashboard</span>
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">bunx bunqueue-dashboard</button>
   </div>
   <p class="bq-dash-links"><a href="https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide">user guide</a> · <a href="https://github.com/egeominotti/bunqueue-dashboard">github</a> · <a href="https://www.npmjs.com/package/bunqueue-dashboard">npm</a></p>
 </div>
@@ -258,21 +353,61 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">capabilities</span>
-  <h2 class="bq-h2">Everything a production queue needs.</h2>
-  <ul class="bq-caps">
-    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Priorities &amp; delays</strong><span>critical jobs first, schedule for later</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Retries &amp; backoff</strong><span>fixed or exponential, per job</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>Dead letter queue</strong><span>failed jobs kept, retryable, never lost</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Cron &amp; schedulers</strong><span>patterns, intervals, timezones</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Flows</strong><span>parent and child jobs, chains, fan in</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Rate limiting</strong><span>per queue, plus global concurrency</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>Stall detection</strong><span>stuck jobs recovered automatically</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Workflow engine</strong><span>saga compensation, branching, signals</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-blue)"></span><div><strong>Simple Mode</strong><span>queue + worker in one object, middleware, circuit breaker</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-amber)"></span><div><strong>Webhooks &amp; events</strong><span>HTTP callbacks, SSE, WebSocket</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-green)"></span><div><strong>Prometheus &amp; probes</strong><span>metrics, health, readiness</span></div></li>
-    <li><span class="bq-dot" style="background: var(--bq-red)"></span><div><strong>S3 backups</strong><span>scheduled, encrypted, restorable</span></div></li>
-  </ul>
+  <h2 class="bq-h2">Four tools, one file.</h2>
+  <p class="bq-lede">Everything a production queue needs, in the same process and the same SQLite file. Adopt one piece or all of them, each stands on its own.</p>
+
+  <div class="bq-tools">
+    <div class="bq-tool">
+      <BqIcon name="rows" />
+      <h3>Queue &amp; Worker</h3>
+      <p>BullMQ-familiar API for adding and processing jobs, end to end TypeScript.</p>
+      <pre class="bq-tool-cmd">{"await queue.add('welcome', data, { priority: 5 })"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/queue/">Priorities &amp; delays</a></li>
+        <li><a href="/guide/worker/">Retries with backoff</a></li>
+        <li><a href="/guide/queue/">Idempotent custom IDs</a></li>
+        <li><a href="/guide/rate-limiting/">Rate limits &amp; concurrency</a></li>
+        <li><a href="/guide/flow/">Flows: parent-child jobs</a></li>
+        <li><a href="/guide/stall-detection/">Stall detection</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="clock" />
+      <h3>Cron &amp; schedulers</h3>
+      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted, never lost on restart.</p>
+      <pre class="bq-tool-cmd">{"await app.cron('daily', '0 9 * * *', data)"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/cron/">Cron patterns</a></li>
+        <li><a href="/guide/cron/">Every-N intervals</a></li>
+        <li><a href="/guide/cron/">Timezones</a></li>
+        <li><a href="/guide/cron/">Run limits</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="branch" />
+      <h3>Workflow engine</h3>
+      <p>Multi-step orchestration with automatic rollback when a step fails.</p>
+      <pre class="bq-tool-cmd">{"new Workflow('order').step(...).parallel(...)"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/workflow/">Saga compensation</a></li>
+        <li><a href="/guide/workflow/">Branching &amp; parallel steps</a></li>
+        <li><a href="/guide/workflow/">Human-in-the-loop signals</a></li>
+        <li><a href="/guide/workflow/">Loops &amp; nested workflows</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="pulse" />
+      <h3>Operations</h3>
+      <p>Failed jobs are kept and retryable, metrics are scrapable, backups are scheduled.</p>
+      <pre class="bq-tool-cmd">{"bunx bunqueue-dashboard"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/dlq/">Dead letter queue</a></li>
+        <li><a href="/guide/monitoring/">Prometheus &amp; probes</a></li>
+        <li><a href="/guide/webhooks/">Webhooks, SSE, WebSocket</a></li>
+        <li><a href="/guide/backup/">S3 backups</a></li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 <div class="bq-wrap bq-section">
@@ -281,6 +416,7 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
   <div class="bq-trust">
     <div class="bq-trust-card">
       <span class="bq-tag">quality</span>
+      <BqIcon name="check" />
       <h3>Tested on every runtime</h3>
       <ul>
         <li>81 e2e scenarios each on Node.js, Deno, Bun</li>
@@ -291,6 +427,7 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
     </div>
     <div class="bq-trust-card">
       <span class="bq-tag">security</span>
+      <BqIcon name="shield" />
       <h3>Hardened by default</h3>
       <ul>
         <li>token auth across TCP and HTTP</li>
@@ -301,6 +438,7 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
     </div>
     <div class="bq-trust-card">
       <span class="bq-tag">operations</span>
+      <BqIcon name="pulse" />
       <h3>Observable in production</h3>
       <ul>
         <li>Prometheus metrics endpoint</li>
@@ -314,10 +452,13 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
 
 <div class="bq-wrap bq-cta">
   <h2 class="bq-h2">Start in under a minute.</h2>
-  <p class="bq-lede" style="margin: 0 auto;">Install the server, add a job, process it. On the runtime you already use.</p>
+  <p class="bq-lede" style="margin: 0 auto;">One install, ten lines, zero infrastructure. On the runtime you already use.</p>
   <div class="bq-actions">
-    <a class="bq-btn" href="/guide/quickstart/">Get started</a>
-    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ Star on GitHub</a>
-    <a class="bq-btn-ghost" href="/guide/comparison/">bunqueue vs BullMQ</a>
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">bun add bunqueue</button>
+    <a class="bq-btn" href="/guide/quickstart/">Read the quickstart</a>
+    <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
   </div>
+  <p class="bq-hero-trust">If bunqueue removes a Redis box from your stack, a star on GitHub helps other teams find it.</p>
 </div>
+
+<script is:inline src="/bq-copy.js"></script>

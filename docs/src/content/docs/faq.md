@@ -122,6 +122,12 @@ head:
       }
 ---
 
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">reference · faq</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Asked, <em>answered.</em></h1>
+  <p class="bq-hero-sub">Straight answers on performance, scaling, SQLite versus Redis, BullMQ migration and production deployment. If your question is not here, GitHub Discussions is the next stop.</p>
+</div>
+
 ## General
 
 ### What is bunqueue?
@@ -180,7 +186,7 @@ brew install oven-sh/bun/bun
 
 bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.4 MB** and completes **up to ~5× faster** on a cold install.
 
-As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency — both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
+As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency, both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
 
 ### Do I need to install anything extra to use the MCP server?
 
@@ -458,20 +464,20 @@ await queue.addBulk(jobs.map(j => ({
 ### What is the Workflow Engine?
 
 The Workflow Engine is a built-in multi-step orchestration system for defining sequential processes with:
-- **Saga compensation** — automatic rollback on failure
-- **Conditional branching** — route execution based on runtime data
-- **Parallel steps** — run independent steps concurrently via `.parallel()`
-- **Step retry** — automatic retry with exponential backoff and jitter
-- **Human-in-the-loop** — pause and wait for external signals, with optional timeout
-- **Nested workflows** — compose workflows with `.subWorkflow()`
-- **Loops** — `doUntil()` and `doWhile()` for conditional iteration with safety limits
-- **forEach** — iterate over dynamic item lists with indexed step results
-- **Map** — synchronous data transforms between steps
-- **Schema validation** — validate step input/output with Zod, ArkType, or any `.parse()` schema
-- **Subscribe** — monitor a specific execution's events in real-time
-- **Observability** — typed event emitter with 11 event types
-- **Cleanup & archival** — manage execution history with cleanup/archive
-- **Step timeouts** — per-step timeout configuration
+- **Saga compensation**, automatic rollback on failure
+- **Conditional branching**, route execution based on runtime data
+- **Parallel steps**, run independent steps concurrently via `.parallel()`
+- **Step retry**, automatic retry with exponential backoff and jitter
+- **Human-in-the-loop**, pause and wait for external signals, with optional timeout
+- **Nested workflows**, compose workflows with `.subWorkflow()`
+- **Loops**, `doUntil()` and `doWhile()` for conditional iteration with safety limits
+- **forEach**, iterate over dynamic item lists with indexed step results
+- **Map**, synchronous data transforms between steps
+- **Schema validation**, validate step input/output with Zod, ArkType, or any `.parse()` schema
+- **Subscribe**, monitor a specific execution's events in real-time
+- **Observability**, typed event emitter with 11 event types
+- **Cleanup & archival**, manage execution history with cleanup/archive
+- **Step timeouts**, per-step timeout configuration
 
 No Temporal, no Inngest, no cloud service required.
 

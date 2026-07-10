@@ -8,7 +8,18 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-bunqueue includes built-in telemetry for production observability. All instrumentation is zero-allocation and adds less than 0.003% overhead (~25ns per operation).
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · telemetry</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">See inside the <em>process.</em></h1>
+  <p class="bq-hero-sub">bunqueue includes built-in telemetry for production observability: latency histograms, EMA throughput rates, per-queue metrics, and structured logs. All instrumentation is zero-allocation and adds less than 0.003% overhead, about 25ns per operation.</p>
+
+  <div class="bq-proof">
+    <span><b>~25ns</b> overhead per operation</span>
+    <span><b>0</b> allocations on the hot path</span>
+    <span><b>15</b> histogram buckets, 0.1ms to 10s</span>
+    <span><b>8+</b> observability platforms supported</span>
+  </div>
+</div>
 
 ## Latency Histograms
 
@@ -102,7 +113,7 @@ curl http://localhost:6790/stats
 
 ### Accessing rates
 
-Rates are included in the `/stats` response shown above (`pushPerSec`, `pullPerSec`) and in the `/prometheus` output. The internal `throughputTracker` is not a public package export — read the rates over HTTP.
+Rates are included in the `/stats` response shown above (`pushPerSec`, `pullPerSec`) and in the `/prometheus` output. The internal `throughputTracker` is not a public package export, read the rates over HTTP.
 
 ## Per-Queue Metrics
 

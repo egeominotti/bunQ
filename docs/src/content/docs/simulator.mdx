@@ -11,31 +11,33 @@ head:
 
 import Simulator from '../../components/simulator/Simulator.tsx';
 
-# Interactive Simulator
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">simulator</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The engine, <em>in your browser.</em></h1>
+  <p class="bq-hero-sub">A faithful in-browser model of bunqueue. Push jobs and watch the same lifecycle a real server runs, waiting to active to completed, with failures bouncing through delayed backoff until they land in the dead-letter lane.</p>
+</div>
 
-A faithful, in-browser model of the bunqueue engine. Push jobs and watch them move through the same lifecycle a real server runs: **waiting → active → completed**, with failures bouncing through **delayed** (exponential backoff) until they land in the **dead-letter lane**. Same FNV-1a shard mapping, same priority ordering, same controls.
-
-Use the **scenario chips** for one-click demos, or drive everything by hand from the control panel. The transport bar pauses the simulation clock and runs it up to 4× speed.
+Use the **scenario chips** for one-click demos, or drive everything by hand from the control panel. The transport bar pauses the simulation clock and runs it up to 4× speed. Same FNV-1a shard mapping, same priority ordering, same controls as the real engine.
 
 <Simulator client:load />
 
 ## What you're looking at
 
-- **Pipeline** — every job as a chip in its state lane. Active chips show live progress; retry chips carry their attempt count (`↻ 2/3`) and backoff countdown; dead letters show the failure reason.
-- **Shards** — bunqueue maps each queue to a shard with `fnv1aHash(queueName) & SHARD_MASK`. A cell flashes when a push lands on it. All jobs of one queue always share one shard.
-- **Throughput** — completions per second over the last 60 seconds of simulation time.
-- **Workers** — each card is one worker; the dots are its concurrency slots (filled = busy). Stopping a worker lets in-flight jobs finish first.
-- **Events** — the server log tail: pushes, completions, retries, dead letters, and every control action.
+- **Pipeline**: every job as a chip in its state lane. Active chips show live progress; retry chips carry their attempt count (`↻ 2/3`) and backoff countdown; dead letters show the failure reason.
+- **Shards**: bunqueue maps each queue to a shard with `fnv1aHash(queueName) & SHARD_MASK`. A cell flashes when a push lands on it. All jobs of one queue always share one shard.
+- **Throughput**: completions per second over the last 60 seconds of simulation time.
+- **Workers**: each card is one worker; the dots are its concurrency slots (filled = busy). Stopping a worker lets in-flight jobs finish first.
+- **Events**: the server log tail: pushes, completions, retries, dead letters, and every control action.
 
 ## Scenarios to try
 
-1. **Burst of 80** — bulk-push 80 jobs and watch four worker slots chew through the backlog.
-2. **Priorities win** — P9 jobs pushed *after* a P1 backlog still jump the whole line.
-3. **Scheduled jobs** — delayed jobs wait in their lane until the countdown expires.
-4. **Failure storm** — at 55% failure rate, retries back off exponentially (1.2s → 2.4s → DLQ). Hit **Retry DLQ** to give dead letters a fresh attempt budget.
-5. **Rate limited** — eight worker slots, but the queue releases only 4 jobs/sec: backpressure you can see.
+1. **Burst of 80**: bulk-push 80 jobs and watch four worker slots chew through the backlog.
+2. **Priorities win**: P9 jobs pushed *after* a P1 backlog still jump the whole line.
+3. **Scheduled jobs**: delayed jobs wait in their lane until the countdown expires.
+4. **Failure storm**: at 55% failure rate, retries back off exponentially (1.2s → 2.4s → DLQ). Hit **Retry DLQ** to give dead letters a fresh attempt budget.
+5. **Rate limited**: eight worker slots, but the queue releases only 4 jobs/sec: backpressure you can see.
 
-Then compose your own: pause a queue mid-burst, drain it, or crank the failure rate while a scenario runs — effects stack like they would on a real server.
+Then compose your own: pause a queue mid-burst, drain it, or crank the failure rate while a scenario runs, effects stack like they would on a real server.
 
 ## How it maps to real bunqueue
 

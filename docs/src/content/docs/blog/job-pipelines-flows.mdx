@@ -22,7 +22,13 @@ head:
 
 import { Aside } from '@astrojs/starlight/components';
 
-Some tasks aren't a single job - they're a pipeline. Resize an image, then generate thumbnails, then update the CDN. bunqueue's `FlowProducer` lets you express these dependencies naturally: children execute first, and the parent job runs only when all children complete.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">blog · flows</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Jobs that wait for their <em>children.</em></h1>
+  <p class="bq-hero-sub">Some tasks are not a single job, they are a pipeline: resize an image, generate thumbnails, update the CDN. FlowProducer expresses these dependencies naturally, children run first and the parent runs only when all of them complete.</p>
+</div>
+
+bunqueue's `FlowProducer` lets you build parent-child dependency trees, fan-out patterns, and processing chains, all covered below.
 
 ## The FlowProducer API
 

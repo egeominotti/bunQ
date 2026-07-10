@@ -20,36 +20,56 @@ head:
       content: MCP, Model Context Protocol, AI agent, job queue, task scheduler, Claude, Claude Code, Claude Desktop, Cursor, Windsurf, bunqueue, cron jobs, HTTP handlers, dead letter queue, rate limiting, AI automation, agentic workflows, LLM tools, AI task queue
 ---
 
-import { Tabs, TabItem, Aside, Badge, Card, CardGrid, Steps } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Aside, Badge, Steps } from '@astrojs/starlight/components';
 import McpArchitecture from '../../../components/McpArchitecture.astro';
 import HttpHandlerFlow from '../../../components/HttpHandlerFlow.astro';
 import HttpHandlerLifecycle from '../../../components/HttpHandlerLifecycle.astro';
+import BqIcon from '@components/BqIcon.astro';
 
-bunqueue ships with a built-in **MCP (Model Context Protocol)** server that gives AI agents full programmatic control over job queues, scheduling, monitoring, and execution.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · mcp</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Your queue, driven by <em>agents.</em></h1>
+  <p class="bq-hero-sub">bunqueue ships a built-in MCP server that gives AI agents full programmatic control over job queues, scheduling, monitoring and execution. One command to connect, and the agent has the whole queue at its disposal.</p>
 
-MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf to interact with external tools. bunqueue implements the MCP server specification using the official `@modelcontextprotocol/sdk`, exposing every queue feature as a tool that agents can call directly. No REST wrappers, no glue code, no middleware. One command to connect, and your agent has a complete job queue system at its disposal.
+  <div class="bq-proof">
+    <span><b>73</b> tools, the full queue surface</span>
+    <span><b>3</b> diagnostic prompts</span>
+    <span><b>5</b> read-only resources</span>
+    <span><b>2</b> modes, embedded or TCP</span>
+  </div>
+</div>
 
-<CardGrid>
-  <Card title="73 Tools" icon="puzzle">
-    Full job lifecycle, queue control, cron scheduling, DLQ management, rate limiting, webhooks, workflows, HTTP handlers, monitoring
-  </Card>
-  <Card title="3 Prompts" icon="rocket">
-    Pre-built diagnostic workflows: health report, queue debug, incident response
-  </Card>
-  <Card title="5 Resources" icon="document">
-    Read-only live context: server stats, queue states, cron schedules, workers, webhooks
-  </Card>
-  <Card title="2 Modes" icon="setting">
-    Embedded (local SQLite, zero config) or TCP (connect to a remote bunqueue server)
-  </Card>
-</CardGrid>
+MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf to interact with external tools. bunqueue implements the MCP server specification using the official `@modelcontextprotocol/sdk`, exposing every queue feature as a tool that agents can call directly. No REST wrappers, no glue code, no middleware.
+
+<div class="bq-cards">
+  <div class="bq-card">
+    <BqIcon name="shards" />
+    <h3>73 Tools</h3>
+    <p>Full job lifecycle, queue control, cron scheduling, DLQ management, rate limiting, webhooks, workflows, HTTP handlers, monitoring</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="pulse" />
+    <h3>3 Prompts</h3>
+    <p>Pre-built diagnostic workflows: health report, queue debug, incident response</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="file" />
+    <h3>5 Resources</h3>
+    <p>Read-only live context: server stats, queue states, cron schedules, workers, webhooks</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="dials" />
+    <h3>2 Modes</h3>
+    <p>Embedded (local SQLite, zero config) or TCP (connect to a remote bunqueue server)</p>
+  </div>
+</div>
 
 ---
 
 ## Quick Start
 
 <Steps>
-1. **Install bunqueue** — the MCP server (`bunqueue-mcp`) ships as a binary *inside* the `bunqueue` package. There is no standalone `bunqueue-mcp` package on npm, so `bunqueue` must be installed first.
+1. **Install bunqueue**, the MCP server (`bunqueue-mcp`) ships as a binary *inside* the `bunqueue` package. There is no standalone `bunqueue-mcp` package on npm, so `bunqueue` must be installed first.
 
    ```bash
    bun add bunqueue          # in your project — for Claude Code
@@ -57,7 +77,7 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
    bun add -g bunqueue       # global install, puts bunqueue-mcp on your PATH
    ```
 
-2. **Install the MCP SDK** — since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
+2. **Install the MCP SDK**, since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
 
    ```bash
    bun add @modelcontextprotocol/sdk
@@ -71,15 +91,15 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 
 4. **Start using it**
 
-   Ask your agent: *"Add a job to the emails queue"* — it works immediately. The MCP server starts as a child process, communicates via stdio, and the agent can call any of the 73 tools.
+   Ask your agent: *"Add a job to the emails queue"*, it works immediately. The MCP server starts as a child process, communicates via stdio, and the agent can call any of the 73 tools.
 </Steps>
 
 <Aside type="caution" title="bunx bunqueue-mcp returns a 404?">
-  `bunqueue-mcp` is **not** a standalone npm package — it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
+  `bunqueue-mcp` is **not** a standalone npm package, it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
 </Aside>
 
 <Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.0+)">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.4 MB of `node_modules` instead of 93 MB** — a **94% smaller install** that's also up to ~5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.4 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also up to ~5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
 
   ```bash
   bun add @modelcontextprotocol/sdk
@@ -120,7 +140,7 @@ The server supports two backend modes: **embedded** (direct SQLite access in the
 ## Configuration
 
 <Aside type="note">
-  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package — no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead. Either way, install the optional peer dependency once with `bun add @modelcontextprotocol/sdk` (see the note above) — `bunx` won't pull it in automatically.
+  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package, no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead. Either way, install the optional peer dependency once with `bun add @modelcontextprotocol/sdk` (see the note above), `bunx` won't pull it in automatically.
 </Aside>
 
 ### Claude Code
@@ -241,23 +261,29 @@ HTTP handlers solve a fundamental problem: an AI agent can schedule jobs and man
 
 When the agent calls `bunqueue_register_handler`, the MCP server spawns an **embedded Worker** inside its own process. This Worker continuously pulls jobs from the specified queue and, for each job, makes an HTTP request to the registered endpoint. The HTTP response is saved as the job result. If the HTTP call fails (non-2xx status or timeout), the job is marked as failed and follows the standard retry/DLQ flow.
 
-This means the agent can set up a fully autonomous pipeline — schedule recurring jobs with cron, auto-process them via HTTP, and check results later — without writing any code or deploying any external service.
+This means the agent can set up a fully autonomous pipeline, schedule recurring jobs with cron, auto-process them via HTTP, and check results later, without writing any code or deploying any external service.
 
 <HttpHandlerFlow />
 
 The embedded Worker inherits all standard Worker features: heartbeat, stall detection, retry with backoff, and dead letter queue. It processes jobs sequentially (concurrency 1) to avoid overwhelming the target endpoint.
 
-<CardGrid>
-  <Card title="bunqueue_register_handler" icon="add-document">
-    Register an HTTP handler on a queue. Specify URL, method, optional headers, body template, and timeout. Spawns a Worker that starts processing immediately.
-  </Card>
-  <Card title="bunqueue_unregister_handler" icon="close">
-    Remove a handler from a queue and gracefully stop its Worker. Jobs already in the queue remain untouched.
-  </Card>
-  <Card title="bunqueue_list_handlers" icon="list-format">
-    List all active HTTP handlers with their configuration and Worker status (running or stopped).
-  </Card>
-</CardGrid>
+<div class="bq-cards">
+  <div class="bq-card">
+    <BqIcon name="push" />
+    <h3>bunqueue_register_handler</h3>
+    <p>Register an HTTP handler on a queue. Specify URL, method, optional headers, body template, and timeout. Spawns a Worker that starts processing immediately.</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="dlq" />
+    <h3>bunqueue_unregister_handler</h3>
+    <p>Remove a handler from a queue and gracefully stop its Worker. Jobs already in the queue remain untouched.</p>
+  </div>
+  <div class="bq-card">
+    <BqIcon name="rows" />
+    <h3>bunqueue_list_handlers</h3>
+    <p>List all active HTTP handlers with their configuration and Worker status (running or stopped).</p>
+  </div>
+</div>
 
 ### Handler configuration
 
@@ -560,13 +586,13 @@ new Worker('emails', async (job) => {
 bun run worker.ts
 ```
 
-**When to use:** Email sending, image processing, database operations, ML inference, complex business logic — anything that needs code execution beyond a simple HTTP call.
+**When to use:** Email sending, image processing, database operations, ML inference, complex business logic, anything that needs code execution beyond a simple HTTP call.
 
 ### Comparison
 
 |                    | HTTP Handlers                     | External Worker                  |
 | ------------------ | --------------------------------- | -------------------------------- |
-| **Setup**          | Zero — agent registers via MCP    | Deploy a Worker process          |
+| **Setup**          | Zero, agent registers via MCP    | Deploy a Worker process          |
 | **Processing**     | HTTP request to an endpoint       | Custom TypeScript function       |
 | **Managed by**     | AI agent (register/unregister)    | Developer (deploy/maintain)      |
 | **Use case**       | API calls, webhooks, monitoring   | Business logic, DB writes, files |

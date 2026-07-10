@@ -8,7 +8,17 @@ head:
       content: https://bunqueue.dev/og/getting-started.png
 ---
 
-Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons — all from one place.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · simple mode</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Queue and worker, <em>one object.</em></h1>
+  <p class="bq-hero-sub">Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons, all from one place.</p>
+
+  <div class="bq-proof">
+    <span><b>12</b> built-in features</span>
+    <span><b>5</b> retry strategies</span>
+    <span><b>1</b> object to close on shutdown</span>
+  </div>
+</div>
 
 ```typescript
 import { Bunqueue } from 'bunqueue/client';
@@ -25,7 +35,7 @@ await app.add('send', { to: 'alice@example.com' });
 ```
 
 :::tip[When to use]
-Use `Bunqueue` when producer and consumer are in the **same process**. For distributed systems, use [`Queue`](/guide/queue/) + [`Worker`](/guide/worker/) separately. For AI agent workflows, use the [MCP Server](/guide/mcp/) instead — agents control queues via natural language without writing code.
+Use `Bunqueue` when producer and consumer are in the **same process**. For distributed systems, use [`Queue`](/guide/queue/) + [`Worker`](/guide/worker/) separately. For AI agent workflows, use the [MCP Server](/guide/mcp/) instead, agents control queues via natural language without writing code.
 :::
 
 ## Architecture
@@ -157,7 +167,7 @@ const app = new Bunqueue('api-calls', {
 | `fibonacci` | `delay × fib(attempt)` | Gradual backoff |
 | `custom` | `customBackoff(attempt, error) → ms` | Anything |
 
-This is **in-process retry** — the job stays active. Different from core `attempts`/`backoff` which re-queues.
+This is **in-process retry**, the job stays active. Different from core `attempts`/`backoff` which re-queues.
 
 ## Graceful Cancellation
 

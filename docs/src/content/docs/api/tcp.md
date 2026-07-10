@@ -8,19 +8,23 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-High-performance binary protocol on port **6789** (default). All messages use **MessagePack** encoding with length-prefixed framing. Supports pipelining for concurrent command processing.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">api reference · tcp</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The wire protocol, <em>documented.</em></h1>
+  <p class="bq-hero-sub">A high-performance binary protocol on port <code>6789</code> by default. All messages use MessagePack encoding with length-prefixed framing, and pipelining lets the server process commands concurrently.</p>
+</div>
 
 ## Wire Format
 
 Every message (request and response) is wrapped in a length-prefixed frame:
 
-```
-┌──────────────────────┬──────────────────────────────┐
-│  4 bytes (Big-Endian │  N bytes (MessagePack payload)│
-│  unsigned 32-bit     │                              │
-│  payload length)     │                              │
-└──────────────────────┴──────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Frame layout</b><span>request and response</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">payload length <i>4 bytes, big-endian unsigned 32-bit</i></div>
+    <div class="bq-diag-cell bq-diag-accent">MessagePack payload <i>N bytes</i></div>
+  </div>
+</div>
 
 The framing protocol works as follows:
 
@@ -280,7 +284,7 @@ Pull the next available job from a queue. Supports optional long polling and loc
 { ok: true, job: Job | null }
 ```
 
-**Response (with owner -- includes lock token):**
+**Response (with owner, includes lock token):**
 
 ```typescript
 { ok: true, job: Job | null, token: string | null }
@@ -313,7 +317,7 @@ Batch pull multiple jobs from a queue.
 { ok: true, jobs: Job[] }
 ```
 
-**Response (with owner -- includes lock tokens):**
+**Response (with owner, includes lock tokens):**
 
 ```typescript
 { ok: true, jobs: Job[], tokens: string[] }

@@ -8,7 +8,17 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-Configure your entire bunqueue server from a single typed file — no more scattered environment variables.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · configuration</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Defaults that hold, knobs that <em>matter.</em></h1>
+  <p class="bq-hero-sub">Configure your entire bunqueue server from a single typed bunqueue.config.ts, no more scattered environment variables. Every option has IntelliSense, every section is optional.</p>
+
+  <div class="bq-proof">
+    <span><b>1</b> typed file, auto-discovered</span>
+    <span><b>8</b> config sections, all optional</span>
+    <span><b>4</b>-level priority: CLI, file, env, defaults</span>
+  </div>
+</div>
 
 ## Quick Start
 
@@ -34,20 +44,20 @@ Then start normally:
 bunqueue start
 ```
 
-The config file is **auto-discovered** — no flags needed.
+The config file is **auto-discovered**, no flags needed.
 
 :::tip[Type Safety]
-`defineConfig()` provides full TypeScript IntelliSense. Every option is typed and documented — no more guessing environment variable names.
+`defineConfig()` provides full TypeScript IntelliSense. Every option is typed and documented, no more guessing environment variable names.
 :::
 
 ## Priority Order
 
 Configuration values are resolved in this order (first wins):
 
-1. **CLI flags** — `bunqueue start --tcp-port 8000`
-2. **Config file** — `bunqueue.config.ts`
-3. **Environment variables** — `TCP_PORT=8000`
-4. **Defaults** — built-in defaults
+1. **CLI flags**, `bunqueue start --tcp-port 8000`
+2. **Config file**, `bunqueue.config.ts`
+3. **Environment variables**, `TCP_PORT=8000`
+4. **Defaults**, built-in defaults
 
 This means you can use the config file as your baseline and override specific values per-environment with env vars or CLI flags.
 
@@ -127,7 +137,7 @@ defineConfig({
 ```
 
 :::note[Secrets]
-Use `process.env.*` for sensitive values like API keys. The config file is code — don't hardcode secrets that get committed to git.
+Use `process.env.*` for sensitive values like API keys. The config file is code, don't hardcode secrets that get committed to git.
 :::
 
 ### `backup`
@@ -313,7 +323,7 @@ defineConfig({
 These three fields are all you need. Everything else is managed automatically by the cloud dashboard.
 
 :::tip[Related Guides]
-- [Environment Variables](/guide/env-vars/) — Full env var reference (still supported as fallback)
-- [Running the Server](/guide/server/) — Server startup guide
-- [S3 Backup](/guide/backup/) — Backup configuration details
+- [Environment Variables](/guide/env-vars/), full env var reference (still supported as fallback)
+- [Running the Server](/guide/server/), server startup guide
+- [S3 Backup](/guide/backup/), backup configuration details
 :::

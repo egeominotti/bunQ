@@ -8,7 +8,18 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-bunqueue exposes Prometheus-compatible metrics for production monitoring. This guide covers the built-in metrics endpoint and a ready-to-use Grafana dashboard.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">server · monitoring</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Prometheus, probes, <em>live events.</em></h1>
+  <p class="bq-hero-sub">bunqueue exposes Prometheus-compatible metrics for production monitoring. This guide covers the built-in metrics endpoint, Kubernetes health probes, alert rules, and a ready-to-use Grafana dashboard.</p>
+
+  <div class="bq-proof">
+    <span><b>25+</b> metrics on /prometheus</span>
+    <span><b>8</b> pre-configured alert rules</span>
+    <span><b>3</b> health endpoints for Kubernetes</span>
+    <span><b>1</b> docker compose command to start it all</span>
+  </div>
+</div>
 
 :::tip[Using AI agents?]
 AI agents connected via MCP can query stats, job counts, per-queue metrics, and Prometheus data via natural language using `bunqueue_get_stats`, `bunqueue_get_queue_stats`, `bunqueue_get_prometheus_metrics`, and `bunqueue_get_memory_stats` tools. See [MCP Server](/guide/mcp/).

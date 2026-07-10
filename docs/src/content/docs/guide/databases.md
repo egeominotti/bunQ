@@ -8,7 +8,18 @@ head:
       content: https://bunqueue.dev/og/server-mode.png
 ---
 
-bunqueue is SQLite only by design. There is no Postgres or MySQL backend, and adding one through Bun's `bun:sql` client is not on the roadmap. This page states the position, explains the engineering reasons behind it, and shows how to run bunqueue on serverless or ephemeral filesystem platforms without an external database.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · storage backends</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">SQLite by default, tuned for <em>queues.</em></h1>
+  <p class="bq-hero-sub">bunqueue is SQLite only by design: no Postgres or MySQL backend, and none on the roadmap. This page explains the engineering reasons, and shows how to run on serverless or ephemeral filesystem platforms without an external database.</p>
+
+  <div class="bq-proof">
+    <span><b>0</b> external databases required</span>
+    <span><b>2</b> runtime dependencies</span>
+    <span><b>3</b> patterns for ephemeral platforms</span>
+    <span><b>1</b> local WAL-mode file</span>
+  </div>
+</div>
 
 ## Why bunqueue is SQLite-only
 

@@ -1,0 +1,26 @@
+---
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Read the bunqueue version from the repo root package.json. __dirname is
+// unreliable here (Astro bundles components into chunks), so resolve from
+// the build cwd (docs/) instead; fall back to no number when isolated.
+let version = '';
+for (const candidate of ['../package.json', '../../package.json']) {
+  try {
+    const pkg = JSON.parse(readFileSync(path.resolve(process.cwd(), candidate), 'utf-8'));
+    if (pkg.name === 'bunqueue' && pkg.version) {
+      version = pkg.version;
+      break;
+    }
+  } catch {
+    /* try next candidate */
+  }
+}
+---
+
+<a class="bq-pill" href="/changelog/">
+  bunqueue {version ? `v${version}` : ''} is here <span aria-hidden="true">→</span>
+</a>

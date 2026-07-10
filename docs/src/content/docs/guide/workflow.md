@@ -12,14 +12,29 @@ head:
       content: "workflow engine, orchestration, saga pattern, compensation, branching, parallel steps, step retry, exponential backoff, nested workflow, sub-workflow, signal timeout, observability, cleanup, archival, human in the loop, step functions, temporal alternative, inngest alternative, bun workflow, typescript workflow, multi-step process, approval workflow, pipeline orchestration, loops, doUntil, doWhile, forEach, map, schema validation, subscribe, zod, crash recovery, type-safe"
 ---
 
-Orchestrate multi-step business processes with a fluent, chainable DSL. Saga compensation, step retry with exponential backoff, parallel execution, conditional branching, nested sub-workflows, human-in-the-loop signals with timeout, loop control flow (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, crash recovery, type-safe step chaining, typed observability events, and cleanup/archival — all built on top of bunqueue's Queue and Worker. No new infrastructure, no external services, no YAML.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · workflow</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Multi-step, with a <em>rollback plan.</em></h1>
+  <p class="bq-hero-sub">Orchestrate multi-step business processes with a fluent, chainable TypeScript DSL: saga compensation, step retry with exponential backoff, parallel execution, branching, nested sub-workflows, human-in-the-loop signals, loops, schema validation, and crash recovery, all built on bunqueue's Queue and Worker. No new infrastructure, no external services, no YAML.</p>
 
-```
-validate ──→ reserve stock ──→ charge payment ──→ send confirmation
-                  ↑                    ↑
-            compensate:           compensate:
-            release stock         refund payment
-```
+  <div class="bq-proof">
+    <span><b>0</b> extra services, SQLite is embedded</span>
+    <span><b>11</b> typed observability events</span>
+    <span><b>3</b> retry attempts per step by default</span>
+  </div>
+</div>
+
+<div class="bq-diag">
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">validate</div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">reserve stock <i>compensate: release stock</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">charge payment <i>compensate: refund payment</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">send confirmation</div>
+  </div>
+</div>
 
 ## bunqueue vs Competitors
 
@@ -49,17 +64,17 @@ validate ──→ reserve stock ──→ charge payment ──→ send confirm
 
 ### Why bunqueue?
 
-- **Zero infrastructure.** Temporal needs PostgreSQL + 7 services. Trigger.dev needs Redis + PostgreSQL. bunqueue needs nothing — SQLite is embedded.
+- **Zero infrastructure.** Temporal needs PostgreSQL + 7 services. Trigger.dev needs Redis + PostgreSQL. bunqueue needs nothing, SQLite is embedded.
 - **Saga pattern is first-class.** Every competitor requires you to implement compensation manually. bunqueue runs compensate handlers in reverse order automatically.
 - **TypeScript-native DSL.** No decorators (Temporal), no wrapper functions (Inngest). Just `.step().step().branch().step()`.
 - **Same process, same codebase.** No separate worker infrastructure, no deployment pipeline for workflow definitions. It's a library, not a platform.
 
 ### When to use something else
 
-- **Multi-region HA with automatic failover** — Use Temporal
-- **Serverless-first with zero ops** — Use Inngest
-- **Already running Redis with BullMQ** — Use BullMQ FlowProducer for simple parent-child chains
-- **Guaranteed exactly-once across restarts** — bunqueue's `engine.recover()` provides at-most-once crash recovery (re-enqueues orphaned executions, re-arms signal timeouts). For guaranteed exactly-once execution with distributed coordination, use Temporal
+- **Multi-region HA with automatic failover**, Use Temporal
+- **Serverless-first with zero ops**, Use Inngest
+- **Already running Redis with BullMQ**, Use BullMQ FlowProducer for simple parent-child chains
+- **Guaranteed exactly-once across restarts**, bunqueue's `engine.recover()` provides at-most-once crash recovery (re-enqueues orphaned executions, re-arms signal timeouts). For guaranteed exactly-once execution with distributed coordination, use Temporal
 
 ## Quick Start
 
@@ -119,7 +134,7 @@ The Engine supports both **embedded** and **TCP** modes. Pass `connection: { por
 
 ### Steps
 
-Steps are the building blocks. Each step receives a context with the workflow input and all previous step results. When you provide a type parameter to `Workflow<TInput>`, all steps get full type inference — no casting needed:
+Steps are the building blocks. Each step receives a context with the workflow input and all previous step results. When you provide a type parameter to `Workflow<TInput>`, all steps get full type inference, no casting needed:
 
 ```typescript
 const flow = new Workflow<{ source: string }>('data-pipeline')
@@ -152,12 +167,12 @@ const flow = new Workflow<{ source: string }>('data-pipeline')
 Every step **must return a value** (or `undefined`). The return value becomes available to subsequent steps via `ctx.steps.stepName` (or `ctx.steps['step-name']` for hyphenated names).
 
 :::tip[Type-Safe Steps]
-Pass a type parameter to `Workflow<TInput>` to get full type inference. Each `.step()` return type is tracked automatically — subsequent steps see the accumulated types without any `as` casts. See [Type-Safe Steps](#type-safe-steps) for details.
+Pass a type parameter to `Workflow<TInput>` to get full type inference. Each `.step()` return type is tracked automatically, subsequent steps see the accumulated types without any `as` casts. See [Type-Safe Steps](#type-safe-steps) for details.
 :::
 
 ### Compensation (Saga Pattern)
 
-When a step fails, compensation handlers run **in reverse order** for all previously completed steps. This implements the [saga pattern](https://microservices.io/patterns/data/saga.html) — the industry-standard approach for distributed transactions without two-phase commit.
+When a step fails, compensation handlers run **in reverse order** for all previously completed steps. This implements the [saga pattern](https://microservices.io/patterns/data/saga.html), the industry-standard approach for distributed transactions without two-phase commit.
 
 ```typescript
 const flow = new Workflow('money-transfer')
@@ -200,10 +215,10 @@ const flow = new Workflow('money-transfer')
 3. Engine runs compensation for B, then A (reverse order)
 4. Execution state becomes `'failed'`
 
-Compensation is **best-effort** — if a compensate handler itself throws, the error is logged but the remaining compensations still run.
+Compensation is **best-effort**, if a compensate handler itself throws, the error is logged but the remaining compensations still run.
 
 :::caution[Make compensations idempotent]
-The engine does not track whether a compensation has already run. If the process crashes during compensation, restarting may re-run handlers that already completed. Always design compensate handlers to be idempotent — e.g., check if a refund already exists before issuing a new one.
+The engine does not track whether a compensation has already run. If the process crashes during compensation, restarting may re-run handlers that already completed. Always design compensate handlers to be idempotent, e.g., check if a refund already exists before issuing a new one.
 :::
 
 :::note
@@ -308,7 +323,7 @@ await engine.signal(run.id, 'editorial-review', {
 **Key behaviors:**
 
 - `waitFor('event')` transitions the execution to `state: 'waiting'`
-- The execution is persisted to SQLite — it survives process restarts. Call `engine.recover()` on startup to re-enqueue orphaned `running` executions and re-arm `waiting` timeouts
+- The execution is persisted to SQLite, it survives process restarts. Call `engine.recover()` on startup to re-enqueue orphaned `running` executions and re-arm `waiting` timeouts
 - `engine.signal(id, event, payload)` stores the payload and resumes execution
 - The signal data is available in `ctx.signals['event-name']`
 - You can have multiple `waitFor` calls in a single workflow (e.g., multi-stage approvals)
@@ -557,13 +572,13 @@ console.log(`Total archived: ${engine.getArchivedCount()}`);
 
 **Cleanup vs Archive:**
 
-- `cleanup(maxAgeMs, states?)` — **Permanently deletes** executions older than `maxAgeMs`
-- `archive(maxAgeMs, states?)` — **Moves** executions to a separate `workflow_executions_archive` table (transactional, up to 1000 per call)
+- `cleanup(maxAgeMs, states?)`, **Permanently deletes** executions older than `maxAgeMs`
+- `archive(maxAgeMs, states?)`, **Moves** executions to a separate `workflow_executions_archive` table (transactional, up to 1000 per call)
 - Both accept an optional `states` filter: `['completed']`, `['failed']`, `['completed', 'failed']`, etc.
 
 ### Type-Safe Steps
 
-The Workflow DSL uses a **generic accumulator pattern** to track step return types at compile time. Each `.step()` call returns a narrower type, so subsequent steps see exactly what previous steps returned — no `as` casts needed.
+The Workflow DSL uses a **generic accumulator pattern** to track step return types at compile time. Each `.step()` call returns a narrower type, so subsequent steps see exactly what previous steps returned, no `as` casts needed.
 
 ```typescript
 // With type parameter: full type inference
@@ -588,7 +603,7 @@ const flow = new Workflow<{ userId: string; email: string }>('onboarding')
 
 **How it works:**
 
-The `Workflow` class has two type parameters: `Workflow<TInput, TSteps>`. Each `.step()` call returns `Workflow<TInput, TSteps & Record<TName, Awaited<TResult>>>` — the step name and return type are added to `TSteps`. This means:
+The `Workflow` class has two type parameters: `Workflow<TInput, TSteps>`. Each `.step()` call returns `Workflow<TInput, TSteps & Record<TName, Awaited<TResult>>>`, the step name and return type are added to `TSteps`. This means:
 
 - `ctx.input` is typed as `TInput` (the type you pass to `Workflow<TInput>`)
 - `ctx.steps` accumulates all completed step results by name
@@ -613,7 +628,7 @@ const flow = new Workflow<{ items: string[] }>('typed-pipeline')
   });
 ```
 
-**Backward compatible:** If you don't pass a type parameter, `Workflow` defaults to `Workflow<unknown, {}>` and behaves exactly like before — you can still use `as` casts.
+**Backward compatible:** If you don't pass a type parameter, `Workflow` defaults to `Workflow<unknown, {}>` and behaves exactly like before, you can still use `as` casts.
 
 ### Crash Recovery
 
@@ -676,8 +691,8 @@ Recovery provides **at-most-once** execution. If a step partially committed (e.g
 
 Repeat a set of steps based on a condition. Two flavors:
 
-- **`doUntil(condition, builder, options?)`** — Runs steps first, then checks condition. Repeats until condition returns `true` (do...until semantics).
-- **`doWhile(condition, builder, options?)`** — Checks condition first, then runs steps. Repeats while condition returns `true` (while...do semantics).
+- **`doUntil(condition, builder, options?)`**, Runs steps first, then checks condition. Repeats until condition returns `true` (do...until semantics).
+- **`doWhile(condition, builder, options?)`**, Checks condition first, then runs steps. Repeats while condition returns `true` (while...do semantics).
 
 ```typescript
 // doUntil: retry sending until delivery confirmed
@@ -710,7 +725,7 @@ const batchFlow = new Workflow('batch')
 - `doWhile` can skip entirely if the condition is `false` on the first check
 - `doUntil` always runs at least once
 - `maxIterations` prevents infinite loops (default: 100)
-- Loop step results are overwritten each iteration — only the last iteration's result is available downstream
+- Loop step results are overwritten each iteration, only the last iteration's result is available downstream
 - Conditions can be async (return a `Promise<boolean>`)
 
 ### forEach
@@ -764,7 +779,7 @@ const flow = new Workflow('etl')
 ```
 
 **Key behaviors:**
-- Runs synchronously (no retry, no timeout) — it's a pure transform
+- Runs synchronously (no retry, no timeout), it's a pure transform
 - Result is stored under the map name (e.g., `ctx.steps['aggregate']`)
 - The transform function receives the full `StepContext` (input, steps, signals)
 
@@ -802,7 +817,7 @@ const flow = new Workflow('validated-order')
 **Key behaviors:**
 - `inputSchema` validates `ctx.input` **before** the step handler executes
 - `outputSchema` validates the handler's return value **after** execution
-- Uses duck typing: any object with a `.parse(data)` method works — no runtime dependency on Zod
+- Uses duck typing: any object with a `.parse(data)` method works, no runtime dependency on Zod
 - Validation failure throws an error (triggers retry or compensation like any other step failure)
 - Works with Zod, ArkType, Valibot, or any custom schema object
 
@@ -827,7 +842,7 @@ unsubscribe();
 ```
 
 **Key behaviors:**
-- Returns an `unsubscribe` function — call it to stop receiving events
+- Returns an `unsubscribe` function, call it to stop receiving events
 - Only receives events for the specified execution ID (filters automatically)
 - Receives all event types: `step:started`, `step:completed`, `step:failed`, `step:retry`, `workflow:*`, `signal:*`
 - Complements `engine.on()` / `engine.onAny()` which are global (all executions)
@@ -997,7 +1012,7 @@ const orderFlow = new Workflow<{ orderId: string; items: Item[]; amount: number 
 - If `process-payment` fails after 5 retries → `reserve-inventory` compensation runs (items released)
 - If `create-shipment` fails → `process-payment` compensation runs (refund), then `reserve-inventory` compensation runs (items released)
 - If any parallel notification step fails → full rollback: refund payment, release inventory
-- The `parallel()` block sends email, notifies warehouse, and tracks analytics concurrently — much faster than sequential
+- The `parallel()` block sends email, notifies warehouse, and tracks analytics concurrently, much faster than sequential
 
 ### CI/CD Deployment Pipeline with Approval Gate
 
@@ -1088,7 +1103,7 @@ await engine.signal(run.id, 'production-approval', {
 
 ### KYC Onboarding with Risk-Based Branching
 
-Different verification paths based on risk scoring — low-risk users get auto-approved, medium-risk need document upload, high-risk go to manual compliance review:
+Different verification paths based on risk scoring, low-risk users get auto-approved, medium-risk need document upload, high-risk go to manual compliance review:
 
 ```typescript
 const kycFlow = new Workflow('kyc-onboarding')
@@ -1344,41 +1359,44 @@ const deployFlow = new Workflow<{ deployId: string }>('wait-deploy')
 
 The workflow engine is a **pure consumer layer** built on top of bunqueue. Zero modifications to the core engine.
 
-```
-Workflow DSL (.step / .branch / .waitFor)
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Engine                                                          │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Executor                                                │    │
-│  │  • Resolves current node (step/branch/parallel/waitFor/  │    │
-│  │    doUntil/doWhile/forEach/map)                          │    │
-│  │  • Runs step handler with timeout + retry (backoff)      │    │
-│  │  • Schema validation (inputSchema/outputSchema)          │    │
-│  │  • Evaluates branch condition, picks path                │    │
-│  │  • Runs parallel steps via Promise.allSettled             │    │
-│  │  • Executes loops (doUntil/doWhile) with maxIterations   │    │
-│  │  • forEach: iterates items with indexed step names       │    │
-│  │  • map: synchronous data transforms                      │    │
-│  │  • Checks signal availability + timeout for waitFor      │    │
-│  │  • Dispatches sub-workflows, polls until complete         │    │
-│  │  • Runs compensation in reverse on failure               │    │
-│  └──────────────────┬──────────────────────────────────────┘    │
-│                      │                                           │
-│  ┌──────────────────┼──────────────────────────────────────┐    │
-│  │                   │                                      │    │
-│  │  ┌────────┐  ┌───▼────┐  ┌───────────────────────┐     │    │
-│  │  │ Queue  │  │ Worker │  │ Store (SQLite)         │     │    │
-│  │  │__wf:   │  │ pulls  │  │ workflow_executions    │     │    │
-│  │  │steps   │──│ & runs │──│ table: id, state,      │     │    │
-│  │  │        │  │ steps  │  │ input, steps, signals  │     │    │
-│  │  └────────┘  └────────┘  └───────────────────────┘     │    │
-│  │  bunqueue internals (Queue + Worker + SQLite)           │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-layer">Workflow DSL <i>.step / .branch / .waitFor</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">Engine</span>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">Executor</span>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">Resolves current node <i>step, branch, parallel, waitFor, doUntil, doWhile, forEach, map</i></div>
+        <div class="bq-diag-cell">Runs step handler <i>timeout + retry with backoff</i></div>
+        <div class="bq-diag-cell">Schema validation <i>inputSchema / outputSchema</i></div>
+      </div>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">Evaluates branch condition <i>picks path</i></div>
+        <div class="bq-diag-cell">Runs parallel steps <i>via Promise.allSettled</i></div>
+        <div class="bq-diag-cell">Executes loops <i>doUntil / doWhile, maxIterations</i></div>
+      </div>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">forEach <i>iterates items, indexed step names</i></div>
+        <div class="bq-diag-cell">map <i>synchronous data transforms</i></div>
+        <div class="bq-diag-cell">waitFor <i>checks signal availability + timeout</i></div>
+      </div>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">Dispatches sub-workflows <i>polls until complete</i></div>
+        <div class="bq-diag-cell">Compensation <i>runs in reverse on failure</i></div>
+      </div>
+    </div>
+    <div class="bq-diag-arrow">↓</div>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">bunqueue internals, Queue + Worker + SQLite</span>
+      <div class="bq-diag-row">
+        <div class="bq-diag-cell">Queue <i><code>__wf:steps</code></i></div>
+        <div class="bq-diag-cell">Worker <i>pulls and runs steps</i></div>
+        <div class="bq-diag-cell bq-diag-accent">Store, SQLite <i>workflow_executions table: id, state, input, steps, signals</i></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 **Execution flow:**
 
@@ -1403,17 +1421,17 @@ Before using the workflow engine in production, be aware of these trade-offs:
 
 | Limitation | Details |
 |---|---|
-| **Single-instance only** | The workflow engine runs in-process. There is no distributed coordination — you cannot run multiple engine instances on the same database. |
+| **Single-instance only** | The workflow engine runs in-process. There is no distributed coordination, you cannot run multiple engine instances on the same database. |
 | **At-most-once execution** | `engine.recover()` re-enqueues orphaned executions, but steps are not idempotent by default. If a step partially commits (e.g., writes to an external API) and the process crashes before saving the result, the step will re-run on recovery. Design external-facing steps to be idempotent. |
 | **Compensation must be idempotent** | The engine doesn't track which compensations have already run. If the process crashes mid-compensation, `engine.recover()` re-runs compensation from the beginning. Always design compensate handlers to be idempotent. |
-| **Recovery requires manual call** | `engine.recover()` must be called explicitly on startup — there is no automatic crash detection. Call it after registering all workflows and before starting new executions. |
+| **Recovery requires manual call** | `engine.recover()` must be called explicitly on startup, there is no automatic crash detection. Call it after registering all workflows and before starting new executions. |
 | **Sub-workflow 300s timeout** | Sub-workflows have a hardcoded 5-minute timeout (not configurable). Long-running child workflows will fail the parent. |
 | **listExecutions returns max 100** | `engine.listExecutions()` is capped at 100 results with no pagination support. For larger datasets, query the SQLite store directly. |
 
 ## Next Steps
 
-- [Simple Mode](/guide/simple-mode/) — All-in-one Queue + Worker for simpler use cases
-- [Queue API](/guide/queue/) — Low-level queue operations
-- [Flow Producer](/guide/flow/) — Parent-child job dependencies (simpler than workflows)
-- [MCP Server](/guide/mcp/) — Let AI agents orchestrate workflows via natural language
-- [Examples](/examples/) — More code recipes
+- [Simple Mode](/guide/simple-mode/), All-in-one Queue + Worker for simpler use cases
+- [Queue API](/guide/queue/), Low-level queue operations
+- [Flow Producer](/guide/flow/), Parent-child job dependencies (simpler than workflows)
+- [MCP Server](/guide/mcp/), Let AI agents orchestrate workflows via natural language
+- [Examples](/examples/), More code recipes

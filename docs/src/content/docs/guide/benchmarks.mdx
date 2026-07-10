@@ -1,6 +1,7 @@
 ---
 title: "Bunqueue Performance Benchmarks: 630K Ops/Sec on Bun"
 description: Bunqueue benchmarks show up to 630K ops/sec bulk push embedded, 90K ops/sec TCP. Real-world throughput tests at 1K to 50K job scales on Bun runtime.
+template: splash
 head:
   - tag: meta
     attrs:
@@ -8,192 +9,220 @@ head:
       content: https://bunqueue.dev/og/benchmarks.png
 ---
 
-import { Tabs, TabItem, Card, CardGrid, Aside, Code } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import BqIcon from '@components/BqIcon.astro';
 
-bunqueue supports two deployment modes: **Embedded** (direct SQLite) and **TCP** (network + SQLite). This page shows real benchmark results comparing both modes at scale.
+<div class="bq-wrap bq-hero bq-bench-hero">
+  <span class="bq-eyebrow">benchmarks</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Measured,<br/>not <em>marketed.</em></h1>
+  <p class="bq-hero-sub">Every figure on this page is the median of 3 runs of a script you can run yourself, on hardware we name, with methodology we publish, including the numbers that don't flatter us.</p>
 
-<Aside type="tip">
-The only honest benchmark is one you run on your own hardware. Clone the repo and run `bun run bench/comprehensive.ts` to verify these results. Every figure below is the **median of 3 runs** of that exact script on an Apple M1 Max (Bun 1.3.14); single runs vary ±10–20%, so re-run a few times.
-</Aside>
-
-## Summary
-
-<CardGrid>
-  <Card title="Embedded Mode" icon="rocket">
-    **Up to 630K ops/sec**
-
-    Bulk push, direct SQLite access, zero network overhead
-  </Card>
-  <Card title="TCP Mode" icon="laptop">
-    **Up to 90K ops/sec**
-
-    Push/bulk over the network for distributed systems
-  </Card>
-  <Card title="Embedded Advantage" icon="star">
-    **Up to ~9x Faster**
-
-    On bulk push (1.2–2.7x on single push); no per-pull network round-trip
-  </Card>
-  <Card title="Scale Tested" icon="open-book">
-    **50,000 Jobs**
-
-    Verified at multiple scales
-  </Card>
-</CardGrid>
-
----
-
-## Install Footprint
-
-Throughput isn't the only number that shrank. A clean `bun add bunqueue` is a featherweight install — re-measured on 2.8.24:
-
-| Metric | bunqueue 2.8.24 | Before (2.7.x) | Change |
-|--------|----------------|----------------|--------|
-| `node_modules` size | 5.5 MB | 93 MB | **−94%** |
-| packages installed | 7 | 117 | **117 → 7** |
-| cold install time | ~1.7 s | ~6 s | **~3.5× faster** |
-
-bunqueue ships just **2 runtime dependencies** — `croner` (cron parsing) and `msgpackr` (binary serialization). SQLite, S3, HTTP, and WebSocket are all built into Bun, so there's nothing else to download. The MCP server's `@modelcontextprotocol/sdk` is an **optional peer dependency**: queue and worker users never pull it in, and you install it once only if you run `bunqueue-mcp`.
-
-<Aside>
-The 2.8.0/2.8.1 MCP refactor removed the SDK, `zod`, and the HTTP stack from the install path; 2.8.2 dropped 2.8 MB of unusable sourcemaps from the published package. A new user goes from ~6s to ~1.2s on a cold install.
-</Aside>
-
----
-
-## Embedded Mode Results
-
-Embedded mode uses direct SQLite access with no network overhead. Ideal for single-process applications.
-
-<div style={{ textAlign: 'center', margin: '2rem 0' }}>
-  <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[40424,130026,184251,241825],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[153206,371672,630568,591254],backgroundColor:'rgba(168,85,247,0.85)'},{label:'Process',data:[29856,67288,82110,86893],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
-    alt="Embedded mode throughput chart"
-    style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-  />
+  <div class="bq-proof">
+    <span><b>630K</b> ops/sec bulk push, embedded</span>
+    <span><b>90K</b> ops/sec push over TCP</span>
+    <span><b>3.5x</b> BullMQ bulk throughput</span>
+    <span><b>5.5 MB</b> install, 2 runtime deps</span>
+  </div>
 </div>
 
-| Scale | Push | Bulk Push | Process |
-|-------|------|-----------|---------|
-| **1,000** | 40,424 ops/sec | 153,206 ops/sec | 29,856 ops/sec |
-| **5,000** | 130,026 ops/sec | 371,672 ops/sec | 67,288 ops/sec |
-| **10,000** | 184,251 ops/sec | 630,568 ops/sec | 82,110 ops/sec |
-| **50,000** | 241,825 ops/sec | 591,254 ops/sec | 86,893 ops/sec |
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">vs bullmq + redis</span>
+  <h2 class="bq-h2">Same workload, no Redis.</h2>
+  <p class="bq-lede">TCP mode against BullMQ 5.79.3 on Redis 8.8.0, identical payloads, 10,000 iterations, same machine. Single push is parity; batching is where the wire protocol pays off.</p>
 
-<Aside>
-Embedded mode scales cleanly: single push climbs to **242K ops/sec** and bulk push peaks around **631K ops/sec** at 10K jobs. The first (1K) row reflects cold-start/warmup; throughput stabilizes from 5K up.
-</Aside>
-
----
-
-## TCP Mode Results
-
-TCP mode connects clients to a bunqueue server over the network. Required for distributed systems with multiple client processes.
-
-<div style={{ textAlign: 'center', margin: '2rem 0' }}>
-  <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K','5K','10K','50K'],datasets:[{label:'Push',data:[33209,56537,71242,90147],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[34470,61293,70739,76384],backgroundColor:'rgba(168,85,247,0.85)'}]},options:{plugins:{title:{display:true,text:'TCP Mode Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{title:{display:true,text:'Job Count'},grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
-    alt="TCP mode throughput chart"
-    style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-  />
+  <div class="bq-chart-grid">
+    <div class="bq-chart">
+      <p class="bq-chart-title">Bulk push, 100-job batches <span>ops/sec, higher is better</span></p>
+      <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">85,700</span></div>
+      <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:29%"></div></div><span class="bq-hval">24,800</span></div>
+      <p class="bq-chart-note"><b>3.5x faster</b></p>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Bulk push p99 latency <span>ms, lower is better</span></p>
+      <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:57%"></div></div><span class="bq-hval">6.3 ms</span></div>
+      <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">11.1 ms</span></div>
+      <p class="bq-chart-note"><b>1.8x lower</b></p>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Single push <span>ops/sec, higher is better</span></p>
+      <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:93%"></div></div><span class="bq-hval">52,756</span></div>
+      <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">56,736</span></div>
+      <p class="bq-chart-note">parity, batching is the difference, not raw push</p>
+    </div>
+  </div>
+  <p class="bq-chart-foot">measured 2026-07-08 · Apple M1 Max, 32 GB · Bun 1.3.14 · TCP mode · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">bench/comparison/run.ts</a></p>
 </div>
 
-| Scale | Push¹ | Bulk Push | Process (1 worker, c=10) |
-|-------|------|-----------|---------|
-| **1,000** | 33,209 ops/sec | 34,470 ops/sec | 173 ops/sec |
-| **5,000** | 56,537 ops/sec | 61,293 ops/sec | 175 ops/sec |
-| **10,000** | 71,242 ops/sec | 70,739 ops/sec | 176 ops/sec |
-| **50,000** | 90,147 ops/sec | 76,384 ops/sec | 184 ops/sec |
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">embedded mode</span>
+  <h2 class="bq-h2">Direct SQLite, no network.</h2>
+  <p class="bq-lede">The queue runs inside your process, so a push is a function call plus a WAL write. Ideal for single-process apps, CLIs, edge and serverless.</p>
 
-<Aside>
-¹ The TCP **Push** column issues jobs in **batches of 100 concurrent `add()` calls** (auto-batched into `PUSHB` frames on the wire), not one awaited add at a time — a single *sequential* awaited `add()` over TCP is ~10K ops/sec (one round-trip per job). It scales to **90K ops/sec** at 50K jobs; bulk push (`addBulk`) peaks around **76K ops/sec**, both amortized with connection pooling (32 connections).
-</Aside>
+  <div class="bq-chart-grid">
+    <div class="bq-chart">
+      <p class="bq-chart-title">Push <span>ops/sec by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:17%"></div></div><span class="bq-hval">40,424</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:54%"></div></div><span class="bq-hval">130,026</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:76%"></div></div><span class="bq-hval">184,251</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">241,825</span></div>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Bulk push <span>ops/sec by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:24%"></div></div><span class="bq-hval">153,206</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:59%"></div></div><span class="bq-hval">371,672</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">630,568</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:94%"></div></div><span class="bq-hval">591,254</span></div>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Process <span>ops/sec by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:34%"></div></div><span class="bq-hval">29,856</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:77%"></div></div><span class="bq-hval">67,288</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:94%"></div></div><span class="bq-hval">82,110</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">86,893</span></div>
+    </div>
+  </div>
 
-<Aside type="caution">
-**Read the Process column carefully.** It measures a *single* worker process at `concurrency: 10` draining the queue over the network. Each job's lock lease is bounded by the worker's free concurrency slots (the over‑pull guard), so in steady state the worker issues roughly one pull round‑trip per freed slot — the per‑job network latency, not server throughput, is the bottleneck. Throughput therefore scales with worker concurrency and the number of worker processes, **not** with queue depth (median of 3, 5K jobs):
-
-| Worker concurrency | TCP process (ops/sec) |
-|--------------------|-----------------------|
-| 10 (default in the bench) | ~182 |
-| 50 | ~4,900 |
-| 100 | ~4,500 |
-
-Real distributed deployments run many workers and/or higher concurrency, so per‑node processing throughput is in the thousands of ops/sec; for maximum single‑process throughput use **embedded mode** (no network round‑trip per pull). Earlier versions of this page reported much higher single‑worker TCP process numbers that predate the lease‑bounding correctness fix and no longer reproduce.
-</Aside>
-
----
-
-## Embedded vs TCP Comparison
-
-How much faster is Embedded mode compared to TCP mode?
-
-<div style={{ textAlign: 'center', margin: '2rem 0' }}>
-  <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['1K Jobs','5K Jobs','10K Jobs','50K Jobs'],datasets:[{label:'Push',data:[1.2,2.3,2.6,2.7],backgroundColor:'rgba(236,72,153,0.85)'},{label:'Bulk Push',data:[4.4,6.1,8.9,7.7],backgroundColor:'rgba(168,85,247,0.85)'}]},options:{plugins:{title:{display:true,text:'Embedded vs TCP Speedup — Push & Bulk (times faster)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Speedup (x times)'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=650&height=400&backgroundColor=white"
-    alt="Embedded vs TCP comparison chart"
-    style={{ maxWidth: '650px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-  />
+  <Aside>
+  Embedded mode scales cleanly: single push climbs to **242K ops/sec** and bulk push peaks around **631K ops/sec** at 10K jobs. The 1K row reflects cold-start/warmup; throughput stabilizes from 5K up.
+  </Aside>
 </div>
 
-| Scale | Push | Bulk Push |
-|-------|------|-----------|
-| **1,000** | 1.2x faster | 4.4x faster |
-| **5,000** | 2.3x faster | 6.1x faster |
-| **10,000** | 2.6x faster | 8.9x faster |
-| **50,000** | 2.7x faster | 7.7x faster |
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">tcp mode</span>
+  <h2 class="bq-h2">Over the wire, for distributed systems.</h2>
+  <p class="bq-lede">Clients connect to a bunqueue server over TCP with msgpack framing and a 32-connection pool. Required when producers and workers are separate processes.</p>
 
-<Aside type="tip">
-For **push/bulk**, embedded is **1.2–8.9x faster** than a single TCP worker — it skips the per-call network round-trip. **Process is intentionally omitted from this table:** the single-worker `concurrency:10` ratio (embedded ~87K vs TCP ~184 ops/sec) is a *pull-latency artifact* described in the caution box above, not a processing-engine difference. Compared fairly — embedded vs a TCP worker at `concurrency:50` (~4,900 ops/sec) — embedded is ~18x on the per-job loop, and most of that is the per-pull network round-trip, not the queue engine. Use embedded mode when your workers run in the same process as the queue.
-</Aside>
+  <div class="bq-chart-grid">
+    <div class="bq-chart">
+      <p class="bq-chart-title">Push, 100 concurrent adds <span>ops/sec by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:37%"></div></div><span class="bq-hval">33,209</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:63%"></div></div><span class="bq-hval">56,537</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:79%"></div></div><span class="bq-hval">71,242</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">90,147</span></div>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Bulk push <span>ops/sec by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:45%"></div></div><span class="bq-hval">34,470</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:80%"></div></div><span class="bq-hval">61,293</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:93%"></div></div><span class="bq-hval">70,739</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">76,384</span></div>
+    </div>
+  </div>
 
----
+  <Aside>
+  The TCP **Push** chart issues jobs in **batches of 100 concurrent `add()` calls** (auto-batched into `PUSHB` frames on the wire), not one awaited add at a time, a single *sequential* awaited `add()` over TCP is ~10K ops/sec (one round-trip per job).
+  </Aside>
 
-## Peak Performance Summary
+  <Aside type="caution">
+  **Read TCP processing numbers carefully.** The bench drains the queue with a *single* worker at `concurrency: 10`: each job's lock lease is bounded by the worker's free concurrency slots (the over-pull guard), so per-job network latency, not server throughput, is the bottleneck, and a single c=10 worker measures ~180 ops/sec. Throughput scales with worker concurrency and worker count, **not** queue depth (median of 3, 5K jobs):
 
-<div style={{ textAlign: 'center', margin: '2rem 0' }}>
-  <img
-    src="https://quickchart.io/chart?c={type:'bar',data:{labels:['Push','Bulk Push'],datasets:[{label:'Embedded',data:[241825,630568],backgroundColor:'rgba(236,72,153,0.85)'},{label:'TCP',data:[90147,76384],backgroundColor:'rgba(59,130,246,0.85)'}]},options:{plugins:{title:{display:true,text:'Peak Push Throughput (ops/sec)',font:{size:18,weight:'bold'}},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Operations/sec'},grid:{color:'rgba(0,0,0,0.1)'}},x:{grid:{display:false}}}}}&width=600&height=400&backgroundColor=white"
-    alt="Peak throughput comparison chart"
-    style={{ maxWidth: '600px', width: '100%', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-  />
+  | Worker concurrency | TCP process (ops/sec) |
+  |--------------------|-----------------------|
+  | 10 (bench default) | ~182 |
+  | 50 | ~4,900 |
+  | 100 | ~4,500 |
+
+  Real deployments run many workers and/or higher concurrency, so per-node processing sits in the thousands of ops/sec; for maximum single-process throughput use **embedded mode**. Earlier versions of this page reported much higher single-worker TCP process numbers that predate the lease-bounding correctness fix and no longer reproduce.
+  </Aside>
 </div>
 
-| Operation | Embedded Mode | TCP Mode |
-|-----------|--------------|----------|
-| **Push** (peak) | 241,825 ops/sec | 90,147 ops/sec |
-| **Bulk Push** (peak) | 630,568 ops/sec | 76,384 ops/sec |
-| **Process** (peak) | 86,893 ops/sec | ~4,900 ops/sec (c=50) |
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">embedded vs tcp</span>
+  <h2 class="bq-h2">What the network costs.</h2>
+  <p class="bq-lede">The same operations, embedded versus over TCP. Skipping the per-call round-trip is worth 1.2x to 2.7x on single push and 4.4x to 8.9x on bulk.</p>
 
----
+  <div class="bq-chart-grid bq-chart-grid-2">
+    <div class="bq-chart">
+      <p class="bq-chart-title">Push speedup <span>embedded ÷ TCP, by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:44%"></div></div><span class="bq-hval">1.2x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:85%"></div></div><span class="bq-hval">2.3x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:96%"></div></div><span class="bq-hval">2.6x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">2.7x</span></div>
+    </div>
+    <div class="bq-chart">
+      <p class="bq-chart-title">Bulk push speedup <span>embedded ÷ TCP, by job count</span></p>
+      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:49%"></div></div><span class="bq-hval">4.4x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:69%"></div></div><span class="bq-hval">6.1x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">8.9x</span></div>
+      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:87%"></div></div><span class="bq-hval">7.7x</span></div>
+    </div>
+  </div>
 
-## Benchmark Methodology
+  <div class="bq-chart" style="margin-top: 1rem;">
+    <p class="bq-chart-title">Peak throughput by mode <span>ops/sec, best scale per operation</span></p>
+    <div class="bq-hrow"><span class="bq-hname">Push · embedded</span><div class="bq-htrack"><div class="bq-hfill" style="width:38%"></div></div><span class="bq-hval">241,825</span></div>
+    <div class="bq-hrow"><span class="bq-hname">Push · TCP</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:14%"></div></div><span class="bq-hval">90,147</span></div>
+    <div class="bq-hrow"><span class="bq-hname">Bulk · embedded</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">630,568</span></div>
+    <div class="bq-hrow"><span class="bq-hname">Bulk · TCP</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:12%"></div></div><span class="bq-hval">76,384</span></div>
+  </div>
 
-The benchmark tests three operations at four different scales (1K, 5K, 10K, 50K jobs):
+  <Aside type="tip">
+  **Process is intentionally omitted from the speedup charts:** the single-worker `concurrency:10` ratio (embedded ~87K vs TCP ~184 ops/sec) is a *pull-latency artifact* described in the caution above, not a processing-engine difference. Compared fairly, embedded vs a TCP worker at `concurrency:50` (~4,900 ops/sec), embedded is ~18x on the per-job loop, and most of that is the per-pull network round-trip. Use embedded mode when your workers run in the same process as the queue.
+  </Aside>
+</div>
 
-### 1. Push Test
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">install footprint</span>
+  <h2 class="bq-h2">5.5 MB, seven packages.</h2>
+  <p class="bq-lede">Throughput isn't the only number that shrank. bunqueue ships <b>2 runtime dependencies</b>, <code>croner</code> and <code>msgpackr</code>. SQLite, S3, HTTP and WebSocket are built into Bun.</p>
 
-The two modes push **differently**, so the "Push" column is not the same operation across modes:
+  | Metric | bunqueue 2.8.24 | Before (2.7.x) | Change |
+  |--------|----------------|----------------|--------|
+  | `node_modules` size | 5.5 MB | 93 MB | **−94%** |
+  | packages installed | 7 | 117 | **117 → 7** |
+  | cold install time | ~1.7 s | ~6 s | **~3.5× faster** |
 
-- **Embedded** awaits each `add()` one at a time (true sequential single-job insertion):
+  <Aside>
+  The 2.8.0/2.8.1 MCP refactor removed the SDK, `zod`, and the HTTP stack from the install path; 2.8.2 dropped 2.8 MB of unusable sourcemaps from the published package. The MCP server's `@modelcontextprotocol/sdk` is an **optional peer dependency**: queue and worker users never pull it in.
+  </Aside>
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">dependency chains</span>
+  <h2 class="bq-h2">From polling to microseconds.</h2>
+  <p class="bq-lede">Jobs with dependencies (<code>dependsOn</code>, flows, parent-child workflows) resolve through event-driven microtask coalescing instead of a 100 ms polling loop.</p>
+
+  <div class="bq-proof" style="margin-top: 2rem;">
+    <span>single dep <b>~6,900x</b> faster</span>
+    <span>4-level chain <b>~9,800x</b> faster</span>
+    <span>fan-out 1→5 <b>~3,600x</b> faster</span>
+  </div>
+
+  | Scenario | Before P50 (polling) | After P50 (event-driven) | P99 after |
+  |----------|-----------|----------|-----------|
+  | **Single dep (A→B)** | 100.05 ms | 14.4 µs | 114.2 µs |
+  | **Chain dep (4 levels)** | 300.43 ms | 30.7 µs | 67.5 µs |
+  | **Fan-out (1→5)** | 100.11 ms | 27.7 µs | 141.2 µs |
+
+  <Aside type="tip">
+  Multi-step pipelines (ETL, workflows, map-reduce) resolve nearly instantly instead of waiting for polling intervals.
+  </Aside>
+
+```bash
+bun run src/benchmark/dependency-latency.bench.ts
+```
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">methodology</span>
+  <h2 class="bq-h2">How the numbers are made.</h2>
+  <p class="bq-lede">Three operations at four scales, 1K, 5K, 10K, 50K jobs, each cell the median of 3 runs. The two modes push differently, and we say so.</p>
+
+  **Push.** Embedded awaits each `add()` one at a time (true sequential insertion). TCP issues jobs in batches of 100 concurrent `add()` calls, which the client auto-batches into `PUSHB` frames, a single awaited `add()` over TCP is round-trip-bound at ~10K ops/sec:
 
 ```typescript
 for (let i = 0; i < scale; i++) {
-  await queue.add('job', PAYLOAD); // embedded
+  await queue.add('job', PAYLOAD); // embedded: sequential
 }
-```
 
-- **TCP** issues jobs in batches of 100 concurrent `add()` calls (which the client auto-batches into `PUSHB` frames), to exercise pipelining — a single awaited `add()` over TCP is round-trip-bound at ~10K ops/sec:
-
-```typescript
-for (let i = 0; i < scale; i += 100) {       // TCP
+for (let i = 0; i < scale; i += 100) { // TCP: 100 concurrent
   await Promise.all(
     Array.from({ length: 100 }, () => queue.add('job', PAYLOAD))
   );
 }
 ```
 
-### 2. Bulk Push Test
-Push jobs in batches of 100 to measure bulk insertion efficiency.
+  **Bulk push.** Batches of 100 through `addBulk`:
 
 ```typescript
 const jobs = Array.from({ length: 100 }, (_, i) => ({
@@ -206,11 +235,9 @@ for (let i = 0; i < scale / 100; i++) {
 }
 ```
 
-### 3. Process Test
-Push jobs in parallel batches of 500, then drain them with a **single worker at `concurrency: 10`** (one process, ten in-flight jobs — not ten worker processes). Over TCP this is bound by per-pull round-trip latency (see the caution box above); embedded has no such bound.
+  **Process.** Push in parallel batches of 500, then drain with a **single worker at `concurrency: 10`**, one process, ten in-flight jobs. Over TCP this is bound by per-pull round-trip latency (see the caution above); embedded has no such bound.
 
 ```typescript
-// Push in parallel batches
 for (let i = 0; i < scale; i += 500) {
   const promises = [];
   for (let j = 0; j < Math.min(500, scale - i); j++) {
@@ -219,222 +246,76 @@ for (let i = 0; i < scale; i += 500) {
   await Promise.all(promises);
 }
 
-// Wait for all to complete
 while (processed < scale) {
   await sleep(5);
 }
 ```
 
----
+  ### Environment
 
-## Run the Benchmark
+  Apple M1 Max (10 cores) · 32 GB RAM · SSD · macOS 26.5 · Bun 1.3.14 · 16 shards auto-detected · payload 111 bytes · 32-connection pool (TCP) · every cell the **median of 3 runs**. Single runs vary ±10 to 20% with warmup and background load; the 1K rows in particular reflect cold start.
+</div>
 
-The benchmark source code is available at [`bench/comprehensive.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comprehensive.ts).
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">reproduce</span>
+  <h2 class="bq-h2">Run it on your hardware.</h2>
+  <p class="bq-lede">The only honest benchmark is one you run yourself. The full script is <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comprehensive.ts"><code>bench/comprehensive.ts</code></a>.</p>
 
 ```bash
-# Clone the repository
 git clone https://github.com/egeominotti/bunqueue.git
-cd bunqueue
-bun install
+cd bunqueue && bun install
 
-# Start the bunqueue server (for TCP tests)
-bun run start &
+bun run start &                  # server, for the TCP half
+bun run bench/comprehensive.ts   # the numbers on this page
 
-# Run the comprehensive benchmark
-bun run bench/comprehensive.ts
-```
-
-### Expected Output
-
-```
-═══════════════════════════════════════════════════════════════
-         bunqueue Comprehensive Benchmark
-         Embedded vs TCP Mode
-═══════════════════════════════════════════════════════════════
-
-Scales: 1,000, 5,000, 10,000, 50,000 jobs
-Bulk size: 100
-Concurrency: 10
-Payload: 111 bytes
-
-✓ TCP server connected (port 6789)
-
-📦 EMBEDDED MODE (Direct SQLite)
-══════════════════════════════════════════════════
-
-🔄 Testing 1,000 jobs...
-  Push: 40,424 ops/sec
-  Bulk Push: 153,206 ops/sec
-  Process: 29,856 ops/sec
-
-...
-
-📊 EMBEDDED MODE RESULTS  (median of 3 runs)
-
-┌──────────┬────────────────┬────────────────┬────────────────┐
-│ Scale    │ Push (ops/s)   │ Bulk (ops/s)   │ Process (ops/s)│
-├──────────┼────────────────┼────────────────┼────────────────┤
-│    1,000 │       40,424   │      153,206   │       29,856   │
-│    5,000 │      130,026   │      371,672   │       67,288   │
-│   10,000 │      184,251   │      630,568   │       82,110   │
-│   50,000 │      241,825   │      591,254   │       86,893   │
-└──────────┴────────────────┴────────────────┴────────────────┘
-
-📈 EMBEDDED vs TCP (Embedded is X times faster)
-
-┌──────────┬────────────────┬────────────────┬────────────────┐
-│ Scale    │ Push           │ Bulk           │ Process†       │
-├──────────┼────────────────┼────────────────┼────────────────┤
-│    1,000 │         1.2x   │         4.4x   │       172.6x   │
-│    5,000 │         2.3x   │         6.1x   │       384.5x   │
-│   10,000 │         2.6x   │         8.9x   │       466.5x   │
-│   50,000 │         2.7x   │         7.7x   │       472.2x   │
-└──────────┴────────────────┴────────────────┴────────────────┘
-† Process ratio is a single-worker c=10 pull-latency artifact, not a
-  server-throughput difference — see the TCP Process note above.
-```
-
-<Aside>
-Run the benchmark **without** `BUNQUEUE_EMBEDDED=1` in the environment. That variable forces every queue/worker into embedded mode (it is used by the test preload), which would make the TCP half of the benchmark silently run in-process and report embedded numbers under a TCP label.
-</Aside>
-
----
-
-## When to Use Each Mode
-
-<CardGrid>
-  <Card title="Embedded Mode" icon="rocket">
-    **Best for single-process apps**
-
-    - Microservices
-    - CLI tools
-    - Edge functions
-    - Serverless
-  </Card>
-  <Card title="TCP Mode" icon="laptop">
-    **Best for distributed systems**
-
-    - Multiple worker processes
-    - Separate producer/consumer
-    - Horizontal scaling
-    - Remote workers
-  </Card>
-</CardGrid>
-
----
-
-## Why bunqueue is Fast
-
-<CardGrid>
-  <Card title="SQLite WAL Mode" icon="seti:db">
-    Concurrent reads/writes with memory-mapped I/O via Bun's native FFI bindings.
-  </Card>
-  <Card title="Auto Sharding" icon="puzzle">
-    Auto-detected from CPU cores (power of 2, max 64). Minimizes lock contention.
-  </Card>
-  <Card title="TCP Pipelining" icon="rocket">
-    Multiple commands in flight per connection with reqId-based response matching.
-  </Card>
-  <Card title="Efficient Structures" icon="seti:config">
-    4-ary MinHeap for O(log4 n) priority queues. Skip lists for temporal indexing. LRU caches.
-  </Card>
-</CardGrid>
-
----
-
-## Benchmark Environment
-
-**Hardware:**
-- Apple M1 Max (10 cores)
-- 32GB RAM
-- SSD storage
-
-**Software:**
-- macOS 26.5
-- Bun 1.3.14
-- bunqueue auto-detected 16 shards (10 CPU cores)
-
-**Configuration:**
-- Scales: 1,000, 5,000, 10,000, 50,000 jobs
-- Bulk size: 100 jobs per batch
-- Process test: 1 worker, concurrency 10
-- Payload: 111 bytes
-- Connection pool: 32 connections (TCP mode)
-- Reported value: **median of 3 runs** per cell
-
-Single-run numbers vary ±10–20% with warmup and background load; the 1K row in particular reflects cold start. Re-run on your own hardware to get figures you can trust.
-
----
-
-## Dependency Chain Latency
-
-Jobs with dependencies (`dependsOn`, `FlowProducer`, parent-child workflows) benefit from event-driven dependency resolution via microtask coalescing, replacing the previous 100ms polling interval.
-
-### Before (polling 100ms via setInterval)
-
-| Scenario | Avg | P50 | P95 | P99 |
-|----------|-----|-----|-----|-----|
-| **Single dep (A&rarr;B)** | 100.09ms | 100.05ms | 101.91ms | 103.90ms |
-| **Chain dep (4 levels)** | 300.83ms | 300.43ms | 304.19ms | 306.72ms |
-| **Fan-out (1&rarr;5)** | 100.21ms | 100.11ms | 101.88ms | 105.37ms |
-
-### After (event-driven via microtask)
-
-| Scenario | Avg | P50 | P95 | P99 |
-|----------|-----|-----|-----|-----|
-| **Single dep (A&rarr;B)** | 26.4&micro;s | 14.4&micro;s | 61.7&micro;s | 114.2&micro;s |
-| **Chain dep (4 levels)** | 32.5&micro;s | 30.7&micro;s | 47.0&micro;s | 67.5&micro;s |
-| **Fan-out (1&rarr;5)** | 36.6&micro;s | 27.7&micro;s | 48.1&micro;s | 141.2&micro;s |
-
-### Improvement
-
-| Scenario | Before P50 | After P50 | Speedup |
-|----------|-----------|----------|---------|
-| **Single dep (A&rarr;B)** | 100.05ms | 0.014ms | **~6,900x** |
-| **Chain (4 levels)** | 300.43ms | 0.031ms | **~9,800x** |
-| **Fan-out (1&rarr;5)** | 100.11ms | 0.028ms | **~3,600x** |
-
-<Aside type="tip">
-Dependency chain latency dropped from **hundreds of milliseconds** to **microseconds**. This means multi-step pipelines (ETL, workflows, map-reduce) resolve nearly instantly instead of waiting for polling intervals.
-</Aside>
-
-```bash
-# Run the dependency latency benchmark
-bun run src/benchmark/dependency-latency.bench.ts
-```
-
----
-
-## Other Benchmarks
-
-The repository includes additional specialized benchmarks:
-
-| Benchmark | Purpose | File |
-|-----------|---------|------|
-| **Comprehensive** | Embedded vs TCP at scale | [`bench/comprehensive.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comprehensive.ts) |
-| **BullMQ Comparison** | bunqueue vs BullMQ (Redis) | [`bench/comparison/run.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts) |
-| **Throughput** | Individual operation speeds | [`bench/throughput.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/throughput.bench.ts) |
-| **Worker** | Realistic worker simulation | [`bench/worker.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/worker.bench.ts) |
-| **Stress** | Production validation | [`bench/stress.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/stress.bench.ts) |
-| **Million Jobs** | High-volume integrity test | [`bench/million-jobs.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/million-jobs.bench.ts) |
-| **Dependency Latency** | Dependency chain resolution speed | [`src/benchmark/dependency-latency.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/src/benchmark/dependency-latency.bench.ts) |
-
-```bash
-# Run BullMQ comparison (requires Redis)
-redis-server --daemonize yes
-bun run start &
+redis-server --daemonize yes     # optional: BullMQ comparison
 bun run bench/comparison/run.ts
 ```
 
----
+  <Aside>
+  Run the benchmark **without** `BUNQUEUE_EMBEDDED=1` in the environment. That variable forces every queue/worker into embedded mode (it is used by the test preload), which would make the TCP half silently run in-process and report embedded numbers under a TCP label.
+  </Aside>
 
-## Submit Your Results
+  Other benchmarks in the repo: [`bench/throughput.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/throughput.bench.ts) (individual operations), [`bench/worker.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/worker.bench.ts) (realistic worker simulation), [`bench/stress.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/stress.bench.ts) (production validation), [`bench/million-jobs.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/million-jobs.bench.ts) (high-volume integrity).
 
-Run benchmarks on your hardware and share results via [GitHub Discussions](https://github.com/egeominotti/bunqueue/discussions).
+  Share your results, CPU model, RAM, Bun version, OS, in [GitHub Discussions](https://github.com/egeominotti/bunqueue/discussions).
+</div>
 
-Include:
-- CPU model
-- RAM
-- Bun version
-- OS
-- Benchmark output
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">why it's fast</span>
+  <h2 class="bq-h2">No magic, four decisions.</h2>
+  <div class="bq-tools">
+    <div class="bq-tool">
+      <BqIcon name="file" />
+      <h3>SQLite WAL mode</h3>
+      <p>Concurrent reads and writes with memory-mapped I/O through Bun's native SQLite bindings, no serialization layer between the queue and its store.</p>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="shards" />
+      <h3>Auto sharding</h3>
+      <p>Shard count auto-detected from CPU cores (power of 2, max 64). Queues hash to shards, so hot queues don't contend on one lock.</p>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="network" />
+      <h3>TCP pipelining</h3>
+      <p>Multiple commands in flight per connection with request-ID response matching, msgpack framing, and transparent client-side batching into <code>PUSHB</code>.</p>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="stack" />
+      <h3>Efficient structures</h3>
+      <p>4-ary min-heap for O(log₄ n) priority queues, skip lists for temporal indexing, LRU caches with hard memory bounds.</p>
+    </div>
+  </div>
+</div>
+
+<div class="bq-wrap bq-cta">
+  <h2 class="bq-h2">Verify it in a minute.</h2>
+  <p class="bq-lede" style="margin: 0 auto;">Install, push 10,000 jobs, watch them drain.</p>
+  <div class="bq-actions">
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">bun add bunqueue</button>
+    <a class="bq-btn" href="/guide/quickstart/">Read the quickstart</a>
+    <a class="bq-btn-ghost" href="/guide/comparison/">bunqueue vs BullMQ</a>
+  </div>
+</div>
+
+<script is:inline src="/bq-copy.js"></script>

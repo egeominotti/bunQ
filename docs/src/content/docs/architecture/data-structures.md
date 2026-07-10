@@ -8,9 +8,11 @@ head:
       content: https://bunqueue.dev/og-image.png
 ---
 
-# Data Structures
-
-bunqueue uses specialized data structures optimized for job queue operations.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">architecture · data structures</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Heaps, skip lists, <em>LRUs.</em></h1>
+  <p class="bq-hero-sub">bunqueue uses specialized data structures optimized for job queue operations: a 4-ary MinHeap, skip lists, LRU caches, FNV-1a hashing, and read-write locks.</p>
+</div>
 
 ## Overview
 
@@ -25,212 +27,193 @@ bunqueue uses specialized data structures optimized for job queue operations.
 
 Used for priority queues and cron scheduling.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  WHY 4-ARY VS BINARY?                        │
-│                                                              │
-│  Binary Heap:                                               │
-│  • Height: log₂(n) = 16 levels for 65k items               │
-│  • 2 children per node                                      │
-│  • More memory indirections                                 │
-│                                                              │
-│  4-ary Heap:                                                │
-│  • Height: log₄(n) = 8 levels for 65k items                │
-│  • 4 children per node                                      │
-│  • Children fit in cache line (64 bytes)                   │
-│  • Fewer cache misses                                       │
-│                                                              │
-│  Trade-off: 4 comparisons per level vs 2                   │
-│  Win: Better cache locality outweighs extra comparisons    │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Why 4-ary vs binary?</b><span>cache locality</span></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">Binary heap <i>height log₂(n) = 16 levels for 65k items, 2 children per node, more memory indirections</i></div>
+    <div class="bq-diag-cell bq-diag-accent">4-ary heap <i>height log₄(n) = 8 levels for 65k items, 4 children per node, children fit in cache line (64 bytes), fewer cache misses</i></div>
+  </div>
+  <p class="bq-diag-note">Trade-off: 4 comparisons per level vs 2. Win: better cache locality outweighs extra comparisons.</p>
+</div>
 
 ### Heap with Lazy Deletion
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  GENERATION TRACKING                         │
-│                                                              │
-│  Each entry has a generation number:                        │
-│  { jobId, priority, runAt, generation: 42n }               │
-│                                                              │
-│  Index maps jobId → { job, generation }                    │
-│                                                              │
-│  REMOVE:                                                    │
-│  └─ Delete from index (O(1))                               │
-│  └─ Heap entry becomes "stale"                             │
-│                                                              │
-│  POP:                                                       │
-│  └─ Loop: peek, check generation match                     │
-│     └─ Mismatch? Skip (stale entry)                        │
-│     └─ Match? Return job                                   │
-│                                                              │
-│  COMPACT (when stale ratio > 20%):                         │
-│  └─ Filter valid entries                                   │
-│  └─ Rebuild heap: O(n)                                     │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Generation tracking</b><span>lazy deletion</span></div>
+  <div class="bq-diag-layer">Each entry has a generation number <i>{ jobId, priority, runAt, generation: 42n }</i></div>
+  <div class="bq-diag-layer">Index maps jobId → { job, generation }</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell bq-diag-accent">REMOVE <i>delete from index O(1), heap entry becomes stale</i></div>
+    <div class="bq-diag-cell">POP <i>loop: peek, check generation match, mismatch: skip stale entry, match: return job</i></div>
+    <div class="bq-diag-cell">COMPACT, stale ratio &gt; 20% <i>filter valid entries, rebuild heap O(n)</i></div>
+  </div>
+</div>
 
 ## Skip List
 
 Used for temporal indexing and efficient range queries.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  SKIP LIST STRUCTURE                         │
-│                                                              │
-│  Level 3:  ─────────────────────► [50] ─────────────────►   │
-│  Level 2:  ─────► [25] ─────────► [50] ─────────► [75] ─►   │
-│  Level 1:  ─► [10] ─► [25] ─► [30] ─► [50] ─► [60] ─► [75]  │
-│  Level 0:  ─► [10] ─► [25] ─► [30] ─► [50] ─► [60] ─► [75]  │
-│                                                              │
-│  Properties:                                                │
-│  • Probabilistic level assignment (p=0.5)                  │
-│  • Expected height: O(log n)                               │
-│  • Simpler than balanced trees                             │
-│  • Good cache locality (sequential links)                  │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Skip list structure</b><span>sorted list with express lanes</span></div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">level 3</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell bq-diag-accent">50</div>
+      <div class="bq-diag-arrow">→</div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">level 2</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">25</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">50</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">75</div>
+      <div class="bq-diag-arrow">→</div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">level 1</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">10</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">25</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">30</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">50</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">60</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">75</div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">level 0</span>
+    <div class="bq-diag-flow">
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">10</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">25</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">30</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">50</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">60</div>
+      <div class="bq-diag-arrow">→</div>
+      <div class="bq-diag-cell">75</div>
+    </div>
+  </div>
+  <p class="bq-diag-note">Properties: probabilistic level assignment (p=0.5), expected height O(log n), simpler than balanced trees, good cache locality (sequential links).</p>
+</div>
 
 ### Range Queries
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  RANGE QUERY                                 │
-│                                                              │
-│  getOldJobs(threshold, limit):                              │
-│                                                              │
-│  1. Navigate to leftmost element: O(log n)                 │
-│  2. Walk forward at level 0: O(k)                          │
-│  3. Collect while createdAt < threshold                    │
-│                                                              │
-│  Total: O(log n + k) where k = results                     │
-│                                                              │
-│  Use case: Find jobs older than X for cleanup              │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Range query</b><span>getOldJobs(threshold, limit)</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">1. Navigate to leftmost element <i>O(log n)</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">2. Walk forward at level 0 <i>O(k)</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">3. Collect while createdAt &lt; threshold</div>
+  </div>
+  <p class="bq-diag-note">Total: O(log n + k) where k = results. Use case: find jobs older than X for cleanup.</p>
+</div>
 
 ## LRU Cache
 
 Used for job results, custom ID mapping, and logs.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  DOUBLY-LINKED LRU                           │
-│                                                              │
-│  Structure:                                                 │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │ Map<Key, Node> + Doubly-Linked List                 │   │
-│  │                                                      │   │
-│  │ HEAD (most recent) ◄──────────────────► TAIL (LRU)  │   │
-│  │   [A] ◄──► [B] ◄──► [C] ◄──► [D]                   │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                              │
-│  GET(key):                                                  │
-│  └─ Find in map: O(1)                                      │
-│  └─ Move to head: O(1) pointer updates                     │
-│                                                              │
-│  SET(key, value):                                          │
-│  └─ If at capacity: remove tail (evict LRU)               │
-│  └─ Add new node at head                                   │
-│                                                              │
-│  All operations: O(1)                                       │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Doubly-linked LRU</b><span>Map&lt;Key, Node&gt; plus doubly-linked list</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell bq-diag-accent">A <i>HEAD, most recent</i></div>
+    <div class="bq-diag-arrow">↔</div>
+    <div class="bq-diag-cell">B</div>
+    <div class="bq-diag-arrow">↔</div>
+    <div class="bq-diag-cell">C</div>
+    <div class="bq-diag-arrow">↔</div>
+    <div class="bq-diag-cell">D <i>TAIL, LRU</i></div>
+  </div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">GET(key) <i>find in map O(1), move to head, O(1) pointer updates</i></div>
+    <div class="bq-diag-cell">SET(key, value) <i>if at capacity remove tail, evict LRU, add new node at head</i></div>
+  </div>
+  <p class="bq-diag-note">All operations: O(1).</p>
+</div>
 
 ### Memory Bounds
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  BOUNDED COLLECTIONS                         │
-│                                                              │
-│  Collection        │ Max Size │ Eviction                   │
-│  ──────────────────┼──────────┼───────────────────────────│
-│  completedJobs     │ 50,000   │ FIFO batch (10%)          │
-│  jobResults        │ 5,000    │ LRU                       │
-│  jobLogs           │ 10,000   │ LRU                       │
-│  customIdMap       │ 50,000   │ LRU                       │
-│  DLQ per queue     │ 10,000   │ FIFO                      │
-│                                                              │
-│  BoundedSet (FIFO):                                        │
-│  └─ No recency tracking (faster)                           │
-│  └─ Batch eviction: remove 10% when full                  │
-│  └─ Amortized cost across many operations                  │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Bounded collections</b><span>max size, eviction</span></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell bq-diag-accent">completedJobs <i>50,000, FIFO batch (10%)</i></div>
+    <div class="bq-diag-cell">jobResults <i>5,000, LRU</i></div>
+    <div class="bq-diag-cell">jobLogs <i>10,000, LRU</i></div>
+    <div class="bq-diag-cell">customIdMap <i>50,000, LRU</i></div>
+    <div class="bq-diag-cell">DLQ per queue <i>10,000, FIFO</i></div>
+  </div>
+  <p class="bq-diag-note">BoundedSet (FIFO): no recency tracking (faster), batch eviction removes 10% when full, amortized cost across many operations.</p>
+</div>
 
 ## Hash Function (FNV-1a)
 
 Used for sharding and distribution.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  FNV-1a HASH                                 │
-│                                                              │
-│  Algorithm:                                                 │
-│  hash = FNV_OFFSET (0x811c9dc5)                            │
-│  for each byte:                                             │
-│    hash = hash XOR byte                                    │
-│    hash = hash * FNV_PRIME (0x01000193)                    │
-│  return hash as unsigned 32-bit                            │
-│                                                              │
-│  Properties:                                                │
-│  • Fast: ~10-15 CPU cycles per character                  │
-│  • Good distribution                                        │
-│  • Deterministic                                            │
-│  • Non-cryptographic (speed over security)                 │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>FNV-1a hash</b><span>algorithm</span></div>
+  <div class="bq-diag-flow">
+    <div class="bq-diag-cell">hash = FNV_OFFSET <i>0x811c9dc5</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell bq-diag-accent">for each byte: hash = hash XOR byte, hash = hash * FNV_PRIME <i>0x01000193</i></div>
+    <div class="bq-diag-arrow">→</div>
+    <div class="bq-diag-cell">return hash <i>unsigned 32-bit</i></div>
+  </div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">Fast <i>~10-15 CPU cycles per character</i></div>
+    <div class="bq-diag-cell">Good distribution</div>
+    <div class="bq-diag-cell">Deterministic</div>
+    <div class="bq-diag-cell">Non-cryptographic <i>speed over security</i></div>
+  </div>
+</div>
 
 ### Sharding
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  SHARD SELECTION                             │
-│                                                              │
-│  shardIndex = fnv1aHash(queueName) & SHARD_MASK            │
-│                                                              │
-│  SHARD_COUNT = auto-detected from CPU cores (power of 2)   │
-│  SHARD_MASK = SHARD_COUNT - 1                              │
-│                                                              │
-│  Examples:                                                  │
-│  • 4 cores  → SHARD_COUNT=4,  SHARD_MASK=0x03 (binary: 11) │
-│  • 10 cores → SHARD_COUNT=16, SHARD_MASK=0x0f (binary: 1111)│
-│  • 20 cores → SHARD_COUNT=32, SHARD_MASK=0x1f (binary: 11111)│
-│  • 64+ cores → SHARD_COUNT=64 (capped)                      │
-│                                                              │
-│  Why bitwise AND?                                          │
-│  • 3-5x faster than modulo                                 │
-│  • Requires power-of-2 shard count                         │
-│  • hash & SHARD_MASK equivalent to hash % SHARD_COUNT      │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Shard selection</b><span><code>shardIndex = fnv1aHash(queueName) &amp; SHARD_MASK</code></span></div>
+  <div class="bq-diag-layer bq-diag-accent">SHARD_COUNT auto-detected from CPU cores, power of 2, SHARD_MASK = SHARD_COUNT - 1</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">4 cores <i>SHARD_COUNT=4, SHARD_MASK=0x03, binary 11</i></div>
+    <div class="bq-diag-cell">10 cores <i>SHARD_COUNT=16, SHARD_MASK=0x0f, binary 1111</i></div>
+    <div class="bq-diag-cell">20 cores <i>SHARD_COUNT=32, SHARD_MASK=0x1f, binary 11111</i></div>
+    <div class="bq-diag-cell">64+ cores <i>SHARD_COUNT=64, capped</i></div>
+  </div>
+  <p class="bq-diag-note">Why bitwise AND? 3-5x faster than modulo, requires power-of-2 shard count, <code>hash &amp; SHARD_MASK</code> is equivalent to <code>hash % SHARD_COUNT</code>.</p>
+</div>
 
 ## Lock Structures
 
 ### RWLock (Read-Write Lock)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  READ-WRITE LOCK                             │
-│                                                              │
-│  Allows:                                                    │
-│  • Multiple concurrent readers                              │
-│  • Single exclusive writer                                  │
-│  • Writer priority (prevents starvation)                   │
-│                                                              │
-│  Fast Path (uncontested write):                            │
-│  if (!writer && readers === 0) {                           │
-│    writer = true;                                          │
-│    return guard;  // Synchronous, no Promise               │
-│  }                                                          │
-│                                                              │
-│  Timeout Cancellation:                                      │
-│  └─ Mark entry as cancelled (O(1))                         │
-│  └─ Skip cancelled entries on release                      │
-│  └─ No O(n) array splice                                   │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Read-write lock</b><span>RWLock</span></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">Multiple concurrent readers</div>
+    <div class="bq-diag-cell">Single exclusive writer</div>
+    <div class="bq-diag-cell">Writer priority <i>prevents starvation</i></div>
+  </div>
+  <div class="bq-diag-layer bq-diag-accent">Fast path, uncontested write <i><code>if (!writer &amp;&amp; readers === 0) { writer = true; return guard; }</code>, synchronous, no Promise</i></div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">timeout cancellation</span>
+    <div class="bq-diag-layer">Mark entry as cancelled O(1), skip cancelled entries on release, no O(n) array splice</div>
+  </div>
+</div>
 
 ## Complexity Summary
 

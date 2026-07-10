@@ -8,8 +8,11 @@ head:
       content: https://bunqueue.dev/og/api-reference.png
 ---
 
-
-Practical examples for common use cases.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">reference · examples</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Copy, paste, <em>ship.</em></h1>
+  <p class="bq-hero-sub">Practical, production-ready examples for common use cases: email queues, image pipelines, scheduled reports, webhooks, ETL stages and workflows. Every snippet runs in embedded mode with zero external services.</p>
+</div>
 
 :::note[Persistence Setup]
 All examples below use embedded mode. For data persistence, pass `dataPath` in the constructor or set `DATA_PATH`:

@@ -8,9 +8,11 @@ head:
       content: https://bunqueue.dev/og-image.png
 ---
 
-# Application Layer Architecture
-
-The application layer orchestrates all queue operations, coordinating between the client layer and domain layer.
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">architecture · application layer</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Use cases and <em>managers.</em></h1>
+  <p class="bq-hero-sub">The application layer orchestrates all queue operations, coordinating between the client layer and domain layer: PUSH, PULL and ACK flows, stall detection, dependency resolution, and background tasks.</p>
+</div>
 
 ## Module Structure
 
@@ -38,298 +40,215 @@ src/application/
 
 ## QueueManager Orchestration
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    QUEUE MANAGER                             │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                     STATE                               │ │
-│  │                                                         │ │
-│  │  shards[N] ◄──► shardLocks[N]    (N = auto-detected)  │ │
-│  │  processingShards[N] ◄──► processingLocks[N]          │ │
-│  │                                                         │ │
-│  │  jobIndex: Map<id, location>                           │ │
-│  │  completedJobs: BoundedSet (50k)                       │ │
-│  │  jobResults: LRU (5k)                                  │ │
-│  │  customIdMap: LRU (50k)                                │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                   OPERATIONS                            │ │
-│  │                                                         │ │
-│  │  push() ──► operations/push.ts                         │ │
-│  │  pull() ──► operations/pull.ts                         │ │
-│  │  ack()  ──► operations/ack.ts                          │ │
-│  │  query  ──► operations/queryOperations.ts              │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │                   MANAGERS                              │ │
-│  │                                                         │ │
-│  │  DLQManager │ EventsManager │ WorkerManager            │ │
-│  │  WebhookManager │ StatsManager │ JobLogsManager        │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │               BACKGROUND TASKS                          │ │
-│  │                                                         │ │
-│  │  cleanup │ stall │ dependency │ dlq │ cron             │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>QueueManager</b><span>central orchestrator</span></div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">state</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell bq-diag-accent">shards[N] <i>paired with shardLocks[N], N auto-detected</i></div>
+      <div class="bq-diag-cell">processingShards[N] <i>paired with processingLocks[N]</i></div>
+    </div>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">jobIndex <i>Map&lt;id, location&gt;</i></div>
+      <div class="bq-diag-cell">completedJobs <i>BoundedSet, 50k</i></div>
+      <div class="bq-diag-cell">jobResults <i>LRU, 5k</i></div>
+      <div class="bq-diag-cell">customIdMap <i>LRU, 50k</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">operations</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">push() <i>operations/push.ts</i></div>
+      <div class="bq-diag-cell">pull() <i>operations/pull.ts</i></div>
+      <div class="bq-diag-cell">ack() <i>operations/ack.ts</i></div>
+      <div class="bq-diag-cell">query <i>operations/queryOperations.ts</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">managers</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">DLQManager</div>
+      <div class="bq-diag-cell">EventsManager</div>
+      <div class="bq-diag-cell">WorkerManager</div>
+    </div>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">WebhookManager</div>
+      <div class="bq-diag-cell">StatsManager</div>
+      <div class="bq-diag-cell">JobLogsManager</div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">background tasks</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">cleanup</div>
+      <div class="bq-diag-cell">stall</div>
+      <div class="bq-diag-cell">dependency</div>
+      <div class="bq-diag-cell">dlq</div>
+      <div class="bq-diag-cell">cron</div>
+    </div>
+  </div>
+</div>
 
 ## PUSH Operation Flow
 
-```
-push(queue, input)
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  1. Generate UUIDv7 ID                                      │
-│  2. Check customId idempotency (customIdMap)               │
-│     └─ If exists: return existing job                       │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  3. Acquire shard write lock                                │
-│     shardIdx = fnv1aHash(queue) & SHARD_MASK               │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  4. Check unique key deduplication                          │
-│     │                                                        │
-│     ├─ Key available? ──► Register key, continue            │
-│     └─ Key exists?                                          │
-│        ├─ strategy: replace ──► Remove old, insert new     │
-│        ├─ strategy: extend ──► Reset TTL, return existing  │
-│        └─ default ──► Return existing                       │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  5. Check dependencies                                      │
-│     │                                                        │
-│     ├─ All satisfied? ──► Push to queue                    │
-│     └─ Not satisfied? ──► Add to waitingDeps               │
-│                           Register in dependencyIndex       │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  6. Update jobIndex                                         │
-│  7. Persist to SQLite (buffered or durable)                │
-│  8. Notify waiters (wake long poll)                        │
-│  9. Broadcast 'pushed' event                                │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>PUSH flow</b><span>push(queue, input)</span></div>
+  <div class="bq-diag-layer">1. Generate UUIDv7 ID, 2. check customId idempotency <i>customIdMap, if exists return existing job</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">3. Acquire shard write lock <i>shardIdx = fnv1aHash(queue) &amp; SHARD_MASK</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">4. check unique key deduplication</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">Key available <i>register key, continue</i></div>
+      <div class="bq-diag-cell">Key exists, strategy replace <i>remove old, insert new</i></div>
+      <div class="bq-diag-cell">Key exists, strategy extend <i>reset TTL, return existing</i></div>
+      <div class="bq-diag-cell">Key exists, default <i>return existing</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">5. check dependencies</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">All satisfied <i>push to queue</i></div>
+      <div class="bq-diag-cell">Not satisfied <i>add to waitingDeps, register in dependencyIndex</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer bq-diag-accent">6. Update jobIndex, 7. persist to SQLite <i>buffered or durable</i>, 8. notify waiters <i>wake long poll</i>, 9. broadcast 'pushed' event</div>
+</div>
 
 ## PULL Operation Flow
 
-```
-pull(queue, timeoutMs)
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  LOOP:                                                      │
-│                                                              │
-│  1. Acquire shard read lock                                 │
-│  2. Check queue paused? ──► return null                    │
-│  3. Check rate limit ──► return null if exceeded           │
-│  4. Check concurrency ──► return null if at limit          │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  5. Pop from priority queue                                 │
-│     │                                                        │
-│     ├─ TTL expired? ──► Skip, try next                     │
-│     ├─ Not ready (delayed)? ──► Skip, try next             │
-│     ├─ FIFO group active? ──► Skip, try next               │
-│     └─ Valid job ──► Continue                               │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-     ┌────────┴────────┐
-     │                 │
-  Job found         No job
-     │                 │
-     ▼                 ▼
-┌─────────────┐   ┌─────────────────────────┐
-│ Move to     │   │ Wait for notification   │
-│ processing  │   │ (event-based, timeout)  │
-│ shard       │   └──────────┬──────────────┘
-└──────┬──────┘              │
-       │                     └───► Retry loop
-       ▼
-┌─────────────────────────────────────────────────────────────┐
-│  6. Create lock token (if useLocks enabled)                │
-│  7. Update jobIndex to 'processing'                        │
-│  8. Mark active in SQLite                                  │
-│  9. Broadcast 'pulled' event                               │
-│  10. Return job with token                                 │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>PULL flow</b><span>pull(queue, timeoutMs), runs as a loop</span></div>
+  <div class="bq-diag-layer">1. Acquire shard read lock, 2. queue paused, return null, 3. rate limit exceeded, return null, 4. concurrency at limit, return null</div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">5. pop from priority queue</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">TTL expired <i>skip, try next</i></div>
+      <div class="bq-diag-cell">Not ready, delayed <i>skip, try next</i></div>
+      <div class="bq-diag-cell">FIFO group active <i>skip, try next</i></div>
+      <div class="bq-diag-cell">Valid job <i>continue</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell bq-diag-accent">Job found <i>move to processing shard</i></div>
+    <div class="bq-diag-cell">No job <i>wait for notification, event-based with timeout, then retry loop</i></div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">6. Create lock token <i>if useLocks enabled</i>, 7. update jobIndex to 'processing', 8. mark active in SQLite, 9. broadcast 'pulled' event, 10. return job with token</div>
+</div>
 
 ## ACK Operation Flow
 
-```
-ack(jobId, result, token)
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  1. Verify lock token (if provided)                        │
-│     └─ Mismatch? ──► Error: token invalid                  │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  2. Remove from processing shard                            │
-│     procIdx = fnv1aHash(jobId) & SHARD_MASK                │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  3. Release shard resources                                 │
-│     ├─ Release unique key                                   │
-│     ├─ Release FIFO group                                   │
-│     └─ Release concurrency slot                             │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  4. Finalize                                                │
-│     ├─ Store result in jobResults (LRU)                    │
-│     ├─ Store result in SQLite                              │
-│     ├─ Update jobIndex to 'completed'                      │
-│     └─ Add to completedJobs (signals deps)                 │
-└─────────────┬───────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  5. Add to pendingDepChecks (wake dependents)              │
-│  6. Broadcast 'completed' event                            │
-│  7. Trigger webhooks                                        │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>ACK flow</b><span>ack(jobId, result, token)</span></div>
+  <div class="bq-diag-layer">1. Verify lock token <i>if provided, on mismatch error: token invalid</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">2. Remove from processing shard <i>procIdx = fnv1aHash(jobId) &amp; SHARD_MASK</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">3. release shard resources</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">Release unique key</div>
+      <div class="bq-diag-cell">Release FIFO group</div>
+      <div class="bq-diag-cell">Release concurrency slot</div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">4. finalize</span>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">Store result in jobResults <i>LRU</i></div>
+      <div class="bq-diag-cell">Store result in SQLite</div>
+      <div class="bq-diag-cell">Update jobIndex to 'completed'</div>
+      <div class="bq-diag-cell bq-diag-accent">Add to completedJobs <i>signals deps</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">5. Add to pendingDepChecks <i>wake dependents</i>, 6. broadcast 'completed' event, 7. trigger webhooks</div>
+</div>
 
 ## Background Tasks
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  BACKGROUND TASK SCHEDULER                   │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Cleanup      │  │ Stall Check  │  │ Dependency   │      │
-│  │ every 10s    │  │ every 5s     │  │ every 100ms  │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ DLQ Maint    │  │ Lock Expire  │  │ Cron         │      │
-│  │ every 60s    │  │ every 5s     │  │ every 1s     │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                              │
-│  Circuit breaker: After 5 consecutive failures,             │
-│  log CRITICAL warning but continue retrying                 │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Background task scheduler</b></div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">Cleanup <i>every 10s</i></div>
+    <div class="bq-diag-cell bq-diag-accent">Stall check <i>every 5s</i></div>
+    <div class="bq-diag-cell">Dependency <i>every 100ms</i></div>
+  </div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">DLQ maintenance <i>every 60s</i></div>
+    <div class="bq-diag-cell">Lock expire <i>every 5s</i></div>
+    <div class="bq-diag-cell">Cron <i>every 1s</i></div>
+  </div>
+  <p class="bq-diag-note">Circuit breaker: after 5 consecutive failures, log a CRITICAL warning but continue retrying.</p>
+</div>
 
 ### Stall Detection (Two-Phase)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    STALL CHECK (every 5s)                    │
-│                                                              │
-│  PHASE 1: Process previous candidates                       │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ For each job in stalledCandidates:                     │ │
-│  │   ├─ Still in processing?                              │ │
-│  │   ├─ Get stall config                                  │ │
-│  │   └─ If confirmed stalled:                             │ │
-│  │      ├─ stallCount < maxStalls ──► Increment + retry   │ │
-│  │      └─ stallCount >= maxStalls ──► Move to DLQ        │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  PHASE 2: Mark new candidates                               │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ For each job in processingShards:                      │ │
-│  │   ├─ No heartbeat for > stallInterval (30s)?          │ │
-│  │   └─ Add to stalledCandidates (check next tick)       │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  Why two-phase? Prevents false positives from               │
-│  transient delays (GC pause, network hiccup)               │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Stall check</b><span>every 5s, two-phase</span></div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">phase 1, process previous candidates</span>
+    <div class="bq-diag-layer">For each job in stalledCandidates: still in processing? get stall config</div>
+    <div class="bq-diag-arrow">↓ if confirmed stalled</div>
+    <div class="bq-diag-row">
+      <div class="bq-diag-cell">stallCount &lt; maxStalls <i>increment + retry</i></div>
+      <div class="bq-diag-cell bq-diag-accent">stallCount &gt;= maxStalls <i>move to DLQ</i></div>
+    </div>
+  </div>
+  <div class="bq-diag-group">
+    <span class="bq-diag-group-label">phase 2, mark new candidates</span>
+    <div class="bq-diag-layer">For each job in processingShards: no heartbeat for &gt; stallInterval <i>30s</i>, add to stalledCandidates <i>checked next tick</i></div>
+  </div>
+  <p class="bq-diag-note">Why two-phase? It prevents false positives from transient delays, like a GC pause or a network hiccup.</p>
+</div>
 
 ### Dependency Resolution
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│              DEPENDENCY PROCESSOR (every 100ms)              │
-│                                                              │
-│  1. Collect completedIds from pendingDepChecks             │
-│     (Set of jobs that completed since last check)          │
-│                                                              │
-│  2. For each completedId:                                   │
-│     └─ Look up dependencyIndex[completedId]                │
-│        └─ Returns: Set<jobIds waiting for this job>        │
-│                                                              │
-│  3. Group by shard for efficient locking                   │
-│                                                              │
-│  4. For each waiting job:                                   │
-│     └─ Check: ALL dependencies completed?                  │
-│        └─ completedJobs.has(depId) for all deps           │
-│                                                              │
-│  5. If all satisfied:                                       │
-│     ├─ Remove from waitingDeps                             │
-│     ├─ Unregister from dependencyIndex                     │
-│     └─ Push to active queue                                │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Dependency processor</b><span>every 100ms</span></div>
+  <div class="bq-diag-layer">1. Collect completedIds from pendingDepChecks <i>set of jobs that completed since last check</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">2. For each completedId, look up dependencyIndex[completedId] <i>returns the Set of jobIds waiting for this job</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">3. Group by shard <i>for efficient locking</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">4. For each waiting job, check ALL dependencies completed <i>completedJobs.has(depId) for all deps</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer bq-diag-accent">5. If all satisfied: remove from waitingDeps, unregister from dependencyIndex, push to active queue</div>
+</div>
 
 ### Cleanup Tasks
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  CLEANUP (every 10s)                         │
-│                                                              │
-│  1. Refresh delayed counts in each shard                   │
-│                                                              │
-│  2. Compact priority queues                                 │
-│     └─ If stale ratio > 20%: rebuild heap                  │
-│                                                              │
-│  3. Clean orphaned processing entries                       │
-│     └─ Jobs stuck > 30min with no heartbeat               │
-│                                                              │
-│  4. Clean stale waiting dependencies                        │
-│     └─ Waiting > 1 hour                                    │
-│                                                              │
-│  5. Clean expired unique keys                               │
-│                                                              │
-│  6. Clean orphaned job index entries                        │
-│                                                              │
-│  7. Remove empty queues                                     │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Cleanup</b><span>every 10s</span></div>
+  <div class="bq-diag-layer">1. Refresh delayed counts in each shard</div>
+  <div class="bq-diag-layer bq-diag-accent">2. Compact priority queues <i>if stale ratio &gt; 20%, rebuild heap</i></div>
+  <div class="bq-diag-layer">3. Clean orphaned processing entries <i>jobs stuck &gt; 30min with no heartbeat</i></div>
+  <div class="bq-diag-layer">4. Clean stale waiting dependencies <i>waiting &gt; 1 hour</i></div>
+  <div class="bq-diag-layer">5. Clean expired unique keys</div>
+  <div class="bq-diag-layer">6. Clean orphaned job index entries</div>
+  <div class="bq-diag-layer">7. Remove empty queues</div>
+</div>
 
 ## Event Broadcasting
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  EVENTS MANAGER                              │
-│                                                              │
-│  Event occurs (completed, failed, progress, stalled)        │
-│         │                                                    │
-│         ▼                                                    │
-│  broadcast(event)                                           │
-│         │                                                    │
-│         ├──► Notify all subscribers (Set-based, O(1) add)  │
-│         ├──► Trigger matching webhooks                      │
-│         └──► Wake completion waiters                        │
-│                                                              │
-│  Event-based waiting (no polling):                          │
-│  waitForJobCompletion(jobId, timeout)                       │
-│    └─ Resolved when 'completed' event for jobId            │
-└─────────────────────────────────────────────────────────────┘
-```
+<div class="bq-diag">
+  <div class="bq-diag-head"><b>Events manager</b></div>
+  <div class="bq-diag-layer">Event occurs <i>completed, failed, progress, stalled</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer bq-diag-accent">broadcast(event)</div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-row">
+    <div class="bq-diag-cell">Notify all subscribers <i>Set-based, O(1) add</i></div>
+    <div class="bq-diag-cell">Trigger matching webhooks</div>
+    <div class="bq-diag-cell">Wake completion waiters</div>
+  </div>
+  <p class="bq-diag-note">Event-based waiting, no polling: waitForJobCompletion(jobId, timeout) resolves when the 'completed' event for jobId arrives.</p>
+</div>

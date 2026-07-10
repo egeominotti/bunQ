@@ -125,16 +125,18 @@ See [data-model](../data-model.md) for full `Job` and the events shape. Most rel
 
 ### getJob (`queryOperations.ts:30`)
 
-1. Read `jobIndex.get(jobId)`. If absent, fall back to SQLite: `storage.getJob` then `storage.getDlqEntry`, finally `completedJobsData` — this keeps `getJob` working after a restart before the index is repopulated (`queryOperations.ts:33`).
-2. Otherwise dispatch on `location.type`. For `queue`, take a read lock and probe run queue → `waitingDeps` → `waitingChildren` (`:46`). For `processing`, read under the processing lock. For `completed`, prefer SQLite then cache. For `dlq`, prefer the SQLite DLQ entry, then the in-memory DLQ shard (`:63`).
+1. Read `jobIndex.get(jobId)`. If absent, fall back to SQLite: `storage.getJob` then `storage.getDlqEntry`, finally `completedJobsData` — this keeps `getJob` working after a restart before the index is repopulated.
+2. Otherwise dispatch on `location.type`. For `queue`, take a read lock and probe run queue → `waitingDeps` → `waitingChildren`. For `processing`, read under the processing lock. For `completed`, prefer SQLite then cache. For `dlq`, prefer the SQLite DLQ entry, then the in-memory DLQ shard.
+3. **Stale-snapshot chase (false-null fix):** the location snapshot is only valid until the first await — while the reader waits on the shard read lock (writers have priority), a concurrent pull can pop the job and move it queue -> processing (the pull flips `jobIndex` atomically with the pop, see job-lifecycle.md). On a lookup miss, `getJob` re-reads the index: if the entry object changed identity, the job MOVED and the lookup retries at the fresh location (up to 4 passes, each requiring a further transition of that very job); if unchanged, the miss is genuine and `null` is returned. This preserves the invariant that `getJob(id) === null` is permanent for never-reused uuidv7 ids (no `JOB -> null -> JOB(active)` flicker). Index entries are always replaced, never mutated, so the identity comparison is exact.
 
-### getJobState (`queryOperations.ts:154`)
+### getJobState (`queryOperations.ts:176`)
 
 1. Fast path: `completedJobs.has(jobId)` → `Completed`.
-2. No index entry → `resolveStateFromStorage` (`:137`): DLQ → `Failed`; raw state `completed`/`active` map through; `waiting`/`delayed` load the row and decide `Delayed` (future `runAt`), else `Prioritized` (priority > 0) vs `Waiting`.
+2. No index entry → `resolveStateFromStorage` (`:159`): DLQ → `Failed`; raw state `completed`/`active` map through; `waiting`/`delayed` load the row and decide `Delayed` (future `runAt`), else `Prioritized` (priority > 0) vs `Waiting`.
 3. `queue` location → under read lock, classify by map membership and `runAt`/`priority`; `processing` → `Active`; `dlq` → `Failed`.
+4. Same stale-snapshot chase as `getJob`: a `queue`-location miss with a changed index entry retries at the fresh location instead of reporting a false `'unknown'` mid-pull.
 
-### getJobs (`queryOperations.ts:435`)
+### getJobs (`queryOperations.ts:467`)
 
 The hard part is correct pagination when results come from multiple non-offset-aware sources (SQLite jobs table + in-memory DLQ, `waiting-children` maps, and the paused view).
 
@@ -180,7 +182,8 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 
 ## Edge Cases & Failure Modes
 
-- **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`queryOperations.ts:33`, `:137`). Without storage (pure embedded) they return `null`/`'unknown'`.
+- **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`queryOperations.ts:45`, `:159`). Without storage (pure embedded) they return `null`/`'unknown'`.
+- **Pull-transition visibility:** during a pull, the queue pop, the `processingShards` insert, and the `jobIndex` flip happen in one synchronous critical section (`pull.ts:50`), and `getJob`/`getJobState` chase a moved location on miss — a poller can no longer observe a transient `null`/`'unknown'` for a job that is being handed to a worker (repro: `test/repro-getjob-false-null-during-pull.test.ts`).
 - **Paused double-count avoidance (#92):** `pausedView` and `resolveStateNeeds` guarantee a single job is reported in exactly one bucket. Verified by the shared `pausedView` helper used across SDK/TCP/dashboard so surfaces cannot drift.
 - **Pagination correctness (#92):** `mergePage` slices once after merge+sort; SQL `offset` is only used on the fast single-source path. `querySqliteWithPriority` over-fetches 2× to compensate for priority post-filtering — a pathological page where more than `limit` rows are filtered out could under-return for that page (mitigated, not fully eliminated, by the 2× factor).
 - **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:207`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.

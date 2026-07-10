@@ -28,50 +28,72 @@ export interface QueryContext {
 
 /** Get job by ID */
 export async function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | null> {
-  const location = ctx.jobIndex.get(jobId);
-  if (!location) {
-    // Fallback: jobIndex may not be populated after restart for completed/DLQ jobs.
-    // Consult SQLite directly so getJob survives recovery.
-    if (ctx.storage) {
-      const job = ctx.storage.getJob(jobId);
-      if (job) return job;
-      const dlqEntry = ctx.storage.getDlqEntry(jobId);
-      if (dlqEntry) return dlqEntry.job;
-    }
-    return ctx.completedJobsData.get(jobId) ?? null;
-  }
-
-  switch (location.type) {
-    case 'queue': {
-      return await withReadLock(ctx.shardLocks[location.shardIdx], () => {
-        const shard = ctx.shards[location.shardIdx];
-        return (
-          shard.getQueue(location.queueName).find(jobId) ??
-          shard.waitingDeps.get(jobId) ??
-          shard.waitingChildren.get(jobId) ??
-          null
-        );
-      });
-    }
-    case 'processing': {
-      return await withReadLock(ctx.processingLocks[location.shardIdx], () => {
-        return ctx.processingShards[location.shardIdx].get(jobId) ?? null;
-      });
-    }
-    case 'completed':
-      return ctx.storage?.getJob(jobId) ?? ctx.completedJobsData.get(jobId) ?? null;
-    case 'dlq': {
+  // The location snapshot is only valid until the first await: while this
+  // reader waits on the shard read lock (writers have priority), a concurrent
+  // pull can pop the job and move it queue -> processing. The pull updates
+  // jobIndex atomically with the pop (tryDequeueNextJob), so on a miss the
+  // index re-read below is authoritative: an identity change means the job
+  // MOVED, and we chase the new location instead of returning a false null
+  // for a job that still exists (getJob(id) === null must be permanent for
+  // never-reused uuidv7 ids). Bounded: every extra pass requires a further
+  // state transition of this very job (queue -> active -> completed/removed),
+  // so 4 passes cover any realistic chase; index entries are always replaced
+  // (never mutated), which makes the identity comparison exact.
+  for (let pass = 0; pass < 4; pass++) {
+    const location = ctx.jobIndex.get(jobId);
+    if (!location) {
+      // Fallback: jobIndex may not be populated after restart for completed/DLQ jobs.
+      // Consult SQLite directly so getJob survives recovery.
       if (ctx.storage) {
-        const dlqEntry = ctx.storage.getDlqEntry(jobId);
-        if (dlqEntry) return dlqEntry.job;
         const job = ctx.storage.getJob(jobId);
         if (job) return job;
+        const dlqEntry = ctx.storage.getDlqEntry(jobId);
+        if (dlqEntry) return dlqEntry.job;
       }
-      const dlqShardIdx = shardIndex(location.queueName);
-      const dlqJobs = ctx.shards[dlqShardIdx].getDlq(location.queueName);
-      return dlqJobs.find((j) => j.id === jobId) ?? null;
+      return ctx.completedJobsData.get(jobId) ?? null;
     }
+
+    let found: Job | null = null;
+    switch (location.type) {
+      case 'queue': {
+        found = await withReadLock(ctx.shardLocks[location.shardIdx], () => {
+          const shard = ctx.shards[location.shardIdx];
+          return (
+            shard.getQueue(location.queueName).find(jobId) ??
+            shard.waitingDeps.get(jobId) ??
+            shard.waitingChildren.get(jobId) ??
+            null
+          );
+        });
+        break;
+      }
+      case 'processing': {
+        found = await withReadLock(ctx.processingLocks[location.shardIdx], () => {
+          return ctx.processingShards[location.shardIdx].get(jobId) ?? null;
+        });
+        break;
+      }
+      case 'completed':
+        found = ctx.storage?.getJob(jobId) ?? ctx.completedJobsData.get(jobId) ?? null;
+        break;
+      case 'dlq': {
+        if (ctx.storage) {
+          const dlqEntry = ctx.storage.getDlqEntry(jobId);
+          if (dlqEntry) return dlqEntry.job;
+          const job = ctx.storage.getJob(jobId);
+          if (job) return job;
+        }
+        const dlqShardIdx = shardIndex(location.queueName);
+        const dlqJobs = ctx.shards[dlqShardIdx].getDlq(location.queueName);
+        found = dlqJobs.find((j) => j.id === jobId) ?? null;
+        break;
+      }
+    }
+    if (found) return found;
+    if (ctx.jobIndex.get(jobId) === location) return null; // no move: genuine miss
+    // The job moved while we held the stale snapshot: chase it.
   }
+  return null;
 }
 
 /** Get job result */
@@ -152,43 +174,53 @@ function resolveStateFromStorage(
 
 /** Get job state by ID */
 export async function getJobState(jobId: JobId, ctx: QueryContext): Promise<JobState | 'unknown'> {
-  const location = ctx.jobIndex.get(jobId);
+  // Same stale-snapshot chase as getJob: a 'queue' location read before the
+  // read-lock await may be outdated by a concurrent pull (queue -> processing)
+  // by the time the lookup runs. On a miss with a changed index entry, retry
+  // with the fresh location instead of reporting a false 'unknown'.
+  for (let pass = 0; pass < 4; pass++) {
+    const location = ctx.jobIndex.get(jobId);
 
-  // Check completed set first (fast path)
-  if (ctx.completedJobs.has(jobId)) {
-    return JobState.Completed;
-  }
-
-  if (!location) {
-    return resolveStateFromStorage(jobId, ctx.storage);
-  }
-
-  switch (location.type) {
-    case 'queue': {
-      // Check if job is delayed, waiting, or waiting for children/deps
-      const result = await withReadLock(ctx.shardLocks[location.shardIdx], () => {
-        const shard = ctx.shards[location.shardIdx];
-        const queueJob = shard.getQueue(location.queueName).find(jobId);
-        if (queueJob) return { job: queueJob, waitingDeps: false, waitingChildren: false };
-        const depsJob = shard.waitingDeps.get(jobId);
-        if (depsJob) return { job: depsJob, waitingDeps: true, waitingChildren: false };
-        const childrenJob = shard.waitingChildren.get(jobId);
-        if (childrenJob) return { job: childrenJob, waitingDeps: false, waitingChildren: true };
-        return null;
-      });
-      if (!result) return 'unknown';
-      if (result.waitingDeps || result.waitingChildren) return 'waiting-children' as JobState;
-      const now = Date.now();
-      if (result.job.runAt > now) return JobState.Delayed;
-      return result.job.priority > 0 ? JobState.Prioritized : JobState.Waiting;
-    }
-    case 'processing':
-      return JobState.Active;
-    case 'completed':
+    // Check completed set first (fast path)
+    if (ctx.completedJobs.has(jobId)) {
       return JobState.Completed;
-    case 'dlq':
-      return JobState.Failed;
+    }
+
+    if (!location) {
+      return resolveStateFromStorage(jobId, ctx.storage);
+    }
+
+    switch (location.type) {
+      case 'queue': {
+        // Check if job is delayed, waiting, or waiting for children/deps
+        const result = await withReadLock(ctx.shardLocks[location.shardIdx], () => {
+          const shard = ctx.shards[location.shardIdx];
+          const queueJob = shard.getQueue(location.queueName).find(jobId);
+          if (queueJob) return { job: queueJob, waitingDeps: false, waitingChildren: false };
+          const depsJob = shard.waitingDeps.get(jobId);
+          if (depsJob) return { job: depsJob, waitingDeps: true, waitingChildren: false };
+          const childrenJob = shard.waitingChildren.get(jobId);
+          if (childrenJob) return { job: childrenJob, waitingDeps: false, waitingChildren: true };
+          return null;
+        });
+        if (!result) {
+          if (ctx.jobIndex.get(jobId) === location) return 'unknown'; // no move
+          break; // moved mid-lookup: chase the new location
+        }
+        if (result.waitingDeps || result.waitingChildren) return 'waiting-children' as JobState;
+        const now = Date.now();
+        if (result.job.runAt > now) return JobState.Delayed;
+        return result.job.priority > 0 ? JobState.Prioritized : JobState.Waiting;
+      }
+      case 'processing':
+        return JobState.Active;
+      case 'completed':
+        return JobState.Completed;
+      case 'dlq':
+        return JobState.Failed;
+    }
   }
+  return 'unknown';
 }
 
 /** Collect completed jobs for a queue from index + storage */

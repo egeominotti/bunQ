@@ -10,6 +10,21 @@ import { Queue, Worker } from '../../src/client';
 
 const QUEUE_NAME = 'test-retry';
 
+/**
+ * Poll until the condition holds or the deadline passes. Fixed sleeps made
+ * this suite flaky on loaded CI runners (backoff scheduling + worker poll
+ * cadence can exceed a blind budget); polling keeps the fast path fast and
+ * gives slow runners room without weakening any assertion.
+ */
+async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 15000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await cond()) return true;
+    await Bun.sleep(25);
+  }
+  return cond();
+}
+
 async function main() {
   console.log('=== Test Retry & Backoff ===\n');
 
@@ -39,7 +54,7 @@ async function main() {
       return { success: true };
     }, { concurrency: 1, embedded: true });
 
-    await Bun.sleep(1000);
+    await waitFor(() => attempts.length === 3);
     await worker.close();
 
     if (attempts.length === 3) {
@@ -79,7 +94,7 @@ async function main() {
       return { success: true };
     }, { concurrency: 1, embedded: true });
 
-    await Bun.sleep(2000);
+    await waitFor(() => timestamps.length >= 4);
     await worker.close();
 
     if (timestamps.length >= 3) {
@@ -127,7 +142,7 @@ async function main() {
       return {};
     }, { concurrency: 1, embedded: true });
 
-    await Bun.sleep(1500);
+    await waitFor(() => attemptCount === 3);
     await worker.close();
 
     if (attemptCount === 3) {
@@ -159,7 +174,10 @@ async function main() {
       throw new Error('Always fails');
     }, { concurrency: 1, embedded: true });
 
-    await Bun.sleep(500);
+    // Wait for the DLQ entry (positive signal), then settle briefly to catch
+    // a spurious second attempt before asserting the count stayed at 1.
+    await waitFor(() => queue.getDlq().length === 1);
+    await Bun.sleep(150);
     await worker.close();
 
     const dlq = queue.getDlq();
@@ -201,7 +219,7 @@ async function main() {
       return { success: true };
     }, { concurrency: 1, embedded: true });
 
-    await Bun.sleep(1000);
+    await waitFor(() => succeeded);
     await worker.close();
 
     if (attemptCount === 3 && succeeded) {
@@ -228,11 +246,21 @@ async function main() {
       removeOnComplete: true,
     });
 
+    let completedEvent = false;
     const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
       return { done: true };
     }, { concurrency: 1, embedded: true });
+    worker.on('completed', () => {
+      completedEvent = true;
+    });
 
-    await Bun.sleep(300);
+    // getJob(id) === null alone is NOT a completion signal: during the pull
+    // transition (queue -> processing) getJob transiently returns null for a
+    // job that was never processed (see
+    // test/repro-getjob-false-null-during-pull.test.ts). Wait for the positive
+    // 'completed' event first, then for the batched-ack removal to land.
+    await waitFor(() => completedEvent);
+    await waitFor(async () => (await queue.getJob(job.id)) === null);
     await worker.close();
 
     // Try to get the job - should be removed

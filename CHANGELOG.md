@@ -2,6 +2,12 @@
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.31] - 2026-07-10
+
+### Fixed — getJob/GetState false null during the pull transition window
+
+The pull popped a job from the shard queue under the shard write lock while `jobIndex` still said `queue`; the index flipped to `processing` only after an await boundary, so a concurrent `getJob`/`GetState` could answer null/unknown for an existing job (JOB → null → JOB(active) flicker). The pop, the `processingShards` insert and the index flip now happen in one synchronous critical section (repairs every reader at once); `finalizeProcessing` detects jobs claimed by a management op between dequeue and finalize and skips delivery (PULLB jobs/tokens stay aligned, no orphan locks); queries chase moved index entries with a bounded 4-pass walk. Pull+ack improved ~9% by dropping the async lock from the hot path. Regression: `test/repro-getjob-false-null-during-pull.test.ts`. Also de-flaked three CI-sensitive tests (soak drift medians, cron maxLimit tick-until-cap, retry-backoff condition polling — the polling is what exposed the bug).
+
 ## [2.8.30] - 2026-07-10
 
 ### Added — "24/7 readiness" battle-testing suites (adversarial, no source changes)

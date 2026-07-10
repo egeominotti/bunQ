@@ -168,7 +168,22 @@ describe('Cron Timezone & DST Edge Cases', () => {
       name: 'three-shot', queue: 'lim-q3', data: {}, repeatEvery: 10, maxLimit: 3,
       preventOverlap: false,
     });
-    for (let i = 0; i < 5; i++) {
+    // Tick until the cap is reached: a fixed tick count is load-sensitive
+    // (the scheduler's 0.8x-interval overlap guard can skip fires that land
+    // too close together on a slow runner), the invariant is the CAP, not
+    // how many opportunities it takes to get there. A limit-reached cron is
+    // REMOVED from the scheduler on the tick after its last fire, so a
+    // missing cron also means the cap was reached (waiting on executions
+    // alone would spin the full deadline and time the test out).
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+      await tickScheduler(manager);
+      const c = manager.getCron('three-shot');
+      if (!c || c.executions >= 3) break;
+    }
+    // Extra opportunities past the cap must not fire a 4th execution.
+    for (let i = 0; i < 3; i++) {
       await new Promise((r) => setTimeout(r, 20));
       await tickScheduler(manager);
     }

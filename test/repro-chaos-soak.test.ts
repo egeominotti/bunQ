@@ -431,21 +431,26 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
     expect(kills).toBeGreaterThanOrEqual(Math.max(1, Math.floor(SOAK_MS / KILL_MS) - 3));
     expect(samples.length).toBeGreaterThanOrEqual(3);
 
-    // NO LATENCY DRIFT: the worst p99 in the second half of the run is not a
-    // multiple of the median p99 in the first half (a drifting queue would show
+    // NO LATENCY DRIFT: the p99 in the second half of the run is not a
+    // multiple of the p99 in the first half (a drifting queue would show
     // p99 climbing monotonically as internal structures bloat).
     const half = Math.floor(samples.length / 2);
     const firstHalfP99 = samples
       .slice(0, half)
       .map((s) => s.p99ProbeMs)
       .sort((a, b) => a - b);
-    const secondHalfMaxP99 = Math.max(...samples.slice(half).map((s) => s.p99ProbeMs));
+    const secondHalfP99 = samples
+      .slice(half)
+      .map((s) => s.p99ProbeMs)
+      .sort((a, b) => a - b);
     const firstHalfMedP99 = quantile(firstHalfP99, 0.5);
-    // No runaway drift: the worst second-half p99 must stay within a modest
-    // multiple of the first-half median (slack for GC jitter, but tight enough
-    // that a monotonically climbing latency — the signature of a bloating
-    // internal structure over a long run — would trip it).
-    expect(secondHalfMaxP99).toBeLessThanOrEqual(Math.max(25, firstHalfMedP99 * 4 + 10));
+    const secondHalfMedP99 = quantile(secondHalfP99, 0.5);
+    // No runaway drift: compare MEDIANS of the two halves. A single GC pause
+    // or noisy-neighbor stall on a shared CI runner produces one isolated
+    // 100ms+ window that a max-based check trips on (observed 179ms once on
+    // GitHub Actions), while genuine drift — a bloating internal structure —
+    // elevates most second-half windows and shifts the median.
+    expect(secondHalfMedP99).toBeLessThanOrEqual(Math.max(25, firstHalfMedP99 * 4 + 10));
 
     // The probe queue accumulates un-consumed latency-probe jobs by design;
     // obliterate it so the baseline check reflects only the drained soak queue.

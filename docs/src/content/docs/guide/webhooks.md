@@ -1,6 +1,6 @@
 ---
 title: "Bunqueue Webhooks & Job Event Notifications"
-description: Configure webhooks with HMAC-SHA256 signatures for bunqueue job events. HTTP callbacks on completion, failure, progress, and stall with auto-retry.
+description: Configure webhooks with HMAC-SHA256 signatures for bunqueue job events. HTTP callbacks on push, start, completion, failure, and progress with auto-retry.
 head:
   - tag: meta
     attrs:
@@ -17,7 +17,7 @@ head:
   <div class="bq-proof">
     <span><b>5</b> event types</span>
     <span><b>HMAC-SHA256</b> signatures</span>
-    <span><b>3</b> retries with backoff</span>
+    <span><b>3</b> delivery attempts with backoff</span>
     <span><b>10 s</b> delivery timeout</span>
   </div>
 </div>
@@ -58,9 +58,9 @@ bunqueue webhook list
 **Output:**
 ```
 URL                                        QUEUE    EVENTS
-https://api.example.com/webhooks/bunqueue  *        all
-https://api.example.com/webhooks/emails    emails   all
-https://api.example.com/webhooks/failures  *        job.failed,job.started
+https://api.example.com/webhooks/bunqueue  *        job.completed,job.failed
+https://api.example.com/webhooks/emails    emails   job.completed,job.failed,job.progress
+https://api.example.com/webhooks/failures  *        job.failed
 ```
 
 ### Enable/Disable Webhook
@@ -263,7 +263,7 @@ func verifyWebhookSignature(payload []byte, signature, secret string) bool {
 
 ## Retry Behavior
 
-bunqueue automatically retries failed webhook deliveries with linear backoff. The number of retries is controlled by the `WEBHOOK_MAX_RETRIES` environment variable (default: 3) and the base delay by `WEBHOOK_RETRY_DELAY_MS` (default: 1000ms):
+bunqueue automatically retries failed webhook deliveries with linear backoff. The total number of delivery attempts is controlled by the `WEBHOOK_MAX_RETRIES` environment variable (default: 3, one immediate attempt plus two retries) and the base delay by `WEBHOOK_RETRY_DELAY_MS` (default: 1000ms):
 
 | Attempt | Delay |
 |---------|-------|

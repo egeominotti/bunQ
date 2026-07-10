@@ -112,9 +112,9 @@ new Worker('uploads', async (job) => {
   // Validate image
   const metadata = await getImageMetadata(path);
 
-  // Note: getChildrenValues() is not yet implemented
-  // For now, handle child results through events or polling
-  // const childResults = await job.getChildrenValues();
+  // Children complete first, so the parent can read their results
+  const childResults = await job.getChildrenValues();
+  // childResults maps child job IDs to their returned output paths
 
   // Update database with original path
   await db.images.update(imageId, {
@@ -701,7 +701,7 @@ import { Workflow, Engine } from 'bunqueue/workflow';
 const kycFlow = new Workflow('kyc')
   .step('score', async (ctx) => {
     const risk = await riskEngine.assess(ctx.input);
-    return { level: risk > 80 ? 'low' : risk > 50 ? 'medium' : 'high' };
+    return { level: risk > 80 ? 'high' : risk > 50 ? 'medium' : 'low' };
   })
   .branch((ctx) => (ctx.steps['score'] as { level: string }).level)
   .path('low', (w) => w.step('auto-approve', async () => ({ method: 'auto' })))
@@ -832,7 +832,7 @@ engine.register(apiFlow);
 await engine.start('api-sync');
 ```
 
-### Workflow: forEach with Map Aggregation
+## Workflow: forEach with Map Aggregation
 
 Process a list of files, transform the results, and produce a summary:
 
@@ -880,7 +880,7 @@ engine.register(batchFlow);
 await engine.start('file-processor', { files: ['a.csv', 'b.csv', 'c.csv'] });
 ```
 
-### Workflow: Polling Loop with doUntil
+## Workflow: Polling Loop with doUntil
 
 Wait for an external resource to be ready using a poll loop:
 
@@ -912,7 +912,7 @@ engine.register(deployFlow);
 await engine.start('deploy-and-wait', { deployId: 'deploy-123' });
 ```
 
-### Workflow: Schema Validation with Subscribe
+## Workflow: Schema Validation with Subscribe
 
 Validate data at each step and monitor execution in real-time:
 

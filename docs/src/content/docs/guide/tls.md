@@ -41,8 +41,8 @@ export default defineConfig({
 One cert pair covers both servers: TCP (`:6789`) and HTTP/WebSocket/SSE
 (`:6790`, becomes `https://` / `wss://`).
 
-The server fails fast at startup if the cert or key file is missing, or if
-only one of the two is set, it never silently falls back to plaintext.
+The server fails fast at startup if the cert or key file is missing or if
+only one of the two is set. It never silently falls back to plaintext.
 
 ## Client SDK
 

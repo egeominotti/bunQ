@@ -675,8 +675,8 @@ spec:
 Environment variables take precedence in this order:
 
 1. Command-line arguments (highest)
-2. Environment variables
-3. Configuration file
+2. Configuration file
+3. Environment variables
 4. Default values (lowest)
 
 ```bash

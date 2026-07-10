@@ -62,7 +62,7 @@ This is a **fair comparison**: both systems use network connections (bunqueue TC
     <BqIcon name="file" />
     <h3>Zero Infrastructure</h3>
     <p><b>No Redis Required</b></p>
-    <p>Embedded SQLite vs Redis server. 7 packages, 5.4 MB installed.</p>
+    <p>Embedded SQLite vs Redis server. 7 packages, 5.5 MB installed.</p>
   </div>
 </div>
 
@@ -213,7 +213,7 @@ Both bunqueue and BullMQ use **identical test conditions**: same payload size (1
 | **Persistence** | ✅ SQLite (embedded) | ✅ Redis |
 | **Horizontal Scaling** | ⚠️ Single process | ✅ Multi-process |
 | **External Dependencies** | ✅ None (2 runtime deps) | ❌ Redis required |
-| **Install Footprint** | ✅ 7 packages, 5.4 MB | ❌ ~3 MB lib + Redis server |
+| **Install Footprint** | ✅ 7 packages, 5.5 MB | ❌ ~3 MB lib + Redis server |
 | **S3 Backup** | ✅ Built-in | ❌ Manual |
 | **TCP Pipelining** | ✅ Built-in | ✅ Via Redis |
 | **MCP Server (AI Agents)** | ✅ 73 tools built-in | ❌ Not available |
@@ -243,7 +243,7 @@ bun run bench/comparison/run.ts
 ### Benchmark Output
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>bunqueue vs BullMQ Comparison Benchmark</b><span>iterations 10,000, bulk size 100, concurrency 50, payload 111 bytes</span></div>
+  <div class="bq-diag-head"><b>bunqueue vs BullMQ Comparison Benchmark</b><span>iterations 10,000, bulk size 100, concurrency 50, payload 100 bytes</span></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">bunqueue, TCP mode</span>
     <div class="bq-diag-row">
@@ -290,7 +290,7 @@ bun run bench/comparison/run.ts
 - 10,000 iterations per test
 - Bulk size: 100 jobs
 - Concurrency: 50 workers
-- Payload: ~100 bytes per job
+- Payload: 100 bytes per job
 - TCP pipelining enabled
 - Connection pool: 32 connections
 

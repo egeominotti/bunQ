@@ -43,7 +43,7 @@ head:
             "name": "How many jobs can bunqueue handle?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "On typical hardware (M2 Pro, 16GB RAM): Push 125,000 jobs/second, Pull 100,000 jobs/second, with 0.1-0.5ms p99 latency."
+              "text": "On typical hardware (M2 Pro, 16GB RAM): push up to ~90,000 ops/second over TCP with 100 concurrent batched adds, bulk push 85,700 ops/second over TCP (3.5x BullMQ's 24,800) and up to 630,000 ops/second embedded. Single push is on par with BullMQ."
             }
           },
           {
@@ -83,7 +83,7 @@ head:
             "name": "How many dependencies does bunqueue have?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 5.4 MB and completes up to roughly 5x faster on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
+              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 5.5 MB and completes up to roughly 5x faster on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
             }
           },
           {
@@ -99,7 +99,7 @@ head:
             "name": "What is the Workflow Engine?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "The Workflow Engine is a built-in multi-step orchestration system. It supports saga compensation, conditional branching, parallel steps, step retry with exponential backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, typed observability events, and cleanup/archival — all without external services like Temporal or Inngest."
+              "text": "The Workflow Engine is a built-in multi-step orchestration system. It supports saga compensation, conditional branching, parallel steps, step retry with exponential backoff, nested sub-workflows, signal timeouts, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation (Zod-compatible), per-execution subscribe, typed observability events, and cleanup/archival, all without external services like Temporal or Inngest."
             }
           },
           {
@@ -184,7 +184,7 @@ brew install oven-sh/bun/bun
 
 ### How many dependencies does bunqueue have?
 
-bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.4 MB** and completes **up to ~5× faster** on a cold install.
+bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.5 MB** and completes **up to ~5× faster** on a cold install.
 
 As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency, both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
 
@@ -235,9 +235,12 @@ To run on serverless or ephemeral filesystems, mount a persistent volume and poi
 ### How many jobs can bunqueue handle?
 
 On typical hardware (M2 Pro, 16GB RAM):
-- **Push**: 125,000 jobs/second
-- **Pull**: 100,000 jobs/second
-- **Latency**: 0.1-0.5ms p99
+- **Push (TCP)**: up to ~90,000 ops/second with 100 concurrent batched adds
+- **Bulk push (TCP)**: 85,700 ops/second, 3.5x faster than BullMQ (24,800)
+- **Bulk push (embedded)**: up to 630,000 ops/second
+- **Single push**: on par with BullMQ
+
+See the [benchmarks page](/guide/benchmarks/) for methodology and full results.
 
 ### How do I optimize throughput?
 
@@ -327,12 +330,14 @@ You can inspect, retry, or purge DLQ jobs.
 
 ### Can I process jobs in order?
 
-Yes, use LIFO mode:
+Yes. FIFO (first in, first out) is the default: jobs with the same priority are processed in the order they were added, so you get in-order processing without any extra options.
+
+If you need newest-first processing instead, use LIFO mode:
 ```typescript
 await queue.add('task', data, { lifo: true });
 ```
 
-Or use priority:
+Or use priority to control ordering explicitly:
 ```typescript
 await queue.add('high', data, { priority: 10 });
 await queue.add('low', data, { priority: 1 });

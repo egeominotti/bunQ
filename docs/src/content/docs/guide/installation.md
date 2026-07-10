@@ -15,7 +15,7 @@ head:
 
   <div class="bq-proof">
     <span><b>1</b> command: bun add bunqueue</span>
-    <span><b>5.4 MB</b> install, 7 packages</span>
+    <span><b>5.5 MB</b> install, 7 packages</span>
     <span><b>4</b> prebuilt binary platforms</span>
   </div>
 </div>
@@ -101,10 +101,6 @@ import type {
   DlqEntry
 } from 'bunqueue/client';
 ```
-
-## Next Steps
-
-- [Quick Start](/guide/quickstart/) - Create your first queue and worker
 
 :::tip[Next Steps]
 - [Quick Start Tutorial](/guide/quickstart/) - Build your first queue

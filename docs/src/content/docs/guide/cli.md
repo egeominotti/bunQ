@@ -44,7 +44,7 @@ Instead of CLI flags and env vars, you can centralize all settings in a typed `b
 
 **Output:**
 ```
-bunqueue v2.1.8
+bunqueue v2.8.30
 TCP server listening on port 6789
 HTTP server listening on port 6790
 Database: ./data/bunq.db
@@ -701,7 +701,7 @@ bunqueue stats
 bunqueue Server Statistics
 ==========================
 Uptime: 2d 5h 30m
-Version: 2.1.8
+Version: 2.8.30
 
 Queues: 5
 Total Jobs: 156,234
@@ -745,7 +745,7 @@ bunqueue health
 {
   "status": "healthy",
   "uptime": 185400,
-  "version": "2.1.8",
+  "version": "2.8.30",
   "database": {
     "status": "ok",
     "size": 47409152,
@@ -769,14 +769,14 @@ bunqueue version
 
 **Output:**
 ```
-Client: bunqueue v2.6.111
-Server: bunqueue v2.6.111
+Client: bunqueue v2.8.30
+Server: bunqueue v2.8.30
 ```
 
 If versions differ:
 ```
-Client: bunqueue v2.6.111
-Server: bunqueue v2.6.108
+Client: bunqueue v2.8.30
+Server: bunqueue v2.8.30
 
 ⚠ Version mismatch! Update server or client to match.
 ```
@@ -794,11 +794,11 @@ bunqueue doctor
 bunqueue doctor
 
 Client
-  ✓ Version: 2.6.111
+  ✓ Version: 2.8.30
 
 Server
   ✓ Reachable at localhost:6790
-  ✓ Version: 2.6.111
+  ✓ Version: 2.8.30
   ✓ Status: healthy
   ✓ Uptime: 2h 15m 30s
   ✓ Connections: TCP=3, WS=0, SSE=0

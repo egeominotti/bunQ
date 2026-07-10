@@ -1,6 +1,6 @@
 ---
 title: "bunqueue TCP Protocol Architecture: Wire Format & Pipelining"
-description: "bunqueue TCP protocol deep dive: MessagePack wire format, 6x faster pipelining, connection pooling, and binary command architecture."
+description: "bunqueue TCP protocol deep dive: MessagePack wire format, pipelining, connection pooling, and binary command architecture."
 head:
   - tag: meta
     attrs:
@@ -41,7 +41,7 @@ Client                    Server
   │<── { ok, id } ───────────│  wait ~1ms
 
   Total: 3 round-trips ≈ 3ms
-  Throughput: ~20,000 ops/sec
+  Throughput: ~1,000 ops/sec (one command per 1ms round-trip)
 ```
 
 ### With Pipelining (Parallel)
@@ -56,10 +56,10 @@ Client                    Server
   │<── { ok, reqId:3 } ──────│
 
   Total: 1 round-trip ≈ 1ms
-  Throughput: ~125,000 ops/sec
+  Throughput: ~3,000 ops/sec (three commands per 1ms round-trip)
 ```
 
-**Result: 6x faster** with pipelining enabled.
+**Result: 3x faster in this example**, and the gain scales with the number of commands in flight. With ~100 concurrent adds, pipelining reaches ~90,000 ops/sec in practice.
 
 ### How Pipelining Works
 

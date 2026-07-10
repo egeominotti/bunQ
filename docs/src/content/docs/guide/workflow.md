@@ -1124,7 +1124,7 @@ const kycFlow = new Workflow('kyc-onboarding')
 
     return {
       score,
-      riskLevel: score > 80 ? 'low' : score > 50 ? 'medium' : 'high',
+      riskLevel: score > 80 ? 'high' : score > 50 ? 'medium' : 'low',
     };
   })
   .branch((ctx) => (ctx.steps['risk-assessment'] as { riskLevel: string }).riskLevel)

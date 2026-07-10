@@ -304,8 +304,8 @@ bunqueue implements the full BullMQ v5 job state machine:
 - [ ] Update imports to `bunqueue/client`
 - [ ] Remove all Redis connection configuration
 - [ ] Update backoff configuration (simplified)
-- [ ] Move rate limiting from worker to queue
-- [ ] Update sandboxed processors to use `SandboxedWorker`
+- [ ] Keep per-worker `limiter: { max, duration }` as-is (BullMQ compatible), optionally add a queue-level limit with `setGlobalRateLimit()`
+- [ ] Convert sandboxed processors to inline `Worker` processors (recommended; `SandboxedWorker` is experimental)
 - [ ] Update repeat config (`cron` → `pattern`)
 - [ ] Test all job processing
 - [ ] Remove Redis server from infrastructure

@@ -205,7 +205,7 @@ Update README.md for:
 
 1. Update version in `package.json`
 2. Update CHANGELOG.md
-3. Create PR titled `release: v1.x.x`
+3. Create PR titled `release: v2.x.x`
 4. After merge, tag and publish
 
 ## Getting Help

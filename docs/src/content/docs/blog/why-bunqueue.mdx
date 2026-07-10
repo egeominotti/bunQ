@@ -48,7 +48,7 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Dependencies</h3>
-    <p>No Redis, no external services. Just your app and a file on disk. <code>bun add bunqueue</code> installs 7 packages (5.4 MB), only <code>croner</code> and <code>msgpackr</code> at runtime.</p>
+    <p>No Redis, no external services. Just your app and a file on disk. <code>bun add bunqueue</code> installs 7 packages (5.5 MB), only <code>croner</code> and <code>msgpackr</code> at runtime.</p>
   </div>
   <div class="bq-card">
     <BqIcon name="speed" />
@@ -120,9 +120,9 @@ bunqueue is designed for **single-instance deployments**. It's the right choice 
 If you need multi-node clustering or Redis pub/sub features, BullMQ remains a solid choice. But for the majority of applications that run on a single server, bunqueue eliminates an entire layer of infrastructure.
 
 <Aside type="note" title="A genuinely small install">
-  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.4 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
+  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.5 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
 </Aside>
 
-## What's Next?
+## Go Deeper
 
-In upcoming posts, we'll dive deep into bunqueue's architecture - from the sharding system that distributes jobs across CPU cores to the auto-batching system that makes TCP mode nearly as fast as embedded mode. Stay tuned.
+Two deep dives into bunqueue's architecture pick up where this post leaves off: the [sharding deep dive](/blog/sharding-deep-dive/) covers how jobs are distributed across CPU cores, and the [auto-batching post](/blog/auto-batching/) explains how TCP mode gets close to embedded-mode throughput for concurrent producers.

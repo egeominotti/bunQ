@@ -540,7 +540,7 @@ bunqueue exposes health endpoints:
 ```bash
 # HTTP health check (detailed)
 curl http://localhost:6790/health
-# {"ok":true,"status":"healthy","uptime":3600,"version":"2.5.7",
+# {"ok":true,"status":"healthy","uptime":3600,"version":"2.8.30",
 #  "queues":{"waiting":5,"active":2},"connections":{"ws":0,"sse":0},
 #  "memory":{"heapUsed":45,"heapTotal":64,"rss":128}}
 
@@ -742,7 +742,7 @@ new Worker('tasks', processor, {
 
 3. **Restore from backup**
    ```bash
-   bunqueue backup restore backups/bunq-2024-01-30T12:00:00.db --force
+   bunqueue backup restore backups/bunq-2026-01-30T12:00:00.db --force
    ```
 
 4. **Start bunqueue**

@@ -34,11 +34,11 @@ type Cover = {
 
 const covers: Cover[] = [
   { file: 'og-image', eyebrow: 'job queue · zero infrastructure', l1: 'The queue', l2pre: 'is ', l2: 'a file.', sub: 'Priorities, retries, cron and DLQ in one process. No Redis.', stats: ['150K+ ops/sec', 'SQLite WAL', 'MIT'] },
-  { file: 'og/getting-started', eyebrow: 'quickstart', l1: 'Working queue', l2pre: 'in ', l2: 'a minute.', sub: 'bun add bunqueue, write ten lines, run. Nothing to provision.', stats: ['1 dependency', '5.4 MB install', 'zero config'] },
+  { file: 'og/getting-started', eyebrow: 'quickstart', l1: 'Working queue', l2pre: 'in ', l2: 'a minute.', sub: 'bun add bunqueue, write ten lines, run. Nothing to provision.', stats: ['1 dependency', '5.5 MB install', 'zero config'] },
   { file: 'og/queue', eyebrow: 'queue api', l1: 'Every job, exactly', l2pre: 'where it ', l2: 'belongs.', sub: 'Priorities, delays, deduplication, bulk and durable writes.', stats: ['idempotent IDs', 'auto-batching', 'BullMQ-familiar'] },
   { file: 'og/worker', eyebrow: 'workers', l1: 'Pull, process,', l2pre: 'ack, ', l2: 'repeat.', sub: 'Concurrency, heartbeats, stall detection, ACK batching.', stats: ['long polling', 'lock ownership', 'typed events'] },
   { file: 'og/server-mode', eyebrow: 'server mode', l1: 'One process', l2pre: 'serves ', l2: 'them all.', sub: 'TCP and HTTP, token auth, native TLS, Unix sockets.', stats: ['TCP :6789', 'HTTP :6790', 'native TLS'] },
-  { file: 'og/client-sdk', eyebrow: 'sdks', l1: 'One protocol,', l2pre: 'every ', l2: 'runtime.', sub: 'Same Queue and Worker API on Node, Deno, Bun, Python, Workers.', stats: ['npm i bunqueue-client', '316 e2e scenarios', 'typed'] },
+  { file: 'og/client-sdk', eyebrow: 'sdks', l1: 'One protocol,', l2pre: 'every ', l2: 'runtime.', sub: 'Same Queue and Worker API on Node, Deno, Bun, Python, Workers.', stats: ['npm i bunqueue-client', '382 e2e scenarios', 'typed'] },
   { file: 'og/api-reference', eyebrow: 'api reference', l1: 'Every endpoint,', l2pre: '', l2: 'documented.', sub: 'TCP commands, HTTP routes and every type, spelled out.', stats: ['40+ commands', 'msgpack wire', 'JSON HTTP'] },
   { file: 'og/benchmarks', eyebrow: 'benchmarks', l1: 'Measured,', l2pre: 'not ', l2: 'marketed.', sub: 'Median of 3 runs, published methodology, reproducible.', stats: ['630K ops/s embedded', '3.5x BullMQ bulk', 'p99 < 1 ms'] },
   { file: 'og/integrations', eyebrow: 'integrations', l1: 'Plays well with', l2pre: 'your ', l2: 'stack.', sub: 'Hono, Elysia, MCP for AI agents, Prometheus, webhooks, S3.', stats: ['73 MCP tools', 'SSE + WebSocket', 'Prometheus'] },

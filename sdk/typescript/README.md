@@ -8,9 +8,9 @@ The bunqueue server runs on Bun, distributed as a binary or a Docker image. This
 
 | Runtime | Status | Notes |
 |---|---|---|
-| Node.js 20 or later | Supported, 81/81 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
-| Bun | Supported, 81/81 e2e and 8/8 integration tests | No additional configuration required |
-| Deno 2 or later | Supported, 81/81 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
+| Node.js 20 or later | Supported, 100/100 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
+| Bun | Supported, 100/100 e2e and 8/8 integration tests | No additional configuration required |
+| Deno 2 or later | Supported, 100/100 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
 | tsx, ts-node, vitest, jest | Supported | These environments execute on Node.js |
 | Cloudflare Workers | Supported, 16/16 e2e tests inside workerd, including Simple Mode and the full API surface | Requires the `nodejs_compat` compatibility flag. The runtime is request scoped, so long lived worker loops are not available: consume in batches from Cron Triggers or Durable Object alarms, a pattern covered by the test suite. TLS connections require a publicly trusted certificate |
 | Browser | Not supported | Raw TCP sockets are unavailable. Use the server HTTP API instead |

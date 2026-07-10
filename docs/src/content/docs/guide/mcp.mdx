@@ -99,7 +99,7 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 </Aside>
 
 <Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.0+)">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.4 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also up to ~5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.5 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also up to ~5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
 
   ```bash
   bun add @modelcontextprotocol/sdk

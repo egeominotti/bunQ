@@ -100,7 +100,7 @@ Clients should send a `Hello` command after connecting to negotiate protocol ver
   protocolVersion: 2,
   capabilities: ['pipelining'],
   server: 'bunqueue',
-  version: '2.1.8'  // Server version string
+  version: '2.8.30'  // Server version string
 }
 ```
 

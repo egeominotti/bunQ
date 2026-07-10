@@ -63,7 +63,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 <Aside type="note">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 </Aside>
 
 The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (local SQLite) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.
@@ -748,16 +748,16 @@ await indexQueue.addBulk(
 
 ## Scheduled Tasks with Cron
 
-<Aside type="note" title="Server Mode Feature">
-Cron scheduling via `upsertJobScheduler()` is only available in **server mode**. In embedded mode, use `setInterval()` + `queue.add()` for recurring jobs.
+<Aside type="note" title="Works in embedded mode too">
+Cron scheduling via `upsertJobScheduler()` works in **both embedded and server mode**. Schedules are persisted in SQLite and survive restarts. You can also attach a `repeat` option to `queue.add()`. See the [Cron guide](/guide/cron/).
 </Aside>
 
-Recurring tasks using cron expressions (server mode) or intervals (embedded mode).
+Recurring tasks using cron expressions or plain intervals, in either mode.
 
-### Server Mode (with Cron)
+### Scheduling Recurring Jobs
 
 ```typescript
-// Server mode: use upsertJobScheduler
+// Works in both embedded and server mode
 await scheduledQueue.upsertJobScheduler('daily-cleanup',
   { pattern: '0 3 * * *' }, // RepeatOpts
   { data: { task: 'cleanup', params: { olderThanDays: 30 } } } // JobTemplate
@@ -769,7 +769,7 @@ await scheduledQueue.upsertJobScheduler('health-check',
 );
 ```
 
-### Embedded Mode (with setInterval)
+### Embedded Mode Example
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -781,19 +781,17 @@ interface ScheduledJob {
 
 const scheduledQueue = new Queue<ScheduledJob>('scheduled', { embedded: true });
 
-// Recurring job using setInterval
-const healthCheckInterval = setInterval(async () => {
-  await scheduledQueue.add('health-check', { task: 'health-check' });
-}, 300000); // Every 5 minutes
+// Recurring health check every 5 minutes
+await scheduledQueue.upsertJobScheduler('health-check',
+  { every: 300000 },
+  { data: { task: 'health-check' } }
+);
 
-// Daily cleanup (use node-cron or similar for cron expressions)
-import cron from 'node-cron';
-cron.schedule('0 3 * * *', async () => {
-  await scheduledQueue.add('cleanup', {
-    task: 'cleanup',
-    params: { olderThanDays: 30 },
-  });
-});
+// Daily cleanup at 3 AM, cron expression persisted in SQLite
+await scheduledQueue.upsertJobScheduler('daily-cleanup',
+  { pattern: '0 3 * * *' },
+  { data: { task: 'cleanup', params: { olderThanDays: 30 } } }
+);
 
 const scheduledWorker = new Worker<ScheduledJob>('scheduled', async (job) => {
   const { task, params } = job.data;
@@ -814,7 +812,6 @@ const scheduledWorker = new Worker<ScheduledJob>('scheduled', async (job) => {
 
 // Clean up on shutdown
 process.on('SIGINT', () => {
-  clearInterval(healthCheckInterval);
   scheduledWorker.close();
 });
 ```

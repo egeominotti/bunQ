@@ -486,7 +486,7 @@ bun test
 | Feature | How It's Used |
 |---------|---------------|
 | **Embedded Mode** | `embedded: true` - no server needed |
-| **Persistence** | `DATA_PATH` env var for SQLite |
+| **Persistence** | `dataPath` option for SQLite |
 | **Multiple Queues** | emails, reports, webhooks |
 | **Concurrency** | Different per worker (3, 2, 5) |
 | **Priority Jobs** | `priority: 10` for VIP emails |

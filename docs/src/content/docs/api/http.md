@@ -1,6 +1,6 @@
 ---
 title: "HTTP REST API Reference"
-description: "Complete HTTP API reference for bunqueue — 76 REST endpoints, 50 real-time pub/sub events, WebSocket and SSE support."
+description: "Complete HTTP API reference for bunqueue: 77 REST endpoints, 60 real-time pub/sub events, WebSocket and SSE support."
 head:
   - tag: meta
     attrs:
@@ -64,9 +64,9 @@ The `GET /prometheus` endpoint optionally requires auth when `requireAuthForMetr
 
 ## CORS
 
-Cross-Origin Resource Sharing is configured via the `CORS_ALLOW_ORIGIN` environment variable. Defaults to `*` (allow all origins). Set to specific origins for production (e.g., `CORS_ALLOW_ORIGIN=https://dashboard.example.com`).
+Cross-Origin Resource Sharing is configured via the `CORS_ALLOW_ORIGIN` environment variable. By default it is unset, meaning no cross-origin access is granted. Set it explicitly, and only to the origins that need browser access (e.g., `CORS_ALLOW_ORIGIN=https://dashboard.example.com`). See the [Security guide](/security/) for hardening recommendations.
 
-All JSON responses include the `Access-Control-Allow-Origin` header. Preflight (`OPTIONS`) requests return:
+When CORS is configured, all JSON responses include the `Access-Control-Allow-Origin` header. Preflight (`OPTIONS`) requests return:
 
 ```
 HTTP/1.1 204 No Content
@@ -1532,7 +1532,7 @@ GET /health
   "ok": true,
   "status": "healthy",
   "uptime": 86400,
-  "version": "2.6.17",
+  "version": "2.8.30",
   "queues": {"waiting": 150, "active": 12, "delayed": 30, "completed": 50000, "dlq": 3},
   "connections": {"tcp": 8, "ws": 4, "sse": 2},
   "memory": {"heapUsed": 45, "heapTotal": 64, "rss": 82}
@@ -1687,7 +1687,7 @@ ws://localhost:6790/ws
 ws://localhost:6790/ws/queues/:queue
 ```
 
-WebSocket supports **pub/sub subscriptions** with **50 event types** across 9 categories. Clients subscribe to specific events and receive only matching data, **zero polling needed**.
+WebSocket supports **pub/sub subscriptions** with **60 event types** across 10 categories. Clients subscribe to specific events and receive only matching data, **zero polling needed**.
 
 #### Event Format
 
@@ -1738,20 +1738,21 @@ After connecting, send a `Subscribe` command to start receiving events:
 
 | Pattern | Matches |
 |---|---|
-| `*` | All 50 events |
-| `job:*` | All 14 job events |
-| `queue:*` | All 7 queue events + `queue:counts` |
-| `worker:*` | All 3 worker events |
+| `*` | All 60 events |
+| `job:*` | All 15 job events |
+| `queue:*` | All 10 queue events, including `queue:counts` |
+| `flow:*` | Both flow events |
+| `worker:*` | All 5 worker events |
 | `dlq:*` | All 4 DLQ events |
-| `cron:*` | All 5 cron events |
+| `cron:*` | All 6 cron events |
 | `stats:*` | `stats:snapshot` |
 | `health:*` | `health:status` |
-| `storage:*` | `storage:status` |
+| `storage:*` | `storage:status`, `storage:size-warning` |
 | `config:*` | Both config events |
 | `ratelimit:*` | All rate limit events |
 | `concurrency:*` | All concurrency events |
 | `webhook:*` | All 4 webhook events |
-| `server:*` | `server:started`, `server:shutdown` |
+| `server:*` | `server:started`, `server:shutdown`, `server:memory-warning` |
 
 #### Legacy Mode
 
@@ -1859,7 +1860,7 @@ function pauseQueue(queue) {
 }
 ```
 
-### All Events (63 total)
+### All Events (60 total)
 
 #### Job Lifecycle (15 events)
 
@@ -2118,17 +2119,17 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 | `POST` | `/gc` | Yes | Force GC + compact |
 | `GET` | `/heapstats` | Yes | Heap statistics |
 
-### Real-time (4 channels, 50 pub/sub events)
+### Real-time (4 channels, 60 pub/sub events)
 
 | Protocol | Path | Description |
 |---|---|---|
 | SSE | `/events` | All events (legacy format) |
 | SSE | `/events/queues/:q` | Queue-filtered events |
-| WebSocket | `/ws` | Pub/sub + commands (50 events, wildcards) |
+| WebSocket | `/ws` | Pub/sub + commands (60 events, wildcards) |
 | WebSocket | `/ws/queues/:q` | Queue-filtered pub/sub |
 
 :::tip[Related]
-- [TCP Protocol Reference](/api/tcp/), binary TCP protocol (same 76 commands)
+- [TCP Protocol Reference](/api/tcp/), the same operations over the binary msgpack protocol, with its own command list
 - [TypeScript Types](/api/types/), type definitions for all APIs
 - [Server Mode](/guide/server/), run the HTTP API server
 :::

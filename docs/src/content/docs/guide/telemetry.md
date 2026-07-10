@@ -93,7 +93,7 @@ Real-time throughput is tracked using Exponential Moving Average (EMA) with `alp
 
 ### Accessing Rates
 
-Rates are exposed via the `/stats` HTTP endpoint:
+Rates are exposed via the `/stats` HTTP endpoint and included in the `/prometheus` output. The internal `throughputTracker` is not a public package export, so read the rates over HTTP:
 
 ```bash
 curl http://localhost:6790/stats
@@ -110,10 +110,6 @@ curl http://localhost:6790/stats
   }
 }
 ```
-
-### Accessing rates
-
-Rates are included in the `/stats` response shown above (`pushPerSec`, `pullPerSec`) and in the `/prometheus` output. The internal `throughputTracker` is not a public package export, read the rates over HTTP.
 
 ## Per-Queue Metrics
 

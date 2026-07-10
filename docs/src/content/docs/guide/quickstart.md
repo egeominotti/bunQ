@@ -1,6 +1,6 @@
 ---
-title: "Quick Start — Build Your First Bun Job Queue in 5 Minutes"
-description: "Get started with bunqueue in 5 minutes. Create queues, add jobs, and process them with Workers. Includes SQLite persistence setup."
+title: "Quick Start: Your First Bun Job Queue in Minutes"
+description: "Get started with bunqueue in minutes. Create queues, add jobs, and process them with Workers. Includes SQLite persistence setup."
 head:
   - tag: meta
     attrs:
@@ -269,7 +269,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.4 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 :::
 
 ```json

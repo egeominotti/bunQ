@@ -135,8 +135,8 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
   <div class="bq-proof">
     <span><b>150K+</b> ops/sec sustained</span>
     <span>p99 under <b>1 ms</b></span>
-    <span><b>5.4 MB</b> install, 2 runtime deps</span>
-    <span><b>316</b> e2e scenarios across 5 runtimes</span>
+    <span><b>5.5 MB</b> install, 2 runtime deps</span>
+    <span><b>382</b> e2e scenarios across 5 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
   </div>
 </div>
@@ -236,7 +236,7 @@ new Worker('emails', async (job) => {
 }, { concurrency: 10 });
 ```
 
-      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 81 e2e scenarios per runtime</p>
+      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 100 e2e scenarios per runtime</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
@@ -254,7 +254,7 @@ def process(job):
 Worker("emails", process, concurrency=10).run()
 ```
 
-      <p><a href="/guide/sdks/">same API, snake_case</a> · 57 e2e scenarios</p>
+      <p><a href="/guide/sdks/">same API, snake_case</a> · 66 e2e scenarios</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>
@@ -419,9 +419,9 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
       <BqIcon name="check" />
       <h3>Tested on every runtime</h3>
       <ul>
-        <li>81 e2e scenarios each on Node.js, Deno, Bun</li>
+        <li>100 e2e scenarios each on Node.js, Deno, Bun</li>
         <li>16 scenarios inside workerd</li>
-        <li>57 scenarios in Python</li>
+        <li>66 scenarios in Python</li>
         <li>every public SDK method covered</li>
       </ul>
     </div>

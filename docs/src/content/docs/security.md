@@ -1,6 +1,6 @@
 ---
 title: "bunqueue Security: Authentication, TLS, Hardening & Disclosure"
-description: "The bunqueue security model: token authentication, native TLS, network isolation, abuse protection, data at rest, secure defaults, a production hardening checklist, and coordinated vulnerability disclosure."
+description: "The bunqueue security model: token authentication, native TLS, network isolation, abuse protection and how to report a vulnerability."
 head:
   - tag: meta
     attrs:

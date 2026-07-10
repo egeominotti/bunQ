@@ -1,6 +1,6 @@
 ---
 title: "Workflow Engine — Multi-Step Orchestration for Bun"
-description: "Orchestrate multi-step workflows with saga compensation, step retry, parallel execution, conditional branching, nested sub-workflows, human-in-the-loop signals with timeout, loops (doUntil/doWhile), forEach iteration, map transforms, schema validation, per-execution subscribe, crash recovery, type-safe step chaining, observability events, and cleanup/archival. Zero infrastructure — no Redis, no Temporal, no cloud service. TypeScript DSL built on bunqueue."
+description: "Multi-step orchestration on bunqueue: saga compensation, retries, parallel steps, branching, signals and loops, persisted to SQLite with no extra services."
 head:
   - tag: meta
     attrs:

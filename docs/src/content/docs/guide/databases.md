@@ -1,6 +1,6 @@
 ---
 title: "Postgres, MySQL & Storage Backends"
-description: "Does bunqueue support Postgres or MySQL? Why bunqueue is SQLite-only by design, and how to run it on serverless or ephemeral-filesystem platforms using a persistent volume or store-and-forward, no database required."
+description: "Why bunqueue is SQLite-only by design, what that means for Postgres and MySQL users, and how to run it on serverless and edge platforms."
 head:
   - tag: meta
     attrs:

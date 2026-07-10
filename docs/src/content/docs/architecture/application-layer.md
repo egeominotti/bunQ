@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Application Layer: Operations, Stall Detection & DLQ Management"
+title: "Application Layer: Operations, Stall Detection, DLQ"
 description: "bunqueue application layer: PUSH/PULL/ACK operations, stall detection, dependency resolution, DLQ management, and job lifecycle flows."
 head:
   - tag: meta

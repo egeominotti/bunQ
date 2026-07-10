@@ -97,6 +97,7 @@ export default defineConfig({
       components: {
         Header: './src/components/Header.astro',
         Head: './src/components/Head.astro',
+        MobileMenuFooter: './src/components/MobileMenuFooter.astro',
       },
       editLink: {
         baseUrl: 'https://github.com/egeominotti/bunqueue/edit/main/docs/',

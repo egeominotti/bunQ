@@ -29,6 +29,7 @@ const { pathname } = Astro.url;
 	<div class="sl-flex print:hidden">
 		{shouldRenderSearch && <Search />}
 	</div>
+	<a class="header-cta header-cta-mobile md:sl-hidden" href="/guide/quickstart/">Get started</a>
 	<div class="sl-hidden md:sl-flex print:hidden right-group">
 		<nav class="nav-links sl-flex" aria-label="Site">
 			{
@@ -112,6 +113,12 @@ const { pathname } = Astro.url;
 		}
 		.header-cta:hover {
 			transform: translateY(-1px);
+		}
+		/* compact variant shown on phones between search and the menu button */
+		.header-cta-mobile {
+			font-size: 0.78rem;
+			padding: 0.4rem 0.7rem;
+			margin-inline-start: auto;
 		}
 
 		@media (min-width: 50rem) {

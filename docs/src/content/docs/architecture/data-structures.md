@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Data Structures: MinHeap, Skip List, LRU Cache & Hashing"
+title: "Data Structures: MinHeap, Skip List, LRU, Hashing"
 description: "Data structures powering bunqueue: 4-ary MinHeap, skip lists, LRU cache, FNV-1a hashing, and read-write locks with complexities."
 head:
   - tag: meta

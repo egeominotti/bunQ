@@ -584,9 +584,32 @@ starlight-toc a[aria-current='true'] {
   background: rgba(239, 68, 68, 0.05);
 }
 
-/* Mobile menu */
+/* Mobile menu button: flat, integrated with the header (kill the default
+   floating white circle + shadow) */
 starlight-menu-button button {
-  color: var(--sl-color-text);
+  background: transparent !important;
+  border: 1px solid var(--bq-line);
+  border-radius: 0.45rem;
+  box-shadow: none !important;
+  color: var(--sl-color-gray-2) !important;
+}
+
+starlight-menu-button button:hover,
+starlight-menu-button[aria-expanded='true'] button {
+  color: var(--sl-color-white) !important;
+  border-color: var(--bq-brand);
+}
+
+/* keep the compact header CTA clear of the absolutely-positioned menu
+   button on pages that have a sidebar drawer */
+:root[data-has-sidebar] .header-cta-mobile {
+  margin-inline-end: 3rem;
+}
+
+/* the drawer nav already draws a divider; drop the duplicate one on the
+   default preferences block that follows it */
+.bq-mobile-nav + .mobile-preferences {
+  border-top: 0;
 }
 
 /* Logo & Site Title */
@@ -1763,6 +1786,17 @@ main:has(.bq-hero) .sl-container {
   margin-top: 1rem;
 }
 
+.bq-hero-trust a {
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--bq-line);
+}
+
+.bq-hero-trust a:hover {
+  color: var(--sl-color-white);
+  border-bottom-color: var(--bq-brand);
+}
+
 .bq-hero-install::before {
   content: '$ ';
   color: var(--bq-brand);
@@ -1943,6 +1977,12 @@ html {
   font-weight: 600;
 }
 
+.bq-diag-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+
 .bq-diag-layer,
 .bq-diag-cell {
   border: 1px solid var(--bq-line);
@@ -1962,6 +2002,7 @@ html {
 .bq-diag-layer > *,
 .bq-diag-cell > * {
   min-width: 0;
+  max-width: 100%;
 }
 
 .bq-diag-cell {
@@ -2048,6 +2089,11 @@ html {
 
 @media (max-width: 40rem) {
   .bq-diag-row { grid-auto-flow: row; grid-auto-columns: unset; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* very narrow phones: one diagram cell per row so long identifiers fit */
+@media (max-width: 26rem) {
+  .bq-diag-row { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* custom icon set */

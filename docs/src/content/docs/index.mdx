@@ -1,6 +1,6 @@
 ---
 title: "The Queue Is a File: Zero-Infrastructure Job Queue"
-description: "bunqueue is a complete job queue in one process, persisted to a single SQLite file. No Redis, no broker. Priorities, retries, cron, DLQ, S3 backups, MCP for AI agents. Clients for Node.js, Deno, Bun, Python and Cloudflare Workers."
+description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups and clients for TypeScript and Python."
 template: splash
 head:
   - tag: meta
@@ -459,6 +459,7 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
     <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
   </div>
   <p class="bq-hero-trust">If bunqueue removes a Redis box from your stack, a star on GitHub helps other teams find it.</p>
+  <p class="bq-hero-trust"><a href="/blog/">Blog</a> · <a href="/simulator/">Simulator</a> · <a href="/guide/comparison/">vs BullMQ</a> · <a href="/guide/introduction/">Docs</a></p>
 </div>
 
 <script is:inline src="/bq-copy.js"></script>

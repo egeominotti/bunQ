@@ -1,5 +1,5 @@
 ---
-title: "Queue API — Add Jobs, Priorities, Delays & Deduplication in bunqueue"
+title: "Queue API: Jobs, Priorities, Delays, Deduplication"
 description: "Complete bunqueue Queue API reference: add jobs with priorities, delays, retries, bulk operations, durable writes, and DLQ configuration."
 head:
   - tag: meta

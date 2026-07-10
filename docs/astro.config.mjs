@@ -100,6 +100,7 @@ export default defineConfig({
         Head: './src/components/Head.astro',
         MobileMenuFooter: './src/components/MobileMenuFooter.astro',
         MarkdownContent: './src/components/MarkdownContent.astro',
+        Footer: './src/components/Footer.astro',
       },
       editLink: {
         baseUrl: 'https://github.com/egeominotti/bunqueue/edit/main/docs/',

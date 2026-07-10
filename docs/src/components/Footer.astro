@@ -1,0 +1,141 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+
+/**
+ * Keeps Starlight's footer (edit link, last updated, pagination) and
+ * appends the site-wide footer: brand, link columns, legal line.
+ */
+const year = new Date().getFullYear();
+---
+
+<Default><slot /></Default>
+
+<footer class="bq-footer">
+  <div class="bq-footer-grid">
+    <div class="bq-footer-brand">
+      <span class="bq-footer-logo" aria-hidden="true"></span>
+      <p class="bq-footer-name">bunqueue</p>
+      <p class="bq-footer-tag">The queue is a file. Zero-infrastructure background jobs, persisted to SQLite.</p>
+    </div>
+    <nav aria-label="Product">
+      <p>Product</p>
+      <a href="/guide/quickstart/">Quickstart</a>
+      <a href="/guide/benchmarks/">Benchmarks</a>
+      <a href="/guide/comparison/">vs BullMQ</a>
+      <a href="/simulator/">Simulator</a>
+      <a href="/changelog/">Changelog</a>
+    </nav>
+    <nav aria-label="Documentation">
+      <p>Docs</p>
+      <a href="/guide/queue/">Queue</a>
+      <a href="/guide/worker/">Worker</a>
+      <a href="/guide/workflow/">Workflow engine</a>
+      <a href="/guide/server/">Server mode</a>
+      <a href="/api/http/">API reference</a>
+    </nav>
+    <nav aria-label="Community">
+      <p>Community</p>
+      <a href="https://github.com/egeominotti/bunqueue">GitHub</a>
+      <a href="https://www.npmjs.com/package/bunqueue">npm</a>
+      <a href="https://x.com/egeominotti">X</a>
+      <a href="/blog/">Blog</a>
+      <a href="/rss.xml">RSS</a>
+    </nav>
+  </div>
+  <p class="bq-footer-legal">MIT licensed · © {year} Egeo Minotti · bunqueue.dev</p>
+</footer>
+
+<style>
+  .bq-footer {
+    margin-top: 4rem;
+    border-top: 1px solid var(--bq-line, var(--sl-color-hairline));
+    padding: 2.6rem 0 2rem;
+    font-family: var(--bq-mono, ui-monospace, monospace);
+  }
+
+  .bq-footer-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+    gap: 2rem;
+  }
+
+  .bq-footer-logo {
+    display: block;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: var(--bq-brand, #ec4899);
+    position: relative;
+  }
+
+  .bq-footer-logo::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 9px;
+    width: 17px;
+    height: 4px;
+    border-radius: 2px;
+    background: #fff;
+    box-shadow: 0 6px 0 -0.5px rgba(255, 255, 255, 0.8), 0 12px 0 -1px rgba(255, 255, 255, 0.6);
+  }
+
+  .bq-footer-name {
+    font-family: var(--bq-display, inherit);
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: var(--sl-color-white);
+    margin: 0.7rem 0 0.3rem;
+  }
+
+  .bq-footer-tag {
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    margin: 0;
+    max-width: 26rem;
+  }
+
+  .bq-footer nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .bq-footer nav p {
+    font-size: 0.72rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin: 0 0 0.25rem;
+  }
+
+  .bq-footer nav a {
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    width: fit-content;
+  }
+
+  .bq-footer nav a:hover {
+    color: var(--sl-color-white);
+  }
+
+  .bq-footer-legal {
+    margin: 2.2rem 0 0;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--bq-line, var(--sl-color-hairline));
+    font-size: 0.76rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  @media (max-width: 50rem) {
+    .bq-footer-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .bq-footer-brand {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

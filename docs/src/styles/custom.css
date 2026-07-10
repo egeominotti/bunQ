@@ -2993,7 +2993,13 @@ html {
 }
 
 .bq-bar-label b.bq-neutral {
-  background: color-mix(in srgb, var(--sl-color-text) 30%, transparent);
+  background: rgba(128, 128, 136, 0.45);
+}
+
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-bar-label b.bq-neutral {
+    background: color-mix(in srgb, var(--sl-color-text) 30%, transparent);
+  }
 }
 
 .bq-legend {
@@ -3008,7 +3014,13 @@ html {
 .bq-legend .bq-dot { margin-right: 0.4rem; }
 
 .bq-dot-them {
-  background: color-mix(in srgb, var(--sl-color-text) 22%, transparent);
+  background: rgba(128, 128, 136, 0.35);
+}
+
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bq-dot-them {
+    background: color-mix(in srgb, var(--sl-color-text) 22%, transparent);
+  }
 }
 
 .bq-bar {

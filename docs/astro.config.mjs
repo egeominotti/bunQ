@@ -377,14 +377,14 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             name: 'twitter:creator',
-            content: '@egeominotti',
+            content: '@EgeoMinotti',
           },
         },
         {
           tag: 'meta',
           attrs: {
             name: 'twitter:site',
-            content: '@egeominotti',
+            content: '@EgeoMinotti',
           },
         },
         {

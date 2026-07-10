@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   BUN_VERSION: "latest"
   REGISTRY: ghcr.io
@@ -66,37 +70,76 @@ jobs:
       - name: Run unit tests
         run: bun test
 
-  # test-tcp:
-  #   name: TCP Integration Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: ${{ env.BUN_VERSION }}
-  #
-  #     - name: Install dependencies
-  #       run: bun install --ignore-scripts
-  #
-  #     - name: Run TCP integration tests
-  #       run: bun scripts/tcp/run-all-tests.ts
+  test-tcp:
+    name: TCP Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
 
-  # test-embedded:
-  #   name: Embedded Integration Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: ${{ env.BUN_VERSION }}
-  #
-  #     - name: Install dependencies
-  #       run: bun install --ignore-scripts
-  #
-  #     - name: Run embedded integration tests
-  #       run: bun scripts/embedded/run-all-tests.ts
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      - name: Run TCP integration tests
+        run: bun scripts/tcp/run-all-tests.ts
+
+  test-embedded:
+    name: Embedded Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      - name: Run embedded integration tests
+        run: bun scripts/embedded/run-all-tests.ts
+
+  # ============================================
+  # Docs site: the bunqueue.dev build must stay green
+  # ============================================
+  docs:
+    name: Docs Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # full history: the sitemap derives real per-page lastmod from git log
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: bun install --ignore-scripts
+
+      - name: Build docs site
+        working-directory: docs
+        run: bun run build
+
+      - name: Sanity-check output
+        working-directory: docs
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          test -f dist/rss.xml
+          # @astrojs/sitemap emits a single minified line, so `grep -c` (which
+          # counts matching LINES) would report 1. Count <loc> OCCURRENCES.
+          URLS=$(grep -o "<loc>" dist/sitemap-0.xml | wc -l | tr -d '[:space:]')
+          echo "sitemap URLs: $URLS"
+          test "$URLS" -ge 60
 
   test-websocket:
     name: WebSocket/SSE Integration Tests
@@ -122,7 +165,7 @@ jobs:
   version-gate:
     name: Version gate
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, test-websocket]
+    needs: [lint, typecheck, test, test-tcp, test-embedded, test-websocket, docs]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       version: ${{ steps.gate.outputs.version }}

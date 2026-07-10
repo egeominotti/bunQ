@@ -93,7 +93,7 @@ defineConfig({
     tcpPort: 6789,           // TCP server port (default: 6789)
     httpPort: 6790,           // HTTP/REST API port (default: 6790)
     host: '0.0.0.0',         // Bind address (default: 0.0.0.0)
-    tcpSocketPath: undefined, // Unix socket for TCP (overrides host/port)
+    tcpSocketPath: undefined, // reserved, not applied yet: TCP always binds host:port
     httpSocketPath: undefined, // Unix socket for HTTP (overrides host/port)
     tlsCertFile: undefined,   // PEM certificate, enables native TLS on TCP + HTTP (with tlsKeyFile)
     tlsKeyFile: undefined,    // PEM private key (set both or neither, partial config is a startup error)

@@ -97,11 +97,13 @@ Three options, in order of preference for typical deployments:
    verification is possible for development only. See the
    [TLS guide](/guide/tls/).
 
-2. **Unix domain sockets** for same host deployments. No network listener
-   exists at all, and access control reduces to filesystem permissions:
+2. **A Unix domain socket for the HTTP API** on same host deployments, where
+   access control reduces to filesystem permissions. The TCP protocol has no
+   Unix-socket support today (`TCP_SOCKET_PATH` is reserved but not applied),
+   so bind it to loopback:
 
    ```bash
-   TCP_SOCKET_PATH=/run/bunqueue/tcp.sock HTTP_SOCKET_PATH=/run/bunqueue/http.sock bunqueue start
+   HTTP_SOCKET_PATH=/run/bunqueue/http.sock HOST=127.0.0.1 bunqueue start
    ```
 
 3. **A reverse proxy** (nginx, Caddy) terminating TLS in front of the HTTP

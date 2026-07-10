@@ -62,23 +62,19 @@ HOST=0.0.0.0 bunqueue start
 
 ### `TCP_SOCKET_PATH`
 
-Unix socket path for TCP server (alternative to TCP_PORT).
+Reserved. The variable is accepted and shown in the startup banner, but the TCP listener currently always binds `HOST:TCP_PORT`, it is not applied.
 
 | Type | Default | Example |
 |------|---------|---------|
 | string | (none) | `/var/run/bunqueue.sock` |
 
-```bash
-TCP_SOCKET_PATH=/var/run/bunqueue.sock bunqueue start
-```
-
-:::note[Unix Socket vs TCP Port]
-When `TCP_SOCKET_PATH` is set, the TCP server binds to the Unix socket instead of a TCP port. Unix sockets offer lower latency for local connections.
+:::caution[Not functional yet]
+Setting `TCP_SOCKET_PATH` does not switch the TCP server to a Unix socket today. Use `HTTP_SOCKET_PATH` for Unix-socket access (HTTP API), or bind TCP to `HOST=127.0.0.1` for local-only access.
 :::
 
 ### `HTTP_SOCKET_PATH`
 
-Unix socket path for HTTP server (alternative to HTTP_PORT).
+Unix socket path for the HTTP server (alternative to HTTP_PORT). When set, the HTTP server binds the Unix socket instead of a TCP port.
 
 | Type | Default | Example |
 |------|---------|---------|

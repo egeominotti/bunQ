@@ -168,8 +168,8 @@ TCP_PORT=6789              HTTP_PORT=6790
 HOST=0.0.0.0               BUNQUEUE_DATA_PATH=./data/bunq.db
 AUTH_TOKENS=token1,token2  CORS_ALLOW_ORIGIN=*
 METRICS_AUTH=false          # Require auth for /metrics endpoint
-TCP_SOCKET_PATH=           # Unix socket for TCP (overrides host/port)
-HTTP_SOCKET_PATH=          # Unix socket for HTTP
+TCP_SOCKET_PATH=           # RESERVED, not wired: TCP always binds HOST:TCP_PORT
+HTTP_SOCKET_PATH=          # Unix socket for HTTP (works)
 TLS_CERT_FILE=             # PEM cert — native TLS on TCP+HTTP (with TLS_KEY_FILE)
 TLS_KEY_FILE=              # PEM private key (both or neither; partial = startup error)
 

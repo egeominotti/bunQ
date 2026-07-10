@@ -2427,6 +2427,38 @@ html {
   .bq-sim-col .bq-simchip:nth-of-type(n + 5) { display: none; }
 }
 
+/* phones: one lane per row, chips flow horizontally and stay readable */
+@media (max-width: 40rem) {
+  .bq-sim-lanes { grid-template-columns: minmax(0, 1fr); }
+
+  .bq-sim-col {
+    height: auto;
+    min-height: 6.2rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    border-right: 0;
+    border-bottom: 1px solid var(--bq-line-soft);
+    padding: 0.3rem 0.7rem 0.7rem;
+  }
+
+  .bq-sim-col:last-child { border-bottom: 0; }
+
+  .bq-sim-head { flex-basis: 100%; }
+
+  .bq-sim-col .bq-simchip:nth-of-type(n + 4) { display: none; }
+
+  .bq-checks { grid-template-columns: minmax(0, 1fr); }
+
+  /* keep the command on one line, but never wider than the page:
+     on 320px-class screens the longest command scrolls inside the chip */
+  .bq-hero-install {
+    white-space: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
 /* ── proof strip ───────────────────────────────────────────────────── */
 
 .bq-proof {
@@ -2441,6 +2473,17 @@ html {
   flex-wrap: wrap;
   gap: 0.4rem 2.2rem;
   justify-content: center;
+}
+
+/* phones: tidy left-aligned column (kept after the base rule so it wins
+   the source-order cascade at equal specificity) */
+@media (max-width: 40rem) {
+  .bq-proof {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
 }
 
 .bq-proof span b {

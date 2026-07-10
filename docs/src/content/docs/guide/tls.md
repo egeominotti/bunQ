@@ -1,6 +1,11 @@
 ---
 title: "Native TLS"
-description: Encrypt bunqueue TCP and HTTP traffic with native TLS — no reverse proxy needed. Server cert/key setup, client options, CLI flags, self-signed certs.
+description: Encrypt bunqueue TCP and HTTP traffic with native TLS, no reverse proxy needed. Server cert/key setup, client options, CLI flags, self-signed certs.
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/server-mode.png
 ---
 
 <div class="bq-wrap bq-hero">
@@ -49,7 +54,7 @@ only one of the two is set. It never silently falls back to plaintext.
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
-// Public CA (Let's Encrypt etc.) — verify with system CAs
+// Public CA (Let's Encrypt etc.): verify with system CAs
 const queue = new Queue('jobs', {
   connection: { host: 'queue.example.com', port: 6789, tls: true },
 });
@@ -91,6 +96,9 @@ needed.
 
 ## Notes
 
+- Certificate verification is on by default: the client rejects untrusted or
+  mismatched server certs unless you explicitly pass
+  `rejectUnauthorized: false` (encryption without authentication, dev only).
 - TLS + auth tokens compose: use both for servers exposed beyond localhost.
 - A TLS-enabled server only accepts TLS clients; plaintext clients fail the
   handshake (they do not hang).

@@ -46,11 +46,14 @@ bunqueue exposes metrics at `/prometheus` on the HTTP port (default 6790):
 curl http://localhost:6790/prometheus
 ```
 
+The endpoint is unauthenticated by default so scrapers work out of the box. Set `METRICS_AUTH=true` to require a bearer token from `AUTH_TOKENS` (see the `bearer_token` scrape config below).
+
 ### Available Metrics
 
 | Metric | Type | Description |
 |--------|------|-------------|
 | `bunqueue_jobs_waiting` | gauge | Jobs waiting in queue |
+| `bunqueue_jobs_prioritized` | gauge | Prioritized jobs (priority > 0) |
 | `bunqueue_jobs_delayed` | gauge | Delayed jobs |
 | `bunqueue_jobs_active` | gauge | Jobs being processed |
 | `bunqueue_jobs_completed` | gauge | Completed jobs in memory |
@@ -75,6 +78,7 @@ All per-queue metrics include a `queue` label for filtering and aggregation:
 | Metric | Type | Description |
 |--------|------|-------------|
 | `bunqueue_queue_jobs_waiting{queue="..."}` | gauge | Waiting jobs per queue |
+| `bunqueue_queue_jobs_prioritized{queue="..."}` | gauge | Prioritized jobs per queue |
 | `bunqueue_queue_jobs_delayed{queue="..."}` | gauge | Delayed jobs per queue |
 | `bunqueue_queue_jobs_active{queue="..."}` | gauge | Active jobs per queue |
 | `bunqueue_queue_jobs_dlq{queue="..."}` | gauge | DLQ jobs per queue |
@@ -112,7 +116,7 @@ bunqueue_queue_jobs_waiting{queue="payments"} 12
 bunqueue_queue_jobs_active{queue="emails"} 5
 
 # Latency histograms
-# HELP bunqueue_push_duration_ms Push operation latency in ms
+# HELP bunqueue_push_duration_ms Push operation latency in milliseconds
 # TYPE bunqueue_push_duration_ms histogram
 bunqueue_push_duration_ms_bucket{le="0.1"} 120
 bunqueue_push_duration_ms_bucket{le="0.5"} 145000
@@ -221,29 +225,43 @@ Pre-configured Prometheus alerts in `monitoring/alert_rules.yml`:
 View metrics from the command line:
 
 ```bash
-# JSON format
+# Prometheus text format
 bunqueue metrics
 
-# Prometheus format
-bunqueue metrics --format prometheus
-
-# Server stats
+# Server stats (human-readable)
 bunqueue stats
+
+# Server stats as JSON
+bunqueue stats --json
 ```
 
 ## Health Endpoints
 
-bunqueue provides Kubernetes-compatible health endpoints:
+bunqueue provides Kubernetes-compatible health endpoints (no auth, no rate limit):
 
 ```bash
 # Detailed health (includes memory stats)
 curl http://localhost:6790/health
 
-# Kubernetes liveness probe
+# Kubernetes liveness probe (alias: /live), returns plain "OK"
 curl http://localhost:6790/healthz
 
 # Kubernetes readiness probe
 curl http://localhost:6790/ready
+```
+
+`/health` reports `status: "healthy"` with per-state job counts, connection counts, memory usage, uptime, and version. When the disk fills up, `ok` flips to `false`, `status` becomes `"degraded"`, and a `storage` block appears with `diskFull: true`, the underlying error, and a `since` timestamp:
+
+```json
+{
+  "ok": true,
+  "status": "healthy",
+  "uptime": 3600,
+  "version": "2.8.30",
+  "queues": { "waiting": 42, "active": 8, "delayed": 3, "completed": 120, "dlq": 0 },
+  "connections": { "tcp": 0, "ws": 1, "sse": 0 },
+  "memory": { "heapUsed": 45, "heapTotal": 80, "rss": 210 }
+}
 ```
 
 ## Debug Endpoints
@@ -256,6 +274,12 @@ curl http://localhost:6790/heapstats
 
 # Force garbage collection
 curl -X POST http://localhost:6790/gc
+```
+
+Both require a bearer token when `AUTH_TOKENS` is set:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:6790/heapstats
 ```
 
 ## File Structure
@@ -310,7 +334,7 @@ Log levels are filtered at runtime. Only messages at or above the configured lev
 6. **Throughput rates**: Monitor `pushPerSec` and `pullPerSec` from `/stats` for real-time throughput
 
 :::tip[Related Guides]
-- [Telemetry & OpenTelemetry](/guide/telemetry/) - Distributed tracing setup
+- [Built-in Telemetry](/guide/telemetry/) - Latency histograms, throughput rates, and log configuration
 - [Troubleshooting](/troubleshooting/) - Diagnose common issues
 - [Production Deployment](/guide/deployment/) - Deploy with monitoring
 :::

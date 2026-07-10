@@ -1,6 +1,6 @@
 ---
-title: "OpenTelemetry & Distributed Tracing for Bunqueue"
-description: Configure OpenTelemetry traces and observability for bunqueue. Latency histograms, throughput tracking, and per-queue distributed tracing.
+title: "Built-in Telemetry: Latency Histograms & Throughput"
+description: Built-in telemetry for bunqueue. Prometheus latency histograms, EMA throughput rates, per-queue metrics, and structured JSON logs.
 head:
   - tag: meta
     attrs:
@@ -46,7 +46,7 @@ Default boundaries (in milliseconds):
 Each histogram exposes three series:
 
 ```
-# HELP bunqueue_push_duration_ms Push operation latency in ms
+# HELP bunqueue_push_duration_ms Push operation latency in milliseconds
 # TYPE bunqueue_push_duration_ms histogram
 bunqueue_push_duration_ms_bucket{le="0.1"} 120
 bunqueue_push_duration_ms_bucket{le="0.5"} 89500
@@ -71,11 +71,11 @@ histogram_quantile(0.50, rate(bunqueue_pull_duration_ms_bucket[5m]))
 
 ### Accessing latency
 
-Latency averages and percentiles are exposed via the `/stats` and `/prometheus` HTTP endpoints. The internal `latencyTracker` is not a public package export, so consume it over HTTP:
+Percentiles come from the `/prometheus` histograms with `histogram_quantile()`, and averages can be derived from the `_sum` and `_count` series. Latency averages are also returned by the `Metrics` TCP command as `avgLatencyMs` and `avgProcessingMs`, accessible over the TCP protocol (the SDK). Note that the `bunqueue metrics` CLI prints Prometheus text, not these JSON fields, and the HTTP `/metrics` endpoint only exposes the `total*` counters. The internal `latencyTracker` is not a public package export, so consume it over these interfaces:
 
 ```bash
-curl http://localhost:6790/stats        # avgLatencyMs, avgProcessingMs
-curl http://localhost:6790/prometheus    # bunqueue_push_duration_ms_bucket, ...
+curl http://localhost:6790/prometheus    # bunqueue_push_duration_ms_bucket, _sum, _count
+# avgLatencyMs / avgProcessingMs: Metrics TCP command via the SDK, not the CLI or an HTTP endpoint
 ```
 
 ## Throughput Tracking
@@ -93,7 +93,7 @@ Real-time throughput is tracked using Exponential Moving Average (EMA) with `alp
 
 ### Accessing Rates
 
-Rates are exposed via the `/stats` HTTP endpoint and included in the `/prometheus` output. The internal `throughputTracker` is not a public package export, so read the rates over HTTP:
+All four rates are exposed via the `/stats` HTTP endpoint. They are not part of the `/prometheus` output; in Prometheus, derive rates from the `bunqueue_jobs_*_total` counters with `rate()`. The internal `throughputTracker` is not a public package export, so read the rates over HTTP:
 
 ```bash
 curl http://localhost:6790/stats
@@ -103,13 +103,17 @@ curl http://localhost:6790/stats
 {
   "ok": true,
   "stats": {
+    "waiting": 120,
+    "active": 8,
     "pushPerSec": 12500,
     "pullPerSec": 12480,
-    "avgLatencyMs": 0.08,
-    "avgProcessingMs": 0.12
+    "completePerSec": 12460,
+    "failPerSec": 2
   }
 }
 ```
+
+The real response also includes `delayed`, `dlq`, `completed`, `failed`, `uptime`, the `total*` counters, and a `memory` block; the example above is trimmed to the rate fields.
 
 ## Per-Queue Metrics
 
@@ -120,6 +124,7 @@ All queue metrics include a `queue` label for drill-down by queue name. This ena
 | Metric | Type | Description |
 |--------|------|-------------|
 | `bunqueue_queue_jobs_waiting{queue="..."}` | gauge | Waiting jobs in specific queue |
+| `bunqueue_queue_jobs_prioritized{queue="..."}` | gauge | Prioritized jobs (priority > 0) in specific queue |
 | `bunqueue_queue_jobs_delayed{queue="..."}` | gauge | Delayed jobs in specific queue |
 | `bunqueue_queue_jobs_active{queue="..."}` | gauge | Active jobs in specific queue |
 | `bunqueue_queue_jobs_dlq{queue="..."}` | gauge | DLQ entries for specific queue |
@@ -151,10 +156,10 @@ topk(5, bunqueue_queue_jobs_waiting)
 
 ```typescript
 const perQueue = queueManager.getPerQueueStats();
-// Map<string, { waiting, delayed, active, dlq }>
+// Map<string, { waiting, prioritized, delayed, active, dlq }>
 
 const emailStats = perQueue.get('emails');
-// { waiting: 30, delayed: 0, active: 5, dlq: 2 }
+// { waiting: 30, prioritized: 0, delayed: 0, active: 5, dlq: 2 }
 ```
 
 ## Log Level Configuration
@@ -190,6 +195,10 @@ Configure the log level with the `LOG_LEVEL` environment variable (and `LOG_FORM
 
 bunqueue exposes a standard Prometheus `/prometheus` endpoint and structured JSON logs. This makes it compatible out-of-the-box with all major observability platforms.
 
+:::note[OpenTelemetry]
+bunqueue does not ship a native OpenTelemetry SDK, OTLP exporter, or distributed tracing. To feed an OpenTelemetry pipeline, scrape `/prometheus` with an OpenTelemetry Collector using the Prometheus receiver.
+:::
+
 ### Metrics (Prometheus Scraping)
 
 | Platform | How to Connect |
@@ -201,7 +210,7 @@ bunqueue exposes a standard Prometheus `/prometheus` endpoint and structured JSO
 | **New Relic** | Prometheus remote write or `nri-prometheus` |
 | **Victoria Metrics** | Direct scrape, drop-in Prometheus replacement |
 | **Chronosphere** | Prometheus remote write |
-| **Splunk Observability** | Otel Collector with Prometheus receiver |
+| **Splunk Observability** | OpenTelemetry Collector with Prometheus receiver |
 
 ### Log Aggregation (`LOG_FORMAT=json`)
 

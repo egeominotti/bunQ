@@ -111,20 +111,20 @@ export default app;
 - Queue dies if app dies
 - Harder to scale workers independently
 
-### Option 2: Separate Worker Process
+### Option 2: Separate Worker Process (through the server)
 
-Run your API and workers as separate processes sharing the same SQLite database.
+Run your API and workers as separate processes. Multi-process setups always go through the bunqueue server: it owns the SQLite file, and every process talks to it over TCP.
 
 ```bash
-# Both processes MUST use the same DATA_PATH
-export DATA_PATH=./data/bunq.db
+# One server owns the database
+bunqueue start --data-path ./data/bunq.db
 ```
 
 ```typescript
-// api.ts - Your web server
+// api.ts - Your web server (TCP client, no embedded flag)
 import { Queue } from 'bunqueue/client';
 
-const queue = new Queue('tasks', { embedded: true });
+const queue = new Queue('tasks');
 
 app.post('/task', async (c) => {
   await queue.add('process', { data: '...' });
@@ -133,30 +133,28 @@ app.post('/task', async (c) => {
 ```
 
 ```typescript
-// worker.ts - Separate process
+// worker.ts - Separate process (TCP client)
 import { Worker } from 'bunqueue/client';
 
 new Worker('tasks', async (job) => {
   // Heavy processing here
   return { done: true };
-}, { embedded: true, concurrency: 10 });
+}, { concurrency: 10 });
 
 console.log('Worker started');
 ```
 
-```bash
-# Run both (same DATA_PATH)
-DATA_PATH=./data/bunq.db bun run api.ts &
-DATA_PATH=./data/bunq.db bun run worker.ts &
-```
-
 **Pros:**
-- Workers can be restarted independently
+- Workers can be restarted and scaled independently
 - Better resource isolation
 
 **Cons:**
-- Two processes to manage
-- Still single SQLite file (no true distribution)
+- One more process to manage (the server)
+- All traffic goes over TCP (localhost round trip)
+
+<Aside type="danger" title="Never share one SQLite file between two embedded processes">
+Two processes with `embedded: true` pointing at the same `DATA_PATH` do **not** work. Each process keeps its own in-memory queue state and reads SQLite only once at startup, so a worker process never sees jobs pushed live by the API process, and both run independent cleanup and buffered writes against the same file. If you need more than one process, use the server as shown above.
+</Aside>
 
 ### Option 3: Server Mode (CLI)
 
@@ -200,12 +198,12 @@ const worker = new Worker('emails', async (job) => {
 ### Dockerfile
 
 ```dockerfile
-FROM oven/bun:1
+FROM oven/bun:1-alpine
 
 WORKDIR /app
 
 # Copy package files
-COPY package.json bun.lockb ./
+COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile --production
 
 # Copy application
@@ -218,9 +216,9 @@ RUN mkdir -p /app/data
 ENV DATA_PATH=/app/data/bunq.db
 ENV NODE_ENV=production
 
-# Health check
+# Health check (wget ships with the Alpine base, curl does not)
 HEALTHCHECK --interval=30s --timeout=3s \
-  CMD curl -f http://127.0.0.1:6790/health || exit 1
+  CMD wget --spider -q http://127.0.0.1:6790/health || exit 1
 
 EXPOSE 6789 6790
 
@@ -612,6 +610,8 @@ bunqueue is I/O bound, not CPU bound. A single core handles most workloads.
 
 ## Production Checklist
 
+For failure semantics, the crash timeline and the invariants each adversarial test suite proves, see [Production Operations](/guide/production/).
+
 <Steps>
 1. **Enable S3 backups**
 
@@ -671,7 +671,7 @@ bunqueue does **not** support horizontal scaling or clustering. It's a single-in
 - ❌ No automatic failover
 - ❌ No distributed processing across machines
 - ✅ Multiple workers in same process (concurrency)
-- ✅ Multiple worker processes on same machine (shared SQLite)
+- ✅ Multiple worker processes on the same machine (through the TCP server, never by sharing the SQLite file)
 
 ### When bunqueue is enough
 
@@ -752,13 +752,15 @@ new Worker('tasks', processor, {
 
 ### Point-in-Time Recovery
 
-SQLite WAL mode allows recovery to recent states:
+SQLite WAL mode allows recovery to recent states. Stop the server first: copying the database and WAL while bunqueue is writing can produce a torn, unusable copy.
 
 ```bash
-# Backup includes WAL file
+# Stop, then copy both files together
+systemctl stop bunqueue
 cp data/bunq.db data/bunq.db-wal /backup/
+systemctl start bunqueue
 
-# Restore
+# Restore (server stopped)
 cp /backup/bunq.db* data/
 ```
 
@@ -766,8 +768,7 @@ cp /backup/bunq.db* data/
 
 ### Network
 
-- Run behind reverse proxy (nginx, Caddy)
-- Use TLS for external connections
+- Terminate TLS natively with `TLS_CERT_FILE` and `TLS_KEY_FILE` (both TCP and HTTP, see [Native TLS](/guide/tls/)), or run behind a reverse proxy (nginx, Caddy)
 - Firewall TCP/HTTP ports
 
 ### Authentication

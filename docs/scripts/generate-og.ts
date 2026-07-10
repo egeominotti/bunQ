@@ -45,6 +45,7 @@ const covers: Cover[] = [
   { file: 'og/advanced', eyebrow: 'advanced', l1: 'Sagas, cron,', l2pre: 'rate limits, ', l2: 'DLQ.', sub: 'Workflow engine with compensation, everything operational.', stats: ['saga rollback', 'cron + tz', 'S3 backups'] },
   { file: 'og/use-cases', eyebrow: 'production patterns', l1: 'What teams', l2pre: 'run ', l2: 'on it.', sub: 'Email, webhooks, payments, images, AI agents, cron.', stats: ['12+ patterns', 'saga rollback', '73 MCP tools'] },
   { file: 'og/workflow', eyebrow: 'workflow engine', l1: 'Multi-step, with', l2pre: 'a ', l2: 'rollback plan.', sub: 'Saga compensation, branching, signals and loops.', stats: ['11 event types', 'waitFor signals', '0 extra services'] },
+  { file: 'og/production', eyebrow: 'guide · production', l1: 'What survives', l2pre: '', l2: 'a crash.', sub: 'At-least-once semantics, tested under kill -9. One file to back up.', stats: ['SIGKILL tested', 'fenced ACKs', 'S3 snapshots'] },
   { file: 'og/hono', eyebrow: 'integrations · hono', l1: 'Background jobs', l2pre: 'for ', l2: 'Hono.', sub: 'Return the response now, do the work in the background.', stats: ['embedded mode', 'zero config', 'typed'] },
   { file: 'og/elysia', eyebrow: 'integrations · elysia', l1: 'Background jobs', l2pre: 'for ', l2: 'Elysia.', sub: 'Return the response now, do the work in the background.', stats: ['embedded mode', 'zero config', 'typed'] },
 ];

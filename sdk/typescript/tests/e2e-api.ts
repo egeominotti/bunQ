@@ -213,7 +213,7 @@ test('api: worker cooperative cancel — cancelJob, cancelAllJobs, isJobCancelle
     },
     { concurrency: 2 }
   );
-  worker.on('cancelled', (info) => seenCancelled.push((info as { jobId: string }).jobId));
+  worker.on('cancelled', (info) => seenCancelled.push(info.jobId));
   const a = await queue.add('long-a', { n: 1 }, { attempts: 1 });
   const b = await queue.add('long-b', { n: 2 }, { attempts: 1 });
   await waitFor(async () => (await queue.getJobCounts()).active === 2);

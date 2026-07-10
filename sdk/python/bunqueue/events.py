@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Callable, Dict, List
+
+logger = logging.getLogger("bunqueue")
 
 Listener = Callable[..., None]
 
@@ -50,4 +53,4 @@ class EventEmitter:
             try:
                 listener(*args)
             except Exception:  # noqa: BLE001 - listeners must not kill the emitter
-                pass
+                logger.warning("listener for %r raised", event, exc_info=True)

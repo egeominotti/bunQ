@@ -2,7 +2,9 @@
 
 Python client for [bunqueue](https://github.com/egeominotti/bunqueue), the
 high-performance job queue server for Bun. Talks the native TCP protocol
-(msgpack, pipelined) — feature parity with the TypeScript client in TCP mode.
+(msgpack, pipelined) with the same core API as the TypeScript SDK, including
+opt-in ACK batching. Connection pooling and the observability hooks are
+TypeScript-only for now.
 
 The bunqueue **server** runs on Bun (or as a compiled binary / Docker). This
 SDK lets any Python service produce and consume jobs on it: *one queue, any
@@ -59,9 +61,11 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
 - **Admin**: rate limit, global concurrency, stall config, webhooks,
   stats/metrics/list_queues/get_workers
 - **Worker**: events (`ready`, `active`, `completed`, `failed`, `progress`,
-  `drained`, `error`, `closed`), pause/resume, graceful `close()`,
-  automatic lock heartbeats (jobs longer than the lock TTL survive),
-  `UnrecoverableError` to skip retries
+  `drained`, `error`, `closed`), pause/resume, graceful `close()` (also a
+  context manager), automatic lock heartbeats (jobs longer than the lock TTL
+  survive), `UnrecoverableError` to skip retries, opt-in ACK batching
+  (`ack_batch={"max_size": 50, "max_delay_ms": 5}`: successful ACKs flush as
+  one `ACKB` on size/delay/close; a job stays active until its batch settles)
 - **FlowProducer**: `add` (parent/child trees), `add_bulk`, `add_chain`
   (sequential), `add_bulk_then` (fan-in), `get_flow`, atomic rollback
 - **Simple Mode** (`Bunqueue`): Queue + Worker in one object — routes,
@@ -86,9 +90,14 @@ from bunqueue import (
     CommandTimeoutError,
     CommandError,         # server answered ok=false
     AuthError,
+    SerializationError,   # payload not msgpack-serializable (e.g. datetime)
     UnrecoverableError,   # raise in a processor: fail terminally, no retries
 )
 ```
+
+The SDK logs its otherwise-silent failure points (swallowed command errors,
+raising listeners, failed registrations) at warning level on the `bunqueue`
+logger; attach a handler to see them.
 
 ## Protocol notes
 
@@ -104,7 +113,7 @@ from bunqueue import (
 ```bash
 python -m venv .venv && .venv/bin/pip install msgpack
 .venv/bin/python tests/test_integration.py   # basic (8)
-.venv/bin/python tests/run_e2e.py            # full e2e vs real server (43)
+.venv/bin/python tests/run_e2e.py            # full e2e vs real server (78)
 ```
 
 Both spawn a real bunqueue server (`bun src/main.ts` from the repo root).

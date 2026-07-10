@@ -6,15 +6,19 @@ with the lifecycle surface (start/run/pause/close).
 
 from __future__ import annotations
 
+import logging
 import os
 import socket as _socket
 import time
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+from .ack_batcher import AckItem
 from .errors import BunqueueError, UnrecoverableError
 from .job import Job
 from .wire import _compact
+
+logger = logging.getLogger("bunqueue")
 
 MAX_POLL_TIMEOUT_MS = 30000
 MAX_STACK_LINES = 20
@@ -75,9 +79,8 @@ class WorkerRuntime:
         try:
             result = self.processor(job)
         except BaseException as exc:  # noqa: BLE001 - fail the job, never the worker
-            self._failed += 1
             stack = traceback.format_exc().splitlines()[-MAX_STACK_LINES:]
-            self._safe_call(
+            failed_sent = self._safe_call(
                 _compact(
                     {
                         "cmd": "FAIL",
@@ -89,18 +92,61 @@ class WorkerRuntime:
                     }
                 )
             )
-            self.emit("failed", job, exc)
+            self._finish_job(job.id)
+            # Only count/emit 'failed' when the server recorded the failure;
+            # on a wire failure only 'error' fired and the server re-leases
+            # the job after lock expiry (same gate as the TS worker).
+            if failed_sent:
+                self._failed += 1
+                self.emit("failed", job, exc)
+            return
+        if self._ack_batcher is not None:
+            # Defer the ACK into a batch; the job stays active (lock renewed by
+            # the heartbeat loop) until the ACKB settles. _on_ack_settled frees
+            # the slot FIRST so a raising listener can never leak it and
+            # permanently shrink the worker's effective concurrency.
+            self._ack_batcher.add(
+                AckItem(
+                    id=job.id,
+                    token=token,
+                    result=result,
+                    on_settled=lambda err, job=job, result=result: self._on_ack_settled(
+                        job, result, err
+                    ),
+                )
+            )
+            return
+        ack: Dict[str, Any] = {"cmd": "ACK", "id": job.id, "token": token}
+        if result is not None:
+            ack["result"] = result
+        acked = self._safe_call(ack)
+        # Free the slot BEFORE emitting (same rationale as the batched path).
+        self._finish_job(job.id)
+        # Only count/emit 'completed' when the ACK reached the server: an
+        # unconfirmed ack means the job will be redelivered after lock expiry,
+        # so reporting success here would double-count (same gate as the
+        # batched path and the TS worker).
+        if acked:
+            self._processed += 1
+            self.emit("completed", job, result)
+
+    def _on_ack_settled(self, job: Job, result: Any, err: Optional[BaseException]) -> None:
+        """Settle callback for a batched ACK: free the slot, then report.
+
+        On a failed ACKB the job is NOT reported as completed: the server
+        never confirmed the ack (the job will be retried after lock expiry),
+        so the worker surfaces an 'error' event per job instead."""
+        self._finish_job(job.id)
+        if err is not None:
+            self.emit("error", err)
         else:
             self._processed += 1
-            ack: Dict[str, Any] = {"cmd": "ACK", "id": job.id, "token": token}
-            if result is not None:
-                ack["result"] = result
-            self._safe_call(ack)
             self.emit("completed", job, result)
-        finally:
-            with self._active_lock:
-                self._active.pop(job.id, None)
-                self._cancelled.pop(job.id, None)
+
+    def _finish_job(self, job_id: str) -> None:
+        with self._active_lock:
+            self._active.pop(job_id, None)
+            self._cancelled.pop(job_id, None)
 
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(self.heartbeat_interval_s):
@@ -121,22 +167,47 @@ class WorkerRuntime:
                 self._safe_call({"cmd": "JobHeartbeatB", "ids": ids, "tokens": tokens})
 
     def _register(self) -> None:
-        self._safe_call(
-            {
-                "cmd": "RegisterWorker",
-                "name": self.name,
-                "queues": [self.queue],
-                "concurrency": self.concurrency,
-                "workerId": self.worker_id,
-                "hostname": _socket.gethostname(),
-                "pid": os.getpid(),
-                "startedAt": int(time.time() * 1000),
-            }
-        )
-        self._registered_generation = self.connection.generation
+        """Register the worker; mark the generation ONLY on success.
 
-    def _safe_call(self, command: Dict[str, Any]) -> None:
+        A failed RegisterWorker must leave ``_registered_generation`` stale so
+        the next poll iteration retries: marking it unconditionally would leave
+        the server unaware of this worker (ListWorkers, skipIfNoWorker crons,
+        Discussion #103 class) until the next reconnect.
+
+        The generation is snapshotted BEFORE the call: if the call itself
+        triggers a reconnect, the stale snapshot forces one harmless duplicate
+        registration (server-side upsert) instead of ever missing one.
+        """
+        generation = self.connection.generation
+        try:
+            self.connection.call(
+                {
+                    "cmd": "RegisterWorker",
+                    "name": self.name,
+                    "queues": [self.queue],
+                    "concurrency": self.concurrency,
+                    "workerId": self.worker_id,
+                    "hostname": _socket.gethostname(),
+                    "pid": os.getpid(),
+                    "startedAt": int(time.time() * 1000),
+                }
+            )
+        except BunqueueError as exc:
+            logger.warning("RegisterWorker failed (will retry next poll): %s", exc)
+            self.emit("error", exc)
+            return
+        self._registered_generation = generation
+
+    def _safe_call(self, command: Dict[str, Any]) -> bool:
+        """Fire a command, swallowing wire failures into an 'error' event.
+
+        Returns True only when the command reached the server, so callers can
+        gate success-side effects (counters, 'completed'/'failed' emits) on
+        the wire outcome, mirroring the TypeScript worker's safeCall."""
         try:
             self.connection.call(command)
+            return True
         except BunqueueError as exc:
+            logger.warning("swallowed %s failure: %s", command.get("cmd"), exc)
             self.emit("error", exc)
+            return False

@@ -20,7 +20,13 @@ from typing import Any, Dict, Optional
 
 import msgpack
 
-from .errors import AuthError, CommandError, CommandTimeoutError, ConnectionClosedError
+from .errors import (
+    AuthError,
+    CommandError,
+    CommandTimeoutError,
+    ConnectionClosedError,
+    SerializationError,
+)
 from .wire import (
     MAX_FRAME_SIZE,
     PROTOCOL_VERSION,
@@ -102,17 +108,27 @@ class Connection:
                     (self.host, self.port), timeout=self.connect_timeout
                 )
             except OSError as exc:
-                self._failed_attempts += 1
-                backoff = min(0.5 * (2 ** (self._failed_attempts - 1)), 5.0)
-                self._next_attempt_at = time.monotonic() + backoff
+                self._note_connect_failure()
                 raise ConnectionClosedError(f"connect failed: {exc}") from exc
-            self._failed_attempts = 0
-            self._next_attempt_at = 0.0
             raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._enable_keepalive(raw)
             ctx = _build_ssl_context(self.tls, self.host)
             if ctx is not None:
-                raw = ctx.wrap_socket(raw, server_hostname=self.host)
+                # The TLS handshake is part of connection establishment: a
+                # failure must close the raw socket (no fd leak), count into
+                # the reconnect backoff like a plain connect failure, and
+                # surface as the SDK's connection error, not a raw ssl.SSLError.
+                try:
+                    raw = ctx.wrap_socket(raw, server_hostname=self.host)
+                except OSError as exc:  # ssl.SSLError is an OSError subclass
+                    try:
+                        raw.close()  # no-op if wrap_socket already detached the fd
+                    except OSError:
+                        pass
+                    self._note_connect_failure()
+                    raise ConnectionClosedError(f"TLS handshake failed: {exc}") from exc
+            self._failed_attempts = 0
+            self._next_attempt_at = 0.0
             raw.settimeout(None)  # reader thread blocks on recv
 
             self._sock = raw
@@ -136,6 +152,15 @@ class Connection:
                     raise ConnectionClosedError(f"auth failed: {exc}") from exc
 
             self._connected = True
+
+    def _note_connect_failure(self) -> None:
+        """Count a failed connection attempt into the exponential backoff.
+
+        Shared by the plain-TCP and TLS-handshake failure paths so both feed
+        the same fast-fail window in :meth:`connect`."""
+        self._failed_attempts += 1
+        backoff = min(0.5 * (2 ** (self._failed_attempts - 1)), 5.0)
+        self._next_attempt_at = time.monotonic() + backoff
 
     def close(self) -> None:
         """Close the connection permanently; pending commands fail."""
@@ -168,13 +193,23 @@ class Connection:
         with self._pending_lock:
             self._req_counter = (self._req_counter + 1) & 0x7FFFFFFF
             req_id = str(self._req_counter)
+
+        # Serialize BEFORE registering the pending future: msgpack rejects
+        # unsupported types (e.g. datetime in job data), and a future
+        # registered ahead of a failed packb would leak in _pending forever.
+        try:
+            payload = msgpack.packb(
+                _js_safe({**_compact(command), "reqId": req_id}), use_bin_type=True
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SerializationError(
+                f"cannot msgpack-serialize {command.get('cmd')} payload: {exc}"
+            ) from exc
+        frame = struct.pack(">I", len(payload)) + payload
+
+        with self._pending_lock:
             fut: Future = Future()
             self._pending[req_id] = fut
-
-        payload = msgpack.packb(
-            _js_safe({**_compact(command), "reqId": req_id}), use_bin_type=True
-        )
-        frame = struct.pack(">I", len(payload)) + payload
 
         sock = self._sock
         try:

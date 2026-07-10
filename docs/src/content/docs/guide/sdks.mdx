@@ -197,7 +197,6 @@ const queue = new Queue('emails', {
   port: 6789,
   token: process.env.BUNQUEUE_TOKEN,
   tls: true,               // or { caFile } or { rejectUnauthorized: false }
-  connectTimeoutMs: 5000,  // default
   commandTimeoutMs: 10000, // default
   maxInFlight: 10_000,     // backpressure bound; 0 = unbounded (default)
   poolSize: 4,             // producer-side connection pool; default 1
@@ -214,13 +213,16 @@ queue = Queue(
     port=6789,
     token=os.environ["BUNQUEUE_TOKEN"],
     tls=True,               # or {"ca_file": "./ca.pem"} or an ssl.SSLContext
-    connect_timeout=5.0,    # default
     command_timeout=10.0,   # default
 )
 ```
 
 </TabItem>
 </Tabs>
+
+The TCP connect timeout is internal in both SDKs (5 seconds) and is not
+configurable through the constructor; the command timeout above governs
+how long each in-flight command waits for a response.
 
 ### Connection resilience
 
@@ -358,13 +360,17 @@ the retry/backoff policy and eventually the [dead letter queue](/guide/dlq/).
 `cancelled`, `error`, `closed`.
 
 **Always attach an `error` listener.** Per Node `EventEmitter` semantics an
-unhandled `error` event throws. The worker frees each job's concurrency
-slot *before* emitting, so even a throwing listener cannot degrade
-throughput, but the error itself is yours to observe.
+unhandled `error` event throws. Both workers free each job's concurrency
+slot *before* emitting, and the Python worker additionally swallows listener
+exceptions, so a throwing listener cannot leak a slot or degrade throughput
+in either SDK. The error itself is yours to observe.
 
 ### ACK batching (high volume)
 
 Opt-in: coalesce completed-job acknowledgements into `ACKB` round-trips.
+
+<Tabs>
+<TabItem label="TypeScript">
 
 ```typescript
 const worker = new Worker('ingest', process, {
@@ -373,6 +379,21 @@ const worker = new Worker('ingest', process, {
 });
 ```
 
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker(
+    "ingest",
+    process,
+    concurrency=32,
+    ack_batch={"max_size": 50, "max_delay_ms": 5},
+)
+```
+
+</TabItem>
+</Tabs>
+
 Semantics are strict: a job stays *active*, its lock still heartbeated,
 until the server confirms the batch; the batch is flushed on `close()`;
 every job settles exactly once even if an event listener throws. Defaults
@@ -380,22 +401,41 @@ are off, so nothing changes unless you enable it.
 
 ### Graceful shutdown
 
+<Tabs>
+<TabItem label="TypeScript">
+
 ```typescript
 await worker.close();        // stop pulling, flush batched ACKs, drain in-flight jobs
 await worker.close(true);    // force: skip the in-flight drain
 ```
 
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.close()           # stop pulling, wait for in-flight jobs to drain
+worker.close(timeout=5)  # bound the wait; the drain continues in the background
+```
+
+Python has no force flag: `close(timeout=...)` bounds how long the call
+waits, and `close(timeout=0)` detaches immediately while in-flight jobs
+finish in the background.
+
+</TabItem>
+</Tabs>
+
 ## Query, control and operations
 
 The full management surface is available in every SDK with identical
-semantics (Python: same methods in snake_case).
+semantics (Python: same methods in snake_case; the rare name that differs
+is noted inline).
 
 | Area | Methods |
 |---|---|
-| Query | `getJob`, `getJobByCustomId`, `getJobs` + per-state helpers (`getWaiting`, `getActive`, `getCompleted`, `getFailed`, `getDelayed`, `getPrioritized`, `getWaitingChildren`), `getJobState`, `getResult`, `getProgress`, counts + counts-per-priority, `getChildrenValues`, job logs |
+| Query | `getJob`, `getJobByCustomId`, `getJobs` + per-state helpers (`getWaiting`, `getActive`, `getCompleted`, `getFailed`, `getDelayed`, `getPrioritized`, `getWaitingChildren`), `getJobState` (Python name: `get_state`), `getResult`, `getProgress`, counts + counts-per-priority, `getChildrenValues`, job logs |
 | Waiting | `waitForJob(id, ttlMs)`, resolves with the result; **throws** on timeout (`CommandTimeoutError`) and on a failed job (`CommandError`), never silently returns `undefined` |
 | Control | `pause` / `resume` / `isPaused`, `drain`, `obliterate`, `clean`, `remove`, `discard`, `promoteJob(s)`, `retryJob` (failed → waiting), `updateJobData`, `updateJobProgress`, `changeJobPriority`, `changeJobDelay`, `moveJobToWait/Delayed/Completed/Failed`, `extendJobLock` |
-| DLQ | `getDlq`, `retryDlq(id?)`, `retryDlqByFilter` (embedded), `purgeDlq`, `retryJobs` (**retries the whole DLQ**, BullMQ semantics; the server has no partial retry), DLQ configuration |
+| DLQ | `getDlq`, `retryDlq(id?)`, `purgeDlq`, `retryJobs` (BullMQ semantics: retries the whole DLQ by default, or pass `count` to retry only the first N entries, honored by server 2.8.29 and later; Python `retry_dlq` accepts `count=` too), DLQ configuration |
 | Schedulers | `upsertJobScheduler` (cron pattern or fixed interval, timezone, `skipIfNoWorker`, `preventOverlap`, per-scheduler job options), `removeJobScheduler`, `getJobScheduler(s)`, `addCron`, `every` |
 | Admin | rate limiting, global concurrency, stall configuration, webhooks, `getStats`, `getMetrics`, `listQueues`, `getWorkers` |
 
@@ -538,9 +578,10 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 </TabItem>
 </Tabs>
 
-Scheduler job options are honored end-to-end: `attempts`, `timeout`,
-`remove_on_complete` and the rest of the template are applied to every
-cron-spawned job, in both SDKs.
+Scheduler job options are honored end to end: the template's `attempts`,
+`backoff`, `timeout`, `delay`, `remove_on_complete` / `remove_on_fail`,
+`priority` and `deduplication` are applied to every cron-spawned job, in
+both SDKs.
 
 One difference from the Bun original: `embedded: true` is not available,
 it requires the in-process Bun runtime. Connect to a server instead; the

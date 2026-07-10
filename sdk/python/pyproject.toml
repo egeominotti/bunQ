@@ -1,28 +1,41 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "bunqueue-client"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python client SDK for bunqueue — high-performance job queue server (TCP mode)"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "Egeo Minotti" }]
 keywords = ["queue", "jobs", "worker", "bunqueue", "task-queue"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: System :: Distributed Computing",
+  "Typing :: Typed",
 ]
 dependencies = ["msgpack>=1.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/egeominotti/bunqueue"
 Documentation = "https://bunqueue.dev"
+Repository = "https://github.com/egeominotti/bunqueue"
+Changelog = "https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["bunqueue"]
+# PEP 561: ship the py.typed marker so type checkers use the inline hints.
+# Hatchling includes package files by default; keep this explicit so a future
+# include/exclude tweak cannot silently drop it.
+[tool.hatch.build.targets.wheel.force-include]
+"bunqueue/py.typed" = "bunqueue/py.typed"

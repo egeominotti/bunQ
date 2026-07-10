@@ -6,13 +6,16 @@ admin surfaces live in :mod:`queue_query` / :mod:`queue_admin` mixins.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+import traceback
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .connection import Connection, TlsOption, _compact
+from .errors import UnrecoverableError
 from .job import Job
 from .options import job_options, job_payload
 from .queue_admin import QueueAdminOps
 from .queue_query import QueueQueryOps
+from .worker_runtime import MAX_STACK_LINES
 
 
 class Queue(QueueQueryOps, QueueAdminOps):
@@ -163,8 +166,37 @@ class Queue(QueueQueryOps, QueueAdminOps):
     def move_job_to_completed(self, job_id: str, result: Any = None, token: Optional[str] = None) -> None:
         self.connection.call(_compact({"cmd": "ACK", "id": job_id, "result": result, "token": token}))
 
-    def move_job_to_failed(self, job_id: str, error: str, token: Optional[str] = None) -> None:
-        self.connection.call(_compact({"cmd": "FAIL", "id": job_id, "error": error, "token": token}))
+    def move_job_to_failed(
+        self, job_id: str, error: Union[BaseException, str], token: Optional[str] = None
+    ) -> None:
+        """Explicit failure path: mirrors the worker's FAIL wire.
+
+        Passing an exception persists its ``stack`` (traceback lines, bounded
+        like the worker path) and the UnrecoverableError "do not retry"
+        intent (#111 silent-loss class), not just the message. String errors
+        travel as before."""
+        if isinstance(error, BaseException):
+            message = str(error) or error.__class__.__name__
+            # Keep the LAST lines: a Python traceback ends with the raise site
+            # and the message (opposite of a JS stack, which leads with them).
+            stack = "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            ).splitlines()[-MAX_STACK_LINES:]
+            unrecoverable = True if isinstance(error, UnrecoverableError) else None
+        else:
+            message, stack, unrecoverable = error, None, None
+        self.connection.call(
+            _compact(
+                {
+                    "cmd": "FAIL",
+                    "id": job_id,
+                    "error": message,
+                    "stack": stack,
+                    "unrecoverable": unrecoverable,
+                    "token": token,
+                }
+            )
+        )
 
     # ------------------------------------------------------------- lifecycle
 

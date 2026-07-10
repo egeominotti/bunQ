@@ -3,6 +3,7 @@
  * monitoring and webhooks. Merged onto Queue.prototype by queue.ts.
  */
 
+import { CommandError } from './errors.js';
 import { compact } from './frame.js';
 import type { Queue } from './queue.js';
 import { type JobOptions, jobPayload, wireJobOptions } from './types.js';
@@ -95,6 +96,10 @@ export const adminMethods = {
     repeat: SchedulerOptions,
     template: { name?: string; data?: unknown; opts?: JobOptions } = {}
   ): Promise<void> {
+    // Priority and deduplication of spawned jobs travel as TOP-LEVEL Cron
+    // fields (the handler reads cmd.priority/uniqueKey/dedup); inside
+    // jobOptions the server's CronJobOptions silently ignores them.
+    const dedup = template.opts?.deduplication;
     await this.call(
       compact({
         cmd: 'Cron',
@@ -103,9 +108,14 @@ export const adminMethods = {
         data: jobPayload(template.name ?? schedulerId, template.data ?? {}),
         schedule: repeat.pattern,
         repeatEvery: repeat.every,
+        priority: template.opts?.priority,
         timezone: repeat.tz,
         immediately: repeat.immediately,
         maxLimit: repeat.limit,
+        uniqueKey: dedup?.id,
+        dedup: dedup
+          ? compact({ ttl: dedup.ttl, extend: dedup.extend, replace: dedup.replace })
+          : undefined,
         skipMissedOnRestart: repeat.skipMissedOnRestart,
         skipIfNoWorker: repeat.skipIfNoWorker,
         preventOverlap: repeat.preventOverlap,
@@ -122,8 +132,11 @@ export const adminMethods = {
     try {
       const response = await this.call({ cmd: 'CronGet', name: schedulerId });
       return (response.cron ?? response.data ?? null) as Raw | null;
-    } catch {
-      return null; // not-found surfaces as a CommandError
+    } catch (err) {
+      // Only 'Cron job not found' maps to null; connection loss, timeouts and
+      // real server errors must surface, not masquerade as a missing scheduler.
+      if (err instanceof CommandError && /not found/i.test(err.message)) return null;
+      throw err;
     }
   },
 

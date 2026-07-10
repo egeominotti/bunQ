@@ -17,6 +17,12 @@ class CommandError(BunqueueError):
     """The server answered with ok=false; message carries the server error."""
 
 
+class SerializationError(BunqueueError):
+    """A command payload cannot be msgpack-serialized (e.g. datetime in job
+    data). Raised before anything is written to the wire; the original
+    msgpack error is chained as ``__cause__``."""
+
+
 class AuthError(BunqueueError):
     """Authentication with the server failed."""
 

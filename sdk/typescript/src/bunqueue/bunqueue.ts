@@ -90,7 +90,18 @@ export class Bunqueue<T = unknown, R = unknown> {
 
     // DLQ & rate limit manager
     this.dlqrl = new DlqRateLimitManager<T>(this.queue);
-    if (opts.dlq) void this.dlqrl.setDlqConfig(opts.dlq);
+    // Fire-and-forget config push: without the catch, an unreachable server at
+    // construction time becomes an unhandled rejection that kills the process.
+    // Route the failure to the worker's 'error' event (the channel every other
+    // background command failure uses); with no listener attached, swallow it
+    // like pause()/resume() do — an unlistened 'error' emit would itself throw.
+    if (opts.dlq) {
+      void this.dlqrl.setDlqConfig(opts.dlq).catch((err: unknown) => {
+        if (this.worker.listenerCount('error') > 0) {
+          this.worker.emit('error', err instanceof Error ? err : new Error(String(err)));
+        }
+      });
+    }
 
     // Subsystems
     this.cb = opts.circuitBreaker

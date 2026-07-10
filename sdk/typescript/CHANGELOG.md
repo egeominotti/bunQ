@@ -5,6 +5,48 @@ All notable changes to `bunqueue-client` (TypeScript SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-07-10
+
+Audit fixes: typed worker events, error-path hygiene and two more members of
+the "client drops a wire-supported field" class (#111).
+
+### Added
+
+- **Typed Worker events.** `worker.on('completed', (job, result) => ...)` now
+  gets typed `Job<T>`/`R`/`Error` parameters in strict mode instead of
+  `unknown[]` (TS18046). The new `WorkerEventMap<T, R>` covers `ready`,
+  `active`, `completed`, `failed`, `progress`, `error`, `drained`, `cancelled`
+  and `closed`; unknown event names keep a generic overload, so existing code
+  compiles unchanged. (H1)
+- `"prepublishOnly": "bun run build"` so a publish can never ship a stale
+  `dist/`. (H3)
+
+### Fixed
+
+- **Bunqueue constructor crash vector.** `new Bunqueue(..., { dlq })` fired
+  `setDlqConfig` with no rejection handler: an unreachable server at
+  construction time killed the process with an unhandled rejection. The
+  failure now routes to the worker's `'error'` event (swallowed when no
+  listener is attached, matching `pause()`/`resume()`). (H2)
+- **ACK/completed asymmetry.** In the non-batched path the worker emitted
+  `'completed'` and incremented `processed` even when the ACK never reached
+  the server. Both the ACK and FAIL paths now mirror the batched semantics:
+  on a wire failure only `'error'` fires, with no counter increment. Errors
+  emitted on `'error'` are now always `Error` instances. (M1)
+- **Not-found swallowing.** `getJobScheduler`, `getJob` and
+  `getJobByCustomId` caught every error (including `ConnectionClosedError`
+  and `CommandTimeoutError`) and returned `null`. The catch is narrowed to a
+  `CommandError` matching `/not found/i`; everything else rethrows. (M2)
+- **Scheduler template priority/deduplication dropped.**
+  `upsertJobScheduler` put `priority` inside `jobOptions`, where the server's
+  `CronJobOptions` ignores it, and never sent the template's deduplication.
+  Both now travel as the top-level `priority`/`uniqueKey`/`dedup` Cron fields
+  the handler reads, matching the reference client. (#111 class, F3)
+- **moveJobToFailed lost the stack and the unrecoverable flag.** It sent only
+  `error.message`; when given an `Error` it now sends the leading stack lines
+  and `unrecoverable: true` for `UnrecoverableError`, mirroring the worker
+  FAIL path. (#111 class, F4)
+
 ## [0.1.6] - 2026-07-09
 
 Enterprise-grade hardening. All additive and backward-compatible; defaults are

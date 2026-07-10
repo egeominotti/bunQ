@@ -3,10 +3,12 @@
  * mutations. Methods are merged onto Queue.prototype by queue.ts.
  */
 
+import { UnrecoverableError } from './errors.js';
 import { compact } from './frame.js';
 import type { Queue } from './queue.js';
 import type { CountResponse, PausedResponse } from './responses.js';
 import type { JobStateName } from './types.js';
+import { MAX_STACK_LINES } from './worker-types.js';
 
 type Ctx = Queue<unknown>;
 
@@ -131,14 +133,33 @@ export const controlMethods = {
     await this.call(compact({ cmd: 'ACK', id, result: returnValue, token }) as { cmd: string });
   },
 
+  /**
+   * Explicit failure path: mirrors the worker's FAIL wire so the stacktrace
+   * and the UnrecoverableError "do not retry" intent are persisted (#111
+   * silent-loss class), not just the message.
+   */
   async moveJobToFailed(
     this: Ctx,
     id: string,
     error: Error | string,
     token?: string
   ): Promise<void> {
-    const message = typeof error === 'string' ? error : error.message;
-    await this.call(compact({ cmd: 'FAIL', id, error: message, token }) as { cmd: string });
+    const err = typeof error === 'string' ? undefined : error;
+    const message = err ? err.message || err.name : (error as string);
+    // Keep the FIRST lines (message + throw site), like the worker path.
+    const stack = err
+      ? (err.stack ?? err.message).split('\n').slice(0, MAX_STACK_LINES)
+      : undefined;
+    await this.call(
+      compact({
+        cmd: 'FAIL',
+        id,
+        error: message,
+        stack,
+        unrecoverable: err instanceof UnrecoverableError ? true : undefined,
+        token,
+      }) as { cmd: string }
+    );
   },
 };
 

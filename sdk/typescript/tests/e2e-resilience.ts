@@ -43,7 +43,7 @@ test('resilience: worker ackBatch (ACKB) completes every job', async () => {
     concurrency: 8,
     ackBatch: { enabled: true, maxSize: 5, maxDelayMs: 5 },
   });
-  worker.on('completed', (job) => completed.push((job as { id: string }).id));
+  worker.on('completed', (job) => completed.push(job.id));
   try {
     const jobs = await Promise.all(Array.from({ length: 25 }, (_, i) => queue.add('t', { i })));
     await waitFor(() => completed.length === 25, 20_000);
@@ -143,7 +143,7 @@ test('resilience: ackBatch with a throwing completed-listener keeps processing (
   });
   worker.on('error', () => {}); // observe errors; 'completed' below still throws
   worker.on('completed', (job) => {
-    seen.push((job as { id: string }).id);
+    seen.push(job.id);
     throw new Error('completed listener boom');
   });
   try {

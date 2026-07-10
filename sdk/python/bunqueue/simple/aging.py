@@ -3,11 +3,14 @@ aging.ts, adapted to the TCP query surface)."""
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any, Dict, Optional
 
 from ..queue import Queue
+
+logger = logging.getLogger("bunqueue")
 
 
 class PriorityAger:
@@ -32,7 +35,7 @@ class PriorityAger:
         try:
             self._boost_old_jobs()
         except Exception:  # noqa: BLE001 - best-effort background task
-            pass
+            logger.warning("priority aging tick failed", exc_info=True)
         finally:
             self._schedule()
 

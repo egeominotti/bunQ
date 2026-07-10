@@ -7,9 +7,14 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 import { Connection } from './connection.js';
-import { MAX_POLL_TIMEOUT_MS, sleep, type WorkerOptions } from './worker-types.js';
+import {
+  MAX_POLL_TIMEOUT_MS,
+  sleep,
+  type WorkerEventMap,
+  type WorkerOptions,
+} from './worker-types.js';
 
-export class WorkerBase extends EventEmitter {
+export class WorkerBase<T = unknown, R = unknown> extends EventEmitter {
   readonly queue: string;
   readonly concurrency: number;
   readonly batchSize: number;
@@ -88,18 +93,40 @@ export class WorkerBase extends EventEmitter {
    * 'ready' is replayed to listeners attached after it fired: with autorun the
    * loop starts inside the constructor, so a plain once-only event could be
    * missed by `new Worker(...).on('ready', ...)` patterns.
+   *
+   * The overloads give the known worker events typed parameters (see
+   * WorkerEventMap); unknown event names keep the generic signature.
    */
-  override on(event: string | symbol, listener: (...args: unknown[]) => void): this {
-    if (event === 'ready' && this.readyFired) listener();
-    return super.on(event, listener);
+  override on<E extends keyof WorkerEventMap<T, R>>(
+    event: E,
+    listener: WorkerEventMap<T, R>[E]
+  ): this;
+  override on(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  override on(event: string | symbol, listener: (...args: never[]) => void): this {
+    if (event === 'ready' && this.readyFired) (listener as () => void)();
+    return super.on(event, listener as (...args: unknown[]) => void);
   }
 
-  override once(event: string | symbol, listener: (...args: unknown[]) => void): this {
+  override once<E extends keyof WorkerEventMap<T, R>>(
+    event: E,
+    listener: WorkerEventMap<T, R>[E]
+  ): this;
+  override once(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  override once(event: string | symbol, listener: (...args: never[]) => void): this {
     if (event === 'ready' && this.readyFired) {
-      listener();
+      (listener as () => void)();
       return this;
     }
-    return super.once(event, listener);
+    return super.once(event, listener as (...args: unknown[]) => void);
+  }
+
+  override off<E extends keyof WorkerEventMap<T, R>>(
+    event: E,
+    listener: WorkerEventMap<T, R>[E]
+  ): this;
+  override off(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  override off(event: string | symbol, listener: (...args: never[]) => void): this {
+    return super.off(event, listener as (...args: unknown[]) => void);
   }
 
   /**
@@ -151,11 +178,16 @@ export class WorkerBase extends EventEmitter {
     this.emit('closed');
   }
 
-  protected async safeCall(command: Record<string, unknown> & { cmd: string }): Promise<void> {
+  /** Dispatch a command, routing failures to 'error'. Returns whether the
+   * command reached the server — callers gate success-only side effects
+   * ('completed'/'failed' emits, counters) on it. */
+  protected async safeCall(command: Record<string, unknown> & { cmd: string }): Promise<boolean> {
     try {
       await this.connection.call(command);
+      return true;
     } catch (err) {
-      this.emit('error', err);
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      return false;
     }
   }
 

@@ -21,7 +21,7 @@ import {
   type WorkerOptions,
 } from './worker-types.js';
 
-export class Worker<T = unknown, R = unknown> extends WorkerBase {
+export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
   private readonly processor: Processor<T, R>;
   private readonly ackBatcher: AckBatcher | null;
 
@@ -44,8 +44,8 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
   run(): void {
     if (this.running || this.closedFlag) return;
     this.running = true;
-    this.loopPromise = this.loop().catch((err) => {
-      this.emit('error', err);
+    this.loopPromise = this.loop().catch((err: unknown) => {
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
     });
   }
 
@@ -68,7 +68,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
         await this.pollOnce();
         backoffIdx = 0;
       } catch (err) {
-        this.emit('error', err);
+        this.emit('error', err instanceof Error ? err : new Error(String(err)));
         if (err instanceof ConnectionClosedError || err instanceof CommandTimeoutError) {
           const delay = RECONNECT_BACKOFF_MS[Math.min(backoffIdx, RECONNECT_BACKOFF_MS.length - 1)];
           backoffIdx += 1;
@@ -143,7 +143,7 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
           onSettled: (err) => {
             this.finishJob(job.id);
             if (err) {
-              this.emit('error', err);
+              this.emit('error', err instanceof Error ? err : new Error(String(err)));
             } else {
               this.processed += 1;
               this.emit('completed', job, result);
@@ -152,21 +152,24 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
         });
         return;
       }
-      this.processed += 1;
-      await this.safeCall(
+      const acked = await this.safeCall(
         compact({ cmd: 'ACK', id: job.id, token, result: result ?? undefined }) as { cmd: string }
       );
       // Free the slot BEFORE emitting: a throwing 'completed' listener must
       // not leak the active slot (same rationale as the batched path).
       this.finishJob(job.id);
-      this.emit('completed', job, result);
+      // Mirror the batched path: a failed ACK already emitted 'error' — do not
+      // also claim completion (no 'completed', no processed++).
+      if (acked) {
+        this.processed += 1;
+        this.emit('completed', job, result);
+      }
     } catch (err) {
-      this.failedCount += 1;
       const error = err instanceof Error ? err : new Error(String(err));
       // Keep the FIRST lines: in a JS stack the message + throw site lead, so
       // slice(0,N) preserves them (slice(-N) would drop them on long stacks).
       const stack = (error.stack ?? error.message).split('\n').slice(0, MAX_STACK_LINES);
-      await this.safeCall(
+      const failed = await this.safeCall(
         compact({
           cmd: 'FAIL',
           id: job.id,
@@ -177,7 +180,12 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase {
         }) as { cmd: string }
       );
       this.finishJob(job.id);
-      this.emit('failed', job, error);
+      // Same asymmetry guard as the ACK path: if the FAIL never reached the
+      // server, only 'error' fires (the lock expiry will retry the job).
+      if (failed) {
+        this.failedCount += 1;
+        this.emit('failed', job, error);
+      }
     }
   }
 

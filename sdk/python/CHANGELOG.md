@@ -5,6 +5,75 @@ All notable changes to `bunqueue-client` (Python SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-10
+
+Second audit pass: packaging, connection failure paths, worker lifecycle
+edges. New fixes ship with repro tests in `tests/e2e_audit_fixes.py` and
+`tests/e2e_worker.py`.
+
+### Added
+
+- **Opt-in ACKB batching for the Worker** (TS SDK parity):
+  `Worker(..., ack_batch={"max_size": 50, "max_delay_ms": 5})` buffers
+  successful ACKs and flushes them as a single `ACKB` round-trip on size,
+  delay, or close. A job stays active (lock renewed) until its batch settles;
+  on a failed batch each job gets an `error` event and `completed` is NOT
+  emitted. (H2)
+- **PEP 561**: the package now ships `bunqueue/py.typed`, so type checkers
+  consume the inline hints; `Typing :: Typed` classifier added. (H1)
+- **Logging**: a `logging.getLogger("bunqueue")` logger (NullHandler attached
+  in `__init__`) now surfaces the previously silent failure points at warning
+  level: `_safe_call` swallowed errors, raising event listeners, failed worker
+  registrations, priority-aging ticks, ACKB settle-callback errors. (H2)
+- `Worker` is now a context manager (`with Worker(...) as w:`), matching
+  `Queue` and `FlowProducer`. (M3)
+- `SerializationError` (subclass of `BunqueueError`), raised when a command
+  payload cannot be msgpack-serialized; the original error is chained. (M1)
+
+### Fixed
+
+- **Pending-future leak on serialization failure.** `Connection._send`
+  registered the reqId future before `msgpack.packb`; an unserializable
+  payload (e.g. a `datetime` in job data) leaked the entry forever and
+  surfaced as a raw `TypeError`. Payloads now serialize first and failures
+  raise `SerializationError`. (M1)
+- **TLS handshake failures** now close the raw socket (no fd leak), count into
+  the same reconnect backoff as plain connect failures, and raise
+  `ConnectionClosedError` with the `ssl` error chained, instead of leaking a
+  raw `ssl.SSLError`. (M2)
+- **Worker close edges**: `close()` with `autorun=False` and `run()` never
+  called now marks the worker closed and closes its connection; an expired
+  `close(timeout)` returns `False` and keeps the live thread reference (state
+  stays honest, a later `close()` joins again) instead of nulling it. (M3)
+- **Register false-success.** A failed `RegisterWorker` no longer marks the
+  generation as registered, so the next poll iteration retries; previously the
+  server could stay unaware of the worker until the next reconnect
+  (Discussion #103 class). (M5)
+- **Scheduler template priority/deduplication** (#111 class, TS SDK parity):
+  `upsert_job_scheduler` now sends the template's `priority` and
+  `deduplication` (`uniqueKey`/`dedup`) as top-level `Cron` fields, where the
+  server actually reads them; inside `jobOptions` they were silently ignored
+  and spawned jobs fell back to defaults.
+- **move_job_to_failed with an exception** (#111 class, TS SDK parity): when
+  passed an `Exception`, the FAIL command now carries `stack` (bounded
+  traceback lines, last-lines like the worker path) and the `unrecoverable`
+  flag for `UnrecoverableError`, so the failure intent and stacktrace persist
+  server-side. String errors travel unchanged.
+
+### Verified
+
+- Not-found narrowing: `get_job`, `get_job_by_custom_id`, `get_job_scheduler`
+  and `get_flow` already catch only `CommandError` with a "not found" message
+  (mapping it to `None`) and rethrow everything else; connection/timeout
+  failures never masquerade as a missing job. Regression test added.
+
+### Packaging
+
+- `LICENSE` (MIT) now ships with the sdist/wheel; pyproject uses the SPDX
+  `license = "MIT"` expression with `license-files` (hatchling >= 1.27).
+- Classifiers for Python 3.9 through 3.13; `Repository` and `Changelog`
+  project URLs. (M4)
+
 ## [0.1.1] - 2026-07-08
 
 Protocol-coherence audit against the bunqueue server. Every fix ships with a

@@ -34,7 +34,9 @@ export const queryMethods = {
       const response = await this.call<JobResponse>({ cmd: 'GetJob', id });
       return response.job ? new Job<T>(response.job, this.connection) : null;
     } catch (err) {
-      if (err instanceof CommandError) return null; // server: 'Job not found'
+      // Only the server's 'Job not found' maps to null; connection loss,
+      // timeouts and other server errors must surface.
+      if (err instanceof CommandError && /not found/i.test(err.message)) return null;
       throw err;
     }
   },
@@ -44,7 +46,7 @@ export const queryMethods = {
       const response = await this.call<JobResponse>({ cmd: 'GetJobByCustomId', customId });
       return response.job ? new Job<T>(response.job, this.connection) : null;
     } catch (err) {
-      if (err instanceof CommandError) return null;
+      if (err instanceof CommandError && /not found/i.test(err.message)) return null;
       throw err;
     }
   },

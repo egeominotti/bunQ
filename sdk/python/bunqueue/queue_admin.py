@@ -77,12 +77,20 @@ class QueueAdminOps:
         "immediately": bool, "limit": n}. ``template``: {"name", "data", "opts"}.
         """
         template = template or {}
+        opts = template.get("opts") or {}
         data: Dict[str, Any] = {"name": template.get("name", scheduler_id)}
         tdata = template.get("data")
         if isinstance(tdata, dict):
             data.update(tdata)
         elif tdata is not None:
             data["payload"] = tdata
+        # Priority and deduplication of spawned jobs travel as TOP-LEVEL Cron
+        # fields (the handler reads cmd.priority/uniqueKey/dedup); inside
+        # jobOptions the server's CronJobOptions silently ignores them (#111).
+        dedup = opts.get("deduplication") or {}
+        dedup_fields = _compact(
+            {"ttl": dedup.get("ttl"), "extend": dedup.get("extend"), "replace": dedup.get("replace")}
+        )
         command = _compact(
             {
                 "cmd": "Cron",
@@ -91,16 +99,19 @@ class QueueAdminOps:
                 "data": data,
                 "schedule": repeat.get("pattern"),
                 "repeatEvery": repeat.get("every"),
+                "priority": opts.get("priority"),
                 "timezone": repeat.get("tz"),
                 "immediately": repeat.get("immediately"),
                 "maxLimit": repeat.get("limit"),
+                "uniqueKey": opts.get("unique_key") or dedup.get("id"),
+                "dedup": dedup_fields if dedup_fields else None,
                 "skipIfNoWorker": repeat.get("skip_if_no_worker"),
                 "skipMissedOnRestart": repeat.get("skip_missed_on_restart"),
                 "preventOverlap": repeat.get("prevent_overlap"),
                 # Map Pythonic template opts (attempts, remove_on_complete, ...)
                 # to the wire CronJobOptions, else the server silently drops
                 # them and cron-spawned jobs fall back to JOB_DEFAULTS.
-                "jobOptions": build_cron_job_options(template.get("opts")),
+                "jobOptions": build_cron_job_options(opts),
             }
         )
         self.connection.call(command)

@@ -10,6 +10,7 @@ The loop/heartbeat internals live in :mod:`worker_runtime`.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket as _socket
 import threading
@@ -17,11 +18,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Optional
 
+from .ack_batcher import AckBatcher
 from .connection import Connection, TlsOption
 from .errors import CommandTimeoutError, ConnectionClosedError
 from .events import EventEmitter
 from .job import Job
 from .worker_runtime import MAX_POLL_TIMEOUT_MS, RECONNECT_BACKOFF_S, WorkerRuntime
+
+logger = logging.getLogger("bunqueue")
 
 Processor = Callable[[Job], Any]
 
@@ -49,6 +53,7 @@ class Worker(EventEmitter, WorkerRuntime):
         heartbeat_interval_s: float = 10.0,
         autorun: bool = True,
         name: Optional[str] = None,
+        ack_batch: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
         if concurrency < 1:
@@ -65,6 +70,16 @@ class Worker(EventEmitter, WorkerRuntime):
 
         self.connection = Connection(host=host, port=port, token=token, tls=tls)
 
+        # Opt-in ACKB batching, ack_batch={"max_size": 50, "max_delay_ms": 5}
+        # (TS parity); the dict is the opt-in, {"enabled": False} disables.
+        self._ack_batcher: Optional[AckBatcher] = None
+        if ack_batch and ack_batch.get("enabled", True):
+            self._ack_batcher = AckBatcher(
+                self.connection,
+                max_size=int(ack_batch.get("max_size", 50)),
+                max_delay_ms=float(ack_batch.get("max_delay_ms", 5)),
+            )
+
         self._active: Dict[str, str] = {}  # job id -> lock token
         self._cancelled: Dict[str, Optional[str]] = {}  # job id -> reason
         self._active_lock = threading.Lock()
@@ -72,6 +87,7 @@ class Worker(EventEmitter, WorkerRuntime):
         self._paused = threading.Event()
         self._ready = threading.Event()
         self._closed = False
+        self._loop_started = False  # run() actually entered its loop
         self._was_busy = False  # for 'drained' edge detection
         self._executor: Optional[ThreadPoolExecutor] = None
         self._run_thread: Optional[threading.Thread] = None
@@ -92,7 +108,7 @@ class Worker(EventEmitter, WorkerRuntime):
             try:
                 listener()
             except Exception:  # noqa: BLE001 - listener errors must not propagate
-                pass
+                logger.warning("replayed 'ready' listener raised", exc_info=True)
         super().on(event, listener)
         return self
 
@@ -100,7 +116,7 @@ class Worker(EventEmitter, WorkerRuntime):
 
     def start(self) -> None:
         """Run the worker in a background thread."""
-        if self._run_thread is not None:
+        if self._closed or self._run_thread is not None:
             return
         self._run_thread = threading.Thread(target=self.run, daemon=True)
         self._run_thread.start()
@@ -109,11 +125,12 @@ class Worker(EventEmitter, WorkerRuntime):
         """Blocking main loop; returns after :meth:`close`.
 
         If the loop is already running (autorun / start()), this joins it
-        instead of starting a second loop — blocking semantics preserved.
+        instead of starting a second loop, so blocking semantics hold.
         """
         if self._run_thread is not None and threading.current_thread() is not self._run_thread:
             self._run_thread.join()
             return
+        self._loop_started = True
         self._executor = ThreadPoolExecutor(
             max_workers=self.concurrency, thread_name_prefix="bunqueue-job"
         )
@@ -158,15 +175,37 @@ class Worker(EventEmitter, WorkerRuntime):
         if not self._ready.wait(timeout):
             raise TimeoutError("worker did not become ready in time")
 
-    def close(self, timeout: Optional[float] = None) -> None:
-        """Graceful shutdown: stop pulling, wait for in-flight jobs."""
+    def close(self, timeout: Optional[float] = None) -> bool:
+        """Graceful shutdown: stop pulling, wait for in-flight jobs.
+
+        Returns True once fully shut down; False when ``timeout`` expires with
+        the loop thread still draining (the thread reference is kept alive so
+        state stays honest and a later ``close()`` can join it again).
+        """
         self._stop.set()
-        if self._run_thread is not None:
-            self._run_thread.join(timeout)
+        thread = self._run_thread
+        if thread is not None:
+            thread.join(timeout)
+            if thread.is_alive():
+                return False  # still draining; do NOT null the live thread
             self._run_thread = None
+            return True
+        if not self._loop_started and not self._closed:
+            # autorun=False and run() never called: no loop will ever reach
+            # _shutdown, so settle the closed state here.
+            self._closed = True
+            self.connection.close()
+            self.emit("closed")
+        return True
 
     # `stop` kept as an alias (pre-1.0 SDK name)
     stop = close
+
+    def __enter__(self) -> "Worker":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     # ------------------------------------------------------ cooperative cancel
 
@@ -199,7 +238,13 @@ class Worker(EventEmitter, WorkerRuntime):
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
+        # Flush AFTER the executor drained: the last in-flight jobs buffer
+        # their ACKs during shutdown(wait=True); send them before closing.
+        if self._ack_batcher is not None:
+            self._ack_batcher.flush()
         self._safe_call({"cmd": "UnregisterWorker", "workerId": self.worker_id})
         self.connection.close()
+        already_closed = self._closed
         self._closed = True
-        self.emit("closed")
+        if not already_closed:
+            self.emit("closed")

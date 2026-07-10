@@ -17,6 +17,8 @@ Usage::
     Worker("emails", process, concurrency=10).run()
 """
 
+import logging as _logging
+
 from .connection import Connection
 from .errors import (
     AuthError,
@@ -24,6 +26,7 @@ from .errors import (
     CommandError,
     CommandTimeoutError,
     ConnectionClosedError,
+    SerializationError,
     UnrecoverableError,
 )
 from .events import EventEmitter
@@ -33,7 +36,13 @@ from .queue import Queue
 from .simple import Bunqueue, CancellationManager, CancelSignal
 from .worker import Worker
 
-__version__ = "0.1.1"
+# Library logging convention: a NullHandler on the package logger so the SDK
+# stays silent unless the application configures logging. Internal warnings
+# (swallowed command failures, raising listeners, background-task errors) go
+# to logging.getLogger("bunqueue").
+_logging.getLogger("bunqueue").addHandler(_logging.NullHandler())
+
+__version__ = "0.1.2"
 
 __all__ = [
     "AuthError",
@@ -50,6 +59,7 @@ __all__ = [
     "FlowProducer",
     "Job",
     "Queue",
+    "SerializationError",
     "UnrecoverableError",
     "Worker",
     "__version__",

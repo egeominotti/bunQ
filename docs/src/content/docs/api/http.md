@@ -1,6 +1,6 @@
 ---
 title: "HTTP REST API Reference"
-description: "Complete HTTP API reference for bunqueue: 77 REST endpoints, 60 real-time pub/sub events, WebSocket and SSE support."
+description: "Complete HTTP API reference for bunqueue: 83 REST endpoints, 60 real-time pub/sub events, WebSocket and SSE support."
 head:
   - tag: meta
     attrs:
@@ -217,20 +217,20 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 | `data` | `any` | *(required)* | Job payload. Any JSON-serializable value. Max 10MB. |
 | `priority` | `number` | `0` | Higher value = processed sooner. Range: -1,000,000 to 1,000,000. |
 | `delay` | `number` | `0` | Milliseconds before the job becomes available for processing. Max: 1 year. |
-| `maxAttempts` | `number` | `3` | Maximum retry attempts before the job moves to the DLQ. Range: 1-1000. |
-| `backoff` | `number` | `1000` | Base retry delay in milliseconds. Increases exponentially: `backoff * 2^attempt`. Max: 1 day. |
-| `ttl` | `number` | — | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year. |
-| `timeout` | `number` | — | Processing timeout in milliseconds. If a worker doesn't ACK within this time, the job is considered stalled. Max: 1 day. |
-| `uniqueKey` | `string` | — | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored. |
-| `jobId` | `string` | — | Custom job ID. If a job with this ID already exists, the push is idempotent (returns the existing ID). |
+| `maxAttempts` | `number` | `3` | Maximum retry attempts before the job moves to the DLQ. Range: 1-1000. `attempts` is accepted as an alias. |
+| `backoff` | `number` or `object` | `1000` | Base retry delay in milliseconds (exponential: `backoff * 2^attempt`, max: 1 day). Also accepts `{ "type": "fixed" \| "exponential", "delay": ms }`. |
+| `ttl` | `number` | - | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year. |
+| `timeout` | `number` | - | Processing timeout in milliseconds. If a worker doesn't ACK within this time, the job is considered stalled. Max: 1 day. |
+| `uniqueKey` | `string` | - | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored. |
+| `jobId` | `string` | - | Custom job ID. If a job with this ID already exists, the push is idempotent (returns the existing ID). |
 | `tags` | `string[]` | `[]` | Metadata tags for filtering and querying. |
-| `groupId` | `string` | — | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially. |
+| `groupId` | `string` | - | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially. |
 | `lifo` | `boolean` | `false` | Last-in-first-out ordering. When true, the job is processed before other jobs at the same priority. |
 | `removeOnComplete` | `boolean` | `false` | Automatically remove the job from memory after completion. Saves memory for fire-and-forget jobs. |
 | `removeOnFail` | `boolean` | `false` | Automatically remove the job after final failure (after all retries exhausted). |
 | `durable` | `boolean` | `false` | Bypass the write buffer and persist to SQLite immediately. Slower (~10k/s vs ~100k/s) but zero data loss risk. |
 | `dependsOn` | `string[]` | `[]` | Job IDs that must complete before this job becomes available. The job enters `waiting-children` state until all dependencies are met. |
-| `repeat` | `object` | — | Repeat configuration: `{ every: ms, limit: n }` for interval-based, or `{ cron: "expression" }` for cron-based. |
+| `repeat` | `object` | - | Repeat configuration: `{ every: ms, limit: n }` for interval-based, or `{ pattern: "cron expression" }` for cron-based (optional `tz`, `startDate`, `endDate`, `immediately`). |
 
 **Success response** (`200`):
 
@@ -294,10 +294,10 @@ GET /queues/:queue/jobs[?timeout=ms]
 ```
 
 ```bash
-# Immediate return (no wait) — returns null if queue is empty
+# Immediate return (no wait), returns null if queue is empty
 curl http://localhost:6790/queues/emails/jobs
 
-# Long-poll for up to 5 seconds — waits for a job to become available
+# Long-poll for up to 5 seconds, waits for a job to become available
 curl http://localhost:6790/queues/emails/jobs?timeout=5000
 ```
 
@@ -361,9 +361,9 @@ curl -X POST http://localhost:6790/queues/emails/jobs/pull-batch \
 | Field | Type | Required | Range | Description |
 |---|---|---|---|---|
 | `count` | `number` | Yes | 1-1000 | Number of jobs to pull |
-| `timeout` | `number` | No | 0-60000 | Long-poll timeout (ms) |
-| `owner` | `string` | No | — | Lock owner identifier for lock-based processing |
-| `lockTtl` | `number` | No | — | Lock time-to-live (ms). Job is released if lock expires without ACK. |
+| `timeout` | `number` | No | - | Long-poll timeout (ms). Honored only when `owner` is set; without `owner` the batch returns immediately. |
+| `owner` | `string` | No | - | Lock owner identifier for lock-based processing |
+| `lockTtl` | `number` | No | - | Lock time-to-live (ms). Job is released if lock expires without ACK. |
 
 **Response** (`200`):
 
@@ -453,7 +453,7 @@ GET /jobs/:id/state
 { "ok": true, "id": "019ce9d7-...", "state": "active" }
 ```
 
-Possible states: `waiting`, `delayed`, `active`, `completed`, `failed`, `unknown`
+Possible states: `waiting`, `prioritized`, `delayed`, `active`, `waiting-children`, `completed`, `failed`, `unknown` (job not found)
 
 ---
 
@@ -730,7 +730,7 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../wait \
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `timeout` | `number` | `30000` | Maximum wait time in milliseconds |
+| `timeout` | `number` | `30000` | Maximum wait time in milliseconds (max: 600000) |
 
 **Completed within timeout:**
 
@@ -791,7 +791,7 @@ GET /jobs/:id/children
 ```
 
 ```json
-{ "ok": true, "values": {"child-job-1": {"result": "..."}, "child-job-2": {"result": "..."}} }
+{ "ok": true, "data": {"values": {"child-job-1": {"result": "..."}, "child-job-2": {"result": "..."}}} }
 ```
 
 ---
@@ -895,6 +895,47 @@ GET /queues
 
 ```json
 { "ok": true, "queues": ["emails", "notifications", "reports"] }
+```
+
+---
+
+### Queues Summary
+
+All queues with paused state and per-state counts in a single call (one round-trip instead of N).
+
+```
+GET /queues/summary
+```
+
+```json
+[
+  {
+    "name": "emails",
+    "paused": false,
+    "counts": {"waiting": 125, "active": 5, "completed": 10234, "failed": 23, "delayed": 2}
+  }
+]
+```
+
+Note: this endpoint returns a bare JSON array (no `ok` wrapper).
+
+---
+
+### List Workers for a Queue
+
+Workers currently registered for a specific queue.
+
+```
+GET /queues/:queue/workers
+```
+
+```json
+{
+  "ok": true,
+  "workers": [
+    {"id": "w-1", "name": "email-worker", "queues": ["emails"], "concurrency": 5, "registeredAt": 1700000000000, "lastSeen": 1700000010000, "activeJobs": 3, "processedJobs": 1500, "failedJobs": 12}
+  ]
+}
 ```
 
 ---
@@ -1068,13 +1109,13 @@ curl -X POST http://localhost:6790/queues/emails/clean \
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `grace` | `number` | `0` | Only remove jobs older than this many milliseconds. `0` = remove all. |
-| `state` | `string` | all | `waiting` or `delayed`. |
+| `state` | `string` | queued | `waiting`/`delayed`/`prioritized`/`paused` (all clean the queued set, the default), `completed`, or `failed`. |
 | `limit` | `number` | `1000` | Max jobs to remove per call. |
 
 **Response** (`200`):
 
 ```json
-{ "ok": true, "count": 42 }
+{ "ok": true, "count": 42, "ids": ["019ce9d7-...", "..."] }
 ```
 
 Uses a temporal index for efficient O(log n + k) cleanup instead of full queue scan.
@@ -1136,13 +1177,47 @@ Returns full DLQ entries (original job + failure metadata) under `entries`, plus
 {
   "ok": true,
   "entries": [
-    {"job": {"id": "...", "data": {...}, "attempts": 3}, "reason": "max attempts", "enteredAt": 1700000000000}
+    {
+      "job": {"id": "...", "data": {}, "attempts": 3},
+      "enteredAt": 1700000000000,
+      "reason": "max_attempts_exceeded",
+      "error": "SMTP timeout",
+      "attempts": [
+        {"attempt": 1, "startedAt": 1700000000000, "failedAt": 1700000001000, "reason": "explicit_fail", "error": "SMTP timeout", "duration": 1000}
+      ],
+      "retryCount": 0
+    }
   ],
   "total": 1
 }
 ```
 
 Omit `limit`/`offset` to return all entries.
+
+---
+
+### DLQ Stats
+
+Aggregated DLQ statistics for a queue.
+
+```
+GET /queues/:queue/dlq/stats
+```
+
+```json
+{
+  "ok": true,
+  "stats": {
+    "total": 12,
+    "byReason": {"explicit_fail": 4, "max_attempts_exceeded": 6, "timeout": 1, "stalled": 1, "ttl_expired": 0, "worker_lost": 0, "unknown": 0},
+    "byQueue": {"emails": 12},
+    "pendingRetry": 0,
+    "expired": 0,
+    "oldestEntry": 1700000000000,
+    "newestEntry": 1700003600000
+  }
+}
+```
 
 ---
 
@@ -1623,7 +1698,7 @@ GET /storage
 ```
 
 ```json
-{ "ok": true, "diskFull": false }
+{ "ok": true, "data": {"diskFull": false, "error": null, "since": null} }
 ```
 
 When `diskFull: true`, the server stops accepting durable writes. In-memory operations continue.
@@ -1655,6 +1730,52 @@ GET /heapstats
 ```
 
 Detailed V8/JSC heap breakdown for debugging memory leaks. Returns top 20 object types by count, internal collection sizes, and heap metrics.
+
+---
+
+## Dashboard Endpoints
+
+Aggregated read-only snapshots designed for dashboards (fewer round-trips than composing the individual endpoints).
+
+### Overview
+
+```
+GET /dashboard
+```
+
+Single call returning `stats` (global counts + totals + uptime), `throughput` (per-second rates), `latency` (averages + percentiles, nested per operation: `push`, `pull`, `ack`), `memory`, `collections`, `workers` (stats + list, capped at 100 with a `truncated` flag), `crons` (total + list, capped at 100), `storage`, and `timestamp`.
+
+### Queues (paginated)
+
+```
+GET /dashboard/queues[?limit=100&offset=0]
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | `number` | `100` | Max queues to return (1-500) |
+| `offset` | `number` | `0` | Skip first N queues |
+
+```json
+{
+  "ok": true,
+  "queues": [
+    {"name": "emails", "waiting": 125, "delayed": 2, "active": 5, "dlq": 3, "paused": false}
+  ],
+  "total": 3,
+  "limit": 100,
+  "offset": 0,
+  "timestamp": 1700000000000
+}
+```
+
+### Queue Detail
+
+```
+GET /dashboard/queues/:queue[?includeJobs=true]
+```
+
+Returns `counts` (all 8 states, paused-aware), `paused`, `priorityCounts`, a `dlqPreview` (up to 10 entries), and, with `includeJobs=true`, up to 10 job summaries per state (`waiting`, `active`, `delayed`, `paused`).
 
 ---
 
@@ -2034,11 +2155,13 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 | `POST` | `/jobs/:id/logs` | Add log |
 | `DELETE` | `/jobs/:id/logs` | Clear logs |
 
-### Queues (13 endpoints)
+### Queues (15 endpoints)
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/queues` | List all queues |
+| `GET` | `/queues/summary` | All queues with paused + counts |
+| `GET` | `/queues/:q/workers` | Workers for a queue |
 | `GET` | `/queues/:q/jobs/list` | List jobs by state |
 | `GET` | `/queues/:q/counts` | Job counts per state |
 | `GET` | `/queues/:q/count` | Total job count |
@@ -2052,11 +2175,12 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 | `POST` | `/queues/:q/promote-jobs` | Promote delayed jobs |
 | `POST` | `/queues/:q/retry-completed` | Retry completed jobs |
 
-### DLQ (3 endpoints)
+### DLQ (4 endpoints)
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/queues/:q/dlq` | List DLQ jobs |
+| `GET` | `/queues/:q/dlq/stats` | DLQ statistics |
 | `POST` | `/queues/:q/dlq/retry` | Retry DLQ jobs |
 | `POST` | `/queues/:q/dlq/purge` | Purge DLQ |
 
@@ -2118,6 +2242,14 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 | `GET` | `/storage` | Yes | Storage health |
 | `POST` | `/gc` | Yes | Force GC + compact |
 | `GET` | `/heapstats` | Yes | Heap statistics |
+
+### Dashboard (3 endpoints)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/dashboard` | Aggregated overview |
+| `GET` | `/dashboard/queues` | Paginated queues with stats |
+| `GET` | `/dashboard/queues/:q` | Single queue detail |
 
 ### Real-time (4 channels, 60 pub/sub events)
 

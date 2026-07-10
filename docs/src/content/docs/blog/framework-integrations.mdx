@@ -248,13 +248,15 @@ import { QueueGroup } from 'bunqueue/client';
 
 const billing = new QueueGroup('billing');
 
-const invoices = billing.getQueue<InvoiceData>('invoices');
-const payments = billing.getQueue<PaymentData>('payments');
-const refunds = billing.getQueue<RefundData>('refunds');
+const invoices = billing.getQueue<InvoiceData>('invoices', { embedded: true });
+const payments = billing.getQueue<PaymentData>('payments', { embedded: true });
+const refunds = billing.getQueue<RefundData>('refunds', { embedded: true });
 
 // Queue names are prefixed: "billing:invoices", "billing:payments", etc.
 
-// Pause all billing queues at once (e.g., during maintenance)
+// Pause all billing queues at once (e.g., during maintenance).
+// Group-wide control (pauseAll/resumeAll/drainAll) operates on the
+// embedded engine, so it applies to embedded-mode queues.
 billing.pauseAll();
 billing.resumeAll();
 ```

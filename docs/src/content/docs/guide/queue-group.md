@@ -72,6 +72,15 @@ billing.drainAll();
 billing.obliterateAll();
 ```
 
+:::caution[Embedded mode only]
+`listQueues()` and the bulk operations (`pauseAll`, `resumeAll`, `drainAll`,
+`obliterateAll`) operate on the **in-process embedded manager**. They do not
+send commands to a remote server, so in TCP mode they are no-ops for the
+server's queues; call `pause()` / `resume()` / `drain()` / `obliterate()` on
+each `Queue` instance instead. `getQueue()` and `getWorker()` work in both
+modes (pass `connection` options for TCP).
+:::
+
 ## Options
 
 Pass options when creating queues or workers:
@@ -141,13 +150,13 @@ const queue = group.getQueue('jobs', { embedded: true });
 
 | Method | Description |
 |--------|-------------|
-| `getQueue(name, opts?)` | Get a queue within the group |
-| `getWorker(name, processor, opts?)` | Create a worker for a queue in the group |
-| `listQueues()` | List all queue names in the group (without prefix) |
-| `pauseAll()` | Pause all queues in the group |
-| `resumeAll()` | Resume all queues in the group |
-| `drainAll()` | Remove waiting jobs from all queues |
-| `obliterateAll()` | Remove all data from all queues |
+| `getQueue(name, opts?)` | Get a queue within the group (embedded or TCP) |
+| `getWorker(name, processor, opts?)` | Create a worker for a queue in the group (embedded or TCP) |
+| `listQueues()` | List all queue names in the group, without prefix (embedded only) |
+| `pauseAll()` | Pause all queues in the group (embedded only) |
+| `resumeAll()` | Resume all queues in the group (embedded only) |
+| `drainAll()` | Remove waiting jobs from all queues (embedded only) |
+| `obliterateAll()` | Remove all data from all queues (embedded only) |
 
 ## Complete Example
 

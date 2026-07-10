@@ -21,13 +21,15 @@ AI agents connected via MCP can set and clear rate limits and concurrency caps v
 
 ## Rate Limit
 
-Limit jobs per time window:
+Limit jobs per second (token bucket, refilled continuously):
 
 ```bash
 # CLI
 bunqueue rate-limit set emails 100  # 100 jobs/second
 bunqueue rate-limit clear emails
 ```
+
+The server-side rate limit window is fixed at **1 second**. No rate limit is set by default (unlimited).
 
 ## Concurrency Limit
 
@@ -42,10 +44,14 @@ bunqueue concurrency clear emails
 ## Embedded Mode
 
 :::note[Works in embedded mode]
-Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes**, in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`) also works embedded.
+Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes**, in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`, sliding window enforced client-side) also works embedded.
 :::
 
-In embedded mode you can call `queue.setGlobalRateLimit(max, duration?)` / `queue.setGlobalConcurrency(n)` directly, use a per-worker `limiter`, or control throughput with worker concurrency:
+:::caution[Server rate limits are per second]
+`queue.setGlobalRateLimit(max, duration?)` accepts a `duration` argument for BullMQ API compatibility, but the server ignores it: the queue-level limit is always `max` jobs per second. For a custom window (e.g. 100 jobs per minute), use the per-worker `limiter: { max, duration }` option instead.
+:::
+
+In embedded mode you can call `queue.setGlobalRateLimit(max)` / `queue.setGlobalConcurrency(n)` directly, use a per-worker `limiter`, or control throughput with worker concurrency:
 
 ```typescript
 const queue = new Queue('emails', { embedded: true });

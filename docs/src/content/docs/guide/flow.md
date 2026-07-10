@@ -1,5 +1,5 @@
 ---
-title: "FlowProducer — Job Dependencies, Chains & Parallel Workflows"
+title: "FlowProducer: Job Dependencies, Chains & Parallel Workflows"
 description: "Build complex job workflows in bunqueue with FlowProducer. Sequential chains, parallel fan-out/merge, and hierarchical dependency trees."
 head:
   - tag: meta
@@ -167,7 +167,7 @@ await flow.addChain([
     queueName: 'pipeline',
     data: {},
     opts: {
-      delay: 1000,  // Wait 1s after fetch completes
+      delay: 1000,  // runAt = add time + 1s; the job still waits for fetch to complete first
     },
   },
 ]);
@@ -206,8 +206,8 @@ const result = await flow.add({
   ],
 });
 
-// result.job — the parent Job
-// result.children — array of JobNode (each with .job and optional .children)
+// result.job: the parent Job
+// result.children: array of JobNode (each with .job and optional .children)
 ```
 
 Children complete first, then the parent becomes available for processing. Inside the parent's worker, use `job.getChildrenValues()` to access child results.
@@ -290,7 +290,7 @@ const result = await flow.add({
       queueName: 'api',
       data: { url: '...' },
       opts: {
-        // No failParentOnFailure — parent continues if this fails
+        // No failParentOnFailure, parent continues if this fails
         attempts: 1,
       },
     },
@@ -427,7 +427,7 @@ const ignored = await job.getIgnoredChildrenFailures();
 Removes this job's pending dependency from its parent. If this was the last pending child, the parent is promoted to the waiting queue. Throws if the job has no parent.
 
 ```typescript
-// Inside a child worker — manually remove self from parent's deps
+// Inside a child worker: manually remove self from parent's deps
 await job.removeChildDependency();
 ```
 
@@ -436,7 +436,7 @@ await job.removeChildDependency();
 Cancels all unprocessed (waiting/delayed) children of a parent job. Active, completed, and failed children are unaffected. Useful inside a `continueParentOnFailure` handler to clean up remaining work.
 
 ```typescript
-// Inside the parent worker — cancel any children still waiting
+// Inside the parent worker: cancel any children still waiting
 await job.removeUnprocessedChildren();
 ```
 
@@ -446,7 +446,7 @@ await job.removeUnprocessedChildren();
 interface FlowJob<T = unknown> {
   name: string;           // Job name
   queueName: string;      // Target queue
-  data: T;                // Job data
+  data?: T;               // Job data (optional)
   opts?: JobOptions;      // Optional job options
   children?: FlowJob[];   // Child jobs (processed BEFORE parent)
 }
@@ -500,22 +500,22 @@ const flow = new FlowProducer({ embedded: true });
 
 // Create worker
 const worker = new Worker('pipeline', async (job) => {
-  console.log(`Processing ${job.data.name || job.name}`);
+  console.log(`Processing ${job.name}`);
 
   if (job.name === 'fetch') {
     // Simulate API call
     return { data: [1, 2, 3] };
   }
 
-  if (job.name === 'process') {
+  if (job.name === 'process' && job.data.__flowParentId) {
     // Access parent result
-    const fetchResult = flow.getParentResult(job.data.__flowParentId);
-    return { processed: fetchResult.data.map(x => x * 2) };
+    const fetchResult = flow.getParentResult<{ data: number[] }>(job.data.__flowParentId);
+    return { processed: fetchResult?.data.map(x => x * 2) };
   }
 
-  if (job.name === 'store') {
-    const processResult = flow.getParentResult(job.data.__flowParentId);
-    console.log('Storing:', processResult.processed);
+  if (job.name === 'store' && job.data.__flowParentId) {
+    const processResult = flow.getParentResult<{ processed: number[] }>(job.data.__flowParentId);
+    console.log('Storing:', processResult?.processed);
     return { stored: true };
   }
 

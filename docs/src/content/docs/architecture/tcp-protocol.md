@@ -103,7 +103,7 @@ On connect, client and server negotiate protocol version:
 { cmd: 'Hello', protocolVersion: 2, capabilities: ['pipelining'] }
 
 // Server → Client
-{ ok: true, protocolVersion: 2, capabilities: ['pipelining'] }
+{ ok: true, protocolVersion: 2, capabilities: ['pipelining'], server: 'bunqueue', version: '2.x.y' }
 ```
 
 Protocol v2 supports pipelining. Older clients without `Hello` default to v1 (sequential).
@@ -130,7 +130,7 @@ Protocol v2 supports pipelining. Older clients without `Hello` default to v1 (se
 - Base delay: 100ms
 - Max delay: 30s
 - Backoff: exponential (2x each attempt)
-- Jitter: ±30%
+- Jitter: additive, up to +30% of the computed delay
 
 **Dead-link detection (half-open sockets):**
 

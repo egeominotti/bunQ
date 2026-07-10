@@ -40,7 +40,7 @@ const worker = new Worker('heavy-queue', processor, {
 ```
 
 :::caution[Apply the same options to Queue]
-The `Queue` and `Worker` share a TCP connection pool keyed by `host:port`. The **first** one created sets the pool options. Pass the same connection config to both:
+Each `Worker` opens its own connection pool from its `connection` options, but `Queue` instances with the default `poolSize` and no token **share** a pool keyed by host, port, pool size, token, and TLS config. The **first** Queue created fixes tuning options like `pingInterval` and `commandTimeout` for every later Queue that maps to the same pool. Pass the same connection config everywhere so all connections get the tuned settings:
 
 ```typescript
 const tcpOpts = { port: 6789, pingInterval: 0, commandTimeout: 60000 };
@@ -55,7 +55,7 @@ const worker = new Worker('heavy', processor, { connection: tcpOpts });
 Even with pings disabled, long synchronous CPU work blocks heartbeats, lock renewals, and TCP responses. Break up CPU-heavy loops with periodic yields:
 
 ```typescript
-// Bad — blocks event loop for entire duration
+// Bad: blocks event loop for entire duration
 function findNthPrime(n: number): number {
   let count = 0, candidate = 1;
   while (count < n) {
@@ -65,7 +65,7 @@ function findNthPrime(n: number): number {
   return candidate;
 }
 
-// Good — yields every 500 iterations
+// Good: yields every 500 iterations
 async function findNthPrime(n: number): Promise<number> {
   let count = 0, candidate = 1, ops = 0;
   while (count < n) {
@@ -84,8 +84,8 @@ async function findNthPrime(n: number): Promise<number> {
 | Setting | Default | Effect under CPU load |
 |---------|---------|----------------------|
 | `pingInterval` | 30000ms | 3 consecutive failures → forced reconnect (~90s) |
-| `commandTimeout` | 30000ms | Long-running commands timeout |
-| `LOCK_TIMEOUT_MS` | 5000ms | Lock expires before worker finishes |
+| `commandTimeout` | 30000ms | Long-running commands timeout (3 consecutive timeouts also force a reconnect) |
+| `lockDuration` | 30000ms | Job lock expires if heartbeats cannot renew it in time |
 | `stallInterval` | 30000ms | Job marked stalled if no heartbeat |
 
 ## Alternative: SandboxedWorker
@@ -97,11 +97,15 @@ async function findNthPrime(n: number): Promise<number> {
 For truly CPU-bound work where yielding is not practical, [`SandboxedWorker`](/guide/worker/#sandboxedworker) runs each job in an isolated Bun Worker thread, so the main event loop is never blocked:
 
 ```typescript
+import { SandboxedWorker } from 'bunqueue/client';
+
 const worker = new SandboxedWorker('heavy-queue', {
   processor: './heavy-processor.ts',
   concurrency: 4,
   connection: { port: 6789 },
 });
+
+await worker.start();
 ```
 
 :::tip[Related Guides]

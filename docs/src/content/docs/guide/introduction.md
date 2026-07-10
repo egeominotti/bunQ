@@ -1,5 +1,5 @@
 ---
-title: "bunqueue — High-Performance Job Queue for Bun with SQLite & MCP"
+title: "bunqueue, High-Performance Job Queue for Bun with SQLite & MCP"
 description: "Discover bunqueue: the fastest Bun job queue with SQLite persistence, zero Redis, cron scheduling, and native MCP server for AI agents."
 head:
   - tag: meta
@@ -61,7 +61,7 @@ head:
 | **Use case** | Single process apps | Multi-process / Microservices |
 | **Setup** | Zero config | Run `bunqueue start` |
 | **Option** | `embedded: true` | Default (no option) |
-| **Persistence** | `DATA_PATH` env var | `--data-path` flag |
+| **Persistence** | `dataPath` option or `DATA_PATH` env var | `--data-path` flag |
 
 ### Embedded Mode
 

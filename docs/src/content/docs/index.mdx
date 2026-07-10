@@ -172,7 +172,7 @@ bun app.ts
 # sending to user@example.com
 ```
 
-      <p class="bq-step-note">That's the whole setup. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>, everything persists to <code>bunq.db</code> automatically. Not on Bun? Same code with <code>bunqueue-client</code> against the server. <a href="/guide/quickstart/">Full quickstart</a></p>
+      <p class="bq-step-note">That's the whole setup. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>, and one <code>dataPath</code> option persists everything to a single SQLite file. Not on Bun? Same code with <code>bunqueue-client</code> against the server. <a href="/guide/quickstart/">Full quickstart</a></p>
     </div>
   </div>
 </div>
@@ -284,7 +284,7 @@ bunqueue stats
 bunqueue dlq list emails
 
 # or let an agent drive it: 73 MCP tools
-claude mcp add bunqueue -- bunqueue-mcp
+claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
       <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
@@ -308,7 +308,7 @@ claude mcp add bunqueue -- bunqueue-mcp
   <span class="bq-eyebrow">persistence</span>
   <h2 class="bq-h2">One process. One file.</h2>
   <div class="bq-file">
-    <p class="bq-lede">Everything the queue knows lives in <code>bunq.db</code>: jobs and their states, schedules, results, the dead letter queue. Back it up with <code>cp</code>, inspect it with <code>sqlite3</code>, ship it to S3 on a schedule. Your infrastructure diagram loses three boxes, and there is no version skew between the queue and its store.</p>
+    <p class="bq-lede">Point <code>dataPath</code> at <code>bunq.db</code> and everything the queue knows lives there: jobs and their states, schedules, results, the dead letter queue. Back it up with <code>cp</code>, inspect it with <code>sqlite3</code>, ship it to S3 on a schedule. Your infrastructure diagram loses three boxes, and there is no version skew between the queue and its store.</p>
     <pre class="bq-tree">production/
 ├── app/                  <i>your services</i>
 └── data/

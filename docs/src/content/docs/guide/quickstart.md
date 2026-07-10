@@ -23,7 +23,7 @@ bunqueue supports two deployment modes:
 | **Best for** | Single-process apps, serverless | Multi-process, microservices |
 | **Setup** | Zero config | Run `bunqueue start` first |
 | **Option needed** | `embedded: true` | None (default) |
-| **Persistence** | `DATA_PATH` env var | `--data-path` flag |
+| **Persistence** | `dataPath` option or `DATA_PATH` env var | `--data-path` flag |
 | **Clients** | Bun only (in process) | Node.js, Deno, Bun, Python, Cloudflare Workers |
 
 **This guide covers Embedded Mode** (most common). For TCP Server Mode, see [Server Guide](/guide/server/).
@@ -262,18 +262,18 @@ installing anything, or read the
 bunqueue includes a native MCP server with 73 tools. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language, no code needed.
 
 ```bash
-# Claude Code — bunqueue-mcp is a binary bundled with bunqueue, so install it first
+# Claude Code, bunqueue-mcp is a binary bundled with bunqueue, so install it first
 bun add bunqueue
 bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 :::
 
 ```json
-// Claude Desktop / Cursor / Windsurf — --package=bunqueue resolves the bundled binary, no install needed
+// Claude Desktop / Cursor / Windsurf: --package=bunqueue resolves the bundled binary, no install needed
 {
   "mcpServers": {
     "bunqueue": {

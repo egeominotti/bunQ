@@ -28,11 +28,15 @@ src/application/
 ├── dlqManager.ts          # Dead letter queue
 ├── eventsManager.ts       # Event pub/sub
 ├── jobLogsManager.ts      # Job logs management
+├── latencyTracker.ts      # Operation latency percentiles
 ├── lockManager.ts         # Lock management
 ├── lockOperations.ts      # Lock acquire/release ops
 ├── metricsExporter.ts     # Prometheus metrics export
+├── monitoringChecks.ts    # Periodic health checks
 ├── stallDetection.ts      # Stall detection
 ├── statsManager.ts        # Queue statistics
+├── taskErrorTracking.ts   # Background task circuit breaker
+├── throughputTracker.ts   # Push/pull/ack rate tracking
 ├── types.ts               # Shared type definitions
 ├── webhookManager.ts      # Webhook notifications
 └── workerManager.ts       # Worker tracking
@@ -51,7 +55,7 @@ src/application/
     <div class="bq-diag-row">
       <div class="bq-diag-cell">jobIndex <i>Map&lt;id, location&gt;</i></div>
       <div class="bq-diag-cell">completedJobs <i>BoundedSet, 50k</i></div>
-      <div class="bq-diag-cell">jobResults <i>LRU, 5k</i></div>
+      <div class="bq-diag-cell">jobResults <i>LRU, 10k</i></div>
       <div class="bq-diag-cell">customIdMap <i>LRU, 50k</i></div>
     </div>
   </div>
@@ -95,7 +99,7 @@ src/application/
   <div class="bq-diag-head"><b>PUSH flow</b><span>push(queue, input)</span></div>
   <div class="bq-diag-layer">1. Generate UUIDv7 ID, 2. check customId idempotency <i>customIdMap, if exists return existing job</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">3. Acquire shard write lock <i>shardIdx = fnv1aHash(queue) &amp; SHARD_MASK</i></div>
+  <div class="bq-diag-layer">3. Acquire shard write lock <i>shardIdx = fnv1a(queue) &amp; SHARD_MASK</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">4. check unique key deduplication</span>
@@ -122,15 +126,15 @@ src/application/
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>PULL flow</b><span>pull(queue, timeoutMs), runs as a loop</span></div>
-  <div class="bq-diag-layer">1. Acquire shard read lock, 2. queue paused, return null, 3. rate limit exceeded, return null, 4. concurrency at limit, return null</div>
+  <div class="bq-diag-layer">1. Acquire shard write lock, 2. queue paused, return null, 3. rate limit exceeded, return null, 4. concurrency at limit, return null</div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-group">
-    <span class="bq-diag-group-label">5. pop from priority queue</span>
+    <span class="bq-diag-group-label">5. dequeue loop, peek head of priority queue</span>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell">TTL expired <i>skip, try next</i></div>
-      <div class="bq-diag-cell">Not ready, delayed <i>skip, try next</i></div>
-      <div class="bq-diag-cell">FIFO group active <i>skip, try next</i></div>
-      <div class="bq-diag-cell">Valid job <i>continue</i></div>
+      <div class="bq-diag-cell">TTL expired <i>drop, try next</i></div>
+      <div class="bq-diag-cell">Not ready, delayed <i>stop, head is the earliest, nothing ready</i></div>
+      <div class="bq-diag-cell">FIFO group active <i>stop, head stays queued to preserve group order</i></div>
+      <div class="bq-diag-cell">Valid job <i>pop, continue</i></div>
     </div>
   </div>
   <div class="bq-diag-arrow">↓</div>
@@ -148,7 +152,7 @@ src/application/
   <div class="bq-diag-head"><b>ACK flow</b><span>ack(jobId, result, token)</span></div>
   <div class="bq-diag-layer">1. Verify lock token <i>if provided, on mismatch error: token invalid</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">2. Remove from processing shard <i>procIdx = fnv1aHash(jobId) &amp; SHARD_MASK</i></div>
+  <div class="bq-diag-layer">2. Remove from processing shard <i>procIdx = fnv1a(jobId) &amp; SHARD_MASK</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">3. release shard resources</span>
@@ -179,14 +183,14 @@ src/application/
   <div class="bq-diag-row">
     <div class="bq-diag-cell">Cleanup <i>every 10s</i></div>
     <div class="bq-diag-cell bq-diag-accent">Stall check <i>every 5s</i></div>
-    <div class="bq-diag-cell">Dependency <i>every 100ms</i></div>
+    <div class="bq-diag-cell">Dependency <i>event-driven, 30s safety fallback</i></div>
   </div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell">DLQ maintenance <i>every 60s</i></div>
     <div class="bq-diag-cell">Lock expire <i>every 5s</i></div>
-    <div class="bq-diag-cell">Cron <i>every 1s</i></div>
+    <div class="bq-diag-cell">Cron <i>precise setTimeout, 60s safety fallback</i></div>
   </div>
-  <p class="bq-diag-note">Circuit breaker: after 5 consecutive failures, log a CRITICAL warning but continue retrying.</p>
+  <p class="bq-diag-note">A job-timeout sweep also runs every 5s, failing active jobs whose processing timeout elapsed. Circuit breaker: after 5 consecutive failures, log a CRITICAL warning but continue retrying.</p>
 </div>
 
 ### Stall Detection (Two-Phase)
@@ -212,8 +216,10 @@ src/application/
 ### Dependency Resolution
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>Dependency processor</b><span>every 100ms</span></div>
-  <div class="bq-diag-layer">1. Collect completedIds from pendingDepChecks <i>set of jobs that completed since last check</i></div>
+  <div class="bq-diag-head"><b>Dependency processor</b><span>event-driven, microtask-coalesced</span></div>
+  <div class="bq-diag-layer">0. On job completion, a flush is scheduled on the next microtask <i>completions from the same tick are coalesced; a 30s interval is only a safety fallback for missed events</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">1. Collect completedIds from pendingDepChecks <i>set of jobs that completed since last flush</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">2. For each completedId, look up dependencyIndex[completedId] <i>returns the Set of jobIds waiting for this job</i></div>
   <div class="bq-diag-arrow">↓</div>

@@ -210,11 +210,34 @@ Add a single job to a queue.
   durable?: boolean,      // Force immediate disk write, bypassing write buffer (default: false)
   repeat?: {              // Repeat configuration
     every?: number,       //   Repeat interval in ms
+    pattern?: string,     //   Cron expression (alternative to every)
     limit?: number,       //   Max repetitions
-    count?: number        //   Current count
-  }
+    count?: number,       //   Current count
+    startDate?: number,   //   Don't fire before this timestamp
+    endDate?: number,     //   Don't fire after this timestamp
+    tz?: string,          //   IANA timezone for pattern
+    immediately?: boolean //   Fire once on creation
+  },
+  // Flow / parent-child (used by FlowProducer):
+  parentId?: string,      // Parent job ID
+  childrenIds?: string[], // Child job IDs (flow parent)
+  failParentOnFailure?: boolean,
+  removeDependencyOnFailure?: boolean,
+  ignoreDependencyOnFailure?: boolean,
+  continueParentOnFailure?: boolean,
+  // Advanced options:
+  stallTimeout?: number,  // Stall detection timeout in ms (max: 1 day)
+  stackTraceLimit?: number, // Cap on stored stack trace lines
+  keepLogs?: number,      // Cap on stored log entries
+  sizeLimit?: number,     // Max serialized data size for this job
+  dedup?: { ttl?: number, extend?: boolean, replace?: boolean }, // Dedup options (uniqueKey carries the id)
+  debounceId?: string,    // Debounce identifier
+  debounceTtl?: number,   // Debounce window in ms
+  timestamp?: number      // Explicit creation timestamp
 }
 ```
+
+The `backoff` field also accepts an object form: `{ type: 'fixed' | 'exponential', delay: number }`.
 
 **Response:**
 
@@ -274,7 +297,8 @@ Pull the next available job from a queue. Supports optional long polling and loc
   queue: string,
   timeout?: number,    // Long poll timeout in ms (0-60000, default: 0)
   owner?: string,      // Client identifier for lock-based pull
-  lockTtl?: number     // Lock TTL in ms (default: 30000)
+  lockTtl?: number,    // Lock TTL in ms (default: 30000)
+  detach?: boolean     // Don't auto-release the job when this connection closes (CLI usage)
 }
 ```
 
@@ -305,7 +329,7 @@ Batch pull multiple jobs from a queue.
   cmd: 'PULLB',
   queue: string,
   count: number,       // Number of jobs to pull (1-1000)
-  timeout?: number,    // Long poll timeout in ms (0-60000)
+  timeout?: number,    // Long poll timeout in ms (honored only when owner is set)
   owner?: string,      // Client identifier for lock-based pull
   lockTtl?: number     // Lock TTL in ms (default: 30000)
 }
@@ -382,7 +406,8 @@ Mark a job as failed. The job will be retried with exponential backoff if it has
   cmd: 'FAIL',
   id: string,            // Job ID
   error?: string,        // Error message
-  stack?: string[],      // Failure stack trace lines — persisted server-side, capped at job.stackTraceLimit (#74)
+  stack?: string[],      // Failure stack trace lines, persisted server-side, capped at job.stackTraceLimit (#74)
+  unrecoverable?: boolean, // Skip all remaining retries and fail terminally (straight to DLQ)
   token?: string         // Lock token (required if pulled with owner)
 }
 ```
@@ -432,8 +457,10 @@ Get the current state of a job.
 **Response:**
 
 ```typescript
-{ ok: true, id: string, state: 'waiting' | 'delayed' | 'active' | 'completed' | 'failed' }
+{ ok: true, id: string, state: string }
 ```
+
+Possible states: `waiting`, `prioritized`, `delayed`, `active`, `waiting-children`, `completed`, `failed`, or `unknown` (job not found).
 
 ---
 
@@ -467,7 +494,7 @@ List jobs with filtering and pagination.
 {
   cmd: 'GetJobs',
   queue: string,
-  state?: 'waiting' | 'delayed' | 'active' | 'completed' | 'failed',
+  state?: JobState | JobState[],  // e.g. 'waiting', 'delayed', 'active', 'completed', 'failed', or an array
   limit?: number,        // Max results (default: 100)
   offset?: number        // Skip N results (default: 0)
 }
@@ -498,13 +525,18 @@ Get job counts grouped by state for a specific queue.
   ok: true,
   counts: {
     waiting: number,
+    prioritized: number,
     delayed: number,
     active: number,
     completed: number,
-    failed: number
+    failed: number,
+    'waiting-children': number,
+    paused: number
   }
 }
 ```
+
+When the queue is paused, ready jobs are reported under `paused` instead of `waiting`/`prioritized` (BullMQ semantics).
 
 ---
 
@@ -677,7 +709,8 @@ Change the priority of a queued job.
 {
   cmd: 'ChangePriority',
   id: string,
-  priority: number
+  priority: number,
+  lifo?: boolean         // Tie-break ordering among same-priority jobs
 }
 ```
 
@@ -757,7 +790,7 @@ Wait for a job to complete. This is event-driven (no polling). Returns immediate
 {
   cmd: 'WaitJob',
   id: string,
-  timeout?: number       // Max wait time in ms (default: 30000)
+  timeout?: number       // Max wait time in ms (default: 30000, max: 600000)
 }
 ```
 
@@ -836,7 +869,7 @@ Remove all waiting jobs from a queue.
 **Response:**
 
 ```typescript
-{ ok: true, count: number }
+{ ok: true, count: number }  // Number of jobs removed
 ```
 
 ---
@@ -870,22 +903,22 @@ Remove jobs older than a grace period, optionally filtered by state.
   cmd: 'Clean',
   queue: string,
   grace: number,         // Grace period in ms - jobs older than this are removed
-  state?: string,        // Filter by state (optional)
-  limit?: number         // Max jobs to remove (optional)
+  state?: string,        // 'waiting'/'delayed'/'prioritized'/'paused' (queued jobs, the default), 'completed', or 'failed'
+  limit?: number         // Max jobs to remove (default: 1000)
 }
 ```
 
 **Response:**
 
 ```typescript
-{ ok: true, count: number }
+{ ok: true, count: number, ids: string[] }  // IDs of the removed jobs
 ```
 
 ---
 
 #### ListQueues
 
-List all known queues with their status.
+List the names of all known queues.
 
 **Request:**
 
@@ -896,17 +929,10 @@ List all known queues with their status.
 **Response:**
 
 ```typescript
-{
-  ok: true,
-  queues: Array<{
-    name: string,
-    waiting: number,
-    delayed: number,
-    active: number,
-    paused: boolean
-  }>
-}
+{ ok: true, queues: string[] }  // Queue names
 ```
+
+For per-queue counts use `GetJobCounts` per queue, or the HTTP `GET /queues/summary` endpoint.
 
 ---
 
@@ -944,7 +970,8 @@ Retry jobs from the dead-letter queue (move them back to waiting).
 {
   cmd: 'RetryDlq',
   queue: string,
-  jobId?: string         // Retry a specific job (optional; omit to retry all)
+  jobId?: string,        // Retry a specific job (optional; omit to retry all)
+  count?: number         // Cap the number of entries retried (omit = retry all)
 }
 ```
 
@@ -1015,6 +1042,9 @@ Create or update a cron/repeating job schedule.
   priority?: number,        // Job priority
   maxLimit?: number,        // Max executions
   timezone?: string,        // IANA timezone (e.g., 'Europe/Rome', 'America/New_York')
+  uniqueKey?: string,       // Deduplication key for cron-spawned jobs
+  dedup?: { ttl?: number, extend?: boolean, replace?: boolean }, // Dedup options for spawned jobs
+  skipMissedOnRestart?: boolean, // Skip missed runs on restart instead of executing them (default true)
   immediately?: boolean,    // Fire once on creation, then continue on schedule (default false)
   skipIfNoWorker?: boolean, // Skip a tick when no worker is registered (default false)
   preventOverlap?: boolean, // Skip a tick while the previous run is still pending/active (default true)
@@ -1041,7 +1071,8 @@ Create or update a cron/repeating job schedule.
     schedule: string | null,
     repeatEvery: number | null,
     nextRun: number,
-    timezone: string | undefined
+    timezone: string | undefined,
+    priority: number | undefined
   }
 }
 ```
@@ -1288,7 +1319,13 @@ Send a heartbeat for a registered worker (keeps the worker registration alive).
 **Request:**
 
 ```typescript
-{ cmd: 'Heartbeat', id: string }  // Worker ID
+{
+  cmd: 'Heartbeat',
+  id: string,            // Worker ID
+  activeJobs?: number,   // Optional stats update
+  processed?: number,
+  failed?: number
+}
 ```
 
 **Response:**
@@ -1309,7 +1346,8 @@ Send a heartbeat for an active job (prevents stall detection from marking it as 
 {
   cmd: 'JobHeartbeat',
   id: string,           // Job ID
-  token?: string        // Lock token for renewal
+  token?: string,       // Lock token for renewal
+  duration?: number     // Lock renewal duration in ms (with token: extends the lock)
 }
 ```
 
@@ -1355,7 +1393,12 @@ Register a worker with the server for monitoring.
 {
   cmd: 'RegisterWorker',
   name: string,
-  queues: string[]       // Queues this worker processes
+  queues: string[],      // Queues this worker processes
+  concurrency?: number,
+  workerId?: string,     // Reuse a stable worker ID across reconnects
+  hostname?: string,
+  pid?: number,
+  startedAt?: number
 }
 ```
 
@@ -1368,10 +1411,21 @@ Register a worker with the server for monitoring.
     workerId: string,
     name: string,
     queues: string[],
-    registeredAt: number
+    concurrency: number,
+    hostname: string | undefined,
+    pid: number | undefined,
+    status: 'active',
+    registeredAt: number,
+    lastSeen: number,
+    activeJobs: number,
+    processedJobs: number,
+    failedJobs: number,
+    currentJob: string | null
   }
 }
 ```
+
+The registration is tied to the TCP connection: the server auto-unregisters the worker when the connection closes.
 
 ---
 
@@ -1413,11 +1467,17 @@ List all registered workers and their stats.
       id: string,
       name: string,
       queues: string[],
+      concurrency: number,
+      hostname: string | undefined,
+      pid: number | undefined,
+      status: 'active' | 'stale',   // stale = no heartbeat within WORKER_TIMEOUT_MS (default 30s)
       registeredAt: number,
       lastSeen: number,
       activeJobs: number,
       processedJobs: number,
-      failedJobs: number
+      failedJobs: number,
+      currentJob: string | null,
+      uptime: number
     }>,
     stats: object          // Aggregated worker stats
   }
@@ -1627,14 +1687,202 @@ Get all log entries for a job.
 **Request:**
 
 ```typescript
-{ cmd: 'GetLogs', id: string }
+{ cmd: 'GetLogs', id: string, start?: number, end?: number }  // start/end: inclusive pagination indexes
 ```
 
 **Response:**
 
 ```typescript
-{ ok: true, data: { logs: Array<{ message: string, level: string, timestamp: number }> } }
+{ ok: true, data: { logs: Array<{ message: string, level: string, timestamp: number }>, count: number } }
 ```
+
+`count` is the total number of stored log entries (before pagination). Logs are capped at 100 entries per job.
+
+---
+
+### Lock Commands
+
+#### ExtendLock
+
+Extend the lock TTL on an active job (lock-based processing).
+
+**Request:**
+
+```typescript
+{ cmd: 'ExtendLock', id: string, duration: number, token?: string }
+```
+
+**Response:** `{ ok: true }` or `{ ok: false, error: 'Lock not found or invalid token' }`
+
+---
+
+#### ExtendLocks
+
+Batch variant of `ExtendLock` (positional arrays, same order).
+
+**Request:**
+
+```typescript
+{ cmd: 'ExtendLocks', ids: string[], tokens: string[], durations: number[] }
+```
+
+**Response:**
+
+```typescript
+{ ok: true, count: number }  // Number of locks successfully extended
+```
+
+---
+
+### More Job Commands
+
+#### ChangeDelay
+
+Change the delay of a delayed job (recomputes `runAt`).
+
+**Request:** `{ cmd: 'ChangeDelay', id: string, delay: number }`
+
+**Response:** `{ ok: true }`
+
+---
+
+#### MoveToWait
+
+Move a job back to `waiting`, dispatching by current state: `active` is released back to the queue, `delayed` is promoted, `failed` is retried from the DLQ, `waiting`/`prioritized` is a no-op success.
+
+**Request:** `{ cmd: 'MoveToWait', id: string }`
+
+**Response:** `{ ok: true }`
+
+---
+
+#### PromoteJobs
+
+Promote all (or up to `count`) delayed jobs in a queue to waiting.
+
+**Request:** `{ cmd: 'PromoteJobs', queue: string, count?: number }`
+
+**Response:** `{ ok: true, count: number }`
+
+---
+
+#### ClearLogs
+
+Clear a job's log entries, optionally keeping the most recent N.
+
+**Request:** `{ cmd: 'ClearLogs', id: string, keepLogs?: number }`
+
+**Response:** `{ ok: true }`
+
+---
+
+#### SetWebhookEnabled
+
+Enable or disable a webhook without deleting it.
+
+**Request:** `{ cmd: 'SetWebhookEnabled', id: string, enabled: boolean }`
+
+**Response:** `{ ok: true }` or `{ ok: false, error: 'Webhook not found' }`
+
+---
+
+#### CompactMemory
+
+Trigger internal memory compaction.
+
+**Request:** `{ cmd: 'CompactMemory' }`
+
+**Response:** `{ ok: true }`
+
+---
+
+### Flow Dependency Commands
+
+Used by FlowProducer for parent/child job graphs.
+
+#### UpdateParent
+
+**Request:** `{ cmd: 'UpdateParent', childId: string, parentId: string }`
+
+**Response:** `{ ok: true }`
+
+#### GetFailedChildrenValues
+
+**Request:** `{ cmd: 'GetFailedChildrenValues', id: string }`
+
+**Response:** `{ ok: true, values: Record<string, any> }`
+
+#### GetIgnoredChildrenFailures
+
+**Request:** `{ cmd: 'GetIgnoredChildrenFailures', id: string }`
+
+**Response:** `{ ok: true, values: Record<string, any> }`
+
+#### RemoveChildDependency
+
+**Request:** `{ cmd: 'RemoveChildDependency', id: string }`
+
+**Response:** `{ ok: true, removed: boolean }`
+
+#### RemoveUnprocessedChildren
+
+**Request:** `{ cmd: 'RemoveUnprocessedChildren', id: string }`
+
+**Response:** `{ ok: true }`
+
+---
+
+### Queue Config Commands
+
+#### SetStallConfig / GetStallConfig
+
+Per-queue stall detection configuration. Numeric fields: `stallInterval`, `maxStalls`, `gracePeriod` (numeric strings are coerced, non-numeric values are dropped).
+
+**Request:**
+
+```typescript
+{ cmd: 'SetStallConfig', queue: string, config: { stallInterval?: number, maxStalls?: number, gracePeriod?: number } }
+{ cmd: 'GetStallConfig', queue: string }
+```
+
+**Response:** `{ ok: true }` for set, `{ ok: true, config: {...} }` for get.
+
+#### SetDlqConfig / GetDlqConfig
+
+Per-queue DLQ configuration. Numeric fields: `autoRetryInterval`, `maxAutoRetries`, `maxAge`, `maxEntries`.
+
+**Request:**
+
+```typescript
+{ cmd: 'SetDlqConfig', queue: string, config: { autoRetry?: boolean, autoRetryInterval?: number, maxAutoRetries?: number, maxAge?: number | null, maxEntries?: number } }
+{ cmd: 'GetDlqConfig', queue: string }
+```
+
+**Response:** `{ ok: true }` for set, `{ ok: true, config: {...} }` for get.
+
+---
+
+### Dashboard Commands
+
+Aggregated read-only snapshots for dashboards (same data as the HTTP `/dashboard` endpoints).
+
+#### DashboardOverview
+
+**Request:** `{ cmd: 'DashboardOverview' }`
+
+**Response:** `{ ok: true, data: { stats, throughput, latency, memory, collections, workers, crons, storage, timestamp } }`
+
+#### DashboardQueues
+
+**Request:** `{ cmd: 'DashboardQueues' }`
+
+**Response:** `{ ok: true, data: { queues: Array<{ name, waiting, prioritized, delayed, active, dlq, paused }>, timestamp } }`
+
+#### DashboardQueue
+
+**Request:** `{ cmd: 'DashboardQueue', queue: string, includeJobs?: boolean, jobsLimit?: number }` (`jobsLimit` default 10, max 50)
+
+**Response:** `{ ok: true, data: { name, counts, paused, priorityCounts, dlqPreview, jobs?, timestamp } }`
 
 ---
 
@@ -1676,8 +1924,13 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `ChangePriority` | Change job priority |
 | | `Promote` | Move delayed job to waiting |
 | | `MoveToDelayed` | Move active job to delayed |
+| | `ChangeDelay` | Change a delayed job's delay |
+| | `MoveToWait` | Move a job back to waiting |
+| | `PromoteJobs` | Promote all delayed jobs in a queue |
 | | `Discard` | Move job to DLQ |
 | | `WaitJob` | Wait for job completion |
+| | `ExtendLock` | Extend a job lock |
+| | `ExtendLocks` | Extend job locks (batch) |
 | | `Pause` | Pause a queue |
 | | `Resume` | Resume a queue |
 | | `IsPaused` | Check if queue is paused |
@@ -1708,12 +1961,27 @@ Job data payloads are limited to **10 MB** when serialized.
 | **Webhooks** | `AddWebhook` | Register a webhook |
 | | `RemoveWebhook` | Remove a webhook |
 | | `ListWebhooks` | List webhooks |
+| | `SetWebhookEnabled` | Enable/disable a webhook |
 | **Rate** | `RateLimit` | Set queue rate limit |
 | | `RateLimitClear` | Clear queue rate limit |
 | | `SetConcurrency` | Set queue concurrency limit |
 | | `ClearConcurrency` | Clear concurrency limit |
+| **Config** | `SetStallConfig` | Set per-queue stall config |
+| | `GetStallConfig` | Get per-queue stall config |
+| | `SetDlqConfig` | Set per-queue DLQ config |
+| | `GetDlqConfig` | Get per-queue DLQ config |
 | **Logs** | `AddLog` | Add job log entry |
 | | `GetLogs` | Get job logs |
+| | `ClearLogs` | Clear job logs |
+| **Flow** | `UpdateParent` | Update a child's parent reference |
+| | `GetFailedChildrenValues` | Failed children values |
+| | `GetIgnoredChildrenFailures` | Ignored children failures |
+| | `RemoveChildDependency` | Remove a child's parent dependency |
+| | `RemoveUnprocessedChildren` | Remove unprocessed children |
+| **Dashboard** | `DashboardOverview` | Aggregated dashboard snapshot |
+| | `DashboardQueues` | All queues with stats |
+| | `DashboardQueue` | Single queue detail |
+| **System** | `CompactMemory` | Trigger memory compaction |
 | **Auth** | `Auth` | Authenticate connection |
 
 :::tip[Related]

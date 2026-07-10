@@ -258,7 +258,7 @@ interface Job<T = unknown> {
 
   /**
    * Remove the deduplication key associated with this job.
-   * @throws Not implemented — no server primitive available. Use `queue.removeDeduplicationKey()` instead.
+   * @throws Not implemented, no server primitive available. Use `queue.removeDeduplicationKey()` instead.
    */
   removeDeduplicationKey(): Promise<boolean>;
 
@@ -304,7 +304,7 @@ interface Job<T = unknown> {
    * @param token - Lock token (optional in embedded mode)
    * @param opts - Options including child reference
    * @returns true if job was moved
-   * @throws In TCP mode — no server command available. Embedded mode only.
+   * @throws In TCP mode, no server command available. Embedded mode only.
    */
   moveToWaitingChildren(
     token?: string,
@@ -448,22 +448,15 @@ interface JobOptions {
   jobId?: string;
 
   /**
-   * Remove job on completion.
-   * - `true`: remove immediately
-   * - `number`: keep for N ms then remove
-   * - `KeepJobs`: keep by age and/or count
+   * Remove job on completion. Boolean only: age/count retention
+   * (number | KeepJobs) is not implemented and would be silently
+   * ignored, so the type is narrowed to prevent the misuse.
    * Default: false
    */
-  removeOnComplete?: boolean | number | KeepJobs;
+  removeOnComplete?: boolean;
 
-  /**
-   * Remove job on failure.
-   * - `true`: remove immediately
-   * - `number`: keep for N ms then remove
-   * - `KeepJobs`: keep by age and/or count
-   * Default: false
-   */
-  removeOnFail?: boolean | number | KeepJobs;
+  /** Remove job on failure. Boolean only, see removeOnComplete. Default: false */
+  removeOnFail?: boolean;
 
   /** Stall timeout in ms. Job is stalled if no heartbeat after this time. */
   stallTimeout?: number;
@@ -549,6 +542,8 @@ All backoff delays include automatic **jitter** to prevent thundering herd:
 Delays are capped at 1 hour by default. This prevents runaway delays at high attempt counts.
 
 ### KeepJobs
+
+Exported for BullMQ compatibility. Not accepted by per-job `removeOnComplete`/`removeOnFail` (those are boolean only); the equivalent shape is accepted by `WorkerOptions.removeOnComplete`/`removeOnFail`.
 
 ```typescript
 interface KeepJobs {
@@ -637,17 +632,24 @@ interface DebounceOptions {
 ### Processor
 
 ```typescript
-type Processor<T = unknown, R = unknown> = (job: Job<T>) => Promise<R> | R;
+type Processor<T = unknown, R = unknown> = (job: Job<T & FlowJobData>) => Promise<R> | R;
 ```
 
+`FlowJobData` contains the optional flow-injected fields (`__parentId`, `__parentQueue`, `__childrenIds`, `__flowParentId`, `__flowParentIds`) that FlowProducer adds to `job.data` when a job is part of a flow.
+
 ### JobCounts
+
+Returned by `queue.getJobCounts()`.
 
 ```typescript
 interface JobCounts {
   waiting: number;
+  prioritized: number;
   active: number;
   completed: number;
   failed: number;
+  delayed: number;
+  paused: number;
 }
 ```
 
@@ -666,6 +668,16 @@ interface QueueOptions {
   /** Use embedded mode (in-process SQLite, default: false) */
   embedded?: boolean;
 
+  /** SQLite database path for embedded mode (overrides the DATA_PATH env vars) */
+  dataPath?: string;
+
+  /**
+   * Auto-batching for queue.add() calls in TCP mode.
+   * Buffers concurrent add() calls and sends them as a single PUSHB command.
+   * Default: enabled for TCP mode, disabled for embedded mode.
+   */
+  autoBatch?: AutoBatchOptions;
+
   /**
    * Namespace prefix prepended to the queue name on the server.
    * Lets multiple environments (e.g. `dev:`, `prod:`) or tenants share
@@ -679,6 +691,21 @@ interface QueueOptions {
 }
 ```
 
+### AutoBatchOptions
+
+```typescript
+interface AutoBatchOptions {
+  /** Enable auto-batching (default: true for TCP, false for embedded) */
+  enabled?: boolean;
+  /** Max items before auto-flush (default: 50) */
+  maxSize?: number;
+  /** Max delay in ms before auto-flush (default: 5) */
+  maxDelayMs?: number;
+}
+```
+
+Jobs added with `durable: true` bypass the batcher and are sent as individual PUSH commands.
+
 ### ConnectionOptions
 
 ```typescript
@@ -691,6 +718,9 @@ interface ConnectionOptions {
 
   /** Unix socket path (takes priority over host/port) */
   socketPath?: string;
+
+  /** Enable TLS to the server: true (system CAs) or custom options (default: off) */
+  tls?: boolean | ClientTlsOptions;
 
   /** Authentication token */
   token?: string;
@@ -720,6 +750,17 @@ interface ConnectionOptions {
 
   /** Max commands in flight per connection (default: 100) */
   maxInFlight?: number;
+}
+```
+
+### ClientTlsOptions
+
+```typescript
+interface ClientTlsOptions {
+  /** Verify the server certificate (default: true). Set false for self-signed in dev. */
+  rejectUnauthorized?: boolean;
+  /** Path to a PEM CA certificate to trust (e.g. the self-signed server cert) */
+  caFile?: string;
 }
 ```
 
@@ -759,6 +800,9 @@ interface WorkerOptions {
   /** Use embedded mode (in-process SQLite, default: false) */
   embedded?: boolean;
 
+  /** SQLite database path for embedded mode (overrides the DATA_PATH env vars) */
+  dataPath?: string;
+
   /** Number of jobs to pull per batch (default: 10, max: 1000) */
   batchSize?: number;
 
@@ -775,6 +819,27 @@ interface WorkerOptions {
 
   /** Rate limiter configuration for controlling job processing rate */
   limiter?: RateLimiterOptions;
+
+  /** Lock duration in ms (default: 30000). Sent to the server on pull; also used by stall detection. */
+  lockDuration?: number;
+
+  /** Max stalls before moving to failed (default: 1). Applied to stall config in embedded mode. */
+  maxStalledCount?: number;
+
+  /** Skip stalled job check, disables the stalled event subscription (default: false) */
+  skipStalledCheck?: boolean;
+
+  /** Skip lock renewal via heartbeat (default: false) */
+  skipLockRenewal?: boolean;
+
+  /** Delay in ms between polls when the queue is drained (default: 50) */
+  drainDelay?: number;
+
+  /** Remove jobs on complete, applied as default for all jobs processed by this worker */
+  removeOnComplete?: boolean | number | { age?: number; count?: number };
+
+  /** Remove jobs on fail, applied as default for all jobs processed by this worker */
+  removeOnFail?: boolean | number | { age?: number; count?: number };
 
   /**
    * Namespace prefix; must match the producing `Queue.prefixKey` to
@@ -793,10 +858,14 @@ interface WorkerOptions {
 // Worker emits these events:
 worker.on('ready', () => void);
 worker.on('active', (job: Job) => void);
-worker.on('completed', (job: Job, result: any) => void);
+worker.on('completed', (job: Job, result: R) => void);
 worker.on('failed', (job: Job, error: Error) => void);
-worker.on('progress', (job: Job, progress: number) => void);
+worker.on('progress', (job: Job | null, progress: number) => void);
+worker.on('stalled', (jobId: string, reason: string) => void);
+worker.on('cancelled', (data: { jobId: string; reason: string }) => void);
+worker.on('log', (job: Job, message: string) => void);
 worker.on('error', (error: Error) => void);
+worker.on('drained', () => void);
 worker.on('closed', () => void);
 ```
 
@@ -849,6 +918,7 @@ interface CompletedEvent<R = unknown> {
 interface FailedEvent {
   jobId: string;
   failedReason: string;
+  data?: unknown;
 }
 
 /** Emitted when job progress is updated */
@@ -913,6 +983,8 @@ events.on('duplicated', ({ jobId }) => { /* ... */ });
 events.on('retried', ({ jobId, prev }) => { /* ... */ });
 events.on('waiting-children', ({ jobId }) => { /* ... */ });
 events.on('drained', ({ id }) => { /* ... */ });
+events.on('paused', () => { /* ... */ });
+events.on('resumed', () => { /* ... */ });
 events.on('error', (error: Error) => { /* ... */ });
 ```
 
@@ -954,7 +1026,7 @@ Per-flow options passed as the second argument to `flow.add(flowJob, opts)`.
 interface FlowOpts {
   /**
    * Default job options per queue name.
-   * Applied as defaults — per-job opts override these.
+   * Applied as defaults, per-job opts override these.
    */
   queuesOptions?: Record<string, Partial<JobOptions>>;
 }
@@ -1054,21 +1126,36 @@ interface SandboxedWorkerOptions {
   /** Poll interval in ms when no workers are idle (default: 10) */
   pollInterval?: number;
 
-  /** Heartbeat interval in ms (default: 5000 embedded, 10000 TCP) */
+  /** Heartbeat interval in ms for TCP lock renewal (default: 10000 for TCP, 0 for embedded) */
   heartbeatInterval?: number;
 
   /** TCP connection options (omit for embedded mode) */
   connection?: ConnectionOptions;
+
+  /** Auto-stop after this many ms of inactivity (0 = disabled, default: 0) */
+  idleTimeout?: number;
+
+  /** Recycle individual idle worker processes after this many ms (default: 30000, 0 = disabled) */
+  idleRecycleMs?: number;
+
+  /** Auto-restart the worker pool when new jobs arrive after idle shutdown (default: false) */
+  autoStart?: boolean;
+
+  /** Poll interval in ms for checking new jobs while in idle-shutdown state (default: 5000) */
+  autoStartPollMs?: number;
 }
 ```
 
 ### SandboxedWorker Stats
 
+Returned by `sandboxedWorker.getStats()`.
+
 ```typescript
-interface SandboxedWorkerStats {
+{
   total: number;    // Total worker processes
   busy: number;     // Currently processing
-  idle: number;     // Available for work
+  idle: number;     // Alive and available for work
+  recycled: number; // Workers recycled after idling
   restarts: number; // Total restarts across all workers
 }
 ```

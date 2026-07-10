@@ -112,15 +112,19 @@ Path to the PEM private key file matching `TLS_CERT_FILE`.
 
 See the [TLS guide](/guide/tls/) for client options and self-signed setup.
 
-### `DATA_PATH`
+### `BUNQUEUE_DATA_PATH` / `DATA_PATH`
 
-Path to SQLite database file.
+Path to SQLite database file. When none of the variables is set, the server runs in-memory (no persistence).
+
+Four aliases are read, in priority order: `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`.
 
 | Type | Default | Example |
 |------|---------|---------|
 | string | `in-memory` | `/var/lib/queue.db` |
 
 ```bash
+BUNQUEUE_DATA_PATH=/var/lib/queue.db bunqueue start
+# equivalent (lower-priority alias):
 DATA_PATH=/var/lib/queue.db bunqueue start
 ```
 
@@ -143,7 +147,7 @@ When set, all TCP and HTTP requests must include a valid token:
 bunqueue push emails '{"to":"test@example.com"}' --token secret-token-1
 
 # HTTP API
-curl -H "Authorization: Bearer secret-token-1" http://localhost:6790/api/queues
+curl -H "Authorization: Bearer secret-token-1" http://localhost:6790/queues
 ```
 
 ### `BQ_TOKEN` / `BUNQUEUE_TOKEN`
@@ -373,6 +377,30 @@ Interval for cleaning up inactive worker registrations.
 WORKER_CLEANUP_INTERVAL_MS=120000 bunqueue start
 ```
 
+### `TCP_IDLE_TIMEOUT_MS`
+
+Slowloris mitigation on the TCP server: a connection that starts a frame but makes no progress completing it within this window is closed. Idle connections with no partial frame are never affected. `0` disables the timeout.
+
+| Type | Default | Example |
+|------|---------|---------|
+| number | `60000` | `120000` |
+
+```bash
+TCP_IDLE_TIMEOUT_MS=120000 bunqueue start
+```
+
+### `TCP_MAX_WRITE_QUEUE_BYTES`
+
+Maximum bytes buffered in a TCP connection's outbound write queue before the connection is dropped (protects against clients that stop reading). `0` disables the bound.
+
+| Type | Default | Example |
+|------|---------|---------|
+| number | `67108864` (64 MB) | `16777216` |
+
+```bash
+TCP_MAX_WRITE_QUEUE_BYTES=16777216 bunqueue start
+```
+
 ## Webhooks
 
 ### `WEBHOOK_MAX_RETRIES`
@@ -403,11 +431,11 @@ WEBHOOK_RETRY_DELAY_MS=5000 bunqueue start
 
 ### `RATE_LIMIT_MAX_REQUESTS`
 
-Maximum TCP requests per client within the rate limit window. Disabled when not set.
+Maximum requests per client (TCP connection or HTTP client IP) within the rate limit window.
 
 | Type | Default | Example |
 |------|---------|---------|
-| number | (none) | `1000` |
+| number | `10000` | `1000` |
 
 ```bash
 RATE_LIMIT_MAX_REQUESTS=1000 bunqueue start
@@ -437,11 +465,45 @@ Interval for cleaning up rate limit tracking data.
 RATE_LIMIT_CLEANUP_MS=120000 bunqueue start
 ```
 
+## Monitoring Thresholds
+
+These control the real-time monitoring events (`queue:idle`, `queue:threshold`, `worker:overloaded`, `server:memory-warning`, `storage:size-warning`) delivered over WebSocket/SSE. See the [HTTP API events reference](/api/http/#all-events-60-total).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QUEUE_IDLE_THRESHOLD_MS` | `30000` | Emit `queue:idle` when a queue is empty with no active jobs for this long. `0` disables. |
+| `QUEUE_SIZE_THRESHOLD` | `0` (disabled) | Emit `queue:threshold` when a queue's waiting count reaches this size. |
+| `WORKER_OVERLOAD_THRESHOLD_MS` | `30000` | Emit `worker:overloaded` when a worker stays at max concurrency for this long. |
+| `MEMORY_WARNING_MB` | `0` (disabled) | Emit `server:memory-warning` when heap usage exceeds this many MB. |
+| `STORAGE_WARNING_MB` | `0` (disabled) | Emit `storage:size-warning` when the SQLite database exceeds this many MB. |
+
+## bunqueue Cloud
+
+Telemetry agent for the bunqueue Cloud dashboard. Cloud mode activates only when `BUNQUEUE_CLOUD_URL`, `BUNQUEUE_CLOUD_API_KEY`, **and** `BUNQUEUE_CLOUD_INSTANCE_ID` are all set.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BUNQUEUE_CLOUD_URL` | (none) | Cloud dashboard URL. Required for cloud mode. |
+| `BUNQUEUE_CLOUD_API_KEY` | (none) | API key. Required for cloud mode. |
+| `BUNQUEUE_CLOUD_INSTANCE_ID` | (none) | Unique instance identifier. Required for cloud mode. |
+| `BUNQUEUE_CLOUD_INSTANCE_NAME` | hostname | Display name for this instance. |
+| `BUNQUEUE_CLOUD_SIGNING_SECRET` | (none) | HMAC signing secret for payloads. |
+| `BUNQUEUE_CLOUD_INTERVAL_MS` | `15000` | Snapshot upload interval in ms. |
+| `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA` | `true` | Include job payloads in telemetry. Set `false` to send metadata only. |
+| `BUNQUEUE_CLOUD_REDACT_FIELDS` | (none) | Comma-separated payload fields to redact. |
+| `BUNQUEUE_CLOUD_EVENTS` | (all) | Comma-separated event filter. |
+| `BUNQUEUE_CLOUD_BUFFER_SIZE` | `720` | Snapshot buffer size while offline. |
+| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures before the circuit breaker opens. |
+| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_RESET_MS` | `60000` | Circuit breaker reset window in ms. |
+| `BUNQUEUE_CLOUD_USE_WEBSOCKET` | `true` | Stream via WebSocket. Set `false` to disable. |
+| `BUNQUEUE_CLOUD_USE_HTTP` | `true` | Upload via HTTP. Set `false` to disable. |
+| `BUNQUEUE_CLOUD_REMOTE_COMMANDS` | `true` | Allow remote commands from the dashboard. Set `false` to disable. |
+
 ## Security & Access
 
 ### `METRICS_AUTH`
 
-Require authentication for metrics endpoints.
+Require authentication for the `/prometheus` metrics endpoint. Only the literal value `true` enables it. The JSON `/metrics` endpoint is already covered by the general `AUTH_TOKENS` check.
 
 | Type | Default | Values |
 |------|---------|--------|
@@ -467,38 +529,47 @@ CORS_ALLOW_ORIGIN=https://app.example.com,https://admin.example.com bunqueue sta
 
 ### `BUNQUEUE_MODE`
 
-Connection mode for bunqueue client and MCP server.
+Connection mode for the MCP server (`bunqueue-mcp`).
 
 | Type | Default | Values |
 |------|---------|--------|
 | string | `embedded` | `embedded`, `tcp` |
 
 ```bash
-BUNQUEUE_MODE=tcp bun run worker.ts
+BUNQUEUE_MODE=tcp bunx bunqueue-mcp
 ```
 
 ### `BUNQUEUE_HOST`
 
-Server host for TCP mode connections.
+Server host for the MCP server in TCP mode. The CLI also reads it as a fallback for `--host` (priority: `HOST` > `BUNQUEUE_HOST` > `BQ_HOST`).
 
 | Type | Default | Example |
 |------|---------|---------|
 | string | `localhost` | `your-server.com` |
 
 ```bash
-BUNQUEUE_HOST=your-server.com bun run worker.ts
+BUNQUEUE_MODE=tcp BUNQUEUE_HOST=your-server.com bunx bunqueue-mcp
 ```
 
 ### `BUNQUEUE_PORT`
 
-Server port for TCP mode connections.
+Server port for the MCP server in TCP mode. It also reads `BUNQUEUE_TOKEN` for authentication.
 
 | Type | Default | Example |
 |------|---------|---------|
 | number | `6789` | `7000` |
 
 ```bash
-BUNQUEUE_PORT=7000 bun run worker.ts
+BUNQUEUE_MODE=tcp BUNQUEUE_PORT=7000 bunx bunqueue-mcp
+```
+
+### `TCP_PORT` / `BUNQUEUE_TCP_PORT` / `BQ_TCP_PORT` (CLI)
+
+Fallback for the CLI `--port` flag when it is not passed explicitly. Read in priority order: `TCP_PORT` > `BUNQUEUE_TCP_PORT` > `BQ_TCP_PORT`. Using `TCP_PORT` means the same variable that binds the server also routes the client in the same shell.
+
+```bash
+export TCP_PORT=7000
+bunqueue stats   # connects to localhost:7000
 ```
 
 ### `BUNQUEUE_EMBEDDED`
@@ -515,7 +586,7 @@ BUNQUEUE_EMBEDDED=1 bun run worker.ts
 
 ### `SQLITE_PATH`
 
-Legacy alias for `DATA_PATH`.
+Legacy alias for the data path, lowest priority (`BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`).
 
 | Type | Default | Example |
 |------|---------|---------|

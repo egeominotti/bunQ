@@ -2,6 +2,24 @@
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.30] - 2026-07-10
+
+### Added — "24/7 readiness" battle-testing suites (adversarial, no source changes)
+
+Eight new adversarial test suites under `test/repro-*.test.ts` assert the delivery and resource guarantees a continuously-running deployment depends on: protocol fuzzing, chaos/fault injection, race/concurrency, crash-recovery under SIGKILL, soak/endurance, stress/degradation, upgrade/rolling restart, and long-running semantics. Each drives a real `QueueManager` + TCP server (several spawn the real `src/main.ts` process against on-disk SQLite) and asserts hard invariants. Result: **50 tests / ~34.6k assertions, all green**, no product bug surfaced (the guarantees already hold). Documented in `docs/architecture.md` (new *Reliability & Battle-Testing* section). No runtime/API changes.
+
+## [2.8.29] - 2026-07-09
+
+### Fixed — `upsertJobScheduler` silently dropped `limit` (#111, thanks @jdorner)
+
+`queue.upsertJobScheduler(id, { every, limit }, template)` accepted a `limit` in `RepeatOpts` but the client scheduler never mapped it to the cron engine's `maxLimit`, so the run cap was persisted as `NULL` and the scheduler fired forever. The backend already supported it; only the client builder omitted it. Fixed on **both** the embedded and TCP paths; `limit` is now surfaced back on `SchedulerInfo.limit`, and the simple-mode `Bunqueue.cron()/every()` helpers gained a `limit` option. RED→GREEN reproduction tests cover embedded and TCP.
+
+### Fixed — audit of the same "client silently drops a supported field" class
+
+- **`retryJobs({ state:'failed', count })` ignored `count`**: the entire DLQ was retried instead of the requested N. Added `count` end-to-end (wire → handler → bounded `retryDlqJobs`); the Python and TypeScript SDKs forward `count` too.
+- **`Queue.moveJobToFailed()` dropped the stacktrace and `UnrecoverableError`**: all four client failure sites now route through a shared `failWire` helper that mirrors the worker path (`stack` + `unrecoverable`).
+- **`Worker.getNextJob()` ignored `lockDuration`**: the manual-acquire API now forwards a custom `lockDuration` on both paths.
+
 ## [2.8.28] - 2026-07-09
 
 ### Fixed — lock-expiry DLQ move was never persisted to SQLite (#110, root cause of #97's re-repros)

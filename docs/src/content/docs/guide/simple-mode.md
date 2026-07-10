@@ -23,7 +23,7 @@ head:
 ```typescript
 import { Bunqueue } from 'bunqueue/client';
 
-const app = new Bunqueue('emails', {
+const app = new Bunqueue<{ to: string }>('emails', {
   embedded: true,
   processor: async (job) => {
     console.log(`Sending to ${job.data.to}`);
@@ -70,7 +70,7 @@ Job → Circuit Breaker → TTL check → AbortController → Retry → Middlewa
 Route jobs to different handlers by name:
 
 ```typescript
-const app = new Bunqueue('notifications', {
+const app = new Bunqueue<{ to: string }>('notifications', {
   embedded: true,
   routes: {
     'send-email': async (job) => {
@@ -162,9 +162,9 @@ const app = new Bunqueue('api-calls', {
 | Strategy | Formula | Use case |
 |----------|---------|----------|
 | `fixed` | `delay` every time | Rate-limited APIs |
-| `exponential` | `delay × 2^attempt` | General purpose |
-| `jitter` | `delay × 2^attempt × random(0.5-1.0)` | Thundering herd prevention |
-| `fibonacci` | `delay × fib(attempt)` | Gradual backoff |
+| `exponential` | `delay × 2^(attempt-1)` | General purpose |
+| `jitter` | `delay × 2^(attempt-1) × random(0.5-1.5)` | Thundering herd prevention |
+| `fibonacci` | `delay × fib(attempt)` (1x, 2x, 3x, 5x, 8x, ...) | Gradual backoff |
 | `custom` | `customBackoff(attempt, error) → ms` | Anything |
 
 This is **in-process retry**, the job stays active. Different from core `attempts`/`backoff` which re-queues.
@@ -243,11 +243,12 @@ app.trigger({
 });
 
 // Conditional trigger (only for large orders)
+// `result` is typed as unknown, cast it to your processor's return type
 app.trigger({
   on: 'place-order',
   create: 'fraud-alert',
-  data: (result) => ({ amount: result.total }),
-  condition: (result) => result.total > 1000,
+  data: (result) => ({ amount: (result as { total: number }).total }),
+  condition: (result) => (result as { total: number }).total > 1000,
 });
 
 // Chain triggers
@@ -298,7 +299,7 @@ const app = new Bunqueue('tasks', {
 });
 ```
 
-A job with priority 1, after 5 min: 3, after 10 min: 5, ... capped at 100.
+Once a job is older than `minAge`, it gains `boost` priority on every check tick. With the config above, a job with priority 1 becomes 3 after 5 minutes, 5 one minute later, and so on, capped at `maxPriority`.
 
 ## Job Deduplication
 
@@ -328,7 +329,7 @@ await app.add('task', data, { deduplication: { id: 'my-custom-id', ttl: 5000 } }
 
 ## Job Debouncing
 
-Coalesce rapid same-name jobs. Only the last one in the TTL window gets processed:
+Attach a default debounce id to every job. Each job gets `debounce: { id: jobName, ttl }` unless the per-job options already set one:
 
 ```typescript
 const app = new Bunqueue('search', {
@@ -339,13 +340,17 @@ const app = new Bunqueue('search', {
   },
 });
 
-// User types fast — only the last query runs
+// All three 'search' jobs share the debounce id 'search'
 await app.add('search', { query: 'h' });
 await app.add('search', { query: 'he' });
-await app.add('search', { query: 'hello' });  // only this one processes
+await app.add('search', { query: 'hello' });
 ```
 
-Debounce groups by job name. Different names = independent debounce windows.
+Debounce groups by job name. Different names get independent debounce ids.
+
+:::caution
+The debounce id and TTL are stored on the job (BullMQ v5 compatible metadata, visible via `job.opts.debounce`), but they do not suppress duplicates by themselves in the current engine. To actually coalesce rapid duplicates, use [deduplication](#job-deduplication): with `replace: true`, a duplicate arriving within the TTL window replaces the pending job, giving last-write-wins semantics.
+:::
 
 ## Rate Limiting
 
@@ -363,14 +368,16 @@ const app = new Bunqueue('api', {
   },
 });
 
-// Or per-group rate limiting (e.g., per customer)
+// Or per-group limiting (e.g., per customer). With groupKey set, `max`
+// becomes a per-group concurrency cap (max active jobs per group value)
+// and `duration` is ignored.
 const app2 = new Bunqueue('api', {
   embedded: true,
   processor: async (job) => callAPI(job.data),
   rateLimit: {
     max: 10,
     duration: 1000,
-    groupKey: 'customerId',  // limits per job.data.customerId
+    groupKey: 'customerId',  // groups by job.data.customerId
   },
 });
 
@@ -410,7 +417,7 @@ app.purgeDlq();           // clear all
 app.setDlqConfig({ autoRetry: false });
 ```
 
-Failure reasons tracked: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`.
+Failure reasons tracked: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`, plus `unknown` as a fallback.
 
 ## Cron Jobs
 
@@ -514,7 +521,7 @@ app.use(async (job, next) => {
 });
 
 app
-  .trigger({ on: 'process', create: 'notify', data: (r) => ({ payload: r.id }) })
+  .trigger({ on: 'process', create: 'notify', data: (r) => ({ payload: (r as { id: string }).id }) })
   .trigger({ on: 'process', event: 'failed', create: 'alert', data: (_, j) => j.data });
 
 await app.cron('cleanup', '0 2 * * *', { payload: 'nightly' });
@@ -543,8 +550,8 @@ process.on('SIGINT', async () => {
 | Option | Default | Description |
 |--------|---------|-------------|
 | `concurrency` | `1` | Parallel jobs |
-| `embedded` | auto | Use embedded SQLite |
-| `connection` | — | TCP server connection |
+| `embedded` | `false` | Use embedded SQLite (`BUNQUEUE_EMBEDDED=1` forces it on) |
+| `connection` | localhost:6789 | TCP server connection |
 | `autorun` | `true` | Start worker immediately |
 
 **Features:**

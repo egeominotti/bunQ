@@ -155,13 +155,13 @@ bun run bench/comparison/run.ts  # the numbers on this page
 
 ## Install Footprint
 
-Throughput is one axis; what you ship is another. We measured `bun add bunqueue` in a clean project as of 2.8.0:
+Throughput is one axis; what you ship is another. We measured `bun add bunqueue` in a clean project as of 2.8.1:
 
-| Metric | bunqueue | Before 2.8.0 | Change |
+| Metric | bunqueue | Before 2.8.1 | Change |
 |--------|----------|--------------|--------|
 | `node_modules` size | 5.5 MB | 93 MB | **−94%** |
 | packages installed | 7 | 117 | **−94%** |
-| cold install time | ~1.2 s | ~6 s | **up to ~5× faster** |
+| cold install time | ~1.7 s | ~6 s | **~3.5× faster** |
 
 The savings come from making `@modelcontextprotocol/sdk` an optional peer dependency (loaded lazily only by the `bunqueue-mcp` bin), dropping `zod` and the HTTP stack from the install path, and removing `bun` from `peerDependencies`. Queue and worker users now download just two runtime dependencies: `croner` and `msgpackr`.
 

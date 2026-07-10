@@ -49,6 +49,10 @@ bunqueue webhook add https://api.example.com/webhooks/failures \
   --events job.failed --secret my-webhook-secret
 ```
 
+:::note[SSRF protection]
+Webhook URLs are validated at registration time: URLs pointing to localhost, private or link-local IP ranges (IPv4 and IPv6, including IPv4-mapped IPv6), or cloud metadata endpoints are **rejected**. Only `http:` and `https:` URLs up to 2048 characters are accepted.
+:::
+
 ### List Webhooks
 
 ```bash
@@ -57,11 +61,17 @@ bunqueue webhook list
 
 **Output:**
 ```
-URL                                        QUEUE    EVENTS
-https://api.example.com/webhooks/bunqueue  *        job.completed,job.failed
-https://api.example.com/webhooks/emails    emails   job.completed,job.failed,job.progress
-https://api.example.com/webhooks/failures  *        job.failed
+  01920b5e-7c4a-7000-8a3e-2f9d1c4b6e10: https://api.example.com/webhooks/bunqueue
+    Events: job.completed, job.failed
+    Delivered: 42 ok / 0 failed
+
+  01920b5e-9d2b-7000-b1c7-8e5f3a2d9c44: https://api.example.com/webhooks/emails
+    Events: job.completed, job.failed, job.progress
+    Queue: emails
+    Delivered: 8 ok / 1 failed
 ```
+
+Each entry starts with the webhook ID, which is what `webhook remove` and `SetWebhookEnabled` take. Disabled webhooks are marked `[disabled]`.
 
 ### Enable/Disable Webhook
 
@@ -69,7 +79,7 @@ Toggling a webhook's enabled state is not a CLI command (the CLI supports `webho
 
 ```text
 # MCP tool
-bunqueue_set_webhook_enabled({ id: "wh_abc123", enabled: false })
+bunqueue_set_webhook_enabled({ id: "01920b5e-7c4a-7000-8a3e-2f9d1c4b6e10", enabled: false })
 ```
 
 Disabling a webhook stops event delivery but preserves the configuration. This is useful for temporarily pausing webhook notifications during maintenance.
@@ -78,7 +88,7 @@ Disabling a webhook stops event delivery but preserves the configuration. This i
 
 ```bash
 # Remove webhook by its ID (shown in webhook list output)
-bunqueue webhook remove wh_abc123
+bunqueue webhook remove 01920b5e-7c4a-7000-8a3e-2f9d1c4b6e10
 ```
 
 ## Event Types
@@ -117,27 +127,26 @@ X-Webhook-Signature: a1b2c3d4e5f6...
   "timestamp": 1704067200000,
   "jobId": "1001",
   "queue": "emails",
-  "data": {
-    "to": "user@example.com",
-    "subject": "Welcome"
-  }
+  "data": { "sent": true }
 }
 ```
 
+All payloads carry `event`, `timestamp`, `jobId`, and `queue`. The optional `data`, `error`, and `progress` fields depend on the event.
+
 ### Event-Specific Payloads
 
-**job.completed**
+**job.completed**, `data` is the job **result** returned by the worker:
 ```json
 {
   "event": "job.completed",
   "timestamp": 1704067200000,
   "jobId": "1001",
   "queue": "emails",
-  "data": { "to": "user@example.com", "subject": "Welcome" }
+  "data": { "sent": true }
 }
 ```
 
-**job.failed**
+**job.failed**, `data` is the job's input data, plus the error message:
 ```json
 {
   "event": "job.failed",
@@ -149,17 +158,18 @@ X-Webhook-Signature: a1b2c3d4e5f6...
 }
 ```
 
-**job.progress**
+**job.progress**, carries the progress percentage (no `data` field):
 ```json
 {
   "event": "job.progress",
   "timestamp": 1704067200000,
   "jobId": "1001",
   "queue": "emails",
-  "data": { "to": "user@example.com", "subject": "Welcome" },
   "progress": 75
 }
 ```
+
+**job.pushed** and **job.started** carry the base fields only.
 
 ## Signature Verification
 
@@ -495,10 +505,11 @@ bunqueue webhook list
 
 ### Webhooks Not Delivered
 
-1. Check webhook is registered: `bunqueue webhook list`
-2. Verify URL is accessible from server
-3. Check firewall rules
-4. Review server logs: `bunqueue logs --filter webhook`
+1. Check webhook is registered and not `[disabled]`: `bunqueue webhook list`
+2. Check the `Delivered: N ok / N failed` counters in `bunqueue webhook list`
+3. Verify URL is accessible from the server (localhost and private IPs are rejected at registration)
+4. Check firewall rules
+5. Review the bunqueue server logs (webhook delivery failures are logged with the target URL)
 
 ### Invalid Signature Errors
 
@@ -517,7 +528,7 @@ bunqueue webhook list
 
 1. Check event filter: `--events` flag
 2. Verify queue filter: `--queue` flag
-3. Check job options (some jobs skip events)
+3. Remember `job.progress` only fires when a processor calls `job.updateProgress()`
 
 :::tip[Related Guides]
 - [Queue API](/guide/queue/) - Queue events and configuration

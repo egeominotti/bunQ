@@ -16,7 +16,7 @@ head:
   <div class="bq-proof">
     <span><b>6h</b> default backup interval</span>
     <span><b>7</b> backups retained by default</span>
-    <span><b>SHA256</b> checksum on every restore</span>
+    <span><b>SHA256</b> checksum verified on restore</span>
     <span><b>4</b> S3-compatible providers documented</span>
   </div>
 </div>
@@ -73,6 +73,8 @@ AWS-style environment variables are also supported as fallbacks: `AWS_ACCESS_KEY
 
 ## CLI Commands
 
+Backup commands run locally (not via TCP): they read the database path from `BUNQUEUE_DATA_PATH` and the S3 credentials from the environment variables above.
+
 ```bash
 # Create backup now
 bunqueue backup now
@@ -100,10 +102,11 @@ Each backup includes:
 
 ## How It Works
 
-1. **Compression**, the database is compressed with gzip before upload for efficient storage
-2. **Checksum**, a SHA256 hash of the original data is computed and stored in the metadata file
-3. **Upload**, the compressed backup and metadata are uploaded to S3 as separate files
-4. **Cleanup**, old backups exceeding the retention limit are automatically deleted
+1. **Checkpoint**, the SQLite WAL is checkpointed (`TRUNCATE`) so all data is in the main database file
+2. **Compression**, the database is compressed with gzip before upload for efficient storage
+3. **Checksum**, a SHA256 hash of the original data is computed and stored in the metadata file
+4. **Upload**, the compressed backup and metadata are uploaded to S3 as separate files, with automatic retry on transient errors (exponential backoff) and a 30 second per-operation timeout
+5. **Cleanup**, old backups exceeding the retention limit are automatically deleted
 
 ## Scheduling
 
@@ -119,4 +122,7 @@ When restoring, bunqueue automatically:
 - Detects whether the backup is gzip-compressed (via metadata or magic bytes)
 - Decompresses the backup if needed
 - Verifies the SHA256 checksum against the metadata to ensure data integrity
-- Supports older uncompressed backups for backward compatibility
+- Validates the `SQLite format 3` file header
+- Writes the payload to a temporary file and runs `PRAGMA integrity_check` on it
+- Only on full success, atomically renames the temporary file over the live database; on any failure the current database is left untouched
+- Supports older uncompressed backups for backward compatibility (checksum verification is skipped when no metadata file exists)

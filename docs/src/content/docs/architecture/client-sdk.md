@@ -56,6 +56,7 @@ src/client/
   </div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">Return Job with methods</div>
+  <p class="bq-diag-note">Auto-batching (TCP mode, on by default): concurrent add() calls are transparently coalesced into a single PUSHB round-trip (defaults: maxSize 50, maxDelayMs 5). Sequential awaits send immediately with no penalty; durable jobs bypass the batcher and go out as individual PUSH.</p>
 </div>
 
 ## Worker Processing Flow

@@ -26,7 +26,9 @@ src/domain/
     ├── uniqueKeyManager.ts  # Deduplication
     ├── limiterManager.ts    # Rate/concurrency
     ├── dependencyTracker.ts # Job dependencies
-    └── temporalManager.ts   # Delayed jobs
+    ├── temporalManager.ts   # Temporal index + delayed jobs
+    ├── waiterManager.ts     # Long-poll waiters
+    └── shardCounters.ts     # O(1) per-queue stats
 ```
 
 ## Sharding Architecture
@@ -38,7 +40,7 @@ Jobs are distributed across N shards (auto-detected from CPU cores) for parallel
   <div class="bq-diag-flow">
     <div class="bq-diag-cell">queueName</div>
     <div class="bq-diag-arrow">→</div>
-    <div class="bq-diag-cell">fnv1aHash()</div>
+    <div class="bq-diag-cell">fnv1a()</div>
     <div class="bq-diag-arrow">→</div>
     <div class="bq-diag-cell">&amp; SHARD_MASK</div>
     <div class="bq-diag-arrow">→</div>
@@ -133,7 +135,7 @@ Each shard is a composition of managers:
     <span class="bq-diag-group-label">when A completes</span>
     <div class="bq-diag-layer">1. Add A.id to pendingDepChecks</div>
     <div class="bq-diag-arrow">↓</div>
-    <div class="bq-diag-layer">2. Background task <i>every 100ms</i></div>
+    <div class="bq-diag-layer">2. Event-driven flush <i>scheduled on the next microtask, coalescing completions from the same tick; a 30s interval acts as safety fallback only</i></div>
     <div class="bq-diag-arrow">↓</div>
     <div class="bq-diag-layer">3. For each completedId, get dependencyIndex[completedId] <i>Set&lt;jobIds&gt;</i></div>
     <div class="bq-diag-arrow">↓</div>
@@ -225,11 +227,11 @@ Ensures only one job per group processes at a time:
   <div class="bq-diag-head"><b>FIFO groups</b><span>job with groupId: "user-123"</span></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">PULL</span>
-    <div class="bq-diag-layer">1. Pop job from queue, 2. check: is groupId in activeGroups?</div>
+    <div class="bq-diag-layer">1. Peek job at queue head, 2. check: is groupId in activeGroups?</div>
     <div class="bq-diag-arrow">↓</div>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell">YES <i>skip this job, try next</i></div>
-      <div class="bq-diag-cell bq-diag-accent">NO <i>add to activeGroups, return job</i></div>
+      <div class="bq-diag-cell">YES <i>job stays at the head, this pull returns no job (preserves strict per-group order)</i></div>
+      <div class="bq-diag-cell bq-diag-accent">NO <i>pop, add to activeGroups, return job</i></div>
     </div>
   </div>
   <div class="bq-diag-group">

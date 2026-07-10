@@ -80,7 +80,7 @@ const worker = new Worker('external-api', async (job) => {
   const remaining = response.headers.get('X-RateLimit-Remaining');
   if (parseInt(remaining) < 10) {
     // Slow down - we're approaching the limit
-    await worker.rateLimit(30_000); // Pause for 30 seconds
+    worker.rateLimit(30_000); // Throttle for 30 seconds
   }
 
   return response.data;
@@ -129,7 +129,8 @@ For APIs with both rate limits and connection limits:
 const queue = new Queue('stripe-api', { embedded: true });
 
 // Stripe rate limit: 100 requests/second
-queue.setGlobalRateLimit(100, 1_000);
+// (the token bucket refills at `limit` tokens per second)
+queue.setGlobalRateLimit(100);
 
 // But also limit concurrent connections
 queue.setGlobalConcurrency(25);
@@ -149,12 +150,13 @@ Clear limits when they're no longer needed:
 
 ```typescript
 // Remove rate limit
+queue.removeGlobalRateLimit();
+
+// Remove concurrency limit
 queue.removeGlobalConcurrency();
 
-// Check current state
-const isMaxed = await queue.isMaxed();
-const ttl = await queue.getRateLimitTtl();
-const isLimited = await worker.isRateLimited();
+// Worker-side: check if this worker is currently throttled
+const isLimited = worker.isRateLimited();
 ```
 
 ## Backpressure Patterns
@@ -177,14 +179,17 @@ setInterval(async () => {
 ### Pattern 2: Adaptive Concurrency
 
 ```typescript
+let currentConcurrency = 10;
+
 const worker = new Worker('tasks', async (job) => {
   const startTime = Date.now();
   const result = await processJob(job.data);
   const duration = Date.now() - startTime;
 
   // If jobs are taking too long, reduce concurrency
-  if (duration > 5_000) {
-    queue.setGlobalConcurrency(Math.max(1, currentConcurrency - 1));
+  if (duration > 5_000 && currentConcurrency > 1) {
+    currentConcurrency -= 1;
+    queue.setGlobalConcurrency(currentConcurrency);
   }
 
   return result;

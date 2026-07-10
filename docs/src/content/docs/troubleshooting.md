@@ -142,28 +142,21 @@ Without `dataPath` or `DATA_PATH`, bunqueue runs in-memory (no persistence acros
 
 ### Jobs not persisted across restarts
 
-If you're using multiple files, the Worker's `autorun: true` (default) can cause the QueueManager to initialize before `DATA_PATH` is set.
+In embedded mode the shared QueueManager is a singleton that is initialized by the **first** `Queue` or `Worker` constructed in the process. If no data path is known at that moment, it opens in-memory and later configuration has no effect.
 
-**Solution:** Use `autorun: false` and start the worker manually:
+Common pitfall: setting `process.env.DATA_PATH` at the top of `main.ts` and then importing a module that constructs a Queue/Worker. ESM imports are hoisted, so the module (and its constructors) run **before** the assignment.
+
+**Solution 1 (recommended):** pass `dataPath` directly in the constructor options, no env var needed:
 
 ```typescript
-// queue.ts
-const worker = new Worker('tasks', processor, {
-  embedded: true,
-  autorun: false,  // Don't start automatically
-});
-
-export function startWorker() {
-  worker.run();
-}
+const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
+const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
 ```
 
-```typescript
-// main.ts
-process.env.DATA_PATH = './data/bunqueue.db';
+**Solution 2:** set the env var before the process starts:
 
-import { startWorker } from './queue';
-startWorker();  // Start after DATA_PATH is set
+```bash
+BUNQUEUE_DATA_PATH=./data/bunqueue.db bun run main.ts
 ```
 
 ## Job Processing Issues
@@ -193,15 +186,26 @@ queue.setStallConfig({
 
 ```typescript
 // Check if paused
-const isPaused = queue.isPaused();
+const isPaused = await queue.isPausedAsync();
 
 // Check counts
-const counts = queue.getJobCounts();
+const counts = await queue.getJobCounts();
 console.log(counts);
-
-// Check rate limit
-const config = queue.getGlobalRateLimit();
 ```
+
+### "Job is not active" when calling updateProgress
+
+Progress can only be updated while the job is **active** (being processed). The server rejects `Progress` for any other state with `Job is not active (current state: ...)`. Typical causes:
+
+- Calling `job.updateProgress()` after the processor returned (job already completed)
+- The job was failed/stalled/cancelled underneath a long-running processor
+- Updating progress from outside the worker while the job is still waiting
+
+Treat it as a signal that you no longer own the job, not as a transient error.
+
+### getJobs() does not show a job I just added
+
+Job listings (`getJobs`, `GetJobs` over TCP) read from SQLite, while pushes go through a write buffer that flushes about every 10ms. A job added a moment ago can be missing from a listing for up to ~10ms. Use `getJob(id)` / `getState(id)` (which read the in-memory index) for read-after-write checks, or add the job with `durable: true` to bypass the buffer.
 
 ### Jobs failing immediately
 
@@ -327,8 +331,8 @@ const worker = new Worker('queue', processor, {
 // Use bulk add
 await queue.addBulk([...jobs]);
 
-// Use bulk ack
-await queue.ackBatch([...jobIds]);
+// Workers batch pulls and acks automatically; tune the batch size
+const batchWorker = new Worker('queue', processor, { batchSize: 100 });
 ```
 
 ### High latency on pull
@@ -405,13 +409,13 @@ If you experience crashes (segfaults) when using `SandboxedWorker`, especially d
 **Solution:** Switch to the standard `Worker` for production workloads:
 
 ```typescript
-// ❌ SandboxedWorker — experimental, may crash
+// ❌ SandboxedWorker: experimental, may crash
 const worker = new SandboxedWorker('queue', {
   processor: './processor.ts',
   concurrency: 4,
 });
 
-// ✅ Worker — stable, production-ready, same functionality
+// ✅ Worker: stable, production-ready, same functionality
 const worker = new Worker('queue', async (job) => {
   // same logic from your processor.ts
   return result;
@@ -440,14 +444,14 @@ These issues will be resolved when Bun stabilizes their Worker API.
 
 ## Debug Mode
 
-Enable verbose logging:
+The server logs to stdout. Switch to structured JSON logs for easier filtering:
 
 ```bash
-# Server mode
-LOG_FORMAT=json DEBUG=bunqueue:* bunqueue start
+# Server mode (structured logs)
+LOG_FORMAT=json bunqueue start
 
-# Check logs
-tail -f /var/log/bunqueue.log
+# Pipe to a file if you want persistent logs
+LOG_FORMAT=json bunqueue start >> /var/log/bunqueue.log 2>&1
 ```
 
 ## Getting Help

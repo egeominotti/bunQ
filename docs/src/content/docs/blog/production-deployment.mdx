@@ -135,7 +135,7 @@ S3_ACCESS_KEY_ID=your-key
 S3_SECRET_ACCESS_KEY=your-secret
 S3_REGION=us-east-1
 S3_BACKUP_INTERVAL=21600000  # Every 6 hours
-S3_BACKUP_RETENTION=7         # Keep 7 days
+S3_BACKUP_RETENTION=7         # Keep the last 7 backups
 ```
 
 ## Health Checks
@@ -145,9 +145,17 @@ bunqueue exposes HTTP health endpoints:
 ```bash
 # Basic health check
 curl http://localhost:6790/health
-# Returns: { "status": "ok", "uptime": 3600, "memory": {...} }
+# Returns: { "ok": true, "status": "healthy", "uptime": 3600,
+#            "version": "...", "queues": {...}, "connections": {...} }
 
-# TCP ping (from your application)
+# Bare liveness probes (200 OK, no body inspection needed)
+curl http://localhost:6790/healthz
+curl http://localhost:6790/ready
+```
+
+From your application, verify the TCP side too:
+
+```typescript
 const queue = new Queue('test', {
   connection: { host: 'localhost', port: 6789 },
 });
@@ -218,7 +226,7 @@ Enable S3 backup for disaster recovery:
 ```bash
 S3_BACKUP_ENABLED=1
 S3_BACKUP_INTERVAL=21600000  # Every 6 hours
-S3_BACKUP_RETENTION=7         # Keep 7 days of backups
+S3_BACKUP_RETENTION=7         # Keep the last 7 backups
 ```
 
 For critical deployments, also consider:

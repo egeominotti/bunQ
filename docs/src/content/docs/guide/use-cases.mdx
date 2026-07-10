@@ -9,7 +9,7 @@ head:
   - tag: meta
     attrs:
       property: og:title
-      content: "bunqueue Use Cases — Production Job Queue Patterns for Bun"
+      content: "bunqueue Use Cases: Production Job Queue Patterns for Bun"
   - tag: meta
     attrs:
       property: og:description
@@ -56,17 +56,17 @@ When an agent connects to bunqueue via MCP (Model Context Protocol), it gains th
 - **Control flow**, pause/resume queues, set rate limits per second, manage concurrency limits
 
 ```bash
-# bunqueue-mcp is a binary bundled with bunqueue — install it first, then connect Claude Code
+# bunqueue-mcp is a binary bundled with bunqueue, install it first, then connect Claude Code
 bun add bunqueue
 bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 <Aside type="note">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
+  Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
 </Aside>
 
-The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (local SQLite) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.
+The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (in-process, SQLite persistence via `DATA_PATH`) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.
 
 ---
 
@@ -298,15 +298,17 @@ const webhookWorker = new Worker<WebhookJob>('webhooks', async (job) => {
 }, { embedded: true, concurrency: 20 });
 
 // Dispatch webhook
+const payload = {
+  orderId: 'ORD-123',
+  total: 99.99,
+  items: [{ sku: 'ITEM-1', qty: 2 }],
+};
+
 await webhookQueue.add('order.created', {
   endpoint: 'https://partner.com/webhooks',
   event: 'order.created',
-  payload: {
-    orderId: 'ORD-123',
-    total: 99.99,
-    items: [{ sku: 'ITEM-1', qty: 2 }],
-  },
-  signature: generateHmacSignature(payload, secret),
+  payload,
+  signature: generateHmacSignature(payload, webhookSecret),
 });
 ```
 
@@ -540,7 +542,7 @@ const notificationWorker = new Worker<NotificationJob>('notifications', async (j
       await job.log(`Sent via ${channel}`);
     } catch (err) {
       results[channel] = false;
-      await job.log(`Failed ${channel}: ${err.message}`);
+      await job.log(`Failed ${channel}: ${(err as Error).message}`);
     }
   }
 
@@ -571,7 +573,7 @@ await notificationQueue.add('security-alert', {
 
 Payment processing is the most critical background job in any e-commerce system. It must be reliable (never lose a charge), idempotent (never charge twice for the same order), and auditable (every action logged). Processing payments synchronously in the checkout flow is risky: a timeout or crash after the charge but before the database update results in a lost transaction.
 
-bunqueue handles this with the `durable: true` flag, which bypasses the write buffer and persists the job to SQLite immediately. This guarantees zero data loss even if the process crashes. The idempotency key pattern prevents duplicate charges, and the DLQ is configured with `autoRetry: false` because failed payments require manual review, you don't want to auto-retry a charge that failed due to insufficient funds.
+bunqueue handles this with the `durable: true` flag, which bypasses the write buffer and persists the job to SQLite immediately (set a `dataPath` on the embedded queue, without one the queue is in-memory). This guarantees zero data loss even if the process crashes. The idempotency key pattern prevents duplicate charges, and the DLQ is configured with `autoRetry: false` because failed payments require manual review, you don't want to auto-retry a charge that failed due to insufficient funds.
 
 ```typescript
 interface PaymentJob {
@@ -586,6 +588,7 @@ interface PaymentJob {
 
 const paymentQueue = new Queue<PaymentJob>('payments', {
   embedded: true,
+  dataPath: './data/payments.db', // durable writes need SQLite persistence
   defaultJobOptions: {
     attempts: 3,
     backoff: 5000,
@@ -661,7 +664,7 @@ await paymentQueue.add('charge', {
   currency: 'usd',
   customerId: 'cus_xxx',
   paymentMethodId: 'pm_xxx',
-  idempotencyKey: `order-${orderId}-payment`,
+  idempotencyKey: 'order-ORD-123-payment',
 }, { durable: true }); // Immediate disk write - no data loss on crash
 ```
 

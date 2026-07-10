@@ -43,10 +43,11 @@ Jobs move to the DLQ when they meet specific failure conditions:
 
 | Condition | Reason | Example |
 |-----------|--------|---------|
-| Max attempts exhausted | `max_attempts` | Job failed 3 times with exponential backoff |
-| Processing timeout | `timeout` | Job exceeded its timeout setting |
+| Max attempts exhausted | `max_attempts_exceeded` | Job failed 3 times with exponential backoff |
 | Stall limit reached | `stalled` | Worker died 3 times while processing this job |
-| Manual discard | `manual` | Explicitly moved via API |
+| Manual discard | `unknown` | Explicitly moved via the discard API |
+
+A processing timeout counts as a failed attempt, so a job that keeps timing out also ends up in the DLQ with reason `max_attempts_exceeded` once its attempts run out.
 
 ```typescript
 const queue = new Queue('payments', { embedded: true });
@@ -59,7 +60,7 @@ await queue.add('charge', { amount: 99.99 }, {
 });
 
 // If all 3 attempts fail, the job moves to DLQ
-// with reason: 'max_attempts'
+// with reason: 'max_attempts_exceeded'
 ```
 
 ## Configuring the DLQ
@@ -90,15 +91,17 @@ const stats = queue.getDlqStats();
 console.log(stats);
 // {
 //   total: 47,
-//   byReason: { max_attempts: 30, timeout: 12, stalled: 5 },
-//   retriable: 42,
+//   byReason: { max_attempts_exceeded: 42, stalled: 5, ... },
+//   byQueue: { payments: 47 },
+//   pendingRetry: 12,
 //   expired: 5,
-//   oldestEntry: 1707000000000
+//   oldestEntry: 1707000000000,
+//   newestEntry: 1707100000000
 // }
 
 // List DLQ entries with filtering
 const entries = queue.getDlq({
-  reason: 'timeout',          // Only timeout failures
+  reason: 'stalled',          // Only stall failures
   olderThan: Date.now() - 86_400_000,  // Older than 24h
   limit: 20,
   offset: 0,
@@ -130,7 +133,7 @@ queue.retryDlq();
 
 // Retry with a filter
 queue.retryDlqByFilter({
-  reason: 'timeout',
+  reason: 'stalled',
   newerThan: Date.now() - 3_600_000, // Only last hour
 });
 ```

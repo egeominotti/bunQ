@@ -1,5 +1,5 @@
 ---
-title: "Worker API — Process Background Jobs with Concurrency & Retries"
+title: "Worker API: Process Background Jobs with Concurrency & Retries"
 description: "Configure bunqueue Workers for job processing: concurrency, heartbeats, batch pulling, lock-based ownership, and sandboxed isolation."
 head:
   - tag: meta
@@ -61,7 +61,9 @@ const worker = new Worker('queue', processor, {
   limiter: {
     max: 10,              // Max 10 jobs per duration window
     duration: 1000,       // Window of 1 second
-    groupKey: 'userId',   // Optional: rate limit per group key in job data
+    // groupKey: 'userId', // Optional: switches the limiter to a per-group
+    //                     // CONCURRENCY cap: max `max` jobs active at once
+    //                     // per distinct job.data[groupKey]; duration unused
   },
 
   // Lock & Stall Tuning
@@ -71,10 +73,9 @@ const worker = new Worker('queue', processor, {
   skipLockRenewal: false,  // Skip heartbeat lock renewal (default: false)
   drainDelay: 50,         // Delay between polls when queue is empty (default: 50)
 
-  // Auto-Cleanup
+  // Auto-Cleanup (boolean only; number/object forms are accepted for
+  // BullMQ type compatibility but are treated as false, not implemented)
   removeOnComplete: true,           // Remove completed jobs immediately
-  // removeOnComplete: 100,          // Keep last 100 completed jobs
-  // removeOnComplete: { age: 3600000, count: 500 }, // Keep by age or count
   removeOnFail: false,              // Same format as removeOnComplete
 
   // TCP Connection (server mode only)
@@ -85,7 +86,7 @@ const worker = new Worker('queue', processor, {
     poolSize: 4,
   },
 
-  // Namespace isolation — must match the producing Queue's prefixKey
+  // Namespace isolation, must match the producing Queue's prefixKey
   prefixKey: 'prod:',
 });
 ```
@@ -103,15 +104,15 @@ const worker = new Worker('queue', processor, {
 | `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
 | `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
 | `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
-| `limiter` | `RateLimiterOptions` | — | Rate limiter for job processing (`{ max, duration, groupKey? }`) |
+| `limiter` | `RateLimiterOptions` | - | Rate limiter (`{ max, duration, groupKey? }`). Without `groupKey`: max jobs per duration window. With `groupKey`: per-group concurrency cap of `max` (duration unused) |
 | `lockDuration` | `number` | `30000` | How long a job lock lasts before expiring (ms) |
 | `maxStalledCount` | `number` | `1` | Max times a job can stall before moving to failed |
 | `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
 | `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
 | `drainDelay` | `number` | `50` | Delay between polls when queue is drained (ms) |
-| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. `true` = immediate, `number` = max count, `{ age?, count? }` = by age/count |
-| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Auto-remove failed jobs. Same format as `removeOnComplete` |
-| `prefixKey` | `string` | — | Namespace prefix; must match the producing `Queue.prefixKey` to consume its jobs. See [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) |
+| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` (not implemented) |
+| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Auto-remove failed jobs. Same behavior as `removeOnComplete` (boolean only) |
+| `prefixKey` | `string` | - | Namespace prefix; must match the producing `Queue.prefixKey` to consume its jobs. See [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) |
 
 ## Job Object
 
@@ -178,6 +179,10 @@ worker.on('cancelled', ({ jobId, reason }) => {
   console.log(`Cancelled: ${jobId} - ${reason}`);
 });
 
+worker.on('log', (job, message) => {
+  console.log(`Log from ${job.id}: ${message}`);
+});
+
 worker.on('closed', () => {
   console.log('Worker closed');
 });
@@ -196,6 +201,7 @@ worker.on('closed', () => {
 | `drained` | `()` | Queue has no more waiting jobs |
 | `error` | `(error: Error)` | Worker-level error |
 | `cancelled` | `({ jobId: string, reason: string })` | Job was cancelled |
+| `log` | `(job: Job<T>, message: string)` | Log message written via `job.log()` |
 | `closed` | `()` | Worker shut down |
 
 ## Control
@@ -285,8 +291,8 @@ When `useLocks: true` (default), workers use BullMQ-style lock tokens:
 - Each job gets a unique lock token when pulled
 - Workers must provide the token when acknowledging/failing jobs
 - Prevents job theft between workers
-- Lock is renewed via heartbeats
-- Heartbeats support a custom `duration` parameter to extend the lock for a specific TTL instead of using the default
+- Lock is renewed via heartbeats (`lockDuration` sets the TTL, default 30000ms)
+- Locks can also be extended explicitly with a custom TTL via `worker.extendJobLocks(jobIds, tokens, duration)`
 
 :::note[When Locks Matter]
 Locks are essential in **server mode** with multiple workers connecting via TCP. They prevent:
@@ -367,8 +373,8 @@ import { SandboxedWorker } from 'bunqueue/client';
 // Embedded mode (in-process)
 const worker = new SandboxedWorker('cpu-intensive', {
   processor: './processor.ts',  // Path to processor file
-  concurrency: 4,               // 4 parallel worker processes
-  timeout: 60000,               // 60s timeout per job (default: 30000)
+  concurrency: 4,               // 4 parallel worker threads
+  timeout: 60000,               // 60s timeout per job (default: 30000, 0 = disabled)
   maxMemory: 256,               // MB per worker (default: 256)
   maxRestarts: 10,              // Auto-restart limit (default: 10)
   autoRestart: true,            // Auto-restart crashed workers (default: true)
@@ -382,17 +388,19 @@ await worker.start();
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `processor` | `string` | — | Path to processor file (required) |
+| `processor` | `string` | (required) | Path to processor file |
 | `concurrency` | `number` | `1` | Number of parallel worker threads |
-| `maxMemory` | `number` | `256` | Max memory per worker thread in MB |
-| `timeout` | `number` | `30000` | Job processing timeout in ms |
+| `maxMemory` | `number` | `256` | Max memory per worker thread in MB (uses Bun smol mode if <= 64) |
+| `timeout` | `number` | `30000` | Job processing timeout in ms (0 = disabled) |
 | `autoRestart` | `boolean` | `true` | Auto-restart crashed workers |
 | `maxRestarts` | `number` | `10` | Max restart attempts per worker |
 | `pollInterval` | `number` | `10` | Job poll interval in ms |
 | `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat interval for stall detection / lock renewal |
-| `autoStart` | `boolean` | `false` | Auto-restart worker pool when new jobs arrive after idle shutdown |
+| `idleTimeout` | `number` | `0` | Auto-stop the pool after this many ms of inactivity (0 = disabled) |
+| `idleRecycleMs` | `number` | `30000` | Recycle individual idle worker threads after this many ms (0 = disabled) |
+| `autoStart` | `boolean` | `false` | Auto-restart worker pool when new jobs arrive after an `idleTimeout` shutdown |
 | `autoStartPollMs` | `number` | `5000` | Poll interval for checking new jobs while idle-stopped |
-| `connection` | `ConnectionOptions` | — | TCP connection config (omit for embedded) |
+| `connection` | `ConnectionOptions` | - | TCP connection config (omit for embedded) |
 
 ### TCP Mode
 
@@ -452,7 +460,7 @@ export default async (job: {
 | **Untrusted code** | ❌ Runs in main thread | ✅ Isolated |
 | **Memory leak protection** | ❌ | ✅ Per-worker memory limit |
 | **Crash isolation** | ❌ | ✅ Only the worker thread dies |
-| **Events** | 10 events | 8 events (no `stalled`, `drained`, `cancelled`) |
+| **Events** | 11 events | 8 events (no `stalled`, `drained`, `cancelled`) |
 | **Concurrency, retries, heartbeats** | ✅ | ✅ Same behavior |
 
 :::tip[Production recommendation]
@@ -520,14 +528,20 @@ worker.on('closed', () => {
 
 ```typescript
 // Start the worker pool
-worker.start();
+await worker.start();
+
+// Check if the pool is running
+worker.isRunning();
 
 // Get stats
 const stats = worker.getStats();
-// { total: 4, busy: 2, idle: 2, restarts: 0 }
+// { total: 4, busy: 2, idle: 2, recycled: 0, restarts: 0 }
 
-// Graceful shutdown
+// Graceful shutdown (waits for busy workers to finish)
 await worker.stop();
+
+// Force shutdown (terminates busy workers immediately)
+await worker.stop(true);
 ```
 
 ## Lifecycle & Shutdown

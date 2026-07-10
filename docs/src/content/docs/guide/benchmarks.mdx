@@ -276,7 +276,7 @@ bun run bench/comparison/run.ts
   Run the benchmark **without** `BUNQUEUE_EMBEDDED=1` in the environment. That variable forces every queue/worker into embedded mode (it is used by the test preload), which would make the TCP half silently run in-process and report embedded numbers under a TCP label.
   </Aside>
 
-  Other benchmarks in the repo: [`bench/throughput.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/throughput.bench.ts) (individual operations), [`bench/worker.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/worker.bench.ts) (realistic worker simulation), [`bench/stress.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/stress.bench.ts) (production validation), [`bench/million-jobs.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/million-jobs.bench.ts) (high-volume integrity).
+  Other benchmarks in the repo: [`src/benchmark/throughput.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/src/benchmark/throughput.bench.ts) (individual operations), [`src/benchmark/worker.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/src/benchmark/worker.bench.ts) (realistic worker simulation), [`src/benchmark/stress.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/src/benchmark/stress.bench.ts) (production validation), [`src/benchmark/million-jobs.bench.ts`](https://github.com/egeominotti/bunqueue/blob/main/src/benchmark/million-jobs.bench.ts) (high-volume integrity).
 
   Share your results, CPU model, RAM, Bun version, OS, in [GitHub Discussions](https://github.com/egeominotti/bunqueue/discussions).
 </div>

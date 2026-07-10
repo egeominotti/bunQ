@@ -79,7 +79,7 @@ await devQueue.add('send', { to: 'tester@example.com' });
 await prodQueue.add('send', { to: 'user@example.com' });
 
 await devQueue.getJobCountsAsync();   // { waiting: 1, ... }
-await prodQueue.getJobCountsAsync();  // { waiting: 1, ... } — never sees dev jobs
+await prodQueue.getJobCountsAsync();  // { waiting: 1, ... }, never sees dev jobs
 ```
 
 A `Worker` must use the **same** `prefixKey` to consume jobs from the prefixed queue:
@@ -166,7 +166,7 @@ await queue.add('daily-report', {}, {
   }
 });
 
-// Cron pattern (server mode)
+// Cron pattern (works in both embedded and TCP modes)
 await queue.add('weekly', {}, {
   repeat: {
     pattern: '0 9 * * MON', // Every Monday at 9am
@@ -351,6 +351,7 @@ When using `replace: true`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `id` | `string` | (required) | Unique deduplication key |
 | `ttl` | `number` | - | Time in ms before unique key expires |
 | `extend` | `boolean` | `false` | Reset TTL on duplicate (returns existing job) |
 | `replace` | `boolean` | `false` | Remove old job and create new one |
@@ -367,9 +368,10 @@ const job = await queue.getJob('job-id');
 
 // Get job state
 const state = await queue.getJobState('job-id');
-// 'waiting' | 'active' | 'completed' | 'failed' | 'delayed'
+// 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
+// | 'failed' | 'waiting-children' | 'unknown'
 
-// Get job counts (sync - embedded mode only)
+// Get job counts (sync in embedded mode; in TCP mode returns a Promise)
 const counts = queue.getJobCounts();
 // { waiting, prioritized, active, completed, failed, delayed, paused }
 
@@ -382,11 +384,11 @@ const jobs = queue.getJobs({ state: 'waiting', start: 0, end: 10 });
 // Get jobs with filtering (async - works with TCP)
 const jobs = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
 
-// Get counts grouped by priority
+// Get counts grouped by priority (sync - embedded mode only)
 const byPriority = queue.getCountsPerPriority();
 // { 0: 50, 10: 20, 100: 5 }
 
-// Async version
+// Async version (works with TCP)
 const byPriority = await queue.getCountsPerPriorityAsync();
 ```
 
@@ -418,15 +420,17 @@ same jobs that `failed` counts (in standalone-server and embedded modes alike).
 ### Count Methods
 
 ```typescript
-// Sync (embedded mode only)
-const waitingCount = queue.getWaitingCount();
-const activeCount = queue.getActiveCount();
-const completedCount = queue.getCompletedCount();
-const failedCount = queue.getFailedCount();
-const delayedCount = queue.getDelayedCount();
+// Async (work in both embedded and TCP modes)
+const waitingCount = await queue.getWaitingCount();
+const activeCount = await queue.getActiveCount();
+const completedCount = await queue.getCompletedCount();
+const failedCount = await queue.getFailedCount();
+const delayedCount = await queue.getDelayedCount();
+
+// Total job count: sync (embedded mode only)
 const total = queue.count();
 
-// Async (works with TCP)
+// Total job count: async (works with TCP)
 const total = await queue.countAsync();
 
 // Check if paused
@@ -479,8 +483,11 @@ queue.drain();
 // Remove all queue data
 queue.obliterate();
 
-// Remove a specific job
+// Remove a specific job (sync, fire-and-forget)
 queue.remove('job-id');
+
+// Remove a specific job and await the removal
+await queue.removeAsync('job-id');
 
 // Wait until queue/server is ready
 await queue.waitUntilReady();
@@ -495,17 +502,18 @@ await queue.disconnect();
 ## Clean & Maintenance
 
 ```typescript
-// Remove completed jobs older than 1 hour (sync)
-queue.clean(3600000, 100, 'completed');
+// Remove completed jobs older than 1 hour (sync, embedded mode only)
+// Returns the removed job ids
+const removedIds = queue.clean(3600000, 100, 'completed');
 
 // Async version (works with TCP)
 const removed = await queue.cleanAsync(3600000, 100, 'completed');
 
-// Promote delayed jobs to waiting
-queue.promoteJobs({ count: 50 });
+// Promote delayed jobs to waiting (returns number promoted)
+const promoted = await queue.promoteJobs({ count: 50 });
 
-// Bulk retry failed or completed jobs
-const retried = await queue.retryJobs({ state: 'failed', count: 100 });
+// Bulk retry failed jobs from the DLQ (only state: 'failed' is supported)
+await queue.retryJobs({ state: 'failed', count: 100 });
 ```
 
 ## Job Progress & Logs
@@ -514,8 +522,8 @@ const retried = await queue.retryJobs({ state: 'failed', count: 100 });
 // Update job progress
 await queue.updateJobProgress('job-id', 75);
 
-// Get job logs
-const logs = queue.getJobLogs('job-id', 0, 100);
+// Get job logs (returns { logs: string[], count: number })
+const { logs, count } = await queue.getJobLogs('job-id', 0, 100);
 
 // Add log entry to a job
 await queue.addJobLog('job-id', 'Processing step 3 completed');
@@ -535,7 +543,9 @@ const depCounts = await queue.getJobDependenciesCount('job-id');
 const processed = await queue.getDependencies('parent-id', 'processed', 0, 10);
 const unprocessed = await queue.getDependencies('parent-id', 'unprocessed', 0, 10);
 
-// Wait for a job to finish
+// Wait for a job to finish (requires a QueueEvents instance)
+import { QueueEvents } from 'bunqueue/client';
+const queueEvents = new QueueEvents('my-queue');
 const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
 ```
 
@@ -563,23 +573,28 @@ await queue.moveJobToWaitingChildren('job-id', token);
 ```typescript
 // Set global concurrency limit (max parallel jobs across all workers)
 queue.setGlobalConcurrency(10);
-const concurrency = await queue.getGlobalConcurrency();
 queue.removeGlobalConcurrency();
 
-// Set global rate limit (max jobs per time window)
-queue.setGlobalRateLimit(100, 1000); // 100 jobs per second
-const rateLimit = await queue.getGlobalRateLimit();
+// Set global rate limit (max jobs per second, token bucket)
+queue.setGlobalRateLimit(100); // 100 jobs per second
 queue.removeGlobalRateLimit();
 
-// Throttle queue for specified duration
-await queue.rateLimit(5000); // pause for 5 seconds
-
-// Check remaining throttle time
-const ttl = await queue.getRateLimitTtl();
-
-// Check if queue hit rate/concurrency limit
-const maxed = await queue.isMaxed();
+// Throttle the queue to ~1 job/sec
+await queue.rateLimit(5000);
 ```
+
+:::caution[Semantics and stubs]
+- `setGlobalRateLimit(max, duration?)` configures a **token bucket refilled at
+  `max` tokens per second**. The `duration` argument is accepted for BullMQ
+  compatibility but is currently ignored, the window is always 1 second.
+- `rateLimit(ms)` throttles the queue to 1 job/sec. In embedded mode the
+  throttle is cleared automatically after `ms`; in TCP mode it is **not**
+  auto-cleared, call `removeGlobalRateLimit()` to lift it.
+- `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and
+  `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they
+  currently return `null` / `null` / `0` / `false` regardless of the actual
+  server state.
+:::
 
 ## Job Schedulers (Repeatable Jobs)
 
@@ -659,30 +674,43 @@ queue.setDlqConfig({
   maxEntries: 10000,
 });
 
-// Get current DLQ config
+// Get current DLQ config (sync; in TCP mode returns the client-side cache)
 const dlqConfig = queue.getDlqConfig();
 
-// Get DLQ entries
+// Get current DLQ config from the server (works with TCP)
+const serverDlqConfig = await queue.getDlqConfigAsync();
+
+// Get DLQ entries (embedded mode only; returns [] in TCP mode)
 const entries = queue.getDlq();
 
 // Filter entries
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
 const recentFails = queue.getDlq({ newerThan: Date.now() - 3600000 });
 
-// Get stats
+// Get stats (embedded mode only; returns zeros in TCP mode)
 const stats = queue.getDlqStats();
 // { total, byReason, pendingRetry, expired, oldestEntry, newestEntry }
 
-// Retry from DLQ
+// Retry from DLQ (returns retried count in embedded mode;
+// fire-and-forget returning 0 in TCP mode)
 queue.retryDlq();           // Retry all
 queue.retryDlq('job-123');  // Retry specific
 
-// Retry by filter
+// Retry by filter (embedded mode only)
 queue.retryDlqByFilter({ reason: 'timeout', limit: 10 });
 
-// Purge DLQ
+// Purge DLQ (returns purged count in embedded mode;
+// fire-and-forget returning 0 in TCP mode)
 queue.purgeDlq();
 ```
+
+:::note[TCP mode]
+Enumerating and filtering DLQ entries from this client API (`getDlq`,
+`getDlqStats`, `retryDlqByFilter`) works in **embedded mode only**. In TCP mode
+use the [CLI](/guide/cli/) (`bunqueue dlq list|retry|purge`) or the `Dlq` /
+`RetryDlq` / `PurgeDlq` TCP commands directly; `retryDlq()` and `purgeDlq()`
+still send the command but do not report a count.
+:::
 
 See [Dead Letter Queue](/guide/dlq/) for more details.
 
@@ -691,9 +719,9 @@ See [Dead Letter Queue](/guide/dlq/) for more details.
 The `retryCompleted()` method allows re-queuing completed jobs for reprocessing. This is useful when you need to re-run a job that completed successfully, for example when business logic changes or you need to regenerate outputs.
 
 ```typescript
-// Retry a specific completed job
-const success = queue.retryCompleted('job-id-123');
-if (success) {
+// Retry a specific completed job (returns the re-queued count: 1 or 0)
+const retried = queue.retryCompleted('job-id-123');
+if (retried > 0) {
   console.log('Job re-queued for processing');
 }
 
@@ -701,8 +729,9 @@ if (success) {
 const count = queue.retryCompleted();
 console.log(`Re-queued ${count} completed jobs`);
 
-// Async version for TCP mode
-const count = await queue.retryCompletedAsync();
+// TCP mode: the sync method is fire-and-forget and returns 0.
+// Use the async version to get the real count back from the server.
+const remoteCount = await queue.retryCompletedAsync();
 ```
 
 :::caution[Use with care]
@@ -780,7 +809,7 @@ const forwarder = queue.forward({
   to: { host: 'queue.example.com', port: 6789, tls: true, token: process.env.BQ_TOKEN },
   queue: 'central-name', // optional remote queue name (default: same)
   concurrency: 4,        // parallel forwards (default: 4)
-  durable: false,        // fsync each job server-side
+  durable: true,         // push remotely with durable: true (default: false)
 });
 
 forwarder.on('forwarded', ({ id, remoteId, name }) => {});
@@ -789,7 +818,7 @@ await forwarder.close();
 ```
 
 Remote failures leave jobs local (retry → DLQ); forwarded jobs carry a
-deterministic remote jobId (`fwd:<queue>:<localId>`), deduped server-side
+deterministic remote jobId (`fwd:<queueKey>:<localId>`), deduped server-side
 within the custom-id retention window (bounded LRU; remote `removeOnComplete`
 evicts it). Full guide: [IoT & Edge](/guide/iot-edge/).
 
@@ -809,6 +838,8 @@ evicts it). Full guide: [IoT & Edge](/guide/iot-edge/).
 | `stallTimeout` | `number` | - | Per-job stall timeout override |
 | `repeat` | `object` | - | Repeating job config |
 | `durable` | `boolean` | `false` | Immediate disk write (bypass buffer) |
+| `lifo` | `boolean` | `false` | Process in LIFO order (newest first) |
+| `parent` | `{ id, queue }` | - | Parent job reference for flow dependencies |
 
 ## Closing
 

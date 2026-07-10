@@ -42,19 +42,22 @@ The number of shards is calculated at startup based on available CPU cores, roun
 
 ```typescript
 function calculateShardCount(): number {
-  const cpuCount = navigator.hardwareConcurrency || 4;
-  // Round up to next power of 2, cap at 64
-  const pow2 = Math.min(
-    64,
-    Math.max(4, 1 << Math.ceil(Math.log2(cpuCount)))
-  );
-  return pow2;
+  const cores = navigator.hardwareConcurrency || 4; // fallback: 4
+
+  // Find next power of 2 >= cores, capped at 64
+  let shards = 1;
+  while (shards < cores && shards < 64) {
+    shards *= 2;
+  }
+  return shards;
 }
 ```
 
 | CPU Cores | Shard Count |
 |-----------|-------------|
-| 1-4       | 4           |
+| 1         | 1           |
+| 2         | 2           |
+| 3-4       | 4           |
 | 5-8       | 8           |
 | 9-16      | 16          |
 | 17-32     | 32          |
@@ -67,11 +70,11 @@ The power-of-2 constraint is critical for the hashing strategy.
 Jobs are assigned to shards using FNV-1a hash on the queue name:
 
 ```typescript
-function fnv1aHash(str: string): number {
+function fnv1a(str: string): number {
   let hash = 0x811c9dc5; // FNV offset basis
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) | 0; // FNV prime
+    hash = Math.imul(hash, 0x01000193); // FNV prime, 32-bit multiply
   }
   return hash >>> 0; // Ensure unsigned
 }
@@ -79,7 +82,7 @@ function fnv1aHash(str: string): number {
 const SHARD_MASK = SHARD_COUNT - 1;
 
 function shardIndex(queueName: string): number {
-  return fnv1aHash(queueName) & SHARD_MASK;
+  return fnv1a(queueName) & SHARD_MASK;
 }
 ```
 
@@ -99,13 +102,19 @@ const idx = hash % SHARD_COUNT;
 
 ## The Shard Structure
 
-Each shard manages multiple named queues, each backed by an `IndexedPriorityQueue`:
+Each shard manages multiple named queues, each backed by an `IndexedPriorityQueue`, plus per-queue state handled by composed managers (DLQ, deduplication, rate limiting, dependencies, temporal index):
 
 ```typescript
 class Shard {
-  private readonly queues = new Map<string, IndexedPriorityQueue>();
-  private readonly dlqEntries = new Map<string, DlqEntry[]>();
-  private readonly stallConfigs = new Map<string, StallConfig>();
+  /** Priority queues by queue name */
+  readonly queues = new Map<string, IndexedPriorityQueue>();
+
+  /** Composed managers for per-queue state */
+  private readonly uniqueKeyManager = new UniqueKeyManager();  // dedup with TTL
+  private readonly dlqManager: DlqShard;                       // dead letter queue
+  private readonly limiterManager = new LimiterManager();      // rate + concurrency
+  private readonly dependencyTracker = new DependencyTracker();
+  private readonly temporalManager = new TemporalManager();    // delayed jobs
 
   getQueue(name: string): IndexedPriorityQueue {
     let queue = this.queues.get(name);
@@ -114,14 +123,6 @@ class Shard {
       this.queues.set(name, queue);
     }
     return queue;
-  }
-
-  push(job: Job): void {
-    this.getQueue(job.queue).push(job);
-  }
-
-  pop(queueName: string): Job | null {
-    return this.getQueue(queueName).pop();
   }
 }
 ```
@@ -132,8 +133,8 @@ Active jobs (being processed by workers) are tracked in a separate set of **proc
 
 ```typescript
 // Processing shards use job ID hashing (not queue name)
-function processingShardIndex(jobId: JobId): number {
-  return fnv1aHash(String(jobId)) & PROCESSING_SHARD_MASK;
+function processingShardIndex(jobId: string): number {
+  return fnv1a(jobId) & SHARD_MASK;
 }
 ```
 
@@ -147,11 +148,11 @@ Violating this order would create deadlocks.
 
 Sharding delivers measurable throughput improvements on multi-core systems:
 
-| Scenario | Single Queue | 4 Shards | 16 Shards |
+| Scenario | Single Shard | 4 Shards | 16 Shards |
 |----------|-------------|----------|-----------|
-| 1 worker | baseline | ~same | ~same |
-| 4 workers | contention | ~3.5x | ~3.8x |
-| 16 workers | high contention | ~8x | ~14x |
+| 1 worker, 1 queue | baseline | ~same | ~same |
+| 4 workers, 4 queues | contention | ~3.5x | ~3.8x |
+| 16 workers, 16 queues | high contention | ~8x | ~14x |
 
 The gains come from reduced lock contention. With a single queue, all workers compete for one lock. With N shards, workers on different queues never contend.
 

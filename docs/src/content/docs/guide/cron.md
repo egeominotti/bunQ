@@ -51,6 +51,8 @@ Examples:
 - `0 0 * * MON` - Every Monday at midnight
 - `0 0 1 * *` - First day of every month
 
+Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted.
+
 ## Timezone Support
 
 bunqueue supports IANA timezones for cron jobs (added in v1.9.4). This allows you to schedule jobs based on specific local times rather than the server's timezone.
@@ -62,21 +64,30 @@ Common timezone examples:
 - `UTC`
 
 ```typescript
-// Schedule job at 9 AM Rome time every day
-await queue.add('daily-report', { type: 'sales' }, {
-  repeat: {
-    pattern: '0 9 * * *',
-    tz: 'Europe/Rome'
-  }
+// Schedule a job at 9 AM Rome time every day
+await queue.upsertJobScheduler('daily-report', {
+  pattern: '0 9 * * *',
+  timezone: 'Europe/Rome',
+}, {
+  name: 'daily-report',
+  data: { type: 'sales' },
 });
 
-// Schedule job at 6 PM New York time on weekdays
-await queue.add('end-of-day', { type: 'summary' }, {
-  repeat: {
-    pattern: '0 18 * * 1-5',
-    tz: 'America/New_York'
-  }
+// Schedule a job at 6 PM New York time on weekdays
+await queue.upsertJobScheduler('end-of-day', {
+  pattern: '0 18 * * 1-5',
+  timezone: 'America/New_York',
+}, {
+  name: 'end-of-day',
+  data: { type: 'summary' },
 });
+```
+
+From the CLI, pass `--timezone` (`-z`):
+
+```bash
+bunqueue cron add daily-report -q reports -d '{"type":"daily"}' \
+  -s "0 9 * * *" -z Europe/Rome
 ```
 
 When a timezone is specified, the cron expression is evaluated in that timezone, automatically handling daylight saving time transitions.
@@ -91,23 +102,38 @@ bunqueue cron add heartbeat \
   -e 300000
 ```
 
-## Embedded Mode (Repeatable Jobs)
+## Client API (Job Schedulers)
+
+`upsertJobScheduler` (BullMQ v5 style) is the programmatic equivalent of `bunqueue cron add`. It works in both embedded and TCP mode:
 
 ```typescript
-await queue.add('report', { type: 'daily' }, {
-  repeat: {
-    pattern: '0 9 * * *',
-  }
+// Cron pattern
+await queue.upsertJobScheduler('report', {
+  pattern: '0 9 * * *',
+}, {
+  name: 'report',
+  data: { type: 'daily' },
 });
 
 // Or interval-based
-await queue.add('heartbeat', {}, {
-  repeat: {
-    every: 60000,  // Every minute
-    limit: 100,    // Max 100 executions
-  }
+await queue.upsertJobScheduler('heartbeat', {
+  every: 60000,  // Every minute
+  limit: 100,    // Max 100 executions, then the scheduler is removed
+}, {
+  data: { check: 'health' },
 });
 ```
+
+Useful options on the repeat object:
+
+- `timezone` - IANA timezone for `pattern` evaluation
+- `limit` - Maximum number of executions
+- `immediately` - Fire once right away on first creation
+- `skipIfNoWorker` - Skip a run when no worker is registered for the queue (default: `false`)
+- `preventOverlap` - Skip a run while the previous job is still active, via an automatic `cron:<name>` unique key (default: `true`)
+- `skipMissedOnRestart` - On server restart, recompute the next run instead of firing missed runs (default: `true`)
+
+For interval-only repetition tied to job completion, `queue.add(name, data, { repeat: { every, limit } })` is also supported: the job re-enqueues itself `every` milliseconds after each completion. Cron `pattern` scheduling requires `upsertJobScheduler` (or the CLI/MCP); `repeat.pattern` on `queue.add` does not evaluate the pattern.
 
 ## AI Agent Cron Management (MCP)
 
@@ -124,7 +150,7 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
+Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
 :::
 
 :::tip[Related Guides]

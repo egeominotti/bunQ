@@ -27,6 +27,7 @@ head:
     <div class="bq-diag-cell"><code>temp_store = MEMORY</code> <i>in-memory temp tables</i></div>
     <div class="bq-diag-cell"><code>mmap_size = 268435456</code> <i>256MB memory-mapped I/O</i></div>
     <div class="bq-diag-cell"><code>page_size = 4096</code> <i>4KB pages</i></div>
+    <div class="bq-diag-cell"><code>busy_timeout = 5000</code> <i>wait up to 5s on lock contention</i></div>
   </div>
 </div>
 
@@ -61,7 +62,7 @@ head:
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Tables</b><span>SQLite schema</span></div>
   <div class="bq-diag-group">
-    <span class="bq-diag-group-label">jobs, 28 columns</span>
+    <span class="bq-diag-group-label">jobs, 30 columns</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell bq-diag-accent">id <i>TEXT PRIMARY KEY, UUIDv7</i></div>
       <div class="bq-diag-cell">queue <i>TEXT</i></div>
@@ -72,7 +73,7 @@ head:
       <div class="bq-diag-cell">state <i>TEXT</i></div>
       <div class="bq-diag-cell">run_at <i>INTEGER</i></div>
       <div class="bq-diag-cell">attempts <i>INTEGER</i></div>
-      <div class="bq-diag-cell">... <i>21 more fields</i></div>
+      <div class="bq-diag-cell">... <i>23 more fields</i></div>
     </div>
   </div>
   <div class="bq-diag-group">
@@ -88,26 +89,32 @@ head:
       <div class="bq-diag-cell">(state, started_at) <i>stall detection</i></div>
       <div class="bq-diag-cell">(group_id) <i>group operations</i></div>
       <div class="bq-diag-cell">(queue, state, priority, run_at) <i>priority pull</i></div>
+      <div class="bq-diag-cell">(completed_at DESC) <i>completed-job recovery ordering</i></div>
     </div>
   </div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell">job_results <i>job_id TEXT PRIMARY KEY, result BLOB MessagePack, completed_at INTEGER</i></div>
     <div class="bq-diag-cell">dlq <i>id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, queue TEXT, entry BLOB full DlqEntry MessagePack, entered_at INTEGER</i></div>
-    <div class="bq-diag-cell">cron_jobs <i>name TEXT PRIMARY KEY, queue TEXT, schedule TEXT, next_run INTEGER, executions INTEGER, timezone TEXT</i></div>
+    <div class="bq-diag-cell">cron_jobs <i>name TEXT PRIMARY KEY, queue TEXT, data BLOB, schedule TEXT, repeat_every INTEGER, priority INTEGER, next_run INTEGER, executions INTEGER, max_limit INTEGER, timezone TEXT, unique_key TEXT, dedup BLOB, skip_missed_on_restart INTEGER, skip_if_no_worker INTEGER, prevent_overlap INTEGER, job_options BLOB</i></div>
+    <div class="bq-diag-cell">queue_state <i>name TEXT PRIMARY KEY, paused INTEGER, rate_limit INTEGER, concurrency_limit INTEGER; persists pause/limits across restarts</i></div>
   </div>
 </div>
 
 ## Crash Recovery Flow
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>Startup recovery</b><span>crash recovery on boot</span></div>
-  <div class="bq-diag-layer">1. Load pending jobs <i>state waiting/delayed: push each to its shard queue, update jobIndex</i></div>
+  <div class="bq-diag-head"><b>Startup recovery</b><span>crash recovery on boot, batches of 10,000 rows</span></div>
+  <div class="bq-diag-layer bq-diag-accent">1. Recover active jobs <i>each counts as one stall: stallCount++ and attempts++; below maxStalls it is requeued with backoff, at maxStalls it moves to the DLQ. Cron-spawned preventOverlap jobs are dropped, the scheduler recreates them</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer bq-diag-accent">2. Load active jobs <i>reset each to waiting, worker may have died, push back to queue</i></div>
+  <div class="bq-diag-layer">2. Load pending jobs <i>state waiting/delayed: jobs with unmet dependencies go to waitingDeps, the rest to their shard queue; jobIndex, customId and uniqueKey mappings restored</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">3. Load DLQ entries <i>restore to in-memory DLQ shards</i></div>
+  <div class="bq-diag-layer">3. Load DLQ entries <i>restore to in-memory DLQ shards, populate jobIndex</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">4. Load cron jobs <i>populate cron scheduler heap</i></div>
+  <div class="bq-diag-layer">4. Restore queue state <i>paused flag, rate limit, concurrency limit per queue</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">5. Load completed jobs <i>up to the 50k in-memory cap, for clean() and stats</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">6. Load cron jobs <i>populate cron scheduler heap; past next_run is recalculated forward when skipMissedOnRestart is set</i></div>
 </div>
 
 ## S3 Backup Flow
@@ -124,7 +131,7 @@ head:
     </div>
     <div class="bq-diag-row">
       <div class="bq-diag-cell bq-diag-accent">5. Upload to S3 <i>application/x-sqlite3</i></div>
-      <div class="bq-diag-cell">6. Upload metadata.json</div>
+      <div class="bq-diag-cell">6. Upload metadata sidecar <i>{key}.meta.json</i></div>
       <div class="bq-diag-cell">7. Cleanup old backups <i>keep N most recent</i></div>
     </div>
   </div>
@@ -132,7 +139,7 @@ head:
     <span class="bq-diag-group-label">restore</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">1. Download backup file from S3</div>
-      <div class="bq-diag-cell">2. Load metadata.json</div>
+      <div class="bq-diag-cell">2. Load metadata sidecar</div>
       <div class="bq-diag-cell">3. Verify SHA256 checksum</div>
       <div class="bq-diag-cell">4. Write to database path</div>
       <div class="bq-diag-cell">5. Restart server to load</div>
@@ -145,9 +152,11 @@ head:
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Error recovery</b><span>flush() fails</span></div>
-  <div class="bq-diag-layer bq-diag-accent">Re-add jobs to buffer <i>this.buffer = jobs.concat(this.buffer)</i></div>
+  <div class="bq-diag-layer bq-diag-accent">Re-buffer failed jobs <i>double-buffered swap: the failed flush buffer is merged back, nothing is dropped</i></div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">Jobs not lost, will retry on next flush</div>
+  <div class="bq-diag-layer">Retry with exponential backoff <i>100ms initial, 30s max, up to 10 retries; regular flushing pauses during backoff</i></div>
+  <div class="bq-diag-arrow">↓</div>
+  <div class="bq-diag-layer">After max retries <i>critical-error callback fires with the affected jobs, so they can be surfaced instead of silently lost</i></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">on shutdown</span>
     <div class="bq-diag-layer">Final flush of remaining buffer, wait for completion before exit</div>

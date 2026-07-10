@@ -180,7 +180,9 @@ emailWorker.on('failed', (job, err) => {
 });
 
 reportWorker.on('completed', (job, result) => {
-  console.log(`Report ready: ${result.reportUrl}`);
+  // result is typed from the second Worker generic (unknown by default)
+  const { reportUrl } = result as { reportUrl: string };
+  console.log(`Report ready: ${reportUrl}`);
 });
 
 webhookWorker.on('failed', (job, err) => {
@@ -477,8 +479,8 @@ Run the full example:
 # Terminal 1 - Start server
 bun run server.ts
 
-# Terminal 2 - Run tests
-bun test
+# Terminal 2 - Run the test script above
+bun run tests.ts
 ```
 
 ## Features Demonstrated

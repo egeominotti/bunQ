@@ -86,7 +86,7 @@ await queue.upsertJobScheduler('sync-data', {
 ```
 
 <Aside type="note">
-  `every` is millisecond-based and doesn't drift. The scheduler calculates the next run time based on the previous execution, not wall clock time.
+  `every` is millisecond-based and doesn't drift. The scheduler is fixed-rate: the next run is anchored to the previous scheduled slot, so a slow or late execution does not push the schedule forward cumulatively.
 </Aside>
 
 ## Timezone Support
@@ -97,7 +97,7 @@ Cron expressions default to UTC. Specify a timezone for local-time scheduling:
 // 9:00 AM New York time (handles DST automatically)
 await queue.upsertJobScheduler('morning-report', {
   pattern: '0 9 * * *',
-  tz: 'America/New_York',
+  timezone: 'America/New_York',
 }, {
   name: 'morning-report',
   data: {},
@@ -106,7 +106,7 @@ await queue.upsertJobScheduler('morning-report', {
 // 6:00 PM Tokyo time
 await queue.upsertJobScheduler('evening-cleanup', {
   pattern: '0 18 * * *',
-  tz: 'Asia/Tokyo',
+  timezone: 'Asia/Tokyo',
 }, {
   name: 'cleanup',
   data: {},
@@ -242,10 +242,10 @@ Manage cron jobs from the command line:
 # List all cron jobs
 bunqueue cron list
 
-# Add a cron job
-bunqueue cron add --name daily-report --queue reports \
+# Add a cron job (name is positional)
+bunqueue cron add daily-report --queue reports \
   --schedule "0 0 * * *" --data '{"type":"daily"}'
 
 # Delete a cron job
-bunqueue cron delete --name daily-report
+bunqueue cron delete daily-report
 ```

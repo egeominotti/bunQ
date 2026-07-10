@@ -9,7 +9,7 @@ head:
   - tag: meta
     attrs:
       property: og:title
-      content: bunqueue MCP Server — AI Agent Job Queue Control
+      content: "bunqueue MCP Server: AI Agent Job Queue Control"
   - tag: meta
     attrs:
       property: og:description
@@ -60,7 +60,7 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
   <div class="bq-card">
     <BqIcon name="dials" />
     <h3>2 Modes</h3>
-    <p>Embedded (local SQLite, zero config) or TCP (connect to a remote bunqueue server)</p>
+    <p>Embedded (in-process, zero config, SQLite via DATA_PATH) or TCP (connect to a remote bunqueue server)</p>
   </div>
 </div>
 
@@ -72,12 +72,12 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 1. **Install bunqueue**, the MCP server (`bunqueue-mcp`) ships as a binary *inside* the `bunqueue` package. There is no standalone `bunqueue-mcp` package on npm, so `bunqueue` must be installed first.
 
    ```bash
-   bun add bunqueue          # in your project — for Claude Code
+   bun add bunqueue          # in your project, for Claude Code
    # or, for Claude Desktop / Cursor / Windsurf (they start the server outside your project):
    bun add -g bunqueue       # global install, puts bunqueue-mcp on your PATH
    ```
 
-2. **Install the MCP SDK**, since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
+2. **Install the MCP SDK**, since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
 
    ```bash
    bun add @modelcontextprotocol/sdk
@@ -98,8 +98,8 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
   `bunqueue-mcp` is **not** a standalone npm package, it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
 </Aside>
 
-<Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.0+)">
-  Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.5 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also up to ~5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
+<Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.1+)">
+  Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.5 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also about 3.5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
 
   ```bash
   bun add @modelcontextprotocol/sdk
@@ -114,7 +114,7 @@ MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf
 </Aside>
 
 <Aside type="tip">
-  That's all. No server to start, no database to configure. In embedded mode, bunqueue creates a local SQLite database automatically. Your agent can immediately add jobs, create cron schedules, set rate limits, register HTTP handlers, and monitor everything.
+  That's all. No server to start, no database to configure. In embedded mode the queue runs in-process; set `DATA_PATH` (or `BUNQUEUE_DATA_PATH`) in the server's `env` to persist jobs to a SQLite file, otherwise state is in-memory for the lifetime of the MCP session. Your agent can immediately add jobs, create cron schedules, set rate limits, register HTTP handlers, and monitor everything.
 </Aside>
 
 ---
@@ -127,7 +127,7 @@ The server supports two backend modes: **embedded** (direct SQLite access in the
 
 <McpArchitecture />
 
-**Embedded mode** is ideal for local development, single-machine deployments, and CLI tools. The MCP server manages its own SQLite database with WAL mode for concurrent access.
+**Embedded mode** is ideal for local development, single-machine deployments, and CLI tools. With a `DATA_PATH` set, the MCP server manages its own SQLite database with WAL mode for concurrent access; without one, the queue is in-memory and state is lost when the MCP process exits.
 
 **TCP mode** connects to a running bunqueue server, allowing your agent to manage production queues shared across multiple workers and services.
 
@@ -251,7 +251,7 @@ Connect to a running bunqueue server instead of local SQLite:
 | **How it works** | Direct SQLite access         | Connects to bunqueue server      |
 | **Setup**        | Zero config                  | Set `BUNQUEUE_MODE=tcp`          |
 | **Best for**     | Local dev, single-machine    | Production, shared queues        |
-| **Data**         | `./data/bunq.db`             | Remote server handles storage    |
+| **Data**         | In-memory, or SQLite via `DATA_PATH` | Remote server handles storage    |
 
 ---
 
@@ -621,8 +621,8 @@ Not-found responses for `get_job`, `get_job_by_custom_id`, `get_progress`, and `
 | `BUNQUEUE_MODE` | `embedded` | `embedded` or `tcp` |
 | `BUNQUEUE_HOST` | `localhost` | TCP server host |
 | `BUNQUEUE_PORT` | `6789` | TCP server port |
-| `BUNQUEUE_TOKEN` | — | Auth token for TCP |
-| `DATA_PATH` | `./data/bunq.db` | SQLite path (embedded) |
+| `BUNQUEUE_TOKEN` | (none) | Auth token for TCP |
+| `DATA_PATH` | (none, in-memory) | SQLite path for embedded mode (`BUNQUEUE_DATA_PATH` and `BQ_DATA_PATH` take priority). If unset, the embedded queue is not persisted |
 
 <Aside type="tip">
   For the server side, you can replace environment variables with a typed `bunqueue.config.ts` file. See [Configuration File](/guide/configuration/) for the full reference.
@@ -662,5 +662,5 @@ bun run worker.ts
 1. Restart Claude Desktop or Claude Code
 2. Check config file syntax (valid JSON)
 3. Verify `bunqueue` is installed so the `bunqueue-mcp` binary resolves (`bun add -g bunqueue`)
-4. Install the optional MCP SDK peer dependency: `bun add @modelcontextprotocol/sdk` (since v2.8.0 it's not bundled; a missing-SDK launch exits with `[bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk"`)
+4. Install the optional MCP SDK peer dependency: `bun add @modelcontextprotocol/sdk` (since v2.8.1 it's not bundled; a missing-SDK launch exits with `[bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk"`)
 5. Run `bunx bunqueue-mcp` manually to check for errors (a `404` for `bunqueue-mcp` means `bunqueue` isn't installed yet)

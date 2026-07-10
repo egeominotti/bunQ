@@ -154,7 +154,7 @@ try {
 | Collection    | Max Size | Eviction   |
 | ------------- | -------- | ---------- |
 | completedJobs | 50,000   | FIFO batch |
-| jobResults    | 5,000    | LRU        |
+| jobResults    | 10,000   | LRU        |
 | jobLogs       | 10,000   | LRU        |
 | customIdMap   | 50,000   | LRU        |
 
@@ -189,12 +189,13 @@ WEBHOOK_MAX_RETRIES=3      WEBHOOK_RETRY_DELAY_MS=1000
 
 # Cloud (bunqueue.io dashboard)
 BUNQUEUE_CLOUD_URL=        BUNQUEUE_CLOUD_API_KEY=
+BUNQUEUE_CLOUD_INSTANCE_ID=    # REQUIRED for cloud mode
 BUNQUEUE_CLOUD_INSTANCE_NAME=  # defaults to hostname
-BUNQUEUE_CLOUD_INTERVAL_MS=5000
+BUNQUEUE_CLOUD_INTERVAL_MS=15000
 BUNQUEUE_CLOUD_USE_WEBSOCKET=true
 BUNQUEUE_CLOUD_USE_HTTP=true
-BUNQUEUE_CLOUD_REMOTE_COMMANDS=false
-BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=false
+BUNQUEUE_CLOUD_REMOTE_COMMANDS=true   # opt out with 'false'
+BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=true  # opt out with 'false'
 BUNQUEUE_CLOUD_REDACT_FIELDS=  # comma-separated
 BUNQUEUE_CLOUD_EVENTS=         # event filter, comma-separated
 BUNQUEUE_CLOUD_BUFFER_SIZE=720
@@ -506,6 +507,6 @@ const mem = queueManager.getMemoryStats();
 | --------------- | -------- | ------------------------------ |
 | Cleanup         | 10s      | Memory cleanup, orphan removal |
 | Stall check     | 5s       | Detect unresponsive jobs       |
-| Dependency      | 100ms    | Process job dependencies       |
+| Dependency      | event-driven (30s safety fallback) | Process job dependencies |
 | DLQ maintenance | 60s      | Auto-retry, expiration         |
 | Lock expiration | 5s       | Remove expired locks           |

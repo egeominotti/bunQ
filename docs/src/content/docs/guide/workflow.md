@@ -1,5 +1,5 @@
 ---
-title: "Workflow Engine — Multi-Step Orchestration for Bun"
+title: "Workflow Engine: Multi-Step Orchestration for Bun"
 description: "Multi-step orchestration on bunqueue: saga compensation, retries, parallel steps, branching, signals and loops, persisted to SQLite with no extra services."
 head:
   - tag: meta
@@ -41,7 +41,7 @@ head:
 | | **bunqueue** | **Temporal** | **Inngest** | **Trigger.dev** |
 |---|---|---|---|---|
 | **Definition** | TypeScript DSL | TypeScript + decorators | `step.run()` wrappers | TypeScript functions |
-| **Infrastructure** | None (embedded SQLite) | PostgreSQL + 7 services | Cloud-only (no self-host) | Redis + PostgreSQL |
+| **Infrastructure** | None (embedded SQLite) | External DB + server cluster | Cloud-first (self-host possible) | Redis + PostgreSQL |
 | **Saga compensation** | Built-in | Manual | Manual | Manual |
 | **Human-in-the-loop** | `.waitFor()` + `signal()` | Signals API | `step.waitForEvent()` | Waitpoint tokens |
 | **Branching** | `.branch().path()` | Code-level if/else | Code-level if/else | Code-level if/else |
@@ -58,13 +58,13 @@ head:
 | **Crash recovery** | `engine.recover()` | Built-in | Built-in | Built-in |
 | **Type-safe step chaining** | Generic accumulator | Manual casting | Manual casting | Manual casting |
 | **Cleanup/archival** | Built-in SQLite archive | Manual | Auto (cloud) | Manual |
-| **Self-hosted** | Yes (zero-config) | Yes (complex) | No | Yes (complex) |
+| **Self-hosted** | Yes (zero-config) | Yes (complex) | Yes (cloud-first) | Yes (complex) |
 | **Pricing** | Free (MIT) | Free self-hosted / Cloud $$ | Free tier, then per-execution | Free tier, then $50/mo+ |
 | **Setup time** | `bun add bunqueue` | Hours to days | Minutes (cloud) | 30min+ self-hosted |
 
 ### Why bunqueue?
 
-- **Zero infrastructure.** Temporal needs PostgreSQL + 7 services. Trigger.dev needs Redis + PostgreSQL. bunqueue needs nothing, SQLite is embedded.
+- **Zero infrastructure.** Temporal needs an external database plus its own server cluster. Trigger.dev needs Redis + PostgreSQL. bunqueue needs nothing, SQLite is embedded.
 - **Saga pattern is first-class.** Every competitor requires you to implement compensation manually. bunqueue runs compensate handlers in reverse order automatically.
 - **TypeScript-native DSL.** No decorators (Temporal), no wrapper functions (Inngest). Just `.step().step().branch().step()`.
 - **Same process, same codebase.** No separate worker infrastructure, no deployment pipeline for workflow definitions. It's a library, not a platform.
@@ -85,7 +85,7 @@ bun add bunqueue
 ```typescript
 import { Workflow, Engine } from 'bunqueue/workflow';
 
-// Define a type-safe workflow — each step's return type is tracked automatically
+// Define a type-safe workflow: each step's return type is tracked automatically
 const orderFlow = new Workflow<{ orderId: string; amount: number }>('order-pipeline')
   .step('validate', async (ctx) => {
     // ctx.input is typed as { orderId: string; amount: number }
@@ -119,7 +119,7 @@ const run = await engine.start('order-pipeline', {
 
 // Check status
 const exec = engine.getExecution(run.id);
-console.log(exec.state);  // 'running' | 'completed' | 'failed' | 'waiting' | 'compensating'
+console.log(exec?.state);  // 'running' | 'completed' | 'failed' | 'waiting' | 'compensating'
 
 // Recover orphaned executions after a crash/restart
 const recovered = await engine.recover();
@@ -323,7 +323,7 @@ await engine.signal(run.id, 'editorial-review', {
 **Key behaviors:**
 
 - `waitFor('event')` transitions the execution to `state: 'waiting'`
-- The execution is persisted to SQLite, it survives process restarts. Call `engine.recover()` on startup to re-enqueue orphaned `running` executions and re-arm `waiting` timeouts
+- The execution is persisted to SQLite. To survive process restarts, pass `dataPath` to the Engine (without it the store is in-memory) and call `engine.recover()` on startup to re-enqueue orphaned `running` executions and re-arm `waiting` timeouts
 - `engine.signal(id, event, payload)` stores the payload and resumes execution
 - The signal data is available in `ctx.signals['event-name']`
 - You can have multiple `waitFor` calls in a single workflow (e.g., multi-stage approvals)
@@ -351,6 +351,8 @@ const flow = new Workflow('api-aggregation')
 
 If a step exceeds its timeout, it fails with a `"timed out"` error. If the step has a compensate handler, compensation runs for all previously completed steps.
 
+The default timeout is 30 seconds per attempt. Set `timeout: 0` to disable the timeout for a step.
+
 ### Step Retry with Backoff
 
 Steps can retry automatically with exponential backoff and jitter:
@@ -371,7 +373,7 @@ const flow = new Workflow('resilient-pipeline')
   });
 ```
 
-**Backoff formula:** `min(500ms * 2^attempt + jitter, 30s)`. The first retry waits ~500ms, the second ~1s, the third ~2s, capping at 30 seconds. Jitter prevents thundering herds.
+**Backoff formula:** `min(500ms * 2^(attempt-1), 30s) + jitter` (jitter adds up to 50% of the delay). The first retry waits ~500ms, the second ~1s, the third ~2s, with the base delay capping at 30 seconds. Jitter prevents thundering herds.
 
 The execution tracks attempt count in `exec.steps['step-name'].attempts`. If all retries are exhausted, the step fails and compensation runs.
 
@@ -439,10 +441,10 @@ const flow = new Workflow('time-limited-approval')
 
 If the signal doesn't arrive within the timeout:
 
-1. The execution state becomes `'failed'`
+1. A `signal:timeout` event is emitted
 2. The error is stored in `exec.steps['__waitFor:manager-approval'].error`
-3. Compensation runs for all previously completed steps
-4. A `signal:timeout` event is emitted
+3. The execution state becomes `'failed'`
+4. Compensation runs for all previously completed steps
 
 :::caution
 The timeout is implemented with `setTimeout` in-memory. If the process restarts while a workflow is waiting, call `engine.recover()` on startup to re-arm the timeout timer automatically. Without recovery, the workflow will wait indefinitely until a signal arrives.
@@ -500,6 +502,8 @@ await engine.start('order', { amount: 99, cardToken: 'tok_abc' });
 Subscribe to typed workflow events for monitoring, logging, and debugging:
 
 ```typescript
+import { Engine, type StepEvent } from 'bunqueue/workflow';
+
 const engine = new Engine({ embedded: true });
 
 // Listen to specific event types
@@ -588,7 +592,7 @@ const flow = new Workflow<{ userId: string; email: string }>('onboarding')
     return { accountId: `acc_${ctx.input.userId}` };
   })
   .step('configure', async (ctx) => {
-    // ctx.steps.create is { accountId: string } — inferred automatically
+    // ctx.steps.create is { accountId: string }, inferred automatically
     await setupDefaults(ctx.steps.create.accountId);
     return { configured: true };
   })
@@ -852,7 +856,8 @@ unsubscribe();
 ### Constructor
 
 ```typescript
-// Embedded mode — everything in-process, no server needed
+// Embedded mode: everything in-process, no server needed.
+// Without dataPath the execution store is in-memory (lost on restart).
 const engine = new Engine({ embedded: true });
 
 // Embedded with SQLite persistence
@@ -861,7 +866,8 @@ const engine = new Engine({
   dataPath: './data/workflows.db',
 });
 
-// TCP mode — connects to a running bunqueue server
+// TCP mode: step jobs run through a bunqueue server.
+// Execution state still lives in a local SQLite store (set dataPath to persist it).
 const engine = new Engine({
   connection: { host: 'localhost', port: 6789 },
 });
@@ -870,7 +876,7 @@ const engine = new Engine({
 const engine = new Engine({
   embedded: true,              // Use embedded mode (default: false)
   connection: { port: 6789 },  // TCP server connection (mutually exclusive with embedded)
-  dataPath: './data/wf.db',    // SQLite persistence path
+  dataPath: './data/wf.db',    // SQLite persistence path (default: in-memory)
   concurrency: 10,             // Max parallel step executions (default: 5)
   queueName: '__wf:steps',     // Internal queue name (default: '__wf:steps')
   onEvent: (event) => {},      // Global event listener (optional)
@@ -902,7 +908,7 @@ const engine = new Engine({
 ```typescript
 const exec = engine.getExecution(run.id);
 
-exec.id;            // 'wf_abc123' — unique execution ID
+exec.id;            // 'wf_abc123': unique execution ID
 exec.workflowName;  // 'order-pipeline'
 exec.state;         // 'running' | 'completed' | 'failed' | 'waiting' | 'compensating'
 exec.input;         // { orderId: 'ORD-1', amount: 99.99 }

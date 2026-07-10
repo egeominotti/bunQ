@@ -67,7 +67,7 @@ head:
             "name": "Can I migrate from BullMQ?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. bunqueue provides a BullMQ-compatible API. Key differences: no Redis connection needed, backoff configuration is simplified, and rate limiting is on the queue level instead of the worker."
+              "text": "Yes. bunqueue provides a BullMQ-compatible API. Key differences: no Redis connection needed and backoff configuration is simplified. The per-worker limiter option works as in BullMQ, and a queue-level rate limit is also available."
             }
           },
           {
@@ -83,7 +83,7 @@ head:
             "name": "How many dependencies does bunqueue have?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 5.5 MB and completes up to roughly 5x faster on a cold cache. As of v2.8.0 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
+              "text": "bunqueue has only 2 runtime dependencies: croner and msgpackr. There is no Redis, MongoDB, or external infrastructure. Running 'bun add bunqueue' installs 7 packages totaling 5.5 MB and completes about 3.5x faster on a cold install. As of v2.8.1 the MCP SDK is an optional peer dependency and Zod is no longer a direct dependency; both are only needed for the MCP server."
             }
           },
           {
@@ -91,7 +91,7 @@ head:
             "name": "Do I need to install anything extra to use the MCP server?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes, one package. The bunqueue-mcp bin and the bunqueue/mcp export still ship with bunqueue, but as of v2.8.0 the MCP SDK is an optional peer dependency that is not downloaded automatically. Install it once with 'bun add @modelcontextprotocol/sdk'. If it is missing when you launch the server, the launcher prints an install message and exits. Queue-only users never need this."
+              "text": "Yes, one package. The bunqueue-mcp bin and the bunqueue/mcp export still ship with bunqueue, but as of v2.8.1 the MCP SDK is an optional peer dependency that is not downloaded automatically. Install it once with 'bun add @modelcontextprotocol/sdk'. If it is missing when you launch the server, the launcher prints an install message and exits. Queue-only users never need this."
             }
           },
           {
@@ -184,13 +184,13 @@ brew install oven-sh/bun/bun
 
 ### How many dependencies does bunqueue have?
 
-bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.5 MB** and completes **up to ~5× faster** on a cold install.
+bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.5 MB** and completes **about 3.5× faster** on a cold install.
 
-As of v2.8.0, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency, both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
+As of v2.8.1, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency, both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
 
 ### Do I need to install anything extra to use the MCP server?
 
-Yes, one package. The `bunqueue-mcp` bin and the `bunqueue/mcp` export still ship with bunqueue, but as of v2.8.0 the MCP SDK is an optional peer dependency that isn't downloaded automatically. Install it once:
+Yes, one package. The `bunqueue-mcp` bin and the `bunqueue/mcp` export still ship with bunqueue, but as of v2.8.1 the MCP SDK is an optional peer dependency that isn't downloaded automatically. Install it once:
 
 ```bash
 bun add @modelcontextprotocol/sdk
@@ -253,8 +253,9 @@ See the [benchmarks page](/guide/benchmarks/) for methodology and full results.
 
 2. **Use batch operations**
    ```typescript
-   await queue.addBulk(jobs);
-   await queue.ackBatch(jobIds);
+   await queue.addBulk(jobs); // single round-trip for many jobs
+   // Workers batch pulls/acks automatically; tune with batchSize
+   const worker = new Worker('queue', processor, { batchSize: 100 });
    ```
 
 3. **Enable WAL mode** (default)
@@ -317,7 +318,7 @@ await queue.add('task', data, {
 });
 ```
 
-Retry delays follow exponential backoff with **jitter** (±50%) to prevent thundering herd. Example base delays: `~1s → ~2s → ~4s → ~8s → ~16s` (actual values vary due to jitter). Delays are capped at 1 hour by default.
+Retry delays follow exponential backoff with **jitter** (±50%) to prevent thundering herd. With a 1000ms base delay the retries wait roughly `~2s → ~4s → ~8s → ~16s` (formula: `delay * 2^attempts`, actual values vary due to jitter). Delays are capped at 1 hour by default.
 
 ### What is the Dead Letter Queue?
 
@@ -336,6 +337,8 @@ If you need newest-first processing instead, use LIFO mode:
 ```typescript
 await queue.add('task', data, { lifo: true });
 ```
+
+Note: LIFO ordering applies among LIFO jobs. Mixing LIFO and FIFO jobs in the same queue does not put a LIFO job ahead of already-queued FIFO jobs.
 
 Or use priority to control ordering explicitly:
 ```typescript
@@ -375,12 +378,15 @@ Not built-in. For high availability:
 
 ### Where is data stored?
 
-Default: `./data/bunq.db`
+There is no default database file: without a data path, jobs are kept in-memory only and are lost on restart.
 
-Configure with:
+Set a path to enable persistence (priority: `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`):
 ```bash
-DATA_PATH=./data/production.db bunqueue start
+BUNQUEUE_DATA_PATH=./data/production.db bunqueue start
+# or: bunqueue start --data-path ./data/production.db
 ```
+
+In embedded mode you can also pass it programmatically: `new Queue('q', { embedded: true, dataPath: './data/q.db' })`.
 
 ### How do I backup the database?
 
@@ -436,8 +442,8 @@ await queue.add('task', data, { removeOnComplete: true });
 // Purge old DLQ entries
 queue.purgeDlq();
 
-// Clean old jobs
-queue.clean(3600000); // 1 hour
+// Clean old jobs (grace period in ms, max jobs to remove)
+queue.clean(3600000, 1000); // 1 hour
 ```
 
 ## Migration
@@ -449,7 +455,7 @@ Yes. See the [Migration Guide](/guide/migration/).
 Key differences:
 - No Redis connection needed
 - Backoff is simplified
-- Rate limiting is on queue, not worker
+- Per-worker `limiter: { max, duration }` works as in BullMQ; a queue-level rate limit (`setGlobalRateLimit`) is also available
 
 ### Can I migrate from other queues?
 

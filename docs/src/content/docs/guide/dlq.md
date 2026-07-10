@@ -1,5 +1,5 @@
 ---
-title: "Dead Letter Queue — Handle Failed Jobs & Auto-Retry in bunqueue"
+title: "Dead Letter Queue: Handle Failed Jobs & Auto-Retry in bunqueue"
 description: "Configure bunqueue's Dead Letter Queue: auto-retry with backoff, expiration policies, filter by failure reason, and monitor DLQ stats."
 head:
   - tag: meta
@@ -14,7 +14,7 @@ head:
   <p class="bq-hero-sub">The Dead Letter Queue stores failed jobs with full metadata for debugging and recovery. Inspect why a job died, retry it automatically or by hand, and expire old entries on a policy.</p>
 
   <div class="bq-proof">
-    <span><b>6</b> tracked failure reasons</span>
+    <span><b>7</b> tracked failure reasons</span>
     <span><b>7 days</b> default retention before purge</span>
     <span><b>10,000</b> max entries per queue</span>
   </div>
@@ -34,6 +34,7 @@ AI agents connected via MCP can inspect DLQ entries, retry failed jobs, and purg
 | `stalled` | Job stalled (no heartbeat) |
 | `ttl_expired` | Job TTL expired before processing |
 | `worker_lost` | Worker disconnected during processing |
+| `unknown` | Fallback for unclassified failures |
 
 ## Configuration
 
@@ -60,6 +61,10 @@ queue.setDlqConfig({
 | `maxAutoRetries` | `3` | Maximum auto-retry attempts |
 | `maxAge` | `604800000` | Auto-purge age (7 days, null = never) |
 | `maxEntries` | `10000` | Maximum DLQ entries per queue |
+
+:::note[Embedded vs TCP]
+The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server. To inspect or manage the DLQ of a remote server, use the CLI (`bunqueue dlq list|retry|purge <queue>`) or the dashboard.
+:::
 
 ## Viewing DLQ Entries
 
@@ -181,10 +186,10 @@ queue.setDlqConfig({
   maxAutoRetries: 3,
 });
 
-// Retry schedule:
-// 1st retry: 1 minute after failure
-// 2nd retry: 2 minutes after 1st retry
-// 3rd retry: 4 minutes after 2nd retry
+// Retry schedule (backoff multiplier is 2^(retryCount-1) at scheduling time):
+// 1st retry: 1 minute after entering the DLQ
+// 2nd retry: 1 minute after the 1st retry (60s × 2^0)
+// 3rd retry: 2 minutes after the 2nd retry (60s × 2^1)
 // After that: no more auto-retries
 ```
 

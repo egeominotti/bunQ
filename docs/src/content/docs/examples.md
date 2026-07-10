@@ -81,8 +81,8 @@ const thumbnailQueue = new Queue('thumbnails', { embedded: true });
 // Flow producer for dependencies (embedded mode)
 const flow = new FlowProducer({ embedded: true });
 
-// Add image processing flow
-await flow.addTree({
+// Add image processing flow (children are processed BEFORE the parent)
+await flow.add({
   name: 'process-image',
   queueName: 'uploads',
   data: { imageId: 'img-123', path: '/uploads/photo.jpg' },
@@ -556,9 +556,11 @@ import { Queue, Worker, QueueGroup } from 'bunqueue/client';
 const emailGroup = new QueueGroup('email');
 
 // Get queues from group (creates queues with namespace prefix)
-const welcomeQueue = emailGroup.getQueue('welcome');        // email:welcome
-const notificationQueue = emailGroup.getQueue('notifications'); // email:notifications
-const digestQueue = emailGroup.getQueue('digest');          // email:digest
+// Group-wide operations (pauseAll, resumeAll, drainAll) work on the
+// embedded shared manager, so create the queues in embedded mode.
+const welcomeQueue = emailGroup.getQueue('welcome', { embedded: true });        // email:welcome
+const notificationQueue = emailGroup.getQueue('notifications', { embedded: true }); // email:notifications
+const digestQueue = emailGroup.getQueue('digest', { embedded: true });          // email:digest
 
 // Pause all email queues at once
 emailGroup.pauseAll();
@@ -567,8 +569,8 @@ emailGroup.pauseAll();
 emailGroup.resumeAll();
 
 // Get individual queue stats
-const welcomeCounts = welcomeQueue.getJobCounts();
-const notificationCounts = notificationQueue.getJobCounts();
+const welcomeCounts = await welcomeQueue.getJobCounts();
+const notificationCounts = await notificationQueue.getJobCounts();
 console.log('Welcome pending:', welcomeCounts.waiting);
 console.log('Notification pending:', notificationCounts.waiting);
 ```
@@ -592,8 +594,8 @@ events.on('active', ({ jobId }) => {
   console.log(`Job ${jobId} started processing`);
 });
 
-events.on('progress', ({ jobId, progress }) => {
-  console.log(`Job ${jobId}: ${progress}%`);
+events.on('progress', ({ jobId, data }) => {
+  console.log(`Job ${jobId}: ${data}%`);
 });
 
 events.on('completed', ({ jobId, returnvalue }) => {
@@ -803,7 +805,7 @@ await engine.start('order', { amount: 99.99 });
 Resilient API calls with monitoring.
 
 ```typescript
-import { Workflow, Engine } from 'bunqueue/workflow';
+import { Workflow, Engine, type StepEvent } from 'bunqueue/workflow';
 
 const apiFlow = new Workflow('api-sync')
   .step('fetch-data', async () => {

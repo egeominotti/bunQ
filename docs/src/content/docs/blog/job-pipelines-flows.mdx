@@ -303,10 +303,10 @@ new Worker('cdn', async (job) => {
 
 bunqueue uses **event-driven dependency resolution** via microtask coalescing. When a child job completes, the parent's dependency state is updated immediately rather than on a polling interval:
 
-| Pattern | Old Polling (100ms) | Event-Driven |
+| Pattern | Old Polling (100ms) | Event-Driven (p50) |
 |---------|-------------------|--------------|
-| Simple parent-child | ~100ms latency | ~28 microseconds |
-| Chain (4 levels) | ~300ms | ~28 microseconds |
-| Fan-out (1 to 5) | ~100ms | ~31 microseconds |
+| Simple parent-child | ~100ms latency | ~14 microseconds |
+| Chain (4 levels) | ~300ms | ~31 microseconds |
+| Fan-out (1 to 5) | ~100ms | ~28 microseconds |
 
 This makes complex flow trees execute with minimal overhead between steps.

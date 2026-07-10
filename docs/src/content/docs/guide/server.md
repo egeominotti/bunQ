@@ -1,5 +1,5 @@
 ---
-title: "Server Mode — Run bunqueue as a Standalone TCP & HTTP Service"
+title: "Server Mode: Run bunqueue as a Standalone TCP & HTTP Service"
 description: "Deploy bunqueue as a standalone server with TCP and HTTP APIs. Multi-client support, token auth, Docker deployment, and graceful shutdown."
 head:
   - tag: meta
@@ -66,7 +66,7 @@ Environment variables still work as fallback when no config file is present.
 | `TCP_PORT` | `6789` | TCP server port |
 | `HTTP_PORT` | `6790` | HTTP server port |
 | `HOST` | `0.0.0.0` | Server hostname |
-| `DATA_PATH` | (memory) | SQLite database path |
+| `BUNQUEUE_DATA_PATH` | (memory) | SQLite database path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) |
 | `AUTH_TOKENS` | (none) | Comma-separated auth tokens |
 | `CORS_ALLOW_ORIGIN` | `(none)` | CORS allowed origins |
 | `LOG_FORMAT` | `text` | Log format (text/json) |
@@ -143,7 +143,7 @@ See [Quick Start](/guide/quickstart/) for a comparison.
 The server handles `SIGINT` and `SIGTERM`:
 
 1. Stops accepting new connections
-2. Waits for active jobs to complete (30s timeout)
+2. Waits for active jobs to complete (30s timeout, configurable via `SHUTDOWN_TIMEOUT_MS`)
 3. Flushes data to disk
 4. Exits cleanly
 
@@ -162,11 +162,11 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::note
-Since v2.8.0, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
+Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx --package=bunqueue` won't pull it in automatically.
 :::
 
 ```json
-// Claude Desktop / Cursor / Windsurf — --package=bunqueue resolves the bundled binary, no install needed
+// Claude Desktop / Cursor / Windsurf: --package=bunqueue resolves the bundled binary, no install needed
 {
   "mcpServers": {
     "bunqueue": {
@@ -183,7 +183,7 @@ With authentication:
 AUTH_TOKENS=my-secret bunqueue start
 ```
 
-The MCP server picks up the connection settings from environment variables (`TCP_PORT`, `HOST`, `AUTH_TOKENS`). Agents get 73 tools to add jobs, manage queues, schedule crons, retry failures, set rate limits, and monitor everything.
+The MCP server picks up the connection settings from environment variables: `BUNQUEUE_MODE=tcp` (default: `embedded`), `BUNQUEUE_HOST`, `BUNQUEUE_PORT`, and `BUNQUEUE_TOKEN` when the server has `AUTH_TOKENS` set. Agents get 73 tools to add jobs, manage queues, schedule crons, retry failures, set rate limits, and monitor everything.
 
 For HTTP handlers (agent-only feature), agents register a URL endpoint and bunqueue auto-processes jobs via HTTP calls, no Worker deployment needed. See [MCP Server guide](/guide/mcp/) for the full reference.
 

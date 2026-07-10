@@ -49,12 +49,13 @@ S3_BACKUP_ENABLED=1
 S3_BUCKET=my-bunqueue-backups
 S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
 S3_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-S3_REGION=us-east-1
 
 # Optional
+S3_REGION=us-east-1               # Default: us-east-1
 S3_ENDPOINT=                      # Custom endpoint (MinIO, R2, etc.)
 S3_BACKUP_INTERVAL=21600000       # Every 6 hours (default)
-S3_BACKUP_RETENTION=7             # Keep 7 days of backups
+S3_BACKUP_RETENTION=7             # Keep the last 7 backups (default)
+S3_BACKUP_PREFIX=backups/         # Key prefix (default)
 ```
 
 Or pass them when starting the server:
@@ -93,11 +94,10 @@ S3_REGION=auto
 The backup runs on a timer (default: every 6 hours):
 
 <Steps>
-1. **Checkpoint WAL** - forces all pending writes to the main database file
-2. **Create consistent snapshot** - SQLite's backup API ensures a point-in-time consistent copy
-3. **Compress** - the backup is compressed before upload
-4. **Upload to S3** - stored with a timestamp-based key
-5. **Cleanup old backups** - removes backups older than retention period
+1. **Checkpoint WAL** - `PRAGMA wal_checkpoint(TRUNCATE)` forces all pending writes into the main database file
+2. **Compress** - the backup is gzip-compressed before upload
+3. **Upload to S3** - stored with a timestamp-based key, alongside a `.meta.json` sidecar with a SHA-256 checksum
+4. **Cleanup old backups** - keeps only the most recent `S3_BACKUP_RETENTION` backups
 </Steps>
 
 <Aside type="note">
@@ -106,19 +106,21 @@ The backup runs on a timer (default: every 6 hours):
 
 ## Backup File Naming
 
-Backups are stored with this key pattern:
+Backups are stored under the `S3_BACKUP_PREFIX` (default `backups/`) with this key pattern:
 
 ```
-bunqueue-backups/
-  backup-2024-01-15T00-00-00.db.gz
-  backup-2024-01-15T06-00-00.db.gz
-  backup-2024-01-15T12-00-00.db.gz
-  backup-2024-01-15T18-00-00.db.gz
+backups/
+  bunqueue-2026-01-15T00-00-00-000Z.db            (gzip-compressed)
+  bunqueue-2026-01-15T00-00-00-000Z.db.meta.json  (checksum + sizes)
+  bunqueue-2026-01-15T06-00-00-000Z.db
+  bunqueue-2026-01-15T06-00-00-000Z.db.meta.json
 ```
+
+Note that the `.db` object is gzip-compressed even though the key has no `.gz` suffix; the `.meta.json` sidecar records the compression flag and a SHA-256 checksum of the original database.
 
 ## Disaster Recovery
 
-To restore from a backup:
+The built-in restore command handles download, decompression, and validation for you:
 
 <Steps>
 1. **Stop bunqueue**
@@ -128,22 +130,20 @@ To restore from a backup:
    # or: docker stop bunqueue
    ```
 
-2. **Download the latest backup**
+2. **Find the backup to restore**
 
    ```bash
-   aws s3 cp s3://my-bunqueue-backups/backup-2024-01-15T18-00-00.db.gz ./
-   gunzip backup-2024-01-15T18-00-00.db.gz
+   # Requires the same S3_* env vars plus BUNQUEUE_DATA_PATH
+   bunqueue backup list
    ```
 
-3. **Replace the database file**
+3. **Restore it**
 
    ```bash
-   # Backup the current (possibly corrupted) file
-   mv /var/lib/bunqueue/queue.db /var/lib/bunqueue/queue.db.corrupted
-
-   # Restore from backup
-   mv backup-2024-01-15T18-00-00.db /var/lib/bunqueue/queue.db
+   bunqueue backup restore backups/bunqueue-2026-01-15T18-00-00-000Z.db --force
    ```
+
+   The restore is validate-before-replace: it verifies the SHA-256 checksum from the `.meta.json` sidecar, checks the SQLite header, runs an integrity check on a temp file, and only then atomically swaps it into place. On any failure the live database is left untouched.
 
 4. **Restart bunqueue**
 
@@ -152,6 +152,14 @@ To restore from a backup:
    # or: docker start bunqueue
    ```
 </Steps>
+
+If you prefer to do it manually, remember the object is gzip-compressed despite the `.db` key:
+
+```bash
+aws s3 cp s3://my-bunqueue-backups/backups/bunqueue-2026-01-15T18-00-00-000Z.db ./
+mv /var/lib/bunqueue/queue.db /var/lib/bunqueue/queue.db.corrupted
+gzip -dc bunqueue-2026-01-15T18-00-00-000Z.db > /var/lib/bunqueue/queue.db
+```
 
 bunqueue will recover the queue state from the restored database, reloading pending jobs, cron schedules, and DLQ entries.
 
@@ -164,9 +172,14 @@ bunqueue will recover the queue state from the restored database, reloading pend
 Monitor backup health in production:
 
 ```bash
-# Check backup status via health endpoint
-curl http://localhost:6790/health
-# Response includes last backup time and status
+# Check the backup configuration
+bunqueue backup status
+
+# List backups and check the most recent timestamp
+bunqueue backup list
+
+# Trigger a backup on demand
+bunqueue backup now
 ```
 
 Set up alerts for:
@@ -204,5 +217,5 @@ zfs snapshot tank/bunqueue@daily
 1. **Enable S3 backup from day one** - don't wait for your first data loss
 2. **Test recovery regularly** - a backup you can't restore from is worthless
 3. **Monitor backup health** - alert on missed backups
-4. **Use retention policies** - keep 7-30 days depending on your needs
+4. **Use retention policies** - keep the last 7-30 backups depending on your needs
 5. **Consider R2 or B2** for cost-effective storage (no egress fees with R2)

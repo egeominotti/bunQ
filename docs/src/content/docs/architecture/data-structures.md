@@ -18,14 +18,14 @@ head:
 
 | Structure | Use Case | Complexity |
 |-----------|----------|------------|
-| 4-ary MinHeap | Priority queue, cron scheduling | O(log₄ n) |
-| Skip List | Temporal indexing, delayed jobs | O(log n) |
+| 4-ary MinHeap | Priority queue, cron scheduling, delayed-job tracking | O(log₄ n) |
+| Skip List | Temporal indexing, cleanup range queries | O(log n) |
 | LRU Cache | Job results, custom IDs | O(1) |
-| Hash (FNV-1a) | Sharding, distribution | O(n) |
+| Hash (FNV-1a) | Sharding, distribution | O(len) |
 
 ## 4-ary MinHeap
 
-Used for priority queues and cron scheduling.
+Used for priority queues, cron scheduling, and delayed-job tracking (TemporalManager keeps delayed jobs in a MinHeap ordered by runAt for O(k) refresh).
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Why 4-ary vs binary?</b><span>cache locality</span></div>
@@ -51,7 +51,7 @@ Used for priority queues and cron scheduling.
 
 ## Skip List
 
-Used for temporal indexing and efficient range queries.
+Used for the temporal index (jobs ordered by createdAt) and efficient range queries during cleanup. Delayed jobs are tracked separately in a MinHeap, not here.
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Skip list structure</b><span>sorted list with express lanes</span></div>
@@ -154,7 +154,7 @@ Used for job results, custom ID mapping, and logs.
   <div class="bq-diag-head"><b>Bounded collections</b><span>max size, eviction</span></div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell bq-diag-accent">completedJobs <i>50,000, FIFO batch (10%)</i></div>
-    <div class="bq-diag-cell">jobResults <i>5,000, LRU</i></div>
+    <div class="bq-diag-cell">jobResults <i>10,000, LRU</i></div>
     <div class="bq-diag-cell">jobLogs <i>10,000, LRU</i></div>
     <div class="bq-diag-cell">customIdMap <i>50,000, LRU</i></div>
     <div class="bq-diag-cell">DLQ per queue <i>10,000, FIFO</i></div>
@@ -186,7 +186,7 @@ Used for sharding and distribution.
 ### Sharding
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>Shard selection</b><span><code>shardIndex = fnv1aHash(queueName) &amp; SHARD_MASK</code></span></div>
+  <div class="bq-diag-head"><b>Shard selection</b><span><code>shardIndex = fnv1a(queueName) &amp; SHARD_MASK</code></span></div>
   <div class="bq-diag-layer bq-diag-accent">SHARD_COUNT auto-detected from CPU cores, power of 2, SHARD_MASK = SHARD_COUNT - 1</div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell">4 cores <i>SHARD_COUNT=4, SHARD_MASK=0x03, binary 11</i></div>

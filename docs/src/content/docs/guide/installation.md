@@ -1,5 +1,5 @@
 ---
-title: "Install bunqueue — Setup Guide for Bun Job Queue"
+title: "Install bunqueue, Setup Guide for Bun Job Queue"
 description: "Install bunqueue via npm or from source. Full TypeScript support with type definitions for Queue, Worker, Job, and all config options."
 head:
   - tag: meta
@@ -16,7 +16,7 @@ head:
   <div class="bq-proof">
     <span><b>1</b> command: bun add bunqueue</span>
     <span><b>5.5 MB</b> install, 7 packages</span>
-    <span><b>4</b> prebuilt binary platforms</span>
+    <span><b>5</b> prebuilt binary platforms</span>
   </div>
 </div>
 
@@ -46,7 +46,7 @@ gateways (Raspberry Pi 4/5, ARM64 boxes) where you don't want to install a
 runtime:
 
 ```bash
-# Pick your platform: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64
+# Pick your platform: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 ships as a .zip)
 curl -fsSLO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-linux-arm64.tar.gz
 tar -xzf bunqueue-linux-arm64.tar.gz
 ./bunqueue-linux-arm64 --version

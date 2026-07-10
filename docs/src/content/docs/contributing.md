@@ -37,16 +37,30 @@ bun install
 
 ### Running Tests
 
+There are three suites. All three must pass before any change lands:
+
 ```bash
-# Run all tests
+# Unit tests (~5000 tests)
 bun test
 
-# Run specific test file
-bun test test/queue.test.ts
+# TCP integration tests (~50 suites, spawns a real server)
+bun scripts/tcp/run-all-tests.ts
+
+# Embedded integration tests (~35 suites)
+bun scripts/embedded/run-all-tests.ts
+```
+
+Other useful invocations:
+
+```bash
+# Run a specific test file
+bun test test/queueManager.test.ts
 
 # Run with coverage
 bun test --coverage
 ```
+
+Note: `bun test` preloads `test/preload.ts`, which sets `BUNQUEUE_EMBEDDED=1`. Tests that need real TCP behavior must opt out with an explicit `embedded: false` and spawn a server.
 
 ### Code Style
 
@@ -91,7 +105,7 @@ test: add DLQ filtering tests
 2. Make your changes
 3. Add/update tests
 4. Update documentation
-5. Run `bun test` and `bun run lint`
+5. Run all three test suites (`bun test`, `bun scripts/tcp/run-all-tests.ts`, `bun scripts/embedded/run-all-tests.ts`) and `bun run check:biome`
 6. Push and create a PR
 
 ### PR Template
@@ -131,8 +145,8 @@ src/
 
 - `src/domain/queue/shard.ts` - Queue sharding logic
 - `src/application/queueManager.ts` - Central coordinator
-- `src/client/queue.ts` - Client Queue class
-- `src/client/worker.ts` - Client Worker class
+- `src/client/queue/queue.ts` - Client Queue class
+- `src/client/worker/worker.ts` - Client Worker class
 
 ## Architecture Guidelines
 
@@ -203,16 +217,16 @@ Update README.md for:
 
 ## Release Process
 
-1. Update version in `package.json`
-2. Update CHANGELOG.md
-3. Create PR titled `release: v2.x.x`
-4. After merge, tag and publish
+Releases are handled by the maintainer. Every release:
+
+1. Bumps the patch version in `package.json`
+2. Updates the changelog (`docs/src/content/docs/changelog.md`)
+3. Publishes to npm with `bun publish`
 
 ## Getting Help
 
 - [GitHub Discussions](https://github.com/egeominotti/bunqueue/discussions)
-- [Discord](https://discord.gg/bunqueue)
-- [Twitter](https://twitter.com/bunqueue)
+- [GitHub Issues](https://github.com/egeominotti/bunqueue/issues)
 
 ## Recognition
 

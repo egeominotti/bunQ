@@ -151,7 +151,7 @@ await queue.add('task', data, {
   priority: 1,
   delay: 5000,
   attempts: 3,
-  backoff: 1000, // Base delay (exponential: 1s, 2s, 4s, 8s...)
+  backoff: 1000, // Base delay (exponential retries: ~2s, ~4s, ~8s...)
   removeOnComplete: true,
   removeOnFail: false,
   jobId: 'custom-id',
@@ -177,10 +177,10 @@ backoff: 1000 // Shorthand: base delay with exponential backoff
 bunqueue supports both `fixed` and `exponential` backoff types, matching BullMQ's behavior:
 
 **Exponential** (`type: 'exponential'`):
-- Attempt 1 fails → wait ~1000ms
-- Attempt 2 fails → wait ~2000ms
-- Attempt 3 fails → wait ~4000ms
-- Formula: `delay * 2^(attempt-1)` with ±50% jitter
+- Attempt 1 fails → wait ~2000ms
+- Attempt 2 fails → wait ~4000ms
+- Attempt 3 fails → wait ~8000ms
+- Formula: `delay * 2^attempts` (attempts = failures so far) with ±50% jitter
 
 **Fixed** (`type: 'fixed'`):
 - Every retry waits approximately the same delay (e.g., ~5000ms each time, ±20% jitter)
@@ -210,7 +210,7 @@ new Worker('queue', processor, {
 ```
 
 :::note
-bunqueue supports BullMQ's per-worker `limiter: { max, duration }` (works embedded). You can also set a queue-level limit with `queue.setGlobalRateLimit(max, duration?)`.
+bunqueue supports BullMQ's per-worker `limiter: { max, duration }` (works embedded). You can also set a queue-level limit with `queue.setGlobalRateLimit(max)`, where `max` is jobs per second (token bucket). The optional second `duration` argument exists for BullMQ signature compatibility but is currently ignored.
 :::
 
 ### Sandboxed Processors
@@ -219,7 +219,7 @@ bunqueue supports BullMQ's per-worker `limiter: { max, duration }` (works embedd
 // BullMQ sandboxed processors
 new Worker('queue', './processor.js', { connection });
 
-// bunqueue — recommended: inline Worker (production-ready)
+// bunqueue, recommended: inline Worker (production-ready)
 import { Worker } from 'bunqueue/client';
 
 const worker = new Worker('queue', async (job) => {
@@ -227,15 +227,15 @@ const worker = new Worker('queue', async (job) => {
   return result;
 }, { embedded: true, concurrency: 4 });
 
-// bunqueue — alternative: SandboxedWorker (experimental, Bun Workers)
+// bunqueue, alternative: SandboxedWorker (experimental, Bun Workers)
 import { SandboxedWorker } from 'bunqueue/client';
 
-const worker = new SandboxedWorker('queue', {
+const sandboxed = new SandboxedWorker('queue', {
   processor: './processor.ts',
   concurrency: 4,
   timeout: 30000,
 });
-worker.start();
+sandboxed.start();
 ```
 
 :::caution

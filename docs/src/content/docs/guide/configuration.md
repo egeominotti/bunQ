@@ -1,5 +1,5 @@
 ---
-title: "Configuration File — bunqueue.config.ts"
+title: "Configuration File: bunqueue.config.ts"
 description: "Centralize all bunqueue server configuration in a single typed file. Type-safe with full IntelliSense support."
 head:
   - tag: meta
@@ -15,7 +15,7 @@ head:
 
   <div class="bq-proof">
     <span><b>1</b> typed file, auto-discovered</span>
-    <span><b>8</b> config sections, all optional</span>
+    <span><b>9</b> config sections, all optional</span>
     <span><b>4</b>-level priority: CLI, file, env, defaults</span>
   </div>
 </div>
@@ -95,6 +95,8 @@ defineConfig({
     host: '0.0.0.0',         // Bind address (default: 0.0.0.0)
     tcpSocketPath: undefined, // Unix socket for TCP (overrides host/port)
     httpSocketPath: undefined, // Unix socket for HTTP (overrides host/port)
+    tlsCertFile: undefined,   // PEM certificate, enables native TLS on TCP + HTTP (with tlsKeyFile)
+    tlsKeyFile: undefined,    // PEM private key (set both or neither, partial config is a startup error)
   },
 });
 ```
@@ -107,7 +109,7 @@ Authentication and security.
 defineConfig({
   auth: {
     tokens: ['my-secret-token'],   // Auth tokens for TCP/HTTP
-    requireAuthForMetrics: false,   // Require auth for /metrics endpoint
+    requireAuthForMetrics: false,   // Require auth for the /prometheus endpoint (env: METRICS_AUTH)
   },
 });
 ```
@@ -267,7 +269,7 @@ export default defineConfig({
 When deploying with containers, you can mix the config file with environment variables:
 
 ```typescript
-// bunqueue.config.ts — static settings in the image
+// bunqueue.config.ts, static settings in the image
 import { defineConfig } from 'bunqueue';
 
 export default defineConfig({
@@ -281,7 +283,8 @@ export default defineConfig({
 ```
 
 ```bash
-# Dynamic settings from environment (override config file)
+# Dynamic settings from environment (fill values the config file leaves unset;
+# the config file wins when both define the same option)
 docker run \
   -e TCP_PORT=6789 \
   -e S3_BUCKET=my-bucket \

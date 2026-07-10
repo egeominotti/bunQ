@@ -74,10 +74,7 @@ Bun's native SQLite driver (`bun:sqlite`) is what makes this architecture viable
 ```typescript
 import { Database } from 'bun:sqlite';
 
-const db = new Database('./queue.db', {
-  strict: true,
-  create: true,
-});
+const db = new Database('./queue.db', { create: true });
 
 // WAL mode for concurrent reads + writes
 db.exec('PRAGMA journal_mode = WAL');
@@ -120,7 +117,7 @@ bunqueue is designed for **single-instance deployments**. It's the right choice 
 If you need multi-node clustering or Redis pub/sub features, BullMQ remains a solid choice. But for the majority of applications that run on a single server, bunqueue eliminates an entire layer of infrastructure.
 
 <Aside type="note" title="A genuinely small install">
-  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.0, `bun add bunqueue` installs **7 packages (5.5 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
+  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.1, `bun add bunqueue` installs **7 packages (5.5 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
 </Aside>
 
 ## Go Deeper

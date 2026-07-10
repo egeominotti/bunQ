@@ -1,5 +1,5 @@
 ---
-title: "Stall Detection — Recover Unresponsive Jobs Automatically in Bun"
+title: "Stall Detection: Recover Unresponsive Jobs Automatically in Bun"
 description: "Configure bunqueue stall detection to auto-recover stuck jobs. Set heartbeat intervals, max stall thresholds, and grace periods for Workers."
 head:
   - tag: meta
@@ -74,6 +74,8 @@ When a job is retried after a stall or lock expiry, its internal counters (queue
 
 ## Events
 
+`QueueEvents` subscribes to the in-process event stream, so it works in embedded mode (same process as the queue):
+
 ```typescript
 import { QueueEvents } from 'bunqueue/client';
 
@@ -83,6 +85,8 @@ events.on('stalled', ({ jobId }) => {
   console.log(`Job ${jobId} stalled`);
 });
 ```
+
+In TCP mode, use the Worker's `stalled` event or subscribe via [webhooks](/guide/webhooks/).
 
 ## Example: Long-Running Jobs
 

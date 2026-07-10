@@ -1,5 +1,5 @@
 ---
-title: "CLI Reference — Manage Bun Job Queues from the Command Line"
+title: "CLI Reference: Manage Bun Job Queues from the Command Line"
 description: "Complete bunqueue CLI reference: push, pull, and ack jobs, manage DLQ, schedule cron tasks, and monitor server stats from your terminal."
 head:
   - tag: meta
@@ -44,10 +44,19 @@ Instead of CLI flags and env vars, you can centralize all settings in a typed `b
 
 **Output:**
 ```
-bunqueue v2.8.30
-TCP server listening on port 6789
-HTTP server listening on port 6790
-Database: ./data/bunq.db
+        (\(\
+        ( -.-)      bunqueue v2.8.30
+        o_(")(")    High-performance job queue for Bun
+
+  ● TCP    0.0.0.0:6789
+  ● HTTP   0.0.0.0:6790
+  ● Socket disabled
+  ● Data   ./data/production.db
+  ● TLS    disabled
+  ● Auth   disabled
+  ● S3 Backup disabled
+  ● Cloud  disabled
+  ● Shards 16 (10 CPU cores)
 ```
 
 ### Connect to Server
@@ -80,37 +89,17 @@ bunqueue push emails '{"to":"user@example.com","subject":"Welcome"}'
 
 **Output:**
 ```
-Job pushed successfully
-ID: 1001
-Queue: emails
-Priority: 0
+Job created: 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
+
+Job IDs are UUID v7 strings (time-ordered).
 
 ```bash
 # With priority (higher = processed first)
 bunqueue push emails '{"to":"vip@example.com"}' --priority 10
-```
 
-**Output:**
-```
-Job pushed successfully
-ID: 1002
-Queue: emails
-Priority: 10
-```
-
-```bash
 # Delayed job (process after 5 seconds)
 bunqueue push notifications '{"message":"Reminder"}' --delay 5000
-```
-
-**Output:**
-```
-Job pushed successfully
-ID: 1003
-Queue: notifications
-State: delayed
-Run at: 2024-01-15T10:30:05.000Z
 ```
 
 ```bash
@@ -191,15 +180,15 @@ bunqueue pull emails
 ```
 
 **Output:**
-```json
-{
-  "id": "1001",
-  "name": "default",
-  "data": {"to":"user@example.com","subject":"Welcome"},
-  "priority": 0,
-  "attempts": 0,
-  "timestamp": 1704067200000
-}
+```
+Job: 019ce9d7-6983-7000-946f-48737be2b0f9
+  Queue:      emails
+  State:      active
+  Priority:   0
+  Attempts:   0/3
+  Data:       {"to":"user@example.com","subject":"Welcome"}
+  Created:    2024-01-15T10:30:00.000Z
+  Started:    2024-01-15T10:30:01.000Z
 ```
 
 ```bash
@@ -208,13 +197,13 @@ bunqueue pull emails --timeout 5000
 ```
 
 ```bash
-# Pull returns null if queue is empty
+# Pull on an empty queue
 bunqueue pull empty-queue
 ```
 
 **Output:**
 ```
-No jobs available
+No job available
 ```
 
 ### Acknowledge Jobs
@@ -223,25 +212,17 @@ Mark jobs as completed after successful processing.
 
 ```bash
 # Simple acknowledgment
-bunqueue ack 1001
+bunqueue ack 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
 ```
-Job 1001 acknowledged
-State: completed
+OK
 ```
 
 ```bash
-# With result data
-bunqueue ack 1001 --result '{"messageId":"msg-abc123","delivered":true}'
-```
-
-**Output:**
-```
-Job 1001 acknowledged
-State: completed
-Result: {"messageId":"msg-abc123","delivered":true}
+# With result data (retrievable later via `bunqueue job result <id>`)
+bunqueue ack 019ce9d7-6983-7000-946f-48737be2b0f9 --result '{"messageId":"msg-abc123","delivered":true}'
 ```
 
 ### Fail Jobs
@@ -249,29 +230,14 @@ Result: {"messageId":"msg-abc123","delivered":true}
 Mark jobs as failed (will retry if attempts remaining).
 
 ```bash
-# Mark as failed
-bunqueue fail 1001 --error "SMTP connection timeout"
+# Mark as failed (retried with backoff while attempts remain,
+# moved to the DLQ once max attempts are exhausted)
+bunqueue fail 019ce9d7-6983-7000-946f-48737be2b0f9 --error "SMTP connection timeout"
 ```
 
 **Output:**
 ```
-Job 1001 marked as failed
-Error: SMTP connection timeout
-Attempts: 1/3
-Next retry: 2024-01-15T10:31:00.000Z
-```
-
-```bash
-# Job moved to DLQ after max attempts
-bunqueue fail 1001 --error "Permanent failure"
-```
-
-**Output:**
-```
-Job 1001 marked as failed
-Error: Permanent failure
-Attempts: 3/3
-Status: Moved to DLQ
+OK
 ```
 
 ---
@@ -282,140 +248,105 @@ Status: Moved to DLQ
 
 ```bash
 # Full job details
-bunqueue job get 1001
+bunqueue job get 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
-```json
-{
-  "id": "1001",
-  "name": "send-email",
-  "queue": "emails",
-  "data": {"to":"user@example.com"},
-  "state": "completed",
-  "priority": 0,
-  "attempts": 1,
-  "progress": 100,
-  "timestamp": 1704067200000,
-  "processedOn": 1704067201000,
-  "finishedOn": 1704067202000,
-  "returnvalue": {"sent":true}
-}
 ```
+Job: 019ce9d7-6983-7000-946f-48737be2b0f9
+  Queue:      emails
+  State:      completed
+  Priority:   0
+  Attempts:   1/3
+  Data:       {"to":"user@example.com"}
+  Progress:   100%
+  Created:    2024-01-15T10:30:00.000Z
+  Started:    2024-01-15T10:30:01.000Z
+```
+
+Use `--json` for the raw job object (`createdAt`, `startedAt`, `completedAt`, `finishedOn`, `processedOn`, and all options).
 
 ```bash
 # Just the state
-bunqueue job state 1001
+bunqueue job state 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
 ```
-completed
+State: completed
 ```
 
 ```bash
 # Get the result
-bunqueue job result 1001
+bunqueue job result 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
-```json
-{"sent":true,"messageId":"msg-abc123"}
+```
+Result: {
+  "sent": true,
+  "messageId": "msg-abc123"
+}
 ```
 
 ### Control Jobs
 
 ```bash
 # Cancel a waiting/delayed job
-bunqueue job cancel 1002
-```
+bunqueue job cancel 019ce9d7-6983-7000-946f-48737be2b0f9
 
-**Output:**
-```
-Job 1002 cancelled
-Previous state: delayed
-```
-
-```bash
 # Promote delayed job to waiting (process immediately)
-bunqueue job promote 1003
+bunqueue job promote 019ce9d7-6983-7000-946f-48737be2b0f9
+
+# Discard a job to the DLQ
+bunqueue job discard 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
-**Output:**
-```
-Job 1003 promoted
-Previous state: delayed
-New state: waiting
-```
-
-```bash
-# Discard a job completely
-bunqueue job discard 1004
-```
-
-**Output:**
-```
-Job 1004 discarded
-```
+Each prints `OK` on success, or `Error: Job not found ...` (exit code 1) on failure.
 
 ### Update Job Properties
 
 ```bash
-# Update progress (0-100)
-bunqueue job progress 1001 50 --message "Processing attachments"
-```
+# Update progress (0-100) on an active job
+bunqueue job progress 019ce9d7-... 50 --message "Processing attachments"
 
-**Output:**
-```
-Job 1001 progress updated
-Progress: 50%
-Message: Processing attachments
-```
+# Update job data
+bunqueue job update 019ce9d7-... '{"to":"new@example.com"}'
 
-```bash
 # Change priority
-bunqueue job priority 1001 20
+bunqueue job priority 019ce9d7-... 20
+
+# Move an active job back to delayed
+bunqueue job delay 019ce9d7-... 60000
+
+# Wait for a job to complete (exit 1 if not completed within the timeout)
+bunqueue job wait 019ce9d7-... --timeout 30000
 ```
 
-**Output:**
-```
-Job 1001 priority updated
-New priority: 20
-```
-
-```bash
-# Add delay to existing job
-bunqueue job delay 1001 60000
-```
-
-**Output:**
-```
-Job 1001 delayed
-Run at: 2024-01-15T10:31:00.000Z
-```
+Each prints `OK` on success. `job wait` prints the stored result when the job completes.
 
 ### Job Logs
 
 ```bash
 # View job logs
-bunqueue job logs 1001
+bunqueue job logs 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
 ```
-[2024-01-15 10:30:00] INFO  Starting email processing
-[2024-01-15 10:30:01] INFO  Template loaded: welcome
-[2024-01-15 10:30:02] INFO  Email sent successfully
+  [2024-01-15T10:30:00.000Z] INFO: Starting email processing
+  [2024-01-15T10:30:01.000Z] INFO: Template loaded: welcome
+  [2024-01-15T10:30:02.000Z] INFO: Email sent successfully
 ```
 
 ```bash
-# Add log entry
-bunqueue job log 1001 "Custom checkpoint reached" --level info
+# Add log entry (levels: info, warn, error)
+bunqueue job log 019ce9d7-6983-7000-946f-48737be2b0f9 "Custom checkpoint reached" --level info
 ```
 
 **Output:**
 ```
-Log entry added to job 1001
+OK
 ```
 
 ---
@@ -430,56 +361,53 @@ bunqueue queue list
 
 **Output:**
 ```
-QUEUE          WAITING   ACTIVE   COMPLETED   FAILED   PAUSED
-emails         125       5        10,234      23       no
-notifications  50        2        5,102       5        no
-reports        0         1        892         0        yes
+  - emails
+  - notifications
+  - reports
 ```
+
+For per-queue counts use `bunqueue queue count <queue>` (total jobs) or the HTTP API (`GET /queues/summary`).
 
 ### Pause and Resume
 
 ```bash
-# Pause processing (workers won't pick new jobs)
+# Pause processing (workers won't pick new jobs; active jobs complete)
 bunqueue queue pause emails
-```
 
-**Output:**
-```
-Queue 'emails' paused
-Waiting jobs: 125 (will not be processed)
-Active jobs: 5 (will complete)
-```
-
-```bash
 # Resume processing
 bunqueue queue resume emails
+
+# Check pause state
+bunqueue queue paused emails
 ```
 
 **Output:**
 ```
-Queue 'emails' resumed
-Processing will continue
+OK
+OK
+Queue is active
 ```
+
+`queue paused` prints `Queue is paused` or `Queue is active`.
 
 ### View Queue Jobs
 
 ```bash
-# List waiting jobs
+# List waiting jobs (--offset for pagination)
 bunqueue queue jobs emails --state waiting --limit 10
 ```
 
 **Output:**
 ```
-ID      NAME         PRIORITY   CREATED
-1001    send-email   10         2024-01-15 10:30:00
-1002    send-email   5          2024-01-15 10:30:01
-1003    send-email   0          2024-01-15 10:30:02
-...
-Showing 10 of 125 jobs
+ID                   Queue           State        Priority   Attempts
+-------------------------------------------------------------------------
+019ce9d7-6983-7000.. emails          waiting      10         0/3
+019ce9d7-6a01-7000.. emails          waiting      5          0/3
+019ce9d7-6a7f-7000.. emails          waiting      0          0/3
 ```
 
 ```bash
-# List failed jobs
+# List failed jobs (valid states: waiting, delayed, active, completed, failed)
 bunqueue queue jobs emails --state failed
 ```
 
@@ -492,14 +420,15 @@ bunqueue queue clean emails --grace 3600000 --state completed
 
 **Output:**
 ```
-Cleaned 1,523 jobs from 'emails'
-State: completed
-Older than: 1 hour
+Cleaned 1523 jobs: 019ce9d7-..., 019ce9d8-..., ...
 ```
 
 ```bash
-# Clean all old jobs (completed and failed)
+# Clean old waiting/delayed jobs (default when --state is omitted)
 bunqueue queue clean emails --grace 86400000
+
+# Optional cap per call (default: 1000)
+bunqueue queue clean emails --grace 86400000 --limit 500
 ```
 
 ### Drain and Obliterate
@@ -511,9 +440,7 @@ bunqueue queue drain emails
 
 **Output:**
 ```
-Queue 'emails' drained
-Removed: 125 waiting jobs
-Active jobs: 5 (still processing)
+Count: 125
 ```
 
 ```bash
@@ -523,7 +450,7 @@ bunqueue queue obliterate emails
 
 **Output:**
 ```
-Queue 'emails' obliterated
+OK
 ```
 
 ---
@@ -533,17 +460,20 @@ Queue 'emails' obliterated
 ### View Dead Letter Queue
 
 ```bash
-bunqueue dlq list emails
+bunqueue dlq list emails            # optionally: --count 10
 ```
 
 **Output:**
 ```
-ID     JOB_ID   ERROR                        FAILED_AT            ATTEMPTS
-1      1001     SMTP timeout                 2024-01-15 10:30:00  3
-2      1005     Invalid recipient            2024-01-15 10:31:00  3
-3      1008     Rate limit exceeded          2024-01-15 10:32:00  3
+  019ce9d7-6983-7000-946f-48737be2b0f9
+    Queue: emails
+    Error: SMTP timeout
+    Failed: 2024-01-15T10:30:00.000Z
 
-Total: 3 entries
+  019ce9d7-7a01-7000-946f-48737be2b0f9
+    Queue: emails
+    Error: Invalid recipient
+    Failed: 2024-01-15T10:31:00.000Z
 ```
 
 ### Retry DLQ Jobs
@@ -555,18 +485,19 @@ bunqueue dlq retry emails
 
 **Output:**
 ```
-Retrying 3 jobs from DLQ
-Jobs moved back to 'emails' queue
+Count: 3
 ```
+
+The count is the number of jobs moved back to the queue.
 
 ```bash
 # Retry specific job
-bunqueue dlq retry emails --id 1001
+bunqueue dlq retry emails --id 019ce9d7-6983-7000-946f-48737be2b0f9
 ```
 
 **Output:**
 ```
-Job 1001 moved from DLQ to 'emails' queue
+Count: 1
 ```
 
 ### Purge DLQ
@@ -577,8 +508,10 @@ bunqueue dlq purge emails
 
 **Output:**
 ```
-Purged DLQ for 'emails'
+Count: 12
 ```
+
+The count is the number of DLQ entries removed.
 
 ---
 
@@ -592,10 +525,17 @@ bunqueue cron list
 
 **Output:**
 ```
-NAME              QUEUE      SCHEDULE        NEXT RUN              EXECUTIONS
-daily-report      reports    0 6 * * *       2024-01-16 06:00:00   45
-hourly-cleanup    cleanup    0 * * * *       2024-01-15 11:00:00   1,082
-health-check      health     */5 * * * *     2024-01-15 10:35:00   8,640
+  daily-report
+    Queue: reports
+    Schedule: 0 6 * * *
+    Executions: 45
+    Next run: 2024-01-16T06:00:00.000Z
+
+  health-check
+    Queue: health
+    Schedule: every 300000ms
+    Executions: 8640
+    Next run: 2024-01-15T10:35:00.000Z
 ```
 
 ### Add Cron Job
@@ -610,10 +550,7 @@ bunqueue cron add daily-report \
 
 **Output:**
 ```
-Cron job 'daily-report' created
-Queue: reports
-Schedule: 0 6 * * * (daily at 6:00 AM)
-Next run: 2024-01-16 06:00:00
+Cron scheduled: daily-report (next run: 2024-01-16T06:00:00.000Z)
 ```
 
 ```bash
@@ -626,10 +563,7 @@ bunqueue cron add health-check \
 
 **Output:**
 ```
-Cron job 'health-check' created
-Queue: health
-Interval: every 30 minutes
-Next run: 2024-01-15 11:00:00
+Cron scheduled: health-check (next run: 2024-01-15T11:00:00.000Z)
 ```
 
 ### Delete Cron Job
@@ -640,7 +574,7 @@ bunqueue cron delete daily-report
 
 **Output:**
 ```
-Cron job 'daily-report' deleted
+OK
 ```
 
 ---
@@ -654,23 +588,11 @@ Cron job 'daily-report' deleted
 bunqueue rate-limit set emails 100
 ```
 
-**Output:**
-```
-Rate limit set for 'emails'
-Limit: 100 jobs/second
-```
-
 ### Set Concurrency Limit
 
 ```bash
 # Max 10 concurrent jobs
 bunqueue concurrency set emails 10
-```
-
-**Output:**
-```
-Concurrency limit set for 'emails'
-Limit: 10 concurrent jobs
 ```
 
 ### Clear Limits
@@ -680,11 +602,7 @@ bunqueue rate-limit clear emails
 bunqueue concurrency clear emails
 ```
 
-**Output:**
-```
-Rate limit cleared for 'emails'
-Concurrency limit cleared for 'emails'
-```
+All four commands print `OK` on success.
 
 ---
 
@@ -698,20 +616,18 @@ bunqueue stats
 
 **Output:**
 ```
-bunqueue Server Statistics
-==========================
-Uptime: 2d 5h 30m
-Version: 2.8.30
+Server Statistics:
 
-Queues: 5
-Total Jobs: 156,234
-  - Waiting: 234
-  - Active: 12
-  - Completed: 155,800
-  - Failed: 188
+  Waiting:     234
+  Active:      12
+  Delayed:     8
+  Completed:   155800
+  Failed:      188
+  DLQ:         3
 
-Database Size: 45.2 MB
-WAL Size: 2.1 MB
+  Uptime:      185400s
+  Push/sec:    120
+  Pull/sec:    118
 ```
 
 ### Prometheus Metrics
@@ -720,17 +636,21 @@ WAL Size: 2.1 MB
 bunqueue metrics
 ```
 
+Prints the same Prometheus text exposition the server serves on `GET /prometheus` (there is no `--format` flag):
+
 **Output:**
 ```
-# HELP bunqueue_jobs_total Total number of jobs
-# TYPE bunqueue_jobs_total counter
-bunqueue_jobs_total{queue="emails",state="completed"} 155800
-bunqueue_jobs_total{queue="emails",state="failed"} 188
+# HELP bunqueue_jobs_waiting Number of jobs waiting in queue
+# TYPE bunqueue_jobs_waiting gauge
+bunqueue_jobs_waiting 234
 
-# HELP bunqueue_job_duration_seconds Job processing duration
-# TYPE bunqueue_job_duration_seconds histogram
-bunqueue_job_duration_seconds_bucket{queue="emails",le="0.1"} 145000
-bunqueue_job_duration_seconds_bucket{queue="emails",le="1"} 155000
+# HELP bunqueue_jobs_pushed_total Total jobs pushed
+# TYPE bunqueue_jobs_pushed_total counter
+bunqueue_jobs_pushed_total 156234
+
+# HELP bunqueue_queue_jobs_waiting Number of waiting jobs per queue
+# TYPE bunqueue_queue_jobs_waiting gauge
+bunqueue_queue_jobs_waiting{queue="emails"} 125
 ...
 ```
 
@@ -740,23 +660,10 @@ bunqueue_job_duration_seconds_bucket{queue="emails",le="1"} 155000
 bunqueue health
 ```
 
-**Output:**
-```json
-{
-  "status": "healthy",
-  "uptime": 185400,
-  "version": "2.8.30",
-  "database": {
-    "status": "ok",
-    "size": 47409152,
-    "wal_size": 2202880
-  },
-  "queues": 5,
-  "jobs": {
-    "active": 12,
-    "waiting": 234
-  }
-}
+`health` is an alias of `stats` over TCP: it prints the same `Server Statistics:` block. For a JSON health payload (status, version, memory, connections), query the HTTP endpoint instead:
+
+```bash
+curl http://localhost:6790/health
 ```
 
 ### Version
@@ -825,9 +732,48 @@ bunqueue doctor --port 6789 --host 192.168.1.100
 
 ---
 
+## Workers & Webhooks
+
+### Workers
+
+```bash
+# List registered workers (with status: active/stale)
+bunqueue worker list
+
+# Register a worker (name + comma-separated queues)
+bunqueue worker register email-worker -q emails,notifications
+
+# Unregister a worker by ID
+bunqueue worker unregister w-abc123
+```
+
+:::caution
+CLI worker registrations are transient: the server unregisters a worker when its TCP connection closes, and the one-shot CLI process exits immediately. The CLI prints a warning about this. For persistent workers, run a long-lived process with the SDK `Worker` class.
+:::
+
+### Webhooks
+
+```bash
+# List webhooks
+bunqueue webhook list
+
+# Add a webhook (--events/-e is required, comma-separated;
+# optional: --queue/-q filter, --secret/-s HMAC secret)
+bunqueue webhook add https://example.com/hooks -e completed,failed -q emails
+
+# Remove a webhook by ID
+bunqueue webhook remove wh-abc123
+```
+
+`webhook add` prints `Webhook added: <id>`; keep the ID for `webhook remove`.
+
+---
+
 ## Backup Operations
 
 ### Create Backup
+
+Backup commands run locally against the database at `BUNQUEUE_DATA_PATH` (they do not go through the TCP server) and require the `S3_*` environment variables to be configured.
 
 ```bash
 bunqueue backup now
@@ -835,11 +781,12 @@ bunqueue backup now
 
 **Output:**
 ```
-Backup started...
-Uploading to S3: backups/2024-01-15/bunq-103000.db
-Backup completed successfully
-Size: 45.2 MB
-Duration: 2.3s
+Backup created successfully
+{
+  "key": "backups/bunq-2024-01-15T10-30-00.db",
+  "size": "45.20 MB",
+  "duration": "2300ms"
+}
 ```
 
 ### List Backups
@@ -850,22 +797,29 @@ bunqueue backup list
 
 **Output:**
 ```
-KEY                                    SIZE      CREATED
-backups/2024-01-15/bunq-103000.db     45.2 MB   2024-01-15 10:30:00
-backups/2024-01-14/bunq-103000.db     44.8 MB   2024-01-14 10:30:00
-backups/2024-01-13/bunq-103000.db     43.2 MB   2024-01-13 10:30:00
+Found 3 backup(s)
+[
+  { "key": "backups/bunq-2024-01-15T10-30-00.db", "size": "45.20 MB", "date": "2024-01-15T10:30:00.000Z" },
+  { "key": "backups/bunq-2024-01-14T10-30-00.db", "size": "44.80 MB", "date": "2024-01-14T10:30:00.000Z" }
+]
 ```
 
 ### Restore Backup
 
 ```bash
 # Restore requires --force (-f) flag to confirm
-bunqueue backup restore backups/2024-01-14/bunq-103000.db --force
+# (stop the server first: restore overwrites the current database)
+bunqueue backup restore backups/bunq-2024-01-14T10-30-00.db --force
 ```
 
 **Output:**
 ```
 Restore completed successfully
+{
+  "key": "backups/bunq-2024-01-14T10-30-00.db",
+  "size": "44.80 MB",
+  "duration": "1800ms"
+}
 ```
 
 ### Backup Status
@@ -876,15 +830,14 @@ bunqueue backup status
 
 **Output:**
 ```
-S3 Backup Configuration
-=======================
-Enabled: true
-Bucket: my-backups
-Region: us-east-1
-Interval: 6 hours
-Retention: 7 backups
-Last backup: 2024-01-15 10:30:00
-Next backup: 2024-01-15 16:30:00
+Backup configuration
+{
+  "enabled": true,
+  "bucket": "my-backups",
+  "endpoint": null,
+  "interval": "360 minutes",
+  "retention": "7 backups"
+}
 ```
 
 ---
@@ -896,9 +849,16 @@ Next backup: 2024-01-15 16:30:00
 | `--host` | `-H` | Server hostname | `localhost` |
 | `--port` | `-p` | TCP port | `6789` |
 | `--token` | `-t` | Authentication token (env: `BQ_TOKEN`, `BUNQUEUE_TOKEN`) | - |
+| `--tls` | - | Connect with TLS (verify with system CAs) | `false` |
+| `--tls-ca <file>` | - | Trust a custom CA cert (implies `--tls`) | - |
+| `--tls-no-verify` | - | TLS without cert verification (self-signed, dev only) | `false` |
 | `--json` | - | Output as JSON | `false` |
 | `--help` | - | Show help | - |
 | `--version` | - | Show version | - |
+
+:::note
+Two subcommands define their own short `-t` (`--timeout`): `pull` and `job wait`. After those commands, `-t` means timeout; use the long `--token` form there.
+:::
 
 ### Authentication
 
@@ -919,7 +879,7 @@ Priority: `--token` flag > `BQ_TOKEN` > `BUNQUEUE_TOKEN`.
 All commands support JSON output for scripting:
 
 ```bash
-bunqueue stats --json | jq '.jobs.waiting'
+bunqueue stats --json | jq '.stats.waiting'
 ```
 
 **Output:**
@@ -927,9 +887,11 @@ bunqueue stats --json | jq '.jobs.waiting'
 234
 ```
 
+The `--json` flag prints the raw server response (`{ "ok": true, ... }`), so nest your `jq` path under the response field (`.stats`, `.jobs`, `.counts`, ...).
+
 ```bash
 # Use in scripts
-WAITING=$(bunqueue queue jobs emails --state waiting --json | jq 'length')
+WAITING=$(bunqueue queue jobs emails --state waiting --json | jq '.jobs | length')
 if [ "$WAITING" -gt 1000 ]; then
   echo "Warning: Queue backlog detected"
 fi
@@ -942,9 +904,9 @@ fi
 ### Process Jobs Manually
 
 ```bash
-# 1. Pull a job
+# 1. Pull a job (response shape: { "ok": true, "job": { ... } })
 JOB=$(bunqueue pull emails --json)
-JOB_ID=$(echo $JOB | jq -r '.id')
+JOB_ID=$(echo $JOB | jq -r '.job.id')
 
 # 2. Process it (your logic here)
 echo "Processing job $JOB_ID..."
@@ -960,7 +922,7 @@ bunqueue ack $JOB_ID --result '{"processed":true}'
 # monitor.sh - Alert if queue backlog grows
 
 THRESHOLD=1000
-WAITING=$(bunqueue queue jobs emails --state waiting --json | jq 'length')
+WAITING=$(bunqueue queue jobs emails --state waiting --json | jq '.jobs | length')
 
 if [ "$WAITING" -gt "$THRESHOLD" ]; then
   echo "ALERT: emails queue has $WAITING waiting jobs"

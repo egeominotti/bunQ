@@ -81,6 +81,7 @@ head:
 | [Persistence](/architecture/persistence/) | SQLite configuration, write buffering, servers |
 | [Data Structures](/architecture/data-structures/) | Core algorithms and complexities |
 | [TCP Protocol](/architecture/tcp-protocol/) | Wire format and commands |
+| [Cron Scheduler](/architecture/cron-scheduler/) | Event-driven scheduling, timezone support, persistence |
 
 ## Key Design Decisions
 
@@ -91,7 +92,7 @@ Jobs are distributed across N independent shards (auto-detected from CPU cores) 
 ```
 SHARD_COUNT = calculateShardCount()  // Power of 2, based on CPU cores, max 64
 SHARD_MASK = SHARD_COUNT - 1
-shardIndex = fnv1aHash(queueName) & SHARD_MASK
+shardIndex = fnv1a(queueName) & SHARD_MASK  // src/shared/hash.ts
 
 // Examples: 4 cores → 4 shards, 10 cores → 16 shards, 64+ cores → 64 shards
 ```
@@ -152,7 +153,7 @@ Acquire in order to prevent deadlocks:
 | Collection | Limit | Eviction |
 |------------|-------|----------|
 | completedJobs | 50,000 | FIFO batch |
-| jobResults | 5,000 | LRU |
+| jobResults | 10,000 | LRU |
 | jobLogs | 10,000 | LRU |
 | customIdMap | 50,000 | LRU |
 | DLQ per queue | 10,000 | FIFO |
@@ -173,4 +174,5 @@ Acquire in order to prevent deadlocks:
 - [TCP Protocol Architecture](/architecture/tcp-protocol/) - Binary protocol and commands
 - [SQLite Persistence Layer](/architecture/persistence/) - Write buffer and WAL mode
 - [Core Data Structures](/architecture/data-structures/) - Skip lists, heaps, and LRU caches
+- [Cron Scheduler](/architecture/cron-scheduler/) - Event-driven scheduling internals
 :::

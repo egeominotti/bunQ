@@ -53,7 +53,8 @@ function getFreePort(): number {
   throw new Error('no free port found');
 }
 
-async function waitPort(port: number, timeoutMs = 15000): Promise<void> {
+// 60s: CI runners cold-start the real server binary much slower than a dev machine
+async function waitPort(port: number, timeoutMs = 60000): Promise<void> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -217,7 +218,7 @@ describe('UPGRADE/RESTART — graceful restart continuity', () => {
       await c.send({ cmd: 'ACK', id: job.id });
     }
     expect(drained.size).toBe(N);
-  }, 40000);
+  }, 150000);
 
   it('U2: waiting + completed(+result) + paused + DLQ state all round-trip through a graceful restart', async () => {
     const db = join(tmpdir(), `bunq-u2-${process.pid}-${randomPort()}.db`);
@@ -283,7 +284,7 @@ describe('UPGRADE/RESTART — graceful restart continuity', () => {
     expect((dlq.jobs as unknown[]).some((j) => String((j as { id: string }).id) === dlqId)).toBe(
       true
     );
-  }, 40000);
+  }, 150000);
 
   it('U3: rolling restart — 8 graceful restart cycles amid durable pushes lose nothing cumulatively', async () => {
     const CYCLES = Number(process.env.ROLLING_CYCLES ?? 8);
@@ -352,5 +353,5 @@ describe('UPGRADE/RESTART — graceful restart continuity', () => {
     }
     // No permanent orphan: every not-yet-completed job was drainable.
     expect(drained.size).toBe(remaining.size);
-  }, 90000);
+  }, 240000);
 });

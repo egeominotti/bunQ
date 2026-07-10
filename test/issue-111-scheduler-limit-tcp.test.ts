@@ -16,7 +16,8 @@ const DB = join(tmpdir(), `bunq-111-tcp-${process.pid}.db`);
 // biome-ignore lint/suspicious/noExplicitAny: Bun.Subprocess
 let proc: any;
 
-async function waitPort(port: number, timeoutMs = 15000) {
+// 60s: CI runners cold-start the real server binary much slower than a dev machine
+async function waitPort(port: number, timeoutMs = 60000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -53,7 +54,7 @@ describe('Issue #111 over TCP: scheduler limit', () => {
       stderr: 'ignore',
     });
     await waitPort(PORT);
-  });
+  }, 70000);
 
   afterAll(async () => {
     proc?.kill();

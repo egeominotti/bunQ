@@ -31,7 +31,8 @@ const DB = join(tmpdir(), `bunq-mtd-tcp-${process.pid}.db`);
 // biome-ignore lint/suspicious/noExplicitAny: Bun.Subprocess
 let proc: any;
 
-async function waitPort(port: number, timeoutMs = 15000) {
+// 60s: CI runners cold-start the real server binary much slower than a dev machine
+async function waitPort(port: number, timeoutMs = 60000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -68,7 +69,7 @@ describe('REPRO: moveToDelayed over TCP', () => {
       stderr: 'ignore',
     });
     await waitPort(PORT);
-  });
+  }, 70000);
 
   afterAll(async () => {
     proc?.kill();
@@ -86,7 +87,7 @@ describe('REPRO: moveToDelayed over TCP', () => {
 
     expect(await q.getJobState(job.id)).toBe('delayed'); // RED: stays 'waiting'
     await q.close();
-  });
+  }, 45000);
 
   test('moveJobToDelayed on an ACTIVE job delays it, not re-queues as waiting (TCP)', async () => {
     const q = new Queue('mtd-active', { connection: { host: '127.0.0.1', port: PORT }, embedded: false });
@@ -120,5 +121,5 @@ describe('REPRO: moveToDelayed over TCP', () => {
 
     // RED: state comes back 'waiting' (delay dropped → NaN runAt) instead of 'delayed'.
     expect(state).toBe('delayed');
-  });
+  }, 45000);
 });

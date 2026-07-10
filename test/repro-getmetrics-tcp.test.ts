@@ -26,7 +26,8 @@ const DB = join(tmpdir(), `bunq-getmetrics-tcp-${process.pid}.db`);
 // biome-ignore lint/suspicious/noExplicitAny: Bun.Subprocess
 let proc: any;
 
-async function waitPort(port: number, timeoutMs = 15000) {
+// 60s: CI runners cold-start the real server binary much slower than a dev machine
+async function waitPort(port: number, timeoutMs = 60000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -64,7 +65,7 @@ describe('REPRO: getMetrics over TCP returns 0', () => {
     });
     await waitPort(PORT);
     await waitPort(HTTP);
-  });
+  }, 130000);
 
   afterAll(async () => {
     proc?.kill();

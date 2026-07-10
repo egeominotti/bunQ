@@ -57,7 +57,8 @@ function getFreePort(): number {
   throw new Error('no free port found');
 }
 
-async function waitPort(port: number, timeoutMs = 15000): Promise<void> {
+// 60s: CI runners cold-start the real server binary much slower than a dev machine
+async function waitPort(port: number, timeoutMs = 60000): Promise<void> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
@@ -224,7 +225,7 @@ describe('CRASH-RECOVERY — durable jobs survive SIGKILL', () => {
       (cnt.active ?? 0) +
       (cnt.paused ?? 0);
     expect(total).toBe(allIds.length);
-  }, 60000);
+  }, 150000); // 4 server spawns, budget ~15s cold-start each plus churn
 
   it('CR2: an ACKed durable job stays completed across SIGKILL (no silent re-run)', async () => {
     const db = join(tmpdir(), `bunq-cr2-${process.pid}-${randomPort()}.db`);
@@ -259,7 +260,7 @@ describe('CRASH-RECOVERY — durable jobs survive SIGKILL', () => {
     // The job must NOT be re-queued as waiting — it stays completed.
     const st = await stateOf(c, QUEUE, id);
     expect(st).toBe('completed');
-  }, 40000);
+  }, 150000);
 
   it('CR3: crash amid a produce/consume churn loses no durable job; flushed completions persist', async () => {
     const db = join(tmpdir(), `bunq-cr3-${process.pid}-${randomPort()}.db`);
@@ -330,7 +331,7 @@ describe('CRASH-RECOVERY — durable jobs survive SIGKILL', () => {
     }
     // Everything that wasn't already completed drains cleanly post-recovery.
     expect(drained.size + completedBeforeCrash.length).toBeGreaterThanOrEqual(M);
-  }, 60000);
+  }, 150000); // 2 server spawns, aligned with the other 2-spawn tests in this file
 });
 
 describe('CRASH-RECOVERY — control-state & DLQ persist across SIGKILL', () => {
@@ -380,7 +381,7 @@ describe('CRASH-RECOVERY — control-state & DLQ persist across SIGKILL', () => 
       await c.send({ cmd: 'ACK', id: job.id, token: p.token as string });
     }
     expect(drained.size).toBe(ids.length);
-  }, 40000);
+  }, 150000);
 
   it('CR5: a job failed into the DLQ survives a crash (still in DLQ after restart)', async () => {
     const db = join(tmpdir(), `bunq-cr5-${process.pid}-${randomPort()}.db`);
@@ -424,7 +425,7 @@ describe('CRASH-RECOVERY — control-state & DLQ persist across SIGKILL', () => 
     const st = await stateOf(c, QUEUE, id);
     expect(['waiting', 'prioritized', 'delayed', 'active']).not.toContain(st);
     expect(st).not.toBe('unknown');
-  }, 40000);
+  }, 150000);
 
   it('CR6: a durable job ACTIVE at crash time is recovered (attempts incremented) and re-runnable — no orphan, no loss', async () => {
     const db = join(tmpdir(), `bunq-cr6-${process.pid}-${randomPort()}.db`);
@@ -464,7 +465,7 @@ describe('CRASH-RECOVERY — control-state & DLQ persist across SIGKILL', () => 
     const ack = await c.send({ cmd: 'ACK', id, token: (repull as { token?: string }).token });
     expect(ack.ok).toBe(true);
     expect(await stateOf(c, QUEUE, id)).toBe('completed');
-  }, 40000);
+  }, 150000);
 
   it('CR7: crash fuzzing — CRASH_CYCLES kill/restart cycles amid durable pushes lose nothing cumulatively', async () => {
     const CYCLES = Number(process.env.CRASH_CYCLES ?? 12);
@@ -518,7 +519,7 @@ describe('CRASH-RECOVERY — control-state & DLQ persist across SIGKILL', () => 
       drained.add(job.id);
     }
     expect(drained.size).toBe(allIds.length);
-  }, 90000);
+  }, 360000); // 13 server spawns (1 + CRASH_CYCLES=12 restarts), ~25s budget each
 });
 
 async function stateOf(c: TcpClient, queue: string, id: string): Promise<string> {

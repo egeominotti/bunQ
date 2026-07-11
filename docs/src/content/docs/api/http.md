@@ -273,7 +273,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs/bulk \
   }'
 ```
 
-Each item in `jobs` supports all the same fields as a single push. The operation is **atomic**, either all jobs are pushed or none are (if validation fails for any job).
+Each item in `jobs` supports all the same fields as a single push and is validated with the same rules (option bounds and `dependsOn` existence; a `dependsOn` entry may also reference the `customId` of an earlier job in the same batch). The operation is **atomic**, either all jobs are pushed or none are: if validation fails for any job, the whole batch is rejected with an error naming the offending index (`jobs[i]: ...`).
 
 **Response** (`200`):
 
@@ -361,7 +361,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs/pull-batch \
 | Field | Type | Required | Range | Description |
 |---|---|---|---|---|
 | `count` | `number` | Yes | 1-1000 | Number of jobs to pull |
-| `timeout` | `number` | No | - | Long-poll timeout (ms). Honored only when `owner` is set; without `owner` the batch returns immediately. |
+| `timeout` | `number` | No | 0-60000 | Long-poll timeout (ms), honored with or without `owner`. Default 0 (return immediately). |
 | `owner` | `string` | No | - | Lock owner identifier for lock-based processing |
 | `lockTtl` | `number` | No | - | Lock time-to-live (ms). Job is released if lock expires without ACK. |
 

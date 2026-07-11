@@ -2,6 +2,16 @@
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.32] - 2026-07-11
+
+### Fixed — permanent concurrency-slot leak in moveJobToDelayed/discardJob
+
+With `setConcurrency(N)`, claiming an ACTIVE job via `moveJobToDelayed` (the BullMQ "retry later" processor pattern) or `discardJob` removed it from processing without releasing the slot; no reconciliation exists, so N claims wedged the queue forever (only `clearConcurrency` unwedged). Both paths now release inside the shard-lock section mirroring ack/fail/moveActiveToWait semantics (uniqueKey freed on DLQ entry like the fail path). Bonus: discarding a WAITING job now frees its uniqueKey (re-adds no longer dedup against the DLQ'd id). Repro: `test/repro-slot-release-claim-paths.test.ts`.
+
+### Fixed — three #111-class option drops
+
+`TcpConnectionPool` now forwards `maxInFlight`/`pipelining` (and keys pools by them); `PUSHB` runs the same validation as `PUSH` (options bounds + dependsOn existence, order-independent for intra-batch chains, self-references rejected; &lt;0.5% batch cost); non-owner `PULLB` honors its `timeout` like `PULL` (no more silent busy-polling with `useLocks: false`). Two suspected siblings were REFUTED by testing first (rate-limit tokens self-heal; `getJobByCustomId` already covered by the 2.8.31 atomic transition, proven RED on the pre-fix commit). Repro: `test/repro-option-drop-class.test.ts`; refuted paths keep regression tests.
+
 ## [2.8.31] - 2026-07-10
 
 ### Fixed — getJob/GetState false null during the pull transition window

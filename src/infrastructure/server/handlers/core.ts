@@ -14,6 +14,7 @@ import {
   validateJobOptions,
   validateNumericField,
 } from '../protocol';
+import { validatePushBatchJobs } from './pushBatchValidation';
 
 /** Handle PUSH command */
 export async function handlePush(
@@ -107,10 +108,10 @@ export async function handlePushBatch(
   const queueError = validateQueueName(cmd.queue);
   if (queueError) return resp.error(queueError, reqId);
 
-  for (const job of cmd.jobs) {
-    const dataError = validateJobData(job.data);
-    if (dataError) return resp.error(dataError, reqId);
-  }
+  // PUSH parity: per-job data/option bounds + dependsOn existence gate
+  // (extended to earlier same-batch custom ids for intra-batch chains).
+  const jobsError = validatePushBatchJobs(cmd.jobs, ctx);
+  if (jobsError) return resp.error(jobsError, reqId);
 
   const ids = await ctx.queueManager.pushBatch(cmd.queue, cmd.jobs);
   return resp.batch(ids, reqId);
@@ -165,6 +166,10 @@ export async function handlePullBatch(
   const countError = validateNumericField(cmd.count, 'count', { min: 1, max: 1000 });
   if (countError) return resp.error(countError, reqId);
 
+  // Validate timeout (same bound as PULL)
+  const timeoutError = validateNumericField(cmd.timeout, 'timeout', { min: 0, max: 60000 });
+  if (timeoutError) return resp.error(timeoutError, reqId);
+
   // If owner is provided, use lock-based pull
   if (cmd.owner) {
     const { jobs, tokens } = await ctx.queueManager.pullBatchWithLock(
@@ -183,8 +188,9 @@ export async function handlePullBatch(
     return resp.pulledJobs(jobs, tokens, reqId);
   }
 
-  // Standard pull (no locks, but still track for client release)
-  const jobs = await ctx.queueManager.pullBatch(cmd.queue, cmd.count, 0);
+  // Standard pull (no locks, but still track for client release) — the
+  // non-owner branch honors cmd.timeout exactly like the owner branch and PULL.
+  const jobs = await ctx.queueManager.pullBatch(cmd.queue, cmd.count, cmd.timeout ?? 0);
   if (ctx.clientId) {
     for (const job of jobs) {
       ctx.queueManager.registerClientJob(ctx.clientId, job.id);

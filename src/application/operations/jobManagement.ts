@@ -254,11 +254,19 @@ export async function moveJobToDelayed(
 
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
+    // Release the concurrency slot (+group+uniqueKey) acquired at pull before
+    // re-queueing, mirroring moveActiveToWait (jobStateTransitions.ts) --
+    // otherwise the slot leaks and setConcurrency(N) wedges after N moves.
+    // Dropping the uniqueKey reservation on requeue matches the sibling
+    // requeue paths (failJob retry, moveActiveToWait, requeueExpiredJob).
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
     shard.getQueue(job.queue).push(job);
     // Update running counters for O(1) stats and temporal index (job is delayed since delay > 0)
     const isDelayed = job.runAt > now;
     shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
+    // The freed slot may unblock waiting jobs for long-pollers.
+    shard.notify();
   });
 
   // Persist the move so the delay survives a restart: the on-disk row was
@@ -308,9 +316,28 @@ export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promi
   if (job) {
     const validJob = job; // Local reference for closure
     const idx = shardIndex(validJob.queue);
+    const fromProcessing = location.type === 'processing';
     const entry = await withWriteLock(ctx.shardLocks[idx], () => {
+      const shard = ctx.shards[idx];
+      if (fromProcessing) {
+        // The pull that activated this job acquired a concurrency slot (and
+        // possibly a FIFO group); return them before the DLQ move or the slot
+        // leaks and setConcurrency(N) wedges after N discards. The uniqueKey
+        // is freed too: every sibling terminal DLQ path releases the full
+        // reservation on entry (failJob, ack.ts; handleMaxStallsExceeded,
+        // lockManager.ts), so the DLQ entry never keeps it.
+        shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId);
+        // The freed slot may unblock waiting jobs for long-pollers.
+        shard.notify();
+      } else if (validJob.uniqueKey) {
+        // Queue branch: the waiting job never acquired a slot or group at
+        // pull, so a full releaseJobResources would free a slot legitimately
+        // held by ANOTHER active job. Release only the uniqueKey reservation,
+        // matching cancelJob and the DLQ-entry semantics above.
+        shard.releaseUniqueKey(validJob.queue, validJob.uniqueKey);
+      }
       // addToDlq already updates dlq counter and returns entry
-      const dlqEntry = ctx.shards[idx].addToDlq(validJob);
+      const dlqEntry = shard.addToDlq(validJob);
       ctx.jobIndex.set(jobId, { type: 'dlq', queueName: validJob.queue });
       return dlqEntry;
     });

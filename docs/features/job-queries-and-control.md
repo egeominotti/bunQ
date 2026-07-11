@@ -103,7 +103,7 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 
 - `cancelJob` → `EventType.Removed` with `prev: 'waiting'` (`jobManagement.ts:75`).
 - `updateJobProgress` → `progress` event + `job.progress` webhook (`jobManagement.ts:108`).
-- `moveJobToDelayed` → `EventType.Delayed` (`jobManagement.ts:272`).
+- `moveJobToDelayed` → `EventType.Delayed` (`jobManagement.ts:280`).
 - `QueueManager.pause`/`resume` wrap `pauseQueue`/`resumeQueue` and emit `EventType.Paused`/`EventType.Resumed` plus dashboard events `queue:paused`/`queue:resumed` (`queueManager.ts:836`).
 - Dashboard-only events from handlers: `job:priority-changed`, `job:promoted`, `job:discarded`, `job:data-updated`, `job:moved-to-delayed`, `queue:drained`, `queue:obliterated`, `queue:removed`, `queue:cleaned`.
 
@@ -158,11 +158,11 @@ On success emits `Removed`. Returns `false` for active/completed/DLQ jobs.
 
 ### moveJobToDelayed (`jobManagement.ts:227`)
 
-Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
+Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Inside the shard-lock section, before the re-push, it calls `shard.releaseJobResources(queue, uniqueKey, groupId)` and then `shard.notify()`, mirroring `moveActiveToWait`: the concurrency slot (+group+uniqueKey) acquired at pull is returned, otherwise `setConcurrency(N)` wedges after N moves (repro: `test/repro-slot-release-claim-paths.test.ts`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
 
-### discardJob (`jobManagement.ts:283`)
+### discardJob (`jobManagement.ts:291`)
 
-Removes the job from its run queue (with `decrementQueued`) or from the processing shard, then under the destination shard lock calls `addToDlq`, sets the index to `dlq`, persists the DLQ entry, and deletes the jobs-table row (`:318`).
+Removes the job from its run queue (with `decrementQueued`) or from the processing shard, then under the destination shard lock releases the job's reservations, calls `addToDlq`, sets the index to `dlq`, persists the DLQ entry, and deletes the jobs-table row. The release is branch-specific: a **processing** job returns the full set via `releaseJobResources` (concurrency slot + group + uniqueKey, matching the fail-to-DLQ paths in `failJob` and `handleMaxStallsExceeded`, which free the reservation on DLQ entry) followed by `shard.notify()`; a **queued** job only releases its `uniqueKey` (parity with `cancelJob`), because it never acquired a slot or group at pull and a full release would free a slot held by another active job.
 
 ### Queue control
 

@@ -267,6 +267,7 @@ Batch push multiple jobs to a queue.
     timeout?: number,
     uniqueKey?: string,
     customId?: string,
+    dependsOn?: string[],
     tags?: string[],
     groupId?: string,
     lifo?: boolean,
@@ -276,6 +277,8 @@ Batch push multiple jobs to a queue.
   }>
 }
 ```
+
+Each job is validated with the same rules as `PUSH` (option bounds and `dependsOn` existence). A `dependsOn` entry may also reference the `customId` of an earlier job in the same batch, so intra-batch chains work. On violation the whole batch is rejected with an error naming the offending index (`jobs[i]: ...`).
 
 **Response:**
 
@@ -329,7 +332,7 @@ Batch pull multiple jobs from a queue.
   cmd: 'PULLB',
   queue: string,
   count: number,       // Number of jobs to pull (1-1000)
-  timeout?: number,    // Long poll timeout in ms (honored only when owner is set)
+  timeout?: number,    // Long poll timeout in ms (0-60000, default: 0), with or without owner
   owner?: string,      // Client identifier for lock-based pull
   lockTtl?: number     // Lock TTL in ms (default: 30000)
 }

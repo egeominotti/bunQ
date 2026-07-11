@@ -192,14 +192,14 @@ All knobs come through `ConnectionOptions` / `PoolOptions` (programmatic; no env
 | `pingInterval` | 30000 ms (0 = off) | health ping cadence |
 | `maxPingFailures` | 3 | consecutive ping fails → reconnect |
 | `maxCommandTimeouts` | 3 (0 = off) | consecutive timeouts → reconnect (#94) |
-| `pipelining` | `true` | declared only; pipelining is always active (see caveat below) |
-| `maxInFlight` | 100 | pipelining window (not forwarded by the pool; see caveat below) |
+| `pipelining` | `true` | forwarded by the pool, but not read by the send path (see caveat below) |
+| `maxInFlight` | 100 | pipelining window per `TcpClient` (forwarded by the pool) |
 | `autoBatch.maxSize` / `maxDelayMs` / `enabled` | 50 / 5 ms / true (TCP) | `add()` coalescing |
 | `autoBatch.maxPending` | 10000 | batcher overflow bound |
 
-Caveats: the `pipelining` flag is declared and defaulted but never read by `TcpClient` (the reqId send path is unconditional, so pipelining is effectively always on). And `TcpConnectionPool` resolves `maxInFlight` into its own options but does not forward it to the `TcpClient`s it constructs (`tcpPool.ts:51`), so pooled connections always run with the default window of 100; a `maxInFlight` override takes effect only on a directly constructed `TcpClient`.
+Caveat: the `pipelining` flag is declared, defaulted, and forwarded, but never read by `TcpClient` (the reqId send path is unconditional, so pipelining is effectively always on). `TcpConnectionPool` forwards both `pipelining` and `maxInFlight` into every `TcpClient` it constructs (`tcpPool.ts:51`), so a `maxInFlight` override takes effect on pooled connections too.
 
-Shared pools are reused only when `poolSize === 4 && !token` for a Queue (`queue.ts:82`); otherwise a dedicated pool is created. Pool sharing key (`getPoolKey`, `tcpPool.ts:228`) includes host, port, poolSize, a 16-bit token hash, and the JSON-stringified TLS config so plaintext and TLS pools to the same target never alias.
+Shared pools are reused only when `poolSize === 4 && !token` for a Queue (`queue.ts:82`); otherwise a dedicated pool is created. Pool sharing key (`getPoolKey`, `tcpPool.ts:230`) includes host, port, poolSize, a 16-bit token hash, the JSON-stringified TLS config, and `pipelining`/`maxInFlight`, so plaintext and TLS pools to the same target never alias and Queues with different pipelining windows never share a pool.
 
 ## Related Docs
 

@@ -62,6 +62,8 @@ export class TcpConnectionPool {
         pingInterval: this.options.pingInterval,
         maxPingFailures: this.options.maxPingFailures,
         maxCommandTimeouts: this.options.maxCommandTimeouts,
+        pipelining: this.options.pipelining,
+        maxInFlight: this.options.maxInFlight,
       });
       // Socket-level errors (e.g. TLS handshake failures, protocol garbage) are
       // emitted as 'error' events; without a listener EventEmitter would throw
@@ -235,7 +237,12 @@ function getPoolKey(options?: PoolOptions): string {
   // TLS config must differentiate pools too: a TLS pool and a plaintext pool
   // to the same host:port are NOT interchangeable.
   const tlsKey = options?.tls ? JSON.stringify(options.tls) : '0';
-  return `${host}:${port}:${poolSize}:${tokenHash}:${tlsKey}`;
+  // pipelining/maxInFlight shape per-connection behavior: without them in the
+  // key, two Queues with different windows would silently share whichever
+  // pool was created first.
+  const pipelining = (options?.pipelining ?? true) ? '1' : '0';
+  const maxInFlight = options?.maxInFlight ?? 100;
+  return `${host}:${port}:${poolSize}:${tokenHash}:${tlsKey}:${pipelining}:${maxInFlight}`;
 }
 
 /** Get or create shared connection pool */

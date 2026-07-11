@@ -21,7 +21,7 @@ Does NOT own (delegated):
 - Actual enqueue/dequeue/ack/fail, persistence, sharding — owned by [Core Queue Engine](./core-queue-engine.md) and [Job Lifecycle](./job-lifecycle.md) via `Queue`/`Worker`.
 - Cron/scheduler semantics — `cron`/`every`/`removeCron`/`listCrons` delegate to `Queue.upsertJobScheduler` / `removeJobScheduler` / `getJobSchedulers` ([Scheduler & Cron](./scheduler-and-cron.md)).
 - DLQ storage and rate limiting — `DlqRateLimitManager` is a pure mixin over `Queue` methods ([Dead Letter Queue](./dead-letter-queue.md), [Rate Limiting & Concurrency](./rate-limiting-and-concurrency.md)).
-- Deduplication/debounce enforcement — `DedupDebounceMerger` only injects `JobOptions.deduplication`/`debounce`; the server enforces them ([Deduplication & Unique Jobs](./deduplication-and-unique.md)).
+- Deduplication/debounce enforcement — `DedupDebounceMerger` only injects `JobOptions.deduplication`/`debounce`. The server enforces deduplication (via `uniqueKey`, [Deduplication & Unique Jobs](./deduplication-and-unique.md)); debounce travels only as job metadata (`debounceId`/`debounceTtl`) and is not enforced anywhere server-side.
 - Worker-level event emission — `on`/`once`/`off` forward straight to `Worker` ([Webhooks, Events & Job Logs](./webhooks-and-events.md)).
 
 ## Dependencies
@@ -58,8 +58,8 @@ class Bunqueue<T = unknown, R = unknown> {
   getJob(id: string): Promise<Job<T> | null>;
   getJobCounts(); getJobCountsAsync(); count(); countAsync();
 
-  cron(id: string, pattern: string, data?: T, opts?: { timezone?: string; jobOpts?: JobOptions }): Promise<SchedulerInfo | null>;
-  every(id: string, intervalMs: number, data?: T, opts?: { jobOpts?: JobOptions }): Promise<SchedulerInfo | null>;
+  cron(id: string, pattern: string, data?: T, opts?: { timezone?: string; limit?: number; jobOpts?: JobOptions }): Promise<SchedulerInfo | null>;
+  every(id: string, intervalMs: number, data?: T, opts?: { limit?: number; jobOpts?: JobOptions }): Promise<SchedulerInfo | null>;
   removeCron(id: string); listCrons();
 
   cancel(jobId: string, gracePeriodMs?: number): void;
@@ -143,7 +143,7 @@ All option shapes live in `src/client/bunqueue/types.ts`. See [data-model](../da
 
 **Middleware onion** (`runMiddlewareChain`, `src/client/bunqueue.ts:176-192`): with zero middlewares, the base processor runs directly. Otherwise `next()` walks `middlewares[0..n)` then the base processor, forming `mw1 → mw2 → … → base → … → mw2 → mw1`. Before each step `next()` checks `ac.signal.aborted` and rejects with `Job cancelled` (`:186`).
 
-**In-process retry** (`executeWithRetry`, `retry.ts:50-71`): re-invokes the chain up to `maxAttempts`. On failure, if `retryIf` returns false it rethrows immediately; otherwise it sleeps `calculateBackoff(...)` and retries. Backoff strategies (`retry.ts:7-47`): `fixed`, `exponential` (`base·2^(n-1)`), `jitter` (`exp·(0.5+random)`), `fibonacci` (`base·fib(n)`), `custom` (`customBackoff(attempt, error)`, falls back to base if absent).
+**In-process retry** (`executeWithRetry`, `retry.ts:50-71`): re-invokes the chain up to `maxAttempts`. On failure, if `retryIf` returns false it rethrows immediately; otherwise it sleeps `calculateBackoff(...)` and retries. Backoff strategies (`retry.ts:7-47`): `fixed`, `exponential` (`base·2^(n-1)`), `jitter` (`exp·(0.5+random)`, factor 0.5-1.5), `fibonacci` (base times the sequence 1, 2, 3, 5, 8, … for attempts 1, 2, 3, …), `custom` (`customBackoff(attempt, error)`, falls back to base if absent).
 
 **Circuit breaker** (`circuitBreaker.ts`): `onFailure` increments a consecutive-failure counter; once `failures >= threshold` (or any failure while `half-open`) it calls `open()` (`:38-45`). `open()` sets state `open`, fires `onOpen`, **pauses the Worker**, and schedules a `resetTimeout` timer that flips to `half-open`, fires `onHalfOpen`, and **resumes the Worker** (`:47-59`). The next success in `half-open` closes the circuit (`:28-36`). `reset()` clears state/timer and resumes the worker if paused (`:61-71`).
 
@@ -173,7 +173,7 @@ This module holds no shard locks; all locking happens inside `Queue`/`Worker`/`Q
 - **Circuit open pauses the whole worker.** While open, no jobs of any name are processed until `resetTimeout` elapses. A single failure during `half-open` re-opens immediately.
 - **Route miss throws.** Unrouted job names throw synchronously inside the processor and become job failures, not silent drops (`bunqueue.ts:113`).
 - **Batch result alignment is positional.** If the batch `processor` returns fewer results than jobs (or reorders), jobs receive the wrong/`undefined` result; a thrown error rejects every job in the batch. Buffered-but-not-flushed jobs are flushed on `close()`, but jobs still in the worker's poll loop are not part of `BatchAccumulator`.
-- **Dedup default key uses `JSON.stringify(data)`.** Non-deterministic key ordering or unstringifiable data affects the dedup id; debounce id is just the job `name`, so all jobs of one name share a debounce window.
+- **Dedup default key uses `JSON.stringify(data)`.** Non-deterministic key ordering or unstringifiable data affects the dedup id. The injected debounce id is just the job `name`, but note that `debounce` is currently metadata-only: the server stores `debounceId`/`debounceTtl` on the job and returns them in job views, with no suppression logic attached.
 - **Trigger errors are unobserved.** `fire()` calls `void this.queue.add(...)` with no catch; a failed trigger enqueue is dropped silently. Triggers also only attach after the first `trigger()` call.
 - **Priority aging is best-effort.** `changeJobPriority` failures are swallowed; aging only scans the first `maxScan` waiting + prioritized jobs per tick, so deep backlogs age slowly.
 - **`pause()`/`resume()` act on both** the queue and the worker (`bunqueue.ts:362-369`); the circuit breaker also calls `worker.pause()/resume()` directly, so an externally-paused worker can be resumed by a circuit half-open transition.

@@ -104,7 +104,7 @@ Events emitted (via `queueManager.emitDashboardEvent`):
 1. `resolveServerConfig` pulls `tlsCertFile`/`tlsKeyFile` from `TLS_CERT_FILE`/`TLS_KEY_FILE` (config file wins) — `resolve.ts:41-42`.
 2. `resolveTlsServerOptions` returns `null` when neither is set, and **throws** when exactly one is set (`resolve.ts:71-82`). The bootstrap catches this and `process.exit(1)` before any listener binds (`bootstrap.ts:88-93`) — TLS is all-or-nothing.
 3. When TLS is configured, the resolved `{ certFile, keyFile }` is passed identically to both `createTcpServer` and `createHttpServer` (`bootstrap.ts:106-121`).
-4. Each server calls `loadTlsOptions` **before** binding (`http.ts:250`, `tcp.ts:330`). `loadTlsOptions` does an `existsSync` check on each path and throws a descriptive error on a missing file (`tls.ts:23-28`), then returns `{ cert: Bun.file(...), key: Bun.file(...) }` which is spread into the `tls` option (`tcp.ts:334`, `http.ts:255`/`263`). Validating before bind avoids a half-started listener on a bad path.
+4. Each server calls `loadTlsOptions` **before** binding (`http.ts:250`, `tcp.ts:352`). `loadTlsOptions` does an `existsSync` check on each path and throws a descriptive error on a missing file (`tls.ts:23-28`), then returns `{ cert: Bun.file(...), key: Bun.file(...) }` which is spread into the `tls` option (`tcp.ts:356`, `http.ts:255`/`263`). Validating before bind avoids a half-started listener on a bad path.
 5. **Per-socket init is lazy and idempotent** (`initConnection`, `tcp.ts`). Under native TLS, Bun can deliver a `data` event **before** `open` runs; the handler previously destructured a null `socket.data`, and the resulting `TypeError` escalated to the process-level unhandledRejection handler — a single unauthenticated connection to the TLS port could shut the whole server down (pre-auth remote DoS, #108). `initConnection` runs from both `open` and lazily from `data` (guarded by `if (socket.data) return`), preserving that first frame; `close`/`drain` early-return when `socket.data` is absent.
 
 ### Client TLS
@@ -123,7 +123,7 @@ Events emitted (via `queueManager.emitDashboardEvent`):
 
 ### TCP auth gate
 
-On `open`, `authenticated` is initialized to `authTokens.size === 0` — i.e. auto-authenticated when no tokens are configured (`tcp.ts:178-179`). In `handleCommand` (`handler.ts:48-60`): `Auth` is always routed to `handleAuth`; any other command is rejected with `error('Not authenticated')` when tokens exist and the connection is not yet authenticated. `handleAuth` (`handler.ts:30-43`) compares the supplied token against each configured token with `constantTimeEqual`, sets `ctx.authenticated = true` on the first match, and emits `auth:failed` otherwise.
+On `open`, `authenticated` is initialized to `authTokens.size === 0` — i.e. auto-authenticated when no tokens are configured (`initConnection`, `tcp.ts:189`). In `handleCommand` (`handler.ts:48-60`): `Auth` is always routed to `handleAuth`; any other command is rejected with `error('Not authenticated')` when tokens exist and the connection is not yet authenticated. `handleAuth` (`handler.ts:30-43`) compares the supplied token against each configured token with `constantTimeEqual`, sets `ctx.authenticated = true` on the first match, and emits `auth:failed` otherwise.
 
 ### CORS
 
@@ -131,7 +131,7 @@ On `open`, `authenticated` is initialized to `authTokens.size === 0` — i.e. au
 
 ### Webhook SSRF validation
 
-`validateWebhookUrl` (`webhookValidation.ts:42-67`) rejects, returning an error string (else `null`): empty/`>2048` chars; unparseable URL; non-`http(s)` protocol; localhost variants (`localhost`, `127.0.0.1`, `::1`, `[::1]`, `*.localhost`); private/loopback/link-local/unspecified IPv4 (10/8, 172.16–31/12, 192.168/16, 169.254, 127, 0; `checkPrivateIpv4`); and cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `*.internal`). `WebhookManager.add` calls it unless `validateUrls` is disabled (`webhookManager.ts:53-58`); the TCP `AddWebhook` handler calls it directly (`handlers/monitoring.ts:225`).
+`validateWebhookUrl` (`webhookValidation.ts:93-131`) rejects, returning an error string (else `null`): empty/`>2048` chars; unparseable URL; non-`http(s)` protocol; localhost variants (`localhost`, `127.0.0.1`, `::1`, `[::1]`, `*.localhost`); private/loopback/link-local/unspecified IPv4 (10/8, 172.16–31/12, 192.168/16, 169.254, 127, 0; `checkPrivateIpv4`); IPv4-mapped/IPv4-compatible IPv6 literals (`[::ffff:a.b.c.d]` and the WHATWG hex-normalized `[::ffff:XXXX:YYYY]` form are unwrapped to the embedded IPv4 and run through the same octet check, `extractMappedIpv4`); IPv6 ULA `fc00::/7`, link-local `fe80::/10`, and `::` unspecified (`checkBlockedIpv6`); and cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `*.internal`). `WebhookManager.add` calls it unless `validateUrls` is disabled (`webhookManager.ts:53-58`); the TCP `AddWebhook` handler calls it directly (`handlers/monitoring.ts:225`).
 
 ### Webhook & Cloud HMAC signing
 
@@ -151,7 +151,7 @@ No queue locks are taken in this module. The only per-connection mutable securit
 - **Token compare is O(validTokens):** every check loops all configured tokens; intended for small token lists.
 - **Webhook delivery:** fire-and-forget with up to `WEBHOOK_MAX_RETRIES` attempts (default 3), linear backoff `WEBHOOK_RETRY_DELAY_MS * (attempt+1)` (default 1000ms), and a 10s per-request `AbortSignal.timeout` (`webhookManager.ts:142-171`). Signature is computed once and reused across retries.
 - **Cloud signing:** signs the post-compression body; the receiver must verify over the same compressed bytes. On `401`/`403` the error is logged loudly rather than silently buffered (`httpSender.ts:122-128`).
-- **SSRF validator is hostname-string based:** it does not resolve DNS, so a public hostname that resolves to a private IP (DNS rebinding) is not caught; only literal private/loopback/metadata hosts and the listed protocols are blocked.
+- **SSRF validator is hostname-string based:** it does not resolve DNS, so a public hostname that resolves to a private IP (DNS rebinding) is not caught; only literal private/loopback/metadata hosts (IPv4 and the IPv6 literal forms listed above) and the listed protocols are blocked.
 
 ## Configuration
 

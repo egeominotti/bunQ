@@ -93,15 +93,15 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 ## Business Logic / Control Flow
 
-### PUSH (`pushJob`, `push.ts:223`)
+### PUSH (`pushJob`, `push.ts:251`)
 
 1. Compute `idx = shardIndex(queue)`; take `shardLocks[idx]` (write).
-2. **customId idempotency** (`handleCustomId`, `push.ts:58`): if `input.customId` maps to a job still in the queue, skip and return the existing job. On reuse where the prior job COMPLETED, the surviving completed row is evicted from `completedJobs`/`completedJobsData`/`jobResults`/`jobIndex` and disk (`push.ts:84`) so the recycled id starts fresh as `waiting` (#92); any stale timeout marker is cleared (`push.ts:96`) to avoid resurrecting the #33/#75 duplicate-execution guard.
+2. **customId idempotency** (`handleCustomId`, `push.ts:61`): if `input.customId` maps to a job still in the queue, skip and return the existing job. On reuse where the prior job COMPLETED, the surviving completed row is evicted from `completedJobs`/`completedJobsData`/`jobResults`/`jobIndex` and disk (`push.ts:105`) so the recycled id starts fresh as `waiting` (#92); any stale timeout marker is cleared (`push.ts:124`) to avoid resurrecting the #33/#75 duplicate-execution guard.
 3. `createJob(id, queue, input, now)`.
-4. **Deduplication** (`handleDeduplication`, `push.ts:105`): only if `job.uniqueKey` is set. Strategies — `replace` (remove old, register new), `extend` (reset TTL, return existing), default BullMQ-style (return existing if it is still waiting or active; broadcast `Duplicated`). If the existing job is completed/failed, a fresh insert is allowed.
-5. **Insert** (`insertJobToShard`, `push.ts:183`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), the job goes to `shard.waitingDeps` and dependencies are registered (timeline `waiting-children`). Otherwise it is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
+4. **Deduplication** (`handleDeduplication`, `push.ts:133`): only if `job.uniqueKey` is set. Strategies — `replace` (remove old, register new), `extend` (reset TTL, return existing), default BullMQ-style (return existing if it is still waiting or active; broadcast `Duplicated`). If the existing job is completed/failed, a fresh insert is allowed.
+5. **Insert** (`insertJobToShard`, `push.ts:211`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), the job goes to `shard.waitingDeps` and dependencies are registered (timeline `waiting-children`). Otherwise it is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
 6. `shard.notify()` wakes one long-poll waiter.
-7. After the lock: persist via `storage.insertJob(job, input.durable)`, bump counters, broadcast `pushed`. **Durable** jobs bypass the 10 ms write buffer (immediate write); `pushJobBatch` (`push.ts:286`) splits durable jobs into a separate `insertJobsBatch(durableJobs, true)` so `addBulk` does not silently downgrade the durability guarantee (`push.ts:333`).
+7. After the lock: persist via `storage.insertJob(job, input.durable)`, bump counters, broadcast `pushed`. **Durable** jobs bypass the 10 ms write buffer (immediate write); `pushJobBatch` (`push.ts:323`) splits durable jobs into a separate `insertJobsBatch(durableJobs, true)` so `addBulk` does not silently downgrade the durability guarantee (`push.ts:384`).
 
 ### PULL (`pullJob`, `pull.ts:210`)
 
@@ -120,7 +120,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 1. Under `processingLocks[procIdx]`, remove the job from `processingShards`; if absent, **throw** `Job not found or not in processing state` (the `QueueManager` catches this to recover stall-retried jobs — see Edge Cases).
 2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId)` (frees concurrency slot, uniqueKey, group).
 3. Release `customId` from `customIdMap` so it can be reused.
-4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add to `completedJobs` + `completedJobsData`, store result in `jobResults` and `storage.storeResult` (only if `result !== undefined`), set `jobIndex` to `completed`, `storage.markCompleted`. If `removeOnComplete`: delete from `jobIndex`, `storage.deleteJob`, and record a bare id in `depCompletions` so dependents still unblock without the job surfacing in queries (`ack.ts:115`).
+4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add to `completedJobs` + `completedJobsData`, store result in `jobResults` and `storage.storeResult` (only if `result !== undefined`), set `jobIndex` to `completed`, `storage.markCompleted`. If `removeOnComplete`: delete from `jobIndex`, `storage.deleteJob`, and record a bare id in `depCompletions` so dependents still unblock without the job surfacing in queries (`ack.ts:122`).
 5. Bump counters, broadcast `completed`, call `onJobCompleted` (dependency processing), and re-schedule repeatable jobs via `onRepeat` if under `repeat.limit`.
 
 ### FAIL (`failJob`, `ack.ts:193`)
@@ -142,7 +142,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 ### Manual transitions (`jobStateTransitions.ts`)
 
-`moveActiveToWait` (`:16`): processing → queue (`runAt = now`, `startedAt = null`, release resources, push, broadcast `waiting` prev `active`). `changeWaitingDelay` (`:59`): updates `runAt` of an in-queue job via `q.updateRunAt`. `moveToWaitingChildren` (`:81`): processing → `shard.waitingChildren` (release resources; jobIndex stays `queue`-typed).
+`moveActiveToWait` (`:16`): processing → queue (`runAt = now`, `startedAt = null`, release resources, push, broadcast `waiting` prev `active`). `changeWaitingDelay` (`:59`): updates `runAt` of an in-queue job via `q.updateRunAt`. `moveToWaitingChildren` (`:84`): processing → `shard.waitingChildren` (release resources; jobIndex stays `queue`-typed).
 
 ## Concurrency & Locking
 
@@ -159,7 +159,7 @@ Lock-token verification, the **#101 grace window** (`isExpiredButOwned`: an expi
 ## Edge Cases & Failure Modes
 
 - **Idempotent push**: a queued `customId` returns the existing job (no insert). A recycled completed `customId` evicts the stale completed row first (#92) so state queries don't wrongly report `completed`, and clears any timeout marker (#33/#75).
-- **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`push.ts:160`); the returned placeholder carries the correct existing id (`push.ts:248`).
+- **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`push.ts:200`); the returned placeholder carries the correct existing id (`push.ts:286`).
 - **Pull loss prevention**: `requeueJob` restores any job that fails to move to processing.
 - **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered.
 - **markActive / persistence errors** during pull are swallowed — in-memory `processingShards` is the source of truth; SQLite recovery reconciles on restart.

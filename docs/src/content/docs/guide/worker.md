@@ -569,6 +569,7 @@ process.on('SIGINT', async () => {
 | `shutdownManager()` | Embedded | Shuts down the shared QueueManager, flushes pending writes, closes SQLite |
 | `closeSharedTcpClient()` | TCP | Closes the shared TCP client connection |
 | `closeAllSharedPools()` | TCP | Closes all shared TCP connection pools |
+| `getSharedPool(options)` | TCP | Returns (or creates) the shared `TcpConnectionPool` for the given connection options, keyed by host, port, poolSize, token and TLS config exactly like Queues share pools. `pool.getHealth()` returns aggregate health: `healthy`, `connectedCount`, `totalCount`, `avgLatencyMs`, `totalCommands`, `totalErrors`, plus a per-connection `clients: ConnectionHealth[]` |
 
 ## CPU-Intensive Workers (TCP)
 

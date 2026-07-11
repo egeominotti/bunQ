@@ -82,7 +82,7 @@ close(force = false): Promise<void>
 ### Internal queue/job names
 
 - Queue name: `__wf:steps` (`DEFAULT_QUEUE_NAME`, `engine.ts:23`).
-- Every node is enqueued as job name `wf:step` with `StepJobData` payload (`executor.ts:287`).
+- Every node is enqueued as job name `wf:step` with `StepJobData` payload (`executor.ts:300`).
 
 ### Events emitted (`WorkflowEventType`, `types.ts:188-199`) — 11 total
 
@@ -105,13 +105,13 @@ SQLite table `workflow_executions` (id PK, workflow_name, state, input/steps/res
 
 **Start** (`executor.ts:49-70`): `register()` rejects duplicate step names across the flattened node graph (`executor.ts:41-46`). `start()` validates the workflow exists and has ≥1 node, mints `id = wf_<ts>_<rand>`, saves an `Execution` at `currentNodeIndex: 0` state `running`, emits `workflow:started`, then `enqueue()`s the first `wf:step` job.
 
-**Per-node loop** (`processStep`, `executor.ts:72-100`): the worker handler calls `processStep(data)`. It loads the execution; if it is absent or not in `running`/`waiting` it returns `null` (execution-level idempotency guard — re-delivered jobs for terminal executions are no-ops). A `waiting` execution is flipped back to `running` so the `waitFor` node re-checks its timeout. It dispatches the node via `executeNode` (`executor.ts:124-139`), then each handler calls `advance(idx+1)`.
+**Per-node loop** (`processStep`, `executor.ts:72-100`): the worker handler calls `processStep(data)`. It loads the execution; if it is absent or not in `running`/`waiting` it returns `null` (execution-level idempotency guard — re-delivered jobs for terminal executions are no-ops). A `waiting` execution is flipped back to `running` so the `waitFor` node re-checks its timeout. It dispatches the node via `executeNode` (`executor.ts:137-152`), then each handler calls `advance(idx+1)`.
 
-**advance** (`executor.ts:269-279`): bumps `currentNodeIndex`, persists, and if past the last node sets `completed` + emits `workflow:completed`; otherwise `enqueue()`s the next job. This is what serializes a single execution into a chain of one-node-at-a-time jobs.
+**advance** (`executor.ts:282-292`): bumps `currentNodeIndex`, persists, and if past the last node sets `completed` + emits `workflow:completed`; otherwise `enqueue()`s the next job. This is what serializes a single execution into a chain of one-node-at-a-time jobs.
 
 **Step** (`runStep` → `executeStepWithRetry`, `runner.ts:38-126`): loops `attempt` `1..def.retry`. Per attempt it writes a `running` `StepRecord`, validates `inputSchema.parse(ctx.input)` if present, runs `runWithTimeout(handler, def.timeout)` (`runner.ts:17-35`), validates `outputSchema.parse(result)`, then writes a `completed` record and emits `step:completed`. On error it emits `step:retry` and sleeps `backoffDelay(attempt)` = `min(500 * 2^(attempt-1), 30_000)` + up to 50% jitter (`runner.ts:9-14`). After the last attempt it writes a `failed` record, emits `step:failed`, and throws.
 
-**Branch** (`runBranch`, `executor.ts:147-161`): evaluates `condition(ctx)` → path name; runs that path's steps sequentially (missing path = skip), then advances.
+**Branch** (`runBranch`, `executor.ts:160-174`): evaluates `condition(ctx)` → path name; runs that path's steps sequentially (missing path = skip), then advances.
 
 **Parallel** (`executeParallelSteps`, `runner.ts:129-146`): runs all steps via `Promise.allSettled`; if any rejected, throws an `AggregateError` of the collected errors.
 
@@ -119,7 +119,7 @@ SQLite table `workflow_executions` (id PK, workflow_name, state, input/steps/res
 
 **Loops/map** (`loops.ts`): `doUntil` runs the body then checks `condition(ctx, iteration)`; `doWhile` checks first; both throw if `maxIterations` exceeded. `forEach` extracts `items`, throws if `items.length > maxIterations`, and for each item runs an indexed step named `<step>:<i>` whose context is enriched with `steps.__item`/`steps.__index`, persisting `loopItem`/`loopIndex` afterward (`loops.ts:77-100`). `map` runs `transform(ctx)` and stores the result as a completed step (`loops.ts:104-121`).
 
-**waitFor** (`runWaitFor`, `executor.ts:196-236`): if the signal is already present, advance. Otherwise, if a `timeout` is set, it tracks `__waitFor:<event>` start time; if elapsed ≥ timeout it emits `signal:timeout`, marks the wait record failed, sets state `failed`, runs compensation, emits `workflow:failed`, and throws `WaitForSignalError`; else it arms a `setTimeout` via `scheduleTimeoutCheck` for the remaining time. Either way it sets state `waiting`, emits `workflow:waiting`, and throws `WaitForSignalError`. The sentinel is caught in `processStep` (`executor.ts:92`) and turned into `return null`, so the step job acks cleanly without triggering compensation.
+**waitFor** (`runWaitFor`, `executor.ts:209-249`): if the signal is already present, advance. Otherwise, if a `timeout` is set, it tracks `__waitFor:<event>` start time; if elapsed ≥ timeout it emits `signal:timeout`, marks the wait record failed, sets state `failed`, runs compensation, emits `workflow:failed`, and throws `WaitForSignalError`; else it arms a `setTimeout` via `scheduleTimeoutCheck` for the remaining time. Either way it sets state `waiting`, emits `workflow:waiting`, and throws `WaitForSignalError`. The sentinel is caught in `processStep` (`executor.ts:92`) and turned into `return null`, so the step job acks cleanly without triggering compensation.
 
 **signal** (`executor.ts:102-128`): loads the execution (throws if not found), clears any pending timeout timer, records `signals[event] = payload` (idempotent), and emits `signal:received` — **always**, so a signal that lands *before* the run parks is still consumed at the `waitFor` via its `signals[event] !== undefined` gate. The resume is then **gated on state**: only a genuinely-parked run (`state === 'waiting'`) is flipped to `running`, persisted, and re-enqueued at `currentNodeIndex` so `processStep` re-runs the `waitFor` node and advances. For any other state (still running an earlier step, already resumed, completed, or failed) it just persists the recorded signal and returns **without** enqueuing. The `state === 'waiting'` check and the flip to `running` are synchronous (no `await` between them), and `store.update` persists `running` before the first `await this.enqueue`; a second concurrent/duplicate `signal()` therefore reads `running` back from the store and returns early. Duplicate/concurrent signals collapse to a **single resume**, so every post-`waitFor` step runs exactly once.
 
@@ -133,7 +133,7 @@ There is **no executor-level lock per execution**. Concurrency control is delega
 
 Within a single execution, nodes are serialized because each `advance()` enqueues exactly one successor job, and a single in-flight job mutates the in-memory `Execution` object then persists it via `WorkflowStore.update` (`store.ts:122-133`, a single `UPDATE` statement). A `parallel` node is the only intra-node concurrency, fanning out via `Promise.allSettled` inside one job.
 
-Signal-timeout timers live in an in-memory `Map<execId, timer>` on the executor (`executor.ts:26`). `scheduleTimeoutCheck` (`executor.ts:290-299`) `set()`s the timer without `clearTimeout`-ing a previously stored one, so re-entering a `waitFor` node can leave an orphaned timer that still fires.
+Signal-timeout timers live in an in-memory `Map<execId, timer>` on the executor (`executor.ts:26`). `scheduleTimeoutCheck` (`executor.ts:303-312`) `set()`s the timer without `clearTimeout`-ing a previously stored one, so re-entering a `waitFor` node can leave an orphaned timer that still fires.
 
 ## Edge Cases & Failure Modes
 
@@ -147,7 +147,7 @@ Signal-timeout timers live in an in-memory `Map<execId, timer>` on the executor 
 - **Loop guards.** `doUntil`/`doWhile` throw on `maxIterations` (default `100`); `forEach` throws if `items.length` exceeds `maxIterations` (default `1000`) *before* running any iteration.
 - **Sub-workflow** is polled, not event-driven: a sub-workflow that runs longer than `300_000ms` makes the parent step throw a timeout (`runner.ts:157,174`).
 - **Compensation never rolls back internal bookkeeping steps** (names prefixed `__`, e.g. `__waitFor:*`), and swallows handler errors (`compensator.ts:26,49`).
-- **List queries are capped** at 100 rows (`getExecution`/`listExecutions`, `store.ts:86-95`); `archive` moves at most 1000 rows per call (`store.ts:173`). Use repeated `archive()`/`cleanup()` calls for large backlogs.
+- **List queries are capped** at 100 rows (`listExecutions`, `store.ts:86-95`; `getExecution` is an uncapped by-id lookup); `archive` moves at most 1000 rows per call (`store.ts:173`). Use repeated `archive()`/`cleanup()` calls for large backlogs.
 - **Listener safety:** emitter dispatch wraps each listener in try/catch so a throwing observer cannot break event delivery (`emitter.ts:112-130`).
 - **Duplicate step names** across the whole node graph are rejected at `register()` (`executor.ts:41-46`).
 

@@ -18,7 +18,7 @@ Owns:
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
 
 Does NOT own (delegated elsewhere):
-- The recovery orchestration / re-enqueue logic — `recover()` in [Background Tasks](./background-tasks.md) (`backgroundTasks.ts:221`) consumes these read APIs and decides what to enqueue, retry, or quarantine.
+- The recovery orchestration / re-enqueue logic — `recover()` in [Background Tasks](./background-tasks.md) (`backgroundTasks.ts:227`) consumes these read APIs and decides what to enqueue, retry, or quarantine.
 - Data-path resolution from env/file-config — [Configuration & Entrypoint](./configuration.md) (`config/resolve.ts:44-49`).
 - In-memory queue/shard state, dedup maps, and counters — [Core Queue Engine](./core-queue-engine.md).
 - DLQ policy (auto-retry, expiry) — [Dead Letter Queue](./dead-letter-queue.md). This layer only persists/loads the rows.
@@ -58,7 +58,7 @@ type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: numb
 
 Key methods (real signatures):
 - Inserts: `insertJob(job: Job, durable?: boolean): void`, `insertJobImmediate(job: Job): void`, `insertJobsBatch(jobs: Job[], durable?: boolean): void`.
-- State: `markActive(jobId, startedAt, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateJobChildrenIds(jobId, childrenIds)`, `deleteJob(jobId)`.
+- State: `markActive(jobId, startedAt, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `deleteJob(jobId)`.
 - Results: `storeResult(jobId, result)`, `getResult(jobId)`, `hasResult(jobId)`.
 - DLQ: `saveDlqEntry(entry)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
@@ -98,42 +98,42 @@ All blob columns store MessagePack. `rowToJob` (`sqliteSerializer.ts:71-151`) re
 ## Business Logic / Control Flow
 
 Buffered write (default path):
-1. `insertJob(job)` → `writeBuffer.add(job)` pushes onto the active buffer (`sqlite.ts:287-293`, `sqliteBatch.ts:212-217`).
-2. The buffer auto-flushes every `writeBufferFlushMs` (10ms) via `setInterval`, or immediately when `activeBuffer.length >= bufferSize` (`sqliteBatch.ts:199-227`).
-3. `flush()` does an atomic double-buffer swap (active → flush buffer, new active = []) under a `flushing` guard, then calls `BatchInsertManager.insertJobsBatch` (`sqliteBatch.ts:239-319`).
-4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/24) = 41` rows (SQLite ~999 bound variables, `COLS_PER_ROW=24`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-110`).
+1. `insertJob(job)` → `writeBuffer.add(job)` pushes onto the active buffer (`sqlite.ts:287-293`, `sqliteBatch.ts:230-235`).
+2. The buffer auto-flushes every `writeBufferFlushMs` (10ms) via `setInterval`, or immediately when `activeBuffer.length >= bufferSize` (`sqliteBatch.ts:217-245`).
+3. `flush()` does an atomic double-buffer swap (active → flush buffer, new active = []) under a `flushing` guard, then calls `BatchInsertManager.insertJobsBatch` (`sqliteBatch.ts:257-337`).
+4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/24) = 41` rows (SQLite ~999 bound variables, `COLS_PER_ROW=24`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-128`). The multi-row `INSERT` is an upsert (`ON CONFLICT(id) DO UPDATE`), so a colliding `id` overwrites the existing row in place instead of throwing `UNIQUE` and failing the whole flush.
 
-Durable write (`durable: true`): bypasses the buffer entirely. `insertJobImmediate` runs the single prepared `insertJob` statement under `safeWrite`; `insertJobsBatch(jobs, true)` runs the whole batch inside one explicit `db.transaction` so a mid-batch failure rolls back all rows (`sqlite.ts:296-300`, `sqlite.ts:567-581`). This is the lower-throughput, no-loss mode.
+Durable write (`durable: true`): bypasses the buffer entirely. `insertJobImmediate` runs the single prepared `insertJob` statement under `safeWrite`; `insertJobsBatch(jobs, true)` runs the whole batch inside one explicit `db.transaction` so a mid-batch failure rolls back all rows (`sqlite.ts:296-300`, `sqlite.ts:589-603`). This is the lower-throughput, no-loss mode.
 
 State transitions and the flush-before-update invariant: `markActive`/`markCompleted`/`markFailed` first call `flushIfBuffered(jobId)` (`sqlite.ts:341-352`). If the row's INSERT is still buffered, the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite the state change with the original `waiting`/`delayed` state. `flushIfBuffered` checks `writeBuffer.hasPending(id)` and flushes first.
 
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
-Recovery (consumer side, `backgroundTasks.ts:221-428`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds()`, then paginates `loadActiveJobs` (Phase 1: stalled → retry-with-backoff or DLQ; cron `preventOverlap` rows and DLQ-duplicate rows are dropped), `loadPendingJobs` (Phase 2: enqueue ready, park unmet deps in `waitingDeps`, restore `customId`/`uniqueKey` dedup), `loadDlq` (restore DLQ), `loadQueueState` (re-apply pause/rate/concurrency — in-memory only, no write-back loop), and `loadCompletedJobs` capped at `maxCompletedJobs` (Phase 3, issue #84).
+Recovery (consumer side, `backgroundTasks.ts:227-434`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds()`, then paginates `loadActiveJobs` (Phase 1: stalled → retry-with-backoff or DLQ; cron `preventOverlap` rows and DLQ-duplicate rows are dropped), `loadPendingJobs` (Phase 2: enqueue ready, park unmet deps in `waitingDeps`, restore `customId`/`uniqueKey` dedup), `loadDlq` (restore DLQ), `loadQueueState` (re-apply pause/rate/concurrency — in-memory only, no write-back loop), and `loadCompletedJobs` capped at `maxCompletedJobs` (Phase 3, issue #84).
 
 Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (13) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 13 adds the `stacktrace` blob (server-side failure stack, issue #74).
 
-Close (`sqlite.ts:796-818`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
+Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 
 ## Concurrency & Locking
 
 This module is not lock-coordinated with the shard locks documented in [Concurrency & Locking](./concurrency-and-locking.md) — it relies on the single-threaded JS event loop plus SQLite's own locking:
 - `PRAGMA busy_timeout = 5000` lets SQLite wait out a busy lock rather than failing immediately (`schema.ts:13`).
-- `WriteBuffer.flushing` is a re-entrancy guard: a `flush()` while another is in progress returns 0 immediately (`sqliteBatch.ts:241`). The auto-flush timer also skips while a backoff retry is pending (`sqliteBatch.ts:200-201`).
+- `WriteBuffer.flushing` is a re-entrancy guard: a `flush()` while another is in progress returns 0 immediately (`sqliteBatch.ts:259`). The auto-flush timer also skips while a backoff retry is pending (`sqliteBatch.ts:219`).
 - The double-buffer swap (`activeBuffer` ↔ `flushBuffer`) is the atomicity primitive: new `add()`s land in a fresh active buffer while the snapshot is written, so no job is written twice or missed across a flush boundary.
 - All mutations are wrapped in `safeWrite()` which toggles the disk-full flag and re-throws.
 
 ## Edge Cases & Failure Modes
 
-- **Per-row constraint isolation (#92 class).** If the atomic batch fails (e.g. a duplicate `jobs.id` PK), `BatchInsertManager` falls back to one-INSERT-per-row, classifying each failure: `SQLITE_CONSTRAINT*` / "constraint failed" → `conflicts` (permanent, dropped and reported, **never** re-buffered — re-buffering would poison every future flush); everything else → `transient` (re-buffered + retried). Valid sibling rows still persist (`sqliteBatch.ts:21-89`, `sqliteBatch.ts:271-315`).
-- **Exponential backoff + critical loss.** Transient failures re-buffer the failed jobs (prepended) and retry with backoff starting 100ms, doubling up to 30000ms, max 10 retries (`sqliteBatch.ts:178-184`, `scheduleBackoffRetry` `sqliteBatch.ts:322-339`). On exhaustion, jobs are handed to `onCriticalError` → `handleCriticalLoss` (`sqlite.ts:131-186`): every lost job is logged with a truncated 500-char data preview, retained in a bounded list (`MAX_RETAINED_LOSSES = 100`, FIFO), and **persisted to the DLQ table** via `saveDlqEntry` (direct prepared statement, not through the failing buffer, so it cannot recurse), then forwarded to the user `onCriticalLoss` callback (wrapped in try/catch).
+- **Per-row constraint isolation (#92 class).** If the atomic batch fails on a constraint (a duplicate `jobs.id` is absorbed in place by the `ON CONFLICT(id) DO UPDATE` upsert, but e.g. a `NOT NULL` violation still throws), `BatchInsertManager` falls back to one-INSERT-per-row, classifying each failure: `SQLITE_CONSTRAINT*` / "constraint failed" → `conflicts` (permanent, dropped and reported, **never** re-buffered — re-buffering would poison every future flush); everything else → `transient` (re-buffered + retried). Valid sibling rows still persist (`sqliteBatch.ts:21-89`, `sqliteBatch.ts:289-327`).
+- **Exponential backoff + critical loss.** Transient failures re-buffer the failed jobs (prepended) and retry with exponential backoff: base 100ms, doubled before each retry (so the first retry fires after 200ms), capped at 30000ms, max 10 retries (`sqliteBatch.ts:195-202`, `scheduleBackoffRetry` `sqliteBatch.ts:340-357`). On exhaustion, jobs are handed to `onCriticalError` → `handleCriticalLoss` (`sqlite.ts:131-186`): every lost job is logged with a truncated 500-char data preview, retained in a bounded list (`MAX_RETAINED_LOSSES = 100`, FIFO), and **persisted to the DLQ table** via `saveDlqEntry` (direct prepared statement, not through the failing buffer, so it cannot recurse), then forwarded to the user `onCriticalLoss` callback (wrapped in try/catch).
 - **Disk full.** `isSqliteFullError` matches `SQLITE_FULL` / "database or disk is full"; `setDiskFull` logs once and exposes `diskFull` / `getDiskFullStatus()`; the flag auto-clears on the next successful `safeWrite` (`sqlite.ts:48-53`, `sqlite.ts:208-234`).
 - **PRAGMA failure is non-fatal.** Applying `PRAGMA_SETTINGS` is wrapped in try/catch because a transient `SQLITE_IOERR_FSTAT` (e.g. `mmap_size` calling `fstat` during a restart/cleanup race) must not escape the constructor and tear down the process (`sqlite.ts:78-84`).
 - **Corrupt `depends_on` blob.** A failed msgpack decode of `depends_on` is NOT collapsed to `[]` (which recovery would treat as "ready, no deps" → out-of-order execution). `decodeDependsOn` returns `corrupt: true` and `rowToJob` stamps the job with the non-enumerable `CORRUPT_DEPENDS_ON` symbol; recovery (`isCorruptDependsOn`) routes it to the DLQ instead (`sqliteSerializer.ts:42-68`, `sqliteSerializer.ts:138-148`).
 - **Lossy decode fallback.** `unpack` logs and returns the provided fallback on decode error rather than throwing, so a single corrupt blob does not abort a whole load (`sqliteSerializer.ts:19-27`).
 - **Id type round-trip.** `brandId` preserves non-string id types without conversion (msgpackr can round-trip bigint), preserving id equality on the critical-loss → DLQ → restart path (`sqliteSerializer.ts:162-164`).
-- **Completed-without-result.** A job acked with no result has `state='completed'` but no `job_results` row; `loadCompletedJobIds` unions both sources so dependency recovery still unblocks dependents (`sqlite.ts:545-557`).
-- **Shutdown loss reporting.** `WriteBuffer.stop()` / `stopGracefully(timeoutMs=5000)` flush remaining jobs and report anything still buffered via `reportLostJobs` → `onCriticalError`, so nothing is silently dropped on shutdown (`sqliteBatch.ts:371-468`).
+- **Completed-without-result.** A job acked with no result has `state='completed'` but no `job_results` row; `loadCompletedJobIds` unions both sources so dependency recovery still unblocks dependents (`sqlite.ts:568-579`).
+- **Shutdown loss reporting.** `WriteBuffer.stop()` / `stopGracefully(timeoutMs=5000)` flush remaining jobs and report anything still buffered via `reportLostJobs` → `onCriticalError`, so nothing is silently dropped on shutdown (`sqliteBatch.ts:390-486`).
 - **Memory bounds.** Recovery loads are paginated (`limit/offset`, default batch 10000) to avoid memory spikes; completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
 
 ## Configuration

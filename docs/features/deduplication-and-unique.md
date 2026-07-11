@@ -91,7 +91,7 @@ class DedupDebounceMerger {
 ### TCP commands / events
 
 - This module does not own a dedicated TCP command. Dedup options ride on `PUSH` / `PUSHB` (`PushCommand.uniqueKey`, `.jobId`, `.dedup`, `.debounceId`, `.debounceTtl` — `src/domain/types/command.ts:27-56`).
-- Event emitted on suppression: `EventType.Duplicated` = `'duplicated'` (`src/domain/types/queue.ts:121`), broadcast from the default reject path (`push.ts:181-188`).
+- Event emitted on suppression: `EventType.Duplicated` = `'duplicated'` (`src/domain/types/queue.ts:121`), broadcast from the default reject path (`push.ts:189-194`).
 - Dashboard-only events: `job:deduplicated` (strategy `extend` / `default`) and `batch:pushed` with a `duplicates` count.
 
 ## Data Models
@@ -114,7 +114,7 @@ SQLite columns: `jobs.unique_key`, `jobs.custom_id` (`schema.ts:34-35`). Note `i
 
 ## Business Logic / Control Flow
 
-Single push: `pushJob` takes the shard write lock and runs both checks inside it (`push.ts:244-281`).
+Single push: `pushJob` takes the shard write lock and runs both checks inside it (`push.ts:257-296`).
 
 ### 1. Custom-ID idempotency — `handleCustomId` (`push.ts:61`)
 
@@ -125,25 +125,25 @@ Single push: `pushJob` takes the shard write lock and runs both checks inside it
    - **active (processing)** — `jobIndex` type `processing`; the job was popped from the queue and is still running on a worker, with its row still on disk → idempotent skip via the existing id.
    For the latter two, `PushContext` has no `processingShards`, so it cannot fetch the live `Job`; `pushJob` / `pushJobBatch` rebuild a placeholder `{ ...job, id }` after `createJob` (mirrors `handleDeduplication`'s active path) and insert nothing. **Completed (#92) and DLQ jobs are terminal** and fall through to the reuse path below.
 3. **Reuse path (#92):** if the same id sits in `completedJobs`, its row survives on disk (`markCompleted` is an UPDATE, not DELETE). Evict it from `completedJobs`, `completedJobsData`, `jobResults`, `jobIndex`, and `storage.deleteJob(id)` so the recycled id starts fresh as `waiting` rather than reporting `completed` (`push.ts:105-111`). This delete is gated on `completedJobs` — it is **not** run on every push, which would tax the customId hot path with a synchronous DELETE + buffer scan inside the shard lock (a measured ~2× push/addBulk regression).
-4. Clear any stale timeout marker for the recycled id so stall-retry recovery is not wrongly discarded (guards against #33/#75 duplicate execution) (`push.ts:117`).
-5. Record `customIdMap.set(customId, id)` and proceed (`push.ts:118`).
+4. Clear any stale timeout marker for the recycled id so stall-retry recovery is not wrongly discarded (guards against #33/#75 duplicate execution) (`push.ts:124`).
+5. Record `customIdMap.set(customId, id)` and proceed (`push.ts:125`).
 
-### 2. Unique-key dedup — `handleDeduplication` (`push.ts:126`)
+### 2. Unique-key dedup — `handleDeduplication` (`push.ts:133`)
 
-1. No `job.uniqueKey` → `{ skip: false }` (`push.ts:133-135`).
-2. No existing entry → `registerUniqueKeyWithTtl(queue, key, job.id, dedup?.ttl)` and allow insert (`push.ts:140-143`).
-3. **`replace`** (`push.ts:148-158`): if the existing job is still in the queue, `q.remove` + `decrementQueued` + drop its `jobIndex` entry; release the old key, register the new job under it, allow insert.
-4. **`extend`** (requires `dedup.extend && dedup.ttl`, `push.ts:161-174`): `extendUniqueKeyTtl`, drop the incoming `customId` mapping, and if the existing job is still present return `{ skip: true, existingId }` (emits `job:deduplicated` strategy `extend`). If the existing job vanished, throw `Duplicate unique_key (extended TTL)`.
-5. **Default (reject, BullMQ-style)** (`push.ts:176-191`): drop the incoming `customId` mapping; if the existing job is still in the queue **or** still tracked in `jobIndex` (active/processing — key held until ack), broadcast `EventType.Duplicated`, emit `job:deduplicated`, and skip.
-6. If the prior owner is gone from `jobIndex` (completed/failed), re-register the key for the new job and allow the insert (`push.ts:195-198`).
+1. No `job.uniqueKey` → `{ skip: false }` (`push.ts:140-142`).
+2. No existing entry → `registerUniqueKeyWithTtl(queue, key, job.id, dedup?.ttl)` and allow insert (`push.ts:147-150`).
+3. **`replace`** (`push.ts:155-165`): if the existing job is still in the queue, `q.remove` + `decrementQueued` + drop its `jobIndex` entry; release the old key, register the new job under it, allow insert.
+4. **`extend`** (requires `dedup.extend && dedup.ttl`, `push.ts:168-181`): `extendUniqueKeyTtl`, drop the incoming `customId` mapping, and if the existing job is still present return `{ skip: true, existingId }` (emits `job:deduplicated` strategy `extend`). If the existing job vanished, throw `Duplicate unique_key (extended TTL)`.
+5. **Default (reject, BullMQ-style)** (`push.ts:183-201`): drop the incoming `customId` mapping; if the existing job is still in the queue **or** still tracked in `jobIndex` (active/processing — key held until ack), broadcast `EventType.Duplicated`, emit `job:deduplicated`, and skip.
+6. If the prior owner is gone from `jobIndex` (completed/failed), re-register the key for the new job and allow the insert (`push.ts:203-205`).
 
-When a dedup result is `skip`, the caller returns the existing queued job if found, otherwise a placeholder carrying `existingId` so the caller sees the correct id without a duplicate insert (`push.ts:271-281`). The custom-id idempotency path uses the same placeholder shape for its active / waiting-children skips.
+When a dedup result is `skip`, the caller returns the existing queued job if found, otherwise a placeholder carrying `existingId` so the caller sees the correct id without a duplicate insert (`push.ts:280-290`). The custom-id idempotency path uses the same placeholder shape for its active / waiting-children skips.
 
-### 3. Batch push — `pushJobBatch` (`push.ts:316`)
+### 3. Batch push — `pushJobBatch` (`push.ts:323`)
 
-Runs `handleCustomId` + `handleDeduplication` per input inside one shard lock; suppressed inputs (custom-id idempotent skip — queued, active, or waiting-children — or unique-key dedup) push the existing id into `resultIds` and continue, inserting nothing. Emits a `batch:pushed` dashboard event with `duplicates: inputs.length - inserted` (`push.ts:387-394`).
+Runs `handleCustomId` + `handleDeduplication` per input inside one shard lock; suppressed inputs (custom-id idempotent skip — queued, active, or waiting-children — or unique-key dedup) push the existing id into `resultIds` and continue, inserting nothing. Emits a `batch:pushed` dashboard event with `duplicates: inputs.length - inserted` (`push.ts:399-406`).
 
-### Lookup — `getJobByCustomId` (`queryOperations.ts:83`)
+### Lookup — `getJobByCustomId` (`queryOperations.ts:105`)
 
 `customIdMap.get(customId)` → `jobIndex` location → resolve from queue / `waitingDeps` / `waitingChildren` / `processingShards` / completed (storage fallback) / DLQ.
 
@@ -157,13 +157,13 @@ If a `Bunqueue` instance is configured with `deduplication`/`debounce`, `merge` 
 
 ## Concurrency & Locking
 
-Both `handleCustomId` and `handleDeduplication` execute **inside** the per-shard write lock (`withWriteLock(ctx.shardLocks[idx], …)`, `push.ts:250`, `:331`) — the comment at `push.ts:242` and `:314` notes this is deliberate to prevent check-then-insert races on the same custom id / unique key. The `customIdMap` write and the unique-key registration are therefore atomic with the queue insert.
+Both `handleCustomId` and `handleDeduplication` execute **inside** the per-shard write lock (`withWriteLock(ctx.shardLocks[idx], …)`, `push.ts:257`, `:338`) — the comment at `push.ts:249` and `:321` notes this is deliberate to prevent check-then-insert races on the same custom id / unique key. The `customIdMap` write and the unique-key registration are therefore atomic with the queue insert.
 
 Lock order follows the global hierarchy (`jobIndex` → `completedJobs` → `shards[N]`); the unique-key registry is private state of the held shard, so no extra lock is needed. See [Concurrency & Locking](./concurrency-and-locking.md).
 
 Lifecycle / release:
 
-- On successful ack and on terminal fail, `Shard.releaseJobResources(queue, uniqueKey, groupId)` releases the key (`shard.ts:216-217`; called from `ack.ts:93,230`, `ackHelpers.ts:148`). The default-reject path intentionally holds the key for active jobs until ack (`push.ts:176-181`).
+- On successful ack and on terminal fail, `Shard.releaseJobResources(queue, uniqueKey, groupId)` releases the key (`shard.ts:216-217`; called from `ack.ts:93,230`, `ackHelpers.ts:148`). The default-reject path intentionally holds the key for active jobs until ack (`push.ts:183-188`).
 - `ack` paths also delete the `customId` mapping (`ack.ts:98,174,258`, `ackHelpers.ts:223`).
 - `cancelJob` releases the key whether the job is in the queue, `waitingChildren`, or `waitingDeps` (`jobManagement.ts:41,65`).
 
@@ -173,14 +173,14 @@ Lifecycle / release:
 - **Re-add of an active / waiting-children custom id is idempotent:** when the prior job has been popped from the PriorityQueue (active = `jobIndex` type `processing`; or waiting-children = type `queue` but held in `shard.waitingDeps`) its row is still on disk, so re-adding the same `jobId` must NOT take the reuse path — that would re-insert the same deterministic id and collide on the `jobs.id` PRIMARY KEY (durable → throws `UNIQUE constraint failed: jobs.id`; buffered → the write buffer silently drops the insert, turning the intended no-op into a reject). `handleCustomId` instead returns the existing job (or, when the live `Job` is unreachable without `processingShards`, a `{ ...job, id }` placeholder) and inserts nothing (`push.ts:82-95`). This is the custom-id twin of the unique-key fix #69. The guard is `!ctx.completedJobs.has(id)` plus a `queue`/`processing` location check, so completed (#92) and DLQ jobs still fall through to reuse.
 - **Custom-id reuse after completion (#92):** completed rows survive on disk; the reuse path evicts them so the recycled id does not falsely report `completed` or collide on the PK at flush (`push.ts:105-111`).
 - **Orphan-row reconciliation via upsert:** a durable `jobs` row can outlive its in-memory tracking when `obliterate()` (a fire-and-forget `void` over TCP — there is no `obliterateAsync`) or a write-buffer flush is reordered relative to an in-flight durable insert: the `customIdMap` / `jobIndex` entries are cleared but the row survives. A later re-add of the same custom id finds no mapping → reuse path → insert. To stop the recycled id colliding on the PK (`UNIQUE constraint failed: jobs.id`), **both** insert statements use `ON CONFLICT(id) DO UPDATE` (upsert): the orphan row is overwritten in place at insert time. The `DO UPDATE SET` clause covers **all** non-id columns — including the per-execution fields `started_at` / `completed_at` / `progress` / `progress_msg` / `last_heartbeat` / `stacktrace`, which are absent from the INSERT column list so `excluded.<col>` resolves to their DEFAULT (the fresh-job value). Without resetting these, an upsert over a previously-completed orphan would leave a brand-new `waiting` job reporting `progress=100` / a stale `completed_at` / a prior life's `stacktrace`. A brand-new id is a plain INSERT with **zero** extra cost, so the customId hot path is not taxed (`statements.ts` `insertJob`, `sqliteBatch.ts` batch insert). In the buffered batch path this also prevents one collision from failing the whole flush and dropping every innocent job batched in the same window (`reportLostJobs`). `jobs` has no triggers/FKs, so `DO UPDATE` has no cascade (unlike `REPLACE`). Covered by `test/repro-idem-active-readd.test.ts`.
-- **Recycled-id timeout marker (#33/#75):** stale `timedOutJobs` entries are cleared on reuse so the new job's stall-retry recovery is not silently dropped (`push.ts:117`).
-- **`extend` with vanished owner:** throws `Duplicate unique_key (extended TTL)` rather than silently inserting (`push.ts:173`).
-- **Restart rehydration:** recovery re-populates `customIdMap` for pending jobs and re-registers unique keys via `registerUniqueKeyWithTtl(..., job.deduplicationTtl ?? undefined)` (`backgroundTasks.ts:350,355`). Completed jobs are deliberately **not** added to `customIdMap` during recovery to avoid LRU-evicting pending mappings (`backgroundTasks.ts:403-406`); custom-id collisions against completed jobs are caught by the storage fallback in `handleCustomId`.
+- **Recycled-id timeout marker (#33/#75):** stale `timedOutJobs` entries are cleared on reuse so the new job's stall-retry recovery is not silently dropped (`push.ts:124`).
+- **`extend` with vanished owner:** throws `Duplicate unique_key (extended TTL)` rather than silently inserting (`push.ts:180`).
+- **Restart rehydration:** recovery re-populates `customIdMap` for pending jobs and re-registers unique keys via `registerUniqueKeyWithTtl(..., job.deduplicationTtl ?? undefined)` (`backgroundTasks.ts:356,361`). Completed jobs are deliberately **not** added to `customIdMap` during recovery to avoid LRU-evicting pending mappings (`backgroundTasks.ts:409-412`); custom-id collisions against completed jobs are caught by the storage fallback in `handleCustomId`.
 - **Memory bounds:** `customIdMap` is an `LRUMap` capped at `maxCustomIds` (default `50_000`, `application/types.ts:37`; init `queueManager.ts:162`). Unique-key registries are swept every cleanup tick (`cleanExpiredUniqueKeys`, `cleanupTasks.ts:101`) and any single-queue registry exceeding **1000** entries is force-trimmed by half via insertion-order iteration (`cleanupTasks.ts:104-113`) — under churn a still-live key can be evicted, weakening (not breaking) dedup. LRU eviction of `customIdMap` likewise allows a re-add to slip through.
-- **Debounce is metadata-only (gotcha):** `debounce` sets `job.debounceId`/`job.debounceTtl` (`add.ts:136-137`, `core.ts:89-90`) but does **not** populate `uniqueKey`, so it does not itself suppress pushes — `handleDeduplication` returns early when `uniqueKey` is falsy. BullMQ-style debounce behavior is achieved via `deduplication` with `extend: true` (which is what `DedupDebounceMerger` emits as `deduplication.id`).
-- **Client helpers are read-only / embedded-only:** `removeDeduplicationKey` (`deduplication.ts:25`) returns `1` if a job exists for the id but does **not** actually release the key; `getDeduplicationJobId` returns `null` in TCP mode. The `JobProxy.removeDeduplicationKey` surface rejects with "not implemented — no server primitive available" (`jobProxy.ts:234-237,534-536`).
-- **Obliterate:** `Shard` clears the per-queue unique-key registry (`uniqueKeyManager.clearQueue`, `shard.ts:484`) and `QueueManager` clears the whole registry on full obliterate (`queueManager.ts:1887`).
-- **Cron overlap:** `preventOverlap` derives the unique key `cron:<name>` (`cronScheduler.ts` `effectiveUniqueKey`, `queueManager.ts:1261`); `removeOrphanedCronJob` releases it for stale waiting jobs on re-upsert (`queueManager.ts:1271-1289`).
+- **Debounce is metadata-only (gotcha):** `debounce` sets `job.debounceId`/`job.debounceTtl` (`add.ts:141-142`, `core.ts:89-90`) but does **not** populate `uniqueKey`, so it does not itself suppress pushes — `handleDeduplication` returns early when `uniqueKey` is falsy. BullMQ-style debounce behavior is achieved via `deduplication` with `extend: true` (which is what `DedupDebounceMerger` emits as `deduplication.id`).
+- **Client helpers are read-only / embedded-only:** `removeDeduplicationKey` (`deduplication.ts:25`) returns `1` if a job exists for the id but does **not** actually release the key; `getDeduplicationJobId` returns `null` in TCP mode. The `JobProxy.removeDeduplicationKey` surface rejects with "not implemented — no server primitive available" (`jobProxy.ts:236-239,537-540`).
+- **Obliterate:** `Shard` clears the per-queue unique-key registry (`uniqueKeyManager.clearQueue`, `shard.ts:484`) and `QueueManager` clears the whole registry on full obliterate (`queueManager.ts:1895`).
+- **Cron overlap:** `preventOverlap` derives the unique key `cron:<name>` (`cronScheduler.ts` `effectiveUniqueKey`, `queueManager.ts:1268-1270`); `removeOrphanedCronJob` releases it for stale waiting jobs on re-upsert (`queueManager.ts:1279-1297`).
 
 ## Configuration
 

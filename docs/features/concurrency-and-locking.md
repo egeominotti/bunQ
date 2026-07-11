@@ -156,7 +156,7 @@ interface StallConfig {
 
 **`StallAction`** (stall.ts:92): `Retry` | `MoveToDlq` | `Keep`.
 
-Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall candidates live in `ctx.stalledCandidates: Set<JobId>` (types.ts:69/140).
+Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall candidates live in `ctx.stalledCandidates: Set<JobId>` (types.ts:69/144).
 
 ## Business Logic / Control Flow
 
@@ -166,7 +166,7 @@ Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall
 
 **`RWLock`** allows many readers or one writer, with **writer priority**: `acquireRead` blocks while `this.writer || this.writerWaiting > 0` (lock.ts:125), preventing writer starvation. `acquireWrite` has a synchronous fast path when uncontested (`!writer && readers === 0`, lock.ts:179). On write release it wakes a waiting writer first, then drains all waiting readers (lock.ts:224–252). All guards carry an idempotent `released` flag.
 
-**`Semaphore`** bounds concurrency. `acquire` consumes a permit or parks a resolver; `release` hands the permit directly to the next waiter (no counter round-trip) or, with no waiters, increments back up to `maxPermits` (semaphore.ts:39–48). Used by the TCP server: each connection holds a `Semaphore(MAX_CONCURRENT_PER_CONNECTION = 50)` and wraps every frame's command handling in `withSemaphore` (tcp.ts:27, 187, 267), capping in-flight pipelined commands per socket.
+**`Semaphore`** bounds concurrency. `acquire` consumes a permit or parks a resolver; `release` hands the permit directly to the next waiter (no counter round-trip) or, with no waiters, increments back up to `maxPermits` (semaphore.ts:39–48). Used by the TCP server: each connection holds a `Semaphore(MAX_CONCURRENT_PER_CONNECTION = 50)` and wraps every frame's command handling in `withSemaphore` (tcp.ts:27, 197, 284), capping in-flight pipelined commands per socket.
 
 ### Lease lifecycle
 
@@ -214,6 +214,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 - *Late ACK after lock expiry* — the #101 grace window (`isExpiredButOwned`) honors a genuine same-instance completion while rejecting a re-pulled-job double-completion via the `createdAt >= startedAt` guard (queueManager.ts:562–576).
 - *Lingering lock is load-bearing* — the stall retry path requeues a job **without** deleting its (now-expired) lock; that lingering token is what the re-lease guard inspects and what the worker-dedup (#33) path keys on. The lock-expiry path, by contrast, *does* delete the lock so a re-lease installs a fresh token.
 - *Concurrent completion vs. stall handler* — both `checkExpiredLocks` and `handleStalledJob` re-verify membership in `processingShards` under the locks before mutating (lockManager.ts:57, stallDetection.ts:94), so a job completed between phases is skipped and no stale `Stalled`/`Failed` event fires.
+- *Atomic pull handoff (2.8.31):* the queue to processing transition happens in one synchronous critical section under the shard write lock: `tryDequeueNextJob` pops the job, inserts it into `processingShards`, and flips the `jobIndex` entry to `processing` before yielding (pull.ts:97-117). The processing-shard `Map` is written without taking `processingLocks` there; this is safe because until the flip no id-targeted critical section can be mid-operation on that id, and it avoids holding the hot shard write lock across an await. `finalizeProcessing` (pull.ts:133) then does only post-await bookkeeping (markActive persistence, counters, broadcast) and re-checks membership in `processingShards` first: if a management op (discard, moveToDelayed, obliterate) claimed the job in between, the pull does not deliver it to the worker.
 - *Double release* — every `LockGuard` is idempotent.
 
 ## Edge Cases & Failure Modes

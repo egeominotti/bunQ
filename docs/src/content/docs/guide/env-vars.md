@@ -258,7 +258,7 @@ S3_REGION=eu-west-1 bunqueue start
 
 ### `S3_ENDPOINT`
 
-Custom S3 endpoint for non-AWS providers.
+Custom S3 endpoint for non-AWS providers. `AWS_ENDPOINT` is accepted as an alias, matching the other S3 variables.
 
 | Type | Default | Example |
 |------|---------|---------|
@@ -557,6 +557,18 @@ Server port for the MCP server in TCP mode. It also reads `BUNQUEUE_TOKEN` for a
 
 ```bash
 BUNQUEUE_MODE=tcp BUNQUEUE_PORT=7000 bunx bunqueue-mcp
+```
+
+### `BUNQUEUE_POOL_SIZE`
+
+Connection pool size for the MCP server in TCP mode.
+
+| Type | Default | Example |
+|------|---------|---------|
+| number | `2` | `4` |
+
+```bash
+BUNQUEUE_MODE=tcp BUNQUEUE_POOL_SIZE=4 bunx bunqueue-mcp
 ```
 
 ### `TCP_PORT` / `BUNQUEUE_TCP_PORT` / `BQ_TCP_PORT` (CLI)

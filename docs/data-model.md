@@ -138,13 +138,15 @@ Two **virtual** states are reported in counts/queries but are *not* members of
 the `JobState` enum (see `JobCounts`, `response.ts:73-82`):
 
 - `waiting-children` — parked in `shard.waitingDeps` or `shard.waitingChildren`
-  (flow dependency not yet satisfied). Derived in `queryOperations.ts:180`.
+  (flow dependency not yet satisfied). Derived in `queryOperations.ts:210`.
 - `paused` — present in `JobCounts` for BullMQ parity; pausing is a queue-level
   flag (`QueueState.paused`), jobs are not individually re-stated.
 
-`getJobState` (`queryOperations.ts:153-192`) derives the state from where the
+`getJobState` (`queryOperations.ts:176-224`) derives the state from where the
 job currently lives (jobIndex location → shard sub-collection → SQLite fallback
-via `resolveStateFromStorage`, `queryOperations.ts:137-151`).
+via `resolveStateFromStorage`, `queryOperations.ts:159-172`). If the index entry
+moves mid-lookup (a concurrent pull flipping queue to processing), it chases the
+fresh location for up to 4 passes instead of reporting a false `unknown` (2.8.31).
 
 Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 `jobStateTransitions.ts`):
@@ -153,12 +155,12 @@ Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 | ------------- | ----------------- | ---------------------------------------------------- |
 | `delayed`     | `waiting`         | scheduler when `runAt <= now`, or `Promote`          |
 | `waiting`     | `active`          | `PULL` / `PULLB`                                      |
-| `waiting`     | `waiting-children`| unmet dependency at push (`push.ts:199-201`)         |
+| `waiting`     | `waiting-children`| unmet dependency at push (`push.ts:219-233`)         |
 | `waiting-children` | `waiting`    | all `dependsOn` completed                            |
 | `active`      | `completed`       | `ACK` (`ack`)                                        |
 | `active`      | `failed`/`delayed`| `FAIL`: retry w/ backoff if `attempts < maxAttempts` |
 | `active`      | `waiting`         | `moveActiveToWait` (`jobStateTransitions.ts:16`)     |
-| `active`      | `waiting-children`| `moveToWaitingChildren` (`jobStateTransitions.ts:81`)|
+| `active`      | `waiting-children`| `moveToWaitingChildren` (`jobStateTransitions.ts:84`)|
 | `active`      | `failed`→DLQ      | timeout / max stalls / max attempts                  |
 | `failed`(DLQ) | `waiting`         | `RetryDlq` / auto-retry                              |
 | `waiting`/`prioritized`/`delayed` | `delayed` | `ChangeDelay` / `MoveToDelayed` (in-place `runAt`)   |
@@ -254,7 +256,7 @@ Supporting enums/types:
 - `JobLocation` (`queue.ts:104-108`) — the jobIndex value:
   `{type:'queue',shardIdx,queueName}` | `{type:'processing',shardIdx}` |
   `{type:'completed',queueName}` | `{type:'dlq',queueName}`.
-- `EventType` (`queue.ts:111-127`) — 15 event types: `pushed`, `pulled`,
+- `EventType` (`queue.ts:111-127`) — 14 event types: `pushed`, `pulled`,
   `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`,
   `duplicated`, `retried`, `waiting-children`, `drained`, `paused`, `resumed`.
 - `JobEvent` (`queue.ts:130-142`) — broadcast shape for subscribers.
@@ -505,11 +507,11 @@ response extends `BaseResponse` (`response.ts:9-12`): `{ ok: boolean; reqId? }`.
 
 ### Commands
 
-The discriminated union `Command` (`command.ts:598-680`) covers ~80 commands.
+The discriminated union `Command` (`command.ts:617-699`) covers ~80 commands.
 Representative shapes:
 
 ```typescript
-export interface PushCommand extends BaseCommand {  // command.ts:17-59
+export interface PushCommand extends BaseCommand {  // command.ts:17-76
   readonly cmd: 'PUSH';
   readonly queue: string;
   readonly data: unknown;
@@ -524,7 +526,7 @@ export interface PushCommand extends BaseCommand {  // command.ts:17-59
   //   removeOnComplete/Fail, repeat, stallTimeout, flow flags, timestamp …
 }
 
-export interface PullCommand extends BaseCommand {  // command.ts:67-74
+export interface PullCommand extends BaseCommand {  // command.ts:84-91
   readonly cmd: 'PULL';
   readonly queue: string;
   readonly timeout?: number;          // long-poll ms
@@ -533,14 +535,14 @@ export interface PullCommand extends BaseCommand {  // command.ts:67-74
   readonly detach?: boolean;          // don't auto-release on disconnect
 }
 
-export interface AckCommand extends BaseCommand {   // command.ts:85-90
+export interface AckCommand extends BaseCommand {   // command.ts:102-107
   readonly cmd: 'ACK';
   readonly id: string;
   readonly result?: unknown;
   readonly token?: string;            // lock token verification
 }
 
-export interface FailCommand extends BaseCommand {  // command.ts:99-108
+export interface FailCommand extends BaseCommand {  // command.ts:116-125
   readonly cmd: 'FAIL';
   readonly id: string;
   readonly error?: string;
@@ -567,7 +569,7 @@ Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
 `UpdateParent`, `GetFailed/IgnoredChildren*`, `RemoveChildDependency`,
 `RemoveUnprocessedChildren`), **Monitoring** (`Stats`, `Metrics`, `Prometheus`,
 `StorageStatus`, `CompactMemory`), **Dashboard** (`DashboardOverview/Queues/Queue`),
-**Auth/Negotiation** (`Auth`, `Hello`). `HelloCommand` (`command.ts:589-595`)
+**Auth/Negotiation** (`Auth`, `Hello`). `HelloCommand` (`command.ts:608-614`)
 negotiates `protocolVersion` and `capabilities: 'pipelining'[]`.
 
 ### Responses
@@ -652,7 +654,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 ```
 
-The row type `DbJob` (`statements.ts:99-130`) mirrors this (BLOB → `Uint8Array`).
+The row type `DbJob` (`statements.ts:121-152`) mirrors this (BLOB → `Uint8Array`).
 Note: `backoffConfig`, `childrenCompleted`, `stallCount`, `repeat`, and the
 BullMQ-v5 flow flags are **not columns**; `rowToJob` (`sqliteSerializer.ts:71-151`)
 reconstructs them with defaults (`stackTraceLimit:10`, flags `false`,
@@ -682,7 +684,7 @@ CREATE TABLE IF NOT EXISTS job_results (
 );
 ```
 
-Written via `INSERT OR REPLACE` (`statements.ts:55-56`).
+Written via `INSERT OR REPLACE` (`statements.ts:77-78`).
 
 ### `dlq` (schema.ts:73-79)
 
@@ -722,7 +724,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
 );
 ```
 
-Row type `DbCron` at `statements.ts:133-150`.
+Row type `DbCron` at `statements.ts:155-172`.
 
 ### `queue_state` (schema.ts:123-128)
 
@@ -736,7 +738,7 @@ CREATE TABLE IF NOT EXISTS queue_state (
 ```
 
 Persists queue control-state for recovery (#100); row type `DbQueueState`
-(`statements.ts:153-158`).
+(`statements.ts:175-180`).
 
 ### `migrations` (schema.ts:132-137)
 
@@ -747,7 +749,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 ```
 
-### Migrations (schema.ts:139-196)
+### Migrations (schema.ts:140-196)
 
 `SCHEMA_VERSION = 13`. The migrate routine (`sqlite.ts:255-278`) reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
@@ -790,9 +792,9 @@ Defined on `QueueManagerState` (`src/application/types.ts:47-92`), sized by
 | `waitingDeps`     | per-shard map              | 10,000  | (`maxWaitingDeps`)             |
 
 \* `jobIndex` is keyed by live jobs; entries are removed on complete/fail/cancel
-rather than capped by size. (Note: the architecture summary in `CLAUDE.md` lists
-`jobResults` at 5,000 — the code default is `10_000`; this doc reflects the
-source.)
+rather than capped by size. All caps above reflect the source defaults in
+`src/application/types.ts` (for example `maxJobResults: 10_000`), matching the
+architecture summary in `CLAUDE.md`.
 
 **Eviction policies:**
 

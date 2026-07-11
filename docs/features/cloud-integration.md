@@ -66,7 +66,7 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 - Identity / lifecycle: `instanceId`, `instanceName`, `version`, `hostname`, `pid`, `startedAt`, `timestamp`, `sequenceId`, optional `shutdown` (set `true` only on the final flush, `cloudAgent.ts:151`).
 - Aggregates: `stats` (counts + `totalPushed/Pulled/Completed/Failed` serialized as **strings** to avoid 53-bit overflow), `throughput`, `latency` (averages + p50/p95/p99), `memory`, `collections` (internal map/heap sizes), `workers`, `storage`, `taskErrors`.
 - Per-queue arrays/maps: `queues`, `queueConfigs`, `queueThroughput`, `queueWaitTime`, `queueRetryRate`, `queueBacklogVelocity`, `queuePriorityDistribution`, `queueExtended` (dedup/groups/deps).
-- Detail lists: `recentJobs` (all queues, all states, no per-queue cap), `dlqEntries` (with `attemptHistory`), `workerDetails`, `webhooks`, `topErrors`, `stallDetails`, `activeLocks`, `crons`, `jobResults`, `jobLogEntries`.
+- Detail lists: `recentJobs` (all queues, all states, capped at 1000 jobs per queue per state via `start: 0, end: 999`, `snapshotHelpers.ts:173`), `dlqEntries` (with `attemptHistory`, uncapped), `workerDetails`, `webhooks`, `topErrors`, `stallDetails`, `activeLocks`, `crons`, `jobResults`, `jobLogEntries`.
 - Optional: `events?: CloudEvent[]` (buffered job events drained into the snapshot), `mcpOperations`/`mcpSummary`, `s3Backup`, `sqliteStats`, `runtime`.
 
 `CloudEvent` (`types.ts:477`) wraps a `JobEvent` (`eventType`, `queue`, `jobId`, `error?`, `progress?`, `data?`, `prev?`, `delay?`). `CloudCommand` / `CloudCommandResult` (`commandHandler.ts:15,44`) are the WS command envelope: `{ type:'command', id, action, ...args }` → `{ type:'command_result', id, success, data?|error? }`.
@@ -82,9 +82,9 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 
 ### Snapshot push (`cloudAgent.ts:184` → `snapshotCollector.ts:148`)
 1. `collectSnapshot` gathers "light" data (`getStats`, memory, throughput, latency, storage, per-queue counts) then the full detail set (live jobs, DLQ, workers, configs, webhooks, locks, results, logs, analytics) on **every** call (`snapshotCollector.ts:156-360`).
-2. `collectLiveJobs` iterates every queue × every state in `ALL_STATES` and maps each domain job to snapshot shape; `paused` is collected so a paused queue's ready jobs still appear instead of vanishing (`snapshotHelpers.ts:30-44,161`).
+2. `collectLiveJobs` iterates every queue × every state in `ALL_STATES` (up to 1000 jobs per queue per state) and maps each domain job to snapshot shape; `paused` is collected so a paused queue's ready jobs still appear instead of vanishing (`snapshotHelpers.ts:30-44,161`).
 3. `enrichFailedJobDurations` back-fills `duration`/`completedAt`/`totalDuration` for failed jobs using the last DLQ attempt-history entry (`snapshotCollector.ts:93`).
-4. Throughput/backlog analytics are **delta-based**: module-level `prevQueueTotals` / `prevQueueWaiting` maps hold the previous snapshot's totals; rates require >0.5s (throughput) / >0.1min (backlog) elapsed to emit (`snapshotHelpers.ts:20,331,449`).
+4. Throughput/backlog analytics are **delta-based**: module-level `prevQueueTotals` / `prevQueueWaiting` maps hold the previous snapshot's totals; rates require >0.5s (throughput) / >0.1min (backlog) elapsed to emit (`snapshotHelpers.ts:20-26,343,459`).
 5. Buffered events are spliced into `snapshot.events` (`cloudAgent.ts:199`), then `httpSender.send(snapshot)`.
 
 ### HTTP send (`httpSender.ts:30`)
@@ -130,6 +130,7 @@ No queue locks are taken by this module; it is a read-mostly observer that calls
 - `statsUpdateTimer` is declared and cleared in `stop()` but **never assigned** — there is no live 15s `stats_update` WS push (`cloudAgent.ts:32,128`).
 - `buildStatsRefresh` (`statsRefresh.ts`) and `buildStatsUpdate` (`statsUpdate.ts`) are exported but not referenced anywhere in `src`; the `stats:refresh` command instead calls `qm.getStats()` directly (`commands.ts:356`). Treat both files as legacy/unwired.
 - Post-command immediate-snapshot trigger is commented out — the dashboard is expected to refresh via WS command results, not via an HTTP re-push (`cloudAgent.ts:100-103`).
+- The `s3:backup` command is effectively a stub: it reads `(qm as unknown).serverHandles?.triggerBackup`, but `QueueManager` has no `serverHandles` property (handles are set on the `CloudAgent`, not the manager) and `ServerHandles` declares no `triggerBackup` member (no caller injects one). Every invocation returns `{ error: 'S3 backup not configured' }` (`commands.ts:359-367`, `snapshotCollector.ts:45`).
 
 ## Configuration
 

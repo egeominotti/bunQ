@@ -76,8 +76,8 @@ High-performance job queue server for Bun. SQLite persistence, cron jobs, priori
 │   ┌───────────────────────────┼─────────────────────────────────┐           │
 │   │                           ▼                                 │           │
 │   │  ┌─────────────┐    ┌──────────┐    ┌─────────────┐        │           │
-│   │  │ WriteBuffer │───►│ SQLite   │◄───│ ReadThrough │        │           │
-│   │  │ (10ms batch)│    │ WAL Mode │    │   Cache     │        │           │
+│   │  │ WriteBuffer │───►│ SQLite   │◄───│ Recovery /  │        │           │
+│   │  │ (10ms batch)│    │ WAL Mode │    │ SQL queries │        │           │
 │   │  └─────────────┘    └──────────┘    └─────────────┘        │           │
 │   │                      Persistence                            │           │
 │   └─────────────────────────────────────────────────────────────┘           │

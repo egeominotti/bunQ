@@ -608,6 +608,14 @@ All four commands print `OK` on success.
 
 ## Monitoring
 
+### Ping
+
+```bash
+bunqueue ping
+```
+
+Sends the `Ping` wire command and prints the round trip result, the quickest liveness check over TCP (it is not listed in `--help` today, but it works).
+
 ### Server Stats
 
 ```bash

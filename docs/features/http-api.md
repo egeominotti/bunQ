@@ -90,7 +90,7 @@ Queues (`routeQueueRoutes`, `httpRouteQueues.ts:168`):
 
 | Method · Path | Command / action |
 |---|---|
-| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` |
+| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array**, no `ok` wrapper, `httpRouteQueues.ts:182`) |
 | `POST /queues/:queue/jobs` | `PUSH` |
 | `GET /queues/:queue/jobs?timeout=` | `PULL` (long-poll) |
 | `POST /queues/:queue/jobs/bulk` | `PUSHB` |

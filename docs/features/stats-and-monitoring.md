@@ -27,7 +27,7 @@ Does NOT own:
 Internal:
 
 - `../shared/hash` — `SHARD_COUNT` and `shardIndex(name)` to iterate shards and locate a queue's owning shard (`statsManager.ts:6`).
-- `./types` — `StatsContext`, the read-only view of QueueManager internals (`statsManager.ts:7`, defined at `src/application/types.ts:129`).
+- `./types` — `StatsContext`, the read-only view of QueueManager internals (`statsManager.ts:7`, defined at `src/application/types.ts:133`).
 - `../shared/histogram` — the `Histogram` class backing each latency series (`latencyTracker.ts:6`, `src/shared/histogram.ts`).
 - `./latencyTracker` — imported by `metricsExporter.ts:9` to append histogram lines.
 - `./workerManager`, `./webhookManager`, `./statsManager` (`PerQueueStats`) — type/data inputs to `generatePrometheusMetrics` (`metricsExporter.ts:6-8`).
@@ -100,10 +100,10 @@ export const latencyTracker = new LatencyTracker();              // singleton, l
 | --- | --- | --- |
 | `Stats` | `handleStats` (`handlers/management.ts:98`) | `StatsResponse` (`stats` payload: waiting/active/delayed/dlq/completed/failed/uptime/pushPerSec/pullPerSec) |
 | `Metrics` | `handleMetrics` (`handlers/management.ts:128`) | `MetricsResponse` — `{ ok, metrics: { totalCompleted, totalFailed, … } }` (totals + avgLatencyMs/avgProcessingMs/memoryUsageMb) |
-
-> The client SDK's `queue.getMetrics('completed'|'failed')` reads this `metrics` payload over TCP — `completed → metrics.totalCompleted`, `failed → metrics.totalFailed` (`client/queue/workers.ts`). It must **not** read `response.stats` (no such key on a `Metrics` reply — that always returned `0`).
 | `Prometheus` | `handlePrometheus` (`handlers/monitoring.ts:298`) | `data({ metrics })` — full Prometheus text |
 | `Ping` | `handlePing` (`handlers/monitoring.ts:116`) | `data({ pong: true, time: Date.now() })` |
+
+> The client SDK's `queue.getMetrics('completed'|'failed')` reads the `Metrics` reply's `metrics` payload over TCP — `completed → metrics.totalCompleted`, `failed → metrics.totalFailed` (`client/queue/workers.ts`). It must **not** read `response.stats` (no such key on a `Metrics` reply — that always returned `0`).
 
 Dispatch table: `handlerRoutes.ts:333-350`.
 
@@ -160,7 +160,7 @@ Builds a `string[]` of `# HELP`/`# TYPE`/value triples: global gauges (waiting, 
 
 ### Throughput rates (`throughputTracker.ts`)
 
-`RateTracker.increment(n)` is O(1), called from push/pull/ack hot paths (`operations/push.ts:269,345`, `operations/pull.ts:119,165`, `operations/ack.ts:134,173,255`, `operations/ackHelpers.ts:279`). `getRate()` (`:25`) computes `count / elapsedSeconds` then folds it into an EMA with `alpha = 0.3` (`lastRate = alpha*current + (1-alpha)*lastRate`), resets the counter, and stamps `lastCalcTime`. Rates are rounded to 2 decimals in `getRates()`.
+`RateTracker.increment(n)` is O(1), called from push/pull/ack hot paths (`operations/push.ts:306,387`, `operations/pull.ts:145`, `operations/ack.ts:134,173,255`, `operations/ackHelpers.ts:279`). `getRate()` (`:25`) computes `count / elapsedSeconds` then folds it into an EMA with `alpha = 0.3` (`lastRate = alpha*current + (1-alpha)*lastRate`), resets the counter, and stamps `lastCalcTime`. Rates are rounded to 2 decimals in `getRates()`.
 
 ### Latency (`latencyTracker.ts` + `histogram.ts`)
 

@@ -34,7 +34,7 @@ Producers ──add()──┐                          ┌──process()──
                 ▼             ▼              ▼
           In-memory     SQLite (WAL)    Background tasks
           priority Qs   write-behind    (scheduler, stall,
-                        + ReadThrough    DLQ, cleanup, locks)
+                        + recovery       DLQ, cleanup, locks)
 ```
 
 ## Technology Stack & Rationale
@@ -46,7 +46,7 @@ Producers ──add()──┐                          ┌──process()──
 | **MessagePack** (`msgpackr`) | [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | ~2–3× faster + more compact than JSON for both the on-disk job blobs and the TCP wire format; preserves binary and numeric types losslessly. |
 | **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:66`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
 | **Zero external deps** | [`package.json:74`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
-| **4-ary heaps / skip-list** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts) | 4-ary branching improves cache locality vs binary heaps; a skip-list orders the temporal index for delayed/cleanup scans. All hand-rolled, dependency-free. |
+| **4-ary heaps / skip-list** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts) | 4-ary branching improves cache locality vs binary heaps; a skip-list orders the temporal cleanup index while a 4-ary min-heap tracks delayed jobs. All hand-rolled, dependency-free. |
 
 ## Layered Architecture
 
@@ -136,7 +136,7 @@ client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
 │                                       ▼                                          │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  WriteBuffer (10ms / 100-job double-buffer) ─► SQLite (WAL, msgpack)     │   │
-│   │  ReadThrough on recovery ◄─ jobs · results · dlq · cron · queue_state    │   │
+│   │  Recovery reads ◄─ jobs · job_results · dlq · cron_jobs · queue_state    │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
@@ -192,7 +192,8 @@ IoT/edge that must tolerate intermittent connectivity. See
    [`operations/push.ts`](../src/application/operations/push.ts)).
 4. `shardIndex(queue)` selects the shard; under its write lock the job is dedup-
    checked (custom id / unique key) and enqueued into the `IndexedPriorityQueue`
-   (or the temporal index if delayed).
+   (delayed jobs live there too, ordered by `runAt`, and are additionally
+   tracked in the shard's temporal delayed min-heap).
 5. The job is handed to the `WriteBuffer` (batched) — or written immediately when
    `durable: true` — and a `job:added` event is emitted. The new `Job` is returned.
 
@@ -203,8 +204,14 @@ IoT/edge that must tolerate intermittent connectivity. See
    [`operations/pull.ts`](../src/application/operations/pull.ts)).
 3. Under the shard lock, `priorityQueue.pop()` yields the highest-priority ready
    job (respecting rate limit, concurrency, paused state, and group ordering).
-4. The job moves to `processingShards[procIdx]`, state → `active`; a lock token is
-   issued when leasing. Long-poll waits on the `WaiterManager` until the timeout.
+4. In the same synchronous critical section as the pop, the job is inserted into
+   `processingShards[procIdx]` and its `jobIndex` entry flips to processing
+   (state → `active`), so observers never see a stale location. Post-await
+   bookkeeping (persist active state, counters, broadcast) runs in
+   `finalizeProcessing` ([`operations/pull.ts:133`](../src/application/operations/pull.ts)),
+   which skips delivery when a management op claimed the job in the meantime.
+   A lock token is issued when leasing. Long-poll waits on the `WaiterManager`
+   until the timeout.
 5. The job (and token) is returned; the worker registry counters update.
 
 **ACK** (success)
@@ -214,8 +221,10 @@ IoT/edge that must tolerate intermittent connectivity. See
 3. The token is validated against `jobLocks`; a stale token (job already timed out
    / re-leased) is discarded so a retry is not skipped (`timedOutJobs` guard).
 4. The job is removed from `processingShards`, added to `completedJobs`, its result
-   stored in the `jobResults` LRU, persisted via the WriteBuffer (or deleted on
-   `removeOnComplete`), and dependents are queued for resolution.
+   stored in the `jobResults` LRU. The completed state and result are written
+   directly to SQLite (`markCompleted`/`storeResult`, after flushing any pending
+   buffered insert for that id), or the row is deleted on `removeOnComplete`;
+   dependents are queued for resolution.
 5. `job:completed` is emitted (events/webhooks/SSE/WS); repeat/cron successors and
    flow parents are scheduled.
 
@@ -291,7 +300,7 @@ proceed during the writer's flush.
   ([`sqlite.ts:91`](../src/infrastructure/persistence/sqlite.ts)). The buffer is
   **double-buffered** — an `activeBuffer` keeps accepting writes while the
   `flushBuffer` is committed in one transaction, so writers never block on disk
-  ([`sqliteBatch.ts:160`](../src/infrastructure/persistence/sqliteBatch.ts)).
+  ([`sqliteBatch.ts:180`](../src/infrastructure/persistence/sqliteBatch.ts)).
 - **Durable.** `add(..., { durable: true })` bypasses the buffer for an immediate
   synchronous write — zero data-loss window at lower throughput.
 - **Resilience.** Flush failures retry with exponential backoff (100ms → 30s, 10
@@ -304,7 +313,8 @@ proceed during the writer's flush.
   cron, and queue control-state back into memory before serving traffic
   ([`queueManager.ts:202`](../src/application/queueManager.ts)).
 
-Persisted tables: `jobs`, results, `dlq`, `cron_jobs`, queue control-state — see
+Persisted tables: `jobs`, `job_results`, `dlq`, `cron_jobs`, `queue_state` (plus
+the `migrations` bookkeeping table) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
 
 ## Background Tasks
@@ -376,7 +386,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 ### Core engine & data structures
 - [Core Queue Engine (QueueManager & Shards)](./features/core-queue-engine.md) — Central coordinator that shards queues, owns global job indexes, and orchestrates all job operations by delegating to operation modules via context objects.
-- [Data Structures (PriorityQueue, heaps, maps)](./features/data-structures.md) — Generic, dependency-free in-memory building blocks: an indexed 4-ary priority heap for ready jobs, a skip-list + min-heap temporal index for delayed/cleanup ordering, and bounded/LRU/TTL containers plus a latency histogram.
+- [Data Structures (PriorityQueue, heaps, maps)](./features/data-structures.md) — Generic, dependency-free in-memory building blocks: an indexed 4-ary priority heap for queued jobs, a skip-list temporal cleanup index plus a 4-ary min-heap tracking delayed jobs, and bounded/LRU/TTL containers plus a latency histogram.
 - [Concurrency & Locking](./features/concurrency-and-locking.md) — In-process synchronization primitives (RWLock, Semaphore) plus job-leasing and stall detection that keep bunqueue's sharded state consistent under concurrent access.
 
 ### Job operations
@@ -384,10 +394,10 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Job Queries & Queue Control](./features/job-queries-and-control.md) — Read/control surface of QueueManager: point/list job queries, single-job mutations, and queue-wide lifecycle operations as pure context-driven functions.
 - [Dead Letter Queue (DLQ)](./features/dead-letter-queue.md) — Terminal sink for jobs that exhausted retries/stalled/lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.
 - [Deduplication & Unique Jobs](./features/deduplication-and-unique.md) — Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock.
-- [Rate Limiting & Concurrency Control](./features/rate-limiting-and-concurrency.md) — Per-queue and per-group rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.
+- [Rate Limiting & Concurrency Control](./features/rate-limiting-and-concurrency.md) — Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.
 
 ### Persistence & scheduling
-- [Persistence (SQLite, WriteBuffer, ReadThrough)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, and queue control-state and serves batched recovery reads on restart.
+- [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, and queue control-state and serves batched recovery reads on restart.
 - [Scheduler & Cron](./features/scheduler-and-cron.md) — Event-driven server engine that fires recurring cron/interval jobs onto queues, persisting next-run/execution state for crash-safe at-most-once-per-slot scheduling.
 - [Background Tasks](./features/background-tasks.md) — Periodic server-side maintenance: timers for timeouts, stall/lock recovery, DLQ upkeep, dependency resolution, memory-bound cleanup, monitoring, plus startup recovery from SQLite.
 

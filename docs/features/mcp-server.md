@@ -137,7 +137,7 @@ The MCP server holds no locks of its own; concurrency safety is delegated to the
 | `BUNQUEUE_PORT` | `6789` | TCP port (parsed with `parseInt`, TCP mode). |
 | `BUNQUEUE_TOKEN` | — | Auth token forwarded to the TCP pool / FlowProducer. |
 | `BUNQUEUE_POOL_SIZE` | `2` | TCP connection pool size (`adapter.ts:671`). |
-| `DATA_PATH` / `BUNQUEUE_DATA_PATH` | `./data/bunq.db` | SQLite path used by the embedded `QueueManager` (resolved by the shared manager; see [Configuration & Entrypoint](./configuration.md)). |
+| `BUNQUEUE_DATA_PATH` / `BQ_DATA_PATH` / `DATA_PATH` / `SQLITE_PATH` | unset → in-memory | SQLite path for the embedded `QueueManager`, resolved by the shared manager in that precedence order (`src/client/manager.ts:13-17`). When none is set, `QueueManager` gets no `dataPath` and runs with **no persistence at all** (jobs live only in memory); the `./data/bunq.db` default belongs to the standalone server bootstrap, not to `bunqueue-mcp`. |
 | `BUNQUEUE_CLOUD_URL` | — | When set in embedded mode, enables `CloudAgent` MCP telemetry (`server.ts:70`). Other `BUNQUEUE_CLOUD_*` vars apply via the agent — see [bunqueue Cloud Dashboard Integration](./cloud-integration.md). |
 
 ## Related Docs

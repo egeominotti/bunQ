@@ -41,7 +41,7 @@ Internal:
 
 External / runtime:
 
-- Bun APIs: `Bun.randomUUIDv7()` (`hash.ts:62`), `navigator.hardwareConcurrency` for shard sizing (`hash.ts:29`), `queueMicrotask` for dependency-flush coalescing (`queueManager.ts:1757`).
+- Bun APIs: `Bun.randomUUIDv7()` (`hash.ts:62`), `navigator.hardwareConcurrency` for shard sizing (`hash.ts:29`), `queueMicrotask` for dependency-flush coalescing (`queueManager.ts:1765`).
 
 ## Public Interface
 
@@ -61,7 +61,7 @@ Core operations:
 - `fail(jobId, error?, token?, unrecoverable?, stack?): Promise<void>` (`queueManager.ts:496`)
 - `jobHeartbeat(jobId, token?): boolean` / `jobHeartbeatBatch(...)` (`queueManager.ts:643`, `660`)
 
-Locks: `createLock`, `verifyLock`, `renewJobLock`, `renewJobLockBatch`, `releaseLock`, `getLockInfo`, `removeLock`, `extendLock` (`queueManager.ts:668-697`, `1198`).
+Locks: `createLock`, `verifyLock`, `renewJobLock`, `renewJobLockBatch`, `releaseLock`, `getLockInfo`, `removeLock`, `extendLock` (`queueManager.ts:668-697`, `1206`).
 
 Queries: `getJob`, `getJobState`, `getResult`, `getChildrenValues`, `getJobByCustomId`, `getProgress`, `count`, `getJobs`, `getCountsPerPriority` (`queueManager.ts:725-986`).
 
@@ -75,7 +75,7 @@ Job management: `cancel`, `updateProgress`, `updateJobData`, `changePriority`, `
 
 Flow/dependencies: `updateJobParent`, `removeChildDependency`, `removeUnprocessedChildren`, `getFailedChildrenValues`, `getIgnoredChildrenFailures` (`queueManager.ts:768-1743`). See [FlowProducer](./flow-producer.md).
 
-Stats/lifecycle: `getStats`, `getQueuesSummary`, `getQueueJobCounts`, `getMemoryStats`, `getStorageStatus`, `compactMemory`, `getPrometheusMetrics`, `shutdown` (`queueManager.ts:1794-1890`). See [Stats & Monitoring](./stats-and-monitoring.md).
+Stats/lifecycle: `getStats`, `getQueuesSummary`, `getQueueJobCounts`, `getMemoryStats`, `getStorageStatus`, `compactMemory`, `getPrometheusMetrics`, `shutdown` (`queueManager.ts:1802-1899`). See [Stats & Monitoring](./stats-and-monitoring.md).
 
 This class is invoked by the TCP and HTTP command handlers; it does not itself parse the wire protocol or expose endpoints. See [TCP Server Handlers](./tcp-server-handlers.md) and [HTTP API](./http-api.md) for the command/endpoint surface that maps onto these methods.
 
@@ -124,7 +124,7 @@ See [data-model](../data-model.md) for full definitions. Most relevant here:
 
 **ACK with lock & recovery paths (`queueManager.ts:350-406`):** If a token is supplied and `verifyLock` fails, the manager checks `isExpiredButOwned` (#101 grace) and `throwIfOwnershipConflict`. It then handles three recovery cases against `jobIndex`: still `processing` → proceed to `ackJob`; requeued to `queue` and not in `timedOutJobs` → `completeStallRetriedJob` to prevent duplicate execution (Issue #33); in `timedOutJobs` → discard so the retry wins. A "not found" error from `ackJob` triggers the same stall-retry recovery.
 
-**Dependency flush (`queueManager.ts:1745-1790`):** On job completion, IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces multiple completions in a tick via `queueMicrotask`; `runDependencyFlush` loops `processPendingDependencies` until the set drains, with a reentrancy guard (`depFlushRunning`) and re-scheduling if new IDs arrive mid-flush.
+**Dependency flush (`queueManager.ts:1753-1791`):** On job completion, IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces multiple completions in a tick via `queueMicrotask`; `runDependencyFlush` loops `processPendingDependencies` until the set drains, with a reentrancy guard (`depFlushRunning`) and re-scheduling if new IDs arrive mid-flush.
 
 **Obliterate (`queueManager.ts:870-940`):** Clears the shard's waiting/delayed queue and DLQ, then explicitly sweeps every global index (`jobIndex`, `completedJobs`, `completedJobsData`, `jobResults`, `jobLogs`, `jobLocks`, flow maps, `repeatChain`, `customIdMap`), purges per-queue metrics + persisted queue-state row, deletes processing-shard entries for the queue, and removes SQLite rows. This is the documented way to reclaim ALL state for a queue.
 
@@ -148,7 +148,7 @@ Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`; `QueueMana
 - **Cron orphan removal.** On `preventOverlap` upsert, a stale waiting cron job is removed by unique key so a reconnecting worker doesn't pick it up immediately (#73, `queueManager.ts:1254-1289`).
 - **Per-queue metric growth.** `perQueueMetrics` is LRU-bounded by `maxCustomIds` so dynamically-named queues can't grow it unbounded; live queues stay resident, `obliterate` deletes the entry (`queueManager.ts:123-132`, `937-940`).
 - **Storage optional.** All `storage?.` calls are guarded; with no `dataPath`, the manager runs fully in-memory and recovery is a no-op.
-- **`shutdown()`** clears every in-memory collection and per-shard structure (`queueManager.ts:1856-1890`); it does not flush in-flight work beyond closing storage.
+- **`shutdown()`** clears every in-memory collection and per-shard structure (`queueManager.ts:1864-1898`); it does not flush in-flight work beyond closing storage.
 
 ## Configuration
 

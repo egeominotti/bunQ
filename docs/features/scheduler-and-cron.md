@@ -30,7 +30,7 @@ Internal:
 - `src/infrastructure/scheduler/cronParser.ts` — `validateCronExpression`, `getNextCronRun`, `getNextIntervalRun`, `expandCronShortcut` (+ unused-by-scheduler helpers `isDue`, `describeCron`).
 - `src/shared/minHeap.ts` — `MinHeap` for the next-run-ordered heap.
 - `src/shared/logger.ts` — `cronLog`.
-- `QueueManager` (`src/application/queueManager.ts`) wires callbacks: push → `push()`, persist → `storage.updateCron()`, worker-check → `workerManager.getForQueue()`, dashboard emit (`queueManager.ts:174-210`).
+- `QueueManager` (`src/application/queueManager.ts`) wires callbacks: push → `push()`, persist → `storage.updateCron()`, worker-check → `workerManager.getForQueue()` (`queueManager.ts:175-192`); dashboard emit is wired later via `setDashboardEmit` (`queueManager.ts:1318`).
 - `src/client/manager.ts` (`getSharedManager`) and `src/client/tcpPool.ts` for the embedded vs TCP split in `scheduler.ts`.
 
 External / runtime:
@@ -63,7 +63,7 @@ type PushJobCallback = (queue: string, input: JobInput) => Promise<void>;
 type PersistCronCallback = (name: string, executions: number, nextRun: number) => void;
 ```
 
-The `QueueManager` re-exposes these as `addCron(input)`, `removeCron(name)`, `getCron(name)`, `listCrons()` (`queueManager.ts:1254-1303`).
+The `QueueManager` re-exposes these as `addCron(input)`, `removeCron(name)`, `getCron(name)`, `listCrons()` (`queueManager.ts:1262-1311`).
 
 ### Parser functions (`cronParser.ts`)
 
@@ -106,11 +106,11 @@ Both delegate to `Queue.upsertJobScheduler` — `cron` sets `pattern`, `every` s
 - `CronDelete` — remove a cron (`handlers/cron.ts:88`).
 - `CronList` — list all crons (`handlers/cron.ts:99`).
 
-Command shapes in `src/domain/types/command.ts:324-358`.
+Command shapes in `src/domain/types/command.ts:341-378` (`CronGet` at `:481`).
 
 ### HTTP / CLI / MCP
 
-- HTTP cron routes proxy to the same handlers (`httpRouteResources.ts:32-79`: `Cron`, `CronDelete`, `CronList`).
+- HTTP cron routes proxy to the same handlers (`httpRouteResources.ts:31-82`: `CronList`, `Cron`, `CronGet`, `CronDelete`).
 - CLI: `bunqueue cron list | add | delete` (`cli/commands/cron.ts`). `add` requires `--queue` + `--data` and one of `--schedule`/`--every`; rejects `--every <= 0` and `--max-limit < 0` (`cron.ts:55-89`).
 - MCP tools `bunqueue_add_cron` / `bunqueue_list_crons` / `bunqueue_delete_cron` (`mcp/tools/cronTools.ts`).
 
@@ -138,7 +138,7 @@ Canonical definition is `CronJob` (`src/domain/types/cron.ts:28-52`). See [data-
 | `preventOverlap` | `boolean` | default `true`. |
 | `jobOptions` | `CronJobOptions \| null` | per-cron retry/cleanup policy (issue #86). |
 
-`CronJobOptions` (`cron.ts:17-25`): `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo` (`scheduler.ts:63-71`): `{ id, name, next, pattern?, every?, limit? }` (`limit` = the persisted `maxLimit` run cap, `undefined` when unlimited; #111). The `cron_jobs` SQLite table is defined at `schema.ts:103-120` (migrations 6–11 added the dedup/skip/overlap/jobOptions columns).
+`CronJobOptions` (`cron.ts:17-25`): `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo` (`scheduler.ts:63-71`): `{ id, name, next, pattern?, every?, limit? }` (`limit` = the persisted `maxLimit` run cap, `undefined` when unlimited; #111). The `cron_jobs` SQLite table is defined at `schema.ts:103-120` (migrations 6, 8-10, and 12 added the dedup/skip/overlap/jobOptions columns).
 
 ## Business Logic / Control Flow
 
@@ -150,7 +150,7 @@ Canonical definition is `CronJob` (`src/domain/types/cron.ts:28-52`). See [data-
 5. `immediately` sets `nextRun = now` **only on first creation**, never on upsert (so it doesn't clobber restart-skip logic) (`cronScheduler.ts:175-177`).
 6. Assign a fresh `generation`, store in map + heap, then `scheduleNext()`.
 
-At the manager layer, `addCron` first calls `removeOrphanedCronJob` when `preventOverlap` is set: it deletes any still-`waiting`/queued job under the cron's uniqueKey before re-arming, so a stale job left over a disconnect window isn't immediately consumed by the new worker (`queueManager.ts:1254-1289`, #73). It then persists via `storage.saveCron`.
+At the manager layer, `addCron` first calls `removeOrphanedCronJob` when `preventOverlap` is set: it deletes any still-`waiting`/queued job under the cron's uniqueKey before re-arming, so a stale job left over a disconnect window isn't immediately consumed by the new worker (`queueManager.ts:1262-1297`, #73). It then persists via `storage.saveCron`.
 
 ### Event-driven wake (`scheduleNext`, `cronScheduler.ts:262-289`)
 Clears the current timer, pops stale heap entries (generation mismatch), then arms a single `setTimeout` for `max(0, nextRun - now)` on the soonest live cron. Re-run after every mutation (add/remove/load/tick).
@@ -173,7 +173,7 @@ Clears the current timer, pops stale heap entries (generation mismatch), then ar
 ### Restart recovery (`load`, `cronScheduler.ts:230-256`)
 For each loaded cron, if (`skipMissedOnRestart || skipIfNoWorker`) and `nextRun < now`, recompute `nextRun` forward and persist it (fixes #73). Since `skipMissedOnRestart` defaults to `true`, missed runs are skipped by default. Heap is rebuilt with `buildFrom` in `O(n)`.
 
-### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts:112-175`)
+### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts:114-183`)
 Builds cron `data` from the template (`buildCronData`), merges queue `defaultJobOptions` under per-scheduler `opts` into `CronJobOptions` (`buildCronJobOptions`, issue #86), extracts dedup from `opts.deduplication`, derives spawned-job `priority` from `opts.priority`/queue default (carried on the top-level field the handler reads), and namespaces the id via `toCronName`. Embedded mode calls `manager.addCron` (timezone defaults to `'UTC'`); TCP mode sends the `Cron` command. `removeJobScheduler`/`getJobScheduler(s)` mirror this over `CronDelete`/`CronList`.
 
 ## Concurrency & Locking
@@ -202,7 +202,7 @@ Builds cron `data` from the template (`buildCronData`), merges queue `defaultJob
 - `CronSchedulerConfig.checkIntervalMs` — **deprecated/no-op**; the scheduler uses precise `setTimeout` (`cronScheduler.ts:19-23,68-71`).
 - `SAFETY_FALLBACK_MS = 60_000` — internal constant, not env-configurable.
 - Per-cron knobs (via `CronJobInput`/`RepeatOpts`): `schedule`/`repeatEvery`, `timezone` (embedded default `'UTC'`), `priority`, `maxLimit`, `uniqueKey`/`dedup`, `skipMissedOnRestart` (default `true`), `skipIfNoWorker` (default `false`), `preventOverlap` (default `true`), `immediately`, and `jobOptions` (`maxAttempts`/`backoff`/`timeout`/`delay`/`stallTimeout`/`removeOnComplete`/`removeOnFail`).
-- Queue-level `defaultJobOptions` feed `buildCronJobOptions` as the base, overridden by the per-scheduler template `opts` (`scheduler.ts:85-99`).
+- Queue-level `defaultJobOptions` feed `buildCronJobOptions` as the base, overridden by the per-scheduler template `opts` (`scheduler.ts:87-101`).
 - Data path / persistence env vars (`BUNQUEUE_DATA_PATH`, etc.) are owned by [Configuration & Entrypoint](./configuration.md) and [Persistence](./persistence.md); this module has no dedicated env vars.
 
 ## Related Docs

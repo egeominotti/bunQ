@@ -101,12 +101,12 @@ getStats(): { total: number; active: number; totalProcessed: number; totalFailed
 
 - `RegisterWorker` → `handleRegisterWorker` (`handlers/monitoring.ts:134`); fields:
   `name`, `queues`, `concurrency?`, `workerId?`, `hostname?`, `pid?`, `startedAt?`
-  (`command.ts:406`). `clientId` is injected server-side from the connection
+  (`command.ts:425`). `clientId` is injected server-side from the connection
   (`handlers/monitoring.ts:144`).
 - `UnregisterWorker` → `handleUnregisterWorker` (`handlers/monitoring.ts:166`); field `workerId`.
 - `ListWorkers` → `handleListWorkers` (`handlers/monitoring.ts:186`).
 - `Heartbeat` (worker-level) → `handleHeartbeat` (`handlers/monitoring.ts:62`); fields:
-  `id`, `activeJobs?`, `processed?`, `failed?` (`command.ts:378`). This is the
+  `id`, `activeJobs?`, `processed?`, `failed?` (`command.ts:397`). This is the
   only worker command that touches `WorkerManager`.
 - `JobHeartbeat` / `JobHeartbeatB` → routed to `QueueManager` job-lock subsystem,
   **not** `WorkerManager` (`handlers/monitoring.ts:81,103`).
@@ -130,7 +130,7 @@ getStats(): { total: number; active: number; totalProcessed: number; totalFailed
 ### Dashboard events emitted
 
 `worker:connected` and `worker:disconnected` are emitted by `QueueManager`
-wrappers (`queueManager.ts:1335,1349`). `WorkerManager` itself emits:
+wrappers (`queueManager.ts:1343,1357`). `WorkerManager` itself emits:
 
 - `worker:disconnected` — per worker removed in `unregisterByClientId` (`workerManager.ts:82`)
 - `worker:idle` — when a worker's `activeJobs` reaches 0 (`workerManager.ts:148,166`)
@@ -162,10 +162,11 @@ interface Worker {
 
 `CreateWorkerOptions` (`worker.ts:29`): `{ workerId?, hostname?, pid?, startedAt?, clientId? }`.
 
-The `ListWorkers` / `RegisterWorker` responses add derived fields not stored on
-`Worker`: `status: 'active' | 'stale'` (computed from `lastSeen`,
+The `ListWorkers` response adds derived fields not stored on `Worker`:
+`status: 'active' | 'stale'` (computed from `lastSeen`,
 `handlers/monitoring.ts:182`) and `uptime: now - registeredAt`
-(`handlers/monitoring.ts:209`).
+(`handlers/monitoring.ts:209`). The `RegisterWorker` response includes a
+hardcoded `status: 'active'` and no `uptime` (`handlers/monitoring.ts:152`).
 
 ## Business Logic / Control Flow
 
@@ -243,7 +244,7 @@ heartbeating is treated as absent even before it is reaped. See
 ### Disconnect cleanup
 
 The TCP and HTTP servers call `QueueManager.unregisterWorkersByClientId` when a
-connection closes (`server/tcp.ts:294`, `server/http.ts:236`,
+connection closes (`server/tcp.ts:314`, `server/http.ts:236`,
 `server/sseHandler.ts:346`), which delegates to
 `unregisterByClientId(clientId)` — removing every worker registered over that
 connection and emitting `worker:disconnected` per removal
@@ -286,7 +287,7 @@ renewal live in the job subsystem (`renewJobLock`), reached via `JobHeartbeat`.
 - **No persistence:** a server restart drops the entire registry; clients must
   re-register (the client `Worker` does this automatically on (re)connect).
 - **Cleanup leak on shutdown:** `stop()` must be called to clear the interval;
-  `QueueManager.shutdown` calls `workerManager.stop()` (`queueManager.ts:1858`).
+  `QueueManager.shutdown` calls `workerManager.stop()` (`queueManager.ts:1866`).
 
 ## Configuration
 

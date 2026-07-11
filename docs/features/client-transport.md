@@ -9,7 +9,7 @@ The client transport layer is the wire-level plumbing that the [Queue](./client-
 ## Responsibilities & Scope
 
 Owns:
-- TCP connection establishment (plaintext or TLS), `connectTimeout` enforcement, and OS-level TCP keepalive setup (`connection.ts:99`).
+- TCP connection establishment (plaintext or TLS), `connectTimeout` enforcement, and OS-level TCP keepalive setup (`connection.ts:155`).
 - Frame parsing / framing of msgpack-encoded command and response objects (delegated to `FrameParser` from the [TCP protocol](./tcp-protocol.md) module).
 - Request/response correlation via per-command `reqId`, pipelining up to `maxInFlight` commands, and per-command timeouts.
 - Reconnection scheduling with exponential backoff + jitter and a configurable attempt cap.
@@ -31,7 +31,7 @@ Internal:
 - Consumed by [Client SDK: Queue](./client-queue-sdk.md) (`queue.ts` wires `TcpConnectionPool` + `AddBatcher`), [Client SDK: Worker](./client-worker-sdk.md) (`worker.ts` creates a pool sized `min(concurrency, 8)` and subscribes via `onReconnect`), and [Store-and-Forward](./store-and-forward.md).
 
 External / runtime:
-- `Bun.connect` (TCP socket), `Bun.file` (TLS CA file), `Bun.hash` (pool key hashing).
+- `Bun.connect` (TCP socket), `node:fs` `readFileSync` (TLS CA file, read into bytes), `Bun.hash` (pool key hashing).
 - `msgpackr` — `pack` / `unpack` for the binary protocol.
 - Node `events.EventEmitter` (base class for `TcpClient` and `ReconnectManager`).
 
@@ -77,7 +77,7 @@ getInFlightCount(): number
 
 `HealthTracker` (`tcp/health.ts:25`): `recordSuccess`, `recordError`, `recordConnected`, `recordPingSuccess`, `recordPingFailure(): boolean`, `recordCommandTimeout(): boolean`, `getHealth(state)`, `startPing(fn)`, `stopPing`.
 
-`CommandQueue` (`tcp/connection.ts:175`): `enqueue`, `dequeue`, `remove(id)`, `addInFlight`, `removeByReqId`, `canSendMore(maxInFlight)`, `hasPending`, `getInFlightCount`, `rejectAll(error)`.
+`CommandQueue` (`tcp/connection.ts:246`): `enqueue`, `dequeue`, `remove(id)`, `addInFlight`, `removeByReqId`, `canSendMore(maxInFlight)`, `hasPending`, `getInFlightCount`, `rejectAll(error)`.
 
 `AddBatcher<T>` (`queue/addBatcher.ts:44`):
 ```typescript
@@ -91,7 +91,7 @@ hasPending(): boolean
 
 `ClientClosedError extends Error` (`tcp/client.ts:22`) — sentinel for the synthetic rejection issued by `close()`/`rejectAll()`.
 
-Helper: `createConnection(target, connectTimeout, events): Promise<ConnectionResult>` and `buildClientTls(tls)` (`tcp/connection.ts:37,51`).
+Helper: `createConnection(target, connectTimeout, events): Promise<ConnectionResult>` and `buildClientTls(tls)` (`tcp/connection.ts:68,43`).
 
 `src/client/tcpClient.ts` is a deprecated re-export shim (`@deprecated Import from './tcp' instead`) that re-exports `TcpClient`, `getSharedTcpClient`, `closeSharedTcpClient`, `DEFAULT_CONNECTION`, and the `ConnectionOptions`/`ConnectionHealth` types. Shared single-client variants live in `tcp/shared.ts` (`getSharedTcpClient`, `closeSharedTcpClient`).
 
@@ -126,11 +126,11 @@ Key shapes defined by this layer:
 ### Send path (pipelined)
 1. `TcpConnectionPool.send` rejects if closed, else picks a client via `getNextClient` (`tcpPool.ts:81`): scans from `currentIndex` for the first `isConnected()` client (advancing `currentIndex`); if all are down it falls back to plain round-robin so the chosen client triggers its own reconnect.
 2. `TcpClient.send` (`client.ts:450`) assigns a monotonic `id` and a wrapped `reqId` (`generateReqId` masks to 31 bits, `client.ts:357`), enqueues the `PendingCommand`, then: if disconnected and not connecting it kicks off `connect().catch(()=>{})`; if connected it calls `processQueue`.
-3. `processQueue` (`client.ts:418`) drains the queue while `hasPending()` and `canSendMore(maxInFlight)` (backpressure at `inFlightByReqId.size < maxInFlight`, `connection.ts:205`), (re)arms the per-command timeout, moves the command to in-flight, and writes `FrameParser.frame(pack(next.command))`.
+3. `processQueue` (`client.ts:418`) drains the queue while `hasPending()` and `canSendMore(maxInFlight)` (backpressure at `inFlightByReqId.size < maxInFlight`, `connection.ts:277`), (re)arms the per-command timeout, moves the command to in-flight, and writes `FrameParser.frame(pack(next.command))`.
 4. On inbound data, `connection.ts` `data` handler feeds bytes to `frameParser.addData(data)` and dispatches each complete frame to `handleData` (`client.ts:218`): `unpack` the frame, match `response.reqId` against in-flight, `clearTimeout`, resolve, and re-run `processQueue` to send more.
 
 ### Connect path
-`doConnect` (`client.ts:171`) calls `createConnection` (msgpack over `Bun.connect`, TLS via `buildClientTls`), enables TCP keepalive (`setKeepAlive(true, 15000)`, best-effort, `connection.ts:106`), authenticates via `sendDirect({cmd:'Auth'})` when a token is set, then marks connected and `recordConnected()`. `connect` (`client.ts:130`) resets the reconnect counter, emits `connected`, starts the ping timer, and flushes the queue. Concurrent `connect()` calls dedupe through `waitForConnection` (`client.ts:156`).
+`doConnect` (`client.ts:171`) calls `createConnection` (msgpack over `Bun.connect`, TLS via `buildClientTls`), enables TCP keepalive (`setKeepAlive(true, 15000)`, best-effort, `connection.ts:155`), authenticates via `sendDirect({cmd:'Auth'})` when a token is set, then marks connected and `recordConnected()`. `connect` (`client.ts:130`) resets the reconnect counter, emits `connected`, starts the ping timer, and flushes the queue. Concurrent `connect()` calls dedupe through `waitForConnection` (`client.ts:156`).
 
 ### TLS server-certificate verification (#109)
 
@@ -160,12 +160,12 @@ No mutexes — single-threaded JS event loop. Concurrency is managed by:
 ## Edge Cases & Failure Modes
 
 - **Malformed frame**: `handleData` catch (`client.ts:247`) treats the framed stream as unrecoverable — emits `warning {malformed_frame}`, `rejectAll`s every pending/in-flight command (so they don't hang until per-command timeout), and `forceReconnect`s for a clean stream.
-- **Frame too large**: `FrameSizeError` from `addData` surfaces as an `error` event (`connection.ts:85`) and the read returns without dispatching.
+- **Frame too large**: `FrameSizeError` from `addData` surfaces as an `error` event (`connection.ts:131`) and the read returns without dispatching.
 - **Command timeout taxonomy** (`client.ts:461`): a still-queued command (never written) is rejected but does NOT count toward dead-link detection; an in-flight command that got no response rejects AND calls `handleCommandTimeout`.
 - **Connection lost / close**: `handleClose` (`client.ts:262`) rejects all in-flight with `Connection lost` and reconnects only if it was previously connected and `canReconnect()`.
-- **Intentional close idempotency / unhandled-rejection safety**: `close` (`client.ts:511`) sets closed, stops ping, cancels reconnect, installs a process-level `unhandledRejection` filter that swallows only `ClientClosedError` (`installClientClosedFilter`, `client.ts:45`), and `rejectAll`s with `ClientClosedError`. `rejectAll` attaches a silent `.catch` to each `cmd.promise` before rejecting (`connection.ts:271`) so fire-and-forget callers (heartbeats, polling loops) don't surface unhandled rejections.
+- **Intentional close idempotency / unhandled-rejection safety**: `close` (`client.ts:511`) sets closed, stops ping, cancels reconnect, installs a process-level `unhandledRejection` filter that swallows only `ClientClosedError` (`installClientClosedFilter`, `client.ts:45`), and `rejectAll`s with `ClientClosedError`. `rejectAll` attaches a silent `.catch` to each `cmd.promise` before rejecting (`connection.ts:342`) so fire-and-forget callers (heartbeats, polling loops) don't surface unhandled rejections.
 - **Max reconnect attempts reached**: `TcpClient` constructor rejects all queued commands with `Max reconnection attempts reached` (`client.ts:125`).
-- **TLS connect failure**: `Bun.connect` may reject (handshake refused) instead of firing `connectError`; the `.catch` in `createConnection` (`connection.ts:150`) routes it to the same rejection so callers never hang past `connectTimeout`.
+- **TLS connect failure**: `Bun.connect` may reject (handshake refused) instead of firing `connectError`; the `.catch` in `createConnection` (`connection.ts:221`) routes it to the same rejection so callers never hang past `connectTimeout`.
 - **Socket error listener**: `TcpConnectionPool` attaches a no-op `error` listener to each client (`tcpPool.ts:70`) so an EventEmitter `error` (e.g. TLS handshake garbage) never crashes the process.
 - **Durable bypass**: `durable` jobs skip the batcher and go out as individual `PUSH` (`queue.ts:215`); `Store-and-Forward` disables auto-batch entirely (`forwarder.ts: autoBatch:{enabled:false}`).
 - **Batcher overflow**: at `maxPending` (10000) `enqueue` drops and rejects the oldest 10% with `Add buffer overflow - oldest entries dropped` (`addBatcher.ts:69`).
@@ -192,10 +192,12 @@ All knobs come through `ConnectionOptions` / `PoolOptions` (programmatic; no env
 | `pingInterval` | 30000 ms (0 = off) | health ping cadence |
 | `maxPingFailures` | 3 | consecutive ping fails → reconnect |
 | `maxCommandTimeouts` | 3 (0 = off) | consecutive timeouts → reconnect (#94) |
-| `pipelining` | `true` | multiple in-flight commands |
-| `maxInFlight` | 100 | pipelining window |
+| `pipelining` | `true` | declared only; pipelining is always active (see caveat below) |
+| `maxInFlight` | 100 | pipelining window (not forwarded by the pool; see caveat below) |
 | `autoBatch.maxSize` / `maxDelayMs` / `enabled` | 50 / 5 ms / true (TCP) | `add()` coalescing |
 | `autoBatch.maxPending` | 10000 | batcher overflow bound |
+
+Caveats: the `pipelining` flag is declared and defaulted but never read by `TcpClient` (the reqId send path is unconditional, so pipelining is effectively always on). And `TcpConnectionPool` resolves `maxInFlight` into its own options but does not forward it to the `TcpClient`s it constructs (`tcpPool.ts:51`), so pooled connections always run with the default window of 100; a `maxInFlight` override takes effect only on a directly constructed `TcpClient`.
 
 Shared pools are reused only when `poolSize === 4 && !token` for a Queue (`queue.ts:82`); otherwise a dedicated pool is created. Pool sharing key (`getPoolKey`, `tcpPool.ts:228`) includes host, port, poolSize, a 16-bit token hash, and the JSON-stringified TLS config so plaintext and TLS pools to the same target never alias.
 

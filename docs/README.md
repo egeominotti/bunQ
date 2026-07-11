@@ -28,7 +28,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | Document | Purpose |
 | --- | --- |
 | [Core Queue Engine](./features/core-queue-engine.md) | Central coordinator that shards queues, owns the global job indexes, and orchestrates all job operations by delegating to operation modules via context objects. |
-| [Data Structures](./features/data-structures.md) | Dependency-free in-memory building blocks: an indexed 4-ary priority heap for ready jobs, a skip-list + min-heap temporal index for delayed/cleanup ordering, and bounded/LRU/TTL containers plus a latency histogram. |
+| [Data Structures](./features/data-structures.md) | Dependency-free in-memory building blocks: an indexed 4-ary priority heap for queued jobs, a skip-list temporal cleanup index plus a 4-ary min-heap tracking delayed jobs, and bounded/LRU/TTL containers plus a latency histogram. |
 | [Concurrency & Locking](./features/concurrency-and-locking.md) | In-process synchronization primitives (RWLock, Semaphore) plus job-leasing and stall detection that keep the sharded state consistent under concurrent access. |
 
 ### Jobs & lifecycle
@@ -39,7 +39,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | [Job Queries & Queue Control](./features/job-queries-and-control.md) | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean). |
 | [Dead Letter Queue](./features/dead-letter-queue.md) | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge. |
 | [Deduplication & Unique Jobs](./features/deduplication-and-unique.md) | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock. |
-| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue and per-group rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands. |
+| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands. |
 
 ### Scheduling & background work
 

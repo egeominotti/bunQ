@@ -95,7 +95,7 @@ function forceReleaseClientJobs(clientId, ctx): number;        // lock-free fall
 | `GetLogs` | `id`, `start?`, `end?` | Read logs (inclusive slice) |
 | `ClearLogs` | `id`, `keepLogs?` | Clear / trim logs |
 
-Command shapes: `src/domain/types/command.ts:428` (webhooks), `:362` (logs), `:480` (`ClearLogs`). Handlers: `src/infrastructure/server/handlers/monitoring.ts:37` (`AddLog`/`GetLogs`), `:219` (webhooks), `:309` (`ClearLogs`). Routing: `src/infrastructure/server/handlerRoutes.ts:339`.
+Command shapes: `src/domain/types/command.ts:447` (webhooks), `:382` (logs), `:499` (`ClearLogs`). Handlers: `src/infrastructure/server/handlers/monitoring.ts:37` (`AddLog`/`GetLogs`), `:219` (webhooks), `:309` (`ClearLogs`). Routing: `src/infrastructure/server/handlerRoutes.ts:339`.
 
 ### HTTP endpoints (thin wrappers over the TCP commands)
 
@@ -161,7 +161,7 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 ### Client tracking & disconnect release
 
 - `registerClientJob` (on PULL) and `unregisterClientJob` (on ACK/FAIL) maintain `clientJobs: Map<clientId, Set<jobId>>`, deleting the set when empty (`clientTracking.ts:14`).
-- On disconnect, the TCP server calls `releaseClientJobsWithRetry` (3 attempts, exponential backoff 100/200/400 ms) → `releaseClientJobs`; on persistent lock failure it falls back to `forceReleaseClientJobs` (`src/infrastructure/server/tcp.ts:298`). SSE disconnect calls `releaseClientJobs` directly (`sseHandler.ts:347`).
+- On disconnect, the TCP server calls `releaseClientJobsWithRetry` (3 attempts, exponential backoff 100/200/400 ms) → `releaseClientJobs`; on persistent lock failure it falls back to `forceReleaseClientJobs` (`src/infrastructure/server/tcp.ts:318`). SSE disconnect calls `releaseClientJobs` directly (`sseHandler.ts:347`).
 - `releaseClientJobs` runs in three phases: (1) collect lock-free, skipping non-`processing` jobs and jobs whose lock has `renewalCount > 0`; (2) group by processing shard then queue shard; (3) acquire **shardLock → processingLock** and call `releaseJobToQueue` (`clientTracking.ts:47`).
 - `releaseJobToQueue` removes the job from the processing shard, deletes its lock, releases concurrency/uniqueKey/groupId resources, then either **discards** cron `preventOverlap` jobs (uniqueKey `cron:*` → deleted, not requeued, fixing the #73 "starts right away on reconnect" bug, `clientTracking.ts:222`) or re-queues it with `startedAt=null` and re-indexed as `{ type: 'queue' }`.
 

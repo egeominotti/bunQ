@@ -75,7 +75,7 @@ Dashboard events emitted (non-exhaustive): `auth:failed`, `job:data-updated`, `j
 
 See [data-model](../data-model.md) for full definitions. The key shapes for this module:
 
-- `HandlerContext` (`types.ts:8`): `{ queueManager: QueueManager; authTokens: Set<string>; authenticated: boolean; clientId?: string }`. Constructed once per connection in the TCP `open` handler and mutated in place (notably `authenticated`).
+- `HandlerContext` (`types.ts:8`): `{ queueManager: QueueManager; authTokens: Set<string>; authenticated: boolean; clientId?: string }`. Constructed once per connection by `initConnection` (`tcp.ts:182`, called from `open` or lazily on the first `data` event under TLS, #108) and mutated in place (notably `authenticated`).
 - `Command` — discriminated union keyed on `cmd`; each handler narrows via `Extract<Command, { cmd: '<X>' }>`.
 - `Response` — discriminated success/error union; `ErrorResponse` is `{ ok: false; error: string; reqId? }`. Every response carries the request's `reqId` so a pipelined client can correlate out-of-order replies.
 
@@ -97,7 +97,7 @@ Core paths:
 - `handlePush` (`core.ts:19`): validates queue name, data size (≤10MB), and numeric option bounds, then validates each `dependsOn` id exists in `jobIndex` **or** `completedJobs` **or** `depCompletions` — the third check covers a `removeOnComplete` parent whose row was deleted, otherwise a late dependent is wrongly rejected (`core.ts:42`). On success returns the new job id via `resp.ok(job.id)`.
 - `handlePushBatch` (`core.ts:102`): validates queue name and each job's data only — it does **not** run `validateJobOptions` nor `dependsOn` existence checks per job. Returns `resp.batch(ids)`.
 - `handlePull` (`core.ts:120`): caps `timeout` to `[0, 60000]`. If `cmd.owner` is set, uses `pullWithLock` and returns the lock `token` (`resp.pulledJob`); otherwise plain `pull` returning `resp.nullableJob`. Either way the job is registered against `ctx.clientId` for connection-loss release — unless the plain pull set `cmd.detach` (`core.ts:149`).
-- `handlePullBatch` (`core.ts:156`): caps `count` to `[1, 1000]`; lock vs. non-lock branches mirror `handlePull`, registering every returned job with the client.
+- `handlePullBatch` (`core.ts:156`): caps `count` to `[1, 1000]`; lock vs. non-lock branches register every returned job with the client, but **`timeout` is honored only in the owner/lock branch**: the plain (no `owner`) branch calls `pullBatch(queue, count, 0)`, so a non-lock `PULLB` never long-polls (`core.ts:187`).
 - `handleAck` / `handleAckBatch` (`core.ts:197`, `core.ts:214`): ack with optional result/token; `ackBatchWithResults` is used only when `results.length === ids.length`, else the result-less `ackBatch`. Both unregister the acked ids from client tracking.
 - `handleFail` (`core.ts:247`): defensively coerces `cmd.stack` to `string[]` and slices to 100 elements before it reaches the domain (`core.ts:257`, #74); the authoritative cap is later in `failJob` via `job.stackTraceLimit`.
 
@@ -120,14 +120,14 @@ The handler layer itself takes **no locks** — every mutation is delegated to `
 
 Concurrency relevant to this layer:
 
-- The transport processes frames of a single connection in parallel under a per-connection `Semaphore(50)` (`tcp.ts:267`), so multiple `handleCommand` calls can be in flight on the same `ctx`. Handlers are therefore expected to be safe against concurrent invocation — they are, because they hold no per-call state and `QueueManager` serializes the underlying mutations.
+- The transport processes frames of a single connection in parallel under a per-connection `Semaphore(50)` (`tcp.ts:284`), so multiple `handleCommand` calls can be in flight on the same `ctx`. Handlers are therefore expected to be safe against concurrent invocation — they are, because they hold no per-call state and `QueueManager` serializes the underlying mutations.
 - `ctx.authenticated` is the single shared mutable field; once `handleAuth` flips it to `true` it is monotonic for the connection's lifetime, so the concurrent reads in the auth gate are benign.
 - Client-job ownership: `registerClientJob` (on pull) / `unregisterClientJob` (on ack/fail) keep a per-`clientId` set so that on disconnect the TCP `close` handler can call `releaseClientJobs` (with retry + force-release fallback) to requeue leased jobs. See [Worker Registry & Management](./workers-management.md).
 - Lock tokens (`token`) are an opaque ownership credential minted by `pullWithLock`/`pullBatchWithLock` and verified by `ack`/`fail`/`extendLock`/`renewJobLock`; the handlers only pass them through.
 
 ## Edge Cases & Failure Modes
 
-- **Error sanitization (double layer):** `handleCommand` catches and rewrites `SQLITE`/`database` errors to `'Internal server error'` (`handler.ts:99`); the transport's `processFrame` repeats the same sanitization as a secondary net (`tcp.ts:272`).
+- **Error sanitization (double layer):** `handleCommand` catches and rewrites `SQLITE`/`database` errors to `'Internal server error'` (`handler.ts:99`); the transport's `processFrame` repeats the same sanitization as a secondary net (`tcp.ts:290-292`).
 - **PUSHB validation asymmetry:** batch push validates only data size, not numeric option bounds or `dependsOn` existence (`core.ts:110`). A batch can therefore enqueue jobs that single `PUSH` would reject.
 - **`Stats`/`Metrics` routing quirk:** these two are dispatched calling `handleStats(ctx, reqId)` / `handleMetrics(ctx, reqId)` without the `cmd` argument (`handlerRoutes.ts:334`); all other handlers receive `cmd` first.
 - **`MetricsData` placeholder fields:** `sqliteSizeMb` and `activeConnections` are hard-coded to `0` in `handleMetrics` (`management.ts:140`); real connection/SSE/WS counts are only surfaced via the bootstrap stats interval and the Cloud agent handles.
@@ -135,8 +135,8 @@ Concurrency relevant to this layer:
 - **Graceful "values" fallback:** flow-value queries (`GetChildrenValues`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`) catch internally and return `{ values: {} }` rather than an error (`query.ts:129`, `advanced.ts:427`).
 - **NaN / non-finite guards:** `validateNumericField` rejects `NaN`/`Infinity` (important for `WaitJob`/`PULL` timeouts, which a hand-rolled `<min`/`>max` check would let through and resolve instantly), and `toFiniteNumber` guards `RateLimit`/`SetConcurrency` limits (`advanced.ts:19`).
 - **Auth bypass surface:** `Auth` is processed before the auth gate, so it is always reachable; failed attempts emit `auth:failed` but otherwise return a generic `Invalid token`. There is no per-connection attempt counter at this layer.
-- **`ConnectionState.authenticated` is vestigial:** `protocol.ts`'s `createConnectionState` sets `authenticated: false`, but the authoritative auth flag is `HandlerContext.authenticated` (set to `authTokens.size === 0` at `tcp.ts:179`). Do not read `state.authenticated` for gating.
-- **Bootstrap fail-fast:** partial TLS cert/key or a port-bind failure calls `process.exit(1)` (after shutting down the manager) rather than starting half a server (`bootstrap.ts:91`, `bootstrap.ts:122`).
+- **`ConnectionState.authenticated` is vestigial:** `protocol.ts`'s `createConnectionState` sets `authenticated: false`, but the authoritative auth flag is `HandlerContext.authenticated` (set to `authTokens.size === 0` at `tcp.ts:189`). Do not read `state.authenticated` for gating.
+- **Bootstrap fail-fast:** partial TLS cert/key or a port-bind failure calls `process.exit(1)` (after shutting down the manager) rather than starting half a server (`bootstrap.ts:92`, `bootstrap.ts:126`).
 - **Shutdown drain bound:** active jobs are awaited only up to `shutdownTimeoutMs`; jobs still active after the deadline are abandoned to the next process's stall detector.
 
 ## Configuration

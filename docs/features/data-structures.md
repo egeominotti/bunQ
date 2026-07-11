@@ -111,7 +111,7 @@ One `IndexedPriorityQueue` is created lazily per queue name inside a shard (`sha
 
 ### Temporal index & delayed refresh (`temporalManager.ts`)
 - The cleanup index is a `SkipList<TemporalEntry>` with a **total-order** comparator `createdAt → jobId` (`:46`). The `jobId` tie-break is load-bearing: `addBulk` captures `now` once, so many entries share one `createdAt`; without the tie-break, `SkipList.insert`'s duplicate scan degrades to O(n) (→ O(n²) per batch) and `delete` would remove the wrong same-`createdAt` node. Equality for dedup is still by `jobId` (`:50`).
-- `getOldJobs` (`:76`) walks `values()` in order, stops once `createdAt > threshold`, filters by `queue`, caps at `limit`. Used by clean (`queueControl.ts:107`).
+- `getOldJobs` (`:76`) walks `values()` in order, stops once `createdAt > threshold`, filters by `queue`, caps at `limit`. Used by clean (`queueControl.ts:109`).
 - Delayed jobs are tracked in three structures kept in sync: `delayedJobIds: Set`, `delayedHeap: MinHeap<DelayedEntry>` (by `runAt`), and `delayedRunAt: Map<JobId, number>` (current `runAt`). `refreshDelayed(now)` (`:152`) pops the heap while `top.runAt <= now`, and for each popped entry checks `delayedRunAt` to detect staleness (job removed → `undefined`; `runAt` changed → mismatch) before counting it ready. `removeDelayed` (`:138`) is lazy: it clears the set/map but leaves the heap entry for `refreshDelayed` to discard.
 
 ### Heaps

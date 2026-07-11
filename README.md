@@ -63,15 +63,15 @@ That's it. Queue + Worker in one object. No Redis, no config, no setup.
 
 ## 🪶 Featherweight install
 
-`bun add bunqueue` pulls **7 packages and 5.4 MB** — and that includes the binary
+`bun add bunqueue` pulls **7 packages and 5.5 MB** — and that includes the binary
 queue server, the CLI, and the MCP server. Most queue libraries pull a Redis
 client and its dependency tree before you've queued a single job.
 
 | | Before (2.7.x) | Now | |
 | --- | --- | --- | --- |
-| **`node_modules`** | 93 MB | **5.4 MB** | **−94%** |
+| **`node_modules`** | 93 MB | **5.5 MB** | **−94%** |
 | **packages** | 117 | **7** | **−110** |
-| **cold install** | ~6 s | **~1.2 s** | **~5× faster** |
+| **cold install** | ~6 s | **~1.7 s** | **~3.5× faster** |
 
 Just **2 runtime dependencies** (`croner` + `msgpackr`). SQLite, S3, HTTP and
 WebSocket are all Bun built-ins. The MCP SDK is an optional peer dependency —
@@ -336,7 +336,7 @@ const app = new Bunqueue('tasks', {
 });
 ```
 
-A job with priority 1, after 5 min: 3, after 10 min: 5, … capped at 100.
+A job with priority 1 becomes eligible after 5 min, then gains +2 on every 60s tick: 3, 5, 7, … capped at 100.
 
 ### Deduplication
 
@@ -362,7 +362,7 @@ Override per-job: `await app.add('task', data, { deduplication: { id: 'my-id', t
 
 ### Debouncing
 
-Coalesce rapid same-name jobs. Only the last one in the TTL window gets processed:
+Attach a default debounce id to same-name jobs. Each job gets `debounce: { id: jobName, ttl }` unless the per-job options already set one:
 
 ```typescript
 const app = new Bunqueue('search', {
@@ -373,8 +373,10 @@ const app = new Bunqueue('search', {
 
 await app.add('search', { query: 'h' });
 await app.add('search', { query: 'he' });
-await app.add('search', { query: 'hello' });  // only this one processes
+await app.add('search', { query: 'hello' });  // all three share the debounce id 'search'
 ```
+
+The debounce id and TTL are stored on the job (BullMQ v5 compatible metadata, visible via `job.opts.debounce`), but they do not suppress duplicates by themselves in the current engine. To actually coalesce rapid duplicates, use [Deduplication](#deduplication) with `replace: true`: a duplicate arriving within the TTL window replaces the pending job, giving last-write-wins semantics.
 
 ### Rate Limiting
 
@@ -385,15 +387,13 @@ const app = new Bunqueue('api', {
   rateLimit: { max: 100, duration: 1000 },
 });
 
-// Per-group rate limiting (e.g., per customer)
+// Per-group cap (e.g., per customer): with groupKey set, max limits
+// concurrently active jobs per group (duration is not applied in this mode)
 const app2 = new Bunqueue('api', {
   embedded: true,
   processor: async (job) => callAPI(job.data),
   rateLimit: { max: 10, duration: 1000, groupKey: 'customerId' },
 });
-
-app.setGlobalRateLimit(50, 1000);
-app.removeGlobalRateLimit();
 ```
 
 ### DLQ (Dead Letter Queue)
@@ -418,7 +418,7 @@ app.retryDlq();                      // retry all
 app.purgeDlq();                      // clear all
 ```
 
-Failure reasons: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`.
+Failure reasons: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`, `unknown`.
 
 ### Cron Jobs
 
@@ -662,9 +662,9 @@ bunx bunqueue-dashboard
 - **MCP server included** — 73 tools, 5 resources, 3 prompts. AI agents get full control out of the box
 - **BullMQ-compatible API** — Same `Queue`, `Worker`, `QueueEvents`
 - **Zero dependencies** — No Redis, no MongoDB
-- **Tiny footprint** — 5.4 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
+- **Tiny footprint** — 5.5 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
 - **SQLite persistence** — Survives restarts, WAL mode for concurrent access
-- **Up to 286K ops/sec** — [Verified benchmarks](https://bunqueue.dev/guide/benchmarks/)
+- **Up to 630K ops/sec** — [Verified benchmarks](https://bunqueue.dev/guide/benchmarks/)
 
 ## Built for AI Agents (MCP Server)
 
@@ -690,8 +690,8 @@ bunqueue is the **first job queue with native MCP support**. AI agents get a ful
 # bunqueue-mcp is a binary bundled inside the bunqueue package (not a standalone npm package),
 # so install bunqueue first, then connect Claude Code:
 bun add bunqueue
-# Since v2.8.0 the MCP SDK is an optional peer dependency. Queue-only users skip it entirely:
-# a clean install drops from 93 MB / 117 packages to 5.4 MB / 7 packages (−94%, up to ~5× faster on a cold install).
+# Since v2.8.1 the MCP SDK is an optional peer dependency. Queue-only users skip it entirely:
+# a clean install drops from 93 MB / 117 packages to 5.5 MB / 7 packages (−94%, ~3.5× faster on a cold install).
 # bunx --package=bunqueue does NOT auto-install optional peers, so install the SDK once to run the MCP server:
 bun add @modelcontextprotocol/sdk
 claude mcp add bunqueue -- bunx bunqueue-mcp
@@ -731,7 +731,7 @@ Supports **embedded** (local SQLite) and **TCP** (remote server) modes. [Full MC
 - **Agentic workflows** — agents push jobs, workers process, agents monitor results
 - Single-server deployments
 - Prototypes and MVPs
-- Moderate to high workloads (up to 286K ops/sec)
+- Moderate to high workloads (up to 630K ops/sec)
 - Teams that want to avoid Redis operational overhead
 - Embedded use cases (CLI tools, edge functions, serverless)
 
@@ -745,7 +745,7 @@ Supports **embedded** (local SQLite) and **TCP** (remote server) modes. [Full MC
 
 If you're already running Redis, BullMQ is great — battle-tested and feature-rich.
 
-bunqueue is for when you **don't want to run Redis**. SQLite with WAL mode handles surprisingly high throughput for single-node deployments (tested up to 286K ops/sec). You get persistence, priorities, delays, retries, cron jobs, and DLQ — without the operational overhead of another service.
+bunqueue is for when you **don't want to run Redis**. SQLite with WAL mode handles surprisingly high throughput for single-node deployments (tested up to 630K ops/sec on bulk push). You get persistence, priorities, delays, retries, cron jobs, and DLQ — without the operational overhead of another service.
 
 ## Install
 
@@ -765,13 +765,15 @@ bunqueue runs in two modes depending on your architecture:
 | ---------------- | ------------------------------------- | -------------------------------------------- |
 | **How it works** | Queue runs inside your process        | Standalone server, clients connect via TCP   |
 | **Setup**        | `bun add bunqueue`                    | `docker run` or `bunqueue start`             |
-| **Performance**  | 286K ops/sec                          | 149K ops/sec                                 |
+| **Performance**  | 630K ops/sec (bulk push)              | 90K ops/sec (push)                           |
 | **Best for**     | Single-process apps, CLIs, serverless | Multiple workers, separate producer/consumer |
 | **Scaling**      | Same process only                     | Multiple clients across machines             |
 
 ### Embedded Mode
 
-Everything runs in your process. No server, no network, no setup.
+Everything runs in your process. No server, no network, no setup. Without a
+data path the queue is in-memory and lost on restart: pass
+`dataPath: './data/app.db'` (or set `BUNQUEUE_DATA_PATH`) to persist jobs.
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -827,8 +829,8 @@ full feature parity, so producers and workers can live anywhere in your stack:
 
 | Where your code runs | Install | Status |
 | -------------------- | ------- | ------ |
-| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) | 58/58 e2e per runtime + 11/11 inside workerd |
-| **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` | 44/44 e2e |
+| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) | 100/100 e2e per runtime + 16/16 inside workerd |
+| **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` | 78/78 e2e |
 
 ```typescript
 // Node.js / Deno / Cloudflare Workers
@@ -909,8 +911,8 @@ SQLite handles surprisingly high throughput for single-node deployments:
 
 | Mode     | Peak Throughput | Use Case            |
 | -------- | --------------- | ------------------- |
-| Embedded | 286K ops/sec    | Same process        |
-| TCP      | 149K ops/sec    | Distributed workers |
+| Embedded | 630K ops/sec (bulk push) | Same process        |
+| TCP      | 90K ops/sec (push)       | Distributed workers |
 
 > Run `bun run bench` to verify on your hardware. [Full benchmark methodology →](https://bunqueue.dev/guide/benchmarks/)
 

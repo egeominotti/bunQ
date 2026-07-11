@@ -83,7 +83,7 @@ The CLI is schemaless on the wire: every command is a plain `Record<string, unkn
 - `SocketData` (`src/cli/client.ts:29`): `{ frameParser: FrameParser; resolve; reject }` — one outstanding request per socket.
 - `BackupCommandResult` (`src/cli/commands/backup.ts:11`): `{ success: boolean; message: string; data?: unknown }`.
 
-Job fields the formatter reads (`src/cli/output.ts`): `id`, `queue`, `state`, `priority`, `attempts`/`maxAttempts`, `data`, `progress`, `createdAt`, `startedAt`, `completedAt`, `runAt`, `error`. Because the server-side Job carries no explicit `state`, `deriveJobState` infers it from timestamps and errs to `'unknown'` rather than guessing (`src/cli/output.ts:52`).
+Job fields the formatter reads (`src/cli/output.ts`): `id`, `queue`, `state`, `priority`, `attempts`/`maxAttempts`, `data`, `progress`, `createdAt`, `startedAt`, `completedAt`, `runAt`, `error`. Because the server-side Job carries no explicit `state`, `deriveJobState` infers it from timestamps (`completed`/`active`/`delayed`/`waiting`) and falls back to `'unknown'` for the ambiguous cases: retries exhausted without completion, or no timestamps at all (`src/cli/output.ts:52`).
 
 ## Business Logic / Control Flow
 
@@ -110,7 +110,7 @@ Done by hand (not `parseArgs`) so unknown/subcommand flags survive into `command
 7. `finally` closes the socket.
 
 ### 4. Output (`formatOutput` → `formatSuccess`, `src/cli/output.ts:422`, `:352`)
-`--json` returns `JSON.stringify(response)` verbatim. Otherwise `unwrap` flattens a `{ data: {...} }` envelope (`:296`), then a cascade picks a renderer: job / jobs-table (DLQ-aware) / workers / webhooks / crons / dlqJobs / logs / stats / counts / queues, then scalar shapes (`id`→"Job created", `ids`→verb chosen by command+subcommand, `workerId`, `webhookId`, `cron`, `state`, `result`, `progress`, `paused`, `count`, `metrics`), falling back to `OK` (`:418`). The subcommand (first positional) is forwarded so batch responses read "Drained"/"Cleaned"/"Retried"/"Purged" correctly (`src/cli/client.ts:218`).
+`--json` returns `JSON.stringify(response, null, 2)` of the raw response (pretty-printed, no unwrapping). Otherwise `unwrap` flattens a `{ data: {...} }` envelope (`:296`), then `formatSuccess` checks `id`→"Job created" (only for `push`) and `ids`→verb chosen by command+subcommand first, then a collection cascade picks a renderer: job / jobs-table (DLQ-aware) / workers / webhooks / crons / dlqJobs / logs / stats / counts / queues, then the remaining scalar shapes (`workerId`, `webhookId`, `cron`, `state`, `result`, `progress`, `paused`, `count`, `metrics`), falling back to `OK` (`:418`). The subcommand (first positional) is forwarded so batch responses read "Drained"/"Cleaned"/"Retried"/"Purged" correctly (`src/cli/client.ts:218`).
 
 ### 5. Server mode (`runServer`, `src/cli/commands/server.ts:118`)
 Parse CLI flags (`parseCliFlags`, `:37`) → `loadConfigFile(configPath)` → `applyCliFlags` (CLI wins over file config, `:83`) → `resolveServerConfig` → `bootServer`. Invalid ports warn and fall back to defaults (6789/6790).

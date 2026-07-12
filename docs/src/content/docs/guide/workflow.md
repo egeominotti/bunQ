@@ -5,7 +5,7 @@ head:
   - tag: meta
     attrs:
       property: og:image
-      content: https://bunqueue.dev/og/workflow.png
+      content: https://bunqueue.dev/og/guide/workflow.png
   - tag: meta
     attrs:
       name: keywords

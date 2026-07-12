@@ -5,7 +5,7 @@ head:
   - tag: meta
     attrs:
       property: og:image
-      content: https://bunqueue.dev/og/advanced.png
+      content: https://bunqueue.dev/og/guide/webhooks.png
 ---
 
 

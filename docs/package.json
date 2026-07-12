@@ -16,11 +16,13 @@
     "@fontsource-variable/bricolage-grotesque": "^5.2.10",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/inter": "^5.2.8",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "astro": "^6.0.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "satori": "^0.26.0",
     "sharp": "^0.33.0"
   },
   "devDependencies": {

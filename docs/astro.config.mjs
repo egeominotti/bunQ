@@ -341,14 +341,14 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image:width',
-            content: '2400',
+            content: '1200',
           },
         },
         {
           tag: 'meta',
           attrs: {
             property: 'og:image:height',
-            content: '1260',
+            content: '630',
           },
         },
         {
@@ -376,13 +376,6 @@ export default defineConfig({
         {
           tag: 'meta',
           attrs: {
-            name: 'twitter:image',
-            content: 'https://bunqueue.dev/og-image.png',
-          },
-        },
-        {
-          tag: 'meta',
-          attrs: {
             name: 'twitter:creator',
             content: '@EgeoMinotti',
           },
@@ -392,13 +385,6 @@ export default defineConfig({
           attrs: {
             name: 'twitter:site',
             content: '@EgeoMinotti',
-          },
-        },
-        {
-          tag: 'meta',
-          attrs: {
-            name: 'twitter:image:alt',
-            content: 'bunqueue - High-performance job queue for Bun & AI agents',
           },
         },
         // JSON-LD Structured Data - SoftwareApplication

@@ -5,7 +5,7 @@ head:
   - tag: meta
     attrs:
       property: og:image
-      content: https://bunqueue.dev/og-image.png
+      content: https://bunqueue.dev/og/architecture/client-sdk.png
 ---
 
 <div class="bq-wrap bq-hero">

@@ -5,7 +5,7 @@ head:
   - tag: meta
     attrs:
       property: og:image
-      content: https://bunqueue.dev/og/getting-started.png
+      content: https://bunqueue.dev/og/contributing.png
 ---
 
 <div class="bq-wrap bq-hero">

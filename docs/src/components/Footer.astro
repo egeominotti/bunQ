@@ -13,7 +13,35 @@ const year = new Date().getFullYear();
 <footer class="bq-footer">
   <div class="bq-footer-grid">
     <div class="bq-footer-brand">
-      <span class="bq-footer-logo" aria-hidden="true"></span>
+      <svg
+        class="bq-footer-logo"
+        width="34"
+        height="34"
+        viewBox="0 0 48 48"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <defs>
+          <linearGradient id="bqFooterMark" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff4f9f"></stop>
+            <stop offset="1" stop-color="#d3156d"></stop>
+          </linearGradient>
+        </defs>
+        <rect width="48" height="48" rx="11" fill="url(#bqFooterMark)"></rect>
+        <g transform="translate(8,8) scale(0.6667)">
+          <g
+            fill="none"
+            stroke="#fff"
+            stroke-width="4.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="13" y="8" width="20" height="20" rx="6.6"></rect>
+            <path d="M31 26V39.5"></path>
+          </g>
+          <circle cx="31" cy="40" r="4" fill="#fff"></circle>
+        </g>
+      </svg>
       <p class="bq-footer-name">bunqueue</p>
       <p class="bq-footer-tag">The queue is a file. Zero-infrastructure background jobs, persisted to SQLite.</p>
     </div>
@@ -63,21 +91,6 @@ const year = new Date().getFullYear();
     display: block;
     width: 34px;
     height: 34px;
-    border-radius: 9px;
-    background: var(--bq-brand, #ec4899);
-    position: relative;
-  }
-
-  .bq-footer-logo::before {
-    content: '';
-    position: absolute;
-    left: 8px;
-    top: 9px;
-    width: 17px;
-    height: 4px;
-    border-radius: 2px;
-    background: #fff;
-    box-shadow: 0 6px 0 -0.5px rgba(255, 255, 255, 0.8), 0 12px 0 -1px rgba(255, 255, 255, 0.6);
   }
 
   .bq-footer-name {

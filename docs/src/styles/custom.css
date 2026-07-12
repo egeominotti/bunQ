@@ -626,6 +626,17 @@ starlight-menu-button[aria-expanded='true'] button {
   height: 28px !important;
 }
 
+/* On phones the header also carries search, the "Get started" CTA and the
+   menu button, so the full wordmark no longer fits beside the mark and the
+   title-wrapper (overflow: clip) would cut it to "bunq". Below the phone
+   breakpoint show the q mark alone; the logo's alt text still names the
+   link "bunqueue", and the wordmark returns on wider screens. */
+@media (max-width: 30rem) {
+  .site-title span {
+    display: none !important;
+  }
+}
+
 /* Sidebar header area */
 starlight-site-title a {
   gap: 0.5rem;

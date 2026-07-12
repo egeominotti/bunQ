@@ -1,48 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="bunqueue">
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#f97316;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#ea580c;stop-opacity:1" />
-    </linearGradient>
-    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#fdba74;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#fb923c;stop-opacity:1" />
+    <linearGradient id="bq" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4f9f"/>
+      <stop offset="1" stop-color="#d3156d"/>
     </linearGradient>
   </defs>
-
-  <!-- Background circle -->
-  <circle cx="100" cy="110" r="70" fill="url(#grad1)"/>
-
-  <!-- Left ear -->
-  <ellipse cx="60" cy="45" rx="18" ry="40" fill="url(#grad1)"/>
-  <ellipse cx="60" cy="45" rx="10" ry="28" fill="url(#grad2)"/>
-
-  <!-- Right ear -->
-  <ellipse cx="140" cy="45" rx="18" ry="40" fill="url(#grad1)"/>
-  <ellipse cx="140" cy="45" rx="10" ry="28" fill="url(#grad2)"/>
-
-  <!-- Face highlight -->
-  <circle cx="100" cy="110" r="55" fill="url(#grad2)" opacity="0.3"/>
-
-  <!-- Eyes -->
-  <ellipse cx="75" cy="100" rx="10" ry="12" fill="#1f2937"/>
-  <ellipse cx="125" cy="100" rx="10" ry="12" fill="#1f2937"/>
-
-  <!-- Eye shine -->
-  <circle cx="78" cy="96" r="4" fill="white"/>
-  <circle cx="128" cy="96" r="4" fill="white"/>
-
-  <!-- Nose -->
-  <ellipse cx="100" cy="125" rx="8" ry="6" fill="#1f2937"/>
-
-  <!-- Mouth -->
-  <path d="M 92 135 Q 100 145 108 135" stroke="#1f2937" stroke-width="3" fill="none" stroke-linecap="round"/>
-
-  <!-- Q tail (queue symbol) -->
-  <path d="M 145 145 L 170 175" stroke="url(#grad1)" stroke-width="12" stroke-linecap="round"/>
-  <circle cx="170" cy="175" r="8" fill="#f97316"/>
-
-  <!-- Queue dots -->
-  <circle cx="155" cy="158" r="4" fill="#fdba74"/>
-  <circle cx="162" cy="165" r="3" fill="#fdba74" opacity="0.7"/>
+  <rect width="48" height="48" rx="11" fill="url(#bq)"/>
+  <g transform="translate(8,8) scale(0.6667)">
+    <g fill="none" stroke="#fff" stroke-width="4.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="13" y="8" width="20" height="20" rx="6.6"/>
+      <path d="M31 26V39.5"/>
+    </g>
+    <circle cx="31" cy="40" r="4" fill="#fff"/>
+  </g>
 </svg>

@@ -93,7 +93,7 @@ export default defineConfig({
       description: 'High-performance job queue for Bun & AI agents. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups. Zero external dependencies.',
       logo: {
         src: './src/assets/logo.svg',
-        replacesTitle: true,
+        replacesTitle: false,
         alt: 'bunqueue',
       },
       social: [

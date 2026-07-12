@@ -1,137 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300" role="img" aria-label="bunqueue, the queue is a file">
   <defs>
-    <linearGradient id="heroGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#fce7f3"/>
-      <stop offset="50%" style="stop-color:#f9a8d4"/>
-      <stop offset="100%" style="stop-color:#ec4899"/>
+    <linearGradient id="tileg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4f9f"/><stop offset="1" stop-color="#d3156d"/>
     </linearGradient>
-    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#f9a8d4"/>
-      <stop offset="100%" style="stop-color:#ec4899"/>
-    </linearGradient>
-    <linearGradient id="bunnyInner" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#fce7f3"/>
-      <stop offset="100%" style="stop-color:#fbcfe8"/>
-    </linearGradient>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
+    <radialGradient id="glow" cx="0.82" cy="0.08" r="0.75">
+      <stop offset="0" stop-color="#db2777" stop-opacity="0.5"/>
+      <stop offset="0.55" stop-color="#db2777" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#db2777" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <style>
-    @keyframes pulse1 {
-      0%, 100% { opacity: 0.1; transform: scale(1); }
-      50% { opacity: 0.18; transform: scale(1.05); }
-    }
-    @keyframes pulse2 {
-      0%, 100% { opacity: 0.15; transform: scale(1); }
-      50% { opacity: 0.25; transform: scale(1.08); }
-    }
-    @keyframes pulse3 {
-      0%, 100% { opacity: 0.2; transform: scale(1); }
-      50% { opacity: 0.35; transform: scale(1.1); }
-    }
-    @keyframes float1 {
-      0%, 100% { transform: translate(0, 0) rotate(0deg); }
-      25% { transform: translate(5px, -8px) rotate(5deg); }
-      50% { transform: translate(0, -12px) rotate(0deg); }
-      75% { transform: translate(-5px, -8px) rotate(-5deg); }
-    }
-    @keyframes float2 {
-      0%, 100% { transform: translate(0, 0) rotate(0deg); }
-      25% { transform: translate(-6px, -6px) rotate(-5deg); }
-      50% { transform: translate(0, -10px) rotate(0deg); }
-      75% { transform: translate(6px, -6px) rotate(5deg); }
-    }
-    @keyframes float3 {
-      0%, 100% { transform: translate(0, 0) rotate(0deg); }
-      25% { transform: translate(8px, -5px) rotate(8deg); }
-      50% { transform: translate(0, -8px) rotate(0deg); }
-      75% { transform: translate(-8px, -5px) rotate(-8deg); }
-    }
-    @keyframes float4 {
-      0%, 100% { transform: translate(0, 0) rotate(0deg); }
-      25% { transform: translate(-4px, -10px) rotate(-8deg); }
-      50% { transform: translate(0, -15px) rotate(0deg); }
-      75% { transform: translate(4px, -10px) rotate(8deg); }
-    }
-    @keyframes bunnyBounce {
-      0%, 100% { transform: translate(200px, 150px) scale(1); }
-      50% { transform: translate(200px, 147px) scale(1.02); }
-    }
-    @keyframes linePulse {
-      0%, 100% { opacity: 0.3; stroke-width: 2; }
-      50% { opacity: 0.6; stroke-width: 2.5; }
-    }
-    @keyframes speedLine {
-      0% { stroke-dashoffset: 60; opacity: 0.2; }
-      50% { opacity: 0.6; }
-      100% { stroke-dashoffset: -60; opacity: 0.2; }
-    }
-    .circle1 { animation: pulse1 3s ease-in-out infinite; transform-origin: 200px 150px; }
-    .circle2 { animation: pulse2 3s ease-in-out infinite 0.3s; transform-origin: 200px 150px; }
-    .circle3 { animation: pulse3 3s ease-in-out infinite 0.6s; transform-origin: 200px 150px; }
-    .job1 { animation: float1 4s ease-in-out infinite; }
-    .job2 { animation: float2 3.5s ease-in-out infinite 0.5s; }
-    .job3 { animation: float3 4.5s ease-in-out infinite 1s; }
-    .job4 { animation: float4 3.8s ease-in-out infinite 0.8s; }
-    .bunny { animation: bunnyBounce 2s ease-in-out infinite; transform-origin: 0 0; }
-    .conn-line { animation: linePulse 2s ease-in-out infinite; }
-    .speed-line { stroke-dasharray: 30 30; animation: speedLine 1.5s linear infinite; }
-  </style>
+  <rect width="1000" height="300" rx="20" fill="#0e0b13"/>
+  <rect width="1000" height="300" rx="20" fill="url(#glow)"/>
 
-  <!-- Background circles -->
-  <circle class="circle1" cx="200" cy="150" r="120" fill="url(#heroGrad)" opacity="0.1"/>
-  <circle class="circle2" cx="200" cy="150" r="90" fill="url(#heroGrad)" opacity="0.15"/>
-  <circle class="circle3" cx="200" cy="150" r="60" fill="url(#heroGrad)" opacity="0.2"/>
-
-  <!-- Main logo box with bunny -->
-  <g filter="url(#glow)">
-    <rect x="150" y="100" width="100" height="100" rx="20" fill="url(#accentGrad)"/>
-
-    <!-- Bunny inside the box - centered at 200, 150 -->
-    <g class="bunny" transform="translate(200, 150)">
-      <!-- Left ear -->
-      <ellipse cx="-16" cy="-32" rx="8" ry="20" fill="white" opacity="0.9"/>
-      <ellipse cx="-16" cy="-32" rx="4" ry="14" fill="url(#bunnyInner)"/>
-      <!-- Right ear -->
-      <ellipse cx="16" cy="-32" rx="8" ry="20" fill="white" opacity="0.9"/>
-      <ellipse cx="16" cy="-32" rx="4" ry="14" fill="url(#bunnyInner)"/>
-      <!-- Head -->
-      <circle cx="0" cy="0" r="28" fill="white" opacity="0.95"/>
-      <!-- Eyes -->
-      <ellipse cx="-10" cy="-4" rx="5" ry="6" fill="#18181b"/>
-      <ellipse cx="10" cy="-4" rx="5" ry="6" fill="#18181b"/>
-      <circle cx="-8" cy="-6" r="2" fill="white"/>
-      <circle cx="12" cy="-6" r="2" fill="white"/>
-      <!-- Nose -->
-      <ellipse cx="0" cy="8" rx="4" ry="3" fill="#be185d"/>
-      <!-- Mouth -->
-      <path d="M -6 14 Q 0 20 6 14" stroke="#be185d" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- q tile -->
+  <g transform="translate(72,102)">
+    <rect width="96" height="96" rx="22" fill="url(#tileg)"/>
+    <g transform="translate(16,16) scale(0.6667)">
+      <g fill="none" stroke="#fff" stroke-width="4.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="13" y="8" width="20" height="20" rx="6.6"/><path d="M31 26V39.5"/>
+      </g>
+      <circle cx="31" cy="40" r="4" fill="#fff"/>
     </g>
   </g>
 
-  <!-- Floating elements representing jobs -->
-  <g opacity="0.8">
-    <rect class="job1" x="60" y="80" width="40" height="40" rx="8" fill="#a78bfa"/>
-    <rect class="job2" x="300" y="60" width="35" height="35" rx="6" fill="#67e8f9"/>
-    <rect class="job3" x="320" y="180" width="45" height="45" rx="10" fill="#86efac"/>
-    <rect class="job4" x="40" y="180" width="30" height="30" rx="6" fill="#fde047"/>
-  </g>
+  <!-- wordmark + tagline -->
+  <text x="200" y="163" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-weight="800" font-size="78" letter-spacing="-3" fill="#f4eff8">bunqueue</text>
+  <text x="203" y="203" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="21" letter-spacing="0.5" fill="#b9adc6">the queue is a file. no redis, no server to run.</text>
 
-  <!-- Connection lines -->
-  <g stroke="#ec4899" stroke-width="2" class="conn-line">
-    <line x1="100" y1="100" x2="150" y2="130"/>
-    <line x1="317" y1="77" x2="250" y2="120"/>
-    <line x1="342" y1="202" x2="250" y2="170"/>
-    <line x1="70" y1="195" x2="150" y2="170"/>
-  </g>
-
-  <!-- Speed lines -->
-  <g stroke="url(#accentGrad)" stroke-width="3" stroke-linecap="round">
-    <line class="speed-line" x1="100" y1="250" x2="140" y2="250"/>
-    <line class="speed-line" x1="120" y1="260" x2="180" y2="260" style="animation-delay: 0.2s"/>
-    <line class="speed-line" x1="90" y1="270" x2="160" y2="270" style="animation-delay: 0.4s"/>
+  <!-- faint chip-on-a-lane motif -->
+  <g opacity="0.9">
+    <path d="M735 250 H930" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3" stroke-linecap="round"/>
+    <rect x="735" y="243" width="14" height="14" rx="4" fill="#ffffff" opacity="0.16"/>
+    <rect x="762" y="243" width="14" height="14" rx="4" fill="#ffffff" opacity="0.28"/>
+    <rect x="789" y="242" width="16" height="16" rx="4.5" fill="#ff59a6"/>
   </g>
 </svg>

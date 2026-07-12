@@ -1,19 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="bunqueue">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#f472b6"/>
-      <stop offset="100%" style="stop-color:#ec4899"/>
+    <linearGradient id="bq" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4f9f"/>
+      <stop offset="1" stop-color="#d3156d"/>
     </linearGradient>
   </defs>
-
-  <!-- Rounded square base -->
-  <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#grad)"/>
-
-  <!-- Queue bars -->
-  <rect x="7" y="8" width="15" height="3.5" rx="1.75" fill="white" opacity="0.95"/>
-  <rect x="7" y="14.5" width="11.5" height="3.5" rx="1.75" fill="white" opacity="0.7"/>
-  <rect x="7" y="21" width="8" height="3.5" rx="1.75" fill="white" opacity="0.45"/>
-
-  <!-- Arrow -->
-  <polygon points="24.5,15.5 28,16.25 24.5,17" fill="white" opacity="0.8"/>
+  <rect width="48" height="48" rx="11" fill="url(#bq)"/>
+  <g transform="translate(8,8) scale(0.6667)">
+    <g fill="none" stroke="#fff" stroke-width="4.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="13" y="8" width="20" height="20" rx="6.6"/>
+      <path d="M31 26V39.5"/>
+    </g>
+    <circle cx="31" cy="40" r="4" fill="#fff"/>
+  </g>
 </svg>

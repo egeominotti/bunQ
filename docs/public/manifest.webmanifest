@@ -4,7 +4,7 @@
   "description": "High-performance job queue for Bun with SQLite persistence",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "background_color": "#141019",
   "theme_color": "#db2777",
   "icons": [
     {

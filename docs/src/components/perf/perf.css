@@ -457,6 +457,10 @@
   .bq-perf-matrix {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* let the qualifier labels wrap instead of pushing the cell wider */
+  .bq-perf-cell i {
+    white-space: normal;
+  }
   .bq-perf-actions {
     margin-left: 0;
     width: 100%;
@@ -466,6 +470,20 @@
   }
   .bq-perf-foot {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* p99 row is too wide for one line on a phone */
+  .bq-perf-lat {
+    flex-wrap: wrap;
+  }
+  /* never let the job counters get squeezed narrower than their digits */
+  .bq-perf-readout {
+    flex-wrap: wrap;
+  }
+  .bq-perf-count {
+    flex-shrink: 0;
+  }
+  .bq-perf-of {
+    flex-shrink: 0;
   }
 }
 

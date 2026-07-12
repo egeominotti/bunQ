@@ -7,7 +7,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · sdks</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One protocol, every <em>runtime.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Client SDKs for every <em>runtime.</em></h1>
   <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, with full feature parity with the built-in Bun client.</p>
 
   <div class="bq-proof">
@@ -28,9 +28,9 @@ against the same queue, with no shared runtime and no translation layer.
 
 | Platform | Package | Current | Distribution |
 |---|---|---|---|
-| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.6 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
-| Python ≥ 3.9 | `bunqueue-client` | 0.1.1 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
-| Bun, embedded in process, no server | `bunqueue` | — | [Quick Start](/guide/quickstart/) |
+| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.7 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
+| Python ≥ 3.9 | `bunqueue-client` | 0.1.2 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
+| Bun, embedded in process, no server | `bunqueue` | - | [Quick Start](/guide/quickstart/) |
 
 Both SDKs are versioned independently from the server and follow semantic
 versioning. The wire protocol is versioned too (`protocolVersion: 1`,
@@ -251,20 +251,20 @@ Every option is validated server-side; identical semantics in both SDKs
 | `delay` | ms | 0 | Up to 1 year |
 | `attempts` | number | 3 | Max attempts including the first; up to 1000 |
 | `backoff` | number \| `{ type, delay }` | 1000 | `type`: `'fixed'` or `'exponential'`; delay up to 1 day |
-| `ttl` | ms | — | Expires the job if not processed in time |
-| `timeout` | ms | — | Per-job processing timeout, up to 1 day |
-| `jobId` | string | — | Custom id; **idempotent**, re-adding an unfinished id is a no-op |
-| `deduplication` | `{ id, ttl?, extend?, replace? }` | — | Dedup window keyed on `id` |
-| `debounce` | `{ id, ttl? }` | — | Collapses bursts to the last job |
-| `dependsOn` | string[] | — | Job ids that must complete first |
-| `parentId` / `childrenIds` | string / string[] | — | Flow relationships (usually set via `FlowProducer`) |
-| `tags` / `groupId` | string[] / string | — | Metadata; `groupId` also scopes group rate limits |
+| `ttl` | ms | - | Expires the job if not processed in time |
+| `timeout` | ms | - | Per-job processing timeout, up to 1 day |
+| `jobId` | string | - | Custom id; **idempotent**, re-adding an unfinished id is a no-op |
+| `deduplication` | `{ id, ttl?, extend?, replace? }` | - | Dedup window keyed on `id` |
+| `debounce` | `{ id, ttl? }` | - | Collapses bursts to the last job |
+| `dependsOn` | string[] | - | Job ids that must complete first |
+| `parentId` / `childrenIds` | string / string[] | - | Flow relationships (usually set via `FlowProducer`) |
+| `tags` / `groupId` | string[] / string | - | Metadata; `groupId` also scopes group rate limits |
 | `lifo` | boolean | false | Orders only among LIFO jobs; mixed queues stay FIFO |
 | `removeOnComplete` / `removeOnFail` | boolean | false | Drop the job record at the terminal state |
 | `durable` | boolean | false | Bypass the server write buffer, fsync before the ACK returns |
-| `repeat` | `{ every }` or `{ pattern, tz? }` + `limit?` | — | Repeatable jobs (see [Cron](/guide/cron/)) |
-| `stallTimeout` | ms | — | Per-job stall detection override |
-| `stackTraceLimit` / `keepLogs` / `sizeLimit` | number | — | Failure stack cap, retained log lines, payload cap |
+| `repeat` | `{ every }` or `{ pattern, tz? }` + `limit?` | - | Repeatable jobs (see [Cron](/guide/cron/)) |
+| `stallTimeout` | ms | - | Per-job stall detection override |
+| `stackTraceLimit` / `keepLogs` / `sizeLimit` | number | - | Failure stack cap, retained log lines, payload cap |
 
 ```typescript
 await queue.add('report', data, { priority: 10, delay: 5000, attempts: 5 });

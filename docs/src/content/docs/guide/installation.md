@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · installation</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One dependency, <em>zero infrastructure.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Install bunqueue, zero <em>infrastructure.</em></h1>
   <p class="bq-hero-sub">Install bunqueue from npm, build it from source, or drop a single self-contained binary on a server. No Redis, no broker, nothing else to provision.</p>
 
   <div class="bq-proof">

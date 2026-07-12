@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · tls</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Encrypted, <em>both protocols.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">TLS without the <em>reverse proxy.</em></h1>
   <p class="bq-hero-sub">bunqueue terminates TLS natively on both the TCP (msgpack) and HTTP servers, no reverse proxy required. TLS is opt-in: without cert/key configuration the server behaves exactly as before, in plaintext.</p>
 
   <div class="bq-proof">

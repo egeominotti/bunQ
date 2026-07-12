@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · cron scheduler</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Time, <em>persisted.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">The cron scheduler, time <em>persisted.</em></h1>
   <p class="bq-hero-sub">The bunqueue cron scheduler uses a MinHeap-based execution model with generation-based lazy deletion, timezone-aware schedules, and SQLite-backed state for recovery on restart.</p>
 </div>
 

@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · environment</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every variable, <em>one page.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every environment variable, <em>one page.</em></h1>
   <p class="bq-hero-sub">The complete environment variable reference for bunqueue: server ports, SQLite path, auth tokens, TLS, S3 backup, timeouts, rate limiting, and logging, each with type, default, and a runnable example.</p>
 </div>
 

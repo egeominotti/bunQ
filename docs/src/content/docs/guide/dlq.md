@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · dlq</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Failures are kept, <em>never lost.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Failed jobs, kept in the <em>DLQ.</em></h1>
   <p class="bq-hero-sub">The Dead Letter Queue stores failed jobs with full metadata for debugging and recovery. Inspect why a job died, retry it automatically or by hand, and expire old entries on a policy.</p>
 
   <div class="bq-proof">

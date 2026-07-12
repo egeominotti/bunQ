@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue api</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every job, exactly <em>where it belongs.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">The Queue API, every job where it <em>belongs.</em></h1>
   <p class="bq-hero-sub">The Queue class is used to add and manage jobs: priorities, delays, retries, bulk operations, deduplication, durable writes, and DLQ configuration, all from one API.</p>
 </div>
 

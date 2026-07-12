@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cpu-intensive-workers</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Heavy jobs, off the <em>event loop.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">CPU-intensive workers, off the <em>event loop.</em></h1>
   <p class="bq-hero-sub">Synchronous CPU-heavy work over TCP blocks the event loop, drops the connection, and requeues every in-flight job. This page explains why it happens and how to configure workers to avoid it.</p>
 </div>
 

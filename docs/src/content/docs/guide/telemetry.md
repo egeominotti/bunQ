@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · telemetry</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">See inside the <em>process.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Telemetry that sees inside the <em>process.</em></h1>
   <p class="bq-hero-sub">bunqueue includes built-in telemetry for production observability: latency histograms, EMA throughput rates, per-queue metrics, and structured logs. All instrumentation is zero-allocation and adds less than 0.003% overhead, about 25ns per operation.</p>
 
   <div class="bq-proof">

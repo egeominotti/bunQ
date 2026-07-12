@@ -11,7 +11,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · webhooks</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">The queue <em>calls you back.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Job events, delivered as <em>webhooks.</em></h1>
   <p class="bq-hero-sub">Receive HTTP callbacks when job events occur, real-time notifications to external systems without polling. HMAC-SHA256 signed payloads with automatic retry.</p>
 
   <div class="bq-proof">

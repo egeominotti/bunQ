@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · flow</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Parents, children, <em>fan-in.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Job flows: parents, children, <em>fan-in.</em></h1>
   <p class="bq-hero-sub">FlowProducer creates job flows with automatic dependency management: sequential chains, parallel execution with a merge step, and hierarchical dependency trees.</p>
 </div>
 

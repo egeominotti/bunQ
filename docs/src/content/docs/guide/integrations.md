@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · integrations</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Plays well with your <em>stack.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Integrations for Hono, Elysia, and <em>MCP.</em></h1>
   <p class="bq-hero-sub">Integrate bunqueue with AI agents over MCP and with modern Bun-native web frameworks. Setup tables, project structure, and graceful shutdown patterns.</p>
 
   <div class="bq-proof">

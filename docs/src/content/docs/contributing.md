@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">project · contributing</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Make bunqueue <em>better.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Contribute to bunqueue, ship a <em>PR.</em></h1>
   <p class="bq-hero-sub">Dev environment setup, coding standards, testing guidelines and the pull request workflow. Everything you need to land a change, whatever your experience level.</p>
 </div>
 

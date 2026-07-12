@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · configuration</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Defaults that hold, knobs that <em>matter.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Server configuration in one typed <em>file.</em></h1>
   <p class="bq-hero-sub">Configure your entire bunqueue server from a single typed bunqueue.config.ts, no more scattered environment variables. Every option has IntelliSense, every section is optional.</p>
 
   <div class="bq-proof">

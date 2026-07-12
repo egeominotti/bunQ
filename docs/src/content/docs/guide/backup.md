@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · s3 backup</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">The whole queue, shipped to <em>S3.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">The whole queue, backed up to <em>S3.</em></h1>
   <p class="bq-hero-sub">Automated backups to any S3-compatible storage with gzip compression and SHA256 integrity verification. Works with AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces.</p>
 
   <div class="bq-proof">

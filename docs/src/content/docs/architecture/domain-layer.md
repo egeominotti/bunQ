@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · domain layer</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Pure logic, no <em>I/O.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">The domain layer, no <em>I/O.</em></h1>
   <p class="bq-hero-sub">The domain layer contains the pure business logic of bunqueue. No external dependencies, just core algorithms and data structures.</p>
 </div>
 

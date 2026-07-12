@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · overview</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">How the pieces <em>fit.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Inside the bunqueue <em>architecture.</em></h1>
   <p class="bq-hero-sub">bunqueue is a high-performance job queue built for Bun with SQLite persistence. This section covers the internal architecture, data flows, and design decisions.</p>
 </div>
 

@@ -71,6 +71,40 @@ if (isTechArticle) {
   });
 }
 
+// FAQPage auto-generated from the FAQ page's own H3 sections, so the schema
+// never drifts from the visible questions. Only real questions are marked up:
+// headings ending in '?' plus quoted error-string headings. The answer is the
+// prose up to the next heading, stripped of markdown to clean text.
+if (id === 'faq') {
+  const stripped = (entry.body ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/:::[\s\S]*?:::/g, ' ')
+    .replace(/`([^`]+)`/g, '$1');
+  const faqs = [];
+  for (const sec of stripped.split(/\n(?=### )/)) {
+    const m = sec.match(/^###\s+(.+?)\s*\n([\s\S]*)$/);
+    if (!m) continue;
+    const raw = m[1].trim();
+    const isQuestion = raw.endsWith('?') || /^["“].*["”]$/.test(raw);
+    if (!isQuestion) continue;
+    const name = raw.replace(/^["“](.*)["”]$/, '$1');
+    // terminate the answer at the next H2 OR a Starlight ::: directive (asides
+    // like :::tip[Related] must never bleed into the structured-data answer)
+    let text = (m[2].split(/\n## |\n:::/)[0] ?? '')
+      .replace(/^\s*\|.*\|\s*$/gm, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*>#]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) continue;
+    if (text.length > 700) text = `${text.slice(0, 697).trimEnd()}...`;
+    faqs.push({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } });
+  }
+  if (faqs.length) {
+    scripts.push({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs });
+  }
+}
+
 const segments = Astro.url.pathname.split('/').filter(Boolean);
 if (segments.length > 0) {
   const labels = {

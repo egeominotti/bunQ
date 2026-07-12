@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Schedules that <em>survive restarts.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Cron jobs that <em>survive restarts.</em></h1>
   <p class="bq-hero-sub">Schedule jobs to run on a recurring basis using cron expressions or plain intervals, with IANA timezone support. Schedules are persisted in SQLite, so they come back after a restart.</p>
 </div>
 

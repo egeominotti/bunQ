@@ -11,7 +11,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · rate limiting</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Fast, but never <em>too fast.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Rate limits and concurrency, under <em>control.</em></h1>
   <p class="bq-hero-sub">Cap jobs per time window or concurrent active jobs per queue to protect downstream services. Works from the CLI, over TCP, and in embedded mode.</p>
 </div>
 

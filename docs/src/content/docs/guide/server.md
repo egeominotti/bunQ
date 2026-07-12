@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · standalone</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One process serves them <em>all.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Server mode, one process for <em>all.</em></h1>
   <p class="bq-hero-sub">Run bunqueue as a standalone server with TCP and HTTP APIs. Any number of producers and workers connect over the wire, with token auth, Docker deployment, and graceful shutdown built in.</p>
 
   <div class="bq-proof">

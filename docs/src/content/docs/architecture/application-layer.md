@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · application layer</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Use cases and <em>managers.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Use cases in the <em>application layer.</em></h1>
   <p class="bq-hero-sub">The application layer orchestrates all queue operations, coordinating between the client layer and domain layer: PUSH, PULL and ACK flows, stall detection, dependency resolution, and background tasks.</p>
 </div>
 

@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · troubleshooting</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">When something looks <em>wrong.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Troubleshooting, cause and <em>fix.</em></h1>
   <p class="bq-hero-sub">Symptoms, causes and fixes for the issues people actually hit: SQLite locks, embedded mode misconfiguration, stuck jobs, half-open connections and backup failures.</p>
 </div>
 

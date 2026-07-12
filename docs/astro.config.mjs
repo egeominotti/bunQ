@@ -242,6 +242,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'TypeScript Types', link: '/api/types/' },
+            { label: 'Glossary', link: '/guide/glossary/' },
             { label: 'Examples', link: '/examples/' },
             { label: 'Migration from BullMQ', link: '/guide/migration/' },
           ],

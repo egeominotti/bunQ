@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">api reference · http</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every endpoint, <em>one page.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">The HTTP API, every <em>endpoint.</em></h1>
   <p class="bq-hero-sub">The bunqueue HTTP API runs on port <code>6790</code> by default, configurable via the <code>HTTP_PORT</code> environment variable. All request and response bodies use JSON (<code>Content-Type: application/json</code>) unless otherwise noted.</p>
 </div>
 

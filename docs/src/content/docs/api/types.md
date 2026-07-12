@@ -10,7 +10,7 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">api reference · types</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every type, <em>spelled out.</em></h1>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every TypeScript type, <em>spelled out.</em></h1>
   <p class="bq-hero-sub">bunqueue is written in TypeScript and provides comprehensive type definitions. All public types are exported from <code>bunqueue/client</code>.</p>
 </div>
 

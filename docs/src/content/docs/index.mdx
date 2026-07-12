@@ -140,8 +140,8 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
 
 <div class="bq-wrap bq-section" id="benchmark">
   <span class="bq-eyebrow">performance · benchmark</span>
-  <h2 class="bq-h2">Race it against BullMQ.</h2>
-  <p class="bq-lede">Pick an operation and a job count, then run it. Both lanes replay throughput we actually measured, bunqueue on Bun against BullMQ on Redis, identical payloads on the same machine. Single push is a tie; batching is where the wire protocol pulls 3.5x ahead.</p>
+  <h2 class="bq-h2">bunqueue vs BullMQ, measured.</h2>
+  <p class="bq-lede">Flip between in-process and over the wire, bulk and single push. Every bar replays throughput we measured, not a slogan. In-process with no Redis, bunqueue clears batches 25x faster; head to head over TCP it is 3.5x on bulk and a dead heat on single push. The number you lose is on the board too.</p>
 
   <PerfSimulator client:load />
 </div>

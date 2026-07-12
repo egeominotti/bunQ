@@ -1,2 +1,5 @@
 .vercel
 .env*.local
+
+# OG generator output (copied into public/ by hand)
+scripts/out/

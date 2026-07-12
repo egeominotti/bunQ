@@ -4,11 +4,13 @@
  * display, IBM Plex Mono eyebrows, the simulator lane/chip motif).
  *
  * Usage (from docs/scripts/):
- *   bun add @resvg/resvg-js
- *   download Inter static TTFs (rsms/inter release, extras/ttf/) and
- *   IBM Plex Mono TTFs (google/fonts ofl/ibmplexmono) into ./fonts/
- *   adjust fontFiles below, then: bun generate-og.ts
- *   output lands in ./out/, copy to docs/public/.
+ *   bun generate-og.ts
+ *   output lands in ./out/, copy to docs/public/ (og-image.png + og/*.png).
+ *
+ * Fonts: static TrueType files are vendored under ./fonts (Inter + IBM Plex
+ * Mono, both OFL). resvg only lays out text from TTF/OTF, it does NOT decode
+ * the .woff/.woff2 the site ships, so these are kept alongside the script to
+ * make a regen self-contained (no network, no manual download).
  */
 import { Resvg } from '@resvg/resvg-js';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -112,11 +114,15 @@ function svg(c: Cover): string {
   <rect width="1200" height="630" fill="${BG}"/>
   <rect width="1200" height="630" fill="url(#pinkGlow)"/>
 
-  <!-- wordmark -->
+  <!-- wordmark: the q mark (chip bowl, lane descender, one node leaving the queue) -->
   <rect x="60" y="56" width="44" height="44" rx="12" fill="${PINK_DEEP}"/>
-  <rect x="71" y="68" width="22" height="5.5" rx="2.75" fill="#fff"/>
-  <rect x="71" y="79" width="15" height="5.5" rx="2.75" fill="#fff" opacity="0.85"/>
-  <rect x="71" y="90" width="19" height="5.5" rx="2.75" fill="#fff" opacity="0.7"/>
+  <g transform="translate(67.33,63.33) scale(0.611)">
+    <g fill="none" stroke="#fff" stroke-width="4.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="13" y="8" width="20" height="20" rx="6.6"/>
+      <path d="M31 26V39.5"/>
+    </g>
+    <circle cx="31" cy="40" r="4" fill="#fff"/>
+  </g>
   <text x="120" y="88" font-family="Inter" font-weight="800" font-size="34" fill="${TEXT}">bunqueue</text>
   <text x="1140" y="86" font-family="IBM Plex Mono" font-weight="600" font-size="20" fill="${PINK}" text-anchor="end">bunqueue.dev</text>
 
@@ -140,10 +146,9 @@ function svg(c: Cover): string {
 }
 
 const fontFiles = [
-  'inter/extras/ttf/Inter-ExtraBold.ttf',
-  'inter/extras/ttf/Inter-Regular.ttf',
-  'PlexMono-SemiBold.ttf',
-  'PlexMono-Regular.ttf',
+  'fonts/Inter-ExtraBold.ttf', // Inter 800: title + wordmark
+  'fonts/Inter-Regular.ttf', // Inter 400: sub copy
+  'fonts/IBMPlexMono-SemiBold.ttf', // Plex 600: eyebrow, stats, url
 ];
 
 mkdirSync('out/og', { recursive: true });

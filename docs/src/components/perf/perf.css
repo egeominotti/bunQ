@@ -1,0 +1,375 @@
+/* Homepage benchmark simulator (PerfSimulator.tsx). Uses the site's --bq-*/
+   --sl-* tokens so it themes light/dark for free. bunqueue is the only
+   saturated element; BullMQ stays a quiet neutral. */
+
+.bq-perf {
+  border: 1px solid var(--bq-line);
+  border-radius: 1rem;
+  background: var(--bq-surface);
+  padding: 1.7rem 1.8rem 1.5rem;
+  margin-top: 2rem;
+}
+
+/* ── controls ─────────────────────────────────────────────────────────── */
+
+.bq-perf-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1.6rem 2.2rem;
+  margin-bottom: 1.9rem;
+}
+
+.bq-perf-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.bq-perf-glabel {
+  font-family: var(--bq-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.bq-perf-toggle {
+  display: inline-flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.bq-perf-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  font-family: var(--bq-display);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--sl-color-gray-2);
+  background: var(--sl-color-bg);
+  border: 1px solid var(--bq-line);
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.bq-perf-chip i {
+  font-style: normal;
+  font-family: var(--bq-mono);
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--sl-color-gray-3);
+}
+
+.bq-perf-chip-sm {
+  font-family: var(--bq-mono);
+  padding: 0.5rem 0.95rem;
+  justify-content: center;
+}
+
+.bq-perf-chip:hover {
+  border-color: color-mix(in srgb, var(--bq-brand) 55%, var(--bq-line));
+  color: var(--sl-color-white);
+}
+
+.bq-perf-chip.is-on {
+  border-color: var(--bq-brand);
+  color: var(--sl-color-white);
+  background: color-mix(in srgb, var(--bq-brand) 12%, var(--sl-color-bg));
+}
+
+.bq-perf-chip.is-on i {
+  color: color-mix(in srgb, var(--bq-brand) 70%, var(--sl-color-gray-2));
+}
+
+.bq-perf-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-left: auto;
+}
+
+.bq-perf-run {
+  min-width: 9.5rem;
+  text-align: center;
+}
+
+.bq-perf-reset {
+  font-family: var(--bq-mono);
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.3rem 0.2rem;
+  transition: color 0.14s ease;
+}
+
+.bq-perf-reset:hover {
+  color: var(--sl-color-white);
+}
+
+/* ── lanes ────────────────────────────────────────────────────────────── */
+
+.bq-perf-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.bq-perf-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.bq-perf-lane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.bq-perf-engine {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.bq-perf-engine b {
+  font-family: var(--bq-display);
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--sl-color-white);
+}
+
+.bq-perf-lane-bq .bq-perf-engine b {
+  color: var(--bq-brand);
+}
+
+.bq-perf-engine i {
+  font-style: normal;
+  font-family: var(--bq-mono);
+  font-size: 0.76rem;
+  color: var(--sl-color-gray-3);
+}
+
+.bq-perf-ops {
+  font-family: var(--bq-mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--sl-color-gray-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.bq-perf-ops span {
+  font-weight: 400;
+  color: var(--sl-color-gray-3);
+  font-size: 0.76rem;
+}
+
+.bq-perf-track {
+  position: relative;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sl-color-text) 7%, transparent);
+  overflow: hidden;
+}
+
+.bq-perf-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  width: 0;
+  overflow: hidden;
+  transition: width 0.05s linear;
+}
+
+.bq-perf-lane-bq .bq-perf-fill {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bq-brand) 78%, var(--sl-color-black)),
+    var(--bq-brand) 60%,
+    color-mix(in srgb, var(--bq-brand) 72%, #fff)
+  );
+  box-shadow: 0 0 14px color-mix(in srgb, var(--bq-brand) 45%, transparent);
+}
+
+.bq-perf-lane-mq .bq-perf-fill {
+  background: color-mix(in srgb, var(--sl-color-text) 30%, transparent);
+}
+
+/* marching stripes convey live motion while a lane runs */
+.bq-perf-flow {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    115deg,
+    transparent 0 38%,
+    color-mix(in srgb, #fff 22%, transparent) 38% 50%,
+    transparent 50% 100%
+  );
+  background-size: 1.5rem 100%;
+  opacity: 0;
+}
+
+.bq-perf-flow.is-live {
+  opacity: 1;
+  animation: bq-perf-march 0.6s linear infinite;
+}
+
+@keyframes bq-perf-march {
+  to {
+    background-position: 1.5rem 0;
+  }
+}
+
+.bq-perf-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  font-family: var(--bq-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.bq-perf-count {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--sl-color-white);
+  min-width: 5.5ch;
+}
+
+.bq-perf-lane-bq .bq-perf-count {
+  color: var(--bq-brand);
+}
+
+.bq-perf-of {
+  font-size: 0.8rem;
+  color: var(--sl-color-gray-3);
+}
+
+.bq-perf-time {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-2);
+}
+
+.bq-perf-lane.is-winner .bq-perf-time {
+  color: var(--bq-green);
+}
+
+/* ── verdict + latency ────────────────────────────────────────────────── */
+
+.bq-perf-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.2rem 2rem;
+  align-items: center;
+  margin-top: 1.7rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--bq-line-soft);
+}
+
+.bq-perf-verdict p {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+}
+
+.bq-perf-hint {
+  color: var(--sl-color-gray-3) !important;
+  font-family: var(--bq-mono);
+  font-size: 0.82rem !important;
+}
+
+.bq-perf-win {
+  color: var(--bq-brand);
+}
+
+.bq-perf-tie {
+  color: var(--sl-color-white);
+}
+
+.bq-perf-lat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  color: var(--sl-color-gray-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bq-perf-lat-label {
+  letter-spacing: 0.04em;
+}
+
+.bq-perf-lat-val {
+  color: var(--sl-color-gray-2);
+}
+
+.bq-perf-lat-bq {
+  color: var(--bq-brand);
+  font-weight: 600;
+}
+
+.bq-perf-lat-vs {
+  color: var(--sl-color-gray-4);
+}
+
+.bq-perf-lat b {
+  color: var(--bq-green);
+  font-weight: 600;
+}
+
+.bq-perf-method {
+  font-family: var(--bq-mono);
+  font-size: 0.74rem;
+  line-height: 1.7;
+  color: var(--sl-color-gray-3);
+  margin: 1.3rem 0 0;
+}
+
+.bq-perf-method a {
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--bq-line);
+}
+
+.bq-perf-method a:hover {
+  color: var(--bq-brand);
+  border-color: var(--bq-brand);
+}
+
+@media (max-width: 46rem) {
+  .bq-perf {
+    padding: 1.3rem 1.2rem 1.2rem;
+  }
+  .bq-perf-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .bq-perf-run {
+    flex: 1;
+  }
+  .bq-perf-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bq-perf-flow.is-live {
+    animation: none;
+  }
+  .bq-perf-fill {
+    transition: none;
+  }
+}

@@ -32,6 +32,7 @@ head:
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import VersionPill from '@components/VersionPill.astro';
 import BqIcon from '@components/BqIcon.astro';
+import PerfSimulator from '@components/perf/PerfSimulator.tsx';
 
 <div class="bq-wrap bq-hero">
   <div class="bq-hero-grid">
@@ -135,6 +136,14 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
     <span><b>382</b> e2e scenarios across 5 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
   </div>
+</div>
+
+<div class="bq-wrap bq-section" id="benchmark">
+  <span class="bq-eyebrow">performance · benchmark</span>
+  <h2 class="bq-h2">Race it against BullMQ.</h2>
+  <p class="bq-lede">Pick an operation and a job count, then run it. Both lanes replay throughput we actually measured, bunqueue on Bun against BullMQ on Redis, identical payloads on the same machine. Single push is a tie; batching is where the wire protocol pulls 3.5x ahead.</p>
+
+  <PerfSimulator client:load />
 </div>
 
 <div class="bq-wrap bq-section" id="quickstart">

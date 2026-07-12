@@ -318,6 +318,7 @@ If you encounter issues during migration:
 - [GitHub Discussions](https://github.com/egeominotti/bunqueue/discussions)
 
 :::tip[Related Guides]
+- [bunqueue vs BullMQ](/guide/comparison/) - Feature and performance comparison
 - [Queue API](/guide/queue/) - Full queue API reference
 - [Worker API](/guide/worker/) - Worker configuration
 - [FAQ](/faq/) - Common migration questions

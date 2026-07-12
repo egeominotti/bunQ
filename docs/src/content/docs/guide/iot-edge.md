@@ -1,5 +1,5 @@
 ---
-title: "IoT & Edge: MQTT to Job Queue on a Gateway"
+title: "IoT & Edge: MQTT to a bunqueue Job Queue Gateway"
 description: Run bunqueue on edge gateways (Raspberry Pi, ARM64). Bridge MQTT sensors to a persisted job queue with retries, DLQ and offline buffering, no Redis.
 ---
 

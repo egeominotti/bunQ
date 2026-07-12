@@ -1,10 +1,12 @@
 ---
 import Default from '@astrojs/starlight/components/Head.astro';
+import { lastmodForId } from '../lib/gitLastmod';
 
 /**
  * Extends Starlight's Head with structured data Starlight cannot emit
  * per-route on its own:
  *  - BlogPosting JSON-LD on every /blog/ post (headline, dates, author)
+ *  - TechArticle JSON-LD on every guide/reference/architecture page
  *  - BreadcrumbList JSON-LD on every page below the homepage
  */
 const SITE = 'https://bunqueue.dev';
@@ -35,6 +37,37 @@ if (isBlogPost) {
       url: 'https://github.com/egeominotti',
     },
     publisher: { '@type': 'Person', name: 'Egeo Minotti' },
+  });
+}
+
+// TechArticle on the technical pages (guides, API reference, architecture,
+// and the reference root pages). Excludes blog posts (they get BlogPosting),
+// the homepage splash (site-wide SoftwareApplication already covers it) and
+// the 404. dateModified comes from real git history, never a build-time now().
+const isTechArticle =
+  !isBlogPost && id !== 'blog' && id !== '' && id !== 'index' && id !== '404';
+if (isTechArticle) {
+  const lastmod = lastmodForId(id);
+  scripts.push({
+    '@context': 'https://schema.org',
+    '@type': 'TechArticle',
+    headline: entry.data.title,
+    description: entry.data.description,
+    url: canonical,
+    mainEntityOfPage: canonical,
+    image: headContent('og:image') ?? `${SITE}/og-image.png`,
+    inLanguage: 'en',
+    ...(lastmod ? { dateModified: lastmod } : {}),
+    author: {
+      '@type': 'Person',
+      name: 'Egeo Minotti',
+      url: 'https://github.com/egeominotti',
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'bunqueue',
+      logo: { '@type': 'ImageObject', url: `${SITE}/apple-touch-icon.png` },
+    },
   });
 }
 

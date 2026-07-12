@@ -1,5 +1,5 @@
 ---
-title: "Bunqueue Environment Variables Reference"
+title: "bunqueue Environment Variables Reference"
 description: Complete environment variable reference for bunqueue. TCP/HTTP ports, SQLite path, auth tokens, S3 backup, timeouts, and logging options.
 head:
   - tag: meta

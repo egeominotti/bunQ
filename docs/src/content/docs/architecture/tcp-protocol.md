@@ -306,3 +306,10 @@ bunqueue also exposes an HTTP API on port 6790:
 | `/jobs/:id/fail` | POST | Fail |
 | `/ws` | GET | WebSocket |
 | `/events` | GET | Server-Sent Events |
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [TCP Protocol Reference](/api/tcp/) - Command-by-command wire spec
+- [Persistence](/architecture/persistence/) - MessagePack serialization shared with storage
+- [Client SDK Architecture](/architecture/client-sdk/) - The pool that speaks this protocol
+:::

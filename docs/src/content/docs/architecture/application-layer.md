@@ -1,5 +1,5 @@
 ---
-title: "Application Layer: Operations, Stall Detection, DLQ"
+title: "bunqueue Application Layer: Operations, Stalls & DLQ"
 description: "bunqueue application layer: PUSH/PULL/ACK operations, stall detection, dependency resolution, DLQ management, and job lifecycle flows."
 head:
   - tag: meta
@@ -258,3 +258,10 @@ src/application/
   </div>
   <p class="bq-diag-note">Event-based waiting, no polling: waitForJobCompletion(jobId, timeout) resolves when the 'completed' event for jobId arrives.</p>
 </div>
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [Domain Layer](/architecture/domain-layer/) - Shards and the state machine these operations mutate
+- [TCP Protocol](/architecture/tcp-protocol/) - How operations arrive over the wire
+- [Persistence](/architecture/persistence/) - Where these operations are durably recorded
+:::

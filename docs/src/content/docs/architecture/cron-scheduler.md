@@ -258,3 +258,10 @@ await queue.removeJobScheduler('daily-cleanup');
 // Inspect a scheduler
 const info = await queue.getJobScheduler('health-check');
 ```
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [Data Structures](/architecture/data-structures/) - Skip list behind time-ordered scheduling
+- [Persistence](/architecture/persistence/) - Where schedulers survive restarts
+- [Cron Jobs Guide](/guide/cron/) - Using schedulers from the client
+:::

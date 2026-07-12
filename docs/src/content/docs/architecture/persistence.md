@@ -182,3 +182,10 @@ head:
     </div>
   </div>
 </div>
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [Data Structures](/architecture/data-structures/) - In-memory structures backed by this store
+- [TCP Protocol](/architecture/tcp-protocol/) - MessagePack payloads shared with the wire format
+- [S3 Backup](/guide/backup/) - Backing up the SQLite file this layer owns
+:::

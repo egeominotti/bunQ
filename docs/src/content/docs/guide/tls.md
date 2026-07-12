@@ -1,5 +1,5 @@
 ---
-title: "Native TLS"
+title: "Native TLS Encryption for bunqueue TCP & HTTP"
 description: Encrypt bunqueue TCP and HTTP traffic with native TLS, no reverse proxy needed. Server cert/key setup, client options, CLI flags, self-signed certs.
 head:
   - tag: meta

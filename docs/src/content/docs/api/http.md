@@ -1,6 +1,6 @@
 ---
-title: "HTTP REST API Reference"
-description: "Complete HTTP API reference for bunqueue: 83 REST endpoints, 60 real-time pub/sub events, WebSocket and SSE support."
+title: "bunqueue HTTP REST API Reference: 83 Endpoints, 60 Events"
+description: "Complete HTTP REST API reference for bunqueue on port 6790: 83 JSON endpoints, 60 real-time pub/sub events, WebSocket and SSE streams, Bearer auth."
 head:
   - tag: meta
     attrs:

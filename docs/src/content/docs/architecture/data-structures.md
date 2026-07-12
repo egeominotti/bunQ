@@ -1,5 +1,5 @@
 ---
-title: "Data Structures: MinHeap, Skip List, LRU, Hashing"
+title: "bunqueue Data Structures: MinHeap, Skip List & LRU"
 description: "Data structures powering bunqueue: 4-ary MinHeap, skip lists, LRU cache, FNV-1a hashing, and read-write locks with complexities."
 head:
   - tag: meta
@@ -227,3 +227,9 @@ Used for sharding and distribution.
 | Shard lookup | Hash + AND | O(len) |
 | Range query | Skip list | O(log n + k) |
 | Lock acquire | RWLock | O(1) uncontested |
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [Domain Layer](/architecture/domain-layer/) - Where these structures hold jobs and priorities
+- [Cron Scheduler](/architecture/cron-scheduler/) - Uses the skip list for time-ordered runs
+:::

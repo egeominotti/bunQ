@@ -1,5 +1,5 @@
 ---
-title: "Postgres, MySQL & Storage Backends"
+title: "bunqueue Storage: Postgres, MySQL & SQLite-Only Design"
 description: "Why bunqueue is SQLite-only by design, what that means for Postgres and MySQL users, and how to run it on serverless and edge platforms."
 head:
   - tag: meta

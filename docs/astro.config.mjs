@@ -41,6 +41,11 @@ try {
   // shallow clone or no git: sitemap entries just omit lastmod
 }
 
+// Newest doc commit date, for a REAL SoftwareApplication.dateModified (never a
+// build-time now(), which would churn the field on every build like the fake
+// sitemap lastmod we deliberately avoid above).
+const latestDocsDate = Object.values(gitLastmod).sort().pop();
+
 function lastmodForUrl(url) {
   const rel = url.replace('https://bunqueue.dev', '').replace(/^\//, '').replace(/\/$/, '');
   const base = rel === '' ? 'index' : rel;
@@ -411,7 +416,7 @@ export default defineConfig({
             operatingSystem: 'Cross-platform',
             softwareVersion: pkg.version,
             datePublished: '2024-01-01',
-            dateModified: new Date().toISOString().split('T')[0],
+            dateModified: (latestDocsDate ?? '2026-07-12T00:00:00Z').split('T')[0],
             license: 'https://opensource.org/licenses/MIT',
             offers: {
               '@type': 'Offer',

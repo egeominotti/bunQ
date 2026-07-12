@@ -12,4 +12,5 @@ Sitemap: https://bunqueue.dev/sitemap-index.xml
 
 # LLMs.txt for AI crawlers
 # https://llmstxt.org/
-# See: https://bunqueue.dev/llms.txt
+# Curated index:  https://bunqueue.dev/llms.txt
+# Full-text dump: https://bunqueue.dev/llms-full.txt

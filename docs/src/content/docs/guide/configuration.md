@@ -1,6 +1,6 @@
 ---
-title: "Configuration File: bunqueue.config.ts"
-description: "Centralize all bunqueue server configuration in a single typed file. Type-safe with full IntelliSense support."
+title: "bunqueue.config.ts: Typed Server Configuration File"
+description: "Centralize every bunqueue server setting in one typed bunqueue.config.ts: ports, auth tokens, storage, CORS, S3 backups, and timeouts with full IntelliSense."
 head:
   - tag: meta
     attrs:

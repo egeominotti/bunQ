@@ -1,5 +1,5 @@
 ---
-title: "Client SDK Architecture: Pooling and Worker Modes"
+title: "bunqueue Client SDK Architecture: Pooling & Worker Modes"
 description: "bunqueue Client SDK internals: TCP connection pooling, embedded vs server mode, worker heartbeats, ACK batching, and auto-batching."
 head:
   - tag: meta
@@ -172,3 +172,10 @@ src/client/
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">6. Close TCP connections</div>
 </div>
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - How every component fits together
+- [TCP Protocol](/architecture/tcp-protocol/) - The wire format the connection pool speaks
+- [Application Layer](/architecture/application-layer/) - What the server does with pulled jobs
+- [Queue API](/guide/queue/) - The client-facing API built on this pool
+:::

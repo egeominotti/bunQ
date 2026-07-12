@@ -1,5 +1,5 @@
 ---
-title: "Domain Layer: Sharding, Priority Queues, Job States"
+title: "bunqueue Domain Layer: Sharding, Priority Queues & States"
 description: "bunqueue domain layer internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic."
 head:
   - tag: meta
@@ -239,3 +239,9 @@ Ensures only one job per group processes at a time:
     <div class="bq-diag-layer">1. Remove groupId from activeGroups, 2. next job in the same group can now be pulled</div>
   </div>
 </div>
+
+:::tip[Related]
+- [Architecture Overview](/architecture/) - Full component map
+- [Data Structures](/architecture/data-structures/) - The 4-ary MinHeap and skip list behind these queues
+- [Application Layer](/architecture/application-layer/) - Operations that drive these state transitions
+:::

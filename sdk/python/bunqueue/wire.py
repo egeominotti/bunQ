@@ -5,7 +5,7 @@ from __future__ import annotations
 import ssl
 from typing import Any, Dict, Optional, Union
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_FRAME_SIZE = 64 * 1024 * 1024  # mirror server-side limit
 
 TlsOption = Union[bool, ssl.SSLContext, Dict[str, Any], None]

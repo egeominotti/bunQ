@@ -19,6 +19,9 @@ import e2e_admin  # noqa: F401
 import e2e_simple  # noqa: F401
 import e2e_simple_extras  # noqa: F401
 import e2e_audit_fixes  # noqa: F401
+import e2e_spec_align  # noqa: F401
+import e2e_realistic  # noqa: F401
+import e2e_edge  # noqa: F401
 from e2e_auth import run_auth_tests
 
 

@@ -148,6 +148,8 @@ export const queryMethods = {
    * will not complete), everything else throws CommandTimeoutError.
    */
   async waitForJob<R = unknown>(this: Ctx, id: string, ttlMs = 30_000): Promise<R> {
+    // The server validates 0 <= timeout <= 600000: clamp instead of erroring.
+    ttlMs = Math.min(Math.max(ttlMs, 0), 600_000);
     const response = await this.call<WaitJobResponse<R>>(
       { cmd: 'WaitJob', id, timeout: ttlMs },
       ttlMs + 5000

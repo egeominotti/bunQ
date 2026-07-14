@@ -326,10 +326,10 @@ per-connection server state.
 | Option | Default | Notes |
 |---|---|---|
 | `concurrency` | 4 | Jobs processed in parallel |
-| `batchSize` | 10 | Jobs fetched per `PULLB`, capped by free slots |
+| `batchSize` | 10 | Jobs fetched per `PULLB`, capped by free slots and the server max (1000) |
 | `pollTimeoutMs` | 5000 | Server-side long-poll; max 30 000 |
 | `lockTtlMs` | 30 000 | Job lease TTL |
-| `heartbeatIntervalS` | 10 | Worker + per-job lock heartbeats |
+| `heartbeatIntervalS` | 10 | Worker + per-job lock heartbeats; 0 disables |
 | `ackBatch` | off | Opt-in ACK batching (below) |
 | `autorun` | true | Start the pull loop at construction |
 

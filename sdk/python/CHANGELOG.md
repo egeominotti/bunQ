@@ -5,6 +5,34 @@ All notable changes to `bunqueue-client` (Python SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-07-14
+
+Spec-alignment audit against the core protocol. Every fix ships with a repro
+test in `tests/e2e_spec_align.py`.
+
+### Fixed
+
+- **`heartbeat_interval_s=0` now disables heartbeats.** Previously
+  `Event.wait(0)` made the heartbeat loop busy-spin, flooding the server with
+  `Heartbeat` commands. `0` (or negative) now matches the official client's
+  "0 = disabled" semantics.
+- **`batch_size` is clamped to the server maximum (1000).** The server
+  rejects `PULLB` with `count > 1000`; an unclamped `batch_size` combined
+  with `concurrency > 1000` wedged the poll loop in a permanent error cycle.
+- **FAIL stack truncation no longer loses the raise site.** The worker sent
+  the last 20 traceback lines but the server persists only the FIRST
+  `stackTraceLimit` lines (default 10), so long tracebacks kept a middle
+  window without the raise site. The worker now sends at most as many
+  trailing lines as the server keeps, honoring a per-job `stackTraceLimit`.
+- **Simple Mode `cron()`/`every()` forward the execution `limit=`.** The
+  option was silently dropped (the "client drops a wire-supported field"
+  class, #111); it now reaches the scheduler as wire `maxLimit`.
+- **`wait_for_job()` clamps `timeout_ms` to the server cap (600000).**
+  Larger values were rejected by the server with "timeout must be at most
+  600000" instead of waiting.
+- **`PROTOCOL_VERSION` bumped to 2**, matching the version the server
+  advertises in `Hello`.
+
 ## [0.1.2] - 2026-07-10
 
 Second audit pass: packaging, connection failure paths, worker lifecycle

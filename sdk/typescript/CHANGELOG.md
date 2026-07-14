@@ -5,6 +5,30 @@ All notable changes to `bunqueue-client` (TypeScript SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-07-14
+
+Spec-alignment audit against the core protocol. Every fix ships with a repro
+test in `tests/e2e-spec-align.ts`.
+
+### Fixed
+
+- **`heartbeatIntervalS: 0` now disables heartbeats.** Previously it armed
+  `setInterval(fn, 0)`, flooding the server with hundreds of `Heartbeat`
+  commands per second. `0` (or negative) now matches the official client's
+  "0 = disabled" semantics.
+- **`batchSize` is clamped to the server maximum (1000).** The server rejects
+  `PULLB` with `count > 1000`; an unclamped `batchSize` combined with
+  `concurrency > 1000` wedged the pull loop in a permanent error cycle.
+- **Simple Mode `cron()`/`every()` forward the execution `limit`.** The option
+  was silently dropped (the "client drops a wire-supported field" class,
+  #111); it now reaches the scheduler as wire `maxLimit`, matching the
+  official client's signature.
+- **`waitForJob()` clamps `ttlMs` to the server cap (600000).** Larger values
+  were rejected by the server with "timeout must be at most 600000" instead
+  of waiting.
+- **`PROTOCOL_VERSION` bumped to 2**, matching the version the server
+  advertises in `Hello`.
+
 ## [0.1.7] - 2026-07-10
 
 Audit fixes: typed worker events, error-path hygiene and two more members of

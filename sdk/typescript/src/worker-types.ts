@@ -53,13 +53,13 @@ export interface WorkerOptions extends Observability {
   ackBatch?: AckBatchOptions;
   /** Max jobs processed in parallel (default 4). */
   concurrency?: number;
-  /** Max jobs fetched per PULLB (default 10, capped by free slots). */
+  /** Max jobs fetched per PULLB (default 10, capped by free slots and the server max 1000). */
   batchSize?: number;
   /** Server-side long-poll timeout in ms (default 5000, max 30000). */
   pollTimeoutMs?: number;
   /** Job lock TTL in ms (default 30000). */
   lockTtlMs?: number;
-  /** Worker + job heartbeat interval in seconds (default 10). */
+  /** Worker + job heartbeat interval in seconds (default 10, 0 = disabled). */
   heartbeatIntervalS?: number;
   /** Start the loop at construction (default true, mirrors the TS client). */
   autorun?: boolean;

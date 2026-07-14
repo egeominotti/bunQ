@@ -197,6 +197,10 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
   // --------------------------------------------------------------- heartbeat
 
   private startHeartbeat(): void {
+    // 0, negative or non-finite (NaN coerces to interval 0) disables
+    // heartbeats — setInterval(fn, 0) would fire every macrotask and flood
+    // the server with Heartbeat commands.
+    if (!(Number.isFinite(this.heartbeatIntervalS) && this.heartbeatIntervalS > 0)) return;
     this.heartbeatTimer = setInterval(() => {
       void (async () => {
         await this.safeCall({

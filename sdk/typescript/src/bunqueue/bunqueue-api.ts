@@ -22,11 +22,11 @@ export const bunqueueApi = {
     id: string,
     pattern: string,
     data?: unknown,
-    opts?: { timezone?: string; jobOpts?: JobOptions }
+    opts?: { timezone?: string; limit?: number; jobOpts?: JobOptions }
   ): Promise<Raw | null> {
     await this.queue.upsertJobScheduler(
       id,
-      { pattern, tz: opts?.timezone },
+      { pattern, tz: opts?.timezone, limit: opts?.limit },
       { name: id, data, opts: opts?.jobOpts }
     );
     return this.queue.getJobScheduler(id);
@@ -37,11 +37,11 @@ export const bunqueueApi = {
     id: string,
     intervalMs: number,
     data?: unknown,
-    opts?: { jobOpts?: JobOptions }
+    opts?: { limit?: number; jobOpts?: JobOptions }
   ): Promise<Raw | null> {
     await this.queue.upsertJobScheduler(
       id,
-      { every: intervalMs },
+      { every: intervalMs, limit: opts?.limit },
       { name: id, data, opts: opts?.jobOpts }
     );
     return this.queue.getJobScheduler(id);
@@ -173,13 +173,13 @@ export interface BunqueueApi<T = unknown, R = unknown> {
     id: string,
     pattern: string,
     data?: T,
-    opts?: { timezone?: string; jobOpts?: JobOptions }
+    opts?: { timezone?: string; limit?: number; jobOpts?: JobOptions }
   ): Promise<Raw | null>;
   every(
     id: string,
     intervalMs: number,
     data?: T,
-    opts?: { jobOpts?: JobOptions }
+    opts?: { limit?: number; jobOpts?: JobOptions }
   ): Promise<Raw | null>;
   removeCron(id: string): Promise<void>;
   listCrons(): Promise<Raw[]>;

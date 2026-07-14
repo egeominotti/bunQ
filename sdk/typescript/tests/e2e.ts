@@ -20,6 +20,8 @@ import './e2e-simple.ts';
 import './e2e-simple-extras.ts';
 import './e2e-auth.ts';
 import './e2e-audit-fixes.ts';
+import './e2e-spec-align.ts';
+import './e2e-realistic.ts';
 import './e2e-observability.ts';
 import './e2e-resilience.ts';
 

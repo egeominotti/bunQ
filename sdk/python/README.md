@@ -1,4 +1,23 @@
-# bunqueue — Python SDK
+<div align="center">
+
+<a href="https://bunqueue.dev">
+  <img src="https://raw.githubusercontent.com/egeominotti/bunqueue/main/.github/logo.png" alt="bunqueue logo" width="110" />
+</a>
+
+# bunqueue-client (Python)
+
+**The official Python client for [bunqueue](https://bunqueue.dev), the high performance job queue server.**
+
+Native TCP protocol (msgpack, pipelined), one runtime dependency (`msgpack`), sync plus thread based workers.
+
+[![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/LICENSE)
+[![python](https://img.shields.io/badge/python-3.9%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
+
+[Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md) · [TypeScript SDK](https://www.npmjs.com/package/bunqueue-client)
+
+</div>
+
+---
 
 Python client for [bunqueue](https://github.com/egeominotti/bunqueue), the
 high-performance job queue server for Bun. Talks the native TCP protocol

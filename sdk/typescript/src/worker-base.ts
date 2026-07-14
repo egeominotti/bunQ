@@ -46,7 +46,11 @@ export class WorkerBase<T = unknown, R = unknown> extends EventEmitter {
     if ((opts.concurrency ?? 4) < 1) throw new Error('concurrency must be >= 1');
     this.queue = queue;
     this.concurrency = opts.concurrency ?? 4;
-    this.batchSize = Math.max(1, opts.batchSize ?? 10);
+    // The server rejects PULLB count > 1000 (handlers/core.ts) — an unclamped
+    // batchSize would wedge the pull loop in a permanent error cycle. The
+    // finite-guard also catches NaN, which would otherwise pass both bounds.
+    const rawBatch = opts.batchSize ?? 10;
+    this.batchSize = Number.isFinite(rawBatch) ? Math.min(Math.max(1, rawBatch), 1000) : 10;
     this.pollTimeoutMs = Math.min(opts.pollTimeoutMs ?? 5000, MAX_POLL_TIMEOUT_MS);
     this.lockTtlMs = opts.lockTtlMs ?? 30_000;
     this.heartbeatIntervalS = opts.heartbeatIntervalS ?? 10;

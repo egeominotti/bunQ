@@ -1,16 +1,43 @@
+<div align="center">
+
+<a href="https://bunqueue.dev">
+  <img src="https://raw.githubusercontent.com/egeominotti/bunqueue/main/.github/logo.png" alt="bunqueue logo" width="110" />
+</a>
+
 # bunqueue-client
 
-Official TypeScript client for [bunqueue](https://github.com/egeominotti/bunqueue), the high performance job queue server. The client implements the native TCP protocol (msgpack, pipelined) and provides full feature parity with the built in Bun client, while running on every modern JavaScript runtime.
+**The official TypeScript client for [bunqueue](https://bunqueue.dev), the high performance job queue server.**
+
+Native TCP protocol (msgpack, pipelined), full parity with the built in Bun client, one runtime dependency.
+Runs everywhere: Node.js, Bun, Deno and Cloudflare Workers.
+
+[![npm version](https://img.shields.io/npm/v/bunqueue-client?color=d3156d&label=npm)](https://www.npmjs.com/package/bunqueue-client)
+[![npm downloads](https://img.shields.io/npm/dm/bunqueue-client?color=ff4f9f)](https://www.npmjs.com/package/bunqueue-client)
+[![license](https://img.shields.io/npm/l/bunqueue-client?color=1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/LICENSE)
+[![runtimes](https://img.shields.io/badge/runtimes-node%20%7C%20bun%20%7C%20deno%20%7C%20workers-2ea44f)](#compatibility)
+
+[Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Python SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
+
+</div>
+
+---
 
 The bunqueue server runs on Bun, distributed as a binary or a Docker image. This client allows any Node.js, Bun, Deno, or Cloudflare Workers service to produce and consume jobs against it: one queue, any language, any runtime.
+
+## Why bunqueue-client
+
+- **Full API surface.** Queues, workers, flows (parent/children trees), schedulers, DLQ, rate limits, webhooks, Simple Mode: 110+ public methods, each covered by an e2e test against a real server.
+- **Cross runtime by design.** Only `node:*` builtins, zero `Bun.*` globals, a single dependency (`msgpackr`). The same package runs on Node 20+, Bun, Deno 2 and Cloudflare Workers (`nodejs_compat`).
+- **Production semantics.** Lock leasing with heartbeat renewal, at least once delivery with retries and backoff, unrecoverable failures straight to the DLQ, reconnection with half open detection, opt in ACK batching and connection pooling.
+- **Typed end to end.** Generic `Queue<T>` / `Worker<T, R>`, typed worker events, structured telemetry hooks for your metrics stack.
 
 ## Compatibility
 
 | Runtime | Status | Notes |
 |---|---|---|
-| Node.js 20 or later | Supported, 100/100 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
-| Bun | Supported, 100/100 e2e and 8/8 integration tests | No additional configuration required |
-| Deno 2 or later | Supported, 100/100 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
+| Node.js 20 or later | Supported, 110/110 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
+| Bun | Supported, 110/110 e2e and 8/8 integration tests | No additional configuration required |
+| Deno 2 or later | Supported, 110/110 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
 | tsx, ts-node, vitest, jest | Supported | These environments execute on Node.js |
 | Cloudflare Workers | Supported, 16/16 e2e tests inside workerd, including Simple Mode and the full API surface | Requires the `nodejs_compat` compatibility flag. The runtime is request scoped, so long lived worker loops are not available: consume in batches from Cron Triggers or Durable Object alarms, a pattern covered by the test suite. TLS connections require a publicly trusted certificate |
 | Browser | Not supported | Raw TCP sockets are unavailable. Use the server HTTP API instead |

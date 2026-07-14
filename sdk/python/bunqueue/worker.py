@@ -61,7 +61,9 @@ class Worker(EventEmitter, WorkerRuntime):
         self.queue = queue
         self.processor = processor
         self.concurrency = concurrency
-        self.batch_size = max(1, batch_size)
+        # The server rejects PULLB count > 1000 — an unclamped batch_size
+        # would wedge the poll loop in a permanent error cycle.
+        self.batch_size = max(1, min(batch_size, 1000))
         self.poll_timeout_ms = min(poll_timeout_ms, MAX_POLL_TIMEOUT_MS)
         self.lock_ttl_ms = lock_ttl_ms
         self.heartbeat_interval_s = heartbeat_interval_s
@@ -137,8 +139,11 @@ class Worker(EventEmitter, WorkerRuntime):
         self._register()
         self._ready.set()
         self.emit("ready")
-        heartbeat = threading.Thread(target=self._heartbeat_loop, daemon=True)
-        heartbeat.start()
+        # 0 (or negative) disables heartbeats — Event.wait(0) returns
+        # immediately, so the loop would busy-spin flooding the server.
+        if self.heartbeat_interval_s > 0:
+            heartbeat = threading.Thread(target=self._heartbeat_loop, daemon=True)
+            heartbeat.start()
         backoff_idx = 0
         try:
             while not self._stop.is_set():

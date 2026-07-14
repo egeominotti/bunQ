@@ -105,6 +105,8 @@ class QueueQueryOps:
         non-completion we probe the job state: a ``failed`` job raises
         :class:`CommandError` (it will not complete), everything else raises
         :class:`CommandTimeoutError`."""
+        # The server validates 0 <= timeout <= 600000: clamp instead of erroring.
+        timeout_ms = max(0, min(timeout_ms, 600_000))
         response = self.connection.call(
             {"cmd": "WaitJob", "id": job_id, "timeout": timeout_ms},
             timeout=timeout_ms / 1000 + 5,

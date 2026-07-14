@@ -21,7 +21,11 @@ from .wire import _compact
 logger = logging.getLogger("bunqueue")
 
 MAX_POLL_TIMEOUT_MS = 30000
-MAX_STACK_LINES = 20
+# The server persists the FIRST `stackTraceLimit` lines (default 10) of the
+# stack we send. A Python traceback ends with the raise site, so we send the
+# LAST lines — but no more than the server keeps, or the raise site would be
+# truncated away by the server-side first-N cap.
+MAX_STACK_LINES = 10
 RECONNECT_BACKOFF_S = (0.5, 1.0, 2.0, 5.0)
 
 
@@ -79,7 +83,11 @@ class WorkerRuntime:
         try:
             result = self.processor(job)
         except BaseException as exc:  # noqa: BLE001 - fail the job, never the worker
-            stack = traceback.format_exc().splitlines()[-MAX_STACK_LINES:]
+            # Send at most as many trailing lines as the server will keep
+            # (its cap keeps the FIRST N): honor a per-job stackTraceLimit.
+            cap = raw.get("stackTraceLimit")
+            cap = cap if isinstance(cap, int) and cap > 0 else MAX_STACK_LINES
+            stack = traceback.format_exc().splitlines()[-cap:]
             failed_sent = self._safe_call(
                 _compact(
                     {

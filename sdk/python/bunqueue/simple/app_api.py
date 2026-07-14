@@ -52,14 +52,14 @@ class BunqueueApi:
     def cron(self, scheduler_id: str, pattern: str, data: Any = None, **opts: Any) -> None:
         self.queue.upsert_job_scheduler(
             scheduler_id,
-            {"pattern": pattern, "tz": opts.get("timezone")},
+            {"pattern": pattern, "tz": opts.get("timezone"), "limit": opts.get("limit")},
             {"name": scheduler_id, "data": data, "opts": opts.get("job_opts")},
         )
 
     def every(self, scheduler_id: str, interval_ms: int, data: Any = None, **opts: Any) -> None:
         self.queue.upsert_job_scheduler(
             scheduler_id,
-            {"every": interval_ms},
+            {"every": interval_ms, "limit": opts.get("limit")},
             {"name": scheduler_id, "data": data, "opts": opts.get("job_opts")},
         )
 

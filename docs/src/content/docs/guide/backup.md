@@ -1,6 +1,6 @@
 ---
-title: "Bunqueue S3 Backup & Automated Disaster Recovery"
-description: Set up automated S3 backups for your bunqueue SQLite database. Works with AWS, Cloudflare R2, MinIO, and DigitalOcean Spaces.
+title: "S3 Backup: Automatic Off-Site Copies of Your Queue"
+description: Automated S3 backups for the bunqueue SQLite database. Works with AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces.
 head:
   - tag: meta
     attrs:
@@ -11,22 +11,29 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · s3 backup</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The whole queue, backed up to <em>S3.</em></h1>
-  <p class="bq-hero-sub">Automated backups to any S3-compatible storage with gzip compression and SHA256 integrity verification. Works with AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces.</p>
-
-  <div class="bq-proof">
-    <span><b>6h</b> default backup interval</span>
-    <span><b>7</b> backups retained by default</span>
-    <span><b>SHA256</b> checksum verified on restore</span>
-    <span><b>4</b> S3-compatible providers documented</span>
-  </div>
+  <p class="bq-hero-sub">bunqueue stores everything in one SQLite file. Turn on S3 backup and the server uploads a compressed, checksummed copy of that file on a schedule, to any S3-compatible storage.</p>
 </div>
 
-## Configuration
+If the machine running bunqueue dies, a backup in object storage is how you get your jobs, cron schedules, and DLQ back. Backups are gzip-compressed and verified with a SHA256 checksum (a fingerprint of the data that proves the restore is byte-identical).
 
-### Config File (Recommended)
+## Quick Start
+
+Set the environment variables and start the server. The first backup runs one minute after startup, then every 6 hours:
+
+```bash
+S3_BACKUP_ENABLED=1
+S3_ACCESS_KEY_ID=your-access-key
+S3_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET=my-backups
+S3_REGION=us-east-1
+S3_BACKUP_INTERVAL=21600000   # 6 hours (default)
+S3_BACKUP_RETENTION=7         # keep 7 backups (default)
+S3_BACKUP_PREFIX=backups/     # key prefix (default)
+```
+
+Or configure it in `bunqueue.config.ts`:
 
 ```typescript
-// bunqueue.config.ts
 import { defineConfig } from 'bunqueue';
 
 export default defineConfig({
@@ -36,33 +43,33 @@ export default defineConfig({
     accessKeyId: process.env.S3_ACCESS_KEY_ID,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     region: 'us-east-1',
-    interval: 21600000,  // 6 hours
+    interval: 21600000,
     retention: 7,
     prefix: 'backups/',
   },
 });
 ```
 
-See [Configuration File](/guide/configuration/) for the full reference.
+See [Configuration File](/guide/configuration/) for the full reference. AWS-style variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`, `AWS_REGION`, `AWS_ENDPOINT`) are also accepted as fallbacks.
 
-### Environment Variables
+## Backup and Restore from the CLI
+
+Backup commands run locally, not through the server: they read the database path from `BUNQUEUE_DATA_PATH` and the S3 credentials from the environment variables above.
 
 ```bash
-S3_BACKUP_ENABLED=1
-S3_ACCESS_KEY_ID=your-access-key
-S3_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET=my-backups
-S3_REGION=us-east-1
-S3_BACKUP_INTERVAL=21600000  # 6 hours
-S3_BACKUP_RETENTION=7         # Keep 7 backups
-S3_BACKUP_PREFIX=backups/     # Default prefix
+bunqueue backup now              # create a backup right now
+bunqueue backup list             # list backups in the bucket
+bunqueue backup status           # show current configuration
+bunqueue backup restore <key> -f # restore (overwrites the database)
 ```
 
-:::note[AWS Environment Variables]
-AWS-style environment variables are also supported as fallbacks: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`, `AWS_REGION`, `AWS_ENDPOINT`.
+:::caution[Restore safety]
+Restore requires the `--force` (`-f`) flag and **overwrites** the current database. Always stop the server before restoring.
 :::
 
 ## Supported Providers
+
+Any S3-compatible storage works. Set `S3_ENDPOINT` for non-AWS providers:
 
 | Provider | Endpoint |
 |----------|----------|
@@ -71,58 +78,16 @@ AWS-style environment variables are also supported as fallbacks: `AWS_ACCESS_KEY
 | MinIO | `http://localhost:9000` |
 | DigitalOcean Spaces | `https://<region>.digitaloceanspaces.com` |
 
-## CLI Commands
-
-Backup commands run locally (not via TCP): they read the database path from `BUNQUEUE_DATA_PATH` and the S3 credentials from the environment variables above.
-
-```bash
-# Create backup now
-bunqueue backup now
-
-# List backups
-bunqueue backup list
-
-# Restore from backup
-bunqueue backup restore <key>
-bunqueue backup restore <key> -f  # Force overwrite
-
-# Check status
-bunqueue backup status
-```
-
-:::caution[Restore Safety]
-Restore requires the `--force` (`-f`) flag and will **overwrite** the current database. Always stop the server before restoring.
-:::
-
-## Backup Contents
-
-Each backup includes:
-- SQLite database file (all jobs, cron, DLQ), compressed with **gzip**
-- Metadata file (`.meta.json`) with timestamp, version, original size, compressed size, and SHA256 checksum
-
 ## How It Works
 
-1. **Checkpoint**, the SQLite WAL is checkpointed (`TRUNCATE`) so all data is in the main database file
-2. **Compression**, the database is compressed with gzip before upload for efficient storage
-3. **Checksum**, a SHA256 hash of the original data is computed and stored in the metadata file
-4. **Upload**, the compressed backup and metadata are uploaded to S3 as separate files, with automatic retry on transient errors (exponential backoff) and a 30 second per-operation timeout
-5. **Cleanup**, old backups exceeding the retention limit are automatically deleted
+Each backup cycle:
 
-## Scheduling
+1. Checkpoints the SQLite WAL (`TRUNCATE`) so all data is in the main database file
+2. Compresses the database with gzip
+3. Computes a SHA256 checksum and writes it to a `.meta.json` metadata file
+4. Uploads both files to S3, retrying transient errors with exponential backoff (30 second per-operation timeout)
+5. Deletes old backups beyond the retention limit
 
-When enabled, backups are automatically scheduled:
+Only one backup runs at a time; overlapping requests are rejected.
 
-- **Initial backup**: Runs 1 minute after server startup
-- **Periodic backups**: Runs every `S3_BACKUP_INTERVAL` milliseconds (default: 6 hours)
-- **Concurrent protection**: Only one backup can run at a time; overlapping requests are rejected
-
-## Restore Verification
-
-When restoring, bunqueue automatically:
-- Detects whether the backup is gzip-compressed (via metadata or magic bytes)
-- Decompresses the backup if needed
-- Verifies the SHA256 checksum against the metadata to ensure data integrity
-- Validates the `SQLite format 3` file header
-- Writes the payload to a temporary file and runs `PRAGMA integrity_check` on it
-- Only on full success, atomically renames the temporary file over the live database; on any failure the current database is left untouched
-- Supports older uncompressed backups for backward compatibility (checksum verification is skipped when no metadata file exists)
+On restore, bunqueue decompresses the backup, verifies the SHA256 checksum against the metadata, validates the `SQLite format 3` header, runs `PRAGMA integrity_check` on a temporary file, and only then atomically renames it over the live database. On any failure the current database is left untouched. Older uncompressed backups without a metadata file are still restorable (checksum verification is skipped).

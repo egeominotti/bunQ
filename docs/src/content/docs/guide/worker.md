@@ -11,146 +11,64 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · worker api</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Pull, process, ack, <em>repeat.</em></h1>
-  <p class="bq-hero-sub">The Worker class processes jobs from a queue: concurrency, heartbeats, batch pulling, lock-based ownership, and sandboxed isolation for CPU-heavy work.</p>
+  <p class="bq-hero-sub">A Worker takes jobs from a queue and runs your function on each one. This page covers concurrency, events, error handling, and the safety nets that recover jobs when things go wrong.</p>
 </div>
 
-:::tip[Using AI agents?]
-If you're using MCP-connected AI agents, you may not need a Worker at all. Agents can register **HTTP handlers** that let bunqueue auto-process jobs by calling your HTTP endpoint. See [MCP Server → HTTP Handlers](/guide/mcp/#http-handlers) for the agent-only alternative.
-:::
-
-:::caution[Important]
-In embedded mode, the Worker **must** have `embedded: true`.
-Without it, the Worker defaults to TCP mode and tries to connect to a bunqueue server.
-:::
-
-## Creating a Worker
+## Create a worker
 
 ```typescript
 import { Worker } from 'bunqueue/client';
 
 const worker = new Worker('my-queue', async (job) => {
-  // Process the job
+  // Process the job; the return value is stored as the job's result
   return { success: true };
 }, { embedded: true });
 ```
 
-## Options
+The worker starts polling immediately. If your processor throws, the job is retried automatically (up to the job's `attempts`, default 3) and then moved to the dead letter queue, a holding area for jobs that keep failing.
+
+:::caution[Embedded vs TCP]
+`embedded: true` runs in-process alongside an embedded Queue. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode.
+:::
+
+## Process jobs in parallel
 
 ```typescript
-const worker = new Worker('queue', processor, {
-  // Mode
-  embedded: true,           // Required for embedded mode
-
-  // Concurrency
-  concurrency: 5,           // Process 5 jobs in parallel (default: 1)
-
-  // Startup
-  autorun: true,            // Start automatically (default: true)
-
-  // Heartbeats & Stall Detection
-  heartbeatInterval: 10000, // Send heartbeat every 10s (default: 10000, 0 = disabled)
-
-  // Batch Pulling (performance optimization)
-  batchSize: 10,            // Jobs to pull per request (default: 10, max: 1000)
-  pollTimeout: 5000,        // Long-poll timeout in ms (default: 0, max: 30000)
-
-  // Lock-Based Ownership (BullMQ-style)
-  useLocks: true,           // Enable job locks (default: true)
-
-  // Rate Limiting
-  limiter: {
-    max: 10,              // Max 10 jobs per duration window
-    duration: 1000,       // Window of 1 second
-    // groupKey: 'userId', // Optional: switches the limiter to a per-group
-    //                     // CONCURRENCY cap: max `max` jobs active at once
-    //                     // per distinct job.data[groupKey]; duration unused
-  },
-
-  // Lock & Stall Tuning
-  lockDuration: 30000,    // Job lock TTL in ms (default: 30000)
-  maxStalledCount: 1,     // Max stalls before job moves to failed (default: 1)
-  skipStalledCheck: false, // Skip stall detection (default: false)
-  skipLockRenewal: false,  // Skip heartbeat lock renewal (default: false)
-  drainDelay: 50,         // Delay between polls when queue is empty (default: 50)
-
-  // Auto-Cleanup (boolean only; number/object forms are accepted for
-  // BullMQ type compatibility but are treated as false, not implemented)
-  removeOnComplete: true,           // Remove completed jobs immediately
-  removeOnFail: false,              // Same format as removeOnComplete
-
-  // TCP Connection (server mode only)
-  connection: {
-    host: 'localhost',
-    port: 6789,
-    token: 'secret',
-    poolSize: 4,
-  },
-
-  // Namespace isolation, must match the producing Queue's prefixKey
-  prefixKey: 'prod:',
+const worker = new Worker('my-queue', processor, {
+  embedded: true,
+  concurrency: 5,  // Up to 5 jobs at once (default: 1)
 });
 ```
 
-**Connection pool sizing:** When `poolSize` is not specified, it defaults to `min(concurrency, 8)`. A worker with `concurrency: 5` opens 5 TCP connections, while `concurrency: 20` caps at 8. You can override this by setting `poolSize` explicitly.
+You can change concurrency at runtime, without restarting:
 
-### Options Reference
+```typescript
+worker.concurrency = 10;  // Scale up under load
+worker.concurrency = 2;   // Scale back down (minimum: 1)
+```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `embedded` | `boolean` | `false` | Use in-process mode |
-| `concurrency` | `number` | `1` | Parallel job processing |
-| `autorun` | `boolean` | `true` | Start automatically |
-| `heartbeatInterval` | `number` | `10000` | Heartbeat interval in ms (0 = disabled) |
-| `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
-| `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
-| `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
-| `limiter` | `RateLimiterOptions` | - | Rate limiter (`{ max, duration, groupKey? }`). Without `groupKey`: max jobs per duration window. With `groupKey`: per-group concurrency cap of `max` (duration unused) |
-| `lockDuration` | `number` | `30000` | How long a job lock lasts before expiring (ms) |
-| `maxStalledCount` | `number` | `1` | Max times a job can stall before moving to failed |
-| `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
-| `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
-| `drainDelay` | `number` | `50` | Delay between polls when queue is drained (ms) |
-| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` (not implemented) |
-| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Auto-remove failed jobs. Same behavior as `removeOnComplete` (boolean only) |
-| `prefixKey` | `string` | - | Namespace prefix; must match the producing `Queue.prefixKey` to consume its jobs. See [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) |
+## Use the job object
 
-## Job Object
-
-Inside the processor, you have access to the job object:
+Inside the processor you get the full job:
 
 ```typescript
 const worker = new Worker('queue', async (job) => {
   job.id;           // Job ID
   job.name;         // Job name
-  job.data;         // Job data
-  job.queueName;    // Queue name
+  job.data;         // Job data (typed if you use Worker<T>)
   job.attemptsMade; // Current attempt number
-  job.timestamp;    // When job was created
-  job.progress;     // Current progress (0-100)
+  job.timestamp;    // When the job was created
 
-  // Update progress
-  await job.updateProgress(50, 'Halfway done');
-
-  // Log messages
-  await job.log('Processing step 1');
+  await job.updateProgress(50, 'Halfway done');  // Report progress
+  await job.log('Processing step 1');             // Attach a log line
 
   return result;
 }, { embedded: true });
 ```
 
-## Events
-
-All events are fully typed, TypeScript will autocomplete event names and infer callback parameter types.
+## React to events
 
 ```typescript
-worker.on('ready', () => {
-  console.log('Worker is ready');
-});
-
-worker.on('active', (job) => {
-  console.log(`Started: ${job.id}`);
-});
-
 worker.on('completed', (job, result) => {
   console.log(`Completed: ${job.id}`, result);
 });
@@ -162,33 +80,9 @@ worker.on('failed', (job, error) => {
 worker.on('progress', (job, progress) => {
   console.log(`Progress: ${job.id} - ${progress}%`);
 });
-
-worker.on('stalled', (jobId, reason) => {
-  console.warn(`Stalled: ${jobId} (${reason})`);
-});
-
-worker.on('drained', () => {
-  console.log('No more jobs in queue');
-});
-
-worker.on('error', (error) => {
-  console.error('Worker error:', error);
-});
-
-worker.on('cancelled', ({ jobId, reason }) => {
-  console.log(`Cancelled: ${jobId} - ${reason}`);
-});
-
-worker.on('log', (job, message) => {
-  console.log(`Log from ${job.id}: ${message}`);
-});
-
-worker.on('closed', () => {
-  console.log('Worker closed');
-});
 ```
 
-### Event Reference
+All events are fully typed. The complete list:
 
 | Event | Callback Parameters | Description |
 |-------|-------------------|-------------|
@@ -201,118 +95,116 @@ worker.on('closed', () => {
 | `drained` | `()` | Queue has no more waiting jobs |
 | `error` | `(error: Error)` | Worker-level error |
 | `cancelled` | `({ jobId: string, reason: string })` | Job was cancelled |
-| `log` | `(job: Job<T>, message: string)` | Log message written via `job.log()` |
+| `log` | `(job: Job<T>, message: string)` | Log written via `job.log()` |
 | `closed` | `()` | Worker shut down |
 
-## Control
+Remove a listener with `worker.off('completed', handler)`.
+
+## Handle errors
+
+Throwing inside the processor fails the current attempt; bunqueue retries with backoff (a growing wait between attempts) until `attempts` is exhausted:
 
 ```typescript
-// Start processing (if autorun: false)
-worker.run();
+const worker = new Worker('queue', async (job) => {
+  await riskyOperation();  // Just let errors throw, retries are automatic
+}, { embedded: true });
 
-// Pause processing
-worker.pause();
+worker.on('failed', (job, error) => {
+  if (job.attemptsMade >= 3) {
+    alertOps(job, error);  // Final failure, tell someone
+  }
+});
+```
 
-// Resume processing
-worker.resume();
+## Control and shut down
 
-// Stop the worker
-await worker.close();      // Wait for active jobs
+```typescript
+worker.run();     // Start processing (if created with autorun: false)
+worker.pause();   // Stop pulling new jobs
+worker.resume();  // Resume
+
+await worker.close();      // Wait for active jobs, then stop
 await worker.close(true);  // Force close immediately
-
-// Check close status
-if (worker.closing) {
-  await worker.closing;    // Promise that resolves when close() finishes
-}
 ```
 
-### Runtime Concurrency
+For a clean process exit, also shut down the shared machinery:
 
-Change concurrency without restarting the worker:
+```typescript
+import { shutdownManager, closeSharedTcpClient } from 'bunqueue/client';
+
+process.on('SIGINT', async () => {
+  await worker.close();
+  shutdownManager();       // Embedded mode: flush writes, close SQLite
+  closeSharedTcpClient();  // TCP mode: close the shared connection pool
+  process.exit(0);
+});
+```
+
+## Options reference
 
 ```typescript
 const worker = new Worker('queue', processor, {
   embedded: true,
-  concurrency: 1,
+  concurrency: 5,
+  batchSize: 100,      // Pull up to 100 jobs per request
+  pollTimeout: 5000,   // Long-poll: wait up to 5s for jobs instead of busy polling
+  limiter: { max: 10, duration: 1000 },  // Max 10 jobs per second
 });
-
-// Scale up under load
-worker.concurrency = 10;
-
-// Scale back down
-worker.concurrency = 2;
-
-// Read current value
-console.log(worker.concurrency); // 2
 ```
 
-The worker immediately starts pulling more jobs when concurrency increases. Minimum value is 1.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `embedded` | `boolean` | `false` | Use in-process mode |
+| `concurrency` | `number` | `1` | Parallel job processing |
+| `autorun` | `boolean` | `true` | Start polling automatically |
+| `heartbeatInterval` | `number` | `10000` | Heartbeat interval in ms (0 = disabled) |
+| `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
+| `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
+| `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
+| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max jobs per window. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
+| `lockDuration` | `number` | `30000` | Job lock TTL in ms |
+| `maxStalledCount` | `number` | `1` | Max stalls before the job moves to failed |
+| `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
+| `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
+| `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
+| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |
+| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Same behavior as `removeOnComplete` (boolean only) |
+| `connection` | `ConnectionOptions` | - | TCP connection (`host`, `port`, `token`, `poolSize`) |
+| `prefixKey` | `string` | - | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) |
 
-### Removing Event Listeners
+**Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
 
-Use `off()` to remove previously registered event listeners:
+## Heartbeats and stall detection
 
-```typescript
-const handler = (job, result) => console.log(result);
-
-worker.on('completed', handler);
-// ... later
-worker.off('completed', handler);
-```
-
-### Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `name` | `string` | Queue name this worker processes |
-| `opts` | `ExtendedWorkerOptions` | Resolved worker options with defaults |
-| `concurrency` | `number` | Get/set current concurrency |
-| `closing` | `Promise<void> \| null` | Promise that resolves when close finishes, or null |
-
-## Heartbeats
-
-Workers automatically send heartbeats while processing jobs. This enables stall detection - if a job doesn't receive a heartbeat within the configured interval, it's considered stalled.
+While a job is processing, the worker automatically pings the queue ("I'm still working on this"). That ping is the heartbeat. If a job stops receiving heartbeats, for example because the worker crashed, the queue marks it stalled and recovers it, so no job is silently lost.
 
 ```typescript
 const worker = new Worker('queue', processor, {
   embedded: true,
-  heartbeatInterval: 5000, // Send heartbeat every 5 seconds
+  heartbeatInterval: 5000, // Ping every 5 seconds
 });
 ```
 
-**Tip:** The `heartbeatInterval` should be less than the queue's `stallInterval` to avoid false positives.
+Keep `heartbeatInterval` shorter than the queue's `stallInterval` to avoid false positives. See [Stall Detection](/guide/stall-detection/).
 
-See [Stall Detection](/guide/stall-detection/) for more details.
+## Lock-based ownership
 
-## Lock-Based Ownership
+With `useLocks: true` (the default), each pulled job gets a lock, a temporary claim that says "this worker owns this job". The lock is renewed by heartbeats (`lockDuration` sets its TTL) and must be presented when completing or failing the job. This prevents two workers from processing the same job, and prevents a slow worker's job from being grabbed by a faster one.
 
-When `useLocks: true` (default), workers use BullMQ-style lock tokens:
-
-- Each job gets a unique lock token when pulled
-- Workers must provide the token when acknowledging/failing jobs
-- Prevents job theft between workers
-- Lock is renewed via heartbeats (`lockDuration` sets the TTL, default 30000ms)
-- Locks can also be extended explicitly with a custom TTL via `worker.extendJobLocks(jobIds, tokens, duration)`
-
-:::note[When Locks Matter]
-Locks are essential in **server mode** with multiple workers connecting via TCP. They prevent:
-- Two workers processing the same job simultaneously
-- A slow worker's job being "stolen" by a faster one
-- Race conditions when workers restart
-
-In **embedded mode** with a single process, locks add overhead but provide extra safety. You can disable them for maximum throughput:
-:::
+Locks matter most in **server mode** with multiple workers. In embedded mode with a single process you can trade the safety for a bit of throughput:
 
 ```typescript
 const worker = new Worker('queue', processor, {
   embedded: true,
-  useLocks: false, // Rely on stall detection only (embedded mode)
+  useLocks: false, // Rely on stall detection only
 });
 ```
 
-## Batch Pulling
+Locks can also be extended explicitly: `worker.extendJobLocks(jobIds, tokens, duration)`.
 
-For better performance with many jobs, use batch pulling:
+## Batch pulling
+
+For high-volume queues, pull many jobs per round-trip and long-poll while idle:
 
 ```typescript
 const worker = new Worker('queue', processor, {
@@ -322,111 +214,28 @@ const worker = new Worker('queue', processor, {
 });
 ```
 
-:::tip[Batch push and worker wakeup]
-When jobs are pushed via `addBulk()` or `pushBatch`, each inserted job triggers a notification to waiting workers. This means if you push 100 jobs and 20 workers are idle with `pollTimeout`, all 20 workers wake up immediately, no need to wait for the poll timeout to expire.
-:::
-
-## Error Handling
-
-```typescript
-const worker = new Worker('queue', async (job) => {
-  try {
-    await riskyOperation();
-  } catch (error) {
-    // Job will be retried if attempts remain
-    throw error;
-  }
-}, { embedded: true });
-
-// Handle at worker level
-worker.on('failed', (job, error) => {
-  if (job.attemptsMade >= 3) {
-    // Final failure - alert someone
-    alertOps(job, error);
-  }
-});
-```
+Bulk pushes wake idle long-polling workers immediately, they never wait out the timeout.
 
 ## SandboxedWorker
 
 :::danger[Experimental, not recommended for production]
-`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are currently **experimental** in Bun. Known issues include unexpected memory growth, thread duplication, and inconsistent behavior across Bun versions.
-
-**For production workloads, use the standard `Worker` instead**, it provides the same API (events, concurrency, heartbeats, retries) and runs entirely in the main thread with zero dependency on experimental Bun APIs.
-
-`SandboxedWorker` will become the recommended choice for CPU-intensive work once Bun stabilizes Worker threads.
+`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are currently **experimental** in Bun. Known issues include unexpected memory growth and inconsistent behavior across Bun versions. For production workloads, use the standard `Worker`.
 :::
 
-`SandboxedWorker` runs processors in **isolated Bun Worker threads** for crash isolation and memory protection. It is designed for CPU-intensive tasks or untrusted code that could crash the process.
-
-:::note[Crash Isolation]
-Each job runs in a separate Bun Worker thread. If a job crashes (OOM, infinite loop, uncaught exception), only that worker is affected. The main process and other workers continue running. Crashed workers are automatically restarted up to `maxRestarts` times.
-:::
-
-:::tip[Processing large files]
-If your jobs process large files (100MB+), increase `maxMemory` above the default of 256MB. For example, for 300MB files set `maxMemory: 512` or higher to avoid OOM crashes.
-:::
+`SandboxedWorker` runs each job in an isolated Bun Worker thread. If a job crashes (out of memory, infinite loop, uncaught exception), only that thread dies; the main process keeps running and the thread is restarted automatically. Use it for CPU-heavy or untrusted code.
 
 ```typescript
 import { SandboxedWorker } from 'bunqueue/client';
 
-// Embedded mode (in-process)
 const worker = new SandboxedWorker('cpu-intensive', {
   processor: './processor.ts',  // Path to processor file
   concurrency: 4,               // 4 parallel worker threads
-  timeout: 60000,               // 60s timeout per job (default: 30000, 0 = disabled)
+  timeout: 60000,               // Per-job timeout (default: 30000, 0 = disabled)
   maxMemory: 256,               // MB per worker (default: 256)
-  maxRestarts: 10,              // Auto-restart limit (default: 10)
-  autoRestart: true,            // Auto-restart crashed workers (default: true)
-  pollInterval: 10,             // Job poll interval in ms (default: 10)
 });
 
 await worker.start();
 ```
-
-### Options Reference
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `processor` | `string` | (required) | Path to processor file |
-| `concurrency` | `number` | `1` | Number of parallel worker threads |
-| `maxMemory` | `number` | `256` | Max memory per worker thread in MB (uses Bun smol mode if <= 64) |
-| `timeout` | `number` | `30000` | Job processing timeout in ms (0 = disabled) |
-| `autoRestart` | `boolean` | `true` | Auto-restart crashed workers |
-| `maxRestarts` | `number` | `10` | Max restart attempts per worker |
-| `pollInterval` | `number` | `10` | Job poll interval in ms |
-| `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat interval for stall detection / lock renewal |
-| `idleTimeout` | `number` | `0` | Auto-stop the pool after this many ms of inactivity (0 = disabled) |
-| `idleRecycleMs` | `number` | `30000` | Recycle individual idle worker threads after this many ms (0 = disabled) |
-| `autoStart` | `boolean` | `false` | Auto-restart worker pool when new jobs arrive after an `idleTimeout` shutdown |
-| `autoStartPollMs` | `number` | `5000` | Poll interval for checking new jobs while idle-stopped |
-| `connection` | `ConnectionOptions` | - | TCP connection config (omit for embedded) |
-
-### TCP Mode
-
-SandboxedWorker also supports TCP mode for connecting to a remote bunqueue server. Pass a `connection` option to enable it:
-
-```typescript
-import { SandboxedWorker } from 'bunqueue/client';
-
-// TCP mode - connects to bunqueue server
-const worker = new SandboxedWorker('cpu-intensive', {
-  processor: './processor.ts',
-  concurrency: 4,
-  connection: {
-    host: 'localhost',
-    port: 6789,
-    token: 'my-auth-token',   // Optional auth
-  },
-  heartbeatInterval: 10000,    // Lock renewal interval (default: 10000 for TCP)
-});
-
-await worker.start();
-```
-
-:::tip[When to use TCP mode]
-Use TCP mode when running bunqueue as a standalone server (systemd, Docker) and you need crash-isolated job processing. The worker processes run in isolated Bun Worker threads while communicating with the server over TCP.
-:::
 
 **Processor file** (`processor.ts`):
 
@@ -441,14 +250,46 @@ export default async (job: {
   log: (message: string) => void;
   fail: (error: string | Error) => void;
 }) => {
-  job.log('Starting heavy computation');
   job.progress(50);
   const result = await heavyComputation(job.data);
   job.progress(100);
-  job.log('Computation finished');
   return result;
 };
 ```
+
+To connect to a remote server instead of running embedded, pass a `connection` option (`host`, `port`, `token`), everything else is the same.
+
+Control:
+
+```typescript
+await worker.start();
+worker.isRunning();
+const stats = worker.getStats(); // { total, busy, idle, recycled, restarts }
+await worker.stop();             // Graceful (waits for busy workers)
+await worker.stop(true);         // Force
+```
+
+If your jobs process large files (100MB+), raise `maxMemory` above the 256MB default to avoid OOM crashes.
+
+### SandboxedWorker options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `processor` | `string` | (required) | Path to processor file |
+| `concurrency` | `number` | `1` | Parallel worker threads |
+| `maxMemory` | `number` | `256` | Max memory per thread in MB (Bun smol mode if <= 64) |
+| `timeout` | `number` | `30000` | Per-job timeout in ms (0 = disabled) |
+| `autoRestart` | `boolean` | `true` | Auto-restart crashed threads |
+| `maxRestarts` | `number` | `10` | Max restart attempts per thread |
+| `pollInterval` | `number` | `10` | Job poll interval in ms |
+| `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat for stall detection / lock renewal |
+| `idleTimeout` | `number` | `0` | Stop the pool after this many idle ms (0 = disabled) |
+| `idleRecycleMs` | `number` | `30000` | Recycle idle threads after this many ms (0 = disabled) |
+| `autoStart` | `boolean` | `false` | Restart the pool when new jobs arrive after an idle shutdown |
+| `autoStartPollMs` | `number` | `5000` | Poll interval while idle-stopped |
+| `connection` | `ConnectionOptions` | - | TCP connection (omit for embedded) |
+
+SandboxedWorker emits 8 of the Worker events: `ready`, `active`, `completed`, `failed`, `progress`, `log`, `error`, `closed`. It does **not** emit `stalled`, `drained`, or `cancelled`.
 
 ### Worker vs SandboxedWorker
 
@@ -458,172 +299,14 @@ export default async (job: {
 | **I/O-bound tasks** (HTTP, DB, APIs) | ✅ Best choice | Overkill |
 | **CPU-intensive tasks** | ⚠️ Blocks event loop | ✅ Runs in separate thread |
 | **Untrusted code** | ❌ Runs in main thread | ✅ Isolated |
-| **Memory leak protection** | ❌ | ✅ Per-worker memory limit |
-| **Crash isolation** | ❌ | ✅ Only the worker thread dies |
-| **Events** | 11 events | 8 events (no `stalled`, `drained`, `cancelled`) |
+| **Crash isolation / memory limits** | ❌ | ✅ |
+| **Events** | 11 events | 8 events |
 | **Concurrency, retries, heartbeats** | ✅ | ✅ Same behavior |
 
-:::tip[Production recommendation]
-Most workloads are I/O-bound (API calls, database queries, file operations). For these, **`Worker` is the right choice**, same concurrency, same events, same retries, zero risk from experimental APIs.
-
-Only consider `SandboxedWorker` if you need crash isolation for truly CPU-bound or untrusted code, and you accept the experimental status.
-:::
-
-### SandboxedWorker Events
-
-SandboxedWorker supports 8 events. Note that `stalled`, `drained`, and `cancelled` are **not available**, these are only on the regular Worker.
-
-```typescript
-worker.on('ready', () => {
-  console.log('Worker pool is ready');
-});
-
-worker.on('active', (job) => {
-  console.log(`Job ${job.id} dispatched to worker process`);
-});
-
-worker.on('completed', (job, result) => {
-  console.log(`Job ${job.id} completed:`, result);
-});
-
-worker.on('failed', (job, error) => {
-  console.error(`Job ${job.id} failed:`, error.message);
-});
-
-worker.on('progress', (job, progress) => {
-  console.log(`Job ${job.id} progress: ${progress}%`);
-});
-
-worker.on('log', (job, message) => {
-  console.log(`Job ${job.id} log: ${message}`);
-});
-
-worker.on('error', (error) => {
-  console.error('Worker error:', error);
-});
-
-worker.on('closed', () => {
-  console.log('Worker pool stopped');
-});
-```
-
-#### Event Reference
-
-| Event | Callback Parameters | Description |
-|-------|---------------------|-------------|
-| `ready` | `()` | Worker pool started and all threads spawned |
-| `active` | `(job: Job)` | Job dispatched to a worker thread |
-| `completed` | `(job: Job, result: unknown)` | Job completed successfully |
-| `failed` | `(job: Job, error: Error)` | Job failed, timed out, or worker crashed |
-| `progress` | `(job: Job, progress: number)` | Job progress updated (0-100) |
-| `log` | `(job: Job, message: string)` | Log message from processor via `job.log()` |
-| `error` | `(error: Error)` | Worker-level error (dispatch failure, heartbeat error, crash) |
-| `closed` | `()` | Worker pool stopped |
-
-:::caution[Events not available on SandboxedWorker]
-`stalled`, `drained`, and `cancelled` events are only available on the regular `Worker`. If you need these, use a regular Worker instead.
-:::
-
-### SandboxedWorker API
-
-```typescript
-// Start the worker pool
-await worker.start();
-
-// Check if the pool is running
-worker.isRunning();
-
-// Get stats
-const stats = worker.getStats();
-// { total: 4, busy: 2, idle: 2, recycled: 0, restarts: 0 }
-
-// Graceful shutdown (waits for busy workers to finish)
-await worker.stop();
-
-// Force shutdown (terminates busy workers immediately)
-await worker.stop(true);
-```
-
-## Lifecycle & Shutdown
-
-When using embedded mode, call `shutdownManager()` to cleanly shut down the shared QueueManager (flushes write buffer, closes SQLite). In TCP mode, use `closeSharedTcpClient()` to close the shared TCP connection pool.
-
-```typescript
-import { shutdownManager, closeSharedTcpClient } from 'bunqueue/client';
-
-process.on('SIGINT', async () => {
-  await worker.close();
-
-  // Embedded mode: shut down the shared QueueManager
-  shutdownManager();
-
-  // TCP mode: close the shared TCP connection pool
-  closeSharedTcpClient();
-
-  process.exit(0);
-});
-```
-
-| Function | Mode | Description |
-|----------|------|-------------|
-| `shutdownManager()` | Embedded | Shuts down the shared QueueManager, flushes pending writes, closes SQLite |
-| `closeSharedTcpClient()` | TCP | Closes the shared TCP client connection |
-| `closeAllSharedPools()` | TCP | Closes all shared TCP connection pools |
-| `getSharedPool(options)` | TCP | Returns (or creates) the shared `TcpConnectionPool` for the given connection options, keyed by host, port, poolSize, token and TLS config exactly like Queues share pools. `pool.getHealth()` returns aggregate health: `healthy`, `connectedCount`, `totalCount`, `avgLatencyMs`, `totalCommands`, `totalErrors`, plus a per-connection `clients: ConnectionHealth[]` |
-
-## CPU-Intensive Workers (TCP)
-
-When processing CPU-heavy jobs over TCP, synchronous work can block the event loop and cause connection drops. See the dedicated [CPU-Intensive Workers](/guide/cpu-intensive-workers/) guide for connection tuning, yield patterns, and timeout reference.
+Most workloads are I/O-bound (API calls, database queries, file operations); for those, `Worker` is the right choice. If CPU-heavy work over TCP is dropping connections, see [CPU-Intensive Workers](/guide/cpu-intensive-workers/) for tuning patterns.
 
 :::tip[Related Guides]
-- [Monitoring & Prometheus Metrics](/guide/monitoring/) - Monitor worker events and performance
-- [Stall Detection & Recovery](/guide/stall-detection/) - Handle unresponsive workers
-- [CPU-Intensive Workers](/guide/cpu-intensive-workers/) - Handle CPU-heavy jobs over TCP
+- [Queue API](/guide/queue/), add and manage jobs
+- [Stall Detection & Recovery](/guide/stall-detection/), handle unresponsive workers
+- [Monitoring & Prometheus Metrics](/guide/monitoring/), watch worker performance
 :::
-
-## Complete Example
-
-```typescript
-import { Queue, Worker, shutdownManager } from 'bunqueue/client';
-
-interface EmailJob {
-  to: string;
-  subject: string;
-  body: string;
-}
-
-const queue = new Queue<EmailJob>('emails', { embedded: true });
-
-const worker = new Worker<EmailJob>('emails', async (job) => {
-  console.log(`Sending email to: ${job.data.to}`);
-
-  await job.updateProgress(50, 'Composing email...');
-  await job.log(`Subject: ${job.data.subject}`);
-
-  // Simulate sending
-  await Bun.sleep(100);
-
-  await job.updateProgress(100, 'Sent!');
-  return { sent: true, timestamp: Date.now() };
-}, {
-  embedded: true,
-  concurrency: 5,
-  heartbeatInterval: 5000,
-});
-
-worker.on('completed', (job, result) => {
-  console.log(`✓ Email sent: ${job.id}`);
-});
-
-worker.on('failed', (job, error) => {
-  console.error(`✗ Email failed: ${job.id} - ${error.message}`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down...');
-  await worker.close();
-  shutdownManager();
-  process.exit(0);
-});
-```

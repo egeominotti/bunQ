@@ -1,6 +1,6 @@
 ---
-title: "bunqueue Glossary: Job Queue Terms & Concepts Explained"
-description: "Plain-language definitions of every bunqueue concept: job, queue, worker, DLQ, backoff, sharding, stall detection, saga compensation, and more."
+title: "bunqueue Glossary: Job Queue Terms in Plain Words"
+description: "Plain-language definitions of every bunqueue concept: job, queue, worker, DLQ, backoff, embedded mode, stall detection, and more. Each term links to its guide."
 head:
   - tag: meta
     attrs:
@@ -11,118 +11,149 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · glossary</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Every job queue term, <em>defined.</em></h1>
-  <p class="bq-hero-sub">One concise definition per concept, each linking to the guide that covers it in full. If a word in the docs is unfamiliar, it is explained here.</p>
+  <p class="bq-hero-sub">Short, plain-words definitions. Each term links to the guide that covers it in full. If a word in the docs is unfamiliar, it is explained here.</p>
 </div>
 
-A **job queue** stores units of work (jobs) so that producers can hand off tasks and workers can process them later, with retries, ordering, and persistence. This page defines the vocabulary bunqueue uses. Every term links to its full guide.
+A **job queue** is a to-do list for your app: you add tasks now, and they run later, in order, with retries if they fail. This page defines the words bunqueue uses, grouped by topic.
 
-## Job
+## The basics
 
-A single unit of work: a name, a JSON payload, and options (priority, delay, attempts, timeout). A job moves through states, `waiting`, `active`, `completed`, `failed`, `delayed`, until it finishes or exhausts its retries. See the [Queue API](/guide/queue/).
+### Job
 
-## Queue
+One unit of work: a name, a JSON payload, and options such as priority or delay. A job moves through states (`waiting`, `active`, `completed`, `failed`, `delayed`) until it finishes or runs out of retries. See the [Queue API](/guide/queue/).
 
-A named channel that holds jobs of one logical kind. Producers add jobs to a queue; workers pull from it. Each queue can be paused, drained, or rate limited independently. See the [Queue API](/guide/queue/).
+### Queue
 
-## Worker
+A named list that holds jobs of one kind, for example `emails`. You add jobs to a queue, workers take them out. Each queue can be paused, drained, or rate limited on its own. See the [Queue API](/guide/queue/).
 
-A process that pulls jobs from a queue and runs a processor function, with a configurable concurrency, heartbeats for stall detection, and lock-based ownership so no two workers run the same job. See the [Worker API](/guide/worker/).
+### Worker
 
-## Producer
+A loop that pulls jobs from a queue and runs your function on each one. You choose how many jobs it runs in parallel. See the [Worker API](/guide/worker/).
 
-Any code that adds jobs. In embedded mode the producer and worker share a process; in server mode producers connect over TCP. See [Server Mode](/guide/server/).
+### Producer
 
-## Embedded mode vs server mode
+Any code that adds jobs. Often just your HTTP handler calling `queue.add()`. See the [Queue API](/guide/queue/).
 
-**Embedded mode** runs the queue in your app's process against a local SQLite file, with no network hop. **Server mode** runs bunqueue as a standalone TCP and HTTP server that many producers and workers connect to. See [Server Mode](/guide/server/) and the [Introduction](/guide/introduction/).
+### Embedded mode vs server mode
 
-## DLQ (Dead Letter Queue)
+**Embedded mode** runs the whole queue inside your app's process, backed by a local SQLite file, no server to run. **Server mode** runs bunqueue as a standalone server that many apps and workers connect to over TCP. See [Server Mode](/guide/server/) and the [Introduction](/guide/introduction/).
 
-The Dead Letter Queue holds jobs that failed permanently, after exhausting all retry attempts, with their error, stack trace, and metadata preserved so you can inspect, retry, or expire them on a policy. See the [Dead Letter Queue guide](/guide/dlq/).
+### Ack
 
-## Retry
+The confirmation a worker sends when a job is done. The `Worker` class acks for you automatically when your function returns. See the [Worker API](/guide/worker/).
 
-Re-running a failed job. bunqueue retries up to `attempts` times before the job moves to the DLQ. See the [Worker API](/guide/worker/).
+### Simple mode
 
-## Backoff
+The `Bunqueue` class, a Queue and a Worker bundled into one object, with named routes and middleware. The fastest way to start. See [Simple Mode](/guide/simple-mode/).
 
-The delay between retry attempts. bunqueue uses exponential backoff by default, so each failure waits longer than the last, which spreads load away from a struggling dependency. See the [Dead Letter Queue guide](/guide/dlq/).
+## When things fail
 
-## Stall detection
+### Retry
 
-The mechanism that recovers jobs from a worker that stopped responding. A worker sends heartbeats while processing; if it misses them past a grace period, the job is marked stalled and re-queued, or sent to the DLQ after too many stalls. See [Stall Detection](/guide/stall-detection/).
+Running a failed job again. bunqueue retries up to `attempts` times (default 3) before giving up. See the [Worker API](/guide/worker/).
 
-## Heartbeat
+### Backoff
 
-A periodic signal a worker sends while a job runs, proving it is still alive. Missed heartbeats trigger stall detection. See [Stall Detection](/guide/stall-detection/).
+The waiting time between retries. Each retry waits longer than the last, which stops a struggling service from being hammered. See the [Dead Letter Queue guide](/guide/dlq/).
 
-## Sharding
+### DLQ (Dead Letter Queue)
 
-Splitting a queue's in-memory structures across N independent shards (chosen as a power of two from the CPU core count) so operations on different jobs do not contend on one lock. See the [Architecture overview](/architecture/) and [Domain Layer](/architecture/domain-layer/).
+The place where jobs go after all retries fail, with their error and stack trace kept so you can inspect and retry them by hand or on a schedule. See the [Dead Letter Queue guide](/guide/dlq/).
 
-## Priority
+### Stall detection
 
-A number attached to a job; higher-priority jobs are pulled before lower ones within the same queue. Implemented with a 4-ary MinHeap. See the [Queue API](/guide/queue/) and [Data Structures](/architecture/data-structures/).
+The safety net for crashed workers. A working worker sends heartbeats; if they stop, the job is taken back and re-queued so another worker can run it. See [Stall Detection](/guide/stall-detection/).
 
-## Concurrency
+### Heartbeat
 
-The number of jobs a single worker runs in parallel. A separate queue-level concurrency cap limits total active jobs across all workers. See [Rate Limiting](/guide/rate-limiting/).
+A small "still alive" signal a worker sends while a job runs. Missed heartbeats trigger stall detection. See [Stall Detection](/guide/stall-detection/).
 
-## Rate limiting
+### Lock (lease)
 
-Capping how many jobs run per time window (or how many are active at once) to protect downstream services from overload. See [Rate Limiting](/guide/rate-limiting/).
+Temporary ownership of a job, given to the worker that pulled it, so two workers never run the same job. If the worker dies, the lock expires and the job can be handed out again. See the [Worker API](/guide/worker/).
 
-## Cron and scheduler
+### Durable write
 
-A scheduler that adds jobs on a recurring basis, from cron expressions or plain intervals, with IANA timezone support, persisted in SQLite so schedules survive a restart. See [Cron Jobs](/guide/cron/).
+A job option (`durable: true`) that writes the job to disk immediately instead of through the 10ms write buffer. Slower, but zero data loss even if the process crashes in that window. See the [Queue API](/guide/queue/).
 
-## Delayed job
+## Timing and ordering
 
-A job that becomes eligible to run only after a set delay. Delayed jobs sit in the `delayed` state until their run time arrives, then move to `waiting`. See the [Queue API](/guide/queue/).
+### Priority
 
-## Deduplication and idempotency
+A number on a job; higher numbers run first within the same queue. See the [Queue API](/guide/queue/).
 
-Giving a job a custom `jobId` (or a `deduplication` window) so that re-adding the same id while it is unfinished is a no-op, making `add()` safe to call more than once. See the [Queue API](/guide/queue/).
+### Delayed job
 
-## Durable write
+A job that waits a set time before it becomes runnable. It sits in the `delayed` state, then moves to `waiting`. See the [Queue API](/guide/queue/).
 
-A job option that flushes the job straight to SQLite instead of the 10ms write buffer, trading throughput for zero data-loss on a crash. See the [Queue API](/guide/queue/).
+### Cron
 
-## Flow and FlowProducer
+A schedule that adds jobs on a recurring basis, from cron expressions like `0 9 * * *` or plain intervals, with timezone support. Schedules survive restarts. See [Cron Jobs](/guide/cron/).
 
-FlowProducer creates parent-child job dependencies: children run first, and the parent runs only after all children complete. Used for pipelines and fan-out/fan-in. See the [Flow Producer guide](/guide/flow/).
+### Promote
 
-## Workflow and saga compensation
+Moving a delayed job to `waiting` right now, ahead of its schedule. See the [Queue API](/guide/queue/).
 
-The Workflow Engine orchestrates multi-step processes with branching, parallel steps, loops, and human-in-the-loop signals. **Saga compensation** runs registered rollback steps in reverse order when a later step fails, undoing partial work. See the [Workflow Engine guide](/guide/workflow/).
+### Concurrency
 
-## Lock (lease)
+How many jobs one worker runs at the same time. A separate queue-level cap can limit active jobs across all workers. See the [Worker API](/guide/worker/) and [Rate Limiting](/guide/rate-limiting/).
 
-Temporary ownership of a job granted to the worker that pulled it, so no other worker processes it. If the lock expires (for example the worker died), the job can be re-leased. See the [Worker API](/guide/worker/).
+### Rate limiting
 
-## Promote
+Capping how many jobs run per time window, to protect a downstream service like an email API from overload. See [Rate Limiting](/guide/rate-limiting/).
 
-Moving a delayed or DLQ job to `waiting` immediately, ahead of its schedule. See the [Queue API](/guide/queue/).
+### Deduplication and idempotency
 
-## Drain and obliterate
+Giving a job a custom `jobId` so adding it twice does nothing the second time. This makes `add()` safe to call more than once for the same logical task. See the [Queue API](/guide/queue/).
 
-**Drain** removes waiting and delayed jobs from a queue while leaving active ones to finish. **Obliterate** removes the queue and every job in it. See the [Queue API](/guide/queue/).
+## Composing jobs
 
-## WAL (Write-Ahead Logging)
+### Flow
 
-The SQLite journaling mode bunqueue runs in, which lets readers and a writer work concurrently and improves write throughput. See [Persistence](/architecture/persistence/).
+Parent-child job dependencies: children run first, the parent runs only after all children complete. Built with `FlowProducer`. See the [Flow Producer guide](/guide/flow/).
 
-## MessagePack
+### Workflow and saga compensation
 
-The compact binary serialization format used on the TCP wire protocol, faster and smaller than JSON. See the [TCP Protocol](/api/tcp/).
+The Workflow Engine runs multi-step processes with branching, parallel steps, loops, and waits for human approval. **Saga compensation** means each step can register an undo function, and on failure the completed steps are undone in reverse order. See the [Workflow Engine guide](/guide/workflow/).
 
-## Store-and-forward
+### Queue group
 
-An edge pattern where a local embedded queue drains its jobs to a central remote server, with local retry and DLQ if the remote is unreachable, so nothing is lost offline. See [IoT & Edge](/guide/iot-edge/).
+Several queues managed as one unit, useful for tenant-per-queue setups. See [Queue Group](/guide/queue-group/).
+
+### Webhook
+
+An HTTP call bunqueue makes to your URL when queue events happen, so other systems can react. See [Webhooks](/guide/webhooks/).
+
+## Control operations
+
+### Pause and resume
+
+Pausing stops workers from receiving new jobs from a queue; jobs already running finish normally. Resume turns delivery back on. See the [Queue API](/guide/queue/).
+
+### Drain and obliterate
+
+**Drain** removes waiting and delayed jobs but lets active ones finish. **Obliterate** deletes the queue and everything in it. See the [Queue API](/guide/queue/).
+
+## Under the hood
+
+### Sharding
+
+Splitting the queue's in-memory state across independent slices (one per CPU core group) so operations on different jobs do not wait on one lock. You never configure this; it is automatic. See [Benchmarks](/guide/benchmarks/).
+
+### WAL (Write-Ahead Logging)
+
+The SQLite mode bunqueue uses, which lets reads and writes happen at the same time. It creates `-wal` and `-shm` files next to the database file. See [Storage](/guide/databases/).
+
+### MessagePack
+
+The compact binary format used on the TCP wire, smaller and faster to parse than JSON. See the [TCP Protocol](/api/tcp/).
+
+### Store-and-forward
+
+An edge pattern: a small embedded queue on the device stores jobs locally, then forwards them to a central server when it can reach it. Nothing is lost while offline. See [IoT & Edge](/guide/iot-edge/).
 
 :::tip[Related]
-- [Introduction](/guide/introduction/) - What bunqueue is and why SQLite over Redis
+- [Introduction](/guide/introduction/) - What bunqueue is and when to use it
+- [Quickstart](/guide/quickstart/) - Running in five minutes
 - [FAQ](/faq/) - Common questions answered
-- [Architecture Overview](/architecture/) - How the internals fit together
-- [Queue API](/guide/queue/) - The API most of these terms live in
 :::

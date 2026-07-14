@@ -15,20 +15,19 @@ import BqIcon from '@components/BqIcon.astro';
 <div class="bq-wrap bq-hero bq-bench-hero">
   <span class="bq-eyebrow">benchmarks</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Benchmarks measured,<br/>not <em>marketed.</em></h1>
-  <p class="bq-hero-sub">Every figure on this page is the median of 3 runs of a script you can run yourself, on hardware we name, with methodology we publish, including the numbers that don't flatter us.</p>
+  <p class="bq-hero-sub">Three numbers matter. Every figure on this page is the median of 3 runs of a script you can run yourself, on hardware we name, including the numbers that don't flatter us.</p>
 
   <div class="bq-proof">
     <span><b>630K</b> ops/sec bulk push, embedded</span>
     <span><b>90K</b> ops/sec push over TCP</span>
     <span><b>3.5x</b> BullMQ bulk throughput</span>
-    <span><b>5.5 MB</b> install, 2 runtime deps</span>
   </div>
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">vs bullmq + redis</span>
   <h2 class="bq-h2">Same workload, no Redis.</h2>
-  <p class="bq-lede">TCP mode against BullMQ 5.79.3 on Redis 8.8.0, identical payloads, 10,000 iterations, same machine. Single push is parity; batching is where the wire protocol pays off.</p>
+  <p class="bq-lede">TCP mode against BullMQ 5.79.3 on Redis 8.8.0, identical payloads, 10,000 iterations, same machine. Single push is parity; batching is where bunqueue's wire protocol pays off.</p>
 
   <div class="bq-chart-grid">
     <div class="bq-chart">
@@ -38,7 +37,7 @@ import BqIcon from '@components/BqIcon.astro';
       <p class="bq-chart-note"><b>3.5x faster</b></p>
     </div>
     <div class="bq-chart">
-      <p class="bq-chart-title">Bulk push p99 latency <span>ms, lower is better</span></p>
+      <p class="bq-chart-title">Bulk push p99 latency <span>ms, lower is better. p99 = the slowest 1% of calls</span></p>
       <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:57%"></div></div><span class="bq-hval">6.3 ms</span></div>
       <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">11.1 ms</span></div>
       <p class="bq-chart-note"><b>1.8x lower</b></p>
@@ -56,7 +55,7 @@ import BqIcon from '@components/BqIcon.astro';
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">embedded mode</span>
   <h2 class="bq-h2">Direct SQLite, no network.</h2>
-  <p class="bq-lede">The queue runs inside your process, so a push is a function call plus a WAL write. Ideal for single-process apps, CLIs, edge and serverless.</p>
+  <p class="bq-lede">In embedded mode the queue runs inside your process, so pushing a job is a function call plus a disk write. Ideal for single-process apps, CLIs, edge and serverless.</p>
 
   <div class="bq-chart-grid">
     <div class="bq-chart">
@@ -83,14 +82,14 @@ import BqIcon from '@components/BqIcon.astro';
   </div>
 
   <Aside>
-  Embedded mode scales cleanly: single push climbs to **242K ops/sec** and bulk push peaks around **631K ops/sec** at 10K jobs. The 1K row reflects cold-start/warmup; throughput stabilizes from 5K up.
+  Single push climbs to **242K ops/sec** and bulk push peaks around **631K ops/sec** at 10K jobs. The 1K row reflects cold-start warmup; throughput stabilizes from 5K up.
   </Aside>
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">tcp mode</span>
   <h2 class="bq-h2">Over the wire, for distributed systems.</h2>
-  <p class="bq-lede">Clients connect to a bunqueue server over TCP with msgpack framing and a 32-connection pool. Required when producers and workers are separate processes.</p>
+  <p class="bq-lede">In TCP mode clients talk to a bunqueue server over the network, which you need when producers and workers are separate processes. The client keeps a 32-connection pool and batches concurrent adds automatically.</p>
 
   <div class="bq-chart-grid">
     <div class="bq-chart">
@@ -110,11 +109,11 @@ import BqIcon from '@components/BqIcon.astro';
   </div>
 
   <Aside>
-  The TCP **Push** chart issues jobs in **batches of 100 concurrent `add()` calls** (auto-batched into `PUSHB` frames on the wire), not one awaited add at a time, a single *sequential* awaited `add()` over TCP is ~10K ops/sec (one round-trip per job).
+  The TCP **Push** chart issues jobs in **batches of 100 concurrent `add()` calls** (auto-batched into `PUSHB` frames on the wire). A single *sequential* awaited `add()` over TCP is ~10K ops/sec, one network round-trip per job.
   </Aside>
 
   <Aside type="caution">
-  **Read TCP processing numbers carefully.** The bench drains the queue with a *single* worker at `concurrency: 10`: each job's lock lease is bounded by the worker's free concurrency slots (the over-pull guard), so per-job network latency, not server throughput, is the bottleneck, and a single c=10 worker measures ~180 ops/sec. Throughput scales with worker concurrency and worker count, **not** queue depth (median of 3, 5K jobs):
+  **Read TCP processing numbers carefully.** The bench drains the queue with a *single* worker at `concurrency: 10`, so per-job network latency, not server throughput, is the bottleneck: that one worker measures ~180 ops/sec. Throughput scales with worker concurrency and worker count, **not** queue depth (median of 3, 5K jobs):
 
   | Worker concurrency | TCP process (ops/sec) |
   |--------------------|-----------------------|
@@ -129,24 +128,7 @@ import BqIcon from '@components/BqIcon.astro';
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">embedded vs tcp</span>
   <h2 class="bq-h2">What the network costs.</h2>
-  <p class="bq-lede">The same operations, embedded versus over TCP. Skipping the per-call round-trip is worth 1.2x to 2.7x on single push and 4.4x to 8.9x on bulk.</p>
-
-  <div class="bq-chart-grid bq-chart-grid-2">
-    <div class="bq-chart">
-      <p class="bq-chart-title">Push speedup <span>embedded ÷ TCP, by job count</span></p>
-      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:44%"></div></div><span class="bq-hval">1.2x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:85%"></div></div><span class="bq-hval">2.3x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:96%"></div></div><span class="bq-hval">2.6x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">2.7x</span></div>
-    </div>
-    <div class="bq-chart">
-      <p class="bq-chart-title">Bulk push speedup <span>embedded ÷ TCP, by job count</span></p>
-      <div class="bq-hrow"><span class="bq-hname">1K</span><div class="bq-htrack"><div class="bq-hfill" style="width:49%"></div></div><span class="bq-hval">4.4x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">5K</span><div class="bq-htrack"><div class="bq-hfill" style="width:69%"></div></div><span class="bq-hval">6.1x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">10K</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">8.9x</span></div>
-      <div class="bq-hrow"><span class="bq-hname">50K</span><div class="bq-htrack"><div class="bq-hfill" style="width:87%"></div></div><span class="bq-hval">7.7x</span></div>
-    </div>
-  </div>
+  <p class="bq-lede">Same operations, both modes, at each operation's best scale. Skipping the per-call network round-trip is worth 1.2x to 2.7x on single push and up to 8.9x on bulk.</p>
 
   <div class="bq-chart" style="margin-top: 1rem;">
     <p class="bq-chart-title">Peak throughput by mode <span>ops/sec, best scale per operation</span></p>
@@ -157,46 +139,22 @@ import BqIcon from '@components/BqIcon.astro';
   </div>
 
   <Aside type="tip">
-  **Process is intentionally omitted from the speedup charts:** the single-worker `concurrency:10` ratio (embedded ~87K vs TCP ~184 ops/sec) is a *pull-latency artifact* described in the caution above, not a processing-engine difference. Compared fairly, embedded vs a TCP worker at `concurrency:50` (~4,900 ops/sec), embedded is ~18x on the per-job loop, and most of that is the per-pull network round-trip. Use embedded mode when your workers run in the same process as the queue.
+  **Process is intentionally not compared here:** the single-worker `concurrency:10` ratio (embedded ~87K vs TCP ~184 ops/sec) is the pull-latency artifact described in the caution above, not a processing-engine difference. Use embedded mode when your workers run in the same process as the queue.
   </Aside>
 </div>
 
 <div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">install footprint</span>
-  <h2 class="bq-h2">5.5 MB, seven packages.</h2>
-  <p class="bq-lede">Throughput isn't the only number that shrank. bunqueue ships <b>2 runtime dependencies</b>, <code>croner</code> and <code>msgpackr</code>. SQLite, S3, HTTP and WebSocket are built into Bun.</p>
+  <span class="bq-eyebrow">other numbers</span>
+  <h2 class="bq-h2">Install size and dependency chains.</h2>
+  <p class="bq-lede">Two more measured figures. bunqueue installs as <b>7 packages, 5.5 MB</b> (down from 117 packages, 93 MB in 2.7.x) because it has only 2 runtime dependencies, <code>croner</code> and <code>msgpackr</code>; SQLite, S3, HTTP and WebSocket are built into Bun.</p>
 
-  | Metric | bunqueue 2.8.30 | Before (2.7.x) | Change |
-  |--------|----------------|----------------|--------|
-  | `node_modules` size | 5.5 MB | 93 MB | **−94%** |
-  | packages installed | 7 | 117 | **117 → 7** |
-  | cold install time | ~1.7 s | ~6 s | **~3.5× faster** |
-
-  <Aside>
-  The 2.8.0/2.8.1 MCP refactor removed the SDK, `zod`, and the HTTP stack from the install path; 2.8.2 dropped 2.8 MB of unusable sourcemaps from the published package. The MCP server's `@modelcontextprotocol/sdk` is an **optional peer dependency**: queue and worker users never pull it in.
-  </Aside>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">dependency chains</span>
-  <h2 class="bq-h2">From polling to microseconds.</h2>
-  <p class="bq-lede">Jobs with dependencies (<code>dependsOn</code>, flows, parent-child workflows) resolve through event-driven microtask coalescing instead of a 100 ms polling loop.</p>
-
-  <div class="bq-proof" style="margin-top: 2rem;">
-    <span>single dep <b>~6,900x</b> faster</span>
-    <span>4-level chain <b>~9,800x</b> faster</span>
-    <span>fan-out 1→5 <b>~3,600x</b> faster</span>
-  </div>
+  Jobs that depend on other jobs (`dependsOn`, flows, parent-child workflows) resolve through events instead of a 100 ms polling loop, so multi-step pipelines fire in microseconds:
 
   | Scenario | Before P50 (polling) | After P50 (event-driven) | P99 after |
   |----------|-----------|----------|-----------|
   | **Single dep (A→B)** | 100.05 ms | 14.4 µs | 114.2 µs |
   | **Chain dep (4 levels)** | 300.43 ms | 30.7 µs | 67.5 µs |
   | **Fan-out (1→5)** | 100.11 ms | 27.7 µs | 141.2 µs |
-
-  <Aside type="tip">
-  Multi-step pipelines (ETL, workflows, map-reduce) resolve nearly instantly instead of waiting for polling intervals.
-  </Aside>
 
 ```bash
 bun run src/benchmark/dependency-latency.bench.ts
@@ -208,7 +166,7 @@ bun run src/benchmark/dependency-latency.bench.ts
   <h2 class="bq-h2">How the numbers are made.</h2>
   <p class="bq-lede">Three operations at four scales, 1K, 5K, 10K, 50K jobs, each cell the median of 3 runs. The two modes push differently, and we say so.</p>
 
-  **Push.** Embedded awaits each `add()` one at a time (true sequential insertion). TCP issues jobs in batches of 100 concurrent `add()` calls, which the client auto-batches into `PUSHB` frames, a single awaited `add()` over TCP is round-trip-bound at ~10K ops/sec:
+  **Push.** Embedded awaits each `add()` one at a time (true sequential insertion). TCP issues jobs in batches of 100 concurrent `add()` calls, which the client auto-batches into `PUSHB` frames; a single awaited `add()` over TCP is round-trip-bound at ~10K ops/sec:
 
 ```typescript
 for (let i = 0; i < scale; i++) {
@@ -236,20 +194,6 @@ for (let i = 0; i < scale / 100; i++) {
 ```
 
   **Process.** Push in parallel batches of 500, then drain with a **single worker at `concurrency: 10`**, one process, ten in-flight jobs. Over TCP this is bound by per-pull round-trip latency (see the caution above); embedded has no such bound.
-
-```typescript
-for (let i = 0; i < scale; i += 500) {
-  const promises = [];
-  for (let j = 0; j < Math.min(500, scale - i); j++) {
-    promises.push(queue.add('job', PAYLOAD));
-  }
-  await Promise.all(promises);
-}
-
-while (processed < scale) {
-  await sleep(5);
-}
-```
 
   ### Environment
 
@@ -288,7 +232,7 @@ bun run bench/comparison/run.ts
     <div class="bq-tool">
       <BqIcon name="file" />
       <h3>SQLite WAL mode</h3>
-      <p>Concurrent reads and writes with memory-mapped I/O through Bun's native SQLite bindings, no serialization layer between the queue and its store.</p>
+      <p>Write-ahead logging lets reads and writes run concurrently, through Bun's native SQLite bindings with no serialization layer in between.</p>
     </div>
     <div class="bq-tool">
       <BqIcon name="shards" />
@@ -298,12 +242,12 @@ bun run bench/comparison/run.ts
     <div class="bq-tool">
       <BqIcon name="network" />
       <h3>TCP pipelining</h3>
-      <p>Multiple commands in flight per connection with request-ID response matching, msgpack framing, and transparent client-side batching into <code>PUSHB</code>.</p>
+      <p>Multiple commands in flight per connection, msgpack framing, and transparent client-side batching of concurrent adds into <code>PUSHB</code>.</p>
     </div>
     <div class="bq-tool">
       <BqIcon name="stack" />
       <h3>Efficient structures</h3>
-      <p>4-ary min-heap for O(log₄ n) priority queues, skip lists for temporal indexing, LRU caches with hard memory bounds.</p>
+      <p>4-ary min-heap for priority queues, skip lists for temporal indexing, LRU caches with hard memory bounds.</p>
     </div>
   </div>
 </div>

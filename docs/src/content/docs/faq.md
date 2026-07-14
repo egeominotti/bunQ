@@ -1,6 +1,6 @@
 ---
 title: "bunqueue FAQ: Bun Job Queue Questions Answered"
-description: "Common questions about bunqueue answered: performance benchmarks, scaling, SQLite vs Redis, BullMQ migration, and production deployment tips."
+description: "Common questions about bunqueue answered: SQLite vs Redis, embedded vs server mode, performance, retries, scaling, backups, and BullMQ migration."
 head:
   - tag: meta
     attrs:
@@ -11,430 +11,163 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · faq</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Asked, <em>answered.</em></h1>
-  <p class="bq-hero-sub">Straight answers on performance, scaling, SQLite versus Redis, BullMQ migration and production deployment. If your question is not here, GitHub Discussions is the next stop.</p>
+  <p class="bq-hero-sub">One-paragraph answers on storage, modes, performance, retries, scaling and migration. If your question is not here, GitHub Discussions is the next stop.</p>
 </div>
 
-## General
+Short answers to the questions people actually ask. Each answer links to the page that owns the topic.
+
+## Basics
 
 ### What is bunqueue?
 
-bunqueue is a high-performance job queue for Bun that uses SQLite for persistence instead of Redis. It provides a BullMQ-compatible API, making migration easy.
+bunqueue is a job queue for Bun: you push jobs (units of work, like "send this email") onto a named queue, and workers pull and process them with retries, priorities, and scheduling. It persists jobs in SQLite (a database stored in a single local file) instead of Redis, and its API is compatible with BullMQ, so migration is mostly an import change. Start with the [quickstart](/guide/quickstart/).
 
 ### Why SQLite instead of Redis?
 
-- **Simplicity**: No external service to manage
-- **Performance**: Bun's native SQLite is incredibly fast
-- **Persistence**: Data survives restarts by default
-- **Cost**: No Redis hosting costs
-- **Portability**: Single file database, easy to backup
+One less server. There is nothing to install, monitor, or pay hosting for, jobs survive restarts by default, and backup is copying one file (or letting the built-in [S3 backup](/guide/backup/) do it). Bun's native SQLite bindings make it fast enough that bunqueue beats BullMQ on bulk throughput; see the [comparison](/guide/comparison/). The trade-off is that the queue is single-instance, covered under Scaling below.
 
-### Is bunqueue production-ready?
+### Does it run on Node.js?
 
-Yes. bunqueue includes:
-- Stall detection for crashed workers
-- Dead letter queues for failed jobs
-- Automatic retries with backoff
-- S3 backups for disaster recovery
-- Rate limiting and concurrency control
+No. bunqueue uses Bun-only APIs (`bun:sqlite`, `Bun.serve`, `Bun.listen`) that do not exist in Node. Your job producers can still be anywhere: any process that can open a TCP connection can talk to a bunqueue server, and official SDKs exist for [TypeScript and Python](/guide/sdks/).
 
-### What are the system requirements?
+### What are the requirements?
 
-- **Bun**: Version 1.3.9 or higher (enforced via `engines`)
-- **OS**: macOS, Linux, Windows (WSL)
-- **Memory**: Minimum 512MB recommended
-- **Disk**: SSD recommended for best performance
+Bun 1.3.9 or newer (enforced via the package `engines` field) on macOS, Linux, or Windows via WSL. An SSD helps write throughput. Install steps are on the [installation page](/guide/installation/).
 
-## Installation
+### How heavy is the install?
 
-### Why doesn't it work with Node.js?
+Two runtime dependencies: `croner` (cron parsing) and `msgpackr` (binary serialization). `bun add bunqueue` installs 7 packages totaling about 5.5 MB. The MCP SDK is an optional peer dependency: only install `@modelcontextprotocol/sdk` if you use the [MCP server](/guide/mcp/), the launcher tells you if it is missing. Queue and Worker users never need it.
 
-bunqueue uses Bun-specific APIs:
-- `bun:sqlite` for database access
-- `Bun.serve` for HTTP server
-- `Bun.listen` for TCP server
+## Modes and storage
 
-These APIs are not available in Node.js.
+### What is the difference between embedded and server mode?
 
-### How do I install Bun?
+Embedded mode (`new Queue('q', { embedded: true })`) runs the queue inside your process: no network, best when producers and workers live in one app. Server mode runs `bunqueue start` as a standalone process and clients connect over TCP: best when multiple processes or machines share queues. The API is the same in both. Pick one mode per deployment; the same SQLite file must never be opened by two processes at once.
+
+### Where is my data stored?
+
+Nowhere, unless you say so. Without a data path, jobs are held in memory and lost on restart. Set `dataPath` in the constructor for embedded mode, or `BUNQUEUE_DATA_PATH` (also accepted: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) or `--data-path` for the server:
 
 ```bash
-# macOS/Linux
-curl -fsSL https://bun.sh/install | bash
-
-# Windows (PowerShell)
-powershell -c "irm bun.sh/install.ps1 | iex"
-
-# Homebrew
-brew install oven-sh/bun/bun
+BUNQUEUE_DATA_PATH=./data/production.db bunqueue start
 ```
 
-### How many dependencies does bunqueue have?
+### How does persistence work?
 
-bunqueue has only **2 runtime dependencies**: `croner` (cron parsing) and `msgpackr` (binary serialization). There's no Redis, no MongoDB, no external infrastructure. Running `bun add bunqueue` installs **7 packages totaling 5.5 MB** and completes **about 3.5× faster** on a cold install.
+Jobs are written to SQLite in WAL mode (write-ahead logging, a journal that lets reads and writes overlap). By default writes are buffered for up to 10ms and flushed in batches, which is what enables ~100k jobs/sec. If a 10ms loss window is unacceptable for a job, add it with `{ durable: true }` to write it to disk before `add()` returns (~10k jobs/sec). Details in [configuration](/guide/configuration/).
 
-As of v2.8.1, the MCP SDK (`@modelcontextprotocol/sdk`) is an **optional peer dependency** and Zod is no longer a direct dependency, both are only needed if you use the MCP server. Queue/Worker/Workflow users install nothing extra.
+### Can I use Postgres or MySQL instead?
 
-### Do I need to install anything extra to use the MCP server?
+No, bunqueue is SQLite-only by design: the storage layer is built on synchronous `bun:sqlite`, and swapping the database would not add clustering to a single-instance engine. On serverless or ephemeral filesystems, mount a persistent volume for the data path, or forward jobs to a central durable server. See [storage backends](/guide/databases/).
 
-Yes, one package. The `bunqueue-mcp` bin and the `bunqueue/mcp` export still ship with bunqueue, but as of v2.8.1 the MCP SDK is an optional peer dependency that isn't downloaded automatically. Install it once:
+### How do I back up and restore?
 
-```bash
-bun add @modelcontextprotocol/sdk
-```
-
-If it's missing when you launch the server, the launcher prints a message telling you to install it and exits. Queue-only users never need this.
-
-## Architecture
-
-### What's the difference between embedded and server mode?
-
-**Embedded Mode:**
-- Queue runs in the same process as your app
-- Best for single-process applications
-- No network overhead
-
-**Server Mode:**
-- Queue runs as a separate server
-- Multiple workers can connect via TCP
-- Best for distributed systems
-
-### Can I use both modes together?
-
-No. Each mode uses its own database file. You should choose one mode per deployment.
-
-### How does job persistence work?
-
-Jobs are stored in SQLite with WAL (Write-Ahead Logging) mode:
-- Writes are fast and atomic
-- Reads don't block writes
-- Data survives process crashes
-- Automatic checkpointing
-
-### Does bunqueue support Postgres or MySQL?
-
-No. bunqueue is SQLite-only by design (zero external infrastructure). Bun's `bun:sql` client is async-only while bunqueue's storage layer is built on synchronous `bun:sqlite`, and swapping the database would not add clustering to what is a single-process engine.
-
-To run on serverless or ephemeral filesystems, mount a persistent volume and point `BUNQUEUE_DATA_PATH` at it, or use store-and-forward to a central durable server. See [Postgres, MySQL & Storage Backends](/guide/databases/).
+Enable the built-in S3 backup (`S3_BACKUP_ENABLED=1` plus bucket and credentials, it uploads on an interval and prunes old copies), or take manual snapshots with `sqlite3 queue.db ".backup backup.db"`. Restore with `bunqueue backup list` and `bunqueue backup restore <key> --force`. Full guide: [backup](/guide/backup/).
 
 ## Performance
 
-### How many jobs can bunqueue handle?
+### How fast is it?
 
-On typical hardware (M2 Pro, 16GB RAM):
-- **Push (TCP)**: up to ~90,000 ops/second with 100 concurrent batched adds
-- **Bulk push (TCP)**: 85,700 ops/second, 3.5x faster than BullMQ (24,800)
-- **Bulk push (embedded)**: up to 630,000 ops/second
-- **Single push**: on par with BullMQ
+In the default buffered mode, around 100k jobs/sec sustained pushes, with up to a 10ms data-loss window if the process dies mid-flush. In durable mode (write confirmed to disk per job), around 10k jobs/sec with no loss window. Bulk and concurrent pushes go higher, embedded mode higher still. Dated, reproducible methodology lives on the [benchmarks page](/guide/benchmarks/).
 
-See the [benchmarks page](/guide/benchmarks/) for methodology and full results.
+### How do I get more throughput?
 
-### How do I optimize throughput?
+Three knobs, in order of impact: raise worker `concurrency` (parallel jobs per worker), batch your inserts with `queue.addBulk(jobs)` (one round-trip for many jobs), and raise the worker's `batchSize` so it pulls and acknowledges jobs in batches. In TCP mode, concurrent `queue.add()` calls are also auto-batched for you by default. See [worker options](/guide/worker/).
 
-1. **Increase concurrency**
-   ```typescript
-   const worker = new Worker('queue', processor, {
-     concurrency: 50
-   });
-   ```
+## Jobs and retries
 
-2. **Use batch operations**
-   ```typescript
-   await queue.addBulk(jobs); // single round-trip for many jobs
-   // Workers batch pulls/acks automatically; tune with batchSize
-   const worker = new Worker('queue', processor, { batchSize: 100 });
-   ```
+### How does deduplication work?
 
-3. **Enable WAL mode** (default)
-   ```bash
-   sqlite3 queue.db "PRAGMA journal_mode=WAL;"
-   ```
-
-### Why are my jobs slow?
-
-Common causes:
-- Low concurrency setting
-- Slow job processor function
-- Database on HDD instead of SSD
-- Too many indexes
-
-## Job Processing
-
-### How does job deduplication work?
-
-bunqueue uses BullMQ-style idempotent job creation with `jobId`:
+Pass a `jobId`. Adding the same `jobId` twice returns the existing job instead of creating a duplicate, same behavior as BullMQ. This makes webhook handlers and restart-recovery code safe to re-run:
 
 ```typescript
-// First call creates the job
-const job1 = await queue.add('task', data, { jobId: 'unique-123' });
-
-// Second call with same jobId returns existing job
-const job2 = await queue.add('task', data, { jobId: 'unique-123' });
-
-console.log(job1.id === job2.id); // true
+await queue.add('charge', data, { jobId: `order-${orderId}` }); // idempotent
 ```
 
-This is useful for:
-- **Service restart recovery**: Restore jobs without duplicates
-- **Webhook deduplication**: Safe handling of retried webhooks
-- **Idempotent operations**: Multiple calls have the same effect as one
+### How do retries and backoff work?
 
-### What happens if a worker crashes?
-
-With stall detection enabled:
-1. Worker misses heartbeat
-2. Job is marked as stalled
-3. Job is retried automatically
-4. If max stalls exceeded, sent to DLQ
-
-### How do retries work?
+`attempts` sets the maximum tries, `backoff` sets the wait between them. A plain number means exponential backoff (waits roughly double each retry: ~2s, ~4s, ~8s with a 1000ms base); the object form `{ type: 'fixed' | 'exponential', delay }` matches BullMQ. All delays get automatic jitter, a small random spread so thousands of failed jobs do not retry in the same instant, and are capped at 1 hour by default.
 
 ```typescript
-await queue.add('task', data, {
-  attempts: 5,        // Max attempts
-  backoff: 1000       // Base delay in ms (doubles each retry)
-});
-
-// Or with advanced (object) backoff
-await queue.add('task', data, {
-  attempts: 5,
-  backoff: {
-    type: 'exponential',  // or 'fixed'
-    delay: 1000,
-  }
-});
+await queue.add('task', data, { attempts: 5, backoff: 1000 });
 ```
 
-Retry delays follow exponential backoff with **jitter** (±50%) to prevent thundering herd. With a 1000ms base delay the retries wait roughly `~2s → ~4s → ~8s → ~16s` (formula: `delay * 2^attempts`, actual values vary due to jitter). Delays are capped at 1 hour by default.
+### What happens when a worker crashes mid-job?
 
-### What is the Dead Letter Queue?
+Workers send heartbeats (periodic "still alive" pings). If one goes silent, stall detection marks its active jobs as stalled and requeues them. A job that stalls too many times goes to the dead letter queue instead of looping forever. See [stall detection](/guide/stall-detection/).
 
-The DLQ stores jobs that:
-- Exceeded max retry attempts
-- Had unrecoverable errors
-- Exceeded max stalls
+### What is the dead letter queue?
 
-You can inspect, retry, or purge DLQ jobs.
+The DLQ is the holding area for jobs that exhausted their retries, threw an unrecoverable error, or stalled too many times. Nothing is silently dropped: you can inspect entries, retry them (`queue.retryDlq()`), or purge them. It also supports auto-retry and expiration policies. See [DLQ](/guide/dlq/).
 
-### Can I process jobs in order?
+### Can I control processing order?
 
-Yes. FIFO (first in, first out) is the default: jobs with the same priority are processed in the order they were added, so you get in-order processing without any extra options.
+FIFO (first in, first out) is the default for jobs of equal priority, so ordered processing needs no options. Use `{ priority: 10 }` to jump the line (higher runs sooner), or `{ lifo: true }` for newest-first among LIFO jobs. Note that a LIFO job does not jump ahead of FIFO jobs that were already queued.
 
-If you need newest-first processing instead, use LIFO mode:
-```typescript
-await queue.add('task', data, { lifo: true });
-```
-
-Note: LIFO ordering applies among LIFO jobs. Mixing LIFO and FIFO jobs in the same queue does not put a LIFO job ahead of already-queued FIFO jobs.
-
-Or use priority to control ordering explicitly:
-```typescript
-await queue.add('high', data, { priority: 10 });
-await queue.add('low', data, { priority: 1 });
-```
-
-## Scaling
+## Scaling and production
 
 ### Can I run multiple workers?
 
-Yes. In server mode, multiple workers can connect:
+Yes. In server mode any number of worker processes, on any machines, connect over TCP and share the queues. That is the standard way to scale processing: the queue server stays single, the workers multiply.
 
-```typescript
-// Worker 1
-const worker1 = new Worker('queue', processor);
+### Does bunqueue support clustering or high availability?
 
-// Worker 2 (different process/machine)
-const worker2 = new Worker('queue', processor);
-```
+No built-in clustering: bunqueue is single-instance, one server process owns the SQLite file. For disaster recovery, use S3 backups plus restore on a replacement host. For edge or multi-site setups, run local embedded queues and use store-and-forward (`queue.forward()`) to drain jobs to a central server. If the queue itself must scale across servers, BullMQ on Redis Cluster is the better fit; see the [comparison](/guide/comparison/).
 
-### Does bunqueue support clustering?
+### Is bunqueue production-ready?
 
-Not built-in. For high availability:
-1. Use S3 backups for failover
-2. Run read replicas with SQLite replication
-3. Use load balancer for multiple servers
-
-### How do I handle high load?
-
-1. **Horizontal scaling**: Add more workers
-2. **Rate limiting**: Protect downstream services
-3. **Priority queues**: Process important jobs first
-4. **Batch processing**: Reduce overhead
-
-## Data & Backup
-
-### Where is data stored?
-
-There is no default database file: without a data path, jobs are kept in-memory only and are lost on restart.
-
-Set a path to enable persistence (priority: `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`):
-```bash
-BUNQUEUE_DATA_PATH=./data/production.db bunqueue start
-# or: bunqueue start --data-path ./data/production.db
-```
-
-In embedded mode you can also pass it programmatically: `new Queue('q', { embedded: true, dataPath: './data/q.db' })`.
-
-### How do I backup the database?
-
-**Option 1: S3 Automatic Backup**
-```bash
-S3_BACKUP_ENABLED=1 \
-S3_BUCKET=my-bucket \
-S3_ACCESS_KEY_ID=xxx \
-S3_SECRET_ACCESS_KEY=xxx \
-bunqueue start
-```
-
-**Option 2: Manual Backup**
-```bash
-sqlite3 queue.db ".backup backup.db"
-```
-
-### How do I restore from backup?
-
-```bash
-bunqueue backup list
-bunqueue backup restore backups/2024-01-15/queue.db --force
-```
-
-## Troubleshooting
-
-### "SQLITE_BUSY: database is locked"
-
-Multiple writers are conflicting. Solutions:
-1. Use server mode for multi-process
-2. Ensure only one embedded instance
-3. Check for stale lock files
-
-### "Job not found"
-
-The job was already:
-- Completed and removed (`removeOnComplete: true`)
-- Failed and removed (`removeOnFail: true`)
-- Manually deleted
-
-### High memory usage
-
-Common causes:
-1. Too many jobs in memory
-2. DLQ accumulating failed jobs
-3. Job data is too large
-
-Solutions:
-```typescript
-// Remove completed jobs
-await queue.add('task', data, { removeOnComplete: true });
-
-// Purge old DLQ entries
-queue.purgeDlq();
-
-// Clean old jobs (grace period in ms, max jobs to remove)
-queue.clean(3600000, 1000); // 1 hour
-```
+Yes. Retries with backoff, stall detection, a dead letter queue, rate limiting, native TLS, Prometheus metrics, and S3 backups are all built in. The [production guide](/guide/production/) covers deployment, sizing, and operations.
 
 ## Migration
 
 ### Can I migrate from BullMQ?
 
-Yes. See the [Migration Guide](/guide/migration/).
-
-Key differences:
-- No Redis connection needed
-- Backoff is simplified
-- Per-worker `limiter: { max, duration }` works as in BullMQ; a queue-level rate limit (`setGlobalRateLimit`) is also available
+Yes, and it is usually small: change the import to `bunqueue/client`, delete the Redis connection, add `embedded: true` (or a TCP `connection`). `Queue`, `Worker`, `QueueEvents`, `FlowProducer`, job options, and events keep the same shapes. The real differences (backoff shorthand, `repeat.cron` renamed to `pattern`, boolean-only `removeOnComplete`) are listed in the [migration guide](/guide/migration/).
 
 ### Can I migrate from other queues?
 
-bunqueue uses a standard job format. Export your jobs as JSON and use:
+There is no importer, but the job format is plain JSON. Export your jobs and bulk-insert them:
 
 ```typescript
-const jobs = loadJobsFromOldQueue();
-await queue.addBulk(jobs.map(j => ({
+await queue.addBulk(oldJobs.map((j) => ({
   name: j.type,
   data: j.payload,
-  opts: { priority: j.priority }
+  opts: { priority: j.priority },
 })));
 ```
 
-## Workflow Engine
+## Workflows
 
-### What is the Workflow Engine?
+### What is the Workflow Engine, and when do I use it over FlowProducer?
 
-The Workflow Engine is a built-in multi-step orchestration system for defining sequential processes with:
-- **Saga compensation**, automatic rollback on failure
-- **Conditional branching**, route execution based on runtime data
-- **Parallel steps**, run independent steps concurrently via `.parallel()`
-- **Step retry**, automatic retry with exponential backoff and jitter
-- **Human-in-the-loop**, pause and wait for external signals, with optional timeout
-- **Nested workflows**, compose workflows with `.subWorkflow()`
-- **Loops**, `doUntil()` and `doWhile()` for conditional iteration with safety limits
-- **forEach**, iterate over dynamic item lists with indexed step results
-- **Map**, synchronous data transforms between steps
-- **Schema validation**, validate step input/output with Zod, ArkType, or any `.parse()` schema
-- **Subscribe**, monitor a specific execution's events in real-time
-- **Observability**, typed event emitter with 11 event types
-- **Cleanup & archival**, manage execution history with cleanup/archive
-- **Step timeouts**, per-step timeout configuration
+`FlowProducer` builds parent-child job trees: fan out children, run the parent when they finish. The Workflow Engine is a step-by-step orchestrator for business processes: ordered steps with per-step retry, conditional branching, parallel blocks, loops, saga compensation (automatic rollback of completed steps when a later one fails), and `waitFor` signals for human approval. Use FlowProducer for job dependency graphs, Workflow for processes with rollback, branching, or human decisions. See [workflow](/guide/workflow/) and [flows](/guide/flow/).
 
-No Temporal, no Inngest, no cloud service required.
+### Do workflows survive restarts?
 
-### What's the difference between Flow and Workflow?
+Yes. Execution state (current step, step results, received signals) is persisted in SQLite, so workflows resume after a restart and can be inspected at any time. The Engine works in both embedded and TCP server mode, it accepts the same connection options as `Queue`.
 
-They solve different problems:
+## Troubleshooting
 
-| | FlowProducer | Workflow Engine |
-|---|---|---|
-| **Pattern** | Parent-child job DAG | Sequential/parallel step pipeline |
-| **Use case** | Fan-out/fan-in, dependencies | Business processes, approvals |
-| **Rollback** | No | Saga compensation |
-| **Branching** | No | Conditional paths |
-| **Parallel** | Via job tree | `.parallel()` with `Promise.allSettled` |
-| **Retry** | Job-level | Step-level with exponential backoff |
-| **Human input** | No | `waitFor` signals with timeout |
-| **Loops** | No | `doUntil()` / `doWhile()` / `forEach()` |
-| **Data transform** | No | `.map()` (synchronous) |
-| **Schema validation** | No | `inputSchema` / `outputSchema` (Zod, ArkType, etc.) |
-| **Composition** | Nested trees | `.subWorkflow()` |
-| **Observability** | Queue events | 11 typed workflow events + `subscribe(id)` |
+### "SQLITE_BUSY: database is locked"
 
-Use `FlowProducer` when you need parallel job trees with dependencies. Use `Workflow` when you need ordered steps with rollback, branching, or human decisions.
+Two processes are writing to the same SQLite file. Run exactly one embedded instance per file, or switch to server mode so all processes go through one server. More cases in [troubleshooting](/troubleshooting/).
 
-### Can I use the Workflow Engine with TCP server mode?
+### "Job not found"
 
-Yes. The Engine constructor accepts the same connection options as Queue:
+The job was already removed: it completed with `removeOnComplete: true`, failed with `removeOnFail: true`, or was deleted manually. Completed-job records are also bounded in memory, so very old results eventually age out.
 
-```typescript
-const engine = new Engine({
-  connection: { host: 'localhost', port: 6789 }
-});
-```
+### High memory usage
 
-### How is workflow state persisted?
-
-Execution state (current step, step results, received signals) is stored in SQLite via the `workflow_executions` table. This means workflows survive process restarts and can be inspected or resumed at any time.
+Usually accumulation: completed jobs kept around, a growing DLQ, or oversized job payloads (keep payloads small, store big blobs elsewhere and pass a reference). Add jobs with `removeOnComplete: true`, purge the DLQ periodically (`queue.purgeDlq()`), and clean old jobs with `queue.clean(3600000, 1000)` (grace period in ms, max jobs to remove).
 
 ## Contributing
 
 ### How can I contribute?
 
-1. Report bugs on [GitHub Issues](https://github.com/egeominotti/bunqueue/issues)
-2. Submit PRs for bug fixes
-3. Propose features in [Discussions](https://github.com/egeominotti/bunqueue/discussions)
-4. Improve documentation
-
-### What's the development setup?
-
-```bash
-git clone https://github.com/egeominotti/bunqueue
-cd bunqueue
-bun install
-bun test
-bun run dev
-```
+Report bugs on [GitHub Issues](https://github.com/egeominotti/bunqueue/issues), propose features in [Discussions](https://github.com/egeominotti/bunqueue/discussions), or send a PR. To develop locally: clone the repo, `bun install`, `bun test`.
 
 :::tip[Related]
-- [Troubleshooting](/troubleshooting/) - Debug common issues
-- [Installation & Setup](/guide/installation/) - Getting started
-- [bunqueue vs BullMQ](/guide/comparison/) - Feature comparison
-- [Workflow Engine](/guide/workflow/) - Multi-step orchestration guide
+- [Troubleshooting](/troubleshooting/), debug common issues
+- [Quickstart](/guide/quickstart/), first queue in two minutes
+- [bunqueue vs BullMQ](/guide/comparison/), features and honest benchmarks
 :::

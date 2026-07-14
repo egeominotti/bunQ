@@ -11,35 +11,37 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue api</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The Queue API, every job where it <em>belongs.</em></h1>
-  <p class="bq-hero-sub">The Queue class is used to add and manage jobs: priorities, delays, retries, bulk operations, deduplication, durable writes, and DLQ configuration, all from one API.</p>
+  <p class="bq-hero-sub">The Queue class is how you add and manage jobs: priorities, delays, retries, bulk adds, deduplication, and guaranteed writes, all from one API.</p>
 </div>
 
-:::tip[Using AI agents?]
-AI agents connected via MCP can perform all queue operations (add jobs, query state, pause/resume, manage DLQ) via natural language, no code needed. See [MCP Server](/guide/mcp/) for setup.
-:::
+A `Queue` is the producer side of bunqueue: you put jobs in, a [Worker](/guide/worker/) takes them out. This page covers everything a queue can do.
 
-:::caution[Important]
-In embedded mode, the Queue **must** have `embedded: true`.
-Without it, the Queue defaults to TCP mode and tries to connect to a bunqueue server.
-:::
-
-## Creating a Queue
+## Create a queue
 
 ```typescript
 import { Queue } from 'bunqueue/client';
 
-// Basic queue - embedded mode
 const queue = new Queue('my-queue', { embedded: true });
 
-// Typed queue
+await queue.add('job-name', { key: 'value' });
+```
+
+:::caution[Embedded vs TCP]
+`embedded: true` runs the queue inside your process. Without it, the Queue connects to a bunqueue server on `localhost:6789` (see [Server Mode](/guide/server/)). The Queue and its Worker must use the same mode.
+:::
+
+Useful variations:
+
+```typescript
+// Typed queue: job.data is type-checked
 interface TaskData {
   userId: number;
   action: string;
 }
 const typedQueue = new Queue<TaskData>('tasks', { embedded: true });
 
-// With default job options
-const queue = new Queue('emails', {
+// Default options applied to every job
+const emailQueue = new Queue('emails', {
   embedded: true,
   defaultJobOptions: {
     attempts: 3,
@@ -47,77 +49,19 @@ const queue = new Queue('emails', {
     removeOnComplete: true,
   }
 });
-```
 
-### TCP Mode (Server)
-
-```typescript
-// Connect to bunqueue server (no embedded option)
-const queue = new Queue('tasks');
-
-// With custom connection
-const queue = new Queue('tasks', {
+// TCP mode with a custom connection
+const remoteQueue = new Queue('tasks', {
   connection: {
     host: '192.168.1.100',
     port: 6789,
-    token: 'secret-token',
-    poolSize: 4,  // Connection pool size
+    token: 'secret-token',  // If AUTH_TOKENS is set on the server
+    poolSize: 4,            // Connection pool size
   }
 });
 ```
 
-### Namespace Isolation (`prefixKey`)
-
-`prefixKey` lets multiple environments, tenants, or services share the **same broker** without their jobs, workers, cron schedulers, stats, pause state, DLQ, or rate limits overlapping. The prefix is prepended to the queue name on the server side; `Queue.name` keeps reporting the logical name.
-
-```typescript
-// Same broker, totally isolated namespaces
-const devQueue  = new Queue('emails', { prefixKey: 'dev:' });
-const prodQueue = new Queue('emails', { prefixKey: 'prod:' });
-
-await devQueue.add('send', { to: 'tester@example.com' });
-await prodQueue.add('send', { to: 'user@example.com' });
-
-await devQueue.getJobCountsAsync();   // { waiting: 1, ... }
-await prodQueue.getJobCountsAsync();  // { waiting: 1, ... }, never sees dev jobs
-```
-
-A `Worker` must use the **same** `prefixKey` to consume jobs from the prefixed queue:
-
-```typescript
-const devWorker = new Worker('emails', processor, {
-  prefixKey: 'dev:',
-  connection: { port: 6789 },
-});
-// devWorker only processes jobs added via devQueue, never prodQueue.
-```
-
-**What gets isolated:**
-
-- Jobs (push / pull / ack / fail / DLQ)
-- Worker registration and lock-based ownership
-- Counts, stats, and `isPaused`
-- `pause()` / `resume()` / `drain()` / `obliterate()`
-- Rate limits and global concurrency
-- **Cron schedulers**, two prefixes can use the same `schedulerId` without colliding on the global cron PRIMARY KEY (this fixes [#77](https://github.com/egeominotti/bunqueue/issues/77))
-
-**Use cases:**
-
-- **Multi-environment**, `dev:` / `staging:` / `prod:` on a single broker, no port juggling
-- **Multi-tenant SaaS**, `tenant-${tenantId}:` per customer, queue names can be reused
-- **Monorepo**, each service prefixes its queues so two `process` queues from `service-a` and `service-b` don't collide
-- **Test isolation**, `test-${runId}:` to avoid `obliterate()` between parallel test runs
-
-**Notes:**
-
-- Backward compatible, without `prefixKey` behavior is identical to previous releases.
-- `Queue.name` always returns the **logical** name. The server-side key (`prefixKey + name`) is internal.
-- `Job.queueName` returned to processors will reflect the prefixed key (e.g. `dev:emails`). This is the only user-visible side effect.
-- Works in both embedded and TCP modes.
-
-## Adding Jobs
-
-### Single Job
+## Add jobs
 
 ```typescript
 const job = await queue.add('job-name', { key: 'value' });
@@ -125,22 +69,23 @@ const job = await queue.add('job-name', { key: 'value' });
 // With options
 const job = await queue.add('job-name', data, {
   priority: 10,           // Higher = processed first
-  delay: 5000,            // Delay in ms before processing
-  attempts: 5,            // Max retry attempts (default: 3)
-  backoff: 2000,          // Backoff in ms (default: 1000ms, jitter applied)
-  // OR object form: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
-  timeout: 30000,         // Job timeout in ms
-  jobId: 'custom-id',     // Custom job ID for deduplication (BullMQ-style)
-  removeOnComplete: true, // Remove job data after completion
-  removeOnFail: false,    // Keep failed jobs
-  stallTimeout: 60000,    // Per-job stall timeout (overrides queue config)
+  delay: 5000,            // Wait 5s before processing
+  attempts: 5,            // Max retries if the processor throws (default: 3)
+  backoff: 2000,          // Wait between retries in ms (default: 1000, jitter applied)
+  // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
+  timeout: 30000,         // Fail the job if processing takes longer
+  jobId: 'custom-id',     // Custom ID, makes the add idempotent (see Deduplication)
+  removeOnComplete: true, // Delete job data after it completes
 });
 ```
 
-### Bulk Add
+The full option list is in the [reference table](#job-options-reference) at the bottom.
+
+### Add many at once
+
+`addBulk` inserts all jobs in one batch, much faster than a loop of `add`:
 
 ```typescript
-// Batch optimized - single lock, batch INSERT
 const jobs = await queue.addBulk([
   { name: 'task-1', data: { id: 1 } },
   { name: 'task-2', data: { id: 2 }, opts: { priority: 10 } },
@@ -148,400 +93,194 @@ const jobs = await queue.addBulk([
 ]);
 ```
 
-### Repeatable Jobs
+### Repeat on a schedule
 
 ```typescript
-// Repeat every 5 seconds
-await queue.add('heartbeat', {}, {
-  repeat: {
-    every: 5000,
-  }
-});
+// Every 5 seconds
+await queue.add('heartbeat', {}, { repeat: { every: 5000 } });
 
-// Repeat with limit
-await queue.add('daily-report', {}, {
-  repeat: {
-    every: 86400000, // 24 hours
-    limit: 30,       // Max 30 repetitions
-  }
-});
+// Every 24 hours, at most 30 times
+await queue.add('daily-report', {}, { repeat: { every: 86400000, limit: 30 } });
 
-// Cron pattern (works in both embedded and TCP modes)
-await queue.add('weekly', {}, {
-  repeat: {
-    pattern: '0 9 * * MON', // Every Monday at 9am
-  }
-});
+// Cron pattern
+await queue.add('weekly', {}, { repeat: { pattern: '0 9 * * MON' } });
 ```
 
-### Updating Repeatable Job Data
-
-You can update the data for the next repeat execution using `updateData()`. This works even after the current execution completes, the update propagates to the successor job automatically.
+You can change the data for future runs at any point in the lifecycle with `updateData()`, even after the current run completes (the update follows the repeat chain to the next scheduled execution):
 
 ```typescript
-const job = await queue.add('sync', { endpoint: '/api/v1' }, {
-  repeat: { every: 60000 },
-});
-
-// Update data for the next execution
-await job.updateData({ endpoint: '/api/v2' });
-// Next repeat will use { endpoint: '/api/v2' }
+const job = await queue.add('sync', { endpoint: '/api/v1' }, { repeat: { every: 60000 } });
+await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
 ```
 
-:::tip[Timing]
-`updateData()` works at any point in the job lifecycle:
-- **Before processing**, updates the waiting/delayed job directly
-- **During processing**, updates the active job, and the next repeat inherits the new data
-- **After completion**, follows the repeat chain to update the next scheduled execution
-:::
+For named, managed schedules, see [Job Schedulers](#job-schedulers-repeatable-jobs) below and the [Cron guide](/guide/cron/).
 
-### Durable Jobs
+### Durable jobs (no data loss)
 
-By default, bunqueue uses a **write buffer** for high throughput: jobs are batched in memory and flushed to SQLite every 10ms. This achieves ~100k jobs/sec but means jobs could be lost if the process crashes before the buffer is flushed.
-
-For **critical jobs** where data loss is unacceptable, use the `durable` option:
+By default bunqueue batches writes to disk every 10ms for speed (~100k jobs/sec). A crash inside that window can lose the not-yet-flushed jobs. For jobs where that is unacceptable, `durable: true` writes to disk before `add()` returns:
 
 ```typescript
-// Critical job: immediate disk write, guaranteed persistence
 await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
   durable: true,
 });
-
-// Batch of critical jobs
-await queue.addBulk([
-  { name: 'payment-1', data: { orderId: '1' }, opts: { durable: true } },
-  { name: 'payment-2', data: { orderId: '2' }, opts: { durable: true } },
-]);
 ```
 
-:::tip[When to use durable]
-Use `durable: true` for:
-- **Payment processing** - financial transactions must not be lost
-- **Order creation** - e-commerce orders require guaranteed persistence
-- **Critical events** - audit logs, compliance data, legal records
-- **Idempotency keys** - when retry is expensive or impossible
-:::
-
-:::note[Performance trade-off]
-| Mode | Throughput | Data Loss Window | Use Case |
-|------|------------|------------------|----------|
+| Mode | Throughput | Data loss window | Use for |
+|------|------------|------------------|---------|
 | Default | ~100k jobs/sec | Up to 10ms | Emails, notifications, analytics |
-| Durable | ~10k jobs/sec | None | Payments, orders, critical events |
-:::
+| Durable | ~10k jobs/sec | None | Payments, orders, audit records |
 
-### Job Deduplication (BullMQ-style)
+## Deduplication
 
-Use `jobId` to prevent duplicate jobs. When a job with the same `jobId` is **still queued** (`waiting` / `delayed` / `prioritized`), **the existing job is returned** instead of creating a duplicate. This works in both **embedded** and **TCP** modes (including auto-batched operations). This is BullMQ-compatible idempotent behavior.
+### With `jobId` (idempotent adds)
 
-:::note[Completed or processing ids are reused, not returned]
-Deduplication only collapses an add onto a job that is still pending. If the prior job with that `jobId` has already **completed** (or is currently **processing**), re-adding the same `jobId` starts a **fresh `waiting` job** under that id, the stale completed record and its result are evicted first (so `getJobState` reports the new run, not the old `completed`). This is what makes a `jobId` safe to reuse across runs (e.g. a daily `report-2026-06-17`): you get idempotency within a run and a clean re-run afterwards, never a permanently-stuck `completed` lookup.
-:::
+Give a job a custom `jobId` and adding it twice does nothing: if a job with that id is still queued (`waiting` / `delayed` / `prioritized`), the existing job is returned instead of creating a duplicate. This makes `add()` safe to call repeatedly, which is what "idempotent" means. Works in embedded and TCP modes, BullMQ-compatible.
 
 ```typescript
-// Basic deduplication with jobId (BullMQ-style idempotency)
-// If job with same jobId exists, returns existing job instead of creating duplicate
-const job = await queue.add('send-email', { to: 'user@test.com' }, {
-  jobId: 'email-user-123'
-});
+const job1 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
+const job2 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
 
-// First call: creates the job
-const job1 = await queue.add('process', { orderId: 123 }, {
-  jobId: 'order-123'
-});
-
-// Second call with same jobId: returns existing job (no duplicate)
-const job2 = await queue.add('process', { orderId: 123 }, {
-  jobId: 'order-123'
-});
-
-console.log(job1.id === job2.id); // true - same job returned
+console.log(job1.id === job2.id); // true, same job returned
 ```
 
-:::tip[Use cases for jobId]
-- **Idempotent operations**: Safe to call multiple times without side effects
-- **Service restart recovery**: Restore jobs without creating duplicates
-- **Webhook deduplication**: Prevent duplicate processing of retried webhooks
-- **User action deduplication**: Prevent double-submits from UI
+Typical uses: webhook retries, double-submits from a UI, restoring jobs on service startup without duplicating them.
+
+:::note[Completed ids are reused, not returned]
+Deduplication only collapses onto a job that is still pending. If the previous job with that `jobId` already completed (or is currently processing), re-adding the same id starts a fresh job under it, and the stale completed record is evicted first. So a `jobId` like `report-2026-06-17` is safe to reuse: you get idempotency within a run and a clean re-run afterwards.
 :::
 
-```typescript
-// Example: Restore jobs on service startup
-async function restoreJobs(jobsToRestore: SavedJob[]) {
-  for (const saved of jobsToRestore) {
-    // Safe: existing jobs are returned, not duplicated
-    await queue.add('process', saved.data, {
-      jobId: saved.id
-    });
-  }
-}
-```
+### With a TTL window
 
-### Advanced Deduplication
-
-For more control over deduplication behavior, use the `deduplication` option with TTL-based unique keys and strategies.
-
-#### TTL-Based Deduplication
-
-While `jobId` provides permanent idempotency (via `customId`), the `deduplication` option uses a separate `uniqueKey` mechanism with TTL-based expiry. The `id` field is required:
+The `deduplication` option dedupes within a time window instead of permanently. The `id` field is required:
 
 ```typescript
-// TTL-based deduplication - unique key expires after 1 hour
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
 await queue.add('notification', { userId: '123' }, {
-  deduplication: {
-    id: 'notify-123',   // Required: unique deduplication key
-    ttl: 3600000        // 1 hour in ms
-  }
-});
-
-// After TTL expires, the same id can create a new job
-// This is useful for rate-limiting or time-windowed deduplication
-```
-
-#### Extend Strategy
-
-The `extend` strategy resets the TTL of an existing job when a duplicate is detected. The existing job is returned (not replaced), but its deduplication window is extended:
-
-```typescript
-// Extend strategy - reset TTL if duplicate, return existing job
-await queue.add('rate-limited-task', { action: 'sync' }, {
-  deduplication: {
-    id: 'sync-task',   // Required: unique deduplication key
-    ttl: 60000,
-    extend: true       // Extend TTL on duplicate
-  }
+  deduplication: { id: 'notify-123', ttl: 3600000 }
 });
 ```
 
-:::tip[When to use extend]
-- **Rate limiting**: Prevent action spam while keeping the dedup window active
-- **Debouncing**: Extend the quiet period on each trigger
-- **Session activity**: Keep deduplication active while user is active
-:::
-
-#### Replace Strategy
-
-The `replace` strategy removes the existing job and inserts a new one with the updated data. This is useful when you always want the latest data to be processed:
+Two strategies change what happens when a duplicate arrives:
 
 ```typescript
-// Replace strategy - remove old job, insert new one
+// extend: keep the existing job, reset its TTL (debouncing, "keep quiet while active")
+await queue.add('sync-task', { action: 'sync' }, {
+  deduplication: { id: 'sync-task', ttl: 60000, extend: true }
+});
+
+// replace: remove the pending job, insert a new one with the latest data (last write wins)
 await queue.add('latest-data', { data: newData }, {
-  deduplication: {
-    id: 'data-job',    // Required: unique deduplication key
-    ttl: 300000,
-    replace: true      // Replace existing job with new data
-  }
+  deduplication: { id: 'data-job', ttl: 300000, replace: true }
 });
 ```
-
-:::caution[Replace behavior]
-When using `replace: true`:
-- The old job is **removed** from the queue
-- A **new job** is created with the new data
-- The new job gets a **new internal ID**
-- Jobs that are already being processed (active state) will **not** be replaced
-:::
-
-:::tip[When to use replace]
-- **Latest state sync**: Always process the most recent data
-- **Configuration updates**: Replace pending config changes with latest
-- **Aggregated events**: Collapse multiple events into one with latest payload
-:::
-
-#### Deduplication Options Reference
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `id` | `string` | (required) | Unique deduplication key |
-| `ttl` | `number` | - | Time in ms before unique key expires |
-| `extend` | `boolean` | `false` | Reset TTL on duplicate (returns existing job) |
-| `replace` | `boolean` | `false` | Remove old job and create new one |
+| `ttl` | `number` | - | Time in ms before the key expires |
+| `extend` | `boolean` | `false` | Reset TTL on duplicate, keep existing job |
+| `replace` | `boolean` | `false` | Remove pending job, create a new one (new internal id) |
 
-:::note[Strategy precedence]
-If both `extend` and `replace` are set to `true`, `replace` takes precedence.
+:::caution[Replace details]
+`replace: true` never touches a job that is already processing (active). If both `extend` and `replace` are set, `replace` wins.
 :::
 
-## Query Operations
+Managing keys directly:
 
 ```typescript
-// Get job by ID
-const job = await queue.getJob('job-id');
+const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
+await queue.removeDeduplicationKey('my-unique-key');              // allow re-adding
+```
 
-// Get job state
+## Query jobs
+
+```typescript
+// One job
+const job = await queue.getJob('job-id');
 const state = await queue.getJobState('job-id');
 // 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
 // | 'failed' | 'waiting-children' | 'unknown'
 
-// Get job counts (sync in embedded mode; in TCP mode returns a Promise)
-const counts = queue.getJobCounts();
+// Counts per state
+const counts = await queue.getJobCountsAsync();
 // { waiting, prioritized, active, completed, failed, delayed, paused }
 
-// Get job counts (async - works with TCP)
-const counts = await queue.getJobCountsAsync();
-
-// Get jobs with filtering (sync - embedded mode only)
-const jobs = queue.getJobs({ state: 'waiting', start: 0, end: 10 });
-
-// Get jobs with filtering (async - works with TCP)
-const jobs = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
-
-// Get counts grouped by priority (sync - embedded mode only)
-const byPriority = queue.getCountsPerPriority();
-// { 0: 50, 10: 20, 100: 5 }
-
-// Async version (works with TCP)
-const byPriority = await queue.getCountsPerPriorityAsync();
+// Lists, filtered by state
+const failed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
 ```
 
-### Jobs by State
+Most read methods come in two flavors: a sync version that only works in embedded mode (`getJobCounts()`, `getJobs()`, `getCountsPerPriority()`, `count()`, `isPaused()`) and an async version that works in both modes (`getJobCountsAsync()`, `getJobsAsync()`, `getCountsPerPriorityAsync()`, `countAsync()`, `isPausedAsync()`). Prefer the async ones unless you know you're embedded.
+
+Per-state shortcuts:
 
 ```typescript
-// Sync (embedded mode only)
+// Sync (embedded only): getWaiting, getActive, getCompleted, getFailed, getDelayed
 const waiting = queue.getWaiting(0, 10);
-const active = queue.getActive(0, 10);
-const completed = queue.getCompleted(0, 10);
-const failed = queue.getFailed(0, 10);
-const delayed = queue.getDelayed(0, 10);
 
-// Async (works with TCP)
-const waiting = await queue.getWaitingAsync(0, 10);
-const active = await queue.getActiveAsync(0, 10);
-const completed = await queue.getCompletedAsync(0, 10);
+// Async (both modes): same names + Async
 const failed = await queue.getFailedAsync(0, 10);
-const delayed = await queue.getDelayedAsync(0, 10);
-```
 
-:::note[Failed jobs]
-A job that exhausts its retry attempts is moved to the dead-letter queue. It is
-still counted by `failed`, retrievable with `getJob(id)`, and **enumerable** via
-`getFailed()` / `getJobs({ state: 'failed' })`, the failed list reflects the
-same jobs that `failed` counts (in standalone-server and embedded modes alike).
-:::
-
-### Count Methods
-
-```typescript
-// Async (work in both embedded and TCP modes)
-const waitingCount = await queue.getWaitingCount();
-const activeCount = await queue.getActiveCount();
-const completedCount = await queue.getCompletedCount();
+// Counts (async, both modes)
 const failedCount = await queue.getFailedCount();
-const delayedCount = await queue.getDelayedCount();
+// also: getWaitingCount, getActiveCount, getCompletedCount, getDelayedCount
 
-// Total job count: sync (embedded mode only)
-const total = queue.count();
-
-// Total job count: async (works with TCP)
-const total = await queue.countAsync();
-
-// Check if paused
-const paused = queue.isPaused();           // sync
-const paused = await queue.isPausedAsync(); // async
+// BullMQ-compatible extras
+const prioritized = await queue.getPrioritized(0, 10);        // jobs with priority > 0
+const waitingChildren = await queue.getWaitingChildren(0, 10); // flow dependencies
 ```
 
-### BullMQ Compatibility Methods
+:::note[Two states worth knowing]
+**Prioritized:** jobs with `priority > 0` report the state `'prioritized'`, not `'waiting'` (BullMQ v5 behavior). Both are pullable; prioritized jobs go first.
 
-```typescript
-// Get prioritized jobs (priority > 0, separate state from 'waiting')
-const prioritized = await queue.getPrioritized(0, 10);
-const count = await queue.getPrioritizedCount();
-
-// Get jobs waiting for children to complete (flow dependencies)
-const waitingChildren = await queue.getWaitingChildren(0, 10);
-const count = await queue.getWaitingChildrenCount();
-```
-
-:::note[Prioritized State]
-In BullMQ v5, jobs with `priority > 0` have a distinct state called `'prioritized'`, separate from `'waiting'` (priority = 0). This affects `getJobState()`, `getJobCounts()`, and all state-based queries. Jobs in both states are pullable, prioritized jobs are dequeued before waiting jobs.
+**Paused:** while a queue is paused, its ready jobs are counted under `paused`, never `waiting`. On `resume()` they return to `waiting`. Pause state survives server restarts when persistence is on.
 :::
 
-:::note[Paused state]
-While a queue is paused, its ready jobs are reported under `paused`, never under
-`waiting`, `getJobCounts()` returns `waiting: 0, paused: N`, and the jobs are
-listed by `getJobs({ state: 'paused' })`. This mirrors BullMQ: a job is never
-counted in both `waiting` and `paused` at once. Delayed and active jobs keep
-their own state; on `resume()` the jobs return to `waiting`.
+Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding area for permanently failed jobs) but remain visible: they are counted by `failed`, returned by `getJob(id)`, and listed by `getFailed()`.
 
-**Pause is durable** (since 2.8.19): with SQLite persistence enabled, `pause`
-state, along with `setRateLimit` and `setConcurrency` overrides, is written
-through to the `queue_state` table and restored on restart. A queue you paused
-for maintenance stays paused across a server restart/upgrade/crash; it does not
-silently resume.
-:::
-
-## Queue Control
+## Control the queue
 
 ```typescript
-// Pause processing (workers stop pulling)
-queue.pause();
+queue.pause();            // Workers stop pulling
+queue.resume();           // Back to normal
+queue.drain();            // Remove all waiting jobs
+queue.obliterate();       // Remove ALL queue data
 
-// Resume processing
-queue.resume();
+queue.remove('job-id');            // Remove one job (fire-and-forget)
+await queue.removeAsync('job-id'); // Remove one job and wait for it
 
-// Remove all waiting jobs
-queue.drain();
-
-// Remove all queue data
-queue.obliterate();
-
-// Remove a specific job (sync, fire-and-forget)
-queue.remove('job-id');
-
-// Remove a specific job and await the removal
-await queue.removeAsync('job-id');
-
-// Wait until queue/server is ready
-await queue.waitUntilReady();
-
-// Close TCP connection (when done)
-queue.close();
-
-// Async disconnect (compatibility)
-await queue.disconnect();
+await queue.waitUntilReady();      // Wait until queue/server is ready
+queue.close();                     // Close TCP connection (no-op in embedded mode)
 ```
 
-## Clean & Maintenance
+## Maintenance
 
 ```typescript
-// Remove completed jobs older than 1 hour (sync, embedded mode only)
-// Returns the removed job ids
-const removedIds = queue.clean(3600000, 100, 'completed');
-
-// Async version (works with TCP)
+// Remove completed jobs older than 1 hour, max 100 (async works in both modes)
 const removed = await queue.cleanAsync(3600000, 100, 'completed');
 
-// Promote delayed jobs to waiting (returns number promoted)
+// Promote delayed jobs to waiting now
 const promoted = await queue.promoteJobs({ count: 50 });
 
-// Bulk retry failed jobs from the DLQ (only state: 'failed' is supported)
+// Re-queue failed jobs from the DLQ
 await queue.retryJobs({ state: 'failed', count: 100 });
+
+// Re-queue completed jobs (e.g. after a logic change)
+const count = await queue.retryCompletedAsync();       // all completed, use with care
+const one = queue.retryCompleted('job-id-123');        // one job (sync, embedded; TCP returns 0)
 ```
 
-## Job Progress & Logs
+## Progress, logs, dependencies
 
 ```typescript
-// Update job progress
+// Progress and logs (also available on the job object inside a processor)
 await queue.updateJobProgress('job-id', 75);
-
-// Get job logs (returns { logs: string[], count: number })
+await queue.addJobLog('job-id', 'Processing step 3 completed');
 const { logs, count } = await queue.getJobLogs('job-id', 0, 100);
 
-// Add log entry to a job
-await queue.addJobLog('job-id', 'Processing step 3 completed');
-```
-
-## Job Dependencies
-
-```typescript
-// Get child job results
+// Parent/child flows (see the Flow guide)
 const childValues = await queue.getChildrenValues('parent-job-id');
-
-// Get job dependencies info
 const deps = await queue.getJobDependencies('job-id');
-const depCounts = await queue.getJobDependenciesCount('job-id');
-
-// Get child jobs with filter
 const processed = await queue.getDependencies('parent-id', 'processed', 0, 10);
-const unprocessed = await queue.getDependencies('parent-id', 'unprocessed', 0, 10);
 
 // Wait for a job to finish (requires a QueueEvents instance)
 import { QueueEvents } from 'bunqueue/client';
@@ -549,57 +288,44 @@ const queueEvents = new QueueEvents('my-queue');
 const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
 ```
 
-## Job State Transitions
+Manual state transitions (BullMQ-compatible, `token` is the worker's lock token):
 
 ```typescript
-// Move job to completed with return value
 await queue.moveJobToCompleted('job-id', { success: true }, token);
-
-// Move job to failed with error
 await queue.moveJobToFailed('job-id', new Error('reason'), token);
-
-// Move job back to waiting
 await queue.moveJobToWait('job-id', token);
-
-// Move job to delayed with specific timestamp
 await queue.moveJobToDelayed('job-id', Date.now() + 60000, token);
-
-// Move job to waiting-for-children state
 await queue.moveJobToWaitingChildren('job-id', token);
 ```
 
-## Rate Limiting & Concurrency
+## Rate limiting and concurrency
 
 ```typescript
-// Set global concurrency limit (max parallel jobs across all workers)
+// Cap parallel processing across ALL workers on this queue
 queue.setGlobalConcurrency(10);
 queue.removeGlobalConcurrency();
 
-// Set global rate limit (max jobs per second, token bucket)
-queue.setGlobalRateLimit(100); // 100 jobs per second
+// Cap throughput (token bucket, refilled per second)
+queue.setGlobalRateLimit(100); // max 100 jobs per second
 queue.removeGlobalRateLimit();
 
-// Throttle the queue to ~1 job/sec
+// Temporary throttle to ~1 job/sec
 await queue.rateLimit(5000);
 ```
 
 :::caution[Semantics and stubs]
-- `setGlobalRateLimit(max, duration?)` configures a **token bucket refilled at
-  `max` tokens per second**. The `duration` argument is accepted for BullMQ
-  compatibility but is currently ignored, the window is always 1 second.
-- `rateLimit(ms)` throttles the queue to 1 job/sec. In embedded mode the
-  throttle is cleared automatically after `ms`; in TCP mode it is **not**
-  auto-cleared, call `removeGlobalRateLimit()` to lift it.
-- `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and
-  `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they
-  currently return `null` / `null` / `0` / `false` regardless of the actual
-  server state.
+- `setGlobalRateLimit(max, duration?)`: the `duration` argument is accepted for BullMQ compatibility but ignored, the window is always 1 second.
+- `rateLimit(ms)`: in embedded mode the throttle clears itself after `ms`; in TCP mode it does not, call `removeGlobalRateLimit()` to lift it.
+- `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they return `null` / `null` / `0` / `false` regardless of actual server state.
 :::
+
+See [Rate Limiting](/guide/rate-limiting/) for worker-side limiting too.
 
 ## Job Schedulers (Repeatable Jobs)
 
+Named, updatable schedules (the managed alternative to `repeat` in job options):
+
 ```typescript
-// Create or update a job scheduler
 await queue.upsertJobScheduler('daily-report', {
   pattern: '0 9 * * *',       // cron pattern
   // or: every: 3600000,      // interval in ms
@@ -608,201 +334,102 @@ await queue.upsertJobScheduler('daily-report', {
   data: { type: 'daily' },
 });
 
-// Get a scheduler
 const scheduler = await queue.getJobScheduler('daily-report');
-
-// List all schedulers
 const schedulers = await queue.getJobSchedulers(0, 100);
 const count = await queue.getJobSchedulersCount();
-
-// Remove a scheduler
 await queue.removeJobScheduler('daily-report');
 ```
 
-## Deduplication Management
+## DLQ operations
+
+The dead letter queue collects jobs that failed permanently (retries exhausted, stalled too often, timed out). Configure how it behaves and act on its entries:
 
 ```typescript
-// Look up job ID by deduplication key
-const jobId = await queue.getDeduplicationJobId('my-unique-key');
-
-// Remove deduplication key (allows re-adding same jobId)
-await queue.removeDeduplicationKey('my-unique-key');
-```
-
-## Workers & Metrics
-
-```typescript
-// List active workers
-const workers = await queue.getWorkers();
-const count = await queue.getWorkersCount();
-
-// Get historical metrics
-const completedMetrics = await queue.getMetrics('completed', 0, 100);
-const failedMetrics = await queue.getMetrics('failed', 0, 100);
-
-// Trim event log
-await queue.trimEvents(1000);
-```
-
-## Stall Configuration
-
-Configure stall detection to recover unresponsive jobs.
-
-```typescript
-queue.setStallConfig({
-  enabled: true,
-  stallInterval: 30000,  // 30 seconds without heartbeat = stalled
-  maxStalls: 3,          // Move to DLQ after 3 stalls
-  gracePeriod: 5000,     // 5 second grace period after job starts
-});
-
-// Get current config
-const config = queue.getStallConfig();
-```
-
-See [Stall Detection](/guide/stall-detection/) for more details.
-
-## DLQ Operations
-
-```typescript
-// Configure DLQ
 queue.setDlqConfig({
-  autoRetry: true,
-  autoRetryInterval: 3600000,  // 1 hour
+  autoRetry: true,             // Periodically re-queue DLQ entries
+  autoRetryInterval: 3600000,  // Every hour
   maxAutoRetries: 3,
-  maxAge: 604800000,           // 7 days
+  maxAge: 604800000,           // Drop entries older than 7 days
   maxEntries: 10000,
 });
 
-// Get current DLQ config (sync; in TCP mode returns the client-side cache)
-const dlqConfig = queue.getDlqConfig();
-
-// Get current DLQ config from the server (works with TCP)
-const serverDlqConfig = await queue.getDlqConfigAsync();
-
-// Get DLQ entries (embedded mode only; returns [] in TCP mode)
+// Inspect (embedded mode only; returns [] / zeros in TCP mode)
 const entries = queue.getDlq();
-
-// Filter entries
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
-const recentFails = queue.getDlq({ newerThan: Date.now() - 3600000 });
+const stats = queue.getDlqStats(); // { total, byReason, pendingRetry, ... }
 
-// Get stats (embedded mode only; returns zeros in TCP mode)
-const stats = queue.getDlqStats();
-// { total, byReason, pendingRetry, expired, oldestEntry, newestEntry }
-
-// Retry from DLQ (returns retried count in embedded mode;
-// fire-and-forget returning 0 in TCP mode)
+// Act
 queue.retryDlq();           // Retry all
-queue.retryDlq('job-123');  // Retry specific
-
-// Retry by filter (embedded mode only)
-queue.retryDlqByFilter({ reason: 'timeout', limit: 10 });
-
-// Purge DLQ (returns purged count in embedded mode;
-// fire-and-forget returning 0 in TCP mode)
-queue.purgeDlq();
+queue.retryDlq('job-123');  // Retry one
+queue.purgeDlq();           // Clear all
 ```
 
 :::note[TCP mode]
-Enumerating and filtering DLQ entries from this client API (`getDlq`,
-`getDlqStats`, `retryDlqByFilter`) works in **embedded mode only**. In TCP mode
-use the [CLI](/guide/cli/) (`bunqueue dlq list|retry|purge`) or the `Dlq` /
-`RetryDlq` / `PurgeDlq` TCP commands directly; `retryDlq()` and `purgeDlq()`
-still send the command but do not report a count.
+Enumerating DLQ entries from this client API works in embedded mode only. Over TCP, use the [CLI](/guide/cli/) (`bunqueue dlq list|retry|purge`); `retryDlq()` and `purgeDlq()` still send the command but return 0 instead of a count. `getDlqConfigAsync()` fetches the real config from the server.
 :::
 
-See [Dead Letter Queue](/guide/dlq/) for more details.
+See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/guide/stall-detection/) for `setStallConfig()`, which controls when unresponsive jobs are recovered.
 
-## Retry Completed Jobs
-
-The `retryCompleted()` method allows re-queuing completed jobs for reprocessing. This is useful when you need to re-run a job that completed successfully, for example when business logic changes or you need to regenerate outputs.
+## Workers and metrics
 
 ```typescript
-// Retry a specific completed job (returns the re-queued count: 1 or 0)
-const retried = queue.retryCompleted('job-id-123');
-if (retried > 0) {
-  console.log('Job re-queued for processing');
-}
+const workers = await queue.getWorkers();       // Active workers on this queue
+const count = await queue.getWorkersCount();
 
-// Retry all completed jobs (use with caution!)
-const count = queue.retryCompleted();
-console.log(`Re-queued ${count} completed jobs`);
+const completedMetrics = await queue.getMetrics('completed', 0, 100);
+const failedMetrics = await queue.getMetrics('failed', 0, 100);
 
-// TCP mode: the sync method is fire-and-forget and returns 0.
-// Use the async version to get the real count back from the server.
-const remoteCount = await queue.retryCompletedAsync();
+await queue.trimEvents(1000);                   // Trim the event log
 ```
 
-:::caution[Use with care]
-Retrying all completed jobs can re-queue a large number of jobs at once. Consider filtering or limiting the scope when dealing with high-volume queues.
-:::
+## Namespace Isolation (`prefixKey`)
 
-## Auto-Batching (TCP Mode)
-
-In TCP mode, `queue.add()` calls are automatically batched into `PUSHB` (bulk push) commands for higher throughput. This is enabled by default and requires no code changes.
-
-**How it works:** If no flush is in-flight, the add is sent immediately (zero overhead for sequential `await`). If a flush is already in-flight, subsequent adds are buffered and sent together when the current flush completes or after `maxDelayMs`, whichever comes first.
+`prefixKey` lets multiple environments, tenants, or services share one server without their jobs, crons, stats, pause state, DLQ, or rate limits overlapping. The prefix is added to the queue name server-side; `Queue.name` keeps reporting the logical name.
 
 ```typescript
-// Auto-batching is enabled by default in TCP mode
-const queue = new Queue('tasks');
+// Same server, fully isolated namespaces
+const devQueue  = new Queue('emails', { prefixKey: 'dev:' });
+const prodQueue = new Queue('emails', { prefixKey: 'prod:' });
 
-// Sequential: no penalty, each add() sends immediately
-for (const item of items) {
-  await queue.add('task', item);
-}
-
-// Concurrent: adds batch into a single PUSHB round-trip
-await Promise.all([
-  queue.add('a', { x: 1 }),
-  queue.add('b', { x: 2 }),
-  queue.add('c', { x: 3 }),
-]);
+await devQueue.add('send', { to: 'tester@example.com' });
+await prodQueue.getJobCountsAsync();  // never sees dev jobs
 ```
 
-### Configuration
+A Worker must use the same `prefixKey` to consume the prefixed queue:
+
+```typescript
+const devWorker = new Worker('emails', processor, { prefixKey: 'dev:' });
+```
+
+Common patterns: `dev:` / `staging:` / `prod:` on one server, `tenant-${id}:` per customer, per-service prefixes in a monorepo, `test-${runId}:` for parallel test isolation.
+
+Notes:
+
+- Everything is isolated per prefix: jobs, worker locks, counts, pause/drain/obliterate, rate limits, and cron schedulers (two prefixes can reuse the same `schedulerId`).
+- Backward compatible: without `prefixKey`, behavior is unchanged. Works in embedded and TCP modes.
+- The only user-visible side effect: `Job.queueName` inside processors shows the prefixed key (e.g. `dev:emails`).
+
+## Auto-batching (TCP mode)
+
+In TCP mode, concurrent `queue.add()` calls are transparently combined into single bulk commands. Enabled by default, no code changes: sequential `await add()` sends immediately with no penalty (~10k ops/s), while concurrent adds (`Promise.all`) batch into one round-trip (~145k ops/s).
 
 ```typescript
 const queue = new Queue('tasks', {
   autoBatch: {
-    maxSize: 100,     // Flush when buffer reaches this size (default: 50)
-    maxDelayMs: 10,   // Max ms to wait before flushing (default: 5)
+    enabled: true,   // default
+    maxSize: 50,     // flush when the buffer reaches this size (default: 50)
+    maxDelayMs: 5,   // max wait before flushing (default: 5)
   },
 });
 ```
 
-### Disabling Auto-Batching
-
-```typescript
-const queue = new Queue('tasks', {
-  autoBatch: { enabled: false },
-});
-```
-
-### Auto-Batch Options Reference
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable or disable auto-batching |
-| `maxSize` | `number` | `50` | Max items before auto-flush |
-| `maxDelayMs` | `number` | `5` | Max delay in ms before auto-flush |
-
-:::note[Performance impact]
-| Pattern | Throughput | Description |
-|---------|------------|-------------|
-| Sequential `await` | ~10k ops/s | Each add sends immediately, no batching overhead |
-| Concurrent (`Promise.all`) | ~145k ops/s | Adds batch into single PUSHB round-trip |
-:::
-
 :::caution[Durable jobs bypass the batcher]
-Jobs with `durable: true` are always sent as individual `PUSH` commands and are never batched, ensuring immediate disk persistence.
+Jobs with `durable: true` are always sent individually so they hit the disk immediately, they are never batched.
 :::
 
-## Store-and-Forward: `queue.forward()`
+## Store-and-forward: `queue.forward()`
 
-Drain this queue's jobs to a remote bunqueue server, the edge/IoT pattern
-(local embedded queue as offline buffer, central server as destination):
+Drain a local embedded queue to a remote bunqueue server, the edge/IoT pattern (local queue as offline buffer, central server as destination):
 
 ```typescript
 const forwarder = queue.forward({
@@ -817,10 +444,7 @@ forwarder.on('error', (err) => {});
 await forwarder.close();
 ```
 
-Remote failures leave jobs local (retry → DLQ); forwarded jobs carry a
-deterministic remote jobId (`fwd:<queueKey>:<localId>`), deduped server-side
-within the custom-id retention window (bounded LRU; remote `removeOnComplete`
-evicts it). Full guide: [IoT & Edge](/guide/iot-edge/).
+If the remote is down, jobs stay local (retry, then DLQ), nothing is lost. Full guide: [IoT & Edge](/guide/iot-edge/).
 
 ## Job Options Reference
 
@@ -831,26 +455,19 @@ evicts it). Full guide: [IoT & Edge](/guide/iot-edge/).
 | `attempts` | `number` | `3` | Max retry attempts |
 | `backoff` | `number \| { type, delay }` | `1000` | Backoff base in ms, or `{ type: 'fixed' \| 'exponential', delay }` |
 | `timeout` | `number` | - | Processing timeout in ms |
-| `jobId` | `string` | - | Custom ID for deduplication (BullMQ-style idempotent) |
-| `deduplication` | `object` | - | Advanced deduplication config (`ttl`, `extend`, `replace`) |
+| `jobId` | `string` | - | Custom ID for idempotent adds |
+| `deduplication` | `object` | - | TTL-based dedup (`id`, `ttl`, `extend`, `replace`) |
 | `removeOnComplete` | `boolean` | `false` | Auto-delete after completion |
 | `removeOnFail` | `boolean` | `false` | Auto-delete after failure |
 | `stallTimeout` | `number` | - | Per-job stall timeout override |
-| `repeat` | `object` | - | Repeating job config |
-| `durable` | `boolean` | `false` | Immediate disk write (bypass buffer) |
-| `lifo` | `boolean` | `false` | Process in LIFO order (newest first) |
-| `parent` | `{ id, queue }` | - | Parent job reference for flow dependencies |
-
-## Closing
-
-```typescript
-// Close TCP connection (no-op in embedded mode)
-queue.close();
-```
+| `repeat` | `object` | - | Repeating job config (`every`, `pattern`, `limit`) |
+| `durable` | `boolean` | `false` | Write to disk before returning |
+| `lifo` | `boolean` | `false` | Process newest first |
+| `parent` | `{ id, queue }` | - | Parent job reference for [flows](/guide/flow/) |
 
 :::tip[Related Guides]
-- [Rate Limiting & Concurrency Control](/guide/rate-limiting/) - Control job processing rates
-- [Dead Letter Queue](/guide/dlq/) - Handle failed jobs
-- [Worker API](/guide/worker/) - Process jobs from queues
-- [Queue Group](/guide/queue-group/) - Manage multiple queues
+- [Worker API](/guide/worker/), process jobs from queues
+- [Dead Letter Queue](/guide/dlq/), handle failed jobs
+- [Rate Limiting](/guide/rate-limiting/), control processing rates
+- [Queue Group](/guide/queue-group/), manage multiple queues
 :::

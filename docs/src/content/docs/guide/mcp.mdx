@@ -1,6 +1,6 @@
 ---
-title: "MCP Server: AI Agents Drive the Queue"
-description: "Connect AI agents to bunqueue via MCP: 73 tools for jobs, cron, DLQ, rate limits and monitoring, from Claude, Cursor or any MCP client."
+title: "MCP Server: Let AI Agents Drive the Queue"
+description: "Connect Claude, Cursor or any MCP client to bunqueue with one command. Agents get 73 tools to add jobs, schedule crons, retry failures and monitor queues."
 head:
   - tag: meta
     attrs:
@@ -20,196 +20,76 @@ head:
       content: MCP, Model Context Protocol, AI agent, job queue, task scheduler, Claude, Claude Code, Claude Desktop, Cursor, Windsurf, bunqueue, cron jobs, HTTP handlers, dead letter queue, rate limiting, AI automation, agentic workflows, LLM tools, AI task queue
 ---
 
-import { Tabs, TabItem, Aside, Badge, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import McpArchitecture from '../../../components/McpArchitecture.astro';
 import HttpHandlerFlow from '../../../components/HttpHandlerFlow.astro';
-import HttpHandlerLifecycle from '../../../components/HttpHandlerLifecycle.astro';
-import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · mcp</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Your queue, driven by <em>agents.</em></h1>
-  <p class="bq-hero-sub">bunqueue ships a built-in MCP server that gives AI agents full programmatic control over job queues, scheduling, monitoring and execution. One command to connect, and the agent has the whole queue at its disposal.</p>
-
-  <div class="bq-proof">
-    <span><b>73</b> tools, the full queue surface</span>
-    <span><b>3</b> diagnostic prompts</span>
-    <span><b>5</b> read-only resources</span>
-    <span><b>2</b> modes, embedded or TCP</span>
-  </div>
+  <p class="bq-hero-sub">bunqueue ships a built-in MCP server, so AI agents like Claude and Cursor can add jobs, schedule crons and monitor queues by talking to it. One command to connect, no code to write.</p>
 </div>
 
-MCP is the open standard that allows AI agents like Claude, Cursor, and Windsurf to interact with external tools. bunqueue implements the MCP server specification using the official `@modelcontextprotocol/sdk`, exposing every queue feature as a tool that agents can call directly. No REST wrappers, no glue code, no middleware.
+MCP (Model Context Protocol) is the open standard that lets AI agents call external tools. bunqueue exposes its whole queue surface as 73 MCP tools, so anything you can do with the SDK or CLI, an agent can do from a chat prompt.
 
-<div class="bq-cards">
-  <div class="bq-card">
-    <BqIcon name="shards" />
-    <h3>73 Tools</h3>
-    <p>Full job lifecycle, queue control, cron scheduling, DLQ management, rate limiting, webhooks, workflows, HTTP handlers, monitoring</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="pulse" />
-    <h3>3 Prompts</h3>
-    <p>Pre-built diagnostic workflows: health report, queue debug, incident response</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="file" />
-    <h3>5 Resources</h3>
-    <p>Read-only live context: server stats, queue states, cron schedules, workers, webhooks</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="dials" />
-    <h3>2 Modes</h3>
-    <p>Embedded (in-process, zero config, SQLite via DATA_PATH) or TCP (connect to a remote bunqueue server)</p>
-  </div>
-</div>
+## Quick start
 
----
+Three commands. `bunqueue-mcp` is a binary bundled inside the `bunqueue` package, and the MCP SDK is an optional peer dependency you install once:
 
-## Quick Start
+```bash
+bun add -g bunqueue                      # provides the bunqueue-mcp binary
+bun add -g @modelcontextprotocol/sdk     # required by the MCP server only
+claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp
+```
 
-<Steps>
-1. **Install bunqueue**, the MCP server (`bunqueue-mcp`) ships as a binary *inside* the `bunqueue` package. There is no standalone `bunqueue-mcp` package on npm, so `bunqueue` must be installed first.
+Then just ask your agent:
 
-   ```bash
-   bun add bunqueue          # in your project, for Claude Code
-   # or, for Claude Desktop / Cursor / Windsurf (they start the server outside your project):
-   bun add -g bunqueue       # global install, puts bunqueue-mcp on your PATH
-   ```
+> "Add a job to the emails queue"
 
-2. **Install the MCP SDK**, since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**: it's only needed to run the MCP server, so queue-only users don't download it. Install it once in the same project/environment where the server runs:
+It works immediately. No server to start, no database to configure. The queue runs inside the MCP process (embedded mode); set `DATA_PATH` in the server's `env` to persist jobs to a SQLite file, otherwise state lives in memory for the session.
 
-   ```bash
-   bun add @modelcontextprotocol/sdk
-   ```
+## What can an agent do?
 
-3. **Connect your AI client**
+Some real prompts and the tools they trigger:
 
-   ```bash
-   claude mcp add bunqueue -- bunx bunqueue-mcp
-   ```
+| You say | The agent calls |
+|---------|-----------------|
+| "Add 3 notification jobs: push, email, sms" | `bunqueue_add_jobs_bulk` |
+| "Schedule session cleanup every hour" | `bunqueue_add_cron` |
+| "Rate limit notifications to 50 per second" | `bunqueue_set_rate_limit` |
+| "Why are jobs stuck? Check the emails queue" | `bunqueue_debug_queue` prompt, then stats and DLQ tools |
+| "Retry everything in the dead letter queue" | `bunqueue_retry_dlq` |
+| "Create a pipeline: validate payment, send receipt, update inventory" | `bunqueue_add_flow_chain` |
 
-4. **Start using it**
+## Setup for other clients
 
-   Ask your agent: *"Add a job to the emails queue"*, it works immediately. The MCP server starts as a child process, communicates via stdio, and the agent can call any of the 73 tools.
-</Steps>
+Claude Desktop, Cursor and Windsurf all use the same JSON block. Config file locations: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows), `~/.config/Claude/claude_desktop_config.json` (Linux), or your editor's MCP settings.
 
-<Aside type="caution" title="bunx bunqueue-mcp returns a 404?">
-  `bunqueue-mcp` is **not** a standalone npm package, it's a binary bundled with `bunqueue`. Running `bunx bunqueue-mcp` before installing `bunqueue` makes `bunx` try to download a package named `bunqueue-mcp`, which doesn't exist (`error: GET https://registry.npmjs.org/bunqueue-mcp - 404`). Install `bunqueue` first (`bun add bunqueue`, or `bun add -g bunqueue` for global use) so `bunx` resolves the bundled binary. As a no-install one-liner, `bunx --package=bunqueue bunqueue-mcp` always fetches the latest published `bunqueue` and runs its MCP binary.
-</Aside>
+```json
+{
+  "mcpServers": {
+    "bunqueue": {
+      "command": "bunx",
+      "args": ["--package=bunqueue", "bunqueue-mcp"]
+    }
+  }
+}
+```
 
-<Aside type="caution" title="The MCP server needs @modelcontextprotocol/sdk (v2.8.1+)">
-  Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency** of `bunqueue`, not a regular dependency. It's only used by the MCP server, so every queue-only user no longer downloads it. A plain `bun add bunqueue` now installs **7 packages instead of 117** and ships **5.5 MB of `node_modules` instead of 93 MB**, a **94% smaller install** that's also about 3.5× faster on a cold install. The trade-off: when you *do* run the MCP server, you install the SDK yourself, once:
+`bunx --package=bunqueue bunqueue-mcp` resolves the bundled binary straight from the `bunqueue` package, so it works even without a global install. It does not auto-install the optional `@modelcontextprotocol/sdk` peer dependency, install that yourself once.
 
-  ```bash
-  bun add @modelcontextprotocol/sdk
-  ```
-
-  `bunx --package=bunqueue bunqueue-mcp` does **not** auto-install optional peer dependencies, so add the SDK explicitly in the project or environment where the server starts. If it's missing, the launcher exits with code 1 and prints:
-
-  ```text
-  [bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk" (an optional peer dependency).
-  Install it with:  bun add @modelcontextprotocol/sdk
-  ```
-</Aside>
-
-<Aside type="tip">
-  That's all. No server to start, no database to configure. In embedded mode the queue runs in-process; set `DATA_PATH` (or `BUNQUEUE_DATA_PATH`) in the server's `env` to persist jobs to a SQLite file, otherwise state is in-memory for the lifetime of the MCP session. Your agent can immediately add jobs, create cron schedules, set rate limits, register HTTP handlers, and monitor everything.
-</Aside>
-
----
-
-## How It Works
-
-The MCP server runs as a subprocess spawned by your AI client. It communicates via **stdio** using the JSON-RPC protocol defined by the MCP specification. When the agent calls a tool (e.g. `bunqueue_add_job`), the MCP server executes the operation against the queue backend and returns the result.
-
-The server supports two backend modes: **embedded** (direct SQLite access in the same process) and **TCP** (connects to a remote bunqueue server). In embedded mode, everything runs locally with zero configuration. In TCP mode, the MCP server acts as a client that forwards operations to your production bunqueue instance.
+## Two modes: embedded and TCP
 
 <McpArchitecture />
 
-**Embedded mode** is ideal for local development, single-machine deployments, and CLI tools. With a `DATA_PATH` set, the MCP server manages its own SQLite database with WAL mode for concurrent access; without one, the queue is in-memory and state is lost when the MCP process exits.
+| | Embedded (default) | TCP (remote) |
+| --- | --- | --- |
+| **How it works** | Queue runs inside the MCP process, direct SQLite access | MCP server forwards to a running bunqueue server |
+| **Setup** | Zero config | Set `BUNQUEUE_MODE=tcp` plus host/port |
+| **Best for** | Local dev, single machine | Production queues shared by real workers |
+| **Data** | In-memory, or a SQLite file via `DATA_PATH` | The remote server owns storage |
 
-**TCP mode** connects to a running bunqueue server, allowing your agent to manage production queues shared across multiple workers and services.
-
-<Aside type="note" title="TCP Mode Parity (v2.6.0)">
-  All 73 MCP tools are fully functional in TCP mode. This includes `extend_lock`, `change_delay`, `clear_job_logs`, `set_webhook_enabled`, `compact_memory`, and batch lock extension. The `job_heartbeat` tool also supports a custom `duration` parameter to extend lock TTL for a specific period.
-</Aside>
-
----
-
-## Configuration
-
-<Aside type="note">
-  The JSON examples below use `args: ["--package=bunqueue", "bunqueue-mcp"]` so `bunx` resolves the bundled `bunqueue-mcp` binary straight from the `bunqueue` package, no separate install needed. If you prefer, run `bun add -g bunqueue` once and use a bare `args: ["bunqueue-mcp"]` instead. Either way, install the optional peer dependency once with `bun add @modelcontextprotocol/sdk` (see the note above), `bunx` won't pull it in automatically.
-</Aside>
-
-### Claude Code
-
-```bash
-# one-time: bun add bunqueue   (installs the bundled bunqueue-mcp binary)
-claude mcp add bunqueue -- bunx bunqueue-mcp
-```
-
-### Claude Desktop
-
-<Tabs>
-<TabItem label="macOS">
-```json
-// ~/Library/Application Support/Claude/claude_desktop_config.json
-{
-  "mcpServers": {
-    "bunqueue": {
-      "command": "bunx",
-      "args": ["--package=bunqueue", "bunqueue-mcp"]
-    }
-  }
-}
-```
-</TabItem>
-<TabItem label="Windows">
-```json
-// %APPDATA%\Claude\claude_desktop_config.json
-{
-  "mcpServers": {
-    "bunqueue": {
-      "command": "bunx",
-      "args": ["--package=bunqueue", "bunqueue-mcp"]
-    }
-  }
-}
-```
-</TabItem>
-<TabItem label="Linux">
-```json
-// ~/.config/Claude/claude_desktop_config.json
-{
-  "mcpServers": {
-    "bunqueue": {
-      "command": "bunx",
-      "args": ["--package=bunqueue", "bunqueue-mcp"]
-    }
-  }
-}
-```
-</TabItem>
-</Tabs>
-
-### Cursor / Windsurf
-
-```json
-{
-  "mcpServers": {
-    "bunqueue": {
-      "command": "bunx",
-      "args": ["--package=bunqueue", "bunqueue-mcp"]
-    }
-  }
-}
-```
-
-### TCP Mode (Remote Server)
-
-Connect to a running bunqueue server instead of local SQLite:
+To manage a production server, point the MCP server at it:
 
 ```json
 {
@@ -228,393 +108,73 @@ Connect to a running bunqueue server instead of local SQLite:
 }
 ```
 
-<Aside type="tip" title="Server Configuration">
-  Configure your bunqueue server with a typed `bunqueue.config.ts` file instead of environment variables. Full IntelliSense, all options in one place. See [Configuration File](/guide/configuration/).
-
-  ```typescript
-  import { defineConfig } from 'bunqueue';
-
-  export default defineConfig({
-    server: { tcpPort: 6789 },
-    auth: { tokens: ['your-auth-token'] },
-    storage: { dataPath: './data/queue.db' },
-    cloud: {
-      url: 'https://cloud.bunqueue.io',
-      apiKey: process.env.BUNQUEUE_CLOUD_API_KEY,
-    },
-  });
-  ```
-</Aside>
-
-|                  | Embedded (default)           | TCP (remote)                     |
-| ---------------- | ---------------------------- | -------------------------------- |
-| **How it works** | Direct SQLite access         | Connects to bunqueue server      |
-| **Setup**        | Zero config                  | Set `BUNQUEUE_MODE=tcp`          |
-| **Best for**     | Local dev, single-machine    | Production, shared queues        |
-| **Data**         | In-memory, or SQLite via `DATA_PATH` | Remote server handles storage    |
-
----
+All 73 tools work in both modes.
 
 ## HTTP Handlers
 
-HTTP handlers solve a fundamental problem: an AI agent can schedule jobs and manage queues, but it cannot run a persistent worker process to actually execute those jobs. HTTP handlers bridge this gap.
-
-When the agent calls `bunqueue_register_handler`, the MCP server spawns an **embedded Worker** inside its own process. This Worker continuously pulls jobs from the specified queue and, for each job, makes an HTTP request to the registered endpoint. The HTTP response is saved as the job result. If the HTTP call fails (non-2xx status or timeout), the job is marked as failed and follows the standard retry/DLQ flow.
-
-This means the agent can set up a fully autonomous pipeline, schedule recurring jobs with cron, auto-process them via HTTP, and check results later, without writing any code or deploying any external service.
-
-<HttpHandlerFlow />
-
-The embedded Worker inherits all standard Worker features: heartbeat, stall detection, retry with backoff, and dead letter queue. It processes jobs sequentially (concurrency 1) to avoid overwhelming the target endpoint.
-
-<div class="bq-cards">
-  <div class="bq-card">
-    <BqIcon name="push" />
-    <h3>bunqueue_register_handler</h3>
-    <p>Register an HTTP handler on a queue. Specify URL, method, optional headers, body template, and timeout. Spawns a Worker that starts processing immediately.</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="dlq" />
-    <h3>bunqueue_unregister_handler</h3>
-    <p>Remove a handler from a queue and gracefully stop its Worker. Jobs already in the queue remain untouched.</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="rows" />
-    <h3>bunqueue_list_handlers</h3>
-    <p>List all active HTTP handlers with their configuration and Worker status (running or stopped).</p>
-  </div>
-</div>
-
-### Handler configuration
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `queue` | Yes | Queue name to attach the handler to |
-| `url` | Yes | HTTP endpoint URL to call for each job |
-| `method` | Yes | `GET`, `POST`, `PUT`, or `DELETE` |
-| `headers` | No | Custom HTTP headers (e.g. `Authorization`, `X-Api-Key`) |
-| `body` | No | Fixed request body template for POST/PUT. If omitted, the job's data payload is sent |
-| `timeoutMs` | No | Request timeout in milliseconds (default: 30000, range: 1000-120000) |
-
-For `POST` and `PUT` requests, the Worker sends the job's data as JSON body by default. If a `body` template is provided, it overrides the job data. `GET` and `DELETE` requests do not send a body.
-
-### Example: Weather monitoring every 10 seconds
+Agents can schedule jobs, but they cannot run a long-lived worker process to execute them. HTTP handlers close that gap: the agent registers a URL on a queue, and the MCP server spawns an embedded worker that pulls each job and calls that URL. The HTTP response becomes the job result; a non-2xx response or timeout fails the job into the normal retry and dead letter flow.
 
 ```bash
 $ claude
 
-> Register a handler on "meteo" that calls the OpenWeather API
+> Register a GET handler on "meteo" that calls the OpenWeather API
 
 ✓ bunqueue_register_handler
-  queue: "meteo"
-  method: GET
-  url: "https://api.openweathermap.org/data/2.5/weather?q=Milan&appid=xxx"
   Worker started. Jobs in "meteo" will be processed via GET.
 
 > Create a cron that pushes a job every 10 seconds
 
 ✓ bunqueue_add_cron
-  name: "check-meteo"
-  queue: "meteo"
-  repeatEvery: 10000
+  name: "check-meteo", repeatEvery: 10000
 
-# Every 10s: cron creates a job → Worker pulls it → GET request to API →
-# response saved as job result → agent can check with bunqueue_get_job_result
+# Every 10s: cron creates a job → worker calls the API → response saved as result
 ```
 
-<Aside type="tip">
-  Handlers persist as long as the MCP server process is running. If the agent session ends, the MCP server shuts down and all handlers are stopped. Re-register them in the next session if needed.
+<HttpHandlerFlow />
+
+`bunqueue_register_handler` parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `queue` | Yes | Queue to attach the handler to |
+| `url` | Yes | Endpoint to call for each job |
+| `method` | Yes | `GET`, `POST`, `PUT`, or `DELETE` |
+| `headers` | No | Custom HTTP headers (e.g. `Authorization`) |
+| `body` | No | Fixed body for POST/PUT; defaults to the job's data as JSON |
+| `timeoutMs` | No | Request timeout (default 30000, range 1000 to 120000) |
+
+Use handlers when processing is just an HTTP call (API polling, webhook forwarding, health checks). For custom logic (database writes, file processing), deploy a normal [Worker](/guide/worker/) instead; the agent still orchestrates jobs and crons, the worker executes them.
+
+<Aside type="caution">
+  Handlers live inside the MCP server process. When the agent session ends, the process exits and all handlers stop. Re-register them in the next session if needed.
 </Aside>
 
----
-
-## All 73 Tools <Badge text="Complete Reference" variant="success" />
-
-### Job Operations <Badge text="11" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_add_job` | Add a job to a queue |
-| `bunqueue_add_jobs_bulk` | Add multiple jobs in one call |
-| `bunqueue_get_job` | Get job details by ID |
-| `bunqueue_get_job_state` | Get current state (waiting/delayed/active/completed/failed) |
-| `bunqueue_get_job_result` | Get the result of a completed job |
-| `bunqueue_cancel_job` | Cancel a waiting or delayed job |
-| `bunqueue_promote_job` | Promote delayed job to waiting |
-| `bunqueue_update_progress` | Update job progress (0-100) |
-| `bunqueue_get_children_values` | Get child job results (FlowProducer) |
-| `bunqueue_get_job_by_custom_id` | Look up job by custom ID |
-| `bunqueue_wait_for_job` | Wait for a job to complete |
-
-### Job Management <Badge text="6" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_update_job_data` | Update job payload data |
-| `bunqueue_change_job_priority` | Change job priority |
-| `bunqueue_move_to_delayed` | Move job to delayed state |
-| `bunqueue_discard_job` | Permanently discard a job |
-| `bunqueue_get_progress` | Get progress value and message |
-| `bunqueue_change_delay` | Change delay of a delayed job |
-
-### Job Consumption <Badge text="8" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_pull_job` | Pull a job from a queue for processing |
-| `bunqueue_pull_job_batch` | Pull multiple jobs at once |
-| `bunqueue_ack_job` | Acknowledge job completion with result |
-| `bunqueue_ack_job_batch` | Batch acknowledge multiple jobs |
-| `bunqueue_fail_job` | Mark a job as failed |
-| `bunqueue_job_heartbeat` | Send heartbeat for active job (supports custom `duration` for lock extension) |
-| `bunqueue_job_heartbeat_batch` | Batch heartbeat for multiple jobs |
-| `bunqueue_extend_lock` | Extend lock on an active job with a specific duration |
-
-### Queue Control <Badge text="11" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_list_queues` | List all queues |
-| `bunqueue_count_jobs` | Count total jobs in a queue |
-| `bunqueue_get_jobs` | List jobs with state filter and pagination |
-| `bunqueue_get_job_counts` | Job counts per state |
-| `bunqueue_pause_queue` | Pause job processing |
-| `bunqueue_resume_queue` | Resume processing |
-| `bunqueue_drain_queue` | Remove all waiting jobs |
-| `bunqueue_obliterate_queue` | Remove ALL data from a queue |
-| `bunqueue_clean_queue` | Remove old jobs by grace period |
-| `bunqueue_is_paused` | Check if queue is paused |
-| `bunqueue_get_counts_per_priority` | Job counts by priority level |
-
-### Dead Letter Queue <Badge text="4" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_get_dlq` | Get failed jobs from DLQ |
-| `bunqueue_retry_dlq` | Retry jobs from DLQ |
-| `bunqueue_purge_dlq` | Clear all DLQ entries |
-| `bunqueue_retry_completed` | Reprocess completed jobs |
-
-### Cron Jobs <Badge text="4" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_add_cron` | Add recurring job (cron pattern or interval) |
-| `bunqueue_list_crons` | List all scheduled crons |
-| `bunqueue_get_cron` | Get cron details by name |
-| `bunqueue_delete_cron` | Delete a cron job |
-
-### Rate Limiting & Concurrency <Badge text="4" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_set_rate_limit` | Set max jobs per second |
-| `bunqueue_clear_rate_limit` | Remove rate limit |
-| `bunqueue_set_concurrency` | Set max concurrent jobs |
-| `bunqueue_clear_concurrency` | Remove concurrency limit |
-
-### Webhooks <Badge text="4" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_add_webhook` | Add webhook for job events |
-| `bunqueue_remove_webhook` | Remove a webhook |
-| `bunqueue_list_webhooks` | List all webhooks |
-| `bunqueue_set_webhook_enabled` | Enable/disable a webhook |
-
-### Workers <Badge text="3" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_register_worker` | Register a new worker |
-| `bunqueue_unregister_worker` | Remove a worker |
-| `bunqueue_worker_heartbeat` | Send worker heartbeat |
-
-### Monitoring <Badge text="11" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_get_stats` | Global server statistics |
-| `bunqueue_get_queue_stats` | Per-queue statistics |
-| `bunqueue_list_workers` | List active workers |
-| `bunqueue_get_job_logs` | Get job log entries |
-| `bunqueue_add_job_log` | Add log entry to a job |
-| `bunqueue_get_storage_status` | Disk health status |
-| `bunqueue_get_per_queue_stats` | Detailed per-queue breakdown |
-| `bunqueue_get_memory_stats` | Memory usage stats |
-| `bunqueue_get_prometheus_metrics` | Prometheus exposition format |
-| `bunqueue_clear_job_logs` | Clear logs for a job |
-| `bunqueue_compact_memory` | Force memory compaction |
-
-### Workflows <Badge text="4" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_add_flow` | Create a flow tree (BullMQ v5 compatible). Children processed before parent |
-| `bunqueue_add_flow_chain` | Create a sequential pipeline: A → B → C |
-| `bunqueue_add_flow_bulk_then` | Fan-out/fan-in: parallel jobs → final merge job |
-| `bunqueue_get_flow` | Retrieve a flow tree with full dependency graph |
-
-### HTTP Handlers <Badge text="3" variant="note" />
-
-| Tool | Description |
-|------|-------------|
-| `bunqueue_register_handler` | Register HTTP handler on a queue and start auto-processing |
-| `bunqueue_unregister_handler` | Remove handler and stop its worker |
-| `bunqueue_list_handlers` | List all active HTTP handlers |
-
----
-
-## Prompts <Badge text="3" variant="caution" />
-
-Pre-built diagnostic workflows for AI agents.
-
-| Prompt | Description |
-|--------|-------------|
-| `bunqueue_health_report` | Full health report with severity levels (OK/WARNING/CRITICAL). Covers system stats, storage, queues, workers, crons, memory |
-| `bunqueue_debug_queue` | Deep diagnostic of a specific queue: state breakdown, pause status, DLQ, active jobs, priority distribution |
-| `bunqueue_incident_response` | Step-by-step triage playbook for "jobs not processing" scenarios |
-
-## Resources <Badge text="5" variant="note" />
-
-Read-only context available at any time.
-
-| URI | Description |
-|-----|-------------|
-| `bunqueue://stats` | Global server statistics |
-| `bunqueue://queues` | All queues with job counts |
-| `bunqueue://crons` | Scheduled cron jobs |
-| `bunqueue://workers` | Active workers |
-| `bunqueue://webhooks` | Registered webhooks |
-
----
-
-## Real-World Example
-
-A complete Claude Code session connected to a remote bunqueue server via TCP:
-
-```bash
-# Connect MCP to your running server (env vars must come BEFORE the -- separator)
-$ claude mcp add bunqueue \
-    --env BUNQUEUE_MODE=tcp \
-    --env BUNQUEUE_HOST=your-server.com \
-    --env BUNQUEUE_PORT=6789 \
-    -- bunx --package=bunqueue bunqueue-mcp
-
-$ claude
-
-> Add 3 notification jobs: push, email, sms
-
-✓ bunqueue_add_jobs_bulk
-  Added 3 jobs to "notifications" queue
-
-> Schedule session cleanup every hour
-
-✓ bunqueue_add_cron
-  Created "cleanup-sessions" → schedule: "0 * * * *"
-  Next run: 2026-02-24T20:00:00.000Z
-
-> Rate limit notifications to 50/sec and show queue status
-
-✓ bunqueue_set_rate_limit → notifications: 50 jobs/sec
-✓ bunqueue_get_job_counts
-  waiting: 3 · active: 0 · completed: 87 · failed: 0
-
-> Create a pipeline: validate payment → send receipt → update inventory
-
-✓ bunqueue_add_flow_chain
-  Created: validate-payment → send-receipt → update-inventory
-
-> Register an HTTP handler to auto-process the "webhooks" queue
-
-✓ bunqueue_register_handler
-  queue: "webhooks"
-  method: POST
-  url: "https://api.example.com/webhook"
-  Worker started. Jobs auto-processed via HTTP.
-```
-
----
-
-## Processing Jobs
-
-Jobs sit in queues until something processes them. Two approaches:
-
-### Option A: HTTP Handlers (no code, agent-managed)
-
-The agent registers an HTTP endpoint on a queue via `bunqueue_register_handler`. The MCP server spawns an embedded Worker that automatically pulls jobs and makes HTTP requests to that endpoint. The response is saved as the job result.
-
-No external process, no deployment, no code. The agent controls the entire lifecycle: register, schedule with cron, monitor results, unregister.
-
-<HttpHandlerLifecycle />
-
-**When to use:** API polling, webhook forwarding, external service calls, health checks, monitoring endpoints. Any use case where the processing logic is just an HTTP call.
-
-```bash
-# Agent conversation example
-> Register a POST handler on "webhooks" that calls https://api.example.com/ingest
-
-✓ Worker started. Every job in "webhooks" will be sent via POST.
-
-> Add a cron to push a job every 30 seconds
-
-✓ Cron "webhook-trigger" created. Jobs auto-processed via HTTP.
-```
-
-### Option B: External Worker (custom logic)
-
-For processing that requires custom code (database writes, file processing, business logic), deploy a separate Worker process. The agent orchestrates (add jobs, schedule crons, monitor progress), the Worker executes.
-
-```typescript
-import { Worker } from 'bunqueue/client';
-
-new Worker('emails', async (job) => {
-  const { to, subject, body } = job.data;
-
-  await job.updateProgress(25, 'Validating recipient...');
-  await validateEmail(to);
-
-  await job.updateProgress(50, 'Sending email...');
-  await sendEmail(to, subject, body);
-
-  await job.log(`Email sent to ${to}`);
-  return { sent: true, timestamp: Date.now() };
-}, { embedded: true });
-```
-
-```bash
-bun run worker.ts
-```
-
-**When to use:** Email sending, image processing, database operations, ML inference, complex business logic, anything that needs code execution beyond a simple HTTP call.
-
-### Comparison
-
-|                    | HTTP Handlers                     | External Worker                  |
-| ------------------ | --------------------------------- | -------------------------------- |
-| **Setup**          | Zero, agent registers via MCP    | Deploy a Worker process          |
-| **Processing**     | HTTP request to an endpoint       | Custom TypeScript function       |
-| **Managed by**     | AI agent (register/unregister)    | Developer (deploy/maintain)      |
-| **Use case**       | API calls, webhooks, monitoring   | Business logic, DB writes, files |
-| **Code required**  | None                              | Yes (Worker definition)          |
-
----
-
-## Error Handling
-
-All 73 tools return structured error responses with `isError: true`:
-
-```json
-{
-  "error": "Human-readable error message"
-}
-```
-
-Not-found responses for `get_job`, `get_job_by_custom_id`, `get_progress`, and `get_cron` also return `isError: true`. No stack traces or internal details are ever exposed.
-
----
-
-## Environment Variables
+## Tool reference
+
+73 tools covering the full queue surface. The agent discovers them automatically, so you rarely need this table; it is here so you know what is on the menu.
+
+| Category | Tools | Examples |
+|----------|-------|----------|
+| Jobs: add and query | 11 | `add_job`, `add_jobs_bulk`, `get_job`, `get_job_result`, `wait_for_job` |
+| Jobs: manage | 6 | `update_job_data`, `change_job_priority`, `move_to_delayed`, `discard_job` |
+| Jobs: consume | 8 | `pull_job`, `ack_job`, `fail_job`, `job_heartbeat`, `extend_lock` |
+| Queue control | 11 | `list_queues`, `pause_queue`, `drain_queue`, `clean_queue`, `get_job_counts` |
+| Dead letter queue | 4 | `get_dlq`, `retry_dlq`, `purge_dlq`, `retry_completed` |
+| Cron scheduling | 4 | `add_cron`, `list_crons`, `get_cron`, `delete_cron` |
+| Rate limits and concurrency | 4 | `set_rate_limit`, `clear_rate_limit`, `set_concurrency`, `clear_concurrency` |
+| Webhooks | 4 | `add_webhook`, `remove_webhook`, `list_webhooks`, `set_webhook_enabled` |
+| Workers | 3 | `register_worker`, `unregister_worker`, `worker_heartbeat` |
+| Monitoring | 11 | `get_stats`, `get_queue_stats`, `get_job_logs`, `get_prometheus_metrics` |
+| Workflows | 4 | `add_flow`, `add_flow_chain`, `add_flow_bulk_then`, `get_flow` |
+| HTTP handlers | 3 | `register_handler`, `unregister_handler`, `list_handlers` |
+
+Every tool name is prefixed `bunqueue_`. All tools return structured errors (`isError: true` with a plain message, never a stack trace).
+
+### Prompts and resources
+
+The server also ships 3 pre-built diagnostic prompts, `bunqueue_health_report` (full health check with OK/WARNING/CRITICAL levels), `bunqueue_debug_queue` (deep dive on one queue) and `bunqueue_incident_response` (a triage playbook for "jobs not processing"), plus 5 read-only resources the agent can read at any time: `bunqueue://stats`, `bunqueue://queues`, `bunqueue://crons`, `bunqueue://workers`, `bunqueue://webhooks`.
+
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -622,45 +182,14 @@ Not-found responses for `get_job`, `get_job_by_custom_id`, `get_progress`, and `
 | `BUNQUEUE_HOST` | `localhost` | TCP server host |
 | `BUNQUEUE_PORT` | `6789` | TCP server port |
 | `BUNQUEUE_TOKEN` | (none) | Auth token for TCP |
-| `DATA_PATH` | (none, in-memory) | SQLite path for embedded mode (`BUNQUEUE_DATA_PATH` and `BQ_DATA_PATH` take priority). If unset, the embedded queue is not persisted |
-
-<Aside type="tip">
-  For the server side, you can replace environment variables with a typed `bunqueue.config.ts` file. See [Configuration File](/guide/configuration/) for the full reference.
-</Aside>
-
----
+| `DATA_PATH` | (none, in-memory) | SQLite path for embedded mode (`BUNQUEUE_DATA_PATH` and `BQ_DATA_PATH` take priority). Unset means jobs are not persisted |
 
 ## Troubleshooting
 
-### MCP server not connecting
+**`bunx bunqueue-mcp` returns a 404.** `bunqueue-mcp` is not a standalone npm package, it is a binary inside `bunqueue`. Install `bunqueue` first, or use `bunx --package=bunqueue bunqueue-mcp` which always resolves correctly.
 
-```bash
-# Verify bunqueue is installed (bunqueue-mcp is a binary bundled with it)
-bun pm ls | grep bunqueue || bun add -g bunqueue
+**The server exits with `requires "@modelcontextprotocol/sdk"`.** Since v2.8.1 the MCP SDK is an optional peer dependency (so queue-only users get a 94% smaller install). Install it once where the server runs: `bun add @modelcontextprotocol/sdk`.
 
-# Check Bun is in PATH
-which bun
+**The agent does not see the tools.** Restart your MCP client, check the config JSON is valid, then run `bunx --package=bunqueue bunqueue-mcp` manually to see the actual error.
 
-# Test manually
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | bunx bunqueue-mcp
-```
-
-### Jobs stuck in waiting
-
-No worker is processing the queue. Either register an HTTP handler or deploy a Worker:
-
-```bash
-# Option A: HTTP handler (via agent)
-# Ask your agent: "Register a handler on <queue> that calls <url>"
-
-# Option B: External worker
-bun run worker.ts
-```
-
-### Claude not seeing tools
-
-1. Restart Claude Desktop or Claude Code
-2. Check config file syntax (valid JSON)
-3. Verify `bunqueue` is installed so the `bunqueue-mcp` binary resolves (`bun add -g bunqueue`)
-4. Install the optional MCP SDK peer dependency: `bun add @modelcontextprotocol/sdk` (since v2.8.1 it's not bundled; a missing-SDK launch exits with `[bunqueue-mcp] The MCP server requires "@modelcontextprotocol/sdk"`)
-5. Run `bunx bunqueue-mcp` manually to check for errors (a `404` for `bunqueue-mcp` means `bunqueue` isn't installed yet)
+**Jobs sit in `waiting` forever.** Nothing is processing the queue. Ask the agent to register an HTTP handler, or run a [Worker](/guide/worker/).

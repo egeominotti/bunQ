@@ -11,122 +11,87 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · quickstart</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Working queue in <em>a minute.</em></h1>
-  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and wire up persistence. Everything on this page runs in a single Bun process with zero configuration.</p>
+  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and turn on persistence. Everything on this page runs in a single Bun process with zero configuration.</p>
 </div>
 
-## Choose Your Mode
+## The smallest working queue
 
-bunqueue supports two deployment modes:
+Install bunqueue (`bun add bunqueue`), save this as `app.ts`, run `bun run app.ts`:
 
-| | Embedded Mode | TCP Server Mode |
-|---|---------------|-----------------|
-| **Best for** | Single-process apps, serverless | Multi-process, microservices |
-| **Setup** | Zero config | Run `bunqueue start` first |
-| **Option needed** | `embedded: true` | None (default) |
-| **Persistence** | `dataPath` option or `DATA_PATH` env var | `--data-path` flag |
-| **Clients** | Bun only (in process) | Node.js, Deno, Bun, Python, Cloudflare Workers |
-
-**This guide covers Embedded Mode** (most common). For TCP Server Mode, see [Server Guide](/guide/server/).
-
-:::tip[Not on Bun? Use the client SDKs]
-Only the server and embedded mode require Bun. With TCP Server Mode your
-producers and workers can run anywhere: install
-[`bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) on
-Node.js, Deno or Cloudflare Workers, or the Python client, and use the same
-Queue and Worker API against the server. See the [SDK guide](/guide/sdks/).
-
-```bash
-npm install bunqueue-client   # Node.js / Deno / Bun / Workers
-```
-:::
-
-:::danger[Common Mistake]
-If `Queue` has `embedded: true` but `Worker` doesn't (or vice versa), the Worker will try to connect to a non-existent TCP server and **timeout with "Command timeout" error**.
-
-**Both must have the same mode!**
 ```typescript
-// ✅ Correct - both embedded
+import { Queue, Worker } from 'bunqueue/client';
+
+// The queue: where you put jobs
+const queue = new Queue('emails', { embedded: true });
+
+// The worker: pulls jobs and runs your function on each one
+const worker = new Worker('emails', async (job) => {
+  console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
+  return { sent: true };
+}, { embedded: true });
+
+// Add a job
+await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
+```
+
+`embedded: true` means the queue runs inside your process, no server needed. That is the mode this page uses.
+
+:::danger[The one mistake everyone makes]
+`Queue` and `Worker` must use the **same mode**. If one has `embedded: true` and the other doesn't, the other tries to connect to a TCP server that isn't running and fails with a "Command timeout" error.
+
+```typescript
+// ✅ Both embedded
 const queue = new Queue('tasks', { embedded: true });
 const worker = new Worker('tasks', handler, { embedded: true });
 
-// ✅ Correct - both TCP (server must be running)
-const queue = new Queue('tasks');
-const worker = new Worker('tasks', handler);
-
-// ❌ Wrong - mixed modes = timeout error
+// ❌ Mixed modes = timeout error
 const queue = new Queue('tasks', { embedded: true });
 const worker = new Worker('tasks', handler);  // Missing embedded: true!
 ```
 :::
 
-## Create a Queue
+## Add jobs with options
 
 ```typescript
-import { Queue } from 'bunqueue/client';
-
-// Create a typed queue
+// Typed queue: job.data is type-checked
 interface EmailJob {
   to: string;
   subject: string;
-  body: string;
 }
-
 const emailQueue = new Queue<EmailJob>('emails', { embedded: true });
-```
 
-## Add Jobs
-
-```typescript
-// Add a single job
-const job = await emailQueue.add('send-email', {
-  to: 'user@example.com',
-  subject: 'Welcome!',
-  body: 'Thanks for signing up.'
+// Priority, delay, retries
+await emailQueue.add('send-email', { to: 'a@test.com', subject: 'Hi' }, {
+  priority: 10,   // Higher = processed first
+  delay: 5000,    // Wait 5 seconds before processing
+  attempts: 3,    // Retry up to 3 times if the processor throws
+  backoff: 1000,  // Wait 1 second between retries (grows on each attempt)
 });
 
-console.log(`Job created: ${job.id}`);
-
-// Add with options
-await emailQueue.add('send-email', data, {
-  priority: 10,        // Higher = processed first
-  delay: 5000,         // Wait 5 seconds before processing
-  attempts: 3,         // Retry up to 3 times
-  backoff: 1000,       // Wait 1 second between retries
-});
-
-// Add multiple jobs (batch optimized)
+// Many jobs at once (one optimized batch)
 await emailQueue.addBulk([
-  { name: 'send-email', data: { to: 'a@test.com', subject: 'Hi', body: '...' } },
-  { name: 'send-email', data: { to: 'b@test.com', subject: 'Hi', body: '...' } },
+  { name: 'send-email', data: { to: 'a@test.com', subject: 'Hi' } },
+  { name: 'send-email', data: { to: 'b@test.com', subject: 'Hi' } },
 ]);
 ```
 
-## Create a Worker
+All options are in the [Queue guide](/guide/queue/).
+
+## Do more inside the processor
 
 ```typescript
-import { Worker } from 'bunqueue/client';
-
 const worker = new Worker<EmailJob>('emails', async (job) => {
-  console.log(`Processing: ${job.name}`);
-
-  // Update progress
-  await job.updateProgress(50, 'Sending email...');
-
-  // Do the work
-  await sendEmail(job.data);
-
-  // Log messages
-  await job.log('Email sent successfully');
-
-  // Return a result
-  return { sent: true, timestamp: Date.now() };
+  await job.updateProgress(50, 'Sending email...');  // Report progress
+  await sendEmail(job.data);                          // Do the work
+  await job.log('Email sent successfully');           // Attach a log line
+  return { sent: true, timestamp: Date.now() };       // Result, stored and queryable
 }, {
-  embedded: true,  // Required for embedded mode
+  embedded: true,
   concurrency: 5,  // Process 5 jobs in parallel
 });
 ```
 
-## Handle Events
+## React to events
 
 ```typescript
 worker.on('completed', (job, result) => {
@@ -140,70 +105,50 @@ worker.on('failed', (job, error) => {
 worker.on('progress', (job, progress) => {
   console.log(`Job ${job.id} progress: ${progress}%`);
 });
-
-worker.on('active', (job) => {
-  console.log(`Job ${job.id} started`);
-});
 ```
 
-## Full Example
+The full event list is in the [Worker guide](/guide/worker/).
+
+## Turn on persistence
+
+Without a data path, jobs live in memory and disappear on restart. Point bunqueue at a SQLite file to survive restarts:
 
 ```typescript
-import { Queue, Worker, shutdownManager } from 'bunqueue/client';
+// Option 1: dataPath option (recommended)
+const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
+const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
 
-interface EmailJob {
-  to: string;
-  subject: string;
-}
+// Option 2: environment variable
+// DATA_PATH=./data/bunqueue.db bun run app.ts
+```
 
-// Producer - must have embedded: true
-const queue = new Queue<EmailJob>('emails', { embedded: true });
+## Shut down cleanly
 
-// Add some jobs
-await queue.add('welcome', { to: 'new@user.com', subject: 'Welcome!' });
-await queue.add('newsletter', { to: 'sub@user.com', subject: 'News' });
+```typescript
+import { shutdownManager } from 'bunqueue/client';
 
-// Consumer - must have embedded: true
-const worker = new Worker<EmailJob>('emails', async (job) => {
-  console.log(`Sending ${job.data.subject} to ${job.data.to}`);
-  await job.updateProgress(100);
-  return { sent: true };
-}, { embedded: true, concurrency: 3 });
-
-worker.on('completed', (job) => {
-  console.log(`✓ ${job.id}`);
-});
-
-// Graceful shutdown
 process.on('SIGINT', async () => {
-  await worker.close();
-  shutdownManager();
+  await worker.close();   // Finish active jobs
+  shutdownManager();      // Flush pending writes, close SQLite
   process.exit(0);
 });
 ```
 
-## With Persistence (SQLite)
+## Need more than one process?
 
-To persist jobs across restarts, pass `dataPath` in the constructor or set `DATA_PATH` before importing:
+Everything above runs in a single process. When multiple services need to share one queue, run bunqueue as a standalone server instead:
 
-```typescript
-import { Queue, Worker } from 'bunqueue/client';
+| | Embedded mode | Server mode |
+|---|---------------|-------------|
+| **Best for** | Single-process apps, serverless | Multi-process, microservices |
+| **Setup** | `embedded: true` | Run `bunqueue start`, drop the option |
+| **Clients** | Bun only (in process) | Node.js, Deno, Bun, Python, Cloudflare Workers |
 
-// Option 1: Pass dataPath directly (recommended)
-const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
-const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
+See the [Server guide](/guide/server/). For non-Bun clients, install [`bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) and use the same API, see the [SDK guide](/guide/sdks/).
 
-// Option 2: Environment variable
-// DATA_PATH=./data/bunqueue.db bun run app.ts
-```
+## Where to go next
 
-:::note
-Without `dataPath` or `DATA_PATH`, bunqueue runs in-memory (no persistence). For server mode, you can also use a [configuration file](/guide/configuration/).
-:::
-
-## Simple Mode (All-in-One)
-
-Want less boilerplate? `Bunqueue` wraps Queue + Worker in a single object with routes, middleware, cron, and more:
+**Less boilerplate.** `Bunqueue` (Simple Mode) wraps Queue + Worker in one object with routes, middleware, and cron:
 
 ```typescript
 import { Bunqueue } from 'bunqueue/client';
@@ -211,126 +156,57 @@ import { Bunqueue } from 'bunqueue/client';
 const app = new Bunqueue('notifications', {
   embedded: true,
   routes: {
-    'send-email': async (job) => {
-      await sendEmail(job.data.to);
-      return { sent: true };
-    },
-    'send-sms': async (job) => {
-      await sendSMS(job.data.to);
-      return { sent: true };
-    },
+    'send-email': async (job) => ({ sent: true }),
+    'send-sms': async (job) => ({ sent: true }),
   },
   concurrency: 10,
 });
 
-// Middleware (wraps every job)
-app.use(async (job, next) => {
-  const start = Date.now();
-  const result = await next();
-  console.log(`${job.name}: ${Date.now() - start}ms`);
-  return result;
-});
-
-// Cron jobs
-await app.cron('daily-report', '0 9 * * *', { type: 'summary' });
-
-// Add jobs
 await app.add('send-email', { to: 'alice@example.com' });
-
-// Graceful shutdown
-await app.close();
+await app.cron('daily-report', '0 9 * * *', { type: 'summary' });
 ```
 
-Simple Mode also includes circuit breaker, batch processing, TTL, priority aging, deduplication, and debouncing. See [Simple Mode guide](/guide/simple-mode/) for the full reference.
+See the [Simple Mode guide](/guide/simple-mode/).
 
-## Watch It Live (Dashboard)
-
-Everything you just built is visible in the web dashboard: queues, jobs and
-their states, the DLQ, cron schedules, workers, live activity, and a SQLite
-inspector. One command, no configuration:
+**Watch it live.** The web dashboard shows queues, jobs, failures, crons, and workers. One command:
 
 ```bash
 bunx bunqueue-dashboard
 ```
 
-Try the [live demo](https://egeominotti.github.io/bunqueue-dashboard/) without
-installing anything, or read the
-[user guide](https://egeominotti.github.io/bunqueue-dashboard/docs/user-guide).
+Try the [live demo](https://egeominotti.github.io/bunqueue-dashboard/) without installing anything.
 
-## Connect AI Agents (MCP)
-
-bunqueue includes a native MCP server with 73 tools. AI agents can schedule tasks, manage pipelines, and monitor queues via natural language, no code needed.
+**Connect AI agents.** bunqueue ships an MCP server with 73 tools, so agents like Claude can add jobs, manage crons, and monitor queues via natural language:
 
 ```bash
-# Claude Code, bunqueue-mcp is a binary bundled with bunqueue, so install it first
-bun add bunqueue
-bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
+bun add bunqueue @modelcontextprotocol/sdk
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
-:::note
-Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
-:::
+Setup for Claude Desktop, Cursor, and Windsurf is in the [MCP guide](/guide/mcp/).
 
-```json
-// Claude Desktop / Cursor / Windsurf: --package=bunqueue resolves the bundled binary, no install needed
-{
-  "mcpServers": {
-    "bunqueue": {
-      "command": "bunx",
-      "args": ["--package=bunqueue", "bunqueue-mcp"]
-    }
-  }
-}
-```
-
-Once connected, agents can add jobs, manage crons, retry failures, set rate limits, and monitor everything. See [MCP Server guide](/guide/mcp/) for the full reference.
-
-## Workflow Engine
-
-Need to orchestrate multi-step processes? bunqueue includes a built-in **Workflow Engine** with branching, saga compensation, and human-in-the-loop signals:
+**Orchestrate multi-step processes.** The built-in workflow engine handles branching, parallel steps, rollback on failure, and human approvals:
 
 ```typescript
 import { Workflow, Engine } from 'bunqueue/workflow';
 
-const flow = new Workflow('order-pipeline')
-  .step('validate', async (ctx) => {
-    const { orderId } = ctx.input as { orderId: string };
-    return { orderId };
-  })
-  .step('charge', async (ctx) => {
-    return { txId: 'tx_123' };
-  }, {
-    compensate: async () => {
-      // Auto-rollback if a later step fails
-      await refundPayment('tx_123');
-    },
-  })
-  .waitFor('manager-approval')  // Pauses until signal received
-  .step('ship', async (ctx) => {
-    const approval = ctx.signals['manager-approval'];
-    return { shipped: true };
-  });
+const flow = new Workflow('order')
+  .step('validate', async (ctx) => ({ ok: true }))
+  .step('charge', async (ctx) => ({ txId: 'tx_123' }))
+  .waitFor('manager-approval')  // Pauses until you send a signal
+  .step('ship', async (ctx) => ({ shipped: true }));
 
 const engine = new Engine({ embedded: true });
 engine.register(flow);
-
-const run = await engine.start('order-pipeline', { orderId: 'ORD-1' });
-
-// Later, when the manager approves:
-await engine.signal(run.id, 'manager-approval', { approved: true });
+await engine.start('order', { orderId: 'ORD-1' });
 ```
 
-Built on top of bunqueue's Queue and Worker, no new infrastructure. [Workflow Engine guide](/guide/workflow/) for the full reference.
+See the [Workflow Engine guide](/guide/workflow/).
 
-## Next Steps
+## Next steps
 
-- [Client SDKs](/guide/sdks/) - Use the queue from Node.js, Deno, Python and Cloudflare Workers
-- [Dashboard](https://egeominotti.github.io/bunqueue-dashboard/) - Drive the whole server from the browser
-- [Workflow Engine](/guide/workflow/) - Multi-step orchestration with branching and saga compensation
-- [Simple Mode](/guide/simple-mode/) - All-in-one Queue + Worker with routes, middleware, cron
-- [Queue API](/guide/queue/) - Full queue operations
-- [Worker API](/guide/worker/) - Worker configuration
-- [MCP Server](/guide/mcp/) - Connect AI agents (Claude, Cursor, Windsurf)
-- [Server Mode](/guide/server/) - Run bunqueue as a standalone server
-- [Code Examples & Recipes](/examples/) - More complete examples
+- [Queue API](/guide/queue/), all job options and queue operations
+- [Worker API](/guide/worker/), concurrency, events, error handling
+- [Server Mode](/guide/server/), run bunqueue as a standalone server
+- [Client SDKs](/guide/sdks/), use the queue from Node.js, Deno, Python
+- [Code Examples & Recipes](/examples/), complete examples

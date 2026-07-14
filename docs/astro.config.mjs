@@ -143,11 +143,65 @@ export default defineConfig({
       },
       sidebar: [
         {
-          label: 'Getting Started',
+          label: 'Start Here',
           items: [
             { label: 'Introduction', link: '/guide/introduction/' },
             { label: 'Installation', link: '/guide/installation/' },
             { label: 'Quick Start', link: '/guide/quickstart/' },
+            { label: 'Migrate from BullMQ', link: '/guide/migration/' },
+            { label: 'FAQ', link: '/faq/' },
+          ],
+        },
+        {
+          label: 'Core Guide',
+          items: [
+            { label: 'Simple Mode', link: '/guide/simple-mode/' },
+            { label: 'Queue', link: '/guide/queue/' },
+            { label: 'Worker', link: '/guide/worker/' },
+            { label: 'Cron Jobs', link: '/guide/cron/' },
+            { label: 'Dead Letter Queue', link: '/guide/dlq/' },
+            { label: 'Flow Producer', link: '/guide/flow/' },
+          ],
+        },
+        {
+          label: 'SDKs · Any Language',
+          items: [
+            { label: 'TypeScript, Python, PHP & Go', link: '/guide/sdks/' },
+          ],
+        },
+        {
+          label: 'Run in Production',
+          items: [
+            { label: 'Running the Server', link: '/guide/server/' },
+            { label: 'Deployment Guide', link: '/guide/deployment/' },
+            { label: 'Configuration File', link: '/guide/configuration/' },
+            { label: 'Environment Variables', link: '/guide/env-vars/' },
+            { label: 'Native TLS', link: '/guide/tls/' },
+            { label: 'Monitoring', link: '/guide/monitoring/' },
+            { label: 'Telemetry', link: '/guide/telemetry/' },
+            { label: 'S3 Backup', link: '/guide/backup/' },
+            { label: 'Databases (Postgres/MySQL)', link: '/guide/databases/' },
+            { label: 'Production Operations', link: '/guide/production/' },
+          ],
+        },
+        {
+          label: 'Advanced',
+          items: [
+            { label: 'Workflow Engine', link: '/guide/workflow/' },
+            { label: 'Queue Group', link: '/guide/queue-group/' },
+            { label: 'CPU-Intensive Workers', link: '/guide/cpu-intensive-workers/' },
+            { label: 'Stall Detection', link: '/guide/stall-detection/' },
+            { label: 'Rate Limiting', link: '/guide/rate-limiting/' },
+            { label: 'Webhooks', link: '/guide/webhooks/' },
+            { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
+          ],
+        },
+        {
+          label: 'Integrations',
+          items: [
+            { label: 'Overview', link: '/guide/integrations/' },
+            { label: 'Hono', link: '/guide/hono/' },
+            { label: 'Elysia', link: '/guide/elysia/' },
           ],
         },
         {
@@ -155,6 +209,25 @@ export default defineConfig({
           items: [
             { label: 'MCP Server', link: '/guide/mcp/' },
             { label: 'Production Patterns', link: '/guide/use-cases/' },
+          ],
+        },
+        {
+          label: 'Performance',
+          items: [
+            { label: 'Benchmarks', link: '/guide/benchmarks/' },
+            { label: 'bunqueue vs BullMQ', link: '/guide/comparison/' },
+          ],
+        },
+        {
+          label: 'Reference',
+          collapsed: true,
+          items: [
+            { label: 'CLI Commands', link: '/guide/cli/' },
+            { label: 'HTTP API', link: '/api/http/' },
+            { label: 'TCP Protocol', link: '/api/tcp/' },
+            { label: 'TypeScript Types', link: '/api/types/' },
+            { label: 'Glossary', link: '/guide/glossary/' },
+            { label: 'Examples', link: '/examples/' },
           ],
         },
         {
@@ -172,83 +245,8 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Client SDK',
-          items: [
-            { label: 'Simple Mode', link: '/guide/simple-mode/' },
-            { label: 'Workflow Engine', link: '/guide/workflow/' },
-            { label: 'Queue', link: '/guide/queue/' },
-            { label: 'Worker', link: '/guide/worker/' },
-            { label: 'CPU-Intensive Workers', link: '/guide/cpu-intensive-workers/' },
-            { label: 'Queue Group', link: '/guide/queue-group/' },
-            { label: 'Flow Producer', link: '/guide/flow/' },
-            { label: 'Stall Detection', link: '/guide/stall-detection/' },
-            { label: 'Dead Letter Queue', link: '/guide/dlq/' },
-          ],
-        },
-        {
-          label: 'Polyglot SDKs',
-          items: [
-            { label: 'Python & TypeScript SDKs', link: '/guide/sdks/' },
-          ],
-        },
-        {
-          label: 'Server Mode',
-          items: [
-            { label: 'Running the Server', link: '/guide/server/' },
-            { label: 'Configuration File', link: '/guide/configuration/' },
-            { label: 'CLI Commands', link: '/guide/cli/' },
-            { label: 'Environment Variables', link: '/guide/env-vars/' },
-            { label: 'HTTP API', link: '/api/http/' },
-            { label: 'TCP Protocol', link: '/api/tcp/' },
-          ],
-        },
-        {
-          label: 'Advanced',
-          items: [
-            { label: 'Cron Jobs', link: '/guide/cron/' },
-            { label: 'S3 Backup', link: '/guide/backup/' },
-            { label: 'Rate Limiting', link: '/guide/rate-limiting/' },
-            { label: 'Webhooks', link: '/guide/webhooks/' },
-          ],
-        },
-        {
-          label: 'Performance',
-          items: [
-            { label: 'Benchmarks', link: '/guide/benchmarks/' },
-            { label: 'bunqueue vs BullMQ', link: '/guide/comparison/' },
-          ],
-        },
-        {
-          label: 'Production',
-          items: [
-            { label: 'Production Operations', link: '/guide/production/' },
-            { label: 'Deployment Guide', link: '/guide/deployment/' },
-            { label: 'Databases (Postgres/MySQL)', link: '/guide/databases/' },
-            { label: 'Native TLS', link: '/guide/tls/' },
-            { label: 'Monitoring', link: '/guide/monitoring/' },
-            { label: 'Telemetry', link: '/guide/telemetry/' },
-          ],
-        },
-        {
-          label: 'Integrations',
-          items: [
-            { label: 'Overview', link: '/guide/integrations/' },
-            { label: 'Hono', link: '/guide/hono/' },
-            { label: 'Elysia', link: '/guide/elysia/' },
-            { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
-          ],
-        },
-        {
-          label: 'Reference',
-          items: [
-            { label: 'TypeScript Types', link: '/api/types/' },
-            { label: 'Glossary', link: '/guide/glossary/' },
-            { label: 'Examples', link: '/examples/' },
-            { label: 'Migration from BullMQ', link: '/guide/migration/' },
-          ],
-        },
-        {
           label: 'Blog',
+          collapsed: true,
           items: [
             { label: 'All Posts', link: '/blog/' },
             { label: 'Why bunqueue: SQLite Over Redis', link: '/blog/why-bunqueue/' },
@@ -269,8 +267,8 @@ export default defineConfig({
         },
         {
           label: 'Resources',
+          collapsed: true,
           items: [
-            { label: 'FAQ', link: '/faq/' },
             { label: 'Troubleshooting', link: '/troubleshooting/' },
             { label: 'Changelog', link: '/changelog/' },
             { label: 'Security', link: '/security/' },

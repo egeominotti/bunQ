@@ -1,6 +1,6 @@
 ---
-title: "Bunqueue Monitoring with Prometheus & Grafana"
-description: Set up Prometheus metrics, Grafana dashboards, and health checks for bunqueue. Monitor backlogs, failure rates, DLQ alerts, and workers.
+title: "Monitoring: Prometheus, Grafana & Health Checks"
+description: Watch bunqueue in production. Prometheus metrics, a ready-made Grafana dashboard, alert rules, and Kubernetes health probes.
 head:
   - tag: meta
     attrs:
@@ -11,44 +11,44 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · monitoring</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Prometheus, probes, <em>live events.</em></h1>
-  <p class="bq-hero-sub">bunqueue exposes Prometheus-compatible metrics for production monitoring. This guide covers the built-in metrics endpoint, Kubernetes health probes, alert rules, and a ready-to-use Grafana dashboard.</p>
-
-  <div class="bq-proof">
-    <span><b>25+</b> metrics on /prometheus</span>
-    <span><b>8</b> pre-configured alert rules</span>
-    <span><b>3</b> health endpoints for Kubernetes</span>
-    <span><b>1</b> docker compose command to start it all</span>
-  </div>
+  <p class="bq-hero-sub">The bunqueue server exposes everything a production setup needs to watch it: a Prometheus metrics endpoint, health probes for Kubernetes, ready-made alert rules, and a Grafana dashboard.</p>
 </div>
 
-:::tip[Using AI agents?]
-AI agents connected via MCP can query stats, job counts, per-queue metrics, and Prometheus data via natural language using `bunqueue_get_stats`, `bunqueue_get_queue_stats`, `bunqueue_get_prometheus_metrics`, and `bunqueue_get_memory_stats` tools. See [MCP Server](/guide/mcp/).
-:::
+## Quick Start
 
-## Quick Start with Docker Compose
-
-bunqueue includes a pre-configured monitoring stack:
+The fastest way to see it all: bunqueue ships a pre-configured monitoring stack.
 
 ```bash
 # Start bunqueue + Prometheus + Grafana
 docker compose --profile monitoring up -d
 ```
 
-Access the dashboards:
 - **Grafana**: http://localhost:3000 (admin/bunqueue)
 - **Prometheus**: http://localhost:9090
 
+Already running Prometheus? Just point it at the metrics endpoint:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'bunqueue'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:6790']
+    metrics_path: /prometheus
+```
+
 ## Prometheus Endpoint
 
-bunqueue exposes metrics at `/prometheus` on the HTTP port (default 6790):
+Metrics live at `/prometheus` on the HTTP port (default 6790):
 
 ```bash
 curl http://localhost:6790/prometheus
 ```
 
-The endpoint is unauthenticated by default so scrapers work out of the box. Set `METRICS_AUTH=true` to require a bearer token from `AUTH_TOKENS` (see the `bearer_token` scrape config below).
+The endpoint is unauthenticated by default so scrapers work out of the box. Set `METRICS_AUTH=true` to require a bearer token from `AUTH_TOKENS`, then add `bearer_token: 'your-auth-token'` to the scrape config.
 
-### Available Metrics
+### Server-wide metrics
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -57,7 +57,7 @@ The endpoint is unauthenticated by default so scrapers work out of the box. Set 
 | `bunqueue_jobs_delayed` | gauge | Delayed jobs |
 | `bunqueue_jobs_active` | gauge | Jobs being processed |
 | `bunqueue_jobs_completed` | gauge | Completed jobs in memory |
-| `bunqueue_jobs_dlq` | gauge | Jobs in dead letter queue |
+| `bunqueue_jobs_dlq` | gauge | Jobs in the dead letter queue |
 | `bunqueue_jobs_pushed_total` | counter | Total jobs pushed |
 | `bunqueue_jobs_pulled_total` | counter | Total jobs pulled |
 | `bunqueue_jobs_completed_total` | counter | Total jobs completed |
@@ -71,186 +71,37 @@ The endpoint is unauthenticated by default so scrapers work out of the box. Set 
 | `bunqueue_webhooks_total` | gauge | Total webhooks |
 | `bunqueue_webhooks_enabled` | gauge | Enabled webhooks |
 
-#### Per-Queue Metrics
+### Per-queue metrics
 
-All per-queue metrics include a `queue` label for filtering and aggregation:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `bunqueue_queue_jobs_waiting{queue="..."}` | gauge | Waiting jobs per queue |
-| `bunqueue_queue_jobs_prioritized{queue="..."}` | gauge | Prioritized jobs per queue |
-| `bunqueue_queue_jobs_delayed{queue="..."}` | gauge | Delayed jobs per queue |
-| `bunqueue_queue_jobs_active{queue="..."}` | gauge | Active jobs per queue |
-| `bunqueue_queue_jobs_dlq{queue="..."}` | gauge | DLQ jobs per queue |
-
-#### Latency Histograms
-
-Operation latency is tracked with Prometheus histograms (bucket boundaries in milliseconds):
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `bunqueue_push_duration_ms` | histogram | Push operation latency |
-| `bunqueue_pull_duration_ms` | histogram | Pull operation latency |
-| `bunqueue_ack_duration_ms` | histogram | Ack operation latency |
-
-Each histogram exposes `_bucket{le="..."}`, `_sum`, and `_count` series. Default bucket boundaries: `0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000` ms.
-
-### Example Output
+Five gauges carry a `queue` label so you can filter and aggregate per queue: `bunqueue_queue_jobs_waiting`, `bunqueue_queue_jobs_prioritized`, `bunqueue_queue_jobs_delayed`, `bunqueue_queue_jobs_active`, and `bunqueue_queue_jobs_dlq`.
 
 ```
-# HELP bunqueue_jobs_waiting Number of jobs waiting in queue
-# TYPE bunqueue_jobs_waiting gauge
-bunqueue_jobs_waiting 42
-
-# HELP bunqueue_jobs_active Number of jobs being processed
-# TYPE bunqueue_jobs_active gauge
-bunqueue_jobs_active 8
-
-# HELP bunqueue_jobs_pushed_total Total jobs pushed
-# TYPE bunqueue_jobs_pushed_total counter
-bunqueue_jobs_pushed_total 150432
-
-# Per-queue breakdown
 bunqueue_queue_jobs_waiting{queue="emails"} 30
 bunqueue_queue_jobs_waiting{queue="payments"} 12
 bunqueue_queue_jobs_active{queue="emails"} 5
-
-# Latency histograms
-# HELP bunqueue_push_duration_ms Push operation latency in milliseconds
-# TYPE bunqueue_push_duration_ms histogram
-bunqueue_push_duration_ms_bucket{le="0.1"} 120
-bunqueue_push_duration_ms_bucket{le="0.5"} 145000
-bunqueue_push_duration_ms_bucket{le="1"} 150000
-bunqueue_push_duration_ms_bucket{le="+Inf"} 150432
-bunqueue_push_duration_ms_sum 12045.3
-bunqueue_push_duration_ms_count 150432
 ```
 
-## Prometheus Configuration
+### Latency histograms
 
-Add bunqueue to your `prometheus.yml`:
+Push, pull, and ack latency are exposed as Prometheus histograms: `bunqueue_push_duration_ms`, `bunqueue_pull_duration_ms`, and `bunqueue_ack_duration_ms`, each with `_bucket`, `_sum`, and `_count` series. Use them for p99 alerts:
 
-```yaml
-scrape_configs:
-  - job_name: 'bunqueue'
-    scrape_interval: 5s
-    static_configs:
-      - targets: ['localhost:6790']
-    metrics_path: /prometheus
+```promql
+histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m]))
 ```
 
-With authentication:
-
-```yaml
-scrape_configs:
-  - job_name: 'bunqueue'
-    scrape_interval: 5s
-    static_configs:
-      - targets: ['localhost:6790']
-    metrics_path: /prometheus
-    bearer_token: 'your-auth-token'
-```
-
-## Grafana Dashboard
-
-The included dashboard provides:
-
-### Overview Row
-- Jobs Waiting, Delayed, Active, Completed, DLQ
-- Active Workers, Cron Jobs, Uptime
-
-### Throughput & Performance
-- Job throughput (pushed/pulled/completed/failed per second)
-- Queue depth over time (stacked area chart)
-- Per-queue breakdown with label filtering
-
-### Success & Failure Analysis
-- Success rate gauge (with thresholds)
-- Failure rate gauge (5-minute window)
-- Completed vs Failed bar chart
-
-### Latency & SLOs
-- Push/Pull/Ack latency histograms (p50, p95, p99)
-- Operation latency heatmap
-- SLO compliance tracking via histogram quantiles
-
-### Workers & Processing
-- Worker count over time
-- Worker throughput (processed/failed per second)
-- Worker utilization gauge
-
-### Webhooks & Cron
-- Webhook status
-- Cron job count
-- Lifetime totals
-
-### Alerts & Health
-- Visual alert indicators for:
-  - DLQ > 100 jobs
-  - Failure rate > 5%
-  - Queue backlog > 10,000
-  - No active workers
-  - Server health
-
-## Alert Rules
-
-Pre-configured Prometheus alerts in `monitoring/alert_rules.yml`:
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `BunqueueDLQHigh` | DLQ > 100 for 5m | critical |
-| `BunqueueHighFailureRate` | Failure > 5% for 5m | warning |
-| `BunqueueQueueBacklog` | Waiting > 10k for 10m | warning |
-| `BunqueueNoWorkers` | 0 workers + waiting jobs | critical |
-| `BunqueueServerDown` | Server unreachable | critical |
-| `BunqueueLowThroughput` | < 1 job/s for 10m | warning |
-| `BunqueueWorkerOverload` | Utilization > 95% | warning |
-| `BunqueueJobsStuck` | Active jobs, no completions | warning |
-
-### Example Alert Rule
-
-```yaml
-- alert: BunqueueDLQHigh
-  expr: bunqueue_jobs_dlq > 100
-  for: 5m
-  labels:
-    severity: critical
-  annotations:
-    summary: "High number of jobs in DLQ"
-    description: "{{ $value }} jobs are in the dead letter queue."
-```
-
-## CLI Metrics
-
-View metrics from the command line:
-
-```bash
-# Prometheus text format
-bunqueue metrics
-
-# Server stats (human-readable)
-bunqueue stats
-
-# Server stats as JSON
-bunqueue stats --json
-```
+See [Built-in Telemetry](/guide/telemetry/) for bucket boundaries and details.
 
 ## Health Endpoints
 
-bunqueue provides Kubernetes-compatible health endpoints (no auth, no rate limit):
+Kubernetes-compatible probes, no auth, no rate limit:
 
 ```bash
-# Detailed health (includes memory stats)
-curl http://localhost:6790/health
-
-# Kubernetes liveness probe (alias: /live), returns plain "OK"
-curl http://localhost:6790/healthz
-
-# Kubernetes readiness probe
-curl http://localhost:6790/ready
+curl http://localhost:6790/health    # detailed health with memory stats
+curl http://localhost:6790/healthz   # liveness probe (alias: /live), plain "OK"
+curl http://localhost:6790/ready     # readiness probe
 ```
 
-`/health` reports `status: "healthy"` with per-state job counts, connection counts, memory usage, uptime, and version. When the disk fills up, `ok` flips to `false`, `status` becomes `"degraded"`, and a `storage` block appears with `diskFull: true`, the underlying error, and a `since` timestamp:
+`/health` reports per-state job counts, connections, memory, uptime, and version:
 
 ```json
 {
@@ -264,77 +115,76 @@ curl http://localhost:6790/ready
 }
 ```
 
-## Debug Endpoints
+When the disk fills up, `ok` flips to `false`, `status` becomes `"degraded"`, and a `storage` block appears with `diskFull: true`, the underlying error, and a `since` timestamp.
 
-For troubleshooting:
+## Alert Rules
+
+Pre-configured Prometheus alerts ship in `monitoring/alert_rules.yml`:
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| `BunqueueDLQHigh` | DLQ > 100 for 5m | critical |
+| `BunqueueHighFailureRate` | Failure > 5% for 5m | warning |
+| `BunqueueQueueBacklog` | Waiting > 10k for 10m | warning |
+| `BunqueueNoWorkers` | 0 workers + waiting jobs | critical |
+| `BunqueueServerDown` | Server unreachable | critical |
+| `BunqueueLowThroughput` | < 1 job/s for 10m | warning |
+| `BunqueueWorkerOverload` | Utilization > 95% | warning |
+| `BunqueueJobsStuck` | Active jobs, no completions | warning |
+
+Each rule looks like this; copy and tune the thresholds for your workload:
+
+```yaml
+- alert: BunqueueDLQHigh
+  expr: bunqueue_jobs_dlq > 100
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "High number of jobs in DLQ"
+    description: "{{ $value }} jobs are in the dead letter queue."
+```
+
+## Grafana Dashboard
+
+The bundled dashboard (`monitoring/grafana/dashboards/bunqueue.json`) covers job counts, throughput, per-queue breakdowns, success and failure rates, latency percentiles and heatmaps, worker utilization, webhooks, cron, and visual alert indicators.
+
+The docker compose stack loads it automatically. To import it into an existing Grafana: Dashboards → Import → upload the JSON → select your Prometheus datasource.
+
+## CLI and Debug Access
 
 ```bash
-# Heap statistics
-curl http://localhost:6790/heapstats
-
-# Force garbage collection
-curl -X POST http://localhost:6790/gc
+bunqueue metrics        # Prometheus text format from the terminal
+bunqueue stats          # human-readable server stats
+bunqueue stats --json   # same, as JSON
 ```
 
-Both require a bearer token when `AUTH_TOKENS` is set:
+For troubleshooting there are two debug endpoints (both require a bearer token when `AUTH_TOKENS` is set):
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" http://localhost:6790/heapstats
+curl http://localhost:6790/heapstats   # heap object breakdown
+curl -X POST http://localhost:6790/gc  # force garbage collection
 ```
-
-## File Structure
-
-```
-monitoring/
-├── prometheus.yml              # Prometheus config
-├── alert_rules.yml             # Alert definitions
-└── grafana/
-    ├── provisioning/
-    │   ├── datasources/        # Auto-configure Prometheus
-    │   └── dashboards/         # Auto-load dashboards
-    └── dashboards/
-        └── bunqueue.json       # Complete dashboard
-```
-
-## Custom Dashboards
-
-Import the dashboard JSON directly:
-
-1. Open Grafana → Dashboards → Import
-2. Upload `monitoring/grafana/dashboards/bunqueue.json`
-3. Select Prometheus datasource
-4. Click Import
 
 ## Logging
 
-Configure log level at startup via environment variable or [config file](/guide/configuration/):
+Configure log level and format at startup via environment variables or the [config file](/guide/configuration/):
 
 ```bash
-LOG_LEVEL=debug bun run src/main.ts    # debug, info, warn, error
-LOG_FORMAT=json bun run src/main.ts    # structured JSON output
+LOG_LEVEL=debug bun run src/main.ts    # debug, info, warn, error (default: info)
+LOG_FORMAT=json bun run src/main.ts    # structured JSON output for log shippers
 ```
-
-Or in `bunqueue.config.ts`:
-
-```typescript
-defineConfig({
-  logging: { level: 'debug', format: 'json' },
-});
-```
-
-Log levels are filtered at runtime. Only messages at or above the configured level are emitted (debug < info < warn < error). Default is `info`.
 
 ## Best Practices
 
-1. **Scrape interval**: Use 5-15 seconds for real-time visibility
-2. **Retention**: Keep 15+ days for trend analysis
-3. **Alerts**: Start with the included rules, tune thresholds for your workload
-4. **Per-queue monitoring**: Use `{queue="..."}` labels to filter dashboards per queue
-5. **Latency SLOs**: Set alerts on histogram quantiles (e.g., `histogram_quantile(0.99, bunqueue_push_duration_ms_bucket) > 50`)
-6. **Throughput rates**: Monitor `pushPerSec` and `pullPerSec` from `/stats` for real-time throughput
+1. **Scrape interval**: 5-15 seconds gives near-real-time visibility
+2. **Alerts**: start with the included rules, tune thresholds for your workload
+3. **Per-queue dashboards**: filter with the `{queue="..."}` label
+4. **Latency SLOs**: alert on histogram quantiles, e.g. `histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m])) > 50`
+5. **Throughput**: the `/stats` endpoint exposes live `pushPerSec` / `pullPerSec` rates, see [Built-in Telemetry](/guide/telemetry/)
 
 :::tip[Related Guides]
-- [Built-in Telemetry](/guide/telemetry/) - Latency histograms, throughput rates, and log configuration
+- [Built-in Telemetry](/guide/telemetry/) - What is measured and how to read it
 - [Troubleshooting](/troubleshooting/) - Diagnose common issues
 - [Production Deployment](/guide/deployment/) - Deploy with monitoring
 :::

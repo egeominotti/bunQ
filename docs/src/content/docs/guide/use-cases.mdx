@@ -1,6 +1,6 @@
 ---
-title: "Production Use Cases & Background Job Patterns for Bun"
-description: "Production-ready bunqueue patterns: AI agent workflows, email delivery, webhooks, payments, image processing, cron scheduling, multi-tenant queues."
+title: "bunqueue Use Cases: Background Job Patterns for Bun"
+description: "Six production patterns with copy-paste code: email delivery, webhooks, image processing, payments, cron scheduling, and multi-step job flows."
 head:
   - tag: meta
     attrs:
@@ -13,1252 +13,279 @@ head:
   - tag: meta
     attrs:
       property: og:description
-      content: "Battle-tested patterns for background jobs in Bun. Email delivery, webhooks, payments, image processing, AI agent workflows, cron scheduling, and more."
+      content: "Six production patterns with copy-paste code: email delivery, webhooks, image processing, payments, cron scheduling, and multi-step job flows."
   - tag: meta
     attrs:
       name: keywords
-      content: "background jobs, job queue, Bun, TypeScript, email queue, webhook delivery, payment processing, image processing, video transcoding, cron jobs, AI agent, MCP, multi-tenant, rate limiting, dead letter queue, retry pattern, AI automation, agentic workflows, AI task scheduler, Claude, Cursor"
+      content: "background jobs, job queue, Bun, TypeScript, email queue, webhook delivery, payment processing, image processing, cron jobs, retry pattern, dead letter queue"
 ---
-
-import { Aside } from '@astrojs/starlight/components';
-import AiAgentWorkflow from '../../../components/AiAgentWorkflow.astro';
-import AppArchitecture from '../../../components/AppArchitecture.astro';
-import JobLifecycle from '../../../components/JobLifecycle.astro';
-import EmailPipeline from '../../../components/EmailPipeline.astro';
-import ReportPipeline from '../../../components/ReportPipeline.astro';
-import WebhookDelivery from '../../../components/WebhookDelivery.astro';
-import ImagePipeline from '../../../components/ImagePipeline.astro';
-import NotificationFanout from '../../../components/NotificationFanout.astro';
-import PaymentFlow from '../../../components/PaymentFlow.astro';
-import MultiTenantArch from '../../../components/MultiTenantArch.astro';
-import WorkflowPatterns from '../../../components/WorkflowPatterns.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · use-cases</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The use cases teams <em>run.</em></h1>
-  <p class="bq-hero-sub">API requests should return immediately while emails, images, payments and external calls happen in the background. Every pattern below is production ready, runs in embedded mode with zero external services, and gets retries, DLQ, progress tracking and cron scheduling from the queue itself.</p>
+  <p class="bq-hero-sub">Six patterns you can copy into a real app: emails, webhooks, images, payments, cron and multi-step flows. Each one moves slow work out of your API request and into a background job.</p>
 </div>
 
-## AI Agent Workflows (MCP)
+This page shows the most common things people build with bunqueue, each with a small working example. If a term is new to you, it gets a plain-words explanation the first time it appears.
 
-AI agents are increasingly used to orchestrate complex automation tasks, but they lack the ability to schedule background work, manage retries, or run recurring operations. bunqueue solves this by exposing its entire queue engine as 73 MCP tools that any AI agent can call directly.
+## The core pattern
 
-When an agent connects to bunqueue via MCP (Model Context Protocol), it gains the ability to add jobs to queues, create cron schedules, set rate limits, monitor queue health, manage dead letter queues, and, with HTTP handlers, auto-process jobs by making HTTP requests without any external worker process.
-
-<AiAgentWorkflow />
-
-**What AI agents can do with bunqueue:**
-- **Schedule tasks**, create cron jobs, delayed execution, recurring workflows with a single tool call
-- **Manage pipelines**, push jobs, monitor progress, retry failures, create sequential or parallel workflows
-- **Auto-process jobs via HTTP**, register an HTTP handler on a queue, and bunqueue calls the endpoint for every job. No external worker needed
-- **Consume jobs directly**, full pull/ack/fail cycle for inline job processing within the agent session
-- **Monitor everything**, server stats, memory, Prometheus metrics, DLQ entries, job logs, per-queue breakdowns
-- **Control flow**, pause/resume queues, set rate limits per second, manage concurrency limits
-
-```bash
-# bunqueue-mcp is a binary bundled with bunqueue, install it first, then connect Claude Code
-bun add bunqueue
-bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
-claude mcp add bunqueue -- bunx bunqueue-mcp
-```
-
-<Aside type="note">
-  Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). To run the MCP server, install it once with `bun add @modelcontextprotocol/sdk`; `bunx` won't pull it in automatically.
-</Aside>
-
-The MCP server runs as a subprocess, communicates via stdio using JSON-RPC, and supports both embedded mode (in-process, SQLite persistence via `DATA_PATH`) and TCP mode (connect to a remote bunqueue server). See the [MCP Server guide](/guide/mcp/) for full setup, all 73 tools, HTTP handler configuration, and real-world examples.
-
----
-
-## Architecture Overview
-
-<AppArchitecture />
-
-## Job Lifecycle
-
-<JobLifecycle />
-
----
-
-## Email Delivery System
-
-Email is one of the most common background job use cases. Sending email synchronously in an API request is slow (SMTP connections, template rendering, attachment handling) and unreliable (provider outages, rate limits, network errors). A queue decouples the send operation from the request, ensuring emails are delivered reliably even if the provider is temporarily unavailable.
-
-bunqueue handles this with automatic retries and exponential backoff. If SendGrid or your SMTP server returns a 5xx error, the job is retried up to N times with increasing delays. After all attempts are exhausted, the job moves to the dead letter queue (DLQ) where it can be inspected, retried manually, or auto-retried on a schedule. Progress tracking lets you monitor each step of the email pipeline in real time.
-
-<EmailPipeline />
-
-```typescript
-import { Queue, Worker, shutdownManager } from 'bunqueue/client';
-
-interface EmailJob {
-  to: string;
-  template: 'welcome' | 'reset-password' | 'invoice' | 'notification';
-  data: Record<string, unknown>;
-  attachments?: { name: string; url: string }[];
-}
-
-const emailQueue = new Queue<EmailJob>('emails', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 5,
-    backoff: 2000,        // Exponential backoff
-    removeOnComplete: true,
-  },
-});
-
-const emailWorker = new Worker<EmailJob>('emails', async (job) => {
-  const { to, template, data, attachments } = job.data;
-
-  await job.updateProgress(10, 'Loading template...');
-  const html = await renderTemplate(template, data);
-
-  await job.updateProgress(30, 'Preparing attachments...');
-  const files = attachments ? await downloadAttachments(attachments) : [];
-
-  await job.updateProgress(50, 'Sending email...');
-  const result = await sendEmail({ to, html, attachments: files });
-
-  await job.log(`Delivered to ${to} via ${result.provider}`);
-  await job.updateProgress(100, 'Delivered');
-
-  return {
-    messageId: result.messageId,
-    provider: result.provider,
-    deliveredAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 10 });
-
-// Send welcome email
-await emailQueue.add('welcome', {
-  to: 'user@example.com',
-  template: 'welcome',
-  data: { name: 'John', activationLink: 'https://...' },
-});
-
-// Send bulk newsletter
-const subscribers = await getSubscribers();
-await emailQueue.addBulk(
-  subscribers.map(sub => ({
-    name: 'newsletter',
-    data: {
-      to: sub.email,
-      template: 'notification',
-      data: { name: sub.name, content: newsletterContent },
-    },
-  }))
-);
-```
-
----
-
-## Report Generation Pipeline
-
-<ReportPipeline />
-
-Reports that query large datasets, transform data, generate files, and upload to storage can take minutes to complete. Running this synchronously in an API request would timeout. Instead, the user triggers the report and receives a notification when it's ready.
-
-bunqueue's progress tracking is essential here: the worker reports each phase (data fetch, processing, file generation, upload) so the frontend can show a live progress bar. The 10-minute timeout prevents stuck jobs from blocking the queue, and the 2-retry policy handles transient database or storage failures.
-
-```typescript
-interface ReportJob {
-  type: 'sales' | 'inventory' | 'analytics' | 'audit';
-  format: 'pdf' | 'xlsx' | 'csv';
-  filters: {
-    dateRange: { start: string; end: string };
-    departments?: string[];
-    regions?: string[];
-  };
-  requestedBy: string;
-  notifyEmail: string;
-}
-
-const reportQueue = new Queue<ReportJob>('reports', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 2,
-    timeout: 600000, // 10 minutes max
-  },
-});
-
-const reportWorker = new Worker<ReportJob>('reports', async (job) => {
-  const { type, format, filters, requestedBy, notifyEmail } = job.data;
-
-  // Phase 1: Query data
-  await job.updateProgress(10, 'Fetching data...');
-  await job.log(`Report type: ${type}, format: ${format}`);
-  const data = await fetchReportData(type, filters);
-
-  // Phase 2: Process data
-  await job.updateProgress(40, `Processing ${data.length} records...`);
-  const processed = await processData(data, type);
-
-  // Phase 3: Generate file
-  await job.updateProgress(70, `Generating ${format.toUpperCase()}...`);
-  const file = await generateFile(processed, format);
-
-  // Phase 4: Upload to storage
-  await job.updateProgress(90, 'Uploading to storage...');
-  const url = await uploadToS3(file, `reports/${job.id}.${format}`);
-
-  // Phase 5: Notify user
-  await job.updateProgress(95, 'Sending notification...');
-  await sendEmail({
-    to: notifyEmail,
-    template: 'report-ready',
-    data: { reportUrl: url, type, format },
-  });
-
-  await job.updateProgress(100, 'Complete');
-
-  return {
-    url,
-    size: file.size,
-    records: data.length,
-    generatedAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 3 });
-
-// Generate monthly sales report
-await reportQueue.add('monthly-sales', {
-  type: 'sales',
-  format: 'xlsx',
-  filters: {
-    dateRange: { start: '2024-01-01', end: '2024-01-31' },
-    regions: ['US', 'EU'],
-  },
-  requestedBy: 'user-123',
-  notifyEmail: 'manager@company.com',
-});
-```
-
----
-
-## Webhook Delivery with Circuit Breaker
-
-<WebhookDelivery />
-
-Webhooks are inherently unreliable. Partner endpoints go down, return 5xx errors, or hit rate limits. A robust webhook system must handle all of these cases gracefully. bunqueue provides exactly this: each webhook delivery is a job with configurable retry attempts, exponential backoff, and a dead letter queue for permanent failures.
-
-The DLQ is configured to auto-retry failed webhooks hourly (up to 3 times) before giving up. This means transient outages are handled automatically without any manual intervention. After 7 days, expired DLQ entries are purged. The worker uses `AbortSignal.timeout()` to prevent hanging connections from blocking the queue.
-
-```typescript
-interface WebhookJob {
-  endpoint: string;
-  event: string;
-  payload: Record<string, unknown>;
-  headers?: Record<string, string>;
-  signature?: string;
-}
-
-const webhookQueue = new Queue<WebhookJob>('webhooks', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 8,
-    backoff: 5000, // Exponential: 5s, 10s, 20s, 40s...
-  },
-});
-
-// Configure DLQ for permanent failures
-webhookQueue.setDlqConfig({
-  autoRetry: true,
-  autoRetryInterval: 3600000, // Retry DLQ every hour
-  maxAutoRetries: 3,
-  maxAge: 604800000, // Keep for 7 days
-});
-
-const webhookWorker = new Worker<WebhookJob>('webhooks', async (job) => {
-  const { endpoint, event, payload, headers, signature } = job.data;
-
-  await job.log(`Delivering ${event} to ${endpoint}`);
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Webhook-Event': event,
-      'X-Webhook-Signature': signature || '',
-      'X-Webhook-Delivery': job.id,
-      ...headers,
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(30000), // 30s timeout
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`HTTP ${response.status}: ${body.slice(0, 200)}`);
-  }
-
-  return {
-    status: response.status,
-    deliveredAt: new Date().toISOString(),
-    attempt: job.attemptsMade,
-  };
-}, { embedded: true, concurrency: 20 });
-
-// Dispatch webhook
-const payload = {
-  orderId: 'ORD-123',
-  total: 99.99,
-  items: [{ sku: 'ITEM-1', qty: 2 }],
-};
-
-await webhookQueue.add('order.created', {
-  endpoint: 'https://partner.com/webhooks',
-  event: 'order.created',
-  payload,
-  signature: generateHmacSignature(payload, webhookSecret),
-});
-```
-
----
-
-## Image Processing Pipeline
-
-<ImagePipeline />
-
-When a user uploads an image, you typically need to generate multiple variants: thumbnails for listings, medium sizes for cards, full resolution for detail views, and OpenGraph images for social sharing. Processing all of these synchronously would make the upload endpoint unbearably slow.
-
-By pushing an image job to bunqueue, the upload returns immediately while a Worker handles the heavy lifting in the background. The worker downloads the source image, runs it through Sharp (or any image processing library) for each variant, uploads the results to a CDN, and saves the URLs as the job result. Progress tracking reports each variant as it completes, and the 2-minute timeout prevents stuck ffmpeg/sharp processes from blocking the queue.
-
-```typescript
-interface ImageJob {
-  sourceUrl: string;
-  variants: Array<{
-    name: string;
-    width: number;
-    height: number;
-    format: 'webp' | 'avif' | 'jpeg';
-    quality: number;
-  }>;
-  destination: string;
-  metadata?: Record<string, string>;
-}
-
-const imageQueue = new Queue<ImageJob>('images', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 3,
-    timeout: 120000, // 2 minutes
-  },
-});
-
-const imageWorker = new Worker<ImageJob>('images', async (job) => {
-  const { sourceUrl, variants, destination, metadata } = job.data;
-  const results: Record<string, string> = {};
-
-  await job.updateProgress(5, 'Downloading source image...');
-  const source = await downloadImage(sourceUrl);
-
-  const totalVariants = variants.length;
-  for (let i = 0; i < totalVariants; i++) {
-    const variant = variants[i];
-    const progress = 10 + Math.floor((i / totalVariants) * 80);
-
-    await job.updateProgress(progress, `Processing ${variant.name}...`);
-
-    // Resize and convert
-    const processed = await sharp(source)
-      .resize(variant.width, variant.height, { fit: 'cover' })
-      .toFormat(variant.format, { quality: variant.quality })
-      .toBuffer();
-
-    // Upload to CDN
-    const path = `${destination}/${variant.name}.${variant.format}`;
-    const url = await uploadToCDN(processed, path, metadata);
-    results[variant.name] = url;
-
-    await job.log(`Uploaded ${variant.name}: ${url}`);
-  }
-
-  await job.updateProgress(100, 'Complete');
-
-  return {
-    variants: results,
-    processedAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 5 });
-
-// Process product image
-await imageQueue.add('product-image', {
-  sourceUrl: 'https://uploads.example.com/raw/product-123.jpg',
-  variants: [
-    { name: 'thumbnail', width: 150, height: 150, format: 'webp', quality: 80 },
-    { name: 'card', width: 400, height: 300, format: 'webp', quality: 85 },
-    { name: 'full', width: 1200, height: 900, format: 'webp', quality: 90 },
-    { name: 'og', width: 1200, height: 630, format: 'jpeg', quality: 85 },
-  ],
-  destination: 'products/123',
-  metadata: { 'Cache-Control': 'public, max-age=31536000' },
-});
-```
-
----
-
-## Data Export/Import System
-
-Exporting large datasets (hundreds of thousands of records) cannot happen in a single request. The data must be fetched in chunks, written to a temporary file, uploaded to storage, and then the user must be notified. This is a textbook background job.
-
-bunqueue's progress tracking shines here: each chunk updates the progress percentage, so the user sees real-time feedback on a potentially 30-minute export. The chunked approach prevents memory exhaustion, instead of loading all records into memory, the worker processes 10,000 records at a time. The 30-minute timeout accommodates large exports while preventing infinite hangs.
-
-```typescript
-interface ExportJob {
-  type: 'users' | 'orders' | 'products' | 'transactions';
-  format: 'csv' | 'json' | 'parquet';
-  filters?: Record<string, unknown>;
-  notifyEmail: string;
-  chunkSize?: number;
-}
-
-const exportQueue = new Queue<ExportJob>('exports', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 2,
-    timeout: 1800000, // 30 minutes
-  },
-});
-
-const exportWorker = new Worker<ExportJob>('exports', async (job) => {
-  const { type, format, filters, notifyEmail, chunkSize = 10000 } = job.data;
-
-  await job.updateProgress(5, 'Counting records...');
-  const totalCount = await countRecords(type, filters);
-  const totalChunks = Math.ceil(totalCount / chunkSize);
-
-  await job.log(`Exporting ${totalCount} ${type} in ${totalChunks} chunks`);
-
-  // Create temporary file
-  const tempFile = await createTempFile(`export-${job.id}.${format}`);
-  const writer = await createWriter(tempFile, format);
-
-  // Process in chunks
-  for (let chunk = 0; chunk < totalChunks; chunk++) {
-    const progress = 10 + Math.floor((chunk / totalChunks) * 80);
-    await job.updateProgress(progress, `Processing chunk ${chunk + 1}/${totalChunks}...`);
-
-    const records = await fetchRecords(type, filters, {
-      offset: chunk * chunkSize,
-      limit: chunkSize,
-    });
-
-    await writer.write(records);
-  }
-
-  await writer.close();
-
-  // Upload to storage
-  await job.updateProgress(95, 'Uploading file...');
-  const url = await uploadToS3(tempFile, `exports/${job.id}.${format}`);
-
-  // Send notification
-  await sendEmail({
-    to: notifyEmail,
-    template: 'export-ready',
-    data: { downloadUrl: url, type, recordCount: totalCount },
-  });
-
-  await job.updateProgress(100, 'Complete');
-
-  return {
-    url,
-    recordCount: totalCount,
-    format,
-    size: await getFileSize(tempFile),
-  };
-}, { embedded: true, concurrency: 2 });
-
-// Export all orders for accounting
-await exportQueue.add('accounting-export', {
-  type: 'orders',
-  format: 'csv',
-  filters: {
-    status: 'completed',
-    dateRange: { start: '2024-01-01', end: '2024-12-31' },
-  },
-  notifyEmail: 'accounting@company.com',
-  chunkSize: 5000,
-});
-```
-
----
-
-## Multi-Channel Notification System
-
-<NotificationFanout />
-
-Modern applications need to reach users through multiple channels: email, push notifications, SMS, and in-app messages. Each channel has its own API, failure modes, and rate limits. Processing notifications synchronously would make the triggering action (e.g. "order placed") extremely slow and fragile, a single SMS provider timeout would block the entire response.
-
-By queuing notification jobs, the triggering action returns instantly while the worker fans out to all configured channels. User preferences are respected (some users opt out of SMS), and individual channel failures don't block other channels. High-priority notifications (like security alerts) use bunqueue's priority system to jump ahead of promotional messages in the queue.
-
-```typescript
-interface NotificationJob {
-  userId: string;
-  type: 'order_update' | 'promotion' | 'security_alert' | 'reminder';
-  title: string;
-  body: string;
-  data?: Record<string, unknown>;
-  channels?: ('email' | 'push' | 'sms' | 'in_app')[];
-}
-
-const notificationQueue = new Queue<NotificationJob>('notifications', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: 1000,
-  },
-});
-
-const notificationWorker = new Worker<NotificationJob>('notifications', async (job) => {
-  const { userId, type, title, body, data, channels } = job.data;
-
-  // Get user preferences
-  const user = await getUser(userId);
-  const prefs = await getNotificationPreferences(userId);
-
-  // Determine channels to use
-  const activeChannels = channels || getDefaultChannels(type);
-  const allowedChannels = activeChannels.filter(ch => prefs[ch] !== false);
-
-  const results: Record<string, boolean> = {};
-
-  for (const channel of allowedChannels) {
-    try {
-      switch (channel) {
-        case 'email':
-          await sendEmail({ to: user.email, subject: title, body });
-          break;
-        case 'push':
-          await sendPushNotification(user.deviceTokens, { title, body, data });
-          break;
-        case 'sms':
-          await sendSMS(user.phone, `${title}: ${body}`);
-          break;
-        case 'in_app':
-          await createInAppNotification(userId, { type, title, body, data });
-          break;
-      }
-      results[channel] = true;
-      await job.log(`Sent via ${channel}`);
-    } catch (err) {
-      results[channel] = false;
-      await job.log(`Failed ${channel}: ${(err as Error).message}`);
-    }
-  }
-
-  return {
-    userId,
-    type,
-    channels: results,
-    sentAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 15 });
-
-// Security alert - high priority, all channels
-await notificationQueue.add('security-alert', {
-  userId: 'user-123',
-  type: 'security_alert',
-  title: 'New login detected',
-  body: 'A new device logged into your account from San Francisco, CA',
-  data: { ip: '192.168.1.1', device: 'Chrome on MacOS' },
-  channels: ['email', 'push', 'sms'],
-}, { priority: 100 });
-```
-
----
-
-## Payment Processing Queue
-
-<PaymentFlow />
-
-Payment processing is the most critical background job in any e-commerce system. It must be reliable (never lose a charge), idempotent (never charge twice for the same order), and auditable (every action logged). Processing payments synchronously in the checkout flow is risky: a timeout or crash after the charge but before the database update results in a lost transaction.
-
-bunqueue handles this with the `durable: true` flag, which bypasses the write buffer and persists the job to SQLite immediately (set a `dataPath` on the embedded queue, without one the queue is in-memory). This guarantees zero data loss even if the process crashes. The idempotency key pattern prevents duplicate charges, and the DLQ is configured with `autoRetry: false` because failed payments require manual review, you don't want to auto-retry a charge that failed due to insufficient funds.
-
-```typescript
-interface PaymentJob {
-  orderId: string;
-  amount: number;
-  currency: string;
-  customerId: string;
-  paymentMethodId: string;
-  metadata?: Record<string, string>;
-  idempotencyKey: string;
-}
-
-const paymentQueue = new Queue<PaymentJob>('payments', {
-  embedded: true,
-  dataPath: './data/payments.db', // durable writes need SQLite persistence
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: 5000,
-    timeout: 60000,
-  },
-});
-
-// Configure strict DLQ for failed payments
-paymentQueue.setDlqConfig({
-  autoRetry: false, // Manual review required
-  maxAge: 2592000000, // Keep for 30 days
-});
-
-const paymentWorker = new Worker<PaymentJob>('payments', async (job) => {
-  const { orderId, amount, currency, customerId, paymentMethodId, idempotencyKey } = job.data;
-
-  await job.log(`Processing payment for order ${orderId}`);
-
-  // Check idempotency
-  const existing = await checkIdempotency(idempotencyKey);
-  if (existing) {
-    await job.log('Payment already processed (idempotent)');
-    return existing;
-  }
-
-  // Create payment intent
-  await job.updateProgress(20, 'Creating payment intent...');
-  const intent = await stripe.paymentIntents.create({
-    amount: Math.round(amount * 100),
-    currency,
-    customer: customerId,
-    payment_method: paymentMethodId,
-    confirm: true,
-    idempotency_key: idempotencyKey,
-  });
-
-  if (intent.status !== 'succeeded') {
-    throw new Error(`Payment failed: ${intent.status}`);
-  }
-
-  // Record transaction
-  await job.updateProgress(80, 'Recording transaction...');
-  await recordTransaction({
-    orderId,
-    paymentIntentId: intent.id,
-    amount,
-    currency,
-    status: 'completed',
-  });
-
-  // Audit log
-  await createAuditLog({
-    action: 'payment.completed',
-    orderId,
-    amount,
-    paymentIntentId: intent.id,
-    jobId: job.id,
-  });
-
-  await job.updateProgress(100, 'Complete');
-
-  return {
-    paymentIntentId: intent.id,
-    status: 'completed',
-    processedAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 5 });
-
-// Process order payment - CRITICAL: use durable for guaranteed persistence
-await paymentQueue.add('charge', {
-  orderId: 'ORD-123',
-  amount: 99.99,
-  currency: 'usd',
-  customerId: 'cus_xxx',
-  paymentMethodId: 'pm_xxx',
-  idempotencyKey: 'order-ORD-123-payment',
-}, { durable: true }); // Immediate disk write - no data loss on crash
-```
-
----
-
-## Search Index Synchronization
-
-Search engines like Elasticsearch or Typesense need to stay in sync with your database. Updating the index synchronously on every database write adds latency and creates a tight coupling between your application and the search service. If Elasticsearch is down, your writes would fail.
-
-By pushing index operations to a queue, database writes return immediately while bunqueue handles the synchronization in the background. The high retry count (5 attempts) and `removeOnComplete: true` flag keep the queue lean while ensuring eventual consistency. Bulk re-indexing after schema changes is straightforward: push thousands of index jobs and let the worker process them at controlled concurrency.
-
-```typescript
-interface IndexJob {
-  action: 'index' | 'update' | 'delete';
-  entity: 'product' | 'user' | 'article' | 'order';
-  id: string;
-  data?: Record<string, unknown>;
-}
-
-const indexQueue = new Queue<IndexJob>('search-index', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 5,
-    backoff: 2000,
-    removeOnComplete: true,
-  },
-});
-
-const indexWorker = new Worker<IndexJob>('search-index', async (job) => {
-  const { action, entity, id, data } = job.data;
-  const indexName = `${entity}s`; // products, users, etc.
-
-  switch (action) {
-    case 'index':
-    case 'update':
-      const document = data || await fetchEntity(entity, id);
-      const transformed = transformForSearch(entity, document);
-      await elasticsearch.index({
-        index: indexName,
-        id,
-        body: transformed,
-      });
-      await job.log(`Indexed ${entity}:${id}`);
-      break;
-
-    case 'delete':
-      await elasticsearch.delete({
-        index: indexName,
-        id,
-        ignore: [404],
-      });
-      await job.log(`Deleted ${entity}:${id} from index`);
-      break;
-  }
-
-  return { action, entity, id };
-}, { embedded: true, concurrency: 20 });
-
-// Index new product
-await indexQueue.add('index-product', {
-  action: 'index',
-  entity: 'product',
-  id: 'prod-123',
-  data: {
-    name: 'Premium Widget',
-    description: 'High-quality widget for professionals',
-    price: 49.99,
-    categories: ['tools', 'professional'],
-    tags: ['premium', 'bestseller'],
-  },
-});
-
-// Bulk re-index after schema change
-const productIds = await getAllProductIds();
-await indexQueue.addBulk(
-  productIds.map(id => ({
-    name: 'reindex',
-    data: { action: 'index', entity: 'product', id },
-  }))
-);
-```
-
----
-
-## Scheduled Tasks with Cron
-
-<Aside type="note" title="Works in embedded mode too">
-Cron scheduling via `upsertJobScheduler()` works in **both embedded and server mode**. Schedules are persisted in SQLite and survive restarts. You can also attach a `repeat` option to `queue.add()`. See the [Cron guide](/guide/cron/).
-</Aside>
-
-Recurring tasks using cron expressions or plain intervals, in either mode.
-
-### Scheduling Recurring Jobs
-
-```typescript
-// Works in both embedded and server mode
-await scheduledQueue.upsertJobScheduler('daily-cleanup',
-  { pattern: '0 3 * * *' }, // RepeatOpts
-  { data: { task: 'cleanup', params: { olderThanDays: 30 } } } // JobTemplate
-);
-
-await scheduledQueue.upsertJobScheduler('health-check',
-  { every: 300000 }, // RepeatOpts: every 5 minutes
-  { data: { task: 'health-check' } } // JobTemplate
-);
-```
-
-### Embedded Mode Example
+Every use case below is a variation of the same idea: your API handler adds a job (a unit of work saved as data) to a queue and returns immediately. A worker (a function that pulls jobs and runs them) does the slow part in the background.
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
-interface ScheduledJob {
-  task: string;
-  params?: Record<string, unknown>;
-}
+// Embedded mode: the queue runs inside your process, no separate server.
+// dataPath persists jobs to a SQLite file so they survive restarts.
+const queue = new Queue('emails', { embedded: true, dataPath: './data/app.db' });
 
-const scheduledQueue = new Queue<ScheduledJob>('scheduled', { embedded: true });
+new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { embedded: true, concurrency: 10 }); // up to 10 jobs in parallel
 
-// Recurring health check every 5 minutes
-await scheduledQueue.upsertJobScheduler('health-check',
-  { every: 300000 },
-  { data: { task: 'health-check' } }
-);
-
-// Daily cleanup at 3 AM, cron expression persisted in SQLite
-await scheduledQueue.upsertJobScheduler('daily-cleanup',
-  { pattern: '0 3 * * *' },
-  { data: { task: 'cleanup', params: { olderThanDays: 30 } } }
-);
-
-const scheduledWorker = new Worker<ScheduledJob>('scheduled', async (job) => {
-  const { task, params } = job.data;
-
-  switch (task) {
-    case 'cleanup':
-      const deleted = await cleanupOldRecords(params?.olderThanDays);
-      return { deleted };
-
-    case 'health-check':
-      const status = await checkSystemHealth();
-      if (!status.healthy) {
-        await alertOps(status);
-      }
-      return status;
-  }
-}, { embedded: true });
-
-// Clean up on shutdown
-process.on('SIGINT', () => {
-  scheduledWorker.close();
-});
+// In your API handler: this returns in microseconds
+await queue.add('welcome', { to: 'user@example.com' });
 ```
 
----
+That is the whole model. The sections below add the options that make each use case reliable. New to bunqueue? Start with the [quickstart](/guide/quickstart/).
 
-## Multi-Tenant Queue Isolation
+## Email delivery
 
-<MultiTenantArch />
-
-In a multi-tenant SaaS application, you need queue isolation between tenants. One tenant's burst of activity should not impact another tenant's job processing. Pausing queues for maintenance on tenant A should not affect tenant B.
-
-bunqueue's `QueueGroup` provides namespace isolation: each tenant gets its own set of queues (emails, reports, webhooks) prefixed with the tenant ID. All queues share the same SQLite database (efficient storage), but operations like pause, resume, and drain are scoped to the tenant. Rate limits and concurrency can be configured per-tenant to enforce resource boundaries.
+Sending email inside an API request is slow and fragile: the provider can be down or rate limited. Queue it instead, and let bunqueue retry on failure.
 
 ```typescript
-import { QueueGroup } from 'bunqueue/client';
+import { Queue, Worker } from 'bunqueue/client';
 
-interface TenantJob {
-  action: string;
-  data: Record<string, unknown>;
-}
+interface EmailJob { to: string; template: string; data: Record<string, unknown> }
 
-// Create isolated queue groups per tenant
-function createTenantQueues(tenantId: string) {
-  const group = new QueueGroup(tenantId);
-
-  return {
-    emails: group.getQueue<TenantJob>('emails', {
-      embedded: true,
-      defaultJobOptions: { attempts: 3 },
-    }),
-    reports: group.getQueue<TenantJob>('reports', {
-      embedded: true,
-      defaultJobOptions: { timeout: 300000 },
-    }),
-    webhooks: group.getQueue<TenantJob>('webhooks', {
-      embedded: true,
-      defaultJobOptions: { attempts: 5 },
-    }),
-    group,
-  };
-}
-
-// Tenant A
-const tenantA = createTenantQueues('tenant-a');
-await tenantA.emails.add('send', { action: 'welcome', data: { userId: '123' } });
-
-// Tenant B (completely isolated)
-const tenantB = createTenantQueues('tenant-b');
-await tenantB.emails.add('send', { action: 'welcome', data: { userId: '456' } });
-
-// Pause all queues for a tenant (maintenance)
-tenantA.group.pauseAll();
-
-// Resume
-tenantA.group.resumeAll();
-
-// List tenant's queues
-console.log(tenantA.group.listQueues()); // ['emails', 'reports', 'webhooks']
-```
-
----
-
-## Rate-Limited API Calls
-
-<Aside type="note" title="Works in embedded mode too">
-Rate limiting works in **both embedded and server mode**. Use `queue.setGlobalRateLimit(max, duration?)`, a per-worker `limiter: { max, duration }` in `WorkerOptions`, or control throughput with worker `concurrency` and job `backoff`.
-</Aside>
-
-<div class="rl-modes">
-  <div class="rl-mode">
-    <span class="rl-tag rl-tag-server">Queue-level</span>
-    <code>setGlobalRateLimit(100)</code>
-    <span class="rl-arrow">→</span>
-    <span class="rl-desc">Token bucket (~100/sec)</span>
-  </div>
-  <div class="rl-mode">
-    <span class="rl-tag rl-tag-embedded">Embedded Mode</span>
-    <code>concurrency + backoff</code>
-    <span class="rl-arrow">→</span>
-    <span class="rl-desc">Parallel limit + retry delay</span>
-  </div>
-</div>
-
-<style>{`
-  .rl-modes {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    margin: 1.5rem 0;
-    padding: 1.5rem;
-    border-radius: 16px;
-    border: 1px solid var(--sl-color-hairline);
-    background: var(--sl-color-bg-sidebar);
-  }
-  :root[data-theme='dark'] .rl-modes {
-    background: rgba(12, 12, 15, 0.8);
-    border-color: rgba(255, 255, 255, 0.06);
-  }
-  .rl-mode {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .rl-tag {
-    display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 6px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .rl-tag-server {
-    color: #ec4899;
-    background: rgba(236, 72, 153, 0.1);
-    border: 1px solid rgba(236, 72, 153, 0.2);
-  }
-  .rl-tag-embedded {
-    color: #3b82f6;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-  }
-  :root[data-theme='dark'] .rl-tag-server {
-    color: #f9a8d4;
-    border-color: rgba(249, 168, 212, 0.3);
-  }
-  :root[data-theme='dark'] .rl-tag-embedded {
-    color: #93c5fd;
-    border-color: rgba(147, 197, 253, 0.3);
-  }
-  .rl-arrow {
-    color: var(--sl-color-gray-3);
-    font-size: 1rem;
-  }
-  .rl-desc {
-    font-size: 0.85rem;
-    color: var(--sl-color-gray-3);
-  }
-`}</style>
-
-External APIs impose rate limits, and exceeding them results in 429 errors, temporary bans, or degraded service. When your application needs to make thousands of API calls (syncing inventory, importing data, sending notifications), you need controlled throughput.
-
-bunqueue provides two levels of rate control. In embedded mode, worker concurrency acts as a parallel limit, setting `concurrency: 10` means at most 10 API calls happen simultaneously. The worker also handles 429 responses by throwing an error, which triggers bunqueue's automatic retry with backoff. For per-second rate limiting, `queue.setGlobalRateLimit(max)` uses a token bucket that refills at `max` tokens per second, and works in both embedded and server mode.
-
-```typescript
-interface ApiJob {
-  endpoint: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: Record<string, unknown>;
-  headers?: Record<string, string>;
-}
-
-const apiQueue = new Queue<ApiJob>('external-api', {
+const emails = new Queue<EmailJob>('emails', {
   embedded: true,
+  dataPath: './data/app.db',
   defaultJobOptions: {
-    attempts: 5,
-    backoff: 10000, // 10 second base backoff for retries
+    attempts: 5,           // try up to 5 times
+    backoff: 2000,         // wait 2s, then 4s, 8s... between tries (exponential backoff)
+    removeOnComplete: true, // drop finished jobs to keep the queue lean
   },
 });
 
-// Control throughput via worker concurrency
-const apiWorker = new Worker<ApiJob>('external-api', async (job) => {
-  const { endpoint, method, body, headers } = job.data;
+new Worker<EmailJob>('emails', async (job) => {
+  const result = await sendEmail(job.data);
+  return { messageId: result.messageId };
+}, { embedded: true, concurrency: 10 });
 
-  const response = await fetch(endpoint, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+// One email
+await emails.add('welcome', { to: 'user@example.com', template: 'welcome', data: { name: 'John' } });
 
-  // Handle rate limiting from external API
-  if (response.status === 429) {
-    const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
-    throw new Error(`Rate limited. Retry after ${retryAfter}s`);
-  }
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-
-  return await response.json();
-}, {
-  embedded: true,
-  concurrency: 10, // Max 10 parallel requests (controls throughput)
-});
-
-// Queue many API calls
-for (const item of items) {
-  await apiQueue.add('sync', {
-    endpoint: 'https://api.external.com/items',
-    method: 'POST',
-    body: item,
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
-}
+// Bulk newsletter, batched in one call
+await emails.addBulk(
+  subscribers.map((s) => ({ name: 'newsletter', data: { to: s.email, template: 'news', data: {} } }))
+);
 ```
 
----
+If all 5 attempts fail, the job lands in the dead letter queue (DLQ), a holding area for jobs that ran out of retries. Inspect it with `queue.getDlq()` and retry with `queue.retryDlq()`. See the [DLQ guide](/guide/dlq/).
 
-## Parent-Child Job Workflows
+## Webhook delivery
 
-<WorkflowPatterns />
-
-Real-world job processing often involves dependencies: you cannot ship an order before validating inventory and payment. You cannot load data into a warehouse before extracting and transforming it. You cannot merge results before all parallel chunks complete.
-
-bunqueue's FlowProducer (BullMQ v5 compatible) supports three workflow patterns. **Parent-child flows** run children in parallel, then execute the parent when all children complete. **Sequential chains** pass results from one job to the next (A → B → C). **Fan-out/fan-in** runs parallel jobs and merges results into a final job. Workers can access parent and child results to build data pipelines without external orchestration.
+Partner endpoints go down and return 5xx errors. Treat every delivery as a job with retries, and let the DLQ auto-retry the stubborn ones on a schedule.
 
 ```typescript
-import { FlowProducer, Queue, Worker } from 'bunqueue/client';
+const webhooks = new Queue('webhooks', {
+  embedded: true,
+  dataPath: './data/app.db',
+  defaultJobOptions: { attempts: 8, backoff: 5000 }, // 5s, 10s, 20s, 40s...
+});
+
+// Jobs that exhaust all 8 attempts go to the DLQ.
+// Auto-retry the DLQ every hour, up to 3 times, then keep entries 7 days.
+webhooks.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 3_600_000,
+  maxAutoRetries: 3,
+  maxAge: 604_800_000,
+});
+
+new Worker('webhooks', async (job) => {
+  const { endpoint, event, payload } = job.data;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Webhook-Event': event },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30_000), // never hang on a dead endpoint
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`); // throwing triggers a retry
+  return { status: res.status };
+}, { embedded: true, concurrency: 20 });
+
+await webhooks.add('order.created', {
+  endpoint: 'https://partner.com/webhooks',
+  event: 'order.created',
+  payload: { orderId: 'ORD-123' },
+});
+```
+
+## Image processing
+
+Generating thumbnails and variants during an upload request makes the upload slow. Queue one job per image, report progress as each variant finishes, and cap the runtime with a timeout.
+
+```typescript
+const images = new Queue('images', {
+  embedded: true,
+  dataPath: './data/app.db',
+  defaultJobOptions: { attempts: 3, timeout: 120_000 }, // kill stuck jobs after 2 minutes
+});
+
+new Worker('images', async (job) => {
+  const { sourceUrl, variants } = job.data;
+  const source = await downloadImage(sourceUrl);
+  const urls: Record<string, string> = {};
+
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    // updateProgress(percent, message): your frontend can poll or subscribe to this
+    await job.updateProgress(Math.round((i / variants.length) * 100), `Processing ${v.name}`);
+    const out = await sharp(source).resize(v.width, v.height).webp().toBuffer();
+    urls[v.name] = await uploadToCDN(out, `${job.id}/${v.name}.webp`);
+  }
+
+  await job.updateProgress(100, 'Done');
+  return { urls };
+}, { embedded: true, concurrency: 5 });
+
+await images.add('product-image', {
+  sourceUrl: 'https://uploads.example.com/raw/product-123.jpg',
+  variants: [
+    { name: 'thumb', width: 150, height: 150 },
+    { name: 'full', width: 1200, height: 900 },
+  ],
+});
+```
+
+The same shape works for video transcoding or any long CPU-bound task, just raise the `timeout`. For heavy CPU work see [CPU-intensive workers](/guide/cpu-intensive-workers/).
+
+## Payments and other critical jobs
+
+A payment job must never be lost and never run twice. Two options handle this:
+
+- `durable: true` skips the write buffer (the small in-memory batch bunqueue normally flushes to disk every 10ms) and writes the job to SQLite before `add()` returns. A crash cannot lose it.
+- `jobId` makes the add idempotent: adding the same `jobId` twice returns the existing job instead of creating a duplicate.
+
+```typescript
+const payments = new Queue('payments', {
+  embedded: true,
+  dataPath: './data/payments.db', // durable writes need a SQLite file
+  defaultJobOptions: { attempts: 3, backoff: 5000, timeout: 60_000 },
+});
+
+// Failed payments need a human, never an automatic re-charge
+payments.setDlqConfig({ autoRetry: false, maxAge: 2_592_000_000 }); // keep 30 days
+
+new Worker('payments', async (job) => {
+  const { orderId, amount, idempotencyKey } = job.data;
+  const intent = await stripe.paymentIntents.create(
+    { amount, currency: 'usd', confirm: true },
+    { idempotencyKey } // provider-side guard against double charges
+  );
+  if (intent.status !== 'succeeded') throw new Error(`Payment failed: ${intent.status}`);
+  await recordTransaction(orderId, intent.id);
+  return { paymentIntentId: intent.id };
+}, { embedded: true, concurrency: 5 });
+
+await payments.add(
+  'charge',
+  { orderId: 'ORD-123', amount: 9999, idempotencyKey: 'order-ORD-123' },
+  { jobId: 'charge-ORD-123', durable: true } // no duplicate, no loss on crash
+);
+```
+
+## Scheduled tasks (cron)
+
+Recurring jobs use `upsertJobScheduler()`. Schedules are stored in SQLite and survive restarts, in both embedded and server mode. A cron expression like `0 3 * * *` means "every day at 3 AM".
+
+```typescript
+const scheduled = new Queue('scheduled', { embedded: true, dataPath: './data/app.db' });
+
+// Daily cleanup at 3 AM
+await scheduled.upsertJobScheduler(
+  'daily-cleanup',
+  { pattern: '0 3 * * *' },
+  { data: { task: 'cleanup' } }
+);
+
+// Health check every 5 minutes
+await scheduled.upsertJobScheduler(
+  'health-check',
+  { every: 300_000 },
+  { data: { task: 'health-check' } }
+);
+
+new Worker('scheduled', async (job) => {
+  if (job.data.task === 'cleanup') return { deleted: await cleanupOldRecords() };
+  return await checkSystemHealth();
+}, { embedded: true });
+```
+
+Timezones, one-off delayed jobs and the `repeat` shorthand on `queue.add()` are covered in the [cron guide](/guide/cron/).
+
+## Multi-step flows
+
+Some work has dependencies: an order ships only after inventory and payment both check out. `FlowProducer` runs child jobs first, in parallel, then runs the parent with access to every child result.
+
+```typescript
+import { FlowProducer, Worker } from 'bunqueue/client';
 
 const flow = new FlowProducer({ embedded: true });
 
-// Order fulfillment workflow
-const orderFlow = await flow.add({
+await flow.add({
   name: 'fulfill-order',
   queueName: 'orders',
   data: { orderId: 'ORD-123' },
   children: [
-    // These run in parallel first
-    {
-      name: 'validate-inventory',
-      queueName: 'inventory',
-      data: { orderId: 'ORD-123' },
-    },
-    {
-      name: 'validate-payment',
-      queueName: 'payments',
-      data: { orderId: 'ORD-123' },
-    },
-    {
-      name: 'calculate-shipping',
-      queueName: 'shipping',
-      data: { orderId: 'ORD-123' },
-    },
+    { name: 'check-inventory', queueName: 'checks', data: { orderId: 'ORD-123' } },
+    { name: 'check-payment', queueName: 'checks', data: { orderId: 'ORD-123' } },
   ],
 });
 
-// Sequential chain: A → B → C
-const pipeline = await flow.addChain([
-  { name: 'extract', queueName: 'etl', data: { source: 's3://bucket/data.csv' } },
-  { name: 'transform', queueName: 'etl', data: {} }, // Gets result from extract
-  { name: 'load', queueName: 'etl', data: { target: 'warehouse' } },
-]);
-
-// Parallel batch then merge
-const batchFlow = await flow.addBulkThen(
-  // These run in parallel
-  [
-    { name: 'process-chunk-1', queueName: 'processing', data: { chunk: 1 } },
-    { name: 'process-chunk-2', queueName: 'processing', data: { chunk: 2 } },
-    { name: 'process-chunk-3', queueName: 'processing', data: { chunk: 3 } },
-  ],
-  // This runs after all chunks complete
-  { name: 'merge-results', queueName: 'processing', data: {} }
-);
-
-// Workers can access parent results
-const mergeWorker = new Worker('processing', async (job) => {
-  if (job.name === 'merge-results') {
-    const childResults = await job.getChildrenValues();
-    // { 'processing:<childId>': { chunk: 1, ... }, ... }  (Record<jobKey, returnValue>)
-    return combineResults(childResults);
-  }
-  // Process individual chunk
-  return processChunk(job.data.chunk);
+new Worker('orders', async (job) => {
+  // Children finished first; read what each one returned
+  const results = await job.getChildrenValues();
+  return shipOrder(job.data.orderId, results);
 }, { embedded: true });
 ```
 
----
+`flow.addChain([...])` runs jobs one after another, and `flow.addBulkThen(jobs, finalJob)` fans out in parallel and merges at the end. See the [flow guide](/guide/flow/). For richer orchestration (branching, rollback on failure, human approval steps) use the [workflow engine](/guide/workflow/).
 
-## Video Transcoding Pipeline
+## Job options cheat sheet
 
-Video transcoding is one of the most resource-intensive background operations. A single video may need to be encoded into 4+ resolutions (1080p, 720p, 480p, 360p), generate thumbnails, and upload all variants to a CDN. This can take minutes to hours depending on the source file size and target formats.
+The options you saw above, all set per job or via `defaultJobOptions`:
 
-bunqueue's long timeout support (up to 1 hour), per-resolution progress tracking, and job logging make it ideal for transcoding pipelines. The worker reports progress as each resolution completes, and job logs capture encoding details (resolution, bitrate, output URL) for debugging. An optional webhook URL notifies your application when transcoding finishes.
+| Option | What it does | Default |
+| --- | --- | --- |
+| `attempts` | Max tries before the job goes to the DLQ | 3 |
+| `backoff` | Base delay between retries, doubles each time | 1000 ms |
+| `timeout` | Max processing time before the job is failed | none |
+| `priority` | Higher numbers run sooner | 0 |
+| `delay` | Wait this many ms before the job is runnable | 0 |
+| `jobId` | Custom ID, adding the same ID twice returns the existing job | auto |
+| `durable` | Write to disk immediately instead of the 10ms buffer | false |
+| `removeOnComplete` | Delete the job once it succeeds | false |
 
-```typescript
-interface TranscodeJob {
-  sourceUrl: string;
-  outputPath: string;
-  resolutions: Array<{
-    name: string;
-    width: number;
-    height: number;
-    bitrate: string;
-  }>;
-  format: 'mp4' | 'webm' | 'hls';
-  webhookUrl?: string;
-}
+Full list in the [queue guide](/guide/queue/).
 
-const transcodeQueue = new Queue<TranscodeJob>('transcode', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 2,
-    timeout: 3600000, // 1 hour
-  },
-});
+## Gotchas
 
-const transcodeWorker = new Worker<TranscodeJob>('transcode', async (job) => {
-  const { sourceUrl, outputPath, resolutions, format, webhookUrl } = job.data;
-  const results: Record<string, string> = {};
+- **No `dataPath` means no persistence.** An embedded queue without `dataPath` (or a `DATA_PATH` env var) keeps everything in memory and loses it on restart.
+- **The default write buffer trades 10ms for speed.** Jobs are flushed to SQLite every 10ms. A hard crash can lose jobs accepted in that window. Use `durable: true` where that matters.
+- **Throwing is how you retry.** A worker that catches every error and returns normally marks the job completed. Let errors propagate when you want a retry.
+- **Do not auto-retry money.** Set `setDlqConfig({ autoRetry: false })` on payment-like queues so failed charges wait for review.
+- **Close workers on shutdown.** `await worker.close()` waits for active jobs to finish; `worker.close(true)` forces a stop. See [production](/guide/production/) for the full shutdown pattern.
 
-  await job.updateProgress(5, 'Downloading source video...');
-  const sourcePath = await downloadVideo(sourceUrl);
+## More patterns
 
-  const totalResolutions = resolutions.length;
-  for (let i = 0; i < totalResolutions; i++) {
-    const res = resolutions[i];
-    const progress = 10 + Math.floor((i / totalResolutions) * 85);
-
-    await job.updateProgress(progress, `Transcoding ${res.name}...`);
-    await job.log(`Starting ${res.name}: ${res.width}x${res.height} @ ${res.bitrate}`);
-
-    const output = await ffmpeg(sourcePath)
-      .size(`${res.width}x${res.height}`)
-      .videoBitrate(res.bitrate)
-      .format(format)
-      .output(`${outputPath}/${res.name}.${format}`)
-      .run();
-
-    const url = await uploadToCDN(output, `${outputPath}/${res.name}.${format}`);
-    results[res.name] = url;
-
-    await job.log(`Completed ${res.name}: ${url}`);
-  }
-
-  // Generate thumbnail
-  await job.updateProgress(98, 'Generating thumbnail...');
-  const thumbnail = await generateThumbnail(sourcePath);
-  results.thumbnail = await uploadToCDN(thumbnail, `${outputPath}/thumb.jpg`);
-
-  // Webhook notification
-  if (webhookUrl) {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId: job.id, status: 'completed', results }),
-    });
-  }
-
-  await job.updateProgress(100, 'Complete');
-
-  return {
-    outputs: results,
-    completedAt: new Date().toISOString(),
-  };
-}, { embedded: true, concurrency: 2 });
-
-// Transcode uploaded video
-await transcodeQueue.add('transcode-video', {
-  sourceUrl: 'https://uploads.example.com/raw/video-123.mov',
-  outputPath: 'videos/123',
-  resolutions: [
-    { name: '1080p', width: 1920, height: 1080, bitrate: '5000k' },
-    { name: '720p', width: 1280, height: 720, bitrate: '2500k' },
-    { name: '480p', width: 854, height: 480, bitrate: '1000k' },
-    { name: '360p', width: 640, height: 360, bitrate: '500k' },
-  ],
-  format: 'mp4',
-  webhookUrl: 'https://api.example.com/webhooks/transcode',
-});
-```
-
----
-
-## Graceful Shutdown Pattern
-
-In production, processes receive shutdown signals (SIGINT, SIGTERM) from container orchestrators, deployment scripts, or manual restarts. A naive shutdown kills workers immediately, leaving jobs in an active state with no acknowledgment. These orphaned jobs become "stalled" and must be recovered on restart.
-
-bunqueue's graceful shutdown pattern pauses all workers (stop accepting new jobs), waits for active jobs to complete (with a 30-second timeout), closes queue connections, and flushes the SQLite write buffer. This ensures no data loss and no orphaned jobs. If active jobs don't complete within the timeout, `worker.close(true)` forces an immediate stop, the stall detector will recover these jobs on restart.
-
-```typescript
-import { Queue, Worker, shutdownManager } from 'bunqueue/client';
-
-// Initialize all queues and workers
-const queues = {
-  emails: new Queue('emails', { embedded: true }),
-  reports: new Queue('reports', { embedded: true }),
-  webhooks: new Queue('webhooks', { embedded: true }),
-};
-
-const workers = {
-  emails: new Worker('emails', emailProcessor, { embedded: true, concurrency: 10 }),
-  reports: new Worker('reports', reportProcessor, { embedded: true, concurrency: 3 }),
-  webhooks: new Worker('webhooks', webhookProcessor, { embedded: true, concurrency: 20 }),
-};
-
-// Graceful shutdown handler
-async function gracefulShutdown(signal: string) {
-  console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
-
-  // 1. Stop accepting new jobs
-  console.log('Pausing all workers...');
-  for (const worker of Object.values(workers)) {
-    worker.pause();
-  }
-
-  // 2. Wait for active jobs to complete (with timeout)
-  console.log('Waiting for active jobs to complete...');
-  const shutdownTimeout = 30000; // 30 seconds
-
-  try {
-    await Promise.race([
-      Promise.all(Object.values(workers).map(w => w.close())),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Shutdown timeout')), shutdownTimeout)
-      ),
-    ]);
-    console.log('All workers closed gracefully');
-  } catch (err) {
-    console.log('Forcing worker shutdown...');
-    await Promise.all(Object.values(workers).map(w => w.close(true)));
-  }
-
-  // 3. Close queue connections
-  console.log('Closing queue connections...');
-  await Promise.all(Object.values(queues).map(q => q.close()));
-
-  // 4. Shutdown the embedded manager (flushes SQLite)
-  shutdownManager();
-
-  console.log('Shutdown complete');
-  process.exit(0);
-}
-
-// Register signal handlers
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-
-// Handle uncaught errors
-process.on('uncaughtException', async (err) => {
-  console.error('Uncaught exception:', err);
-  await gracefulShutdown('uncaughtException');
-});
-
-process.on('unhandledRejection', async (reason) => {
-  console.error('Unhandled rejection:', reason);
-  await gracefulShutdown('unhandledRejection');
-});
-```
+- [AI agents via MCP](/guide/mcp/), let Claude or any MCP client schedule and monitor jobs
+- [Multi-tenant isolation](/guide/queue-group/), one namespaced queue set per tenant
+- [Rate-limited API calls](/guide/rate-limiting/), token buckets and worker limiters
+- [Edge and IoT forwarding](/guide/iot-edge/), queue locally, drain to a central server
+- [Copy-paste examples](/examples/), shorter recipes for common tasks
 
 <script is:inline src="/bq-inter.js"></script>

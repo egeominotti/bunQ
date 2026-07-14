@@ -1,6 +1,6 @@
 ---
-title: "Cron Jobs & Scheduled Tasks in Bunqueue"
-description: Schedule recurring jobs with cron expressions or intervals in bunqueue. IANA timezone support, repeatable jobs, and embedded or server mode.
+title: "Cron Jobs: Run Jobs on a Schedule"
+description: Schedule recurring jobs in bunqueue with cron expressions or plain intervals. Timezone support, persisted in SQLite, survives restarts.
 head:
   - tag: meta
     attrs:
@@ -11,69 +11,65 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Cron jobs that <em>survive restarts.</em></h1>
-  <p class="bq-hero-sub">Schedule jobs to run on a recurring basis using cron expressions or plain intervals, with IANA timezone support. Schedules are persisted in SQLite, so they come back after a restart.</p>
+  <p class="bq-hero-sub">Run a job every day at 9 AM, or every 5 minutes, without an external scheduler. Schedules are stored in SQLite, so they come back after a restart.</p>
 </div>
 
-## Server Mode
+A cron job is a job that bunqueue creates for you on a schedule. You describe the schedule once, with a cron expression (a five-field pattern like `0 9 * * *`) or a plain interval in milliseconds, and bunqueue enqueues a fresh job each time it fires.
 
-```bash
-# Add a cron job
-bunqueue cron add daily-report \
-  -q reports \
-  -d '{"type":"daily"}' \
-  -s "0 9 * * *"
+## Quick Start
 
-# List cron jobs
-bunqueue cron list
-
-# Delete
-bunqueue cron delete daily-report
-```
-
-## Cron Expressions
-
-<div class="bq-diag">
-  <div class="bq-diag-head"><b>Cron expression</b><span>five fields, left to right</span></div>
-  <div class="bq-diag-layer bq-diag-accent"><code>* * * * *</code></div>
-  <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-row">
-    <div class="bq-diag-cell">minute <i>0-59</i></div>
-    <div class="bq-diag-cell">hour <i>0-23</i></div>
-    <div class="bq-diag-cell">day of month <i>1-31</i></div>
-    <div class="bq-diag-cell">month <i>1-12</i></div>
-    <div class="bq-diag-cell">day of week <i>0-6, Sun=0</i></div>
-  </div>
-</div>
-
-Examples:
-- `0 9 * * *` - Every day at 9:00 AM
-- `*/15 * * * *` - Every 15 minutes
-- `0 0 * * MON` - Every Monday at midnight
-- `0 0 1 * *` - First day of every month
-
-Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted.
-
-## Timezone Support
-
-bunqueue supports IANA timezones for cron jobs (added in v1.9.4). This allows you to schedule jobs based on specific local times rather than the server's timezone.
-
-Common timezone examples:
-- `Europe/Rome`
-- `America/New_York`
-- `Asia/Tokyo`
-- `UTC`
+Create a scheduler with `upsertJobScheduler`. It works in both embedded and TCP mode, and calling it again with the same name updates the schedule instead of duplicating it:
 
 ```typescript
-// Schedule a job at 9 AM Rome time every day
+import { Queue, Worker } from 'bunqueue/client';
+
+const queue = new Queue('reports', { embedded: true });
+
+// Every day at 9:00 AM
 await queue.upsertJobScheduler('daily-report', {
   pattern: '0 9 * * *',
-  timezone: 'Europe/Rome',
 }, {
   name: 'daily-report',
   data: { type: 'sales' },
 });
 
-// Schedule a job at 6 PM New York time on weekdays
+// A normal worker processes the scheduled jobs
+new Worker('reports', async (job) => {
+  console.log('Running report:', job.data.type);
+}, { embedded: true });
+```
+
+Or from the CLI, against a running server:
+
+```bash
+bunqueue cron add daily-report -q reports -d '{"type":"daily"}' -s "0 9 * * *"
+bunqueue cron list
+bunqueue cron delete daily-report
+```
+
+## Common Tasks
+
+### Run every N milliseconds
+
+Use `every` instead of a cron pattern when you just want a fixed interval:
+
+```typescript
+await queue.upsertJobScheduler('heartbeat', {
+  every: 60000,  // every minute
+  limit: 100,    // optional: stop after 100 runs
+}, {
+  data: { check: 'health' },
+});
+```
+
+CLI equivalent: `bunqueue cron add heartbeat -q system -d '{"check":"health"}' -e 60000`.
+
+### Schedule in a specific timezone
+
+Pass an IANA timezone (like `Europe/Rome` or `America/New_York`) and the pattern is evaluated in that timezone, daylight saving included:
+
+```typescript
+// 6 PM New York time, weekdays only
 await queue.upsertJobScheduler('end-of-day', {
   pattern: '0 18 * * 1-5',
   timezone: 'America/New_York',
@@ -90,72 +86,55 @@ bunqueue cron add daily-report -q reports -d '{"type":"daily"}' \
   -s "0 9 * * *" -z Europe/Rome
 ```
 
-When a timezone is specified, the cron expression is evaluated in that timezone, automatically handling daylight saving time transitions.
+### Repeat a job after each completion
 
-## Interval-Based
-
-```bash
-# Every 5 minutes
-bunqueue cron add heartbeat \
-  -q system \
-  -d '{"check":"health"}' \
-  -e 300000
-```
-
-## Client API (Job Schedulers)
-
-`upsertJobScheduler` (BullMQ v5 style) is the programmatic equivalent of `bunqueue cron add`. It works in both embedded and TCP mode:
+For simple repetition tied to job completion, `queue.add` with `repeat` also works: the job re-enqueues itself `every` milliseconds after each run completes.
 
 ```typescript
-// Cron pattern
-await queue.upsertJobScheduler('report', {
-  pattern: '0 9 * * *',
-}, {
-  name: 'report',
-  data: { type: 'daily' },
-});
-
-// Or interval-based
-await queue.upsertJobScheduler('heartbeat', {
-  every: 60000,  // Every minute
-  limit: 100,    // Max 100 executions, then the scheduler is removed
-}, {
-  data: { check: 'health' },
-});
+await queue.add('sync', { source: 'crm' }, { repeat: { every: 30000, limit: 10 } });
 ```
 
-Useful options on the repeat object:
+Note: `repeat.pattern` on `queue.add` is not evaluated. Cron patterns require `upsertJobScheduler` or the CLI.
 
-- `timezone` - IANA timezone for `pattern` evaluation
-- `limit` - Maximum number of executions
-- `immediately` - Fire once right away on first creation
-- `skipIfNoWorker` - Skip a run when no worker is registered for the queue (default: `false`)
-- `preventOverlap` - Skip a run while the previous job is still active, via an automatic `cron:<name>` unique key (default: `true`)
-- `skipMissedOnRestart` - On server restart, recompute the next run instead of firing missed runs (default: `true`)
+## Cron Expression Cheat Sheet
 
-For interval-only repetition tied to job completion, `queue.add(name, data, { repeat: { every, limit } })` is also supported: the job re-enqueues itself `every` milliseconds after each completion. Cron `pattern` scheduling requires `upsertJobScheduler` (or the CLI/MCP); `repeat.pattern` on `queue.add` does not evaluate the pattern.
+Five fields, left to right: minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week (0-6, Sunday = 0).
 
-## AI Agent Cron Management (MCP)
+| Expression | Meaning |
+|---|---|
+| `0 9 * * *` | Every day at 9:00 AM |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 0 * * MON` | Every Monday at midnight |
+| `0 0 1 * *` | First day of every month |
 
-AI agents can create, list, and delete cron jobs via natural language using the [MCP Server](/guide/mcp/):
+Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted.
 
-- *"Create a cron job that runs every hour to clean up old sessions"*
-- *"List all scheduled cron jobs"*
-- *"Delete the daily-report cron"*
+## Scheduler Options
+
+Options on the repeat object of `upsertJobScheduler`:
+
+| Option | Default | Description |
+|---|---|---|
+| `pattern` | - | Cron expression |
+| `every` | - | Interval in ms (alternative to `pattern`) |
+| `timezone` | `UTC` (embedded) / server timezone (TCP) | IANA timezone for `pattern` evaluation |
+| `limit` | unlimited | Max executions, then the scheduler is removed |
+| `immediately` | `false` | Fire once right away on first creation |
+| `skipIfNoWorker` | `false` | Skip a run when no worker is registered for the queue |
+| `preventOverlap` | `true` | Skip a run while the previous job is still active |
+| `skipMissedOnRestart` | `true` | On server restart, recompute the next run instead of firing missed runs |
+
+## AI Agents (MCP)
+
+AI agents can manage cron jobs in natural language ("create a cron that cleans old sessions every hour") through the [MCP Server](/guide/mcp/):
 
 ```bash
-bun add bunqueue          # bunqueue-mcp is a binary bundled with bunqueue
-bun add @modelcontextprotocol/sdk   # optional peer dependency, required only for the MCP server
+bun add bunqueue @modelcontextprotocol/sdk
 claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
-:::note
-Since v2.8.1, `@modelcontextprotocol/sdk` is an **optional peer dependency**, queue-only installs skip it (7 packages and 5.5 MB instead of 117 and 93 MB, a 94% smaller install). Install it once with `bun add @modelcontextprotocol/sdk` to run the MCP server.
-:::
-
 :::tip[Related Guides]
 - [Queue API](/guide/queue/) - Job options for cron-created jobs
-- [Server Mode](/guide/server/) - Cron scheduling in server mode
 - [CLI Commands](/guide/cli/) - Manage cron jobs via CLI
-- [MCP Server](/guide/mcp/) - Full AI agent integration with 73 tools
+- [MCP Server](/guide/mcp/) - AI agent integration
 :::

@@ -11,16 +11,12 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · configuration</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Server configuration in one typed <em>file.</em></h1>
-  <p class="bq-hero-sub">Configure your entire bunqueue server from a single typed bunqueue.config.ts, no more scattered environment variables. Every option has IntelliSense, every section is optional.</p>
-
-  <div class="bq-proof">
-    <span><b>1</b> typed file, auto-discovered</span>
-    <span><b>9</b> config sections, all optional</span>
-    <span><b>4</b>-level priority: CLI, file, env, defaults</span>
-  </div>
+  <p class="bq-hero-sub">Configure the whole bunqueue server from a single typed bunqueue.config.ts instead of scattered environment variables. Every option has IntelliSense, every section is optional.</p>
 </div>
 
-## Quick Start
+This page is about configuring the **standalone server** ([Server Mode](/guide/server/)). Embedded mode needs no config file, it takes options directly in the `Queue`/`Worker` constructors.
+
+## Quick start
 
 Create a `bunqueue.config.ts` in your project root:
 
@@ -44,42 +40,30 @@ Then start normally:
 bunqueue start
 ```
 
-The config file is **auto-discovered**, no flags needed.
+The config file is **auto-discovered**, no flags needed. `defineConfig()` gives you full TypeScript IntelliSense, so you never have to guess an option name.
 
-:::tip[Type Safety]
-`defineConfig()` provides full TypeScript IntelliSense. Every option is typed and documented, no more guessing environment variable names.
-:::
+## Priority order
 
-## Priority Order
-
-Configuration values are resolved in this order (first wins):
+When the same option is set in more than one place, the first of these wins:
 
 1. **CLI flags**, `bunqueue start --tcp-port 8000`
 2. **Config file**, `bunqueue.config.ts`
 3. **Environment variables**, `TCP_PORT=8000`
-4. **Defaults**, built-in defaults
+4. **Built-in defaults**
 
-This means you can use the config file as your baseline and override specific values per-environment with env vars or CLI flags.
+Use the config file as your baseline and override per environment with env vars or flags.
 
-## Explicit Config Path
+## Picking a config file
+
+bunqueue looks in your project root for `bunqueue.config.ts`, then `bunqueue.config.js`, then `bunqueue.config.mjs`. To use a specific file:
 
 ```bash
-# Use a specific config file
 bunqueue start --config ./config/production.config.ts
-
 # Short form
 bunqueue start -c ./config/staging.config.ts
 ```
 
-## Supported File Formats
-
-bunqueue looks for these files in your project root (in order):
-
-1. `bunqueue.config.ts`
-2. `bunqueue.config.js`
-3. `bunqueue.config.mjs`
-
-## Full Configuration Reference
+## Full configuration reference
 
 Every section is **optional**. Only specify what you need.
 
@@ -90,10 +74,10 @@ TCP and HTTP server settings.
 ```typescript
 defineConfig({
   server: {
-    tcpPort: 6789,           // TCP server port (default: 6789)
+    tcpPort: 6789,            // TCP server port (default: 6789)
     httpPort: 6790,           // HTTP/REST API port (default: 6790)
-    host: '0.0.0.0',         // Bind address (default: 0.0.0.0)
-    tcpSocketPath: undefined, // reserved, not applied yet: TCP always binds host:port
+    host: '0.0.0.0',          // Bind address (default: 0.0.0.0)
+    tcpSocketPath: undefined, // Reserved, not applied yet: TCP always binds host:port
     httpSocketPath: undefined, // Unix socket for HTTP (overrides host/port)
     tlsCertFile: undefined,   // PEM certificate, enables native TLS on TCP + HTTP (with tlsKeyFile)
     tlsKeyFile: undefined,    // PEM private key (set both or neither, partial config is a startup error)
@@ -103,20 +87,24 @@ defineConfig({
 
 ### `auth`
 
-Authentication and security.
+Authentication tokens for clients. Set this on any server reachable from a network.
 
 ```typescript
 defineConfig({
   auth: {
-    tokens: ['my-secret-token'],   // Auth tokens for TCP/HTTP
-    requireAuthForMetrics: false,   // Require auth for the /prometheus endpoint (env: METRICS_AUTH)
+    tokens: ['my-secret-token'],    // Auth tokens for TCP/HTTP
+    requireAuthForMetrics: false,   // Require auth for /prometheus (env: METRICS_AUTH)
   },
 });
 ```
 
+:::note[Secrets]
+The config file is code, don't hardcode secrets that get committed to git. Use `process.env.*` for sensitive values.
+:::
+
 ### `storage`
 
-Database persistence.
+Where jobs persist. Without `dataPath`, everything is in-memory and lost on restart.
 
 ```typescript
 defineConfig({
@@ -128,7 +116,7 @@ defineConfig({
 
 ### `cors`
 
-Cross-Origin Resource Sharing for the HTTP API.
+Allowed origins for browser access to the HTTP API.
 
 ```typescript
 defineConfig({
@@ -138,13 +126,9 @@ defineConfig({
 });
 ```
 
-:::note[Secrets]
-Use `process.env.*` for sensitive values like API keys. The config file is code, don't hardcode secrets that get committed to git.
-:::
-
 ### `backup`
 
-S3-compatible backup settings.
+Automatic snapshots of the SQLite database to any S3-compatible storage (AWS, MinIO, Cloudflare R2). See [S3 Backup](/guide/backup/).
 
 ```typescript
 defineConfig({
@@ -164,8 +148,6 @@ defineConfig({
 
 ### `timeouts`
 
-Timeout settings for various operations.
-
 ```typescript
 defineConfig({
   timeouts: {
@@ -179,7 +161,7 @@ defineConfig({
 
 ### `webhooks`
 
-Webhook delivery settings.
+Delivery retries for [webhooks](/guide/webhooks/).
 
 ```typescript
 defineConfig({
@@ -192,8 +174,6 @@ defineConfig({
 
 ### `logging`
 
-Log output configuration.
-
 ```typescript
 defineConfig({
   logging: {
@@ -203,7 +183,7 @@ defineConfig({
 });
 ```
 
-## Complete Examples
+## Complete examples
 
 ### Development
 
@@ -211,16 +191,8 @@ defineConfig({
 import { defineConfig } from 'bunqueue';
 
 export default defineConfig({
-  server: {
-    tcpPort: 6789,
-    httpPort: 6790,
-  },
-  storage: {
-    dataPath: './data/dev.db',
-  },
-  logging: {
-    level: 'debug',
-  },
+  storage: { dataPath: './data/dev.db' },
+  logging: { level: 'debug' },
 });
 ```
 
@@ -230,21 +202,13 @@ export default defineConfig({
 import { defineConfig } from 'bunqueue';
 
 export default defineConfig({
-  server: {
-    tcpPort: 6789,
-    httpPort: 6790,
-    host: '0.0.0.0',
-  },
+  server: { tcpPort: 6789, httpPort: 6790, host: '0.0.0.0' },
   auth: {
     tokens: [process.env.BUNQUEUE_AUTH_TOKEN!],
     requireAuthForMetrics: true,
   },
-  storage: {
-    dataPath: '/data/bunqueue/queue.db',
-  },
-  cors: {
-    origins: [process.env.FRONTEND_URL!],
-  },
+  storage: { dataPath: '/data/bunqueue/queue.db' },
+  cors: { origins: [process.env.FRONTEND_URL!] },
   backup: {
     enabled: true,
     bucket: process.env.S3_BUCKET!,
@@ -254,19 +218,14 @@ export default defineConfig({
     interval: 3600000,  // Every hour
     retention: 30,
   },
-  logging: {
-    level: 'info',
-    format: 'json',
-  },
-  timeouts: {
-    shutdown: 60000,
-  },
+  logging: { level: 'info', format: 'json' },
+  timeouts: { shutdown: 60000 },
 });
 ```
 
 ### Docker / Kubernetes
 
-When deploying with containers, you can mix the config file with environment variables:
+Mix the config file (static settings baked into the image) with environment variables (per-deployment values). Remember: when both define the same option, the config file wins.
 
 ```typescript
 // bunqueue.config.ts, static settings in the image
@@ -275,16 +234,12 @@ import { defineConfig } from 'bunqueue';
 export default defineConfig({
   server: { host: '0.0.0.0' },
   logging: { format: 'json' },
-  backup: {
-    enabled: true,
-    region: 'eu-west-1',
-  },
+  backup: { enabled: true, region: 'eu-west-1' },
 });
 ```
 
 ```bash
-# Dynamic settings from environment (fill values the config file leaves unset;
-# the config file wins when both define the same option)
+# Dynamic settings fill what the config file leaves unset
 docker run \
   -e TCP_PORT=6789 \
   -e S3_BUCKET=my-bucket \
@@ -298,20 +253,16 @@ docker run \
 Available from both package exports:
 
 ```typescript
-// From the main package
 import { defineConfig } from 'bunqueue';
-
-// From the client package
+// or
 import { defineConfig } from 'bunqueue/client';
 ```
 
 ## bunqueue Cloud
 
 :::caution[Beta Coming Soon]
-bunqueue Cloud is launching in beta soon. Once the dashboard is live, you'll be able to connect your instances with the `cloud` section in the config file. No code changes needed.
+bunqueue Cloud is launching in beta soon. Once the dashboard is live, you'll connect instances with the `cloud` section, no code changes needed.
 :::
-
-When bunqueue Cloud is available, this is how you'll configure it:
 
 ```typescript
 defineConfig({
@@ -322,8 +273,6 @@ defineConfig({
   },
 });
 ```
-
-These three fields are all you need. Everything else is managed automatically by the cloud dashboard.
 
 :::tip[Related Guides]
 - [Environment Variables](/guide/env-vars/), full env var reference (still supported as fallback)

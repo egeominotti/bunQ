@@ -1,6 +1,6 @@
 ---
 title: "Bunqueue vs BullMQ: Performance Comparison & Feature Differences"
-description: "bunqueue vs BullMQ: 1.3x faster push, 3.2x faster bulk. Zero Redis, native MCP for AI agents, SQLite persistence. Full feature comparison."
+description: "bunqueue vs BullMQ compared honestly: throughput benchmarks with dated methodology, feature differences, and the cases where BullMQ is the better pick."
 head:
   - tag: meta
     attrs:
@@ -14,66 +14,64 @@ import BqIcon from '@components/BqIcon.astro';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · comparison</span>
   <h1 class="bq-hero-h1 bq-bench-h1">bunqueue vs BullMQ, one less <em>server.</em></h1>
-  <p class="bq-hero-sub">Real benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical workloads, a full feature comparison, and the cases where BullMQ is still the better pick.</p>
-
-  <div class="bq-proof">
-    <span><b>1.3x</b> faster single push</span>
-    <span><b>3.2x</b> faster bulk push</span>
-    <span><b>1.7x</b> faster processing</span>
-    <span><b>0</b> Redis servers to run</span>
-  </div>
+  <p class="bq-hero-sub">Benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical workloads, a feature comparison, and the cases where BullMQ is still the better pick.</p>
 </div>
 
-:::note[Numbers vary across runs and versions]
-Benchmark figures depend on hardware, runtime and library versions; each page
-states its own dated methodology. A more recent run (2026-07-08, Apple M1 Max,
-Bun 1.3.14, BullMQ 5.79.3, Redis 8.8.0) measured bulk push at 85,700 vs 24,800
-ops/sec (3.5x) with single push at parity; it is summarized on the
-[home page](/) with its full methodology. The **Process** figures below predate
-a worker-leasing correctness fix (2.8.18) that bounds how many jobs a single
-TCP worker can lease: a single worker at `concurrency: 50` now measures in the
-thousands of ops/sec, not tens of thousands, and end-to-end throughput scales
-with worker count rather than queue depth. See the
-[benchmarks page](/guide/benchmarks/) caution for current single-worker
-processing numbers. Reproduce either run with `bun run bench/comparison/run.ts`.
-:::
+This page helps you decide between bunqueue and BullMQ. Short version first, then the numbers with their caveats, then features.
 
-<Aside type="note">
-This is a **fair comparison**: both systems use network connections (bunqueue TCP vs Redis TCP). For embedded mode benchmarks (no network), bunqueue is significantly faster.
-</Aside>
+## Quick answer
 
-## Summary
+Pick **bunqueue** if you run on Bun and one queue server (or one process, in embedded mode) is enough. You get the same Queue and Worker API as BullMQ with no Redis to install, monitor, or pay for. Jobs persist in a SQLite file.
+
+Pick **BullMQ** if you need to scale the queue itself across multiple servers, already operate Redis, or need workers in languages beyond bunqueue's official SDKs (TypeScript and Python). Details in [When to Use BullMQ Instead](#when-to-use-bullmq-instead).
+
+## The numbers
 
 <div class="bq-cards">
   <div class="bq-card">
     <BqIcon name="speed" />
     <h3>1.3x Faster Push</h3>
     <p><b>54,140 vs 43,261 ops/sec</b></p>
-    <p>Single job push operations</p>
+    <p>Single job push</p>
   </div>
   <div class="bq-card">
     <BqIcon name="spark" />
     <h3>3.2x Faster Bulk</h3>
     <p><b>139,200 vs 44,000 ops/sec</b></p>
-    <p>Bulk push (100 jobs per batch)</p>
+    <p>Bulk push, 100 jobs per batch</p>
   </div>
   <div class="bq-card">
     <BqIcon name="check" />
-    <h3>1.7x Faster Processing</h3>
-    <p><b>33,052 vs 19,225 ops/sec</b></p>
-    <p>Job processing throughput</p>
+    <h3>Lower Bulk Latency</h3>
+    <p><b>3.26 vs 4.53 ms p99</b></p>
+    <p>Bulk push tail latency</p>
   </div>
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Infrastructure</h3>
-    <p><b>No Redis Required</b></p>
-    <p>Embedded SQLite vs Redis server. 7 packages, 5.5 MB installed.</p>
+    <p><b>No Redis required</b></p>
+    <p>Embedded SQLite. 7 packages, 5.5 MB installed.</p>
   </div>
 </div>
 
----
+| Operation | bunqueue | BullMQ | Speedup |
+|-----------|----------|--------|---------|
+| **Push** (single job) | 54,140 ops/sec | 43,261 ops/sec | **1.3x** |
+| **Bulk push** (100 per batch) | 139,200 ops/sec | 44,000 ops/sec | **3.2x** |
+| **Bulk push p99 latency** | 3.26 ms | 4.53 ms | **1.4x lower** |
 
-## Throughput Comparison
+:::note[Read this before quoting numbers]
+Benchmark figures depend on hardware and library versions, and they change across bunqueue versions. Two things to know:
+
+1. A more recent run (2026-07-08, Apple M1 Max, Bun 1.3.14, BullMQ 5.79.3, Redis 8.8.0) measured **bulk push at 85,700 vs 24,800 ops/sec (3.5x)** with **single push at parity**. It is summarized on the [home page](/) with full methodology.
+2. This page does not quote a Process (end-to-end job consumption) figure. Older published Process numbers predate a worker-leasing correctness fix in 2.8.18 that bounds how many jobs one TCP worker can lease. A single worker at `concurrency: 50` now measures in the thousands of ops/sec, and end-to-end throughput scales with worker count, not queue depth. See the [benchmarks page](/guide/benchmarks/) for current numbers.
+
+Reproduce either run with `bun run bench/comparison/run.ts`.
+:::
+
+<Aside type="note">
+This is a fair comparison: both systems go over the network (bunqueue TCP vs Redis TCP), same payload size (100 bytes), same batch sizes, same push strategy. Embedded mode (queue inside your process, no network) benchmarks significantly higher; see [benchmarks](/guide/benchmarks/).
+</Aside>
 
 <div class="bq-chart-grid">
   <div class="bq-chart">
@@ -89,233 +87,67 @@ This is a **fair comparison**: both systems use network connections (bunqueue TC
     <p class="bq-chart-note"><b>3.2x faster</b></p>
   </div>
   <div class="bq-chart">
-    <p class="bq-chart-title">Process <span>ops/sec, higher is better</span></p>
-    <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">33,052</span></div>
-    <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:58%"></div></div><span class="bq-hval">19,225</span></div>
-    <p class="bq-chart-note"><b>1.7x faster</b></p>
+    <p class="bq-chart-title">Bulk push p99 <span>ms, lower is better</span></p>
+    <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:72%"></div></div><span class="bq-hval">3.26 ms</span></div>
+    <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">4.53 ms</span></div>
+    <p class="bq-chart-note"><b>1.4x lower</b></p>
   </div>
 </div>
 
-| Operation | bunqueue | BullMQ | Speedup |
-|-----------|----------|--------|---------|
-| **Push** | 54,140 ops/sec | 43,261 ops/sec | **1.3x faster** |
-| **Bulk Push** | 139,200 ops/sec | 44,000 ops/sec | **3.2x faster** |
-| **Process** | 33,052 ops/sec | 19,225 ops/sec | **1.7x faster** |
+**Environment for the table above:** Mac Studio (Apple M1 Max, 32 GB, SSD), macOS Tahoe, Bun 1.3.8, Redis 7.x on localhost. 10,000 iterations per test, bulk size 100, payload 100 bytes, 32-connection pool with pipelining.
 
----
+## Why bunqueue is faster on these workloads
 
-## Latency Comparison
+- **TCP pipelining**: many commands in flight per connection, responses matched by request id.
+- **Batched writes**: SQLite in WAL mode (write-ahead logging, a journal that lets reads and writes overlap) groups many jobs into one disk transaction.
+- **Sharding**: work is spread across independent shards sized to your CPU cores, which keeps lock contention low.
+- **In-memory hot path**: the ready queue lives in memory (skip lists, heaps, LRU caches), SQLite is the durability layer, not the dispatcher.
 
-<div class="bq-chart" style="max-width: 34rem;">
-  <p class="bq-chart-title">Bulk push p99 latency <span>ms, lower is better</span></p>
-  <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:72%"></div></div><span class="bq-hval">3.26 ms</span></div>
-  <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">4.53 ms</span></div>
-  <p class="bq-chart-note"><b>1.4x lower</b></p>
-</div>
-
-| Operation | bunqueue p99 | BullMQ p99 | Improvement |
-|-----------|--------------|------------|-------------|
-| **Bulk Push** | 3.26ms | 4.53ms | **1.4x lower** |
-
----
-
-## Speedup by Operation
-
-<div class="bq-chart" style="max-width: 34rem;">
-  <p class="bq-chart-title">Speedup by operation <span>bunqueue ÷ BullMQ, higher is better</span></p>
-  <div class="bq-hrow"><span class="bq-hname">Bulk push</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">3.2x</span></div>
-  <div class="bq-hrow"><span class="bq-hname">Process</span><div class="bq-htrack"><div class="bq-hfill" style="width:53%"></div></div><span class="bq-hval">1.7x</span></div>
-  <div class="bq-hrow"><span class="bq-hname">Push</span><div class="bq-htrack"><div class="bq-hfill" style="width:41%"></div></div><span class="bq-hval">1.3x</span></div>
-</div>
-
----
-
-## How the Benchmark Works
-
-The benchmark performs three tests for both bunqueue and BullMQ:
-
-### 1. Push Test
-Pushes 10,000 jobs using 32 parallel connections to measure raw push throughput.
-
-```typescript
-// 32 concurrent clients pushing jobs
-await benchmarkParallel('Push', async () => {
-  await queue.add('job', PAYLOAD);
-}, 10000, 32);
-```
-
-### 2. Bulk Push Test
-Pushes 100 jobs per batch, 1,000 times (100,000 total jobs) to measure bulk insertion performance.
-
-```typescript
-// Batch of 100 jobs per operation
-const jobs = Array.from({ length: 100 }, (_, i) => ({
-  name: 'bulk-job',
-  data: { ...PAYLOAD, i },
-}));
-await queue.addBulk(jobs);
-```
-
-### 3. Process Test
-Measures end-to-end throughput: pushing 10,000 jobs and processing them with a single worker at `concurrency: 50` (50 jobs in flight).
-
-```typescript
-// Push jobs in parallel batches
-for (let i = 0; i < 10000; i += 1000) {
-  await Promise.all(batch.map(() => queue.add('job', PAYLOAD)));
-}
-
-// Wait for all to be processed
-while (processed < 10000) {
-  await new Promise(r => setTimeout(r, 10));
-}
-```
-
-<Aside type="tip">
-Both bunqueue and BullMQ use **identical test conditions**: same payload size (100 bytes), same batch sizes, same worker concurrency (50), and same parallel push strategy.
-</Aside>
-
----
-
-## Why is bunqueue Faster?
-
-<div class="bq-cards">
-  <div class="bq-card">
-    <BqIcon name="network" />
-    <h3>TCP Pipelining</h3>
-    <p>bunqueue's TCP protocol supports <b>pipelining</b> - multiple commands in flight per connection, with reqId-based response matching.</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="rows" />
-    <h3>Optimized Data Structures</h3>
-    <p>Skip lists, MinHeap, and LRU cache provide O(log n) or O(1) operations for common tasks.</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="file" />
-    <h3>Batch Transactions</h3>
-    <p>SQLite transactions batch multiple operations into single disk writes with WAL mode.</p>
-  </div>
-  <div class="bq-card">
-    <BqIcon name="shards" />
-    <h3>Auto-Scaled Sharding</h3>
-    <p>Lock contention is minimized by distributing work across N independent shards (auto-detected from CPU cores, max 64).</p>
-  </div>
-</div>
-
----
-
-## Feature Comparison
+## Feature comparison
 
 | Feature | bunqueue | BullMQ |
 |---------|----------|--------|
-| **Queue Types** | ✅ Standard, Priority, LIFO | ✅ Standard, Priority, LIFO |
-| **Delayed Jobs** | ✅ Yes | ✅ Yes |
-| **Retries & Backoff** | ✅ Exponential | ✅ Exponential |
-| **Dead Letter Queue** | ✅ Built-in (auto-retry, expiration) | ⚠️ Failed set, no dedicated DLQ |
-| **Rate Limiting** | ✅ Per-queue | ✅ Per-queue |
-| **Cron Jobs** | ✅ Built-in | ✅ Via scheduler |
-| **Job Dependencies** | ✅ Parent-child flows | ✅ Parent-child flows |
-| **Persistence** | ✅ SQLite (embedded) | ✅ Redis |
-| **Horizontal Scaling** | ⚠️ Single process | ✅ Multi-process |
-| **External Dependencies** | ✅ None (2 runtime deps) | ❌ Redis required |
-| **Install Footprint** | ✅ 7 packages, 5.5 MB | ❌ ~3 MB lib + Redis server |
-| **S3 Backup** | ✅ Built-in | ❌ Manual |
-| **TCP Pipelining** | ✅ Built-in | ✅ Via Redis |
-| **MCP Server (AI Agents)** | ✅ 73 tools built-in | ❌ Not available |
-
----
-
-## Run the Benchmark Yourself
-
-The benchmark source code is available at [`bench/comparison/run.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts).
-
-```bash
-# Clone the repository
-git clone https://github.com/egeominotti/bunqueue.git
-cd bunqueue
-bun install
-
-# Start Redis (required for BullMQ)
-redis-server --daemonize yes
-
-# Start bunqueue server
-bun run start &
-
-# Run the benchmark
-bun run bench/comparison/run.ts
-```
-
-### Benchmark Output
-
-<div class="bq-diag">
-  <div class="bq-diag-head"><b>bunqueue vs BullMQ Comparison Benchmark</b><span>iterations 10,000, bulk size 100, concurrency 50, payload 100 bytes</span></div>
-  <div class="bq-diag-group">
-    <span class="bq-diag-group-label">bunqueue, TCP mode</span>
-    <div class="bq-diag-row">
-      <div class="bq-diag-cell">Push <i>54,140 ops/sec</i></div>
-      <div class="bq-diag-cell">Bulk Push <i>139,200 ops/sec, p99: 3.26ms</i></div>
-      <div class="bq-diag-cell">Process <i>33,052 ops/sec</i></div>
-    </div>
-  </div>
-  <div class="bq-diag-group">
-    <span class="bq-diag-group-label">BullMQ, Redis</span>
-    <div class="bq-diag-row">
-      <div class="bq-diag-cell">Push <i>43,261 ops/sec</i></div>
-      <div class="bq-diag-cell">Bulk Push <i>44,000 ops/sec, p99: 4.53ms</i></div>
-      <div class="bq-diag-cell">Process <i>19,225 ops/sec</i></div>
-    </div>
-  </div>
-  <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-group">
-    <span class="bq-diag-group-label">results, speedup</span>
-    <div class="bq-diag-row">
-      <div class="bq-diag-cell">Push <i>1.3x</i></div>
-      <div class="bq-diag-cell bq-diag-accent">Bulk Push <i>3.2x</i></div>
-      <div class="bq-diag-cell">Process <i>1.7x</i></div>
-    </div>
-  </div>
-  <p class="bq-diag-note">Run with Redis connected and the bunqueue server connected on port 6789.</p>
-</div>
-
----
-
-## Benchmark Environment
-
-**Hardware:**
-- Mac Studio, Apple M1 Max
-- 32GB RAM
-- SSD storage
-
-**Software:**
-- macOS Tahoe
-- Bun 1.3.8
-- Redis 7.x (localhost)
-
-**Configuration:**
-- 10,000 iterations per test
-- Bulk size: 100 jobs
-- Concurrency: 50 workers
-- Payload: 100 bytes per job
-- TCP pipelining enabled
-- Connection pool: 32 connections
-
----
+| Queue types (standard, priority, LIFO) | ✅ | ✅ |
+| Delayed jobs, retries with backoff | ✅ | ✅ |
+| Dead letter queue (holding area for jobs that failed all retries) | ✅ Built-in, with auto-retry and expiration | ⚠️ Failed set, no dedicated DLQ |
+| Rate limiting | ✅ Per-worker and per-queue | ✅ Per-worker |
+| Cron / repeatable jobs | ✅ Built-in | ✅ Via Job Scheduler |
+| Parent-child flows | ✅ | ✅ |
+| Persistence | SQLite file, embedded | Redis server |
+| Horizontal scaling of the queue itself | ❌ Single instance | ✅ Redis Cluster |
+| External dependencies | ✅ None (2 runtime deps) | ❌ Redis required |
+| S3 backup | ✅ Built-in | ❌ Manual |
+| MCP server for AI agents | ✅ Built-in | ❌ |
+| Client languages | TypeScript, Python | Node.js, Python, and community ports |
 
 ## When to Use BullMQ Instead
 
-While bunqueue is faster for most use cases, BullMQ may be better when:
+bunqueue is single-instance: one server process owns the SQLite file, and workers connect to it. BullMQ is the better pick when:
 
-- **Horizontal scaling** is required across multiple processes/servers
-- **Redis** is already part of your infrastructure
-- **Redis-specific features** like pub/sub or Lua scripts are needed
-- **Workers in languages** beyond bunqueue's official SDKs (TypeScript and Python) need to share the same queue
+- **The queue itself must scale horizontally** across multiple servers (Redis Cluster).
+- **Redis is already in your stack** and operating it costs you nothing extra.
+- **You need Redis-specific features** such as pub/sub fan-out or custom Lua scripts.
+- **Your workers are written in languages** outside bunqueue's official SDKs (TypeScript and Python).
+- **You cannot run on Bun.** bunqueue's server and embedded mode require the Bun runtime.
 
 <Aside>
-For single-process applications, microservices, or edge deployments, bunqueue provides superior performance with simpler operations.
+For single-process apps, a service plus its workers, or edge deployments, bunqueue gives you the same API with one less moving part.
 </Aside>
 
+## Run it yourself
+
+```bash
+git clone https://github.com/egeominotti/bunqueue.git
+cd bunqueue && bun install
+redis-server --daemonize yes   # BullMQ side
+bun run start &                # bunqueue server
+bun run bench/comparison/run.ts
+```
+
+Source: [`bench/comparison/run.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts).
+
 <Aside type="tip" title="Related">
-- [Migration from BullMQ](/guide/migration/) - Step-by-step guide to switch your queues
-- [Benchmarks](/guide/benchmarks/) - Full throughput and latency numbers
-- [Production Operations](/guide/production/) - What running bunqueue actually costs
+- [Migration from BullMQ](/guide/migration/), the step-by-step switch
+- [Benchmarks](/guide/benchmarks/), full throughput and latency numbers
+- [Production Operations](/guide/production/), what running bunqueue actually costs
 </Aside>

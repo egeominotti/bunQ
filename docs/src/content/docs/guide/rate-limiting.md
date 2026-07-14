@@ -1,6 +1,6 @@
 ---
 title: "Rate Limiting & Concurrency Control for Bun Job Queues"
-description: Control job processing rates in bunqueue with per-queue rate limits and concurrency caps. Protect downstream services via CLI or HTTP API.
+description: Control job processing rates in bunqueue with per-queue rate limits and concurrency caps. Protect downstream services via CLI, SDK or MCP.
 head:
   - tag: meta
     attrs:
@@ -12,68 +12,94 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · rate limiting</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Rate limits and concurrency, under <em>control.</em></h1>
-  <p class="bq-hero-sub">Cap jobs per time window or concurrent active jobs per queue to protect downstream services. Works from the CLI, over TCP, and in embedded mode.</p>
+  <p class="bq-hero-sub">Cap how many jobs start per second, or how many run at the same time, so a busy queue never overwhelms the API or database behind it.</p>
 </div>
 
-:::tip[Using AI agents?]
-AI agents connected via MCP can set and clear rate limits and concurrency caps via natural language using `bunqueue_set_rate_limit`, `bunqueue_clear_rate_limit`, `bunqueue_set_concurrency`, and `bunqueue_clear_concurrency` tools. See [MCP Server](/guide/mcp/).
-:::
+bunqueue gives you two independent knobs per queue:
 
-## Rate Limit
+- **Rate limit**: how many jobs may *start* per second (throughput cap).
+- **Concurrency limit**: how many jobs may be *active at once* (parallelism cap).
 
-Limit jobs per second (token bucket, refilled continuously):
+Neither is set by default, so queues run unlimited until you say otherwise.
+
+## Set a rate limit
+
+Cap a queue at 100 jobs per second:
 
 ```bash
-# CLI
-bunqueue rate-limit set emails 100  # 100 jobs/second
-bunqueue rate-limit clear emails
+bunqueue rate-limit set emails 100   # max 100 jobs/second
+bunqueue rate-limit clear emails     # back to unlimited
 ```
 
-The server-side rate limit window is fixed at **1 second**. No rate limit is set by default (unlimited).
+Or from the SDK (works in both embedded and TCP mode):
 
-## Concurrency Limit
+```typescript
+queue.setGlobalRateLimit(100);  // 100 jobs/second
+queue.removeGlobalRateLimit();
+```
 
-Limit concurrent active jobs:
+The server-side window is fixed at **1 second**, implemented as a token bucket that refills continuously.
+
+## Set a concurrency limit
+
+Cap a queue at 5 jobs running at the same time, across all workers:
 
 ```bash
-# CLI
-bunqueue concurrency set emails 5  # Max 5 concurrent
+bunqueue concurrency set emails 5
 bunqueue concurrency clear emails
 ```
 
-## Embedded Mode
+```typescript
+queue.setGlobalConcurrency(5);
+queue.removeGlobalConcurrency();
+```
 
-:::note[Works in embedded mode]
-Rate limiting (`setGlobalRateLimit`) and concurrency limiting (`setGlobalConcurrency`) work in **both embedded and TCP modes**, in embedded mode they call the in-process manager directly. A per-worker `limiter: { max, duration }` (in `WorkerOptions`, sliding window enforced client-side) also works embedded.
-:::
-
-:::caution[Server rate limits are per second]
-`queue.setGlobalRateLimit(max, duration?)` accepts a `duration` argument for BullMQ API compatibility, but the server ignores it: the queue-level limit is always `max` jobs per second. For a custom window (e.g. 100 jobs per minute), use the per-worker `limiter: { max, duration }` option instead.
-:::
-
-In embedded mode you can call `queue.setGlobalRateLimit(max)` / `queue.setGlobalConcurrency(n)` directly, use a per-worker `limiter`, or control throughput with worker concurrency:
+This is a *queue-level* cap. Each worker also has its own `concurrency` option that limits how many jobs that one worker runs in parallel:
 
 ```typescript
-const queue = new Queue('emails', { embedded: true });
-
-// Control processing rate with worker concurrency
 const worker = new Worker('emails', processor, {
-  embedded: true,
-  concurrency: 5, // Max 5 parallel jobs
+  concurrency: 5, // this worker runs at most 5 jobs at once
 });
 ```
 
-For custom time-based rate limiting beyond the built-in options, you can also implement it in your processor:
+## Custom time windows (per worker)
+
+Need "100 jobs per minute" instead of per second? The queue-level limit only supports a 1-second window, but each worker can enforce a sliding window of any duration with the `limiter` option:
 
 ```typescript
-import { Ratelimit } from '@upstash/ratelimit'; // or similar
+const worker = new Worker('emails', processor, {
+  limiter: { max: 100, duration: 60_000 }, // 100 jobs per minute, per worker
+});
+```
 
-const ratelimit = new Ratelimit({ ... });
+The limit is enforced client-side by each worker, so with 3 identical workers the effective rate is 3x.
 
+## Using AI agents?
+
+Agents connected via [MCP](/guide/mcp/) can set and clear both limits in natural language ("rate limit emails to 50 per second") through the `bunqueue_set_rate_limit`, `bunqueue_clear_rate_limit`, `bunqueue_set_concurrency`, and `bunqueue_clear_concurrency` tools.
+
+## Reference
+
+| Control | Scope | Window | How |
+|---------|-------|--------|-----|
+| Rate limit | Queue (all workers) | Fixed 1 second | `bunqueue rate-limit set`, `queue.setGlobalRateLimit(max)` |
+| Concurrency limit | Queue (all workers) | n/a | `bunqueue concurrency set`, `queue.setGlobalConcurrency(n)` |
+| Worker concurrency | One worker | n/a | `new Worker(..., { concurrency })` |
+| Worker limiter | One worker | Any duration | `new Worker(..., { limiter: { max, duration } })` |
+
+## Gotchas
+
+:::caution[The queue-level duration argument is ignored]
+`queue.setGlobalRateLimit(max, duration?)` accepts a `duration` argument for BullMQ API compatibility, but the server ignores it: the queue-level limit is always `max` jobs **per second**. For a custom window, use the per-worker `limiter` option above.
+:::
+
+For rate limiting that must be shared with code outside the queue (for example, an API budget also consumed by web requests), use an external limiter inside your processor:
+
+```typescript
 const worker = new Worker('emails', async (job) => {
-  await ratelimit.limit('email-send'); // External rate limiter
+  await ratelimit.limit('email-send'); // external limiter, e.g. Upstash
   await sendEmail(job.data);
-}, { embedded: true });
+});
 ```
 
 :::tip[Related Guides]

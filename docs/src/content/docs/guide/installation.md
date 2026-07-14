@@ -11,58 +11,24 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · installation</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Install bunqueue, zero <em>infrastructure.</em></h1>
-  <p class="bq-hero-sub">Install bunqueue from npm, build it from source, or drop a single self-contained binary on a server. No Redis, no broker, nothing else to provision.</p>
-
-  <div class="bq-proof">
-    <span><b>1</b> command: bun add bunqueue</span>
-    <span><b>5.5 MB</b> install, 7 packages</span>
-    <span><b>5</b> prebuilt binary platforms</span>
-  </div>
+  <p class="bq-hero-sub">One command installs everything: the library, the server, and the CLI. No Redis, no broker, nothing else to provision.</p>
 </div>
 
 ## Requirements
 
-- [Bun](https://bun.sh) v1.3.9 or later (enforced via `engines`)
+- [Bun](https://bun.sh) v1.3.9 or later
 
-## Install from npm
+## Install
 
 ```bash
 bun add bunqueue
 ```
 
-## Install from source
+That is it. The package is 5.5 MB with 7 packages total, and includes the client library, the standalone server, and the CLI.
 
-```bash
-git clone https://github.com/egeominotti/bunqueue.git
-cd bunqueue
-bun install
-bun run build
-```
+## Verify it works
 
-## Single binary (no Bun required)
-
-Each release ships self-contained executables, useful on servers and edge
-gateways (Raspberry Pi 4/5, ARM64 boxes) where you don't want to install a
-runtime:
-
-```bash
-# Pick your platform: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 ships as a .zip)
-curl -fsSLO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-linux-arm64.tar.gz
-tar -xzf bunqueue-linux-arm64.tar.gz
-./bunqueue-linux-arm64 --version
-sudo mv bunqueue-linux-arm64 /usr/local/bin/bunqueue
-
-bunqueue start --data-path /var/lib/bunqueue/queue.db
-```
-
-Checksums: `SHA256SUMS` is attached to every release.
-
-The binary is the full server + CLI. For the client SDK in your app code you
-still install the package (`bun add bunqueue`).
-
-## Verify Installation
-
-### Embedded Mode
+Save this as `test.ts` and run `bun run test.ts`:
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -77,19 +43,44 @@ const worker = new Worker('test', async (job) => {
 await queue.add('hello', { message: 'bunqueue is working!' });
 ```
 
-### Server Mode
+You should see `Processing: { message: "bunqueue is working!" }`. Next: the [Quick Start](/guide/quickstart/) builds on this.
+
+To check the server and CLI:
 
 ```bash
-# Start server
-bunqueue start
-
-# Check version
 bunqueue --version
+bunqueue start
 ```
 
-## TypeScript Support
+## Single binary (no Bun required)
 
-bunqueue is written in TypeScript and includes full type definitions:
+Each release ships self-contained executables, useful on servers and edge devices (Raspberry Pi, ARM64 boxes) where you don't want to install a runtime:
+
+```bash
+# Platforms: linux-x64 | linux-arm64 | darwin-x64 | darwin-arm64 (windows-x64 ships as a .zip)
+curl -fsSLO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-linux-arm64.tar.gz
+tar -xzf bunqueue-linux-arm64.tar.gz
+sudo mv bunqueue-linux-arm64 /usr/local/bin/bunqueue
+
+bunqueue start --data-path /var/lib/bunqueue/queue.db
+```
+
+A `SHA256SUMS` file is attached to every release for checksum verification.
+
+The binary is the full server + CLI. For the client SDK in your app code you still install the package (`bun add bunqueue`).
+
+## Install from source
+
+```bash
+git clone https://github.com/egeominotti/bunqueue.git
+cd bunqueue
+bun install
+bun run build
+```
+
+## TypeScript support
+
+bunqueue is written in TypeScript and ships full type definitions:
 
 ```typescript
 import type {
@@ -103,7 +94,7 @@ import type {
 ```
 
 :::tip[Next Steps]
-- [Quick Start Tutorial](/guide/quickstart/) - Build your first queue
-- [Introduction](/guide/introduction/) - Learn about bunqueue features
-- [MCP Server](/guide/mcp/) - Connect AI agents to manage queues via natural language
+- [Quick Start](/guide/quickstart/), build your first queue
+- [Introduction](/guide/introduction/), what bunqueue is and when to use it
+- [MCP Server](/guide/mcp/), let AI agents manage your queues
 :::

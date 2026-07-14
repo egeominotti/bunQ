@@ -1,6 +1,6 @@
 ---
-title: "CPU-Intensive Workers over TCP in Bunqueue"
-description: Run CPU-heavy Bun jobs over TCP without dropping connections. Configure ping intervals, command timeouts, and yield patterns for reliability.
+title: "CPU-Intensive Workers in bunqueue: Keep TCP Connections Alive"
+description: "Heavy CPU jobs can freeze Bun's event loop, drop the TCP connection, and requeue in-flight jobs. Here is the config fix, the yield pattern, and SandboxedWorker."
 head:
   - tag: meta
     attrs:
@@ -11,36 +11,47 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cpu-intensive-workers</span>
   <h1 class="bq-hero-h1 bq-bench-h1">CPU-intensive workers, off the <em>event loop.</em></h1>
-  <p class="bq-hero-sub">Synchronous CPU-heavy work over TCP blocks the event loop, drops the connection, and requeues every in-flight job. This page explains why it happens and how to configure workers to avoid it.</p>
+  <p class="bq-hero-sub">Heavy number crunching in a TCP worker can freeze the connection, drop it, and requeue every in-flight job. This page shows the fix.</p>
 </div>
 
-## The Problem
+If your jobs do heavy synchronous computation (image processing, crypto, parsing large files) and your workers connect over TCP, read this page. It explains a failure mode you will otherwise meet in production, and three ways to avoid it.
 
-The TCP client sends periodic ping health checks (default: every 30s). Under heavy CPU load, the event loop can't process these pings in time. After 3 consecutive failures (~90s), the client triggers a forced reconnect, which closes the socket. When the server detects the socket close, it calls `releaseClientJobs()` and **requeues all processing jobs**. The worker then fails to ACK completed jobs with:
+## The quick fix
 
-```
-Error: Job not found or not in processing state
-```
-
-## Connection Options
-
-Disable the ping health check and increase the command timeout:
+Relax the connection health checks so CPU bursts do not look like a dead connection:
 
 ```typescript
 const worker = new Worker('heavy-queue', processor, {
   concurrency: 3,
   connection: {
     port: 6789,
-    pingInterval: 0,        // Disable ping health check
-    commandTimeout: 60000,  // Increase command timeout to 60s
+    pingInterval: 0,        // disable the ping health check
+    commandTimeout: 60000,  // allow slow replies (default 30s)
   },
-  useLocks: false,          // Avoid lock expiration under load
-  heartbeatInterval: 0,     // Disable heartbeat
+  useLocks: false,          // no job lock to expire under load
+  heartbeatInterval: 0,     // no heartbeat to miss
 });
 ```
 
-:::caution[Apply the same options to Queue]
-Each `Worker` opens its own connection pool from its `connection` options, but `Queue` instances with the default `poolSize` and no token **share** a pool keyed by host, port, pool size, token, and TLS config. The **first** Queue created fixes tuning options like `pingInterval` and `commandTimeout` for every later Queue that maps to the same pool. Pass the same connection config everywhere so all connections get the tuned settings:
+`useLocks` and `heartbeatInterval` are part of stall detection, the safety net that reclaims jobs from crashed workers. Disabling them means a genuinely crashed worker's jobs wait longer to be recovered, so only do this for queues where jobs are CPU-heavy and workers are supervised.
+
+## Why this happens
+
+Bun runs your code on a single **event loop**, the one thread that handles all timers and network I/O. A long synchronous computation blocks it completely, so nothing else runs:
+
+1. The TCP client pings the server every 30 seconds as a health check. Blocked loop, no pings.
+2. After 3 missed pings (about 90 seconds), the client assumes the connection is dead and reconnects, closing the socket.
+3. The server sees the socket close and **requeues all jobs that worker was processing**.
+4. Your worker finishes its computation and tries to report completion, and gets:
+
+```
+Error: Job not found or not in processing state
+```
+
+The job then runs again on another worker. The config above removes steps 1 and 2.
+
+:::caution[Apply the same connection options to your Queue instances]
+Each `Worker` opens its own connection pool, but `Queue` instances with the default pool size and no auth token **share** a pool keyed by host, port, pool size, token, and TLS config. The first `Queue` created fixes `pingInterval` and `commandTimeout` for every later `Queue` on the same pool. Pass one shared config everywhere:
 
 ```typescript
 const tcpOpts = { port: 6789, pingInterval: 0, commandTimeout: 60000 };
@@ -50,12 +61,12 @@ const worker = new Worker('heavy', processor, { connection: tcpOpts });
 ```
 :::
 
-## Non-Blocking CPU Work
+## Better: yield inside CPU loops
 
-Even with pings disabled, long synchronous CPU work blocks heartbeats, lock renewals, and TCP responses. Break up CPU-heavy loops with periodic yields:
+Even with pings disabled, a blocked event loop stalls progress updates, lock renewals, and every other queue on the same process. If you can, break the work up:
 
 ```typescript
-// Bad: blocks event loop for entire duration
+// Bad: blocks the event loop for the whole run
 function findNthPrime(n: number): number {
   let count = 0, candidate = 1;
   while (count < n) {
@@ -65,7 +76,7 @@ function findNthPrime(n: number): number {
   return candidate;
 }
 
-// Good: yields every 500 iterations
+// Good: hands control back to the event loop every 500 iterations
 async function findNthPrime(n: number): Promise<number> {
   let count = 0, candidate = 1, ops = 0;
   while (count < n) {
@@ -77,30 +88,17 @@ async function findNthPrime(n: number): Promise<number> {
 }
 ```
 
-`await Bun.sleep(0)` yields to the event loop for one tick, allowing timers, TCP I/O, and heartbeats to fire.
-
-## Default Timeouts Reference
-
-| Setting | Default | Effect under CPU load |
-|---------|---------|----------------------|
-| `pingInterval` | 30000ms | 3 consecutive failures → forced reconnect (~90s) |
-| `commandTimeout` | 30000ms | Long-running commands timeout (3 consecutive timeouts also force a reconnect) |
-| `lockDuration` | 30000ms | Job lock expires if heartbeats cannot renew it in time |
-| `stallInterval` | 30000ms | Job marked stalled if no heartbeat |
+`await Bun.sleep(0)` pauses for one tick, letting timers, TCP traffic, and heartbeats fire. With regular yields you can keep the default health checks on.
 
 ## Alternative: SandboxedWorker
 
-:::caution[Experimental, Bun Workers are not yet stable]
-`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are **experimental**. Known issues include memory growth and thread duplication across Bun versions. For production, prefer the yield-based approach above or use the standard `Worker`. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker) for details.
-:::
-
-For truly CPU-bound work where yielding is not practical, [`SandboxedWorker`](/guide/worker/#sandboxedworker) runs each job in an isolated Bun Worker thread, so the main event loop is never blocked:
+For work that cannot yield, `SandboxedWorker` runs each job in a separate Bun Worker thread, so the main event loop never blocks:
 
 ```typescript
 import { SandboxedWorker } from 'bunqueue/client';
 
 const worker = new SandboxedWorker('heavy-queue', {
-  processor: './heavy-processor.ts',
+  processor: './heavy-processor.ts', // file with a default-exported async function
   concurrency: 4,
   connection: { port: 6789 },
 });
@@ -108,8 +106,28 @@ const worker = new SandboxedWorker('heavy-queue', {
 await worker.start();
 ```
 
-:::tip[Related Guides]
-- [Worker API](/guide/worker/) - Full worker configuration options
-- [Stall Detection & Recovery](/guide/stall-detection/) - Handle stalled workers
-- [Monitoring & Prometheus Metrics](/guide/monitoring/) - Monitor CPU-heavy workloads
+:::caution[Experimental]
+`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are experimental. Known issues include memory growth and thread duplication across Bun versions. Prefer the yield pattern for production. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+:::
+
+## Timeout reference
+
+What each default does to a CPU-bound worker:
+
+| Setting | Default | Effect under CPU load |
+|---------|---------|----------------------|
+| `pingInterval` | 30000ms | 3 missed pings force a reconnect (~90s) |
+| `commandTimeout` | 30000ms | Slow replies time out; 3 in a row also force a reconnect |
+| `lockDuration` | 30000ms | The job's ownership lease expires if heartbeats cannot renew it |
+| `stallInterval` | 30000ms | Job is marked stalled after this long without a heartbeat |
+
+## Gotchas
+
+- **Embedded mode is not immune.** There is no TCP connection to drop, but a blocked event loop still freezes timers, progress updates, and any HTTP server in the same process. Yield anyway.
+- **Do not disable pings globally.** Tune only the heavy queue's connections; keep defaults for normal queues so dead connections are still detected quickly.
+
+:::tip[Related]
+- [Worker API](/guide/worker/) - All worker options
+- [Stall Detection](/guide/stall-detection/) - How stalled jobs are recovered
+- [Monitoring](/guide/monitoring/) - Watch CPU-heavy workloads in production
 :::

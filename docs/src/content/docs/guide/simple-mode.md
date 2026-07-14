@@ -11,14 +11,10 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · simple mode</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Queue and worker, <em>one object.</em></h1>
-  <p class="bq-hero-sub">Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons, all from one place.</p>
-
-  <div class="bq-proof">
-    <span><b>12</b> built-in features</span>
-    <span><b>5</b> retry strategies</span>
-    <span><b>1</b> object to close on shutdown</span>
-  </div>
+  <p class="bq-hero-sub">Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons, all from one place, one thing to close on shutdown.</p>
 </div>
+
+If your producer and consumer live in the same process, creating a `Queue` and a `Worker` separately is boilerplate. `Bunqueue` wraps both:
 
 ```typescript
 import { Bunqueue } from 'bunqueue/client';
@@ -35,35 +31,10 @@ await app.add('send', { to: 'alice@example.com' });
 ```
 
 :::tip[When to use]
-Use `Bunqueue` when producer and consumer are in the **same process**. For distributed systems, use [`Queue`](/guide/queue/) + [`Worker`](/guide/worker/) separately. For AI agent workflows, use the [MCP Server](/guide/mcp/) instead, agents control queues via natural language without writing code.
+Use `Bunqueue` when producer and consumer are in the **same process**. For distributed systems (separate producer and worker services), use [`Queue`](/guide/queue/) + [`Worker`](/guide/worker/) directly.
 :::
 
-## Architecture
-
-```
-new Bunqueue('emails', opts)
-    │
-    ├── this.queue  = new Queue('emails', ...)
-    ├── this.worker = new Worker('emails', ...)
-    │
-    └── Subsystems (all optional):
-        ├── RetryEngine         ── jitter, fibonacci, exponential, custom
-        ├── CircuitBreaker      ── pauses worker after N failures
-        ├── BatchAccumulator    ── groups N jobs into one call
-        ├── TriggerManager      ── "on complete → create job B"
-        ├── TtlChecker          ── rejects expired jobs
-        ├── PriorityAger        ── boosts old jobs' priority
-        ├── CancellationManager ── AbortController per job
-        └── DedupDebounceMerger ── deduplication & debounce defaults
-```
-
-Processing pipeline per job:
-
-```
-Job → Circuit Breaker → TTL check → AbortController → Retry → Middleware → Processor
-```
-
----
+Under the hood, `Bunqueue` is exactly `new Queue()` + `new Worker()` plus optional subsystems. Each job flows through: circuit breaker check → TTL check → cancellation setup → retry wrapper → middleware → your processor. Every subsystem is off until you configure it.
 
 ## Routes
 
@@ -94,7 +65,7 @@ Use **one** of `processor`, `routes`, or `batch`. Passing multiple or none throw
 
 ## Middleware
 
-Wraps every job execution. Receives the job and a `next()` function:
+Wraps every job execution, like middleware in a web framework. Each middleware receives the job and a `next()` function:
 
 ```typescript
 // Timing middleware
@@ -115,18 +86,18 @@ app.use(async (job, next) => {
 });
 ```
 
-Execution order is onion-style: `mw1 → mw2 → processor → mw2 → mw1`. When no middleware is added, zero overhead.
+Execution order is onion-style: `mw1 → mw2 → processor → mw2 → mw1`. With no middleware added, there is zero overhead.
 
-## Batch Processing
+## Batch processing
 
-Accumulates N jobs and processes them together:
+Accumulate N jobs and process them together, ideal for bulk database inserts:
 
 ```typescript
 const app = new Bunqueue('db-inserts', {
   embedded: true,
   batch: {
     size: 50,        // flush every 50 jobs
-    timeout: 2000,   // or every 2 seconds
+    timeout: 2000,   // or every 2 seconds, whichever comes first
     processor: async (jobs) => {
       const rows = jobs.map(j => j.data.row);
       await db.insertMany('table', rows);
@@ -136,11 +107,11 @@ const app = new Bunqueue('db-inserts', {
 });
 ```
 
-Flushes when buffer reaches `size` **or** `timeout` expires. On `close()`, remaining jobs are flushed.
+On `close()`, remaining buffered jobs are flushed.
 
-## Advanced Retry
+## Advanced retry
 
-5 strategies + retry predicate:
+Five backoff strategies (how long to wait between retry attempts) plus a predicate to decide what is worth retrying:
 
 ```typescript
 const app = new Bunqueue('api-calls', {
@@ -163,15 +134,15 @@ const app = new Bunqueue('api-calls', {
 |----------|---------|----------|
 | `fixed` | `delay` every time | Rate-limited APIs |
 | `exponential` | `delay × 2^(attempt-1)` | General purpose |
-| `jitter` | `delay × 2^(attempt-1) × random(0.5-1.5)` | Thundering herd prevention |
+| `jitter` | `delay × 2^(attempt-1) × random(0.5-1.5)` | Avoid retry storms |
 | `fibonacci` | `delay × fib(attempt)` (1x, 2x, 3x, 5x, 8x, ...) | Gradual backoff |
 | `custom` | `customBackoff(attempt, error) → ms` | Anything |
 
-This is **in-process retry**, the job stays active. Different from core `attempts`/`backoff` which re-queues.
+This is **in-process retry**: the job stays active while retrying. Different from core `attempts`/`backoff`, which re-queues the job.
 
-## Graceful Cancellation
+## Graceful cancellation
 
-Cancel running jobs with AbortController:
+Cancel running jobs via an AbortController signal (the standard way to tell async code to stop):
 
 ```typescript
 const app = new Bunqueue('encoding', {
@@ -193,22 +164,16 @@ app.cancel(job.id, 5000);  // cancel after 5s grace period
 
 The signal works with `fetch` too: `await fetch(url, { signal })`.
 
-## Circuit Breaker
+## Circuit breaker
 
-Pauses the worker after too many consecutive failures:
-
-```
-CLOSED ──→ failures ≥ threshold ──→ OPEN (worker paused)
-                                       │
-              ←── success ──── HALF-OPEN ←── timeout expires
-```
+When a downstream service is down, retrying every job just burns attempts. A circuit breaker pauses the worker after too many consecutive failures, then probes periodically until the service recovers:
 
 ```typescript
 const app = new Bunqueue('payments', {
   embedded: true,
   processor: async (job) => paymentGateway.charge(job.data),
   circuitBreaker: {
-    threshold: 5,         // open after 5 failures
+    threshold: 5,         // open (pause) after 5 consecutive failures
     resetTimeout: 30000,  // try again after 30s
     onOpen: () => alert('Gateway down!'),
     onClose: () => alert('Gateway recovered'),
@@ -219,9 +184,9 @@ app.getCircuitState();  // 'closed' | 'open' | 'half-open'
 app.resetCircuit();     // force close + resume worker
 ```
 
-When both retry and circuit breaker are active: all retries exhausted = 1 circuit breaker failure.
+When both retry and circuit breaker are active: one job exhausting all its retries counts as one circuit breaker failure.
 
-## Event Triggers
+## Event triggers
 
 Create follow-up jobs automatically when a job completes or fails:
 
@@ -242,24 +207,20 @@ app.trigger({
   data: (result, job) => ({ id: job.data.id }),
 });
 
-// Conditional trigger (only for large orders)
-// `result` is typed as unknown, cast it to your processor's return type
+// Conditional trigger; `result` is typed as unknown, cast it
 app.trigger({
   on: 'place-order',
   create: 'fraud-alert',
   data: (result) => ({ amount: (result as { total: number }).total }),
   condition: (result) => (result as { total: number }).total > 1000,
 });
-
-// Chain triggers
-app
-  .trigger({ on: 'step-1', create: 'step-2', data: (r) => r })
-  .trigger({ on: 'step-2', create: 'step-3', data: (r) => r });
 ```
+
+Triggers chain: `step-1 → step-2 → step-3`. For anything more complex, use the [Workflow Engine](/guide/workflow/).
 
 ## Job TTL
 
-Expire unprocessed jobs. Checked when the worker picks up the job:
+Expire jobs that waited too long, checked when the worker picks the job up:
 
 ```typescript
 const app = new Bunqueue('otp', {
@@ -279,11 +240,11 @@ app.setDefaultTtl(120000);
 app.setNameTtl('flash-sale', 30000);
 ```
 
-Resolution: `perName[job.name]` → `defaultTtl` → `0` (no TTL).
+Resolution order: `perName[job.name]` → `defaultTtl` → `0` (no TTL).
 
-## Priority Aging
+## Priority aging
 
-Automatically boosts priority of old waiting jobs to prevent starvation:
+Low-priority jobs can starve behind a stream of high-priority ones. Priority aging automatically boosts jobs the longer they wait:
 
 ```typescript
 const app = new Bunqueue('tasks', {
@@ -291,7 +252,7 @@ const app = new Bunqueue('tasks', {
   processor: async (job) => ({ done: true }),
   priorityAging: {
     interval: 60000,    // check every 60s
-    minAge: 300000,     // boost after 5 minutes
+    minAge: 300000,     // start boosting after 5 minutes
     boost: 2,           // +2 priority per tick
     maxPriority: 100,   // cap
     maxScan: 200,       // max jobs per tick
@@ -299,11 +260,9 @@ const app = new Bunqueue('tasks', {
 });
 ```
 
-Once a job is older than `minAge`, it gains `boost` priority on every check tick. With the config above, a job with priority 1 becomes 3 after 5 minutes, 5 one minute later, and so on, capped at `maxPriority`.
+## Deduplication defaults
 
-## Job Deduplication
-
-Prevent duplicate jobs automatically. Jobs with the same name + data get the same dedup ID:
+Prevent duplicate jobs automatically: jobs with the same name + data get the same dedup ID within the TTL window:
 
 ```typescript
 const app = new Bunqueue('webhooks', {
@@ -311,8 +270,6 @@ const app = new Bunqueue('webhooks', {
   processor: async (job) => processWebhook(job.data),
   deduplication: {
     ttl: 60000,       // dedup window: 60 seconds
-    extend: false,    // don't extend TTL on duplicate
-    replace: false,   // don't replace data
   },
 });
 
@@ -321,105 +278,68 @@ await app.add('hook', { event: 'user.created', userId: '123' }); // deduplicated
 await app.add('hook', { event: 'user.updated', userId: '123' }); // different data → new job
 ```
 
-Override per-job with explicit `deduplication` in options:
+Override per job: `await app.add('task', data, { deduplication: { id: 'my-id', ttl: 5000 } })`. Strategies (`extend`, `replace`) are explained in [Queue → Deduplication](/guide/queue/#deduplication).
 
-```typescript
-await app.add('task', data, { deduplication: { id: 'my-custom-id', ttl: 5000 } });
-```
+### Debounce
 
-## Job Debouncing
+The `debounce: { ttl }` option attaches a default debounce id (the job name) to every job. It is BullMQ-compatible metadata, visible via `job.opts.debounce`, but it does **not** suppress duplicates by itself in the current engine. To actually coalesce rapid duplicates, use `deduplication` with `replace: true` (last write wins).
 
-Attach a default debounce id to every job. Each job gets `debounce: { id: jobName, ttl }` unless the per-job options already set one:
+## Rate limiting
 
-```typescript
-const app = new Bunqueue('search', {
-  embedded: true,
-  processor: async (job) => executeSearch(job.data.query),
-  debounce: {
-    ttl: 500,  // 500ms debounce window
-  },
-});
-
-// All three 'search' jobs share the debounce id 'search'
-await app.add('search', { query: 'h' });
-await app.add('search', { query: 'he' });
-await app.add('search', { query: 'hello' });
-```
-
-Debounce groups by job name. Different names get independent debounce ids.
-
-:::caution
-The debounce id and TTL are stored on the job (BullMQ v5 compatible metadata, visible via `job.opts.debounce`), but they do not suppress duplicates by themselves in the current engine. To actually coalesce rapid duplicates, use [deduplication](#job-deduplication): with `replace: true`, a duplicate arriving within the TTL window replaces the pending job, giving last-write-wins semantics.
-:::
-
-## Rate Limiting
-
-Control job processing speed:
+Control processing speed:
 
 ```typescript
 const app = new Bunqueue('api', {
   embedded: true,
   processor: async (job) => callExternalAPI(job.data),
-
-  // Worker-level: max 100 jobs per second
-  rateLimit: {
-    max: 100,
-    duration: 1000,
-  },
+  rateLimit: { max: 100, duration: 1000 },  // max 100 jobs per second
 });
 
-// Or per-group limiting (e.g., per customer). With groupKey set, `max`
-// becomes a per-group concurrency cap (max active jobs per group value)
-// and `duration` is ignored.
+// Per-group limiting (e.g. per customer). With groupKey set, `max` becomes
+// a per-group concurrency cap (max active jobs per group) and duration is ignored.
 const app2 = new Bunqueue('api', {
   embedded: true,
   processor: async (job) => callAPI(job.data),
-  rateLimit: {
-    max: 10,
-    duration: 1000,
-    groupKey: 'customerId',  // groups by job.data.customerId
-  },
+  rateLimit: { max: 10, duration: 1000, groupKey: 'customerId' },
 });
 
 // Runtime updates
-app.setGlobalRateLimit(50, 1000);   // change to 50/sec
-app.removeGlobalRateLimit();        // remove limit
+app.setGlobalRateLimit(50, 1000);
+app.removeGlobalRateLimit();
 ```
 
 ## DLQ (Dead Letter Queue)
 
-Automatically manage failed jobs:
+The DLQ collects jobs that failed permanently. Simple Mode can auto-retry and prune it:
 
 ```typescript
 const app = new Bunqueue('critical', {
   embedded: true,
   processor: async (job) => riskyOperation(job.data),
   dlq: {
-    autoRetry: true,           // auto-retry failed jobs
-    autoRetryInterval: 3600000, // retry every hour
-    maxAutoRetries: 3,         // max 3 retries
-    maxAge: 604800000,         // purge after 7 days
-    maxEntries: 10000,         // max DLQ size
+    autoRetry: true,            // re-queue failed jobs periodically
+    autoRetryInterval: 3600000, // every hour
+    maxAutoRetries: 3,
+    maxAge: 604800000,          // purge entries older than 7 days
+    maxEntries: 10000,
   },
 });
 
-// Query DLQ
-const entries = app.getDlq();                              // all entries
-const stats = app.getDlqStats();                           // { total, byReason, ... }
-const timeouts = app.getDlq({ reason: 'timeout' });       // filter by reason
+// Query
+const entries = app.getDlq();
+const stats = app.getDlqStats();                    // { total, byReason, ... }
+const timeouts = app.getDlq({ reason: 'timeout' });
 
-// Manual actions
+// Act
 app.retryDlq();           // retry all
 app.retryDlq('job-id');   // retry one
 app.purgeDlq();           // clear all
-
-// Update config at runtime
 app.setDlqConfig({ autoRetry: false });
 ```
 
 Failure reasons tracked: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`, plus `unknown` as a fallback.
 
-## Cron Jobs
+## Cron jobs
 
 ```typescript
 await app.cron('daily-report', '0 9 * * *', { type: 'report' });
@@ -430,67 +350,29 @@ await app.listCrons();
 await app.removeCron('healthcheck');
 ```
 
-See [Cron Jobs guide](/guide/cron/) for advanced options.
+See the [Cron guide](/guide/cron/) for advanced options.
 
-## Events
+## Events, control, direct access
 
 ```typescript
+// Events (same as Worker)
 app.on('completed', (job, result) => { });
 app.on('failed', (job, error) => { });
-app.on('active', (job) => { });
-app.on('progress', (job, progress) => { });
-app.on('stalled', (jobId, reason) => { });
-app.on('error', (error) => { });
-app.on('ready', () => { });
-app.on('drained', () => { });
-app.on('closed', () => { });
-```
+// also: active, progress, stalled, error, ready, drained, closed
 
-## Adding Jobs
-
-```typescript
-// Single
-await app.add('task', { key: 'value' });
-
-// With options
-await app.add('urgent', data, {
-  priority: 10,
-  delay: 5000,
-  attempts: 5,
-  durable: true,
-});
-
-// Bulk
-await app.addBulk([
-  { name: 'email', data: { to: 'alice' } },
-  { name: 'email', data: { to: 'bob' }, opts: { priority: 10 } },
-]);
-```
-
-## Control
-
-```typescript
+// Control
 app.pause();           // pause queue + worker
 app.resume();          // resume both
 await app.close();     // graceful shutdown
 await app.close(true); // force shutdown
+app.isRunning(); app.isPaused(); app.isClosed();
 
-app.isRunning();
-app.isPaused();
-app.isClosed();
-```
-
-## Direct Access
-
-For operations not exposed by Simple Mode:
-
-```typescript
-app.queue.getWaiting();
+// Escape hatch: the underlying Queue and Worker are yours
 app.queue.setStallConfig({ stallInterval: 30000 });
 app.worker.concurrency = 20;
 ```
 
-## Full Example
+## Full example
 
 ```typescript
 import { Bunqueue, shutdownManager } from 'bunqueue/client';
@@ -533,9 +415,9 @@ process.on('SIGINT', async () => {
 });
 ```
 
-## API Reference
+## API reference
 
-### Constructor Options
+### Constructor options
 
 **Processing mode** (pick one):
 

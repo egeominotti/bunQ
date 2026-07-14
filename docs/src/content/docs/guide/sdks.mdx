@@ -52,13 +52,73 @@ interoperate on the same queues out of the box.
 
 ### 1. Run the server
 
-The server is the only component that requires [Bun](https://bun.sh).
+The server is the only component that requires [Bun](https://bun.sh), and
+only if you run it with `bunx`. Docker and the prebuilt binary need nothing
+at all.
+
+<Tabs>
+<TabItem label="bunx">
 
 ```bash
 bunx bunqueue start
-# or, with Docker and persistent data:
-# docker run -d -p 6789:6789 -p 6790:6790 -v bunqueue-data:/app/data ghcr.io/egeominotti/bunqueue:latest
 ```
+
+One command, no install. Data persists to `./data/bunq.db` by default;
+change it with `--data-path` or `BUNQUEUE_DATA_PATH`.
+
+</TabItem>
+<TabItem label="Docker">
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
+```
+
+The named volume keeps the SQLite file across container restarts and
+upgrades.
+
+</TabItem>
+<TabItem label="Docker Compose">
+
+```yaml
+# compose.yaml
+services:
+  bunqueue:
+    image: ghcr.io/egeominotti/bunqueue:latest
+    ports:
+      - "6789:6789"   # TCP protocol (SDKs)
+      - "6790:6790"   # HTTP API (/health, /metrics)
+    volumes:
+      - bunqueue-data:/app/data
+    # environment:
+    #   AUTH_TOKENS: "your-secret-token"
+
+volumes:
+  bunqueue-data:
+```
+
+```bash
+docker compose up -d
+```
+
+</TabItem>
+<TabItem label="Binary">
+
+```bash
+# download the binary for your platform from GitHub Releases
+curl -LO https://github.com/egeominotti/bunqueue/releases/latest/download/bunqueue-darwin-arm64
+chmod +x bunqueue-darwin-arm64
+./bunqueue-darwin-arm64 start
+```
+
+Prebuilt binaries for macOS and Linux are attached to every
+[release](https://github.com/egeominotti/bunqueue/releases); no runtime
+required.
+
+</TabItem>
+</Tabs>
 
 Port 6789 serves the TCP protocol used by the SDKs, port 6790 serves the
 HTTP API with `/health` and `/metrics`. Additional deployment options are
@@ -116,8 +176,8 @@ go get github.com/egeominotti/bunqueue/sdk/go
 
 ### 3. Produce jobs
 
-<Tabs>
-<TabItem label="Node / Deno / Bun">
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { Queue } from 'bunqueue-client';
@@ -164,8 +224,8 @@ queue.Add("welcome", map[string]any{"to": "user@example.com"}, nil)
 
 ### 4. Process jobs
 
-<Tabs>
-<TabItem label="Node / Deno / Bun">
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { Worker } from 'bunqueue-client';
@@ -249,16 +309,17 @@ Understanding four facts about the transport explains most SDK behavior:
    back, so many commands are in flight on one socket concurrently. A
    single connection is usually all a service needs.
 3. **Authentication-first**, when a token is configured, `Auth` is
-   guaranteed to be the first frame on every (re)connection. The TypeScript
-   client enforces this through synchronous write ordering; the Python
-   client through a connection lock (safe under free-threaded concurrency).
+   guaranteed to be the first frame on every (re)connection, in every SDK:
+   TypeScript through synchronous write ordering, Python through a
+   connection lock (safe under free-threaded concurrency), PHP and Go
+   inside the connect sequence itself.
 4. **The job name travels inside `data`**, `add('welcome', {to})` is
    encoded as `data: { name: 'welcome', to }`. Non-object payloads are
    wrapped as `{ name, payload }`.
 
 ### Connection options
 
-<Tabs>
+<Tabs syncKey="lang">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -288,11 +349,39 @@ queue = Queue(
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+$queue = new Queue('emails', [
+    'host' => 'queue.example.com',
+    'port' => 6789,
+    'token' => getenv('BUNQUEUE_TOKEN'),
+    'tls' => true,             // or ['caFile' => './ca.pem'] or ['verifyPeer' => false]
+    'connectTimeout' => 10.0,  // seconds, default
+    'commandTimeout' => 30.0,  // seconds, default
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{
+    Host:           "queue.example.com",
+    Port:           6789,
+    Token:          os.Getenv("BUNQUEUE_TOKEN"),
+    TLS:            &bunqueue.TLSOptions{CAFile: "./ca.pem"}, // or &TLSOptions{} for system CAs
+    ConnectTimeout: 10 * time.Second, // default
+    CommandTimeout: 30 * time.Second, // default
+})
+```
+
+</TabItem>
 </Tabs>
 
-The TCP connect timeout is internal in both SDKs (5 seconds) and is not
-configurable through the constructor; the command timeout above governs
-how long each in-flight command waits for a response.
+The command timeout governs how long each in-flight command waits for a
+response. In TypeScript and Python the TCP connect timeout is internal
+(5 seconds); PHP and Go expose it as an option (10 seconds by default).
 
 ### Connection resilience
 
@@ -311,8 +400,12 @@ Every SDK implements the same production-grade recovery model:
 
 ### Job options
 
-Every option is validated server-side; identical semantics in both SDKs
-(Python uses snake_case: `attempts`, `job_id`, `remove_on_complete`, …).
+Every option is validated server-side; identical semantics in every SDK.
+Naming follows each language's idiom: TypeScript and PHP use camelCase keys
+(`attempts`, `jobId`, `removeOnComplete`), Python uses snake_case
+(`attempts`, `job_id`, `remove_on_complete`), Go takes a
+`bunqueue.JobOptions` map with the camelCase keys. Unknown options raise an
+error in every SDK instead of being silently dropped.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
@@ -335,10 +428,40 @@ Every option is validated server-side; identical semantics in both SDKs
 | `stallTimeout` | ms | - | Per-job stall detection override |
 | `stackTraceLimit` / `keepLogs` / `sizeLimit` | number | - | Failure stack cap, retained log lines, payload cap |
 
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
+
 ```typescript
 await queue.add('report', data, { priority: 10, delay: 5000, attempts: 5 });
 await queue.add('charge', payment, { jobId: `order-${orderId}`, durable: true });
 ```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add("report", data, priority=10, delay=5000, attempts=5)
+queue.add("charge", payment, job_id=f"order-{order_id}", durable=True)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('report', $data, ['priority' => 10, 'delay' => 5000, 'attempts' => 5]);
+$queue->add('charge', $payment, ['jobId' => "order-{$orderId}", 'durable' => true]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("report", data, bunqueue.JobOptions{"priority": 10, "delay": 5000, "attempts": 5})
+queue.Add("charge", payment, bunqueue.JobOptions{"jobId": "order-" + orderID, "durable": true})
+```
+
+</TabItem>
+</Tabs>
 
 ### Idempotency and bulk
 
@@ -348,7 +471,7 @@ instead of creating a duplicate. This holds for `addBulk` too, each bulk
 entry's `jobId` is preserved on the wire, so an idempotent batch ingest can
 be re-run safely after a crash:
 
-<Tabs>
+<Tabs syncKey="lang">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -368,12 +491,37 @@ queue.add_bulk([
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->addBulk(array_map(
+    fn ($o) => ['name' => 'ingest', 'data' => $o, 'jobId' => "order-{$o['id']}"],
+    $orders
+));
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+entries := make([]bunqueue.BulkEntry, 0, len(orders))
+for _, o := range orders {
+    entries = append(entries, bunqueue.BulkEntry{
+        Name: "ingest",
+        Data: o,
+        Opts: bunqueue.JobOptions{"jobId": "order-" + o.ID},
+    })
+}
+ids, err := queue.AddBulk(entries)
+```
+
+</TabItem>
 </Tabs>
 
 ### Producer throughput
 
 For high-volume producers the TypeScript SDK can fan commands across a
-round-robin connection pool, one line, no API change:
+round-robin connection pool, one line, no API change (TypeScript only):
 
 ```typescript
 const queue = new Queue('ingest', { poolSize: 4 });
@@ -381,7 +529,8 @@ const queue = new Queue('ingest', { poolSize: 4 });
 
 The pool is **producer-side only**: workers intentionally keep a single
 connection, because job leases (lock tokens) and worker registration are
-per-connection server state.
+per-connection server state. In every SDK, `addBulk` is the first tool for
+throughput: one round-trip for the whole batch.
 
 ## Processing jobs
 
@@ -389,13 +538,17 @@ per-connection server state.
 
 | Option | Default | Notes |
 |---|---|---|
-| `concurrency` | 4 | Jobs processed in parallel |
+| `concurrency` | 4 | Jobs processed in parallel (TypeScript, Python, Go; the PHP worker is sequential by design, scale it with more processes) |
 | `batchSize` | 10 | Jobs fetched per `PULLB`, capped by free slots and the server max (1000) |
 | `pollTimeoutMs` | 5000 | Server-side long-poll; max 30 000 |
 | `lockTtlMs` | 30 000 | Job lease TTL |
-| `heartbeatIntervalS` | 10 | Worker + per-job lock heartbeats; 0 disables |
-| `ackBatch` | off | Opt-in ACK batching (below) |
-| `autorun` | true | Start the pull loop at construction |
+| `heartbeatIntervalS` | 10 | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
+| `ackBatch` | off | Opt-in ACK batching (below; TypeScript and Python) |
+| `autorun` | true | Start the pull loop at construction (TypeScript and Python; PHP and Go start explicitly with `run()` / `Run()`) |
+
+Same names in every SDK, adapted to the language: Python snake_case
+(`poll_timeout_ms`), PHP an options array with the camelCase keys, Go a
+`WorkerOptions` struct (`PollTimeoutMs`, `LockTtlMs`, ...).
 
 ### Lease model
 
@@ -406,6 +559,9 @@ and the server requeues the job (or moves it to the DLQ once `maxStalls`
 is exceeded), at-least-once delivery, so make handlers idempotent.
 
 ### Failures
+
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { UnrecoverableError } from 'bunqueue-client';
@@ -418,6 +574,53 @@ const worker = new Worker('emails', async (job) => {
 });
 ```
 
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import UnrecoverableError, Worker
+
+def process(job):
+    if not is_valid(job.data):
+        raise UnrecoverableError("malformed payload")  # skip retries -> DLQ
+    return send(job.data)
+
+worker = Worker("emails", process)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\UnrecoverableError;
+use Bunqueue\Worker;
+
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    if (!isValid($job->data())) {
+        throw new UnrecoverableError('malformed payload'); // skip retries -> DLQ
+    }
+    return send($job->data());
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    if !isValid(job.Data()) {
+        return nil, bunqueue.NewUnrecoverableError("malformed payload") // skip retries -> DLQ
+    }
+    return send(job.Data())
+}, bunqueue.WorkerOptions{})
+```
+
+Panics are recovered, failed with their real stack, and never kill the
+worker.
+
+</TabItem>
+</Tabs>
+
 A thrown error fails the job with its message and the leading stack lines
 (persisted server-side, capped by `stackTraceLimit`); the server applies
 the retry/backoff policy and eventually the [dead letter queue](/guide/dlq/).
@@ -425,20 +628,64 @@ the retry/backoff policy and eventually the [dead letter queue](/guide/dlq/).
 
 ### Worker events
 
-`ready`, `active`, `completed`, `failed`, `progress`, `drained`,
-`cancelled`, `error`, `closed`.
+Every SDK emits `ready`, `active`, `completed`, `failed`, `drained`,
+`error` and `closed`; TypeScript and Python additionally emit `progress`
+and `cancelled`.
 
-**Always attach an `error` listener.** Per Node `EventEmitter` semantics an
-unhandled `error` event throws. Both workers free each job's concurrency
-slot *before* emitting, and the Python worker additionally swallows listener
-exceptions, so a throwing listener cannot leak a slot or degrade throughput
-in either SDK. The error itself is yours to observe.
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
+
+```typescript
+worker.on('completed', (job, result) => log.info('done', job.id));
+worker.on('failed', (job, err) => log.warn('failed', job.id, err.message));
+worker.on('error', (err) => log.error(err)); // always attach
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.on("completed", lambda job, result: log.info("done %s", job.id))
+worker.on("failed", lambda job, err: log.warning("failed %s: %s", job.id, err))
+worker.on("error", lambda err: log.error(err))
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->on('completed', fn ($job, $result) => $log->info("done {$job->id()}"));
+$worker->on('failed', fn ($job, $err) => $log->warning("failed {$job->id()}"));
+$worker->on('error', fn ($err) => $log->error($err->getMessage()));
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.On("completed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    log.Printf("done %s", job.ID())
+})
+worker.On("error", func(args ...any) { log.Println(args[0]) })
+```
+
+</TabItem>
+</Tabs>
+
+**In TypeScript, always attach an `error` listener**: per Node
+`EventEmitter` semantics an unhandled `error` event throws. The other SDKs
+swallow listener exceptions. Every worker frees each job's concurrency
+slot *before* emitting, so a throwing listener cannot leak a slot or
+degrade throughput in any SDK. The error itself is yours to observe.
 
 ### ACK batching (high volume)
 
 Opt-in: coalesce completed-job acknowledgements into `ACKB` round-trips.
+Available in TypeScript and Python; the PHP and Go workers acknowledge
+each job individually.
 
-<Tabs>
+<Tabs syncKey="lang">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -470,7 +717,7 @@ are off, so nothing changes unless you enable it.
 
 ### Graceful shutdown
 
-<Tabs>
+<Tabs syncKey="lang">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -491,13 +738,35 @@ waits, and `close(timeout=0)` detaches immediately while in-flight jobs
 finish in the background.
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->installSignalHandlers(); // SIGTERM / SIGINT -> graceful stop
+$worker->stop();                  // finish the in-flight job, then return from run()
+$worker->close();                 // unregister and close the connection
+```
+
+The PHP worker is sequential, so stopping waits for at most one in-flight
+job; the unprocessed rest of the batch is re-leased by the server.
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.Stop()  // stop pulling; in-flight jobs finish
+worker.Close() // unregister and close the connection
+```
+
+</TabItem>
 </Tabs>
 
 ## Query, control and operations
 
 The full management surface is available in every SDK with identical
-semantics (Python: same methods in snake_case; the rare name that differs
-is noted inline).
+semantics: TypeScript and PHP in camelCase, Python in snake_case, Go in
+exported Go style (`GetJobCounts`, `RetryDlq`, ...). The per-state helpers
+(`getWaiting`, `getActive`, ...) exist in TypeScript and Python; PHP and Go
+pass the state to `getJobs` / `GetJobs` directly.
 
 | Area | Methods |
 |---|---|
@@ -508,18 +777,78 @@ is noted inline).
 | Schedulers | `upsertJobScheduler` (cron pattern or fixed interval, timezone, `skipIfNoWorker`, `preventOverlap`, per-scheduler job options), `removeJobScheduler`, `getJobScheduler(s)`, `addCron`, `every` |
 | Admin | rate limiting, global concurrency, stall configuration, webhooks, `getStats`, `getMetrics`, `listQueues`, `getWorkers` |
 
+A representative slice, in every language:
+
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
+
+```typescript
+const job = await queue.getJob(id);            // null when missing
+const state = await queue.getJobState(id);     // 'waiting' | 'active' | ...
+const result = await queue.waitForJob(id, 30_000);
+const counts = await queue.getJobCounts();     // { waiting, active, completed, ... }
+await queue.pause();
+const dropped = await queue.drain();           // number of removed jobs
+await queue.retryDlq();                        // re-queue dead-lettered jobs
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+job = queue.get_job(id)                 # None when missing
+state = queue.get_state(id)             # "waiting" | "active" | ...
+result = queue.wait_for_job(id, timeout_ms=30000)
+counts = queue.get_job_counts()         # {"waiting": ..., "active": ..., ...}
+queue.pause()
+dropped = queue.drain()                 # number of removed jobs
+queue.retry_dlq()                       # re-queue dead-lettered jobs
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$job = $queue->getJob($id);              // null when missing
+$state = $queue->getState($id);          // 'waiting' | 'active' | ...
+$result = $queue->waitForJob($id, 30000);
+$counts = $queue->getJobCounts();        // ['waiting' => ..., 'active' => ..., ...]
+$queue->pause();
+$dropped = $queue->drain();              // number of removed jobs
+$queue->retryDlq();                      // re-queue dead-lettered jobs
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+job, _ := queue.GetJob(id)               // nil when missing
+state, _ := queue.GetState(id)           // "waiting" | "active" | ...
+result, _ := queue.WaitForJob(id, 30000)
+counts, _ := queue.GetJobCounts()        // map[string]int{"waiting": ..., ...}
+_ = queue.Pause()
+dropped, _ := queue.Drain()              // number of removed jobs
+_, _ = queue.RetryDlq("", 0)             // re-queue dead-lettered jobs
+```
+
+</TabItem>
+</Tabs>
+
 Two behaviors worth knowing:
 
-- **Not-found is `null`/`None`**, never an exception, `getJob`,
+- **Not-found is `null`/`None`/`nil`**, never an exception, `getJob`,
   `getJobByCustomId` and `getJobScheduler` map the server's not-found
   response for you.
-- **`updateJobProgress` requires an active job**; the server rejects
+- **Progress updates require an active job**; the server rejects
   progress updates on waiting jobs by design.
 
 ## Flows
 
 Pipelines and parent/child trees with automatic ordering, children
 complete before their parent, results are readable from the parent:
+
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { FlowProducer } from 'bunqueue-client';
@@ -546,6 +875,89 @@ const node = await flow.add({
 await flow.addBulkThen(parts, { name: 'merge', queueName: 'orders' });
 ```
 
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import FlowProducer
+
+flow = FlowProducer()
+
+# Sequential pipeline
+flow.add_chain([
+    {"name": "extract", "queueName": "etl"},
+    {"name": "transform", "queueName": "etl"},
+    {"name": "load", "queueName": "etl"},
+])
+
+# Tree: parent waits for its children
+node = flow.add({
+    "name": "assemble", "queueName": "orders",
+    "children": [
+        {"name": "reserve-stock", "queueName": "orders"},
+        {"name": "charge-card", "queueName": "orders"},
+    ],
+})
+
+# Fan-in: N parallel jobs converge into one
+flow.add_bulk_then(parts, {"name": "merge", "queueName": "orders"})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\FlowProducer;
+
+$flow = new FlowProducer();
+
+// Sequential pipeline
+$flow->addChain([
+    ['name' => 'extract', 'queueName' => 'etl'],
+    ['name' => 'transform', 'queueName' => 'etl'],
+    ['name' => 'load', 'queueName' => 'etl'],
+]);
+
+// Tree: parent waits for its children
+$node = $flow->add([
+    'name' => 'assemble', 'queueName' => 'orders',
+    'children' => [
+        ['name' => 'reserve-stock', 'queueName' => 'orders'],
+        ['name' => 'charge-card', 'queueName' => 'orders'],
+    ],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+flow := bunqueue.NewFlowProducer(bunqueue.Options{})
+defer flow.Close()
+
+// Sequential pipeline
+ids, err := flow.AddChain([]bunqueue.ChainStep{
+    {Name: "extract", QueueName: "etl"},
+    {Name: "transform", QueueName: "etl"},
+    {Name: "load", QueueName: "etl"},
+})
+
+// Tree: parent waits for its children
+node, err := flow.Add(bunqueue.FlowJob{
+    Name: "assemble", QueueName: "orders",
+    Children: []bunqueue.FlowJob{
+        {Name: "reserve-stock", QueueName: "orders"},
+        {Name: "charge-card", QueueName: "orders"},
+    },
+})
+```
+
+</TabItem>
+</Tabs>
+
+Fan-in (`addBulkThen`, N parallel jobs converging into one final job) is
+available in TypeScript and Python.
+
 Creation is transactional per call: if any push fails, every job already
 created by that call is cancelled (rollback). `getFlow(id)` reconstructs a
 tree from a root id, it returns `null` for a missing root, skips children
@@ -554,10 +966,11 @@ always returns the surviving partial tree instead of throwing.
 
 ## Observability
 
-The TypeScript SDK exposes a zero-dependency observability layer: you
-bring OpenTelemetry, Prometheus or your own logger, the SDK stays silent
-by default and consumer errors are isolated so a throwing sink can never
-break the transport.
+The TypeScript SDK exposes a zero-dependency observability layer
+(TypeScript only): you bring OpenTelemetry, Prometheus or your own logger,
+the SDK stays silent by default and consumer errors are isolated so a
+throwing sink can never break the transport. In every other language,
+scrape the server's HTTP `/metrics` endpoint for the same picture.
 
 ```typescript
 import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
@@ -587,10 +1000,12 @@ scrape the HTTP `/metrics` endpoint (Prometheus format).
 of the official client's [Simple Mode](/guide/simple-mode/). It brings
 routes, onion middleware, in-process retry strategies, a circuit breaker,
 batch accumulation, event triggers, job TTL, priority aging, cooperative
-cancellation, and deduplication or debounce defaults.
+cancellation, and deduplication or debounce defaults. Available in
+TypeScript and Python; in PHP and Go, compose `Queue` and `Worker`
+directly.
 
-<Tabs>
-<TabItem label="Node / Deno / Bun">
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { Bunqueue } from 'bunqueue-client';
@@ -650,7 +1065,8 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 Scheduler job options are honored end to end: the template's `attempts`,
 `backoff`, `timeout`, `delay`, `remove_on_complete` / `remove_on_fail`,
 `priority` and `deduplication` are applied to every cron-spawned job, in
-both SDKs.
+every SDK (scheduler support included: `upsertJobScheduler` exists in PHP
+and Go too).
 
 One difference from the Bun original: `embedded: true` is not available,
 it requires the in-process Bun runtime. Connect to a server instead; the
@@ -691,7 +1107,7 @@ internet, and TLS needs a publicly trusted certificate.
 
 Authentication uses server-side tokens; transport security uses native TLS.
 
-<Tabs>
+<Tabs syncKey="lang">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -717,21 +1133,47 @@ queue = Queue(
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+$queue = new Queue('emails', [
+    'host' => 'queue.example.com',
+    'port' => 6789,
+    'token' => getenv('BUNQUEUE_TOKEN'),  // server started with AUTH_TOKENS=...
+    'tls' => ['caFile' => './ca.pem'],    // or true for system CAs
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{
+    Host:  "queue.example.com",
+    Port:  6789,
+    Token: os.Getenv("BUNQUEUE_TOKEN"), // server started with AUTH_TOKENS=...
+    TLS:   &bunqueue.TLSOptions{CAFile: "./ca.pem"}, // or &TLSOptions{} for system CAs
+})
+```
+
+</TabItem>
 </Tabs>
 
-Certificate verification is **on by default** for every TLS connection,
-a wrong or missing CA rejects the connection instead of silently
-connecting; only an explicit `rejectUnauthorized: false` (TypeScript) or
-`{"verify": False}` (Python) opts into encryption-only mode for
-development. Start the server with `AUTH_TOKENS` to require
-authentication, and with `TLS_CERT_FILE` plus `TLS_KEY_FILE` for encrypted
-transport. Full hardening guidance lives in the
-[deployment guide](/guide/deployment/).
+Certificate verification is **on by default** for every TLS connection in
+every SDK, a wrong or missing CA rejects the connection instead of
+silently connecting; only an explicit opt-out
+(`rejectUnauthorized: false` in TypeScript, `{"verify": False}` in Python,
+`['verifyPeer' => false]` in PHP, `InsecureSkipVerify: true` in Go)
+switches to encryption-only mode for development. Start the server with
+`AUTH_TOKENS` to require authentication, and with `TLS_CERT_FILE` plus
+`TLS_KEY_FILE` for encrypted transport. Full hardening guidance lives in
+the [deployment guide](/guide/deployment/).
 
 ## Errors and guarantees
 
-Both SDKs expose the same typed error hierarchy, so retry logic can branch
-precisely:
+Every SDK exposes the same typed error hierarchy, so retry logic can
+branch precisely (PHP: exception classes under `Bunqueue\Exception`; Go:
+error types matched with `errors.As`):
 
 | Error | Meaning |
 |---|---|
@@ -748,9 +1190,9 @@ the ACK means the job runs again, design handlers to be idempotent (the
 - **JavaScript** numbers are IEEE 754 doubles, exact up to 2⁵³. Pass larger
   64-bit identifiers (snowflake ids) as strings; never put `BigInt` in job
   data.
-- **Python** integers outside the int32 range are automatically encoded as
-  float64 on the wire (exact up to 2⁵³, safe for millisecond timestamps);
-  the same string rule applies to larger identifiers.
+- **Python, PHP and Go** integers outside the int32 range are automatically
+  encoded as float64 on the wire (exact up to 2⁵³, safe for millisecond
+  timestamps); the same string rule applies to larger identifiers.
 
 ## Write a client in any language
 
@@ -769,7 +1211,7 @@ route through your own API instead.
 ## Resources
 
 - [`bunqueue-client` on npm](https://www.npmjs.com/package/bunqueue-client), the full step by step README, from server start to production
-- [Changelog (TypeScript SDK)](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Changelog (Python SDK)](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md)
+- Changelogs: [TypeScript](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Python](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md) · [PHP](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/CHANGELOG.md)
 - [Queue API](/guide/queue/), every job option explained
 - [Worker](/guide/worker/), concurrency, events, graceful shutdown
 - [Simple Mode](/guide/simple-mode/), everything in one object

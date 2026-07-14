@@ -1,6 +1,6 @@
 ---
 title: "Stall Detection: Recover Unresponsive Jobs Automatically in Bun"
-description: "Configure bunqueue stall detection to auto-recover stuck jobs. Set heartbeat intervals, max stall thresholds, and grace periods for Workers."
+description: "bunqueue stall detection auto-recovers stuck jobs. It is on by default; tune heartbeat intervals, max stall thresholds, and grace periods for long jobs."
 head:
   - tag: meta
     attrs:
@@ -11,7 +11,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · stall-detection</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Stuck jobs <em>come back.</em></h1>
-  <p class="bq-hero-sub">Stall detection automatically identifies jobs that stop sending heartbeats during processing and recovers them, retrying first and moving repeat offenders to the DLQ.</p>
+  <p class="bq-hero-sub">If a worker crashes or hangs mid-job, the job is not lost. bunqueue notices the silence, retries the job, and parks repeat offenders in the dead letter queue.</p>
 
   <div class="bq-proof">
     <span><b>30s</b> without a heartbeat marks a job stalled</span>
@@ -20,11 +20,9 @@ head:
   </div>
 </div>
 
-## How It Works
+While a worker processes a job it sends periodic **heartbeats**, small "I'm still alive" signals. If heartbeats stop (crashed process, hung code, dead network), the job is **stalled**: bunqueue re-queues it for another worker, and after too many stalls moves it to the [dead letter queue](/guide/dlq/) (DLQ), the holding area for jobs that keep failing.
 
-1. Workers send periodic heartbeats while processing jobs
-2. The queue manager checks for jobs without recent heartbeats
-3. Stalled jobs are either retried or moved to the DLQ
+**Stall detection is on by default with sensible defaults.** You only need this page if your jobs run longer than 30 seconds, or you want to tune the thresholds.
 
 ## Configuration
 
@@ -34,53 +32,67 @@ import { Queue } from 'bunqueue/client';
 const queue = new Queue('my-queue', { embedded: true });
 
 queue.setStallConfig({
-  enabled: true,         // Enable stall detection (default: true)
-  stallInterval: 30000,  // Job is stalled after 30s without heartbeat
-  maxStalls: 3,          // Move to DLQ after 3 stalls
-  gracePeriod: 5000,     // Grace period after job starts
+  enabled: true,         // on by default
+  stallInterval: 30000,  // stalled after 30s without a heartbeat
+  maxStalls: 3,          // move to DLQ after 3 stalls
+  gracePeriod: 5000,     // no stall checks in the first 5s of a job
 });
 ```
-
-### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `enabled` | `true` | Enable/disable stall detection |
-| `stallInterval` | `30000` | Time (ms) without heartbeat before job is stalled |
+| `stallInterval` | `30000` | Time (ms) without a heartbeat before a job is stalled |
 | `maxStalls` | `3` | Max stalls before moving to DLQ |
-| `gracePeriod` | `5000` | Initial grace period after job starts |
+| `gracePeriod` | `5000` | Initial grace period (ms) after a job starts |
 
-## Worker Heartbeats
-
-Workers automatically send heartbeats:
+On the worker side, heartbeats are automatic:
 
 ```typescript
 const worker = new Worker('queue', processor, {
-  embedded: true,
-  heartbeatInterval: 10000, // Heartbeat every 10 seconds
+  heartbeatInterval: 10000, // heartbeat every 10 seconds (default)
 });
 ```
 
-The `heartbeatInterval` should be less than `stallInterval` to avoid false positives.
+Keep `heartbeatInterval` well below `stallInterval`, otherwise healthy jobs get flagged as stalled.
 
-## Stall Actions
+## Long-running jobs
 
-When a job stalls, one of these actions is taken:
+Jobs longer than 30 seconds need a wider stall window, or they will be re-queued while still running:
 
-1. **Retry** - Job is re-queued with incremented stall count
-2. **Move to DLQ** - Job exceeds `maxStalls` and is moved to Dead Letter Queue
+```typescript
+// Video processing may take hours
+const videoQueue = new Queue('video-processing', { embedded: true });
 
-When a job is retried after a stall or lock expiry, its internal counters (queued count, shard stats) are updated correctly and waiting workers are notified immediately. This means requeued jobs are picked up without delay.
+videoQueue.setStallConfig({
+  stallInterval: 300000,  // 5 minutes
+  maxStalls: 2,
+  gracePeriod: 60000,
+});
 
-## Events
+const worker = new Worker('video-processing', async (job) => {
+  for (const chunk of video.chunks) {
+    await processChunk(chunk);
+    await job.updateProgress(chunk.progress); // also counts as a heartbeat
+  }
+}, { embedded: true, heartbeatInterval: 30000 });
+```
 
-`QueueEvents` subscribes to the in-process event stream, so it works in embedded mode (same process as the queue):
+Two things reset the stall timer: the worker's automatic heartbeat (every `heartbeatInterval` ms) and any `job.updateProgress()` call. For long jobs without natural progress points, the automatic heartbeat is enough.
+
+## What happens when a job stalls
+
+1. **Retry**: the job goes back to waiting with its stall count incremented, and waiting workers are notified immediately, so it is picked up without delay.
+2. **DLQ**: once the stall count exceeds `maxStalls`, the job moves to the dead letter queue with reason `stalled`.
+
+## Listening for stalls
+
+In embedded mode (queue and listener in the same process), use `QueueEvents`:
 
 ```typescript
 import { QueueEvents } from 'bunqueue/client';
 
 const events = new QueueEvents('my-queue');
-
 events.on('stalled', ({ jobId }) => {
   console.log(`Job ${jobId} stalled`);
 });
@@ -88,53 +100,12 @@ events.on('stalled', ({ jobId }) => {
 
 In TCP mode, use the Worker's `stalled` event or subscribe via [webhooks](/guide/webhooks/).
 
-## Example: Long-Running Jobs
-
-For jobs that take a long time, increase the stall interval:
-
-```typescript
-// Queue for video processing (may take hours)
-const videoQueue = new Queue('video-processing', { embedded: true });
-
-videoQueue.setStallConfig({
-  stallInterval: 300000,  // 5 minutes
-  maxStalls: 2,
-  gracePeriod: 60000,     // 1 minute grace
-});
-
-// Worker with frequent heartbeats
-const worker = new Worker('video-processing', async (job) => {
-  for (const chunk of video.chunks) {
-    await processChunk(chunk);
-    // updateProgress() also sends a heartbeat to reset the stall timer
-    await job.updateProgress(chunk.progress);
-  }
-}, {
-  embedded: true,
-  heartbeatInterval: 30000, // Automatic heartbeat every 30 seconds
-});
-```
-
-:::tip[Heartbeat Methods]
-Both methods reset the stall detection timer:
-- `job.updateProgress()` - Use when you have progress to report
-- Worker's automatic heartbeat - Runs every `heartbeatInterval` ms in the background
-
-For long-running jobs without natural progress points, rely on `heartbeatInterval`.
-:::
-
 ## Monitoring
-
-Check stall-related stats:
 
 ```typescript
 const stats = queue.getDlqStats();
 console.log('Stalled jobs in DLQ:', stats.byReason.stalled);
-```
 
-Filter DLQ by stalled reason:
-
-```typescript
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
 ```
 
@@ -144,25 +115,10 @@ const stalledJobs = queue.getDlq({ reason: 'stalled' });
 `SandboxedWorker` depends on experimental Bun Workers. For production, use the standard `Worker`. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
 :::
 
-SandboxedWorker automatically sends heartbeats in both embedded and TCP mode. In embedded mode, `heartbeatInterval` defaults to `5000ms`, keeping `lastHeartbeat` fresh so long-running jobs are not falsely detected as stalled.
-
-```typescript
-const worker = new SandboxedWorker('heavy-jobs', {
-  processor: './processor.ts',
-  timeout: 0,              // Disable worker-level timeout for long jobs
-  heartbeatInterval: 5000, // Default in embedded mode (keeps stall detection happy)
-});
-```
-
-:::tip[Long-running SandboxedWorker jobs]
-If your jobs run longer than the default `stallInterval` (30s), you have three options:
-1. **Increase `stallInterval`**, `queue.setStallConfig({ stallInterval: 300000 })` (5 minutes)
-2. **Call `progress()` periodically**, Each call refreshes `lastHeartbeat`
-3. **Disable stall detection**, `queue.setStallConfig({ enabled: false })`
-:::
+`SandboxedWorker` also sends heartbeats automatically in both modes; in embedded mode `heartbeatInterval` defaults to `5000` ms. If its jobs run longer than `stallInterval`, either raise `stallInterval`, call `progress()` periodically, or disable stall detection with `queue.setStallConfig({ enabled: false })`.
 
 :::tip[Related Guides]
-- [Dead Letter Queue](/guide/dlq/) - Where stalled jobs end up after max retries
+- [Dead Letter Queue](/guide/dlq/) - Where stalled jobs end up after max stalls
 - [Worker API](/guide/worker/) - Configure heartbeat intervals
 - [CPU-Intensive Workers](/guide/cpu-intensive-workers/) - Prevent stalls in CPU-heavy workloads
 :::

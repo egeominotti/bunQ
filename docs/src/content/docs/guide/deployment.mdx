@@ -1,6 +1,6 @@
 ---
-title: "Bunqueue Production Deployment Guide: Docker, Systemd & PM2"
-description: Deploy bunqueue to production with Docker, systemd, or PM2. S3 backups, health checks, resource limits, and disaster recovery strategies.
+title: "Deploy bunqueue: Docker, systemd & PM2"
+description: The smallest way to run bunqueue in production, then tight configs for Docker, systemd, and PM2, plus health checks, backups, and restore steps.
 head:
   - tag: meta
     attrs:
@@ -8,61 +8,45 @@ head:
       content: https://bunqueue.dev/og/guide/deployment.png
 ---
 
-import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · deployment</span>
   <h1 class="bq-hero-h1 bq-bench-h1">From laptop to <em>production.</em></h1>
-  <p class="bq-hero-sub">How to run bunqueue in production as the single-instance job queue it is designed to be. Docker, systemd and PM2 setups, S3 backups, health checks, resource limits and disaster recovery.</p>
-
-  <div class="bq-proof">
-    <span><b>1M</b> jobs validated, 100% integrity</span>
-    <span><b>3</b> deployment options</span>
-    <span><b>S3</b> backups for disaster recovery</span>
-    <span><b>1</b> process, no clustering</span>
-  </div>
+  <p class="bq-hero-sub">This page shows the smallest working way to run bunqueue in production, then ready-to-paste configs for Docker, systemd, and PM2, plus health checks and backups.</p>
 </div>
 
-<Aside type="caution">
-bunqueue runs as a **single process**. There's no built-in clustering or multi-node support. Tested and validated up to **1 million jobs** with 100% data integrity.
-</Aside>
+bunqueue runs as a **single process** that stores everything in one SQLite file. There is no clustering and no multi-node setup to plan. Deploying it means answering one question: does the queue live inside your app process, or in its own process?
 
-## Architecture Overview
+## The smallest deploy: embedded mode
 
-<div class="bq-diag">
-  <div class="bq-diag-group">
-    <span class="bq-diag-group-label">Your Application</span>
-    <div class="bq-diag-row">
-      <div class="bq-diag-cell">Web App</div>
-      <div class="bq-diag-cell">API</div>
-      <div class="bq-diag-cell">Workers</div>
-    </div>
-    <div class="bq-diag-arrow">↓</div>
-    <div class="bq-diag-layer">bunqueue <i>embedded mode, single instance</i></div>
-    <div class="bq-diag-arrow">↓</div>
-    <div class="bq-diag-layer bq-diag-accent">SQLite Database <i>./data/bunq.db, local file</i></div>
-  </div>
-  <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">S3 Backup <i>optional, disaster recovery</i></div>
-</div>
+Embedded mode means the queue runs inside your application process, no separate queue server at all. Point it at a file path so jobs survive restarts:
 
-## Deployment Options
+```typescript
+// app.ts
+import { Queue, Worker } from 'bunqueue/client';
 
-### Option 1: Embedded Mode (Recommended)
+const queue = new Queue('emails', {
+  embedded: true,
+  dataPath: './data/bunq.db', // jobs persist here
+});
 
-Run bunqueue directly in your application process. No separate server needed.
+await queue.add('send', { to: 'user@example.com' });
 
-<Aside type="caution">
-Set `DATA_PATH` environment variable or use a [configuration file](/guide/configuration/) for SQLite persistence. Without it, data is stored **in-memory only** and will be lost on restart.
-</Aside>
-
-```bash
-# Enable SQLite persistence
-export DATA_PATH=./data/bunq.db
+new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { embedded: true, dataPath: './data/bunq.db', concurrency: 5 });
 ```
 
-<Aside type="tip" title="Config File">
-Instead of environment variables, you can centralize all settings in a typed `bunqueue.config.ts`:
+Deploy your app the way you already deploy it. The queue ships with it. Done.
+
+<Aside type="caution">
+Without `dataPath` (or the `BUNQUEUE_DATA_PATH` environment variable), the embedded queue keeps jobs **in memory only** and loses them on restart.
+</Aside>
+
+<Aside type="tip" title="Prefer a config file?">
+You can centralize settings in a typed `bunqueue.config.ts` instead of environment variables:
 
 ```typescript
 import { defineConfig } from 'bunqueue';
@@ -74,168 +58,76 @@ export default defineConfig({
 });
 ```
 
-See [Configuration File](/guide/configuration/) for the full reference.
+See [Configuration File](/guide/configuration/).
 </Aside>
 
-```typescript
-// app.ts
-import { Queue, Worker } from 'bunqueue/client';
+## More than one process? Run the server
 
-// Your web framework (Hono, Elysia, Express...)
-const app = new Hono();
-
-// Queue is embedded in the same process (uses DATA_PATH for persistence)
-const emailQueue = new Queue('emails', { embedded: true });
-
-app.post('/send-email', async (c) => {
-  const { to, subject } = await c.req.json();
-  await emailQueue.add('send', { to, subject });
-  return c.json({ queued: true });
-});
-
-// Worker runs in the same process
-new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { embedded: true, concurrency: 5 });
-
-export default app;
-```
-
-**Pros:**
-- Simplest setup
-- No network latency
-- Single deployment unit
-
-**Cons:**
-- Queue dies if app dies
-- Harder to scale workers independently
-
-### Option 2: Separate Worker Process (through the server)
-
-Run your API and workers as separate processes. Multi-process setups always go through the bunqueue server: it owns the SQLite file, and every process talks to it over TCP.
+The moment your API and your workers are separate processes (or separate containers), run the bunqueue server. One server owns the SQLite file; every other process talks to it over TCP:
 
 ```bash
-# One server owns the database
 bunqueue start --data-path ./data/bunq.db
 ```
 
 ```typescript
-// api.ts - Your web server (TCP client, no embedded flag)
+// api.ts, pushes jobs (no embedded flag = TCP client to localhost:6789)
 import { Queue } from 'bunqueue/client';
-
 const queue = new Queue('tasks');
-
-app.post('/task', async (c) => {
-  await queue.add('process', { data: '...' });
-  return c.json({ ok: true });
-});
+await queue.add('process', { data: '...' });
 ```
 
 ```typescript
-// worker.ts - Separate process (TCP client)
+// worker.ts, a separate process, restart and scale it independently
 import { Worker } from 'bunqueue/client';
-
 new Worker('tasks', async (job) => {
-  // Heavy processing here
   return { done: true };
 }, { concurrency: 10 });
-
-console.log('Worker started');
 ```
 
-**Pros:**
-- Workers can be restarted and scaled independently
-- Better resource isolation
-
-**Cons:**
-- One more process to manage (the server)
-- All traffic goes over TCP (localhost round trip)
-
-<Aside type="danger" title="Never share one SQLite file between two embedded processes">
-Two processes with `embedded: true` pointing at the same `DATA_PATH` do **not** work. Each process keeps its own in-memory queue state and reads SQLite only once at startup, so a worker process never sees jobs pushed live by the API process, and both run independent cleanup and buffered writes against the same file. If you need more than one process, use the server as shown above.
-</Aside>
-
-### Option 3: Server Mode (CLI)
-
-Run bunqueue as a standalone server. Interact via CLI or HTTP API.
+You can also push jobs without any SDK, via CLI or HTTP:
 
 ```bash
-# Start server
-bunqueue start --tcp-port 6789 --http-port 6790
-```
+bunqueue push emails '{"to": "user@example.com"}'
 
-```bash
-# Add jobs via CLI
-bunqueue push emails '{"to": "user@example.com", "subject": "Hello"}'
-
-# Or via HTTP API
 curl -X POST http://localhost:6790/queues/emails/jobs \
   -H "Content-Type: application/json" \
   -d '{"data": {"to": "user@example.com"}}'
 ```
 
-<Aside type="tip">
-The `Queue` and `Worker` classes from `bunqueue/client` connect to the TCP server by default (when `embedded` is not set to `true`). You can also use the CLI or HTTP API.
+<Aside type="danger" title="Never share one SQLite file between two embedded processes">
+Two processes with `embedded: true` pointing at the same file do **not** work. Each keeps its own in-memory state and reads the file only at startup, so they never see each other's jobs and both write to the same file. Multiple processes always go through the server.
 </Aside>
 
-```typescript
-import { Queue, Worker } from 'bunqueue/client';
-
-// Connects to localhost:6789 by default
-const queue = new Queue('emails');
-await queue.add('send', { to: 'user@example.com' });
-
-// Worker also connects to the server
-const worker = new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-});
-```
-
-## Docker Deployment
-
-### Dockerfile
+## Docker
 
 ```dockerfile
 FROM oven/bun:1-alpine
 
 WORKDIR /app
-
-# Copy package files
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile --production
-
-# Copy application
 COPY . .
-
-# Create data directory
 RUN mkdir -p /app/data
 
-# Environment
 ENV DATA_PATH=/app/data/bunq.db
 ENV NODE_ENV=production
 
-# Health check (wget ships with the Alpine base, curl does not)
+# wget ships with the Alpine base, curl does not
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD wget --spider -q http://127.0.0.1:6790/health || exit 1
 
 EXPOSE 6789 6790
-
 CMD ["bun", "run", "start"]
 ```
 
-### Docker Compose
-
 ```yaml
-version: '3.8'
-
+# docker-compose.yml
 services:
   bunqueue:
     build: .
     ports:
-      - "6789:6789"  # TCP
-      - "6790:6790"  # HTTP
+      - "6789:6789"  # TCP (SDK clients)
+      - "6790:6790"  # HTTP (health, metrics, REST)
     volumes:
       - bunqueue-data:/app/data
     environment:
@@ -251,14 +143,12 @@ services:
       resources:
         limits:
           memory: 512M
-        reservations:
-          memory: 256M
 
 volumes:
   bunqueue-data:
 ```
 
-## Systemd Service
+## systemd
 
 For bare-metal or VM deployments:
 
@@ -277,595 +167,143 @@ ExecStart=/usr/local/bin/bunqueue start
 Restart=always
 RestartSec=5
 
-# Environment
 Environment=NODE_ENV=production
-Environment=DATA_PATH=/var/lib/bunq.db
-EnvironmentFile=/etc/env
+Environment=DATA_PATH=/var/lib/bunqueue/bunq.db
+EnvironmentFile=/etc/bunqueue.env
 
-# Security
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/bunqueue
 
-# Resource limits
 MemoryMax=512M
-CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-# Install
 sudo systemctl daemon-reload
-sudo systemctl enable bunqueue
-sudo systemctl start bunqueue
-
-# Check status
-sudo systemctl status bunqueue
+sudo systemctl enable --now bunqueue
 sudo journalctl -u bunqueue -f
 ```
 
-### Updating bunqueue
+To upgrade: stop the service, `bun install -g bunqueue@latest`, start it again, then confirm with `curl http://localhost:6790/health | jq .version`. Updating the package does not restart the service.
 
-To update bunqueue on a systemd-managed server:
+## PM2
 
-```bash
-# 1. Stop the service
-sudo systemctl stop bunqueue
-
-# 2. Update the package
-bun install -g bunqueue@latest
-
-# 3. Verify the new version
-bunqueue --version
-
-# 4. Restart the service
-sudo systemctl start bunqueue
-
-# 5. Confirm the running version
-curl http://localhost:6790/health | jq .version
-```
-
-:::caution
-Always verify the running version with `curl /health` after restart. Simply running `bun update` does **not** restart the service, you must explicitly stop and start it with `systemctl`.
-:::
-
-## Building from Source
-
-Compile bunqueue into a standalone executable for production deployment.
-
-### Build Command
-
-```bash
-# Clone the repository
-git clone https://github.com/egeominotti/bunqueue.git
-cd bunqueue
-
-# Install dependencies
-bun install
-
-# Build standalone binary
-bun run build
-```
-
-This creates `dist/bunqueue` (~56 MB), a self-contained executable with no runtime dependencies.
-
-### Verify Build
-
-```bash
-# Check version
-./dist/bunqueue --version
-
-# Show help
-./dist/bunqueue --help
-
-# Start server
-./dist/bunqueue start
-```
-
-### Install Globally
-
-```bash
-# Copy to system path
-sudo cp dist/bunqueue /usr/local/bin/
-
-# Verify installation
-bunqueue --version
-```
-
-<Aside type="tip">
-The compiled binary includes the Bun runtime. No need to install Bun on the target server.
-</Aside>
-
----
-
-## PM2 Process Manager
-
-For cross-platform process management with PM2:
-
-### Compiled Binary (Recommended)
-
-First, build the standalone executable:
-
-```bash
-bun run build
-```
-
-Then configure PM2:
+Build the standalone binary first (`bun run build` in the repo produces `dist/bunqueue`, a self-contained executable that bundles the Bun runtime), or install globally.
 
 ```javascript
 // ecosystem.config.js
 module.exports = {
   apps: [{
     name: 'bunqueue',
-    script: '/usr/local/bin/bunqueue',  // Compiled binary
+    script: '/usr/local/bin/bunqueue',
     args: 'start',
-    instances: 1,  // Single instance only - no cluster mode
-    exec_mode: 'fork',
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '512M',
-    env: {
-      NODE_ENV: 'production',
-      DATA_PATH: '/var/lib/bunq.db',
-      TCP_PORT: 6789,
-      HTTP_PORT: 6790,
-    },
-    error_file: '/var/log/error.log',
-    out_file: '/var/log/out.log',
-    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-    merge_logs: true,
-  }]
-};
-```
-
-### Development Mode (with Bun)
-
-For development or when using the source directly:
-
-```javascript
-// ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'bunqueue',
-    script: 'bun',
-    args: 'run start',
-    cwd: '/opt/bunqueue',
-    instances: 1,
+    instances: 1,          // single instance only, no cluster mode
     exec_mode: 'fork',
     autorestart: true,
     max_memory_restart: '512M',
     env: {
       NODE_ENV: 'production',
-      DATA_PATH: '/var/lib/bunq.db',
+      DATA_PATH: '/var/lib/bunqueue/bunq.db',
       TCP_PORT: 6789,
       HTTP_PORT: 6790,
     },
   }]
 };
 ```
-
-### PM2 Commands
 
 ```bash
-# Start
 pm2 start ecosystem.config.js
-
-# Restart
-pm2 restart bunqueue
-
-# Stop
-pm2 stop bunqueue
-
-# View logs
-pm2 logs bunqueue
-
-# Monitor
-pm2 monit
-
-# Save process list for startup
-pm2 save
-pm2 startup
+pm2 save && pm2 startup   # survive reboots
 ```
 
 <Aside type="caution">
-Do not use PM2 cluster mode (`instances > 1`). bunqueue is a single-instance queue and multiple instances will cause data corruption.
+Never use PM2 cluster mode (`instances > 1`). bunqueue is a single-instance queue; multiple instances writing the same file will corrupt data.
 </Aside>
 
-## Environment Variables
+## Health checks
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATA_PATH` | SQLite database path | `in-memory` |
-| `TCP_PORT` | TCP server port | `6789` |
-| `HTTP_PORT` | HTTP server port | `6790` |
-| `AUTH_TOKENS` | Comma-separated auth tokens | - |
-| `S3_BACKUP_ENABLED` | Enable S3 backups | `0` |
-| `S3_ACCESS_KEY_ID` | S3 access key | - |
-| `S3_SECRET_ACCESS_KEY` | S3 secret key | - |
-| `S3_BUCKET` | S3 bucket name | - |
-| `S3_REGION` | S3 region | `us-east-1` |
-| `S3_ENDPOINT` | Custom S3 endpoint | - |
-| `S3_BACKUP_INTERVAL` | Backup interval (ms) | `21600000` (6h) |
-| `S3_BACKUP_RETENTION` | Backups to keep | `7` |
-
-## S3 Backup Configuration
-
-<Aside type="tip">
-Always enable S3 backups in production. SQLite is a single file, if it corrupts or the disk fails, you lose everything.
-</Aside>
-
-### AWS S3
+The HTTP port (default 6790) serves everything an orchestrator needs:
 
 ```bash
-S3_BACKUP_ENABLED=1
-S3_ACCESS_KEY_ID=AKIA...
-S3_SECRET_ACCESS_KEY=...
-S3_BUCKET=my-bunqueue-backups
-S3_REGION=us-east-1
-S3_BACKUP_INTERVAL=3600000  # Every hour
-S3_BACKUP_RETENTION=24       # Keep 24 backups
+curl http://localhost:6790/health    # detailed: status, version, job counts, memory
+curl http://localhost:6790/healthz   # bare liveness, returns OK
+curl http://localhost:6790/ready     # readiness
+curl http://localhost:6790/prometheus # metrics in Prometheus text format
 ```
-
-### Cloudflare R2
-
-```bash
-S3_BACKUP_ENABLED=1
-S3_ACCESS_KEY_ID=...
-S3_SECRET_ACCESS_KEY=...
-S3_BUCKET=bunqueue-backups
-S3_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-S3_REGION=auto
-```
-
-### MinIO (Self-hosted)
-
-```bash
-S3_BACKUP_ENABLED=1
-S3_ACCESS_KEY_ID=minioadmin
-S3_SECRET_ACCESS_KEY=minioadmin
-S3_BUCKET=bunqueue
-S3_ENDPOINT=http://minio:9000
-S3_REGION=us-east-1
-```
-
-## Health Checks
-
-bunqueue exposes health endpoints:
-
-```bash
-# HTTP health check (detailed)
-curl http://localhost:6790/health
-# {"ok":true,"status":"healthy","uptime":3600,"version":"2.8.30",
-#  "queues":{"waiting":5,"active":2},"connections":{"ws":0,"sse":0},
-#  "memory":{"heapUsed":45,"heapTotal":64,"rss":128}}
-
-# Simple liveness probe
-curl http://localhost:6790/healthz
-# OK
-
-# Readiness probe
-curl http://localhost:6790/ready
-# {"ok":true,"ready":true}
-
-# Queue stats
-curl http://localhost:6790/stats
-# {"ok":true,"stats":{"waiting":5,"active":2,"completed":1000,"dlq":0}}
-
-# Prometheus metrics (text format)
-curl http://localhost:6790/prometheus
-```
-
-### Kubernetes Probes
 
 ```yaml
+# Kubernetes
 livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 6790
+  httpGet: { path: /healthz, port: 6790 }
   initialDelaySeconds: 5
   periodSeconds: 10
-
 readinessProbe:
-  httpGet:
-    path: /ready
-    port: 6790
+  httpGet: { path: /ready, port: 6790 }
   initialDelaySeconds: 5
   periodSeconds: 5
 ```
 
-## Resource Requirements
+Alerting thresholds and dashboards are covered in [Monitoring](/guide/monitoring/) and [Production Operations](/guide/production/).
 
-### Memory
+## Backups and restore
 
-| Workload | Recommended RAM |
-|----------|-----------------|
-| Light (&lt;1k jobs/day) | 128 MB |
-| Medium (1k-10k jobs/day) | 256 MB |
-| Heavy (10k-100k jobs/day) | 512 MB |
-| Very Heavy (&gt;100k jobs/day) | 1 GB+ |
-
-### Disk
-
-SQLite database size depends on:
-- Number of jobs retained
-- Job data size
-- `removeOnComplete` setting
-
-```typescript
-// Reduce disk usage
-new Queue('tasks', {
-  defaultJobOptions: {
-    removeOnComplete: true,  // Don't keep completed jobs
-    removeOnFail: false,     // Keep failed for debugging
-  }
-});
-```
-
-### CPU
-
-bunqueue is I/O bound, not CPU bound. A single core handles most workloads.
-
-## Production Checklist
-
-For failure semantics, the crash timeline and the invariants each adversarial test suite proves, see [Production Operations](/guide/production/).
-
-<Steps>
-1. **Enable S3 backups**
-
-   Don't skip this. SQLite corruption = data loss.
-
-2. **Set auth tokens**
-
-   ```bash
-   AUTH_TOKENS=token1,token2,token3
-   ```
-
-3. **Use `durable: true` for critical jobs**
-
-   ```typescript
-   // Payments, orders, and critical events
-   await queue.add('payment', data, { durable: true });
-   ```
-
-4. **Configure resource limits**
-
-   Prevent runaway memory/CPU usage.
-
-5. **Set up monitoring**
-
-   Scrape `/prometheus` with Prometheus or similar.
-
-6. **Configure log aggregation**
-
-   Send logs to a central system.
-
-7. **Test backup restoration**
-
-   ```bash
-   # List backups first
-   bunqueue backup list
-   # Then restore by key
-   bunqueue backup restore backups/bunq-2026-01-30T12:00:00.db --force
-   ```
-
-8. **Set up alerts**
-
-   - DLQ count > threshold
-   - Waiting jobs growing
-   - Worker not processing
-
-</Steps>
-
-## Scaling Limitations
-
-<Aside type="caution" title="No Clustering">
-bunqueue does **not** support horizontal scaling or clustering. It's a single-instance queue.
-</Aside>
-
-### What this means
-
-- ❌ No multi-node deployment
-- ❌ No automatic failover
-- ❌ No distributed processing across machines
-- ✅ Multiple workers in same process (concurrency)
-- ✅ Multiple worker processes on the same machine (through the TCP server, never by sharing the SQLite file)
-
-### When bunqueue is enough
-
-| Scenario | Jobs/day | bunqueue? |
-|----------|----------|-----------|
-| Small SaaS | &lt;10k | ✅ Perfect |
-| Medium app | 10k-100k | ✅ Fine |
-| Large app | 100k-1M | ✅ Tested |
-| Enterprise | &gt;1M | ⚠️ Test first |
-
-### When to use something else
-
-If you need:
-- **High availability** → Redis + BullMQ with Sentinel
-- **Distributed processing** → Kafka, RabbitMQ
-- **Multi-region** → Managed queues (SQS, Cloud Tasks)
-- **Complex workflows** → Temporal, Inngest
-
-### Vertical scaling
-
-bunqueue scales **vertically** well:
-- More RAM = more jobs in memory
-- Faster disk (NVMe) = faster SQLite
-- More CPU cores = more worker concurrency
-
-```typescript
-// Scale worker concurrency with available CPUs
-import { cpus } from 'os';
-
-new Worker('tasks', processor, {
-  concurrency: cpus().length * 2
-});
-```
-
-## Disaster Recovery
-
-### Backup Strategy
-
-<div class="bq-diag">
-  <div class="bq-diag-flow">
-    <div class="bq-diag-cell">Every 1 hour</div>
-    <div class="bq-diag-arrow">→</div>
-    <div class="bq-diag-cell bq-diag-accent">S3 backup</div>
-  </div>
-  <div class="bq-diag-flow">
-    <div class="bq-diag-cell">Every 6 hours</div>
-    <div class="bq-diag-arrow">→</div>
-    <div class="bq-diag-cell">Verify backup integrity</div>
-  </div>
-  <div class="bq-diag-flow">
-    <div class="bq-diag-cell">Every day</div>
-    <div class="bq-diag-arrow">→</div>
-    <div class="bq-diag-cell">Test restore in staging</div>
-  </div>
-</div>
-
-### Recovery Steps
-
-1. **Stop bunqueue**
-   ```bash
-   systemctl stop bunqueue
-   ```
-
-2. **List available backups**
-   ```bash
-   bunqueue backup list
-   ```
-
-3. **Restore from backup**
-   ```bash
-   bunqueue backup restore backups/bunq-2026-01-30T12:00:00.db --force
-   ```
-
-4. **Start bunqueue**
-   ```bash
-   systemctl start bunqueue
-   ```
-
-### Point-in-Time Recovery
-
-SQLite WAL mode allows recovery to recent states. Stop the server first: copying the database and WAL while bunqueue is writing can produce a torn, unusable copy.
+The whole queue is one SQLite file, so back up that one file. The built-in S3 backup uploads periodic snapshots (works with AWS S3, Cloudflare R2, MinIO):
 
 ```bash
-# Stop, then copy both files together
-systemctl stop bunqueue
-cp data/bunq.db data/bunq.db-wal /backup/
-systemctl start bunqueue
-
-# Restore (server stopped)
-cp /backup/bunq.db* data/
-```
-
-## Security
-
-### Network
-
-- Terminate TLS natively with `TLS_CERT_FILE` and `TLS_KEY_FILE` (both TCP and HTTP, see [Native TLS](/guide/tls/)), or run behind a reverse proxy (nginx, Caddy)
-- Firewall TCP/HTTP ports
-
-### Authentication
-
-```bash
-# Generate strong tokens
-AUTH_TOKENS=$(openssl rand -hex 32),$(openssl rand -hex 32)
-```
-
-### File Permissions
-
-```bash
-# Restrict database access
-chmod 600 /var/lib/bunq.db
-chown bunqueue:bunqueue /var/lib/bunq.db
-```
-
-## Monitoring with Prometheus
-
-```yaml
-# prometheus.yml
-scrape_configs:
-  - job_name: 'bunqueue'
-    static_configs:
-      - targets: ['localhost:6790']
-    metrics_path: /prometheus
-```
-
-### Key Metrics
-
-| Metric | Alert Threshold |
-|--------|-----------------|
-| `bunqueue_jobs_waiting` | &gt; 1000 for 5 min |
-| `bunqueue_jobs_dlq` | &gt; 10 |
-| `bunqueue_jobs_active` | 0 for 5 min (workers dead?) |
-| `bunqueue_jobs_failed_total` | increasing rapidly |
-
-## Example: Full Production Setup
-
-```bash
-# /etc/env
-NODE_ENV=production
-DATA_PATH=/var/lib/bunq.db
-TCP_PORT=6789
-HTTP_PORT=6790
-AUTH_TOKENS=prod-token-abc123,deploy-token-xyz789
-
-# S3 Backups
 S3_BACKUP_ENABLED=1
-S3_ACCESS_KEY_ID=AKIA...
+S3_BUCKET=my-bunqueue-backups
+S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
-S3_BUCKET=company-bunqueue-backups
-S3_REGION=eu-west-1
-S3_BACKUP_INTERVAL=3600000
-S3_BACKUP_RETENTION=48
+S3_REGION=us-east-1           # or S3_ENDPOINT for R2/MinIO
+S3_BACKUP_INTERVAL=3600000    # every hour (default 6h)
+S3_BACKUP_RETENTION=24        # snapshots kept
 ```
 
-```typescript
-// production.ts
-import { Queue, Worker } from 'bunqueue/client';
+To restore after a disk loss:
 
-const queue = new Queue('production-tasks', {
-  embedded: true,
-  defaultJobOptions: {
-    attempts: 5,
-    backoff: 5000,
-    removeOnComplete: true,
-  }
-});
-
-// Configure DLQ alerts
-queue.setDlqConfig({
-  maxEntries: 1000,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-});
-
-// Regular jobs (buffered writes - high throughput)
-await queue.add('send-email', { to: 'user@example.com' });
-
-// Critical jobs (immediate disk write - no data loss)
-await queue.add('process-payment', { orderId: '123' }, { durable: true });
-
-// Worker with production settings
-new Worker('production-tasks', async (job) => {
-  await job.updateProgress(0, 'Starting...');
-
-  try {
-    const result = await processJob(job.data);
-    await job.log(`Completed: ${JSON.stringify(result)}`);
-    return result;
-  } catch (error) {
-    await job.log(`Error: ${error.message}`);
-    throw error;
-  }
-}, {
-  embedded: true,
-  concurrency: 10,
-  heartbeatInterval: 5000,
-});
+```bash
+systemctl stop bunqueue
+bunqueue backup list
+bunqueue backup restore backups/bunq-2026-01-30T12:00:00.db --force
+systemctl start bunqueue
 ```
+
+Provider-specific setup (R2, MinIO, Spaces) and how restore validates snapshots before replacing anything: [S3 Backup guide](/guide/backup/).
+
+## Reference: key environment variables
+
+| Variable | What it does | Default |
+|----------|--------------|---------|
+| `BUNQUEUE_DATA_PATH` | SQLite file path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) | in-memory |
+| `TCP_PORT` | Port for SDK clients | `6789` |
+| `HTTP_PORT` | Port for health, metrics, REST | `6790` |
+| `AUTH_TOKENS` | Comma-separated tokens clients must present | none (open) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | PEM cert and key for native TLS on TCP and HTTP. Set both or neither; setting only one is a startup error | off |
+| `S3_BACKUP_ENABLED` | Turn on S3 snapshots | `0` |
+| `SHUTDOWN_TIMEOUT_MS` | How long a graceful shutdown waits for active jobs | `30000` |
+
+The full list, including all S3 and cloud variables, lives in [Environment Variables](/guide/env-vars/). The same options are available as CLI flags: `bunqueue start --tcp-port --http-port --data-path --auth-tokens --tls-cert --tls-key`.
+
+## Sizing
+
+bunqueue is I/O bound, not CPU bound; one core handles most workloads.
+
+| Jobs per day | RAM |
+|--------------|-----|
+| under 10k | 128-256 MB |
+| 10k-100k | 512 MB |
+| over 100k | 1 GB+ |
+
+Disk grows with retained jobs. Set `removeOnComplete: true` in job options to drop completed jobs, and keep `removeOnFail: false` so failures stay inspectable. Scale vertically: more RAM, faster disk (NVMe), higher worker `concurrency`.
+
+## Gotchas
+
+- **No horizontal scaling.** No multi-node, no failover, no distributed processing. If you need those, reach for Redis + BullMQ with Sentinel, Kafka, or a managed queue like SQS. Multiple worker *processes* on one machine are fine, through the TCP server.
+- **Two embedded processes, one file, is silent corruption.** See the warning above; always go through the server for multi-process.
+- **Copying the database while the server runs can produce a torn copy.** SQLite runs in WAL mode (writes go to a `.db-wal` sidecar file first). Stop the server, then copy `bunq.db` and `bunq.db-wal` together, or just use the built-in S3 backup, which snapshots safely while live.
+- **`AUTH_TOKENS` is not set by default.** Anyone who can reach the ports can push and pull jobs. Set tokens (`openssl rand -hex 32`) and either enable [native TLS](/guide/tls/) or keep the ports on a private network. See [Security](/security/).
+- **Jobs you cannot afford to lose in a hard crash should be `durable: true`.** By default writes are buffered for up to 10 ms for throughput; `durable` writes hit disk before the add returns. Details in [Production Operations](/guide/production/).

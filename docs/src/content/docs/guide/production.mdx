@@ -1,6 +1,6 @@
 ---
-title: "bunqueue in Production: Crash Semantics, Backups & Ops"
-description: "What a bunqueue deployment costs to operate and what survives failure: crash semantics, at-least-once delivery, ACK fencing, S3 backups, and monitoring."
+title: "bunqueue in Production: What Survives a Crash"
+description: "Plain answers to what happens when a worker or the server dies mid-job: at-least-once delivery, durable writes, backups, monitoring, and a go-live checklist."
 template: splash
 head:
   - tag: meta
@@ -14,75 +14,71 @@ import { Aside } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · production</span>
   <h1 class="bq-hero-h1 bq-bench-h1">What survives <em>a crash.</em></h1>
-  <p class="bq-hero-sub">Running bunqueue in production is one queue server plus one SQLite file. This page tells you exactly what that costs to operate and, when a process dies mid-job, exactly what survives. Every claim below is backed by a test file in the repository you can run yourself.</p>
+  <p class="bq-hero-sub">Running bunqueue in production is one process plus one SQLite file. This page answers, in plain words, what happens when something dies mid-job, what to monitor, and what to check before go-live.</p>
+</div>
 
-  <div class="bq-proof">
-    <span><b>0</b> durable jobs lost across kill -9 cycles</span>
-    <span><b>at-least-once</b> delivery, fenced ACKs</span>
-    <span><b>12</b> failure-injection test suites</span>
-    <span><b>1</b> file to back up</span>
-  </div>
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">quick answers</span>
+  <h2 class="bq-h2">If it dies, what happens?</h2>
+  <p class="bq-lede">The short version first. Each row is a real failure and the behavior you get out of the box.</p>
+
+  | Failure | What happens to the job |
+  |---------|-------------------------|
+  | Worker crashes mid-job | The job is redelivered to another worker after its lease expires. It may run twice, never zero times. |
+  | Server killed hard (`kill -9`) | Jobs written to disk survive and recover on restart. Jobs accepted in the last ~10 ms may be lost, unless they were added with `durable: true`. |
+  | Server restarted gracefully (SIGTERM, deploys) | Nothing is lost, even buffered jobs. Shutdown flushes all pending writes before exiting. |
+  | Job fails repeatedly | After its retry attempts are exhausted it moves to the DLQ (dead letter queue, a parking lot for failed jobs you can inspect and retry). See [DLQ](/guide/dlq/). |
+  | Disk fills up | The server stays up and reports itself `degraded` on `/health`. Durable pushes fail explicitly instead of pretending to succeed. |
+  | The whole machine is lost | You restore the last S3 snapshot. Your maximum data loss is the backup interval. |
+
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">the crash timeline</span>
   <h2 class="bq-h2">The worker dies before the ACK.</h2>
-  <p class="bq-lede">This is the failure that defines a queue's honesty. Here is the exact sequence, and where bunqueue's guarantee starts and stops.</p>
+  <p class="bq-lede">This is the failure that defines a queue's honesty. Here is the exact sequence.</p>
 
-  1. A worker pulls a job over TCP. The server marks it active and issues a **lock token**, a lease with a default TTL of 30 seconds (the worker's `lockDuration`).
-  2. The handler runs your side effect. The email is sent, the charge is captured.
-  3. The worker dies **before its ACK reaches the server**: process crash, OOM kill, network partition. If ACK batching is enabled, every completion still sitting in the client-side buffer dies with it.
-  4. The server never records the completion. The job stays active under its lease.
-  5. The lease expires (or, for a worker that never heartbeated, the connection-close recovery path fires immediately) and the job is requeued with `attempts + 1`.
-  6. Another worker pulls it. **Your side effect runs again.**
+  1. A worker pulls a job. The server marks it active and gives the worker a **lease**: a lock with a time-to-live (default 30 seconds, the worker's `lockDuration`), renewed by heartbeats while the job runs.
+  2. Your handler does its side effect. The email is sent, the charge is captured.
+  3. The worker dies **before its ACK reaches the server**. An ACK is the worker's "done" confirmation; without it the server has no idea the work happened.
+  4. The lease expires and the server requeues the job with its attempt count incremented.
+  5. Another worker pulls it. **Your side effect runs again.**
 
-  The guarantee is **at-least-once**. bunqueue promises the job is never lost; it does not promise the job runs once. Handler idempotency is on you, and no queue on any backend can take that off you: the side effect and the acknowledgment are two systems, and the crash window between them is physics, not implementation.
+  The guarantee is **at-least-once**: a job is never lost, but it can run more than once. No queue on any backend can promise better, because your side effect and the acknowledgment are two separate systems and a crash can always land between them. What bunqueue does guarantee around the edges:
 
-  ### The ACK plumbing, precisely
-
-  - **One ACK round trip per job is the [`bunqueue-client` SDK](/guide/sdks/) default.** ACK batching into `ACKB` frames is opt-in via the worker's `ackBatch` option (`sdk/typescript/src/worker-types.ts`); enabling it widens step 3's buffer window in exchange for throughput. The bundled `bunqueue/client` Worker batches ACKs over TCP by default (up to `batchSize`, flushed within 50 ms); in embedded mode ACKs are a direct in-process call with no buffer.
-  - **Custom `jobId` gives you idempotent enqueue.** Re-adding the same `jobId` is a no-op, even under 25 concurrent pushes, even while the job is active (`test/repro-race-concurrency.test.ts`, R2 and R3). Producers that retry on timeout should always set one.
-  - **Late ACKs are fenced.** An ACK must present the job's lock token. If the lock's TTL elapsed while the handler was still running, the server grants a grace window and accepts the completion, but only when the token still matches **and** the lock is not older than the job's current `startedAt` (`isExpiredButOwned` in `src/application/queueManager.ts`, issue #101). A job that was reclaimed and re-leased to another worker has a newer `startedAt`, so the old worker's late ACK is rejected: no double completion.
-  - **Duplicate ACKs are a graceful no-op**, with one deliberate exception: a job the server's timeout sweep already failed and requeued for retry discards the late ACK, so the retry wins instead of the timeout being silently overridden (the `timedOutJobs` check in `QueueManager.ack()`).
+  - A late ACK from a worker whose lease already expired is still accepted, but only if the job was not re-leased to someone else in the meantime. Two workers can never both complete the same job.
+  - Re-adding a job with the same custom `jobId` is a no-op, even under heavy concurrency. Producers that retry on timeout should always set one.
+  - Duplicate ACKs are harmless.
 
   <Aside type="caution" title="What you must do">
-  - Put an **idempotency key** on every external side effect (payment captures, emails, webhooks). Derive it from `job.id` or your own `jobId`.
-  - **Dedupe enqueues with a custom `jobId`** wherever the producer might retry.
-  - Write handlers so a second run of the same job is harmless. Treat the `completed` event as at-least-once too.
-  - Mark jobs you cannot afford to lose as `durable: true` so they skip the 10 ms write buffer.
+  - Write handlers so running the same job twice is harmless. Put an **idempotency key** (derived from `job.id` or your own `jobId`) on every external side effect: payments, emails, webhooks.
+  - Set a custom `jobId` wherever the producer might retry an add.
+  - Mark jobs you cannot afford to lose as `durable: true`.
   </Aside>
 </div>
 
 <div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">invariants under failure</span>
-  <h2 class="bq-h2">Tested by breaking it on purpose.</h2>
-  <p class="bq-lede">Each row is an adversarial test suite in the repository. The first nine shipped in 2.8.30; the last three land in the same release as this page. Run any of them with <code>bun test test/&lt;file&gt;</code>.</p>
+  <span class="bq-eyebrow">durability</span>
+  <h2 class="bq-h2">Two write modes, one decision.</h2>
+  <p class="bq-lede">By default bunqueue batches writes to SQLite every 10 ms for throughput. A durable write skips the batch and hits disk before the add returns.</p>
 
-  | Scenario | What is injected | Invariant that holds | Suite |
-  |----------|------------------|----------------------|-------|
-  | Server crash | `kill -9` (SIGKILL) on the real server process, restart on the same database, repeated cycles and crash fuzzing | No durable job that got `ok: true` is ever lost; an ACKed and flushed completion stays completed (no silent re-run); a job active at crash time is recovered with `attempts` incremented; paused state and DLQ entries persist; restart never wedges | `test/repro-chaos-crash-recovery.test.ts` (CR1 to CR7) |
-  | Worker death mid-lease | Hard socket `terminate()` (a true drop, not a graceful close) of a worker holding a job | The job is redelivered to another worker (at-least-once); a job whose worker heartbeated is not instantly re-dispatched, only lock expiry reclaims it (no concurrent double-run); 20 pulled-and-abandoned jobs are all recoverable; the redelivered job completes cleanly | `test/repro-chaos-fault-injection.test.ts` (C1 to C4) |
-  | Cron under clock skew | Backward wall-clock jumps, DST spring-forward and fall-back | Next-run computation always moves strictly forward; DST transitions resolve to valid future instants | `test/repro-chaos-fault-injection.test.ts` (C5a to C5c) |
-  | Sustained churn | Continuous push/pull/ack traffic while a worker socket is killed and respawned every 400 ms for the whole run (env-tunable up to a 24 h soak) | Every pushed job is completed at least once, none lost; internal collections collapse back to baseline after drain (no per-job or per-connection leak); the 50k `completedJobs` cap holds; the server stays responsive | `test/repro-chaos-soak.test.ts` |
-  | Forced race interleavings | 25 concurrent PULLs on one job, 25 concurrent PUSHes with one `jobId`, a stale ACK racing lock expiry plus re-lease, 8 workers draining 100 jobs | Exactly one worker receives a job; exactly one job exists per `jobId`; the stale ACK after re-lease does not complete the job twice (R5); the full drain reconciles with no loss and no duplicates | `test/repro-race-concurrency.test.ts` (R1 to R6) |
-  | Lock expires mid-handler | Lock TTL elapses without renewal while the handler is still running, then the ACK arrives | The completion is accepted through the grace window instead of being lost to a stall; a genuinely re-leased job still rejects the stale worker's ACK | `test/repro-issue101-lost-ack-lock-expiry.test.ts` |
-  | Overload | A huge unbacked backlog, 100 slowloris connections holding partial frames, 500 in-flight commands on a single socket, a client that floods but never reads | Memory stays bounded; the abusive client's connection is dropped while healthy clients stay fast; all pipelined commands complete; latency returns to baseline after the spike | `test/repro-stress-degradation.test.ts` (S1 to S4) |
-  | Protocol garbage | Raw-socket fuzzing: corrupt msgpack, lying length prefixes, frames over the 64 MB limit, zero-length and torn frames, 100 random-byte frames, pre-auth probing | The server process never crashes or wedges; a fresh connection always completes a normal round trip afterwards; mutating commands are rejected before `Auth` succeeds | `test/repro-fuzz-protocol.test.ts` |
-  | Deploy restart | SIGTERM restarts, including 8 rolling restart cycles under live pushes | Even buffered (non-durable) jobs survive a graceful restart, because shutdown flushes the write buffer and checkpoints the WAL; waiting jobs, results, paused state and DLQ all round-trip | `test/repro-upgrade-restart.test.ts` (U1 to U3) |
-  | Weeks of uptime | 1,000 cron ticks, DST boundaries, LRU pressure far past every cap, a queue that fails forever | Cron does not drift; `jobResults` and the custom-id dedup map never exceed their caps; the DLQ stays bounded to `maxEntries` and remains retryable | `test/repro-longrunning-semantics.test.ts` (L1 to L4) |
-  | Durability gaps | A worker connection destroyed with completions still in the client-side ACK buffer; a `-wal` file truncated or given a garbage header between runs; a corrupted main `.db` | ACKs that reached the server stay completed, unflushed ACKs are redelivered and completed exactly once, never double-counted; a truncated WAL replays a strict committed prefix with no phantom jobs; a garbaged WAL header discards the WAL but keeps checkpointed data intact; a corrupt main database gets an explicit refusal or a demonstrably working start, never a wedge | `test/repro-durability-gaps.test.ts` (new in this release) |
-  | System clock jumps | `Date.now()` jumped hours forward and backward, live and across restarts | Forward jumps promote delayed jobs exactly once; backward jumps never run a job early and never wedge; lock reclaim under a jump stays exactly-once with no double-completion; a cron restart after a jump recomputes `next_run` without firing a backlog storm | `test/repro-clock-jump.test.ts` (new in this release) |
-  | Disk full | A real tiny filesystem filled to `ENOSPC` under the live server (the suite self-skips where it cannot provision one) | The server never crashes on `SQLITE_FULL`; durable pushes fail explicitly with `ok: false`, never a fake id; every push acknowledged before the wall stays queryable; buffered mode keeps accepting but the degradation is surfaced (`/health` goes `degraded` with `storage.diskFull`); service recovers once space is freed | `test/repro-disk-full.test.ts` (new in this release) |
+  | Mode | Throughput | Loss window on a hard crash |
+  |------|-----------|------------------------------|
+  | Buffered (default) | ~100k jobs/sec | up to 10 ms of accepted jobs |
+  | `durable: true` per job | ~10k jobs/sec | none |
 
-  <Aside title="What is not covered, honestly">
-  Buffered (non-durable) jobs can lose up to ~10 ms of writes on a **hard crash**; that window is the documented throughput trade-off, and `durable: true` closes it per job. bunqueue is a single-instance server: losing the whole host means restoring from the last S3 snapshot, so your recovery point is the backup interval, not zero. And at-least-once means duplicates are possible by design; the suites prove no loss and no concurrent double-run, not exactly-once side effects.
-  </Aside>
+```typescript
+await queue.add('send-newsletter', data);                  // buffered, fast
+await queue.add('capture-payment', data, { durable: true }); // on disk before this returns
+```
+
+  Mixing is free: mark only the jobs that are money as durable and keep the rest batched. The 10 ms window only exists for hard crashes; graceful restarts flush everything. Measured numbers per mode are in [Benchmarks](/guide/benchmarks/).
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">backup and restore</span>
   <h2 class="bq-h2">One file, snapshotted to S3.</h2>
-  <p class="bq-lede">The entire queue state is one SQLite database, so disaster recovery is one file in object storage. Works with AWS S3, Cloudflare R2, MinIO and DigitalOcean Spaces.</p>
+  <p class="bq-lede">The entire queue state is one SQLite database, so disaster recovery is one file in object storage. Works with AWS S3, Cloudflare R2, and MinIO.</p>
 
 ```bash
 S3_BACKUP_ENABLED=1
@@ -94,65 +90,14 @@ S3_BACKUP_INTERVAL=21600000    # snapshot cadence, default 6 hours
 S3_BACKUP_RETENTION=7          # snapshots kept, oldest pruned
 ```
 
-  Each snapshot checkpoints the WAL (`PRAGMA wal_checkpoint(TRUNCATE)`) so the main file is complete, gzips it, computes a SHA-256 checksum and uploads both the payload and a metadata sidecar (`src/infrastructure/backup/s3BackupOperations.ts`).
-
-  **Restore validates before it replaces.** `bunqueue backup restore <key>` downloads the snapshot, verifies the checksum, checks the `SQLite format 3` header, writes it to a temp file and runs `PRAGMA integrity_check` on that candidate. Only on full success is the temp file atomically renamed over the live database. A corrupt or truncated backup is rejected and the live database is never touched.
-
 ```bash
 bunqueue backup now       # snapshot immediately
 bunqueue backup list      # list snapshots with size and age
-bunqueue backup restore <key>
+bunqueue backup restore <key> --force   # stop the server first
 bunqueue backup status
 ```
 
-  Size the interval to your recovery point: with the 6 hour default, a total host loss costs you at most 6 hours of queue state. Rehearse the restore path before you need it, and see the [S3 Backup guide](/guide/backup/) for provider-specific setup.
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">wal growth</span>
-  <h2 class="bq-h2">The other file next to your file.</h2>
-  <p class="bq-lede">bunqueue runs SQLite in WAL mode: readers never block the writer, and writes append to a <code>.db-wal</code> sidecar that is periodically folded back into the main file.</p>
-
-  Under steady load SQLite auto-checkpoints and the WAL stays small. It is folded down explicitly at two moments: every S3 snapshot, and every clean shutdown, where `close()` flushes the write buffer and runs `wal_checkpoint(TRUNCATE)` before the process exits (`src/infrastructure/persistence/sqlite.ts`).
-
-  What to watch:
-
-  - **The `.db-wal` file size on disk**, next to your database. Sustained growth means checkpoints cannot complete, almost always because a long-lived read transaction is pinning the WAL.
-  - **Disk headroom.** Budget for the database, the WAL, and one uncompressed snapshot copy during backup. If the volume fills, `SQLITE_FULL` flips `/health` to `degraded` with a `storage.diskFull` flag instead of crashing the process.
-  - **`/health` memory numbers** (`heapUsed`, `rss`) for the in-memory side; internal collections are hard-capped (50k completed IDs, LRU results and dedup maps), so RSS should plateau, not climb.
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">single-writer saturation</span>
-  <h2 class="bq-h2">One writer, by design.</h2>
-  <p class="bq-lede">SQLite allows exactly one writer at a time. bunqueue turns that from a bottleneck into a batching opportunity, but it is still the ceiling you size against.</p>
-
-  All persistence funnels through a write buffer that coalesces inserts and flushes them as multi-row transactions every 10 ms (or every 100 jobs, whichever comes first). That is the difference between the two throughput modes:
-
-  | Mode | Throughput | Data-loss window on hard crash |
-  |------|-----------|-------------------------------|
-  | Buffered (default) | ~100k jobs/sec | up to 10 ms of accepted pushes |
-  | `durable: true` | ~10k jobs/sec | none, write hits SQLite before the ACK to the producer |
-
-  Practical sizing rules:
-
-  - **Reads scale, writes serialize.** WAL mode lets queries, dashboards and `GetJobs` run concurrently with the writer; only mutations queue behind the single writer.
-  - **Reserve `durable: true` for jobs that are money.** Mixing is free: durable pushes bypass the buffer individually while everything else stays batched.
-  - **Queues shard in memory, not on disk.** The server hashes queues across CPU-count shards for lock-free concurrency, but they share one SQLite file. If one instance's write ceiling is genuinely reached, split unrelated queues across separate server instances (one database each), or move producers to `addBulk`, which is the cheapest 3 to 8x you will find. See the [benchmarks](/guide/benchmarks/) for measured numbers per mode.
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">protocol compatibility</span>
-  <h2 class="bq-h2">Versioned wire, boring upgrades.</h2>
-  <p class="bq-lede">Clients speak msgpack frames over TCP: a 4-byte big-endian length prefix, then a msgpack body, 64 MB frame cap.</p>
-
-  The protocol is versioned: a client can send `Hello` and the server answers with its protocol version (currently `2`), its capability list (`pipelining`) and its exact server version (`src/infrastructure/server/handlers/monitoring.ts`). The `bunqueue-client` SDK exposes this as `connection.hello()`. Unknown commands come back as error responses, they never kill the connection, so older clients degrade feature by feature instead of breaking.
-
-  Compatibility policy:
-
-  - **`bunqueue-client` 0.1.x (TypeScript and Python) targets server 2.8.x.** The SDKs are wire-only clients; they contain no queue logic, so patch upgrades on either side are safe.
-  - **Server upgrades are restart-shaped.** The database schema migrates forward automatically on startup, and the rolling-restart suite (`test/repro-upgrade-restart.test.ts`) reopens a database written by the previous cycle on every iteration.
-  - Upgrade order when it matters: server first, then clients. See the [SDK guide](/guide/sdks/) for per-runtime specifics.
+  Restore validates before it replaces: it verifies the snapshot's checksum and runs an integrity check on a temp copy, and only then swaps it in. A corrupt backup never touches your live database. Size the interval to how much queue state you can afford to lose, and rehearse one restore before you need it. Provider setup lives in the [S3 Backup guide](/guide/backup/).
 </div>
 
 <div class="bq-wrap bq-section">
@@ -162,13 +107,19 @@ bunqueue backup status
 
   | Endpoint | What it gives you |
   |----------|-------------------|
-  | `GET /health` | `healthy` or `degraded`, uptime, version, per-state job counts, connection counts, heap and RSS in MB, and a `storage.diskFull` block when the disk is full |
+  | `GET /health` | `healthy` or `degraded`, uptime, version, job counts per state, memory, and a `storage.diskFull` flag when the disk is full |
   | `GET /healthz`, `/live`, `/ready` | Bare liveness and readiness probes for orchestrators |
-  | `GET /prometheus` | Prometheus text format: `bunqueue_jobs_waiting/active/delayed/dlq`, `bunqueue_jobs_pushed_total/pulled_total/completed_total/failed_total`, `bunqueue_push/pull/ack_duration_ms`, `bunqueue_workers_*`, per-queue `bunqueue_queue_jobs_*`, `bunqueue_uptime_seconds` |
+  | `GET /prometheus` | Metrics in Prometheus text format: job counts, totals, operation latencies, per-queue gauges |
   | `GET /metrics` | The same counters as JSON |
-  | `GET /heapstats`, `POST /gc` | Debug heap breakdown and forced GC; both require auth |
 
-  Set `METRICS_AUTH=true` to require an auth token on the metrics endpoints. Alert on four things: **DLQ growth** (`bunqueue_jobs_dlq` climbing means handlers are failing terminally), **queue depth** (`bunqueue_jobs_waiting` sustained growth means consumers cannot keep up), **`/health` status `degraded`** (disk full), and **RSS drift** after the workload has plateaued. The [Monitoring guide](/guide/monitoring/) covers dashboards and webhook alerting.
+  Set `METRICS_AUTH=true` to require an auth token on the metrics endpoints. Alert on four things:
+
+  - **DLQ growth**: `bunqueue_jobs_dlq` climbing means handlers are failing terminally.
+  - **Queue depth**: `bunqueue_jobs_waiting` growing steadily means workers cannot keep up.
+  - **`/health` reporting `degraded`**: the disk is full.
+  - **Memory drift**: RSS should plateau once the workload does; internal caches are hard-capped.
+
+  Dashboards and webhook alerting are covered in [Monitoring](/guide/monitoring/).
 </div>
 
 <div class="bq-wrap bq-section">
@@ -176,9 +127,9 @@ bunqueue backup status
   <h2 class="bq-h2">SIGTERM is a contract.</h2>
   <p class="bq-lede">Deploys restart the server constantly. The shutdown path is what makes that boring.</p>
 
-  On SIGTERM or SIGINT the server stops accepting TCP and HTTP connections, then waits up to `SHUTDOWN_TIMEOUT_MS` (default 30,000) for active jobs to reach zero, polling once per second. Then it flushes the write buffer, checkpoints the WAL and closes the database (`src/infrastructure/server/bootstrap.ts`). That flush is why even non-durable jobs survive a graceful restart (proven by U1 in the upgrade suite): the 10 ms buffer window only exists for hard crashes.
+  On SIGTERM the server stops accepting connections, waits up to `SHUTDOWN_TIMEOUT_MS` (default 30,000 ms) for active jobs to finish, then flushes every pending write and closes the database cleanly. That flush is why even non-durable jobs survive deploys.
 
-  Jobs still active when the deadline hits are not lost: they are already persisted as `active`, and the recovery pass on the next startup requeues them with `attempts` incremented (or routes them to the DLQ if they are out of attempts). Their workers' late ACKs will fail against the stopped server and the jobs simply redeliver, which is at-least-once doing its job. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler to make that case rare, and give your orchestrator a termination grace period slightly above that (Kubernetes defaults to 30 s, raise `terminationGracePeriodSeconds` if you raise the timeout).
+  Jobs still running when the deadline hits are not lost either: they are already persisted as active, and the next startup requeues them for retry. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler, and give your orchestrator a termination grace period slightly above that (Kubernetes defaults to 30 s).
 </div>
 
 <div class="bq-wrap bq-section">
@@ -197,17 +148,20 @@ bunqueue backup status
     <li><code>SHUTDOWN_TIMEOUT_MS</code> sized above your longest handler</li>
     <li>disk alert covering the <code>.db</code> and <code>.db-wal</code> files</li>
     <li>worker <code>lockDuration</code> above your slowest job, or heartbeats on</li>
-    <li>the adversarial suites run once on your own hardware</li>
   </ul>
+
+  <Aside title="Honest limits">
+  Buffered jobs can lose up to ~10 ms of writes on a hard crash; `durable: true` closes that per job. bunqueue is single-instance, so losing the host means restoring the last snapshot; your recovery point is the backup interval. At-least-once means duplicates are possible by design. SQLite in WAL mode (writes append to a `.db-wal` sidecar file) keeps that sidecar small on its own, but watch its size on disk: sustained growth usually means a long-lived read is pinning it. When upgrading, restart the server first (the schema migrates forward automatically), then update clients.
+  </Aside>
 </div>
 
 <div class="bq-wrap bq-cta">
-  <h2 class="bq-h2">Now break it yourself.</h2>
-  <p class="bq-lede" style="margin: 0 auto;">Clone the repo, run the crash suites, kill -9 the server mid-load and watch the invariants hold.</p>
+  <h2 class="bq-h2">Ready to deploy?</h2>
+  <p class="bq-lede" style="margin: 0 auto;">The deployment guide has the Docker, systemd, and PM2 configs to paste.</p>
   <div class="bq-actions">
     <button type="button" class="bq-hero-install" aria-label="Copy install command">bun add bunqueue</button>
-    <a class="bq-btn" href="/guide/quickstart/">Read the quickstart</a>
-    <a class="bq-btn-ghost" href="/guide/deployment/">Deployment guide</a>
+    <a class="bq-btn" href="/guide/deployment/">Deployment guide</a>
+    <a class="bq-btn-ghost" href="/guide/quickstart/">Quickstart</a>
   </div>
 </div>
 

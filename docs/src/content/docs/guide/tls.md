@@ -11,7 +11,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · tls</span>
   <h1 class="bq-hero-h1 bq-bench-h1">TLS without the <em>reverse proxy.</em></h1>
-  <p class="bq-hero-sub">bunqueue terminates TLS natively on both the TCP (msgpack) and HTTP servers, no reverse proxy required. TLS is opt-in: without cert/key configuration the server behaves exactly as before, in plaintext.</p>
+  <p class="bq-hero-sub">Point bunqueue at a certificate and key, and all traffic between clients and the server is encrypted. No nginx or Caddy in front, one cert pair covers both the TCP and HTTP ports.</p>
 
   <div class="bq-proof">
     <span><b>1</b> cert pair covers TCP and HTTP</span>
@@ -20,7 +20,9 @@ head:
   </div>
 </div>
 
-## Server
+TLS (the encryption behind `https://`) is opt-in: without a cert and key the server runs in plaintext, exactly as before. Turn it on whenever clients connect over a network you don't fully trust.
+
+## Enable TLS on the server
 
 ```bash
 # CLI flags
@@ -43,13 +45,11 @@ export default defineConfig({
 });
 ```
 
-One cert pair covers both servers: TCP (`:6789`) and HTTP/WebSocket/SSE
-(`:6790`, becomes `https://` / `wss://`).
+One cert pair covers both servers: TCP (`:6789`) and HTTP/WebSocket/SSE (`:6790`, which becomes `https://` / `wss://`).
 
-The server fails fast at startup if the cert or key file is missing or if
-only one of the two is set. It never silently falls back to plaintext.
+The server fails fast at startup if the cert or key file is missing, or if only one of the two is set. It never silently falls back to plaintext.
 
-## Client SDK
+## Connect a client
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -70,18 +70,19 @@ const queue3 = new Queue('jobs', {
 });
 ```
 
-`Worker` accepts the same `connection.tls` options. The msgpack protocol is
-unchanged, TLS only wraps the transport.
+`Worker` accepts the same `connection.tls` options. The wire protocol is unchanged, TLS only wraps the transport.
 
-## CLI client
+From the CLI:
 
 ```bash
-bunqueue stats --host queue.example.com --tls            # system CAs
-bunqueue stats --tls-ca ./ca.pem                          # custom CA
-bunqueue stats --tls-no-verify                            # self-signed, dev only
+bunqueue stats --host queue.example.com --tls    # system CAs
+bunqueue stats --tls-ca ./ca.pem                 # custom CA
+bunqueue stats --tls-no-verify                   # self-signed, dev only
 ```
 
 ## Self-signed certificate (dev / internal networks)
+
+No public domain? Generate your own cert:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
@@ -90,17 +91,11 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
-Clients then connect with `tls: { caFile: './cert.pem' }` (the self-signed
-cert acts as its own CA), full verification, no `rejectUnauthorized: false`
-needed.
+Clients then connect with `tls: { caFile: './cert.pem' }` (the self-signed cert acts as its own CA). That keeps full verification, no `rejectUnauthorized: false` needed.
 
-## Notes
+## Good to know
 
-- Certificate verification is on by default: the client rejects untrusted or
-  mismatched server certs unless you explicitly pass
-  `rejectUnauthorized: false` (encryption without authentication, dev only).
-- TLS + auth tokens compose: use both for servers exposed beyond localhost.
-- A TLS-enabled server only accepts TLS clients; plaintext clients fail the
-  handshake (they do not hang).
-- HTTP endpoints (`/health`, dashboards, `/ws`, `/events`) are served over
-  `https://`/`wss://` when TLS is enabled.
+- Certificate verification is on by default: the client rejects untrusted or mismatched server certs unless you explicitly pass `rejectUnauthorized: false` (encryption without authentication, dev only).
+- TLS encrypts traffic but does not identify clients. Combine it with [auth tokens](/guide/env-vars/) for servers exposed beyond localhost.
+- A TLS-enabled server only accepts TLS clients; plaintext clients fail the handshake immediately (they do not hang).
+- HTTP endpoints (`/health`, dashboards, `/ws`, `/events`) are served over `https://`/`wss://` when TLS is enabled.

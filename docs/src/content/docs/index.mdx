@@ -40,13 +40,35 @@ import BqIcon from '@components/BqIcon.astro';
       <h1 class="bq-hero-h1">The queue<br/>is <em>a file.</em></h1>
       <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
 
-      <p class="bq-install-label">Install bunqueue</p>
+      <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it can run embedded, no server at all)</span></p>
+
+      <Tabs syncKey="server">
+        <TabItem label="One command">
+
+```bash
+bunx bunqueue start
+```
+
+        </TabItem>
+        <TabItem label="Docker">
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
+```
+
+        </TabItem>
+      </Tabs>
+
+      <p class="bq-install-label">2 · Install the client for your language</p>
 
       <Tabs syncKey="runtime">
         <TabItem label="Bun">
 
 ```bash
-bun add bunqueue
+bun add bunqueue   # embedded: queue + worker in your process
 ```
 
         </TabItem>
@@ -54,7 +76,6 @@ bun add bunqueue
 
 ```bash
 npm install bunqueue-client
-bunx bunqueue start   # the queue server, one command
 ```
 
         </TabItem>
@@ -69,7 +90,6 @@ npm install bunqueue-client   # produce jobs from fetch handlers
 
 ```bash
 pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
-bunx bunqueue start   # the queue server, one command
 ```
 
         </TabItem>
@@ -77,7 +97,6 @@ bunx bunqueue start   # the queue server, one command
 
 ```bash
 composer require bunqueue/client
-bunx bunqueue start   # the queue server, one command
 ```
 
         </TabItem>
@@ -85,18 +104,6 @@ bunx bunqueue start   # the queue server, one command
 
 ```bash
 go get github.com/egeominotti/bunqueue/sdk/go
-bunx bunqueue start   # the queue server, one command
-```
-
-        </TabItem>
-        <TabItem label="Docker">
-
-```bash
-# server with persistent data; clients connect on :6789
-docker run -d --name bunqueue \
-  -p 6789:6789 -p 6790:6790 \
-  -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
 ```
 
         </TabItem>

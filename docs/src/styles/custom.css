@@ -1639,6 +1639,17 @@ main.bq-has-hero .sl-container {
   margin: 0 0 0.3rem;
 }
 
+/* Breathing room between the hero's stacked installer steps. */
+.bq-install-label + starlight-tabs,
+.bq-install-label + .tabs {
+  margin-top: 0.4rem;
+}
+
+.bq-hero-left starlight-tabs + .bq-install-label,
+.bq-hero-left .tabs + .bq-install-label {
+  margin-top: 1.8rem;
+}
+
 .bq-hero-left .bq-actions {
   margin-top: 1.6rem;
 }
@@ -2490,11 +2501,11 @@ html {
 }
 
 .bq-steps {
-  margin-top: 2.2rem;
+  margin-top: 3rem;
   display: flex;
   flex-direction: column;
-  gap: 1.6rem;
-  max-width: 46rem;
+  gap: 3rem;
+  max-width: 52rem;
 }
 
 .bq-step {

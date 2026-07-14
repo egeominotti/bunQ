@@ -37,7 +37,7 @@ import BqIcon from '@components/BqIcon.astro';
   <div class="bq-hero-grid">
     <div class="bq-hero-left">
       <VersionPill />
-      <h1 class="bq-hero-h1">The queue<br/>is <em>a file.</em></h1>
+      <h1 class="bq-hero-h1">bunqueue.<br/>The queue is <em>a file.</em></h1>
       <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
 
       <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it can run embedded, no server at all)</span></p>
@@ -62,7 +62,7 @@ docker run -d --name bunqueue \
         </TabItem>
       </Tabs>
 
-      <p class="bq-install-label">2 · Install the client for your language</p>
+      <p class="bq-install-label" style="margin-top: 2.2rem;">2 · Install the client for your language</p>
 
       <Tabs syncKey="runtime">
         <TabItem label="Bun">

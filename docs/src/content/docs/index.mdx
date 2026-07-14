@@ -69,6 +69,7 @@ npm install bunqueue-client   # produce jobs from fetch handlers
 
 ```bash
 pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
+bunx bunqueue start   # the queue server, one command
 ```
 
         </TabItem>
@@ -76,6 +77,7 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
 
 ```bash
 composer require bunqueue/client
+bunx bunqueue start   # the queue server, one command
 ```
 
         </TabItem>
@@ -83,6 +85,18 @@ composer require bunqueue/client
 
 ```bash
 go get github.com/egeominotti/bunqueue/sdk/go
+bunx bunqueue start   # the queue server, one command
+```
+
+        </TabItem>
+        <TabItem label="Docker">
+
+```bash
+# server with persistent data; clients connect on :6789
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
 ```
 
         </TabItem>

@@ -187,10 +187,12 @@ go get github.com/egeominotti/bunqueue/sdk/go
       <h3><span class="bq-dot" style="background: var(--bq-blue)"></span> TypeScript · Node, Deno, Bun</h3>
 
 ```typescript
-import { Queue, Worker } from 'bunqueue-client';
+import { Queue, Worker }
+  from 'bunqueue-client';
 
 const queue = new Queue('emails');
-await queue.add('welcome', { to: 'a@b.co' });
+await queue.add('welcome',
+  { to: 'a@b.co' });
 
 new Worker('emails', async (job) => {
   await sendEmail(job.data);
@@ -207,13 +209,15 @@ new Worker('emails', async (job) => {
 from bunqueue import Queue, Worker
 
 queue = Queue("emails")
-queue.add("welcome", {"to": "a@b.co"}, attempts=3)
+queue.add("welcome",
+    {"to": "a@b.co"}, attempts=3)
 
 def process(job):
     send_email(job.data["to"])
     return {"sent": True}
 
-Worker("emails", process, concurrency=10).run()
+Worker("emails", process,
+    concurrency=10).run()
 ```
 
       <p><a href="/guide/sdks/">same API, snake_case</a> · sync producer, threaded workers</p>
@@ -226,10 +230,12 @@ use Bunqueue\Queue;
 use Bunqueue\Worker;
 
 $queue = new Queue('emails');
-$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
+$queue->add('welcome',
+    ['to' => 'a@b.co'], ['attempts' => 3]);
 
-$worker = new Worker('emails', fn ($job) => sendEmail($job->data()));
-$worker->run();          // daemon loop, or runOnce() from a cron tick
+$worker = new Worker('emails',
+    fn ($job) => sendEmail($job->data()));
+$worker->run(); // or runOnce()
 ```
 
       <p><a href="/guide/sdks/">FPM-friendly producer, CLI worker</a> · runOnce() for cron ticks</p>
@@ -238,12 +244,17 @@ $worker->run();          // daemon loop, or runOnce() from a cron tick
       <h3><span class="bq-dot" style="background: #00add8"></span> Go</h3>
 
 ```go
-queue := bunqueue.NewQueue("emails", bunqueue.Options{})
-queue.Add("welcome", map[string]any{"to": "a@b.co"}, nil)
+queue := bunqueue.NewQueue("emails",
+    bunqueue.Options{})
+queue.Add("welcome",
+    map[string]any{"to": "a@b.co"}, nil)
 
-worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+worker := bunqueue.NewWorker("emails",
+  func(job *bunqueue.Job) (any, error) {
     return sendEmail(job.Data())
-}, bunqueue.WorkerOptions{Concurrency: 8})
+  }, bunqueue.WorkerOptions{
+    Concurrency: 8,
+  })
 worker.Run()
 ```
 
@@ -257,10 +268,13 @@ import { Queue } from 'bunqueue-client';
 
 export default {
   async fetch(req: Request, env: Env) {
-    const q = new Queue('signups', { host: env.HOST, tls: true });
-    const job = await q.add('welcome', await req.json());
+    const q = new Queue('signups',
+      { host: env.HOST, tls: true });
+    const job = await q.add('welcome',
+      await req.json());
     q.close();
-    return Response.json({ queued: job.id });
+    return Response.json(
+      { queued: job.id });
   },
 };
 ```
@@ -272,12 +286,13 @@ export default {
 
 ```bash
 # push, watch, inspect from the terminal
-bunqueue push emails '{"to":"a@b.co"}' --priority 5
+bunqueue push emails '{"to":"a@b.co"}'
 bunqueue stats
 bunqueue dlq list emails
 
 # or let an agent drive it: 73 MCP tools
-claude mcp add bunqueue -- bunx bunqueue-mcp
+claude mcp add bunqueue \
+  -- bunx bunqueue-mcp
 ```
 
       <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
@@ -295,16 +310,19 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
       <div class="bq-step-head"><span class="bq-step-num">1</span><h3>Write <code>app.ts</code>, a queue and a worker</h3></div>
 
 ```typescript
-import { Queue, Worker } from 'bunqueue/client';
+import { Queue, Worker }
+  from 'bunqueue/client';
 
-const queue = new Queue('emails', { embedded: true });
+const queue = new Queue('emails',
+  { embedded: true });
 
 new Worker('emails', async (job) => {
-  console.log(`sending to ${job.data.to}`);
+  console.log(`to ${job.data.to}`);
   return { sent: true };
 }, { embedded: true });
 
-await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
+await queue.add('welcome',
+  { to: 'a@b.co' }, { attempts: 3 });
 ```
 
     </div>
@@ -313,7 +331,7 @@ await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
 
 ```bash
 bun app.ts
-# sending to user@example.com
+# sending to a@b.co
 ```
 
       <p class="bq-step-note">That's the whole setup. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>, and one <code>dataPath</code> option persists everything to a single SQLite file. Not on Bun? Same code with <code>bunqueue-client</code> against the server. <a href="/guide/quickstart/">Full quickstart</a></p>
@@ -396,11 +414,14 @@ bun app.ts
     </div>
 
 ```typescript
-import { Queue, Worker } from 'bunqueue/client';
+import { Queue, Worker }
+  from 'bunqueue/client';
 
-const queue = new Queue('emails', { embedded: true });
+const queue = new Queue('emails',
+  { embedded: true });
 
-await queue.add('welcome', { to: 'user@example.com' }, { attempts: 3 });
+await queue.add('welcome',
+  { to: 'a@b.co' }, { attempts: 3 });
 
 const worker = new Worker('emails', async (job) => {
   await sendEmail(job.data);

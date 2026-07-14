@@ -3008,6 +3008,28 @@ html {
   .bq-hero { padding-top: 2.5rem; }
   .bq-sim-head { font-size: 0.58rem; letter-spacing: 0.06em; gap: 0.35rem; }
   .bq-sim-col { padding: 0.3rem 0.45rem 0.6rem; }
+
+  /* Phones: use the full width and keep code readable without clipping.
+     Starlight's content panel alone eats 64px of a 390px viewport. */
+  main:has(.bq-hero) .content-panel { padding-inline: 0.2rem !important; }
+  .bq-wrap { padding: 0 0.75rem; }
+  .bq-lang { padding: 0.8rem 0.55rem; border-radius: 0.7rem; }
+  /* EC bakes its vars behind a :root-level selector, so override the
+     consuming rules directly (higher specificity than EC's own). */
+  .bq-lang .expressive-code pre > code,
+  .bq-hero .expressive-code pre > code,
+  .bq-steps .expressive-code pre > code {
+    font-size: 0.7rem;
+    line-height: 1.65;
+  }
+  .bq-lang .expressive-code .ec-line .code,
+  .bq-hero .expressive-code .ec-line .code,
+  .bq-steps .expressive-code .ec-line .code {
+    padding-inline-start: calc(var(--ecIndent, 0ch) + 0.6rem - var(--ecGtrBrdWd, 0px));
+    padding-inline-end: 0.6rem;
+  }
+  .bq-install-label span { display: block; margin-top: 0.15rem; }
+  .bq-hero-install { max-width: 100%; overflow-x: auto; white-space: nowrap; }
 }
 
 /* ── vs BullMQ: instantly-readable comparison ──────────────────────── */

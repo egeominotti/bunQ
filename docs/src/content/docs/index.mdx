@@ -1,6 +1,6 @@
 ---
 title: "The Queue Is a File: Zero-Infrastructure Job Queue"
-description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups and clients for TypeScript and Python."
+description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups and clients for TypeScript, Python, PHP and Go."
 template: splash
 head:
   - tag: meta
@@ -32,7 +32,6 @@ head:
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import VersionPill from '@components/VersionPill.astro';
 import BqIcon from '@components/BqIcon.astro';
-import PerfSimulator from '@components/perf/PerfSimulator.tsx';
 
 <div class="bq-wrap bq-hero">
   <div class="bq-hero-grid">
@@ -73,13 +72,27 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
 ```
 
         </TabItem>
+        <TabItem label="PHP">
+
+```bash
+composer require bunqueue/client
+```
+
+        </TabItem>
+        <TabItem label="Go">
+
+```bash
+go get github.com/egeominotti/bunqueue/sdk/go
+```
+
+        </TabItem>
       </Tabs>
 
       <div class="bq-actions">
         <a class="bq-btn" href="#quickstart">Get started in 60s</a>
         <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
       </div>
-      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python and Cloudflare Workers</p>
+      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers</p>
     </div>
 
     <div class="bq-hero-right">
@@ -133,17 +146,122 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
     <span><b>150K+</b> ops/sec sustained</span>
     <span>p99 under <b>1 ms</b></span>
     <span><b>5.5 MB</b> install, 2 runtime deps</span>
-    <span><b>382</b> e2e scenarios across 5 runtimes</span>
+    <span><b>500+</b> e2e scenarios across 7 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
   </div>
 </div>
 
-<div class="bq-wrap bq-section" id="benchmark">
-  <span class="bq-eyebrow">performance · benchmark</span>
-  <h2 class="bq-h2">bunqueue vs BullMQ, measured.</h2>
-  <p class="bq-lede">Flip between in-process and over the wire, bulk and single push. Every bar replays throughput we measured, not a slogan. In-process with no Redis, bunqueue clears batches 25x faster; head to head over TCP it is 3.5x on bulk and a dead heat on single push. The number you lose is on the board too.</p>
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">polyglot clients</span>
+  <h2 class="bq-h2">One queue, any language.</h2>
+  <p class="bq-lede">The server owns every queue semantic, so clients stay thin and identical in spirit: add a job in one language, process it in another, same options, same guarantees. Official SDKs for TypeScript, Python, PHP and Go, built on a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire protocol</a>.</p>
+  <div class="bq-actions" style="margin-top: 1.4rem;">
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
+    <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
+    <a class="bq-btn-ghost" href="https://www.npmjs.com/package/bunqueue-client">npm</a>
+  </div>
 
-  <PerfSimulator client:load />
+  <div class="bq-langs">
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-blue)"></span> TypeScript · Node, Deno, Bun</h3>
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+await queue.add('welcome', { to: 'a@b.co' });
+
+new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { concurrency: 10 });
+```
+
+      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · Node, Deno, Bun and Workers</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails")
+queue.add("welcome", {"to": "a@b.co"}, attempts=3)
+
+def process(job):
+    send_email(job.data["to"])
+    return {"sent": True}
+
+Worker("emails", process, concurrency=10).run()
+```
+
+      <p><a href="/guide/sdks/">same API, snake_case</a> · sync producer, threaded workers</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #777bb3"></span> PHP</h3>
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('emails');
+$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
+
+$worker = new Worker('emails', fn ($job) => sendEmail($job->data()));
+$worker->run();          // daemon loop, or runOnce() from a cron tick
+```
+
+      <p><a href="/guide/sdks/">FPM-friendly producer, CLI worker</a> · runOnce() for cron ticks</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #00add8"></span> Go</h3>
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+queue.Add("welcome", map[string]any{"to": "a@b.co"}, nil)
+
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    return sendEmail(job.Data())
+}, bunqueue.WorkerOptions{Concurrency: 8})
+worker.Run()
+```
+
+      <p><a href="/guide/sdks/">goroutine worker pool</a> · one dependency, go get and go</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+export default {
+  async fetch(req: Request, env: Env) {
+    const q = new Queue('signups', { host: env.HOST, tls: true });
+    const job = await q.add('welcome', await req.json());
+    q.close();
+    return Response.json({ queued: job.id });
+  },
+};
+```
+
+      <p><a href="/guide/sdks/">nodejs_compat flag, produce from fetch handlers</a> · consume via Cron Triggers</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: var(--bq-red)"></span> CLI &amp; AI agents</h3>
+
+```bash
+# push, watch, inspect from the terminal
+bunqueue push emails '{"to":"a@b.co"}' --priority 5
+bunqueue stats
+bunqueue dlq list emails
+
+# or let an agent drive it: 73 MCP tools
+claude mcp add bunqueue -- bunx bunqueue-mcp
+```
+
+      <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
+    </div>
+  </div>
 </div>
 
 <div class="bq-wrap bq-section" id="quickstart">
@@ -212,119 +330,6 @@ bun app.ts
     <a class="bq-btn" href="/guide/migration/">Migrate from BullMQ in minutes</a>
     <a class="bq-btn-ghost" href="/guide/comparison/">Full comparison</a>
     <a class="bq-btn-ghost" href="/guide/benchmarks/">Benchmarks</a>
-  </div>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">polyglot clients</span>
-  <h2 class="bq-h2">One queue, any language.</h2>
-  <p class="bq-lede">The server owns every queue semantic, so clients stay thin. Official SDKs for TypeScript, Python, PHP and Go speak the native TCP protocol, certified against a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire spec</a> by a 17-check <a href="https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance">conformance suite</a>.</p>
-  <div class="bq-actions" style="margin-top: 1.4rem;">
-    <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
-    <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
-    <a class="bq-btn-ghost" href="https://www.npmjs.com/package/bunqueue-client">npm</a>
-  </div>
-
-  <div class="bq-langs">
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-blue)"></span> TypeScript · Node, Deno, Bun</h3>
-
-```typescript
-import { Queue, Worker } from 'bunqueue-client';
-
-const queue = new Queue('emails');
-await queue.add('welcome', { to: 'a@b.co' });
-
-new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { concurrency: 10 });
-```
-
-      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 110 e2e scenarios per runtime</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
-
-```python
-from bunqueue import Queue, Worker
-
-queue = Queue("emails")
-queue.add("welcome", {"to": "a@b.co"}, attempts=3)
-
-def process(job):
-    send_email(job.data["to"])
-    return {"sent": True}
-
-Worker("emails", process, concurrency=10).run()
-```
-
-      <p><a href="/guide/sdks/">same API, snake_case</a> · 100 e2e scenarios</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #777bb3"></span> PHP</h3>
-
-```php
-use Bunqueue\Queue;
-use Bunqueue\Worker;
-
-$queue = new Queue('emails');
-$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
-
-$worker = new Worker('emails', fn ($job) => sendEmail($job->data()));
-$worker->run();          // daemon loop, or runOnce() from a cron tick
-```
-
-      <p><a href="/guide/sdks/">FPM-friendly producer, CLI worker</a> · 33 e2e scenarios</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: #00add8"></span> Go</h3>
-
-```go
-queue := bunqueue.NewQueue("emails", bunqueue.Options{})
-queue.Add("welcome", map[string]any{"to": "a@b.co"}, nil)
-
-worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
-    return sendEmail(job.Data())
-}, bunqueue.WorkerOptions{Concurrency: 8})
-worker.Run()
-```
-
-      <p><a href="/guide/sdks/">goroutine worker pool</a> · 32 e2e scenarios</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>
-
-```typescript
-import { Queue } from 'bunqueue-client';
-
-export default {
-  async fetch(req: Request, env: Env) {
-    const q = new Queue('signups', { host: env.HOST, tls: true });
-    const job = await q.add('welcome', await req.json());
-    q.close();
-    return Response.json({ queued: job.id });
-  },
-};
-```
-
-      <p><a href="/guide/sdks/">nodejs_compat flag, produce from fetch handlers</a> · 16 scenarios inside workerd</p>
-    </div>
-    <div class="bq-lang">
-      <h3><span class="bq-dot" style="background: var(--bq-red)"></span> CLI &amp; AI agents</h3>
-
-```bash
-# push, watch, inspect from the terminal
-bunqueue push emails '{"to":"a@b.co"}' --priority 5
-bunqueue stats
-bunqueue dlq list emails
-
-# or let an agent drive it: 73 MCP tools
-claude mcp add bunqueue -- bunx bunqueue-mcp
-```
-
-      <p><a href="/guide/mcp/">MCP server</a> for Claude, Cursor and any MCP client</p>
-    </div>
   </div>
 </div>
 
@@ -455,9 +460,9 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
       <BqIcon name="check" />
       <h3>Tested on every runtime</h3>
       <ul>
-        <li>100 e2e scenarios each on Node.js, Deno, Bun</li>
+        <li>110 e2e scenarios each on Node.js, Deno, Bun</li>
         <li>16 scenarios inside workerd</li>
-        <li>66 scenarios in Python</li>
+        <li>100 in Python · 33 in PHP · 32 in Go</li>
         <li>every public SDK method covered</li>
       </ul>
     </div>

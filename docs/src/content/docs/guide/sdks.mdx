@@ -13,13 +13,13 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · sdks</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Client SDKs for every <em>runtime.</em></h1>
-  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, certified against a formal wire spec by a language-agnostic conformance suite.</p>
+  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, with the same Queue and Worker API in every language.</p>
 
   <div class="bq-proof">
-    <span><b>110</b> e2e scenarios each on Node, Deno, Bun</span>
-    <span><b>100</b> in Python · <b>33</b> in PHP · <b>32</b> in Go</span>
-    <span><b>16</b> scenarios inside workerd</span>
-    <span><b>17</b> conformance checks on 1 versioned wire protocol</span>
+    <span><b>6</b> languages and runtimes, one queue</span>
+    <span><b>1</b> formal, versioned wire protocol</span>
+    <span>produce in one language, <b>consume in another</b></span>
+    <span>retries, priorities, cron, DLQ: <b>all server-side</b></span>
   </div>
 </div>
 
@@ -43,20 +43,10 @@ Every SDK is versioned independently from the server and follows semantic
 versioning. The wire protocol is versioned too (`protocolVersion: 2`,
 negotiated via `Hello`), so a client keeps working across server upgrades.
 
-The protocol itself is a formal, public contract: the
-[wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md)
-plus a language-agnostic
-[conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
-of 17 checks that every official SDK passes against a real server. A
-community client in any language becomes protocol-conformant the same way:
-write a small driver, run the suite, pass 17/17.
-
-Every claim on this page is verified against a real bunqueue server, on
-every supported platform: **110 end-to-end scenarios each on Node.js, Deno
-and Bun**, 16 inside workerd (the actual Cloudflare Workers runtime),
-**100 in Python**, **33 in PHP** and **32 in Go**, plus the 17-check
-conformance suite per SDK, with npm releases published with build
-provenance and gated on the full e2e suite.
+The protocol itself is a formal, public contract, so your code is never
+coupled to a specific SDK version or language: a client written today keeps
+working across server upgrades, and services in different languages
+interoperate on the same queues out of the box.
 
 ## Getting started
 
@@ -306,8 +296,7 @@ how long each in-flight command waits for a response.
 
 ### Connection resilience
 
-Both SDKs implement the same production-grade recovery model, verified by
-dedicated failure-injection tests:
+Every SDK implements the same production-grade recovery model:
 
 | Mechanism | Behavior |
 |---|---|
@@ -694,10 +683,9 @@ export default {
 Workers are request-scoped, so there is no long-lived worker loop. Instead:
 produce from fetch handlers, and consume in batches from a
 [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/),
-pull, process, acknowledge, return. Both patterns (Simple Mode included)
-are covered by the SDK's 16-scenario suite that runs inside workerd. Two
-requirements apply: the server must be reachable from the internet, and TLS
-needs a publicly trusted certificate.
+pull, process, acknowledge, return. Both patterns work with Simple Mode
+too. Two requirements apply: the server must be reachable from the
+internet, and TLS needs a publicly trusted certificate.
 
 ## Security
 
@@ -764,30 +752,16 @@ the ACK means the job runs again, design handlers to be idempotent (the
   float64 on the wire (exact up to 2⁵³, safe for millisecond timestamps);
   the same string rule applies to larger identifiers.
 
-## Quality assurance
+## Write a client in any language
 
-Every SDK release is validated against a real bunqueue server, spawned
-fresh for each run, on every supported runtime, locally and in CI on every
-change:
-
-| Runtime | Verification |
-|---|---|
-| Node.js | 110 e2e scenarios and 8 integration tests |
-| Bun | 110 e2e scenarios and 8 integration tests |
-| Deno | 110 e2e scenarios and 8 integration tests, identical test files |
-| Cloudflare Workers | 16 scenarios executed inside workerd, full API surface and Simple Mode |
-| Python | 100 e2e scenarios and 8 integration tests |
-| PHP | 33 e2e scenarios against a real server, plus a dedicated auth server |
-| Go | 32 e2e scenarios, `go vet` and `gofmt` clean |
-| Every SDK | 17-check [conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), double-verified through an independent wire connection |
-
-Coverage includes payload limits, unicode integrity, pipelining under
-concurrency, server crash and restart with automatic reconnection,
-half-open-link recovery, auth ordering under concurrent commands, ACK-batch
-error paths (a failing batch settles every job exactly once and leaks no
-concurrency slot), lock survival for jobs that outlast the lock TTL, and a
-realistic multi-queue production scenario with zero-loss accounting. npm
-releases are published with build provenance and gated on the e2e suite.
+The wire protocol is small and fully documented: length-prefixed msgpack
+frames, one command per message, plain request/response. If your language
+is not covered yet, you can build a client against the
+[wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md)
+and certify it with the
+[conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance):
+point its runner at your client and it tells you exactly what to fix. The
+official SDKs are built and certified the same way.
 
 Browsers are not supported, raw TCP sockets are unavailable there, so
 route through your own API instead.
@@ -804,5 +778,5 @@ route through your own API instead.
 - [Dead Letter Queue](/guide/dlq/), what happens when jobs fail
 - [Deployment guide](/guide/deployment/), Docker, TLS, authentication, monitoring
 - [Wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md), the normative contract every SDK implements
-- [Conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), certify a client in any language with 17 checks
+- [Conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), certify a client in any language
 - SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [`sdk/php`](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) · [`sdk/go`](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)

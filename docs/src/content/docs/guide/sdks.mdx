@@ -1,6 +1,6 @@
 ---
-title: "bunqueue SDKs: Node.js, Deno, Python & Cloudflare Workers"
-description: "Official bunqueue SDKs for Node.js, Deno, Bun, Python and Cloudflare Workers: one wire protocol, the same Queue and Worker API on every runtime."
+title: "bunqueue SDKs: Node.js, Deno, Python, PHP, Go & Cloudflare Workers"
+description: "Official bunqueue SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers: one formal wire protocol, a conformance suite, the same Queue and Worker API everywhere."
 head:
   - tag: meta
     attrs:
@@ -13,13 +13,13 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · sdks</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Client SDKs for every <em>runtime.</em></h1>
-  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, with full feature parity with the built-in Bun client.</p>
+  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, certified against a formal wire spec by a language-agnostic conformance suite.</p>
 
   <div class="bq-proof">
-    <span><b>100</b> e2e scenarios each on Node, Deno, Bun</span>
-    <span><b>66</b> e2e scenarios in Python</span>
+    <span><b>110</b> e2e scenarios each on Node, Deno, Bun</span>
+    <span><b>100</b> in Python · <b>33</b> in PHP · <b>32</b> in Go</span>
     <span><b>16</b> scenarios inside workerd</span>
-    <span><b>1</b> versioned wire protocol</span>
+    <span><b>17</b> conformance checks on 1 versioned wire protocol</span>
   </div>
 </div>
 
@@ -33,20 +33,30 @@ against the same queue, with no shared runtime and no translation layer.
 
 | Platform | Package | Current | Distribution |
 |---|---|---|---|
-| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.7 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
-| Python ≥ 3.9 | `bunqueue-client` | 0.1.2 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
+| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.9 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
+| Python ≥ 3.9 | `bunqueue-client` | 0.1.4 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
+| PHP ≥ 8.1 | `bunqueue/client` | 0.1.0 | Packagist upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) |
+| Go ≥ 1.22 | `github.com/egeominotti/bunqueue/sdk/go` | 0.1.0 | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
 | Bun, embedded in process, no server | `bunqueue` | - | [Quick Start](/guide/quickstart/) |
 
-Both SDKs are versioned independently from the server and follow semantic
-versioning. The wire protocol is versioned too (`protocolVersion: 1`,
+Every SDK is versioned independently from the server and follows semantic
+versioning. The wire protocol is versioned too (`protocolVersion: 2`,
 negotiated via `Hello`), so a client keeps working across server upgrades.
 
+The protocol itself is a formal, public contract: the
+[wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md)
+plus a language-agnostic
+[conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
+of 17 checks that every official SDK passes against a real server. A
+community client in any language becomes protocol-conformant the same way:
+write a small driver, run the suite, pass 17/17.
+
 Every claim on this page is verified against a real bunqueue server, on
-every supported platform: **100 end-to-end scenarios each on Node.js, Deno
-and Bun**, 16 inside workerd (the actual Cloudflare Workers runtime), and
-**66 in Python**, enforced in CI on every change (runtime matrix: Bun,
-Node and Deno for TypeScript; Python 3.10 and 3.12), with npm releases
-published with build provenance and gated on the full e2e suite.
+every supported platform: **110 end-to-end scenarios each on Node.js, Deno
+and Bun**, 16 inside workerd (the actual Cloudflare Workers runtime),
+**100 in Python**, **33 in PHP** and **32 in Go**, plus the 17-check
+conformance suite per SDK, with npm releases published with build
+provenance and gated on the full e2e suite.
 
 ## Getting started
 
@@ -96,6 +106,22 @@ pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/py
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```bash
+# Packagist release upcoming; today, add the repository to composer.json
+# and require bunqueue/client, or vendor sdk/php directly:
+composer require bunqueue/client
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```bash
+go get github.com/egeominotti/bunqueue/sdk/go
+```
+
+</TabItem>
 </Tabs>
 
 ### 3. Produce jobs
@@ -120,6 +146,27 @@ from bunqueue import Queue
 queue = Queue("emails")
 
 queue.add("welcome", {"to": "user@example.com"})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$queue = new Queue('emails');
+
+$queue->add('welcome', ['to' => 'user@example.com']);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+defer queue.Close()
+
+queue.Add("welcome", map[string]any{"to": "user@example.com"}, nil)
 ```
 
 </TabItem>
@@ -156,6 +203,32 @@ Worker("emails", process, concurrency=10).run()
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Worker;
+
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    sendEmail($job->data()['to']);
+    return ['sent' => true];
+});
+
+$worker->installSignalHandlers();
+$worker->run();          // blocking loop; or $worker->runOnce() from a cron tick
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    return sendEmail(job.Data()["to"].(string))
+}, bunqueue.WorkerOptions{Concurrency: 8})
+
+worker.Run()
+```
+
+</TabItem>
 </Tabs>
 
 Run either file with the runtime you already use:
@@ -165,6 +238,8 @@ node --experimental-strip-types app.ts    # Node 22 or later
 bun app.ts                                # Bun
 deno run -A app.ts                        # Deno 2 or later
 python app.py                             # Python
+php worker.php                            # PHP
+go run .                                  # Go
 ```
 
 Producer and worker are usually separate services, often in different
@@ -697,11 +772,14 @@ change:
 
 | Runtime | Verification |
 |---|---|
-| Node.js | 100 e2e scenarios and 8 integration tests |
-| Bun | 100 e2e scenarios and 8 integration tests |
-| Deno | 100 e2e scenarios and 8 integration tests, identical test files |
+| Node.js | 110 e2e scenarios and 8 integration tests |
+| Bun | 110 e2e scenarios and 8 integration tests |
+| Deno | 110 e2e scenarios and 8 integration tests, identical test files |
 | Cloudflare Workers | 16 scenarios executed inside workerd, full API surface and Simple Mode |
-| Python | 66 e2e scenarios and 8 integration tests |
+| Python | 100 e2e scenarios and 8 integration tests |
+| PHP | 33 e2e scenarios against a real server, plus a dedicated auth server |
+| Go | 32 e2e scenarios, `go vet` and `gofmt` clean |
+| Every SDK | 17-check [conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), double-verified through an independent wire connection |
 
 Coverage includes payload limits, unicode integrity, pipelining under
 concurrency, server crash and restart with automatic reconnection,
@@ -725,4 +803,6 @@ route through your own API instead.
 - [Cron Jobs](/guide/cron/), schedules and repeatable jobs
 - [Dead Letter Queue](/guide/dlq/), what happens when jobs fail
 - [Deployment guide](/guide/deployment/), Docker, TLS, authentication, monitoring
-- SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
+- [Wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md), the normative contract every SDK implements
+- [Conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), certify a client in any language with 17 checks
+- SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [`sdk/php`](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) · [`sdk/go`](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)

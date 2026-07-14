@@ -42,7 +42,7 @@ from .worker import Worker
 # to logging.getLogger("bunqueue").
 _logging.getLogger("bunqueue").addHandler(_logging.NullHandler())
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 __all__ = [
     "AuthError",

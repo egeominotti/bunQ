@@ -218,7 +218,7 @@ bun app.ts
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">polyglot clients</span>
   <h2 class="bq-h2">One queue, any language.</h2>
-  <p class="bq-lede">The server owns every queue semantic, so clients stay thin. Official SDKs speak the native TCP protocol with full feature parity, verified by the same test suite on every runtime.</p>
+  <p class="bq-lede">The server owns every queue semantic, so clients stay thin. Official SDKs for TypeScript, Python, PHP and Go speak the native TCP protocol, certified against a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire spec</a> by a 17-check <a href="https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance">conformance suite</a>.</p>
   <div class="bq-actions" style="margin-top: 1.4rem;">
     <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
     <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>
@@ -241,7 +241,7 @@ new Worker('emails', async (job) => {
 }, { concurrency: 10 });
 ```
 
-      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 100 e2e scenarios per runtime</p>
+      <p><a href="https://www.npmjs.com/package/bunqueue-client">npm install bunqueue-client</a> · 110 e2e scenarios per runtime</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: var(--bq-green)"></span> Python</h3>
@@ -259,7 +259,38 @@ def process(job):
 Worker("emails", process, concurrency=10).run()
 ```
 
-      <p><a href="/guide/sdks/">same API, snake_case</a> · 66 e2e scenarios</p>
+      <p><a href="/guide/sdks/">same API, snake_case</a> · 100 e2e scenarios</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #777bb3"></span> PHP</h3>
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('emails');
+$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
+
+$worker = new Worker('emails', fn ($job) => sendEmail($job->data()));
+$worker->run();          // daemon loop, or runOnce() from a cron tick
+```
+
+      <p><a href="/guide/sdks/">FPM-friendly producer, CLI worker</a> · 33 e2e scenarios</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #00add8"></span> Go</h3>
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+queue.Add("welcome", map[string]any{"to": "a@b.co"}, nil)
+
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    return sendEmail(job.Data())
+}, bunqueue.WorkerOptions{Concurrency: 8})
+worker.Run()
+```
+
+      <p><a href="/guide/sdks/">goroutine worker pool</a> · 32 e2e scenarios</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>

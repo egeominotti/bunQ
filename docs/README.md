@@ -59,6 +59,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
+| [Wire Protocol Specification](./protocol.md) | The normative, versioned client-facing spec of the TCP protocol (framing, envelope, command shapes, semantics, conformance requirements) — the contract every SDK is certified against via `sdk/conformance/`. |
 | [TCP Wire Protocol & Framing](./features/tcp-protocol.md) | Binary length-prefixed MessagePack transport that frames, pipelines, and backpressure-manages all TCP client/server commands and responses. |
 | [TCP Server Command Handlers](./features/tcp-server-handlers.md) | Request-handling layer that authenticates decoded commands, dispatches them through category routers to thin handler adapters, and shapes results into typed responses; also wires the full server in bootstrap. |
 | [HTTP / REST / SSE / WebSocket API](./features/http-api.md) | HTTP transport (port 6790) exposing the queue control surface as REST plus SSE/WebSocket real-time event streams, diagnostics, and metrics — all over the shared `handleCommand` dispatcher. |

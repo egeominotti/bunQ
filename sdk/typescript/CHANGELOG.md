@@ -5,6 +5,18 @@ All notable changes to `bunqueue-client` (TypeScript SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-07-14
+
+Conformance-suite driven: the SDK is now certified by the cross-language
+conformance kit (`sdk/conformance`, 17/17) against the formal wire spec
+(`docs/protocol.md`).
+
+### Fixed
+
+- **`drain()` now returns the number of removed jobs** (was `void`,
+  silently discarding the wire `count` — the "discarded return value"
+  class the conformance suite checks for).
+
 ## [0.1.8] - 2026-07-14
 
 Spec-alignment audit against the core protocol. Every fix ships with a repro

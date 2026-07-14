@@ -25,8 +25,10 @@ export const controlMethods = {
     return (await this.call<PausedResponse>({ cmd: 'IsPaused', queue: this.name })).paused === true;
   },
 
-  async drain(this: Ctx): Promise<void> {
-    await this.call({ cmd: 'Drain', queue: this.name });
+  /** Remove all waiting/delayed jobs; returns how many were dropped. */
+  async drain(this: Ctx): Promise<number> {
+    const response = await this.call<{ count?: number }>({ cmd: 'Drain', queue: this.name });
+    return response.count ?? 0;
   },
 
   async obliterate(this: Ctx): Promise<void> {

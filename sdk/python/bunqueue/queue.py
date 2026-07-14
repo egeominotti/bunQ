@@ -81,8 +81,10 @@ class Queue(QueueQueryOps, QueueAdminOps):
         response = self.connection.call({"cmd": "IsPaused", "queue": self.name})
         return bool(response.get("paused"))
 
-    def drain(self) -> None:
-        self.connection.call({"cmd": "Drain", "queue": self.name})
+    def drain(self) -> int:
+        """Remove all waiting/delayed jobs; returns how many were dropped."""
+        response = self.connection.call({"cmd": "Drain", "queue": self.name})
+        return int(response.get("count", 0))
 
     def obliterate(self) -> None:
         self.connection.call({"cmd": "Obliterate", "queue": self.name})

@@ -1,6 +1,6 @@
 ---
-title: "Migrate from BullMQ to Bunqueue: Step-by-Step Guide"
-description: Migrate from BullMQ to bunqueue with minimal code changes. Keep your Queue and Worker API, delete the Redis config, and switch to Bun-native SQLite.
+title: "Replace BullMQ: Migrate to bunqueue in Minutes"
+description: "Replace BullMQ with bunqueue in minutes: keep your Queue and Worker API, delete the Redis config, switch to Bun-native SQLite."
 head:
   - tag: meta
     attrs:

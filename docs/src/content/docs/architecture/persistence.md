@@ -1,5 +1,5 @@
 ---
-title: "SQLite Persistence: WAL, Write Buffering, S3 Backups"
+title: "SQLite Persistence: WAL, Write Buffer, S3 Backups"
 description: "bunqueue persistence layer: SQLite WAL mode config, write buffering, read-through cache, S3 backup flows, and durability guarantees."
 head:
   - tag: meta

@@ -1,6 +1,6 @@
 ---
-title: "Cron Jobs: Run Jobs on a Schedule"
-description: Schedule recurring jobs in bunqueue with cron expressions or plain intervals. Timezone support, persisted in SQLite, survives restarts.
+title: "Bun Cron Jobs: Persistent Schedules & Timezones"
+description: "Run cron jobs in Bun: cron expressions, plain intervals, timezones. Schedules persist in SQLite and survive restarts."
 head:
   - tag: meta
     attrs:

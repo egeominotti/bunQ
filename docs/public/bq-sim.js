@@ -96,6 +96,29 @@
         }
       }
 
+      // reduced motion: render one representative still frame, no timers
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        enqueue(chip('charge-card', 9, 1));
+        enqueue(chip('send-email', 5, 1));
+        const act = chip('render-pdf', 3, 1);
+        active.appendChild(act);
+        act.dataset.state = 'active';
+        for (const [name, pri, ms] of [['resize-image', 2, '4ms'], ['webhook-post', 4, '7ms']]) {
+          const d = chip(name, pri, 1);
+          d.dataset.state = 'done';
+          d.querySelector('.bq-pri').textContent = ms;
+          done.appendChild(d);
+        }
+        const kept = chip('sync-crm', 1, 3);
+        kept.dataset.state = 'fail';
+        kept.querySelector('.bq-pri').textContent = 'kept · retryable';
+        dlqSlot.appendChild(kept);
+        refresh();
+        const caption = document.querySelector('.bq-pipeline-caption');
+        if (caption) caption.textContent = 'snapshot: higher priority jobs jump the line, failures retry with backoff, exhausted retries land in the dead letter queue';
+        return;
+      }
+
       // seed and start
       enqueue(chip('send-email', 5, 1));
       enqueue(chip('resize-image', 2, 1));

@@ -1,5 +1,5 @@
 ---
-title: "bunqueue TCP Protocol Architecture: Wire Format & Pipelining"
+title: "TCP Protocol Architecture: Wire Format & Pipelining"
 description: "bunqueue TCP protocol deep dive: MessagePack wire format, pipelining, connection pooling, and binary command architecture."
 head:
   - tag: meta

@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Client SDK Architecture: Pooling & Worker Modes"
+title: "Client SDK Architecture: Pooling & Worker Modes"
 description: "bunqueue Client SDK internals: TCP connection pooling, embedded vs server mode, worker heartbeats, ACK batching, and auto-batching."
 head:
   - tag: meta

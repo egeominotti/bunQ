@@ -2959,6 +2959,18 @@ html {
   margin-right: 0.55rem;
 }
 
+/* prose cards (trade-offs, home FAQ) reuse the trust card shell */
+.bq-trust-card > p {
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--sl-color-gray-2);
+  margin: 0.2rem 0 0;
+}
+
+.bq-trust-card > p code {
+  font-size: 0.8rem;
+}
+
 /* ── dashboard ─────────────────────────────────────────────────────── */
 
 .bq-dash video {

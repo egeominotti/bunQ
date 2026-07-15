@@ -1,5 +1,5 @@
 ---
-title: "Stall Detection: Recover Unresponsive Jobs Automatically in Bun"
+title: "Stall Detection: Auto-Recover Unresponsive Jobs"
 description: "bunqueue stall detection auto-recovers stuck jobs. It is on by default; tune heartbeat intervals, max stall thresholds, and grace periods for long jobs."
 head:
   - tag: meta

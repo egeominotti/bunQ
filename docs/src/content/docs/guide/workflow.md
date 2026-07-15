@@ -1,6 +1,6 @@
 ---
-title: "Workflow Engine: Multi-Step Processes with Automatic Rollback"
-description: "Orchestrate multi-step business processes in TypeScript: automatic rollback on failure, retries, branching, parallel steps, and human approval gates. No extra services."
+title: "Workflow Engine: Multi-Step Jobs with Rollback"
+description: "Orchestrate multi-step processes in TypeScript: automatic rollback on failure, retries, branching, parallel steps, human approval gates."
 head:
   - tag: meta
     attrs:

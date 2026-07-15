@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Storage: SQLite by Design, No Postgres Needed"
+title: "Storage: SQLite by Design, No Postgres Needed"
 description: "bunqueue persists jobs in a single local SQLite file, no Postgres, MySQL, or Redis. Why, and how to deploy on serverless and ephemeral platforms anyway."
 head:
   - tag: meta

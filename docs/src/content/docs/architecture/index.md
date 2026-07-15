@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Architecture: Sharded Job Queue System Design for Bun"
+title: "Architecture: Sharded Job Queue Design for Bun"
 description: "Architecture overview of bunqueue: auto-scaling shards, TCP protocol, SQLite WAL persistence, and background task scheduling internals."
 head:
   - tag: meta

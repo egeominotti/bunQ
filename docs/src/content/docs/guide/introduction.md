@@ -1,5 +1,5 @@
 ---
-title: "bunqueue, High-Performance Job Queue for Bun with SQLite & MCP"
+title: "Introduction: SQLite Job Queue for Bun"
 description: "Discover bunqueue: the fastest Bun job queue with SQLite persistence, zero Redis, cron scheduling, and native MCP server for AI agents."
 head:
   - tag: meta

@@ -1,5 +1,5 @@
 ---
-title: "CPU-Intensive Workers in bunqueue: Keep TCP Connections Alive"
+title: "CPU-Intensive Workers: Keep TCP Connections Alive"
 description: "Heavy CPU jobs can freeze Bun's event loop, drop the TCP connection, and requeue in-flight jobs. Here is the config fix, the yield pattern, and SandboxedWorker."
 head:
   - tag: meta

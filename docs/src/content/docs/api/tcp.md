@@ -1,5 +1,5 @@
 ---
-title: "bunqueue TCP Protocol Reference: Binary MessagePack Commands"
+title: "TCP Protocol Reference: Binary MessagePack Commands"
 description: "TCP protocol spec for bunqueue: MessagePack wire format, pipelining, length-prefixed framing, and full command reference for all operations."
 head:
   - tag: meta

@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Cron Scheduler: MinHeap Execution & Timezone Support"
+title: "Cron Scheduler: MinHeap Execution & Timezones"
 description: "bunqueue cron scheduler internals: MinHeap-based execution with O(1) lazy deletion, timezone support, and SQLite-backed persistence."
 head:
   - tag: meta

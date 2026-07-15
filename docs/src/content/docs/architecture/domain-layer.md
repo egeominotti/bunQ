@@ -1,5 +1,5 @@
 ---
-title: "bunqueue Domain Layer: Sharding, Priority Queues & States"
+title: "Domain Layer: Sharding, Priority Queues & States"
 description: "bunqueue domain layer internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic."
 head:
   - tag: meta

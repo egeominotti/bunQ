@@ -1,5 +1,5 @@
 ---
-title: "Simple Mode: Queue + Worker in One Object | bunqueue"
+title: "Simple Mode: Queue + Worker in One Object"
 description: "bunqueue Simple Mode combines Queue and Worker in one object: named routes, onion middleware, cron, events, and 12 built-in features with zero boilerplate."
 head:
   - tag: meta

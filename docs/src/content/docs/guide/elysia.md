@@ -1,5 +1,5 @@
 ---
-title: "Bunqueue + Elysia: Validated Background Jobs for Bun"
+title: "Elysia: Validated Background Jobs for Bun"
 description: "Add background jobs to an Elysia app with bunqueue: validated enqueue routes with t.Object, a shared queue plugin, DLQ monitoring, and clean shutdown."
 head:
   - tag: meta

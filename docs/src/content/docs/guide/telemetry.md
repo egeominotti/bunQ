@@ -1,5 +1,5 @@
 ---
-title: "Built-in Telemetry: Latency & Throughput Out of the Box"
+title: "Telemetry: Latency & Throughput Out of the Box"
 description: bunqueue measures its own latency and throughput with no setup. Prometheus histograms, live per-second rates, and structured logs.
 head:
   - tag: meta

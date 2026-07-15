@@ -1,5 +1,5 @@
 ---
-title: "Rate Limiting & Concurrency Control for Bun Job Queues"
+title: "Rate Limiting & Concurrency for Bun Job Queues"
 description: Control job processing rates in bunqueue with per-queue rate limits and concurrency caps. Protect downstream services via CLI, SDK or MCP.
 head:
   - tag: meta

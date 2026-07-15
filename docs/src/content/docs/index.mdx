@@ -1,6 +1,6 @@
 ---
-title: "The Queue Is a File: Zero-Infrastructure Job Queue"
-description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups and clients for TypeScript, Python, PHP and Go."
+title: "The SQLite Job Queue: Zero Infrastructure, No Redis"
+description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups. TypeScript, Python, PHP and Go clients."
 template: splash
 head:
   - tag: meta
@@ -27,6 +27,10 @@ head:
     attrs:
       name: 'keywords'
       content: 'job queue, task queue, background jobs, bun, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
+  - tag: script
+    attrs:
+      type: 'application/ld+json'
+    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path is one batched transaction. Measured at 630K jobs/sec bulk push embedded and 90K over TCP."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do."}}]}'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
@@ -40,29 +44,7 @@ import BqIcon from '@components/BqIcon.astro';
       <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
       <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
 
-      <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it can run embedded, no server at all)</span></p>
-
-      <Tabs syncKey="server">
-        <TabItem label="One command">
-
-```bash
-bunx bunqueue start
-```
-
-        </TabItem>
-        <TabItem label="Docker">
-
-```bash
-docker run -d --name bunqueue \
-  -p 6789:6789 -p 6790:6790 \
-  -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
-```
-
-        </TabItem>
-      </Tabs>
-
-      <p class="bq-install-label" style="margin-top: 2.2rem;">2 · Install the client for your language</p>
+      <p class="bq-install-label">1 · Install, in your language</p>
 
       <Tabs syncKey="runtime">
         <TabItem label="Bun">
@@ -109,6 +91,29 @@ go get github.com/egeominotti/bunqueue/sdk/go
         </TabItem>
       </Tabs>
 
+      <p class="bq-install-label" style="margin-top: 2.2rem;">2 · Start the server <span style="font-weight: 400; opacity: 0.7;">(on Bun, skip: it runs embedded, no server at all)</span></p>
+
+      <Tabs syncKey="server">
+        <TabItem label="Terminal">
+
+```bash
+bun add -g bunqueue   # install once
+bunqueue start
+```
+
+        </TabItem>
+        <TabItem label="Docker">
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
+```
+
+        </TabItem>
+      </Tabs>
+
       <div class="bq-actions">
         <a class="bq-btn" href="#quickstart">Get started in 60s</a>
         <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
@@ -118,7 +123,7 @@ go get github.com/egeominotti/bunqueue/sdk/go
 
     <div class="bq-hero-right">
       <div class="bq-bench-card">
-        <p class="bq-bench-title">Pushing 100-job batches</p>
+        <p class="bq-bench-title">Pushing 100-job batches over TCP</p>
         <p class="bq-bench-sub">throughput in ops/sec vs BullMQ + Redis, identical workloads</p>
         <div class="bq-bar-row">
           <div class="bq-bar-label"><span>bunqueue · 85,700 ops/s</span><b>3.5x</b></div>
@@ -164,8 +169,8 @@ go get github.com/egeominotti/bunqueue/sdk/go
   <script is:inline src="/bq-sim.js"></script>
 
   <div class="bq-proof">
-    <span><b>150K+</b> ops/sec sustained</span>
-    <span>p99 under <b>1 ms</b></span>
+    <span><b>630K</b> ops/sec bulk push, embedded</span>
+    <span><b>90K</b> ops/sec push over TCP</span>
     <span><b>5.5 MB</b> install, 2 runtime deps</span>
     <span><b>500+</b> e2e scenarios across 7 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
@@ -343,7 +348,7 @@ bun app.ts
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">vs bullmq</span>
   <h2 class="bq-h2">Same job, three fewer boxes.</h2>
-  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes the requirement: the queue lives in your process and persists to one file.</p>
+  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes the requirement: the queue lives in your process and persists to one file. Coming from Celery, Sidekiq or asynq instead? Same trade: the broker box is the part that disappears.</p>
 
   <div class="bq-vs">
     <div class="bq-vs-card">
@@ -370,6 +375,30 @@ bun app.ts
     <a class="bq-btn" href="/guide/migration/">Migrate from BullMQ in minutes</a>
     <a class="bq-btn-ghost" href="/guide/comparison/">Full comparison</a>
     <a class="bq-btn-ghost" href="/guide/benchmarks/">Benchmarks</a>
+  </div>
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">trade-offs</span>
+  <h2 class="bq-h2">Where bunqueue stops.</h2>
+  <p class="bq-lede">Single-instance by design: one process owns the SQLite file. That is exactly what deletes the Redis box, and it draws a clear line. Read this before you adopt.</p>
+
+  <div class="bq-trust">
+    <div class="bq-trust-card">
+      <span class="bq-tag">availability</span>
+      <h3>No clustering, no failover</h3>
+      <p>One server process owns the queue. Disaster recovery is S3 backup plus restore on a new host, not automatic failover. If the queue itself must span servers, BullMQ on Redis Cluster is the better fit, <a href="/guide/comparison/">we say so in the comparison</a>.</p>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">durability</span>
+      <h3>Buffered writes by default</h3>
+      <p>Writes are batched for up to 10ms, that buffer is what buys ~100K jobs/sec. A hard crash inside the window can lose those jobs. Jobs that cannot tolerate it take <code>{"{ durable: true }"}</code> and hit disk before <code>add()</code> returns.</p>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">scaling</span>
+      <h3>Workers scale, the server does not</h3>
+      <p>Any number of worker processes on any machines connect over TCP, that is the scaling path. For edge and multi-site setups, run local embedded queues and drain them to a central server with <a href="/guide/iot-edge/">forward()</a>.</p>
+    </div>
   </div>
 </div>
 
@@ -534,6 +563,27 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
   </div>
 </div>
 
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">sqlite, seriously?</span>
+  <h2 class="bq-h2">The questions everyone asks.</h2>
+
+  <div class="bq-trust">
+    <div class="bq-trust-card">
+      <h3>Can SQLite handle a production queue?</h3>
+      <p>In WAL mode, yes: reads and writes overlap and the write path is one batched transaction. Measured at 630K jobs/sec bulk push embedded and 90K over TCP, <a href="/guide/benchmarks/">numbers and methodology here</a>.</p>
+    </div>
+    <div class="bq-trust-card">
+      <h3>What happens on a crash?</h3>
+      <p>Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable.</p>
+    </div>
+    <div class="bq-trust-card">
+      <h3>Locks? "database is locked"?</h3>
+      <p>Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do.</p>
+    </div>
+  </div>
+  <p class="bq-dash-links" style="margin-top: 1.4rem;">More answers in the <a href="/faq/">FAQ</a>: deduplication, ordering, backups, memory, Postgres.</p>
+</div>
+
 <div class="bq-wrap bq-cta">
   <h2 class="bq-h2">Start in under a minute.</h2>
   <p class="bq-lede" style="margin: 0 auto;">One install, ten lines, zero infrastructure. On the runtime you already use.</p>
@@ -543,7 +593,7 @@ worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
     <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
   </div>
   <p class="bq-hero-trust">If bunqueue removes a Redis box from your stack, a star on GitHub helps other teams find it.</p>
-  <p class="bq-hero-trust"><a href="/blog/">Blog</a> · <a href="/simulator/">Simulator</a> · <a href="/guide/comparison/">vs BullMQ</a> · <a href="/guide/introduction/">Docs</a></p>
+  <p class="bq-hero-trust"><a href="/blog/">Blog</a> · <a href="/simulator/">Simulator</a> · <a href="/guide/comparison/">vs BullMQ</a> · <a href="/faq/">FAQ</a> · <a href="/guide/introduction/">Docs</a></p>
 </div>
 
 <script is:inline src="/bq-copy.js"></script>

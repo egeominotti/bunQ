@@ -1,6 +1,6 @@
 ---
-title: "Worker API: Process Background Jobs with Concurrency & Retries"
-description: "Configure bunqueue Workers for job processing: concurrency, heartbeats, batch pulling, lock-based ownership, and sandboxed isolation."
+title: "Bun Worker: Process Background Jobs with Retries"
+description: "Run a Bun worker: process background jobs with concurrency, retries, heartbeats, batch pulling and lock-based ownership."
 head:
   - tag: meta
     attrs:

@@ -37,7 +37,7 @@ import BqIcon from '@components/BqIcon.astro';
   <div class="bq-hero-grid">
     <div class="bq-hero-left">
       <VersionPill />
-      <h1 class="bq-hero-h1">bunqueue.<br/>The queue is <em>a file.</em></h1>
+      <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
       <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
 
       <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it can run embedded, no server at all)</span></p>
@@ -231,10 +231,11 @@ use Bunqueue\Worker;
 
 $queue = new Queue('emails');
 $queue->add('welcome',
-    ['to' => 'a@b.co'], ['attempts' => 3]);
+    ['to' => 'a@b.co'],
+    ['attempts' => 3]);
 
 $worker = new Worker('emails',
-    fn ($job) => sendEmail($job->data()));
+    fn ($j) => sendEmail($j->data()));
 $worker->run(); // or runOnce()
 ```
 

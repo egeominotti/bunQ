@@ -3009,12 +3009,85 @@ html {
   .bq-sim-head { font-size: 0.58rem; letter-spacing: 0.06em; gap: 0.35rem; }
   .bq-sim-col { padding: 0.3rem 0.45rem 0.6rem; }
 
-  /* Phones: use the full width and keep code readable without clipping.
-     Starlight's content panel alone eats 64px of a 390px viewport. */
+  /* ═══════════════ phone design layer (≤38rem only) ═══════════════
+     One vertical rhythm, thumb-first controls, full-width canvas.
+     Desktop and tablet are untouched by everything in this block. */
+
+  /* canvas: reclaim the width (Starlight's panel alone eats 64px) */
   main:has(.bq-hero) .content-panel { padding-inline: 0.2rem !important; }
-  .bq-wrap { padding: 0 0.75rem; }
-  .bq-lang { padding: 0.8rem 0.55rem; border-radius: 0.7rem; }
-  /* EC bakes its vars behind a :root-level selector, so override the
+  .bq-wrap { padding: 0 1rem; }
+  .bq-section { margin-top: 4.75rem; }
+
+  /* hero: brand becomes a quiet mono kicker, the thesis line gets the stage */
+  .bq-hero { padding-top: 1.4rem; }
+  .bq-h1-brand {
+    display: block;
+    font-family: var(--bq-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--bq-brand);
+    margin-bottom: 0.8rem;
+  }
+  .bq-h1-br { display: none; }
+  .bq-hero-h1 { font-size: 2.6rem; line-height: 1.05; margin-bottom: 1rem; }
+  .bq-hero-sub { font-size: 1.02rem; line-height: 1.7; margin-bottom: 2rem; }
+
+  /* installer: the two steps read as one guided rail */
+  .bq-install-label {
+    font-size: 0.72rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--bq-brand);
+  }
+  .bq-install-label span { display: block; margin-top: 0.2rem; color: var(--sl-color-gray-3); }
+  .bq-hero-install { max-width: 100%; overflow-x: auto; white-space: nowrap; }
+
+  /* tab strips: hide the scrollbar, fade the edge so "more" is obvious */
+  starlight-tabs .tablist-wrapper {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 2.4rem), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 2.4rem), transparent);
+  }
+  starlight-tabs .tablist-wrapper::-webkit-scrollbar { display: none; }
+
+  /* actions: full-width, thumb-sized */
+  .bq-hero-left .bq-actions { margin-top: 2rem; gap: 0.7rem; }
+  .bq-hero-left .bq-actions .bq-btn,
+  .bq-hero-left .bq-actions .bq-btn-ghost {
+    flex: 1 1 100%;
+    text-align: center;
+    padding-block: 0.95rem;
+    font-size: 1rem;
+  }
+  .bq-hero-trust { font-size: 0.76rem; line-height: 1.9; }
+
+  /* benchmark card: compact, still legible */
+  .bq-bench-card { padding: 1.15rem 1rem 0.95rem; }
+
+  /* proof: a 2x2 stat grid instead of a stacked list */
+  .bq-proof {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 1.4rem;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    padding: 1.3rem 0.2rem;
+    margin-top: 3.5rem;
+  }
+  .bq-proof span { display: block; }
+  .bq-proof span b { display: block; font-size: 1.15rem; letter-spacing: -0.01em; }
+
+  /* section headers: one scale */
+  .bq-h2 { font-size: 1.9rem; }
+  .bq-lede { font-size: 1rem; line-height: 1.7; }
+
+  /* language cards: tighter chrome, code owns the width */
+  .bq-lang { padding: 0.85rem 0.6rem; border-radius: 0.7rem; }
+  .bq-lang p { font-size: 0.76rem; }
+
+  /* code: EC bakes its vars behind a :root-level selector, so override the
      consuming rules directly (higher specificity than EC's own). */
   .bq-lang .expressive-code pre > code,
   .bq-hero .expressive-code pre > code,
@@ -3028,8 +3101,20 @@ html {
     padding-inline-start: calc(var(--ecIndent, 0ch) + 0.6rem - var(--ecGtrBrdWd, 0px));
     padding-inline-end: 0.6rem;
   }
-  .bq-install-label span { display: block; margin-top: 0.15rem; }
-  .bq-hero-install { max-width: 100%; overflow-x: auto; white-space: nowrap; }
+
+  /* quickstart: step number joins the heading row, code gets the gutter back */
+  .bq-step { padding-left: 0; }
+  .bq-step-num { position: static; flex: none; }
+  .bq-steps { gap: 2.6rem; margin-top: 2.4rem; }
+
+  /* dashboard demo: full-bleed for impact */
+  .bq-dash video {
+    width: calc(100% + 2.4rem);
+    max-width: none;
+    margin-inline: -1.2rem;
+    border-radius: 0;
+    border-inline: none;
+  }
 }
 
 /* ── vs BullMQ: instantly-readable comparison ──────────────────────── */

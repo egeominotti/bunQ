@@ -46,7 +46,7 @@ Producers ──add()──┐                          ┌──process()──
 | **MessagePack** (`msgpackr`) | [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | ~2–3× faster + more compact than JSON for both the on-disk job blobs and the TCP wire format; preserves binary and numeric types losslessly. |
 | **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:66`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
 | **Zero external deps** | [`package.json:74`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
-| **4-ary heaps / skip-list** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts) | 4-ary branching improves cache locality vs binary heaps; a skip-list orders the temporal cleanup index while a 4-ary min-heap tracks delayed jobs. All hand-rolled, dependency-free. |
+| **4-ary heaps / queue-local skip-lists** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts), [`src/domain/queue/temporalIndex.ts`](../src/domain/queue/temporalIndex.ts) | 4-ary branching improves cache locality vs binary heaps; one skip-list per queue orders cleanup candidates, with a reverse job-ID index for direct deletion. A compacting 4-ary min-heap tracks delayed jobs. |
 
 ## Layered Architecture
 
@@ -72,7 +72,7 @@ client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
 - **`domain/`** — Pure, synchronous, side-effect-free. `Shard` composes
   `IndexedPriorityQueue` (waiting/delayed jobs), `DlqShard`, `UniqueKeyManager`
   (dedup), `LimiterManager` (rate/concurrency), `DependencyTracker`,
-  `TemporalManager`, `WaiterManager`, `ShardCounters`
+  `TemporalManager`/`TemporalIndex`, queue-scoped `WaiterManager`, `ShardCounters`
   ([`src/domain/queue/shard.ts`](../src/domain/queue/shard.ts)). Plus all type
   definitions in `domain/types/`. → [Data Structures](./features/data-structures.md),
   [Core Queue Engine](./features/core-queue-engine.md), [`./data-model.md`](./data-model.md).
@@ -81,10 +81,10 @@ client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
   through context objects built by `ContextFactory`
   ([`src/application/queueManager.ts:50`](../src/application/queueManager.ts),
   [`operations/`](../src/application/operations)). Houses DLQ, Events, Worker,
-  JobLogs, Stats managers and background-task wiring.
+  JobLogs, Stats managers, the batch `QueueStatsAggregator`, and background-task wiring.
 - **`infrastructure/`** — `SqliteStorage` (+ `WriteBuffer`, `BatchInsertManager`),
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
-  `CloudAgent`. The `server/bootstrap.ts` is the single composition root.
+  `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates. The `server/bootstrap.ts` is the single composition root.
 - **`client/`** — In-process SDK: `Queue`, `Worker`, `SandboxedWorker`,
   `FlowProducer`, `QueueGroup`, `Bunqueue` (simple mode), the `Workflow`/`Engine`
   pair, and the TCP `TcpPool`/forwarder. Each transparently targets embedded or TCP.
@@ -202,16 +202,19 @@ IoT/edge that must tolerate intermittent connectivity. See
 2. Dispatch → `QueueManager.pull()` / `pullWithLock()`
    ([`queueManager.ts:309`](../src/application/queueManager.ts),
    [`operations/pull.ts`](../src/application/operations/pull.ts)).
-3. Under the shard lock, `priorityQueue.pop()` yields the highest-priority ready
-   job (respecting rate limit, concurrency, paused state, and group ordering).
+3. Under the shard lock, the priority queue is scanned in priority order until
+   the first ready job from an eligible FIFO group is found. Delayed or group-
+   blocked entries are restored before returning, so an ineligible head cannot
+   hide ready work from another group.
 4. In the same synchronous critical section as the pop, the job is inserted into
    `processingShards[procIdx]` and its `jobIndex` entry flips to processing
    (state → `active`), so observers never see a stale location. Post-await
    bookkeeping (persist active state, counters, broadcast) runs in
    `finalizeProcessing` ([`operations/pull.ts:133`](../src/application/operations/pull.ts)),
    which skips delivery when a management op claimed the job in the meantime.
-   A lock token is issued when leasing. Long-poll waits on the `WaiterManager`
-   until the timeout.
+   A lock token is issued when leasing. Long-poll waits in a queue-specific
+   `WaiterManager` bucket until a matching queue edge or the timeout; surplus
+   notifications coalesce into one retry hint.
 5. The job (and token) is returned; the worker registry counters update.
 
 **ACK** (success)
@@ -362,6 +365,11 @@ no `localeCompare`), MessagePack framing, and transparent client-side add-batchi
 that coalesces concurrent `add()` calls into one `PUSHB` round-trip. The only
 data-loss exposure is the ≤10 ms buffered window — eliminated per-job with
 `durable: true`. Numbers are order-of-magnitude and hardware-dependent.
+
+The cross-version `bench/fix-impact.ts` harness loads runtime modules from an
+explicit source root and records raw samples plus correctness invariants. See
+the [2026-07-16 core-fix benchmark](./benchmarks/fix-impact-2026-07-16.md) for
+the current before/after methodology, results, and remaining hot paths.
 
 ## Reliability & Battle-Testing
 

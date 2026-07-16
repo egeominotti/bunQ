@@ -14,7 +14,7 @@
 
 <p align="center">
   High-performance job queue for Bun. Built for AI agents and automation.<br/>
-  Zero external dependencies. MCP-native. TypeScript-first.
+  Zero external infrastructure. MCP-native. TypeScript-first.
 </p>
 
 <p align="center">
@@ -471,7 +471,8 @@ await app.close(true); // force shutdown
 
 ```typescript
 const counts = await queue.getJobCountsAsync();
-// { waiting, prioritized, active, completed, failed, delayed, paused }
+// { waiting, prioritized, active, completed, failed, delayed,
+//   'waiting-children', paused }
 
 // Failed jobs (those that exhausted their attempts) are enumerable by state —
 // the failed list reflects the same jobs that `failed` counts.
@@ -661,7 +662,7 @@ bunx bunqueue-dashboard
 
 - **MCP server included** — 73 tools, 5 resources, 3 prompts. AI agents get full control out of the box
 - **BullMQ-compatible API** — Same `Queue`, `Worker`, `QueueEvents`
-- **Zero dependencies** — No Redis, no MongoDB
+- **Zero external infrastructure** — No Redis, no MongoDB
 - **Tiny footprint** — 5.5 MB installed, 7 packages (just 2 runtime deps: `croner` + `msgpackr`)
 - **SQLite persistence** — Survives restarts, WAL mode for concurrent access
 - **Up to 630K ops/sec** — [Verified benchmarks](https://bunqueue.dev/guide/benchmarks/)

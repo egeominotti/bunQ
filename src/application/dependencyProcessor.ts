@@ -100,7 +100,11 @@ function promoteJobsToQueue(
   }
 
   if (jobsToPromote.length > 0) {
-    shard.notify();
+    const promotedByQueue = new Map<string, number>();
+    for (const job of jobsToPromote) {
+      promotedByQueue.set(job.queue, (promotedByQueue.get(job.queue) ?? 0) + 1);
+    }
+    for (const [queue, count] of promotedByQueue) shard.notifyBatch(queue, count);
     for (const job of jobsToPromote) {
       ctx.dashboardEmit?.('job:dependencies-resolved', { jobId: String(job.id), queue: job.queue });
     }

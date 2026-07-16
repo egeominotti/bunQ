@@ -203,7 +203,8 @@ const state = await queue.getJobState('job-id');
 
 // Counts per state
 const counts = await queue.getJobCountsAsync();
-// { waiting, prioritized, active, completed, failed, delayed, paused }
+// { waiting, prioritized, active, completed, failed, delayed,
+//   'waiting-children', paused }
 
 // Lists, filtered by state
 const failed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
@@ -226,13 +227,20 @@ const failedCount = await queue.getFailedCount();
 
 // BullMQ-compatible extras
 const prioritized = await queue.getPrioritized(0, 10);        // jobs with priority > 0
-const waitingChildren = await queue.getWaitingChildren(0, 10); // flow dependencies
+const waitingChildren = await queue.getJobsAsync({
+  state: 'waiting-children', start: 0, end: 10,
+});
 ```
+
+`getPrioritized()` works in embedded and TCP modes. The BullMQ compatibility
+helper `getWaitingChildren()` is currently embedded-only; use the explicit
+`getJobsAsync({ state: 'waiting-children' })` query above when the same code must
+work in both modes.
 
 :::note[Two states worth knowing]
 **Prioritized:** jobs with `priority > 0` report the state `'prioritized'`, not `'waiting'` (BullMQ v5 behavior). Both are pullable; prioritized jobs go first.
 
-**Paused:** while a queue is paused, its ready jobs are counted under `paused`, never `waiting`. On `resume()` they return to `waiting`. Pause state survives server restarts when persistence is on.
+**Paused:** while a queue is paused, its ready jobs are counted under `paused`, never `waiting` or `prioritized`. On `resume()` each job returns to its logical `waiting` or `prioritized` state. Pause state survives server restarts when persistence is on.
 :::
 
 Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding area for permanently failed jobs) but remain visible: they are counted by `failed`, returned by `getJob(id)`, and listed by `getFailed()`.

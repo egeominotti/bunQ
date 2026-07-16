@@ -606,7 +606,8 @@ export class SqliteStorage {
 
   /**
    * Query jobs by queue with optional state filter and pagination.
-   * Uses idx_jobs_queue_state index for O(log n) lookups.
+   * This is the raw persisted-state query. Logical waiting/prioritized/delayed
+   * views should use queryJobsByLogicalStates().
    */
   queryJobs(
     queue: string,
@@ -619,19 +620,19 @@ export class SqliteStorage {
       const placeholders = options.states.map(() => '?').join(',');
       rows = this.db
         .query<DbJob, (string | number)[]>(
-          `SELECT * FROM jobs WHERE queue = ? AND state IN (${placeholders}) ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+          `SELECT * FROM jobs WHERE queue = ? AND state IN (${placeholders}) ORDER BY created_at ${order}, id ${order} LIMIT ? OFFSET ?`
         )
         .all(queue, ...options.states, options.limit, options.offset);
     } else if (options.state) {
       rows = this.db
         .query<DbJob, [string, string, number, number]>(
-          `SELECT * FROM jobs WHERE queue = ? AND state = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+          `SELECT * FROM jobs WHERE queue = ? AND state = ? ORDER BY created_at ${order}, id ${order} LIMIT ? OFFSET ?`
         )
         .all(queue, options.state, options.limit, options.offset);
     } else {
       rows = this.db
         .query<DbJob, [string, number, number]>(
-          `SELECT * FROM jobs WHERE queue = ? ORDER BY created_at ${order} LIMIT ? OFFSET ?`
+          `SELECT * FROM jobs WHERE queue = ? ORDER BY created_at ${order}, id ${order} LIMIT ? OFFSET ?`
         )
         .all(queue, options.limit, options.offset);
     }
@@ -640,15 +641,70 @@ export class SqliteStorage {
   }
 
   /**
+   * Query public/logical job states before applying pagination.
+   *
+   * SQLite persists pending jobs as waiting/delayed, while the public state is
+   * time-dependent: a delayed row becomes waiting or prioritized once run_at
+   * is reached. Keeping these predicates in SQL makes OFFSET count the logical
+   * result rather than the unfiltered persisted rows.
+   */
+  queryJobsByLogicalStates(
+    queue: string,
+    states: string[],
+    options: { limit: number; offset: number; asc: boolean; now: number }
+  ): Job[] {
+    const uniqueStates = Array.from(new Set(states));
+    if (uniqueStates.length === 0) return [];
+
+    const predicates: string[] = [];
+    const predicateParams: (string | number)[] = [];
+    const requested = new Set(uniqueStates);
+
+    if (requested.has('waiting')) {
+      predicates.push("(state IN ('waiting', 'delayed') AND run_at <= ? AND priority <= 0)");
+      predicateParams.push(options.now);
+    }
+    if (requested.has('prioritized')) {
+      predicates.push("(state IN ('waiting', 'delayed') AND run_at <= ? AND priority > 0)");
+      predicateParams.push(options.now);
+    }
+    if (requested.has('delayed')) {
+      predicates.push("(state IN ('waiting', 'delayed') AND run_at > ?)");
+      predicateParams.push(options.now);
+    }
+
+    const persistedStates = uniqueStates.filter(
+      (state) => state !== 'waiting' && state !== 'prioritized' && state !== 'delayed'
+    );
+    if (persistedStates.length > 0) {
+      predicates.push(`state IN (${persistedStates.map(() => '?').join(',')})`);
+      predicateParams.push(...persistedStates);
+    }
+
+    const order = options.asc ? 'ASC' : 'DESC';
+    const rows = this.db
+      .query<DbJob, (string | number)[]>(
+        `SELECT * FROM jobs INDEXED BY idx_jobs_queue_created
+         WHERE queue = ? AND (${predicates.join(' OR ')})
+         ORDER BY created_at ${order}, id ${order}
+         LIMIT ? OFFSET ?`
+      )
+      .all(queue, ...predicateParams, options.limit, options.offset);
+
+    return rows.map((row) => rowToJob(row));
+  }
+
+  /**
    * Load pending jobs with pagination for efficient recovery.
-   * Orders by priority (desc) and run_at (asc) to process urgent jobs first.
+   * Orders by priority (desc), run_at (asc), and id (asc) so page boundaries
+   * remain deterministic when scheduling fields compare equal.
    * @param limit Max jobs to return (default: 10000)
    * @param offset Skip first N jobs (default: 0)
    */
   loadPendingJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
       .query<DbJob, [number, number]>(
-        "SELECT * FROM jobs WHERE state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC LIMIT ? OFFSET ?"
+        "SELECT * FROM jobs WHERE state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC, id ASC LIMIT ? OFFSET ?"
       )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));

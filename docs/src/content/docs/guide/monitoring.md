@@ -85,7 +85,7 @@ bunqueue_queue_jobs_active{queue="emails"} 5
 
 Push, pull, and ack latency are exposed as Prometheus histograms: `bunqueue_push_duration_ms`, `bunqueue_pull_duration_ms`, and `bunqueue_ack_duration_ms`, each with `_bucket`, `_sum`, and `_count` series. Use them for p99 alerts:
 
-```promql
+```text
 histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m]))
 ```
 
@@ -108,7 +108,7 @@ curl http://localhost:6790/ready     # readiness probe
   "ok": true,
   "status": "healthy",
   "uptime": 3600,
-  "version": "2.8.30",
+  "version": "x.y.z",
   "queues": { "waiting": 42, "active": 8, "delayed": 3, "completed": 120, "dlq": 0 },
   "connections": { "tcp": 0, "ws": 1, "sse": 0 },
   "memory": { "heapUsed": 45, "heapTotal": 80, "rss": 210 }

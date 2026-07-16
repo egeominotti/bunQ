@@ -19,7 +19,7 @@ head:
 | Structure | Use Case | Complexity |
 |-----------|----------|------------|
 | 4-ary MinHeap | Priority queue, cron scheduling, delayed-job tracking | O(log₄ n) |
-| Skip List | Temporal indexing, cleanup range queries | O(log n) |
+| Skip List | Queue-local temporal indexing, cleanup range queries | O(log q) |
 | LRU Cache | Job results, custom IDs | O(1) |
 | Hash (FNV-1a) | Sharding, distribution | O(len) |
 
@@ -49,9 +49,15 @@ Used for priority queues, cron scheduling, and delayed-job tracking (TemporalMan
   </div>
 </div>
 
+The delayed-job heap uses a different lazy-removal check: a `Map<jobId, runAt>`
+is the live source of truth. When no delayed jobs remain, the heap is cleared
+immediately. Otherwise it is rebuilt in O(n) once there are at least 256 stale
+entries and stale entries are at least as numerous as live entries. This bounds
+retained heap memory after cancellation or promotion churn.
+
 ## Skip List
 
-Used for the temporal index (jobs ordered by createdAt) and efficient range queries during cleanup. Delayed jobs are tracked separately in a MinHeap, not here.
+Used for queue-local temporal indexes (jobs ordered by `createdAt`, then job ID) and efficient range queries during cleanup. Each queue owns a separate skip list, while a direct job-ID map points to the corresponding entries for logarithmic removal. Delayed jobs are tracked separately in a MinHeap, not here.
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Skip list structure</b><span>sorted list with express lanes</span></div>
@@ -117,13 +123,13 @@ Used for the temporal index (jobs ordered by createdAt) and efficient range quer
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Range query</b><span>getOldJobs(threshold, limit)</span></div>
   <div class="bq-diag-flow">
-    <div class="bq-diag-cell">1. Navigate to leftmost element <i>O(log n)</i></div>
+    <div class="bq-diag-cell">1. Select the queue-local index <i>O(1)</i></div>
     <div class="bq-diag-arrow">→</div>
     <div class="bq-diag-cell">2. Walk forward at level 0 <i>O(k)</i></div>
     <div class="bq-diag-arrow">→</div>
     <div class="bq-diag-cell bq-diag-accent">3. Collect while createdAt &lt; threshold</div>
   </div>
-  <p class="bq-diag-note">Total: O(log n + k) where k = results. Use case: find jobs older than X for cleanup.</p>
+  <p class="bq-diag-note">Total: O(log q + k), where q is the number of indexed jobs in that queue and k is the number returned. Removal uses the job-ID map plus a queue-local skip-list delete: O(log q).</p>
 </div>
 
 ## LRU Cache
@@ -225,7 +231,8 @@ Used for sharding and distribution.
 | Remove job | Lazy deletion | O(1) |
 | Get result | LRU map | O(1) |
 | Shard lookup | Hash + AND | O(len) |
-| Range query | Skip list | O(log n + k) |
+| Range query | Queue-local skip list | O(log q + k) |
+| Remove temporal entry | Job-ID map + queue skip list | O(log q) |
 | Lock acquire | RWLock | O(1) uncontested |
 
 :::tip[Related]

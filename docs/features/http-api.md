@@ -90,7 +90,7 @@ Queues (`routeQueueRoutes`, `httpRouteQueues.ts:168`):
 
 | Method · Path | Command / action |
 |---|---|
-| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array**, no `ok` wrapper, `httpRouteQueues.ts:182`) |
+| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array** of `{ name, paused, counts: { waiting, prioritized, delayed, active, completed, failed } }`, no `ok` wrapper, `httpRouteQueues.ts:182`) |
 | `POST /queues/:queue/jobs` | `PUSH` |
 | `GET /queues/:queue/jobs?timeout=` | `PULL` (long-poll) |
 | `POST /queues/:queue/jobs/bulk` | `PUSHB` |
@@ -161,9 +161,9 @@ Auth (`checkAuth`, `http.ts:50`): no-op when `authTokens` is empty; otherwise ex
 
 Event fan-out is wired once in `createHttpServer` (`http.ts:81`): `queueManager.subscribe` forwards each `JobEvent` to both `wsHandler.broadcast` and `sseHandler.broadcast`; `setDashboardEmit` routes non-job events (worker/queue/dlq/cron/…) to both handlers' `emitEvent`. Periodic broadcasters are started for both channels.
 
-SSE broadcast (`sseHandler.broadcast`, `sseHandler.ts:149`): assigns a monotonic `id`, maps the event name, serializes `{ queue, jobId, timestamp, error?, progress?, prev?, delay? }`, buffers it in the ring (`bufferEvent`), enqueues `id:`/`event:`/`data:` to clients whose `queueFilter` matches (or is null), prunes clients whose `controller.enqueue` throws, then emits a `queue:counts` typed event for the affected queue. `createResponse` (`sseHandler.ts:319`) registers the client, immediately sends `retry: <ms>` + a `connected` frame, and on `resumeId > 0` replays buffered events with `id > lastEventId` (`replayEvents`, `sseHandler.ts:303`). Stream `cancel` deletes the client and releases its jobs/workers.
+SSE broadcast (`sseHandler.broadcast`): assigns a monotonic `id`, maps and serializes the event, buffers it in the replay ring, writes to matching clients, and schedules the affected queue for a count refresh. `QueueCountsScheduler` deduplicates queue names for 10 ms and obtains all pending counts with one batch aggregation before emitting `queue:counts`. `createResponse` registers the client, sends the retry/connected frames, and replays buffered events newer than `Last-Event-ID`. Stream cancellation deletes the client and releases its jobs/workers.
 
-WS broadcast (`wsHandler.broadcast`, `wsHandler.ts:339`): for each client, skips on `queueFilter` mismatch; legacy clients (`subscriptions === null`) get the raw `JobEvent` JSON, subscribed clients get `{ event, ts, data }` only if the event matches a subscribed pattern (`matches`, `wsHandler.ts:175`). Then emits `queue:counts`. Sends go through `safeSend` (`wsHandler.ts:204`).
+WS broadcast (`wsHandler.broadcast`): for each client, skips on `queueFilter` mismatch; legacy clients (`subscriptions === null`) get the raw `JobEvent` JSON, subscribed clients get `{ event, ts, data }` only if the event matches a subscribed pattern. It then schedules the same coalesced batch `queue:counts` refresh used by SSE. Scheduler timers are cancelled when broadcasts stop. Sends go through `safeSend`.
 
 ## Concurrency & Locking
 
@@ -174,7 +174,7 @@ The HTTP layer holds no shard locks itself; all locking happens inside `handleCo
 
 ## Edge Cases & Failure Modes
 
-- **0-client early return** (perf invariant): both `SseHandler.broadcast` (`sseHandler.ts:155`) and `WsHandler.broadcast` (`wsHandler.ts:323`/`339`) and the typed-emit paths return immediately when there are no clients. This is load-bearing: without it every job event would still pay `JSON.stringify` + encode + ring-buffer + an O(queue-size) `getQueueJobCounts`, turning a bulk push into O(N²) even with no dashboard attached.
+- **0-client early return** (perf invariant): both transport broadcast and typed-emit paths return immediately with no clients. With clients present, queue counts are batch-aggregated after a 10 ms coalescing window, so an event burst pays one shared O(total live jobs) pass rather than one queue/global scan per event.
 - **Connection limits**: SSE caps at `MAX_CLIENTS = 1000` → `503 "Too many SSE connections"` (`sseHandler.ts:320`); WS caps at `MAX_WS_CLIENTS = 1000` via `canAccept()` → `503` (`http.ts:157`). WS upgrade failure → `400`.
 - **WS backpressure**: `safeSend` (`wsHandler.ts:204`) checks `ws.getBufferedAmount()`; above `BACKPRESSURE_BYTES` (1 MiB) it increments `droppedMessages` and *skips* the message (treats the client as alive but slow, does not disconnect). A `send` throw marks the client dead and removes it.
 - **SSE replay bounds**: ring buffer holds the last `EVENT_BUFFER_SIZE = 1000` events; reconnects requesting older IDs silently miss the gap. Heartbeat = 30 s, advertised `retry: 3000` ms.

@@ -14,9 +14,11 @@ export function buildStatsUpdate(qm: QueueManager) {
   const s = qm.getStats();
   const rates = throughputTracker.getRates();
   const queueNames = qm.listQueues();
+  const countsByQueue = qm.getAllQueueJobCounts();
 
-  const queues = queueNames.map((name) => {
-    const c = qm.getQueueJobCounts(name);
+  const queues = queueNames.flatMap((name) => {
+    const c = countsByQueue.get(name);
+    if (!c) return [];
     return {
       name,
       waiting: c.waiting,

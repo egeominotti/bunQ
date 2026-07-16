@@ -14,6 +14,7 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | --- | --- |
 | [Architecture](./architecture.md) | System overview, technology stack & rationale, layered design, component diagram, deployment modes, request data flows (PUSH/PULL/ACK/FAIL), sharding, lock hierarchy, persistence model, performance characteristics, and the full module map. |
 | [Data Model](./data-model.md) | Authoritative reference for the `Job` model & state machine, `JobOptions`, queue/DLQ/cron/worker/webhook types, the TCP `Command`/`Response` wire shapes, the complete SQLite schema (tables, indexes, migrations), and the in-memory collections with their eviction bounds. |
+| [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
 
 **Suggested reading order:** Architecture → Data Model → the feature docs for the area you are touching.
 
@@ -28,7 +29,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | Document | Purpose |
 | --- | --- |
 | [Core Queue Engine](./features/core-queue-engine.md) | Central coordinator that shards queues, owns the global job indexes, and orchestrates all job operations by delegating to operation modules via context objects. |
-| [Data Structures](./features/data-structures.md) | Dependency-free in-memory building blocks: an indexed 4-ary priority heap for queued jobs, a skip-list temporal cleanup index plus a 4-ary min-heap tracking delayed jobs, and bounded/LRU/TTL containers plus a latency histogram. |
+| [Data Structures](./features/data-structures.md) | Dependency-free in-memory building blocks: an indexed 4-ary priority heap, queue-local temporal skip-lists with reverse job-ID lookup, a compacting delayed min-heap, and bounded/LRU/TTL containers plus a latency histogram. |
 | [Concurrency & Locking](./features/concurrency-and-locking.md) | In-process synchronization primitives (RWLock, Semaphore) plus job-leasing and stall detection that keep the sharded state consistent under concurrent access. |
 
 ### Jobs & lifecycle
@@ -87,7 +88,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
-| [Stats, Metrics & Monitoring](./features/stats-and-monitoring.md) | Read-only aggregation of queue depth counts, cumulative counters, memory sizes, EMA throughput rates, and latency histograms, exposed via TCP `Stats`/`Metrics`/`Prometheus`/`Ping`, HTTP `/stats` `/metrics` `/prometheus` `/health` `/dashboard`, and the periodic stats log. |
+| [Stats, Metrics & Monitoring](./features/stats-and-monitoring.md) | Read-only global and one-pass batch per-queue aggregation, coalesced WS/SSE count updates, cumulative counters, memory sizes, EMA throughput rates, and latency histograms. |
 | [Webhooks, Events & Job Logs](./features/webhooks-and-events.md) | Server-side observability: outbound HTTP webhooks, in-process event pub/sub, bounded per-job logs, and client-job ownership/disconnect release. |
 | [Worker Registry & Management](./features/workers-management.md) | Server-side in-memory registry of connected workers tracking liveness, queues, concurrency, and per-worker job counters; backs `skipIfNoWorker` crons and dashboard/HTTP/CLI worker visibility. |
 

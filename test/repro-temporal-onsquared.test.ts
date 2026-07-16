@@ -69,4 +69,28 @@ describe('temporal index O(n²) repro', () => {
     expect(remaining).not.toContain(jid(50));
     expect(remaining.length).toBe(99);
   });
+
+  test('queue lookup and removal do not scan unrelated queues', () => {
+    const tm = new TemporalManager();
+    const base = Date.now() - 1_000_000;
+    const unrelatedCount = 500_000;
+
+    for (let i = 0; i < unrelatedCount; i++) {
+      tm.addToIndex(base + i, jid(i), 'unrelated');
+    }
+    const targetId = 'target-job' as JobId;
+    tm.addToIndex(base + unrelatedCount, targetId, 'target');
+
+    let startedAt = Bun.nanoseconds();
+    const old = tm.getOldJobs('target', 0, 1);
+    const lookupMs = (Bun.nanoseconds() - startedAt) / 1e6;
+
+    startedAt = Bun.nanoseconds();
+    tm.removeFromIndex(targetId);
+    const removalMs = (Bun.nanoseconds() - startedAt) / 1e6;
+
+    expect(old).toEqual([{ jobId: targetId, createdAt: base + unrelatedCount }]);
+    expect(tm.indexSize).toBe(unrelatedCount);
+    expect(lookupMs + removalMs).toBeLessThan(4);
+  });
 });

@@ -128,6 +128,18 @@ describe('TemporalManager', () => {
       tm.clearIndexForQueue('bulk-queue');
       expect(tm.indexSize).toBe(1);
     });
+
+    test('should preserve another queue entry with the same job ID', () => {
+      tm.addToIndex(1000, jobId('shared'), 'emails');
+      tm.addToIndex(2000, jobId('shared'), 'payments');
+
+      tm.clearIndexForQueue('emails');
+
+      expect(tm.indexSize).toBe(1);
+      expect(tm.getOldJobs('payments', -1e15, 10)).toEqual([
+        { jobId: jobId('shared'), createdAt: 2000 },
+      ]);
+    });
   });
 
   describe('getOldJobs', () => {
@@ -185,6 +197,19 @@ describe('TemporalManager', () => {
       const oldJobs = tm.getOldJobs('nonexistent', 3000, 100);
       expect(oldJobs.length).toBe(0);
     });
+
+    test('should use job ID as deterministic tie-breaker', () => {
+      const createdAt = Date.now() - 10000;
+      tm.addToIndex(createdAt, jobId('j3'), 'emails');
+      tm.addToIndex(createdAt, jobId('j1'), 'emails');
+      tm.addToIndex(createdAt, jobId('j2'), 'emails');
+
+      expect(tm.getOldJobs('emails', 3000, 100).map((job) => job.jobId)).toEqual([
+        jobId('j1'),
+        jobId('j2'),
+        jobId('j3'),
+      ]);
+    });
   });
 
   describe('cleanOrphaned', () => {
@@ -238,6 +263,18 @@ describe('TemporalManager', () => {
       const removed = tm.cleanOrphaned(validIds);
       expect(removed).toBe(3);
       expect(tm.indexSize).toBe(2);
+    });
+
+    test('should remove every timestamp registered for an orphaned job ID', () => {
+      tm.addToIndex(1000, jobId('orphan'), 'emails');
+      tm.addToIndex(2000, jobId('orphan'), 'payments');
+      tm.addToIndex(3000, jobId('valid'), 'emails');
+
+      const removed = tm.cleanOrphaned(new Set([jobId('valid')]));
+
+      expect(removed).toBe(2);
+      expect(tm.indexSize).toBe(1);
+      expect(tm.getOldJobs('payments', -1e15, 10)).toEqual([]);
     });
   });
 
@@ -307,6 +344,16 @@ describe('TemporalManager', () => {
       expect(sizes.delayedHeap).toBe(1);
       expect(sizes.delayedRunAt).toBe(1);
     });
+
+    test('should compact stale entries created by repeated rescheduling', () => {
+      const runAt = Date.now() + 365 * 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 2_000; i++) {
+        tm.addDelayed(jobId('rescheduled'), runAt + i);
+      }
+
+      expect(tm.delayedCount).toBe(1);
+      expect(tm.getSizes().delayedHeap).toBeLessThan(1_024);
+    });
   });
 
   describe('removeDelayed', () => {
@@ -345,13 +392,40 @@ describe('TemporalManager', () => {
       expect(tm.isDelayed(jobId('j2'))).toBe(false);
       expect(tm.isDelayed(jobId('j3'))).toBe(true);
     });
+
+    test('should compact stale future entries when no delayed jobs remain', () => {
+      const runAt = Date.now() + 365 * 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 2_000; i++) {
+        const id = jobId(`future-${i}`);
+        tm.addDelayed(id, runAt);
+        tm.removeDelayed(id);
+      }
+
+      expect(tm.delayedCount).toBe(0);
+      expect(tm.getSizes().delayedHeap).toBe(0);
+    });
+
+    test('should bound stale future entries while delayed jobs remain live', () => {
+      const runAt = Date.now() + 365 * 24 * 60 * 60 * 1000;
+      tm.addDelayed(jobId('live'), runAt + 1);
+
+      for (let i = 0; i < 2_000; i++) {
+        const id = jobId(`stale-${i}`);
+        tm.addDelayed(id, runAt);
+        tm.removeDelayed(id);
+      }
+
+      expect(tm.delayedCount).toBe(1);
+      expect(tm.isDelayed(jobId('live'))).toBe(true);
+      expect(tm.getSizes().delayedHeap).toBeLessThan(1_024);
+    });
   });
 
   describe('refreshDelayed', () => {
     test('should promote jobs whose runAt is in the past', () => {
       const now = Date.now();
       tm.addDelayed(jobId('j1'), now - 1000); // already past
-      tm.addDelayed(jobId('j2'), now - 500);  // already past
+      tm.addDelayed(jobId('j2'), now - 500); // already past
 
       const count = tm.refreshDelayed(now);
       expect(count).toBe(2);
@@ -374,7 +448,7 @@ describe('TemporalManager', () => {
       const now = Date.now();
       tm.addDelayed(jobId('j1'), now - 1000); // past
       tm.addDelayed(jobId('j2'), now + 5000); // future
-      tm.addDelayed(jobId('j3'), now - 500);  // past
+      tm.addDelayed(jobId('j3'), now - 500); // past
 
       const count = tm.refreshDelayed(now);
       expect(count).toBe(2);
@@ -443,8 +517,8 @@ describe('TemporalManager', () => {
     test('should correctly handle interleaved add/remove/refresh', () => {
       const now = 10000;
 
-      tm.addDelayed(jobId('j1'), 5000);  // due
-      tm.addDelayed(jobId('j2'), 8000);  // due
+      tm.addDelayed(jobId('j1'), 5000); // due
+      tm.addDelayed(jobId('j2'), 8000); // due
       tm.addDelayed(jobId('j3'), 15000); // not due
 
       // Remove j2 before refresh
@@ -595,8 +669,8 @@ describe('TemporalManager', () => {
 
       const sizes = tm.getSizes();
       expect(sizes.delayedJobIds).toBe(2); // j1, j3
-      expect(sizes.delayedHeap).toBe(3);   // j1, j2, j3 still in heap
-      expect(sizes.delayedRunAt).toBe(2);  // j1, j3
+      expect(sizes.delayedHeap).toBe(3); // j1, j2, j3 still in heap
+      expect(sizes.delayedRunAt).toBe(2); // j1, j3
     });
 
     test('should converge after refreshDelayed cleans stale entries', () => {
@@ -610,8 +684,8 @@ describe('TemporalManager', () => {
       tm.refreshDelayed(2500);
 
       const sizes = tm.getSizes();
-      expect(sizes.delayedJobIds).toBe(1);  // only j3
-      expect(sizes.delayedRunAt).toBe(1);   // only j3
+      expect(sizes.delayedJobIds).toBe(1); // only j3
+      expect(sizes.delayedRunAt).toBe(1); // only j3
       // Heap had j1 popped and j2 stale popped, j3 remains
       expect(sizes.delayedHeap).toBe(1);
     });
@@ -754,7 +828,7 @@ describe('TemporalManager', () => {
       // At now=3000: heap pops 1000 (j1, stale), then 2000 (j2, valid), stops at 5000
       const count = tm.refreshDelayed(3000);
       expect(count).toBe(1); // only j2 promoted
-      expect(tm.isDelayed(jobId('j1'))).toBe(true);  // still delayed (runAt=5000)
+      expect(tm.isDelayed(jobId('j1'))).toBe(true); // still delayed (runAt=5000)
       expect(tm.isDelayed(jobId('j2'))).toBe(false); // promoted
     });
 

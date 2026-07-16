@@ -28,7 +28,7 @@ src/domain/
     ├── dependencyTracker.ts # Job dependencies
     ├── temporalManager.ts   # Temporal index + delayed jobs
     ├── waiterManager.ts     # Long-poll waiters
-    └── shardCounters.ts     # O(1) per-queue stats
+    └── shardCounters.ts     # Running shard totals
 ```
 
 ## Sharding Architecture
@@ -73,11 +73,16 @@ Each shard is a composition of managers:
     <div class="bq-diag-cell">TemporalManager <i>delayed jobs, MinHeap</i></div>
   </div>
   <div class="bq-diag-row">
-    <div class="bq-diag-cell">stats <i>queued, delayed, dlq</i></div>
+    <div class="bq-diag-cell">stats <i>running shard totals: queued, delayed, dlq</i></div>
     <div class="bq-diag-cell">activeGroups <i>Map, FIFO groups</i></div>
-    <div class="bq-diag-cell">waiters <i>Array, long poll support</i></div>
+    <div class="bq-diag-cell">waiters <i>queue-local cursor deques, long-poll support</i></div>
   </div>
 </div>
+
+The shard counters make aggregate queued, delayed, and DLQ totals constant-time.
+Splitting ready jobs into `waiting` versus `prioritized` still examines current
+queue entries. Multi-queue summary calls batch that work and traverse global
+processing/completed/dependency collections once, instead of once per queue.
 
 ## Priority Queue Flow
 
@@ -98,6 +103,16 @@ Each shard is a composition of managers:
     <div class="bq-diag-layer">1. Delete from index <i>O(1)</i>, 2. heap entry becomes stale <i>skipped on pop</i>, 3. compact heap when stale ratio &gt; 20%</div>
   </div>
 </div>
+
+## Long-Poll Waiters
+
+Waiters are isolated by queue. Each queue keeps an append-only entry array with
+a head cursor, an active count, and one coalesced pending-notification bit.
+Notification clears a waiter's timer immediately and advances the cursor; it
+does not repeatedly filter or splice the full array. Consumed prefixes are
+compacted once the head reaches 1,024 entries and at least half the array is
+stale. Surplus batch notifications collapse into one retry hint rather than
+accumulating credits that would cause repeated empty pulls.
 
 ## Job State Machine
 

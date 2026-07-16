@@ -664,6 +664,8 @@ Indexes on `jobs`:
 
 ```sql
 CREATE INDEX idx_jobs_queue_state        ON jobs(queue, state);
+CREATE INDEX idx_jobs_queue_created      ON jobs(queue, created_at, id);
+CREATE INDEX idx_jobs_queue_state_created ON jobs(queue, state, created_at, id);
 CREATE INDEX idx_jobs_run_at             ON jobs(run_at) WHERE state IN ('waiting','delayed');
 CREATE INDEX idx_jobs_unique             ON jobs(queue, unique_key) WHERE unique_key IS NOT NULL;
 CREATE INDEX idx_jobs_custom_id          ON jobs(custom_id) WHERE custom_id IS NOT NULL;
@@ -751,7 +753,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (schema.ts:140-196)
 
-`SCHEMA_VERSION = 13`. The migrate routine (`sqlite.ts:255-278`) reads
+`SCHEMA_VERSION = 14`. The migrate routine (`sqlite.ts:255-278`) reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -769,6 +771,7 @@ then records `SCHEMA_VERSION`.
 | 11      | `idx_jobs_completed_order` (completed-job recovery, #84)          |
 | 12      | `cron_jobs.job_options` BLOB (per-cron retry/cleanup policy, #86) |
 | 13      | `jobs.stacktrace` BLOB (persist last failure stack, #74)          |
+| 14      | Stable `getJobs` indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)` |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 

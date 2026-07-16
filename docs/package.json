@@ -24,8 +24,5 @@
     "react-dom": "^19.0.0",
     "satori": "^0.26.0",
     "sharp": "^0.33.0"
-  },
-  "devDependencies": {
-    "remark-gfm": "^4.0.1"
   }
 }

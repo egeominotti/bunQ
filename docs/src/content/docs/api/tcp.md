@@ -100,7 +100,7 @@ Clients should send a `Hello` command after connecting to negotiate protocol ver
   protocolVersion: 2,
   capabilities: ['pipelining'],
   server: 'bunqueue',
-  version: '2.8.30'  // Server version string
+  version: 'x.y.z'  // Installed server package version
 }
 ```
 
@@ -343,6 +343,9 @@ Batch pull multiple jobs from a queue.
 ```typescript
 { ok: true, jobs: Job[] }
 ```
+
+Results are ordered by `createdAt` ascending (oldest first), with the job ID as
+a deterministic tie-breaker, before `offset` and `limit` are applied.
 
 **Response (with owner, includes lock tokens):**
 

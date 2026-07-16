@@ -136,15 +136,16 @@ See [data-model](../data-model.md) for full `Job` and the events shape. Most rel
 3. `queue` location → under read lock, classify by map membership and `runAt`/`priority`; `processing` → `Active`; `dlq` → `Failed`.
 4. Same stale-snapshot chase as `getJob`: a `queue`-location miss with a changed index entry retries at the fresh location instead of reporting a false `'unknown'` mid-pull.
 
-### getJobs (`queryOperations.ts:467`)
+### getJobs (`queryOperations.ts`)
 
 The hard part is correct pagination when results come from multiple non-offset-aware sources (SQLite jobs table + in-memory DLQ, `waiting-children` maps, and the paused view).
 
 - Normalizes `state` (string | string[] | empty → `null` = unfiltered).
-- Storage path: if unfiltered and the queue has no DLQ entries, SQL paginates directly with `offset=start` (`:502`). If any derived source contributes, it gathers `[0, end)` from every source, then `mergePage` concatenates, sorts by `createdAt`, and slices `[start, end)` exactly once (`:460`) — pushing `offset` into SQL would drop/duplicate rows across pages (#92).
-- `prioritized`/`waiting` have no dedicated SQLite state, so `querySqliteWithPriority` (`:422`) maps `prioritized`→`waiting`, over-fetches 2×, then post-filters by `priority > 0` / `priority <= 0`.
+- Storage path: SQL applies the requested logical-state predicate, stable ordering, and pagination together. `waiting`, `prioritized`, and `delayed` are translated to predicates over persisted `state`, `run_at`, and `priority`; ordering is `(created_at, id)` in the requested direction and uses the schema-v14 queue indexes.
+- If a derived source contributes (DLQ, paused jobs, or `waiting-children`), every source is gathered from index zero, deduplicated by job ID, globally sorted by `(createdAt, id)`, and sliced `[start, end)` exactly once. Pushing an offset into only one source would drop or duplicate rows across pages.
+- Jobs parked in `waitingDeps`/`waitingChildren` remain persisted as `waiting`, `delayed`, or `active`; the in-memory parked state is authoritative. Their IDs are excluded from SQL results before pagination, and they appear only as `waiting-children` when that logical state is requested.
 - Paused semantics: `resolveStateNeeds` (`:341`) suppresses explicit `waiting`/`prioritized` queries on a paused queue; those jobs are returned only under `paused` (`:518`). An unfiltered query still lists them by their temporal state.
-- In-memory path (embedded, no storage): `collectJobsByState` gathers per state, sorts, slices.
+- In-memory path (embedded, no storage): `collectJobsByState` gathers every matching source before sorting and slicing; it never truncates insertion order before applying descending order.
 
 ### cancelJob (`jobManagement.ts:30`)
 
@@ -185,7 +186,7 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 - **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`queryOperations.ts:45`, `:159`). Without storage (pure embedded) they return `null`/`'unknown'`.
 - **Pull-transition visibility:** during a pull, the queue pop, the `processingShards` insert, and the `jobIndex` flip happen in one synchronous critical section (`pull.ts:50`), and `getJob`/`getJobState` chase a moved location on miss — a poller can no longer observe a transient `null`/`'unknown'` for a job that is being handed to a worker (repro: `test/repro-getjob-false-null-during-pull.test.ts`).
 - **Paused double-count avoidance (#92):** `pausedView` and `resolveStateNeeds` guarantee a single job is reported in exactly one bucket. Verified by the shared `pausedView` helper used across SDK/TCP/dashboard so surfaces cannot drift.
-- **Pagination correctness (#92):** `mergePage` slices once after merge+sort; SQL `offset` is only used on the fast single-source path. `querySqliteWithPriority` over-fetches 2× to compensate for priority post-filtering — a pathological page where more than `limit` rows are filtered out could under-return for that page (mitigated, not fully eliminated, by the 2× factor).
+- **Pagination correctness:** logical-state filtering happens before SQL `LIMIT/OFFSET`; derived sources are merged and deduplicated before one final slice. `(created_at, id)` is the deterministic tie-breaker for both ascending and descending pages.
 - **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:209`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.
 - **Idempotency / not-found:** all mutations return `false` (or `[]`) when the job is absent or in the wrong location; `cancelJob`/`promoteJob`/`changeJobPriority` only act on queued jobs, `updateJobProgress`/`moveJobToDelayed` only on processing jobs. `promoteJob` no-ops if `runAt <= now` (already due).
 - **Progress clamping:** `updateJobProgress` clamps to `[0,100]` and refreshes `lastHeartbeat`, so a progress update doubles as a heartbeat for stall detection. The progress webhook failure is caught and logged, never propagated.

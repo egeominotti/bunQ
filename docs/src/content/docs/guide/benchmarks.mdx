@@ -144,6 +144,31 @@ import BqIcon from '@components/BqIcon.astro';
 </div>
 
 <div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">correctness fixes · before and after</span>
+  <h2 class="bq-h2">Fast paths measured with their invariants.</h2>
+  <p class="bq-lede">A separate July 16 engineering run compared the last committed baseline with this candidate worktree on the same Apple M1 Max and Bun 1.3.14. It pools samples from baseline → candidate → candidate → baseline processes and reports median / nearest-rank p95. An incorrect result is never presented as a speedup.</p>
+
+  | Workload | Before median | After median | Engineering result |
+  |---|---:|---:|---|
+  | SQLite page at offset 20k | 11.109 ms | 0.628 ms | **17.69× faster**, temporary ORDER BY B-tree removed |
+  | 200-queue summary over 50k jobs | 503.575 ms | 4.883 ms | **103.13× faster**, prioritized count now exact |
+  | Sparse-queue temporal lookup behind 500k unrelated jobs | 6.228 ms | 0.000417 ms | **~14,935× faster** with queue-local indexes |
+  | Temporal removal by ID behind 500k unrelated jobs | 5.569 ms | 0.001792 ms | **~3,108× faster** with direct lookup |
+  | Notify 10k active waiters | 446.255 ms | 0.807 ms | **552.98× faster**, surplus notification debt coalesced |
+  | 100k delayed add/remove pairs | 17.261 ms | 18.694 ms | 8.3% CPU cost; retained heap entries **100,000 → 0** |
+
+  Three correctness paths deliberately do more work than the broken baseline:
+
+  - Recovery of 10,001 active jobs is 22.7% slower, but now recovers all 10,001 exactly; the baseline skipped one row and doubled its queued counter.
+  - Descending in-memory pagination sorts the complete matching set, returning indexes 49,999…49,900 instead of the wrong 100…1 page.
+  - Pulling past 5,000 jobs from an already-active FIFO group costs 1.672 ms median and reaches eligible `B1`; the baseline returned `null` without looking past the blocked root.
+
+  `getStats()` remains O(n) because it classifies ready jobs by delay and priority; it measured 36.3% slower in this workload. The report calls this out as remaining engineering work rather than hiding it.
+
+  <p class="bq-chart-foot">full method, p95 values, correctness observations and reproduction command: <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/fix-impact-2026-07-16.md">engineering report</a> · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/fix-impact.ts">benchmark runner</a></p>
+</div>
+
+<div class="bq-wrap bq-section">
   <span class="bq-eyebrow">other numbers</span>
   <h2 class="bq-h2">Install size and dependency chains.</h2>
   <p class="bq-lede">Two more measured figures. bunqueue installs as <b>7 packages, 5.5 MB</b> (down from 117 packages, 93 MB in 2.7.x) because it has only 2 runtime dependencies, <code>croner</code> and <code>msgpackr</code>; SQLite, S3, HTTP and WebSocket are built into Bun.</p>

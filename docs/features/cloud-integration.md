@@ -81,7 +81,7 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 3. `subscribeToEvents()` registers a `QueueManager.subscribe` callback (`cloudAgent.ts:210`).
 
 ### Snapshot push (`cloudAgent.ts:184` → `snapshotCollector.ts:148`)
-1. `collectSnapshot` gathers "light" data (`getStats`, memory, throughput, latency, storage, per-queue counts) then the full detail set (live jobs, DLQ, workers, configs, webhooks, locks, results, logs, analytics) on **every** call (`snapshotCollector.ts:156-360`).
+1. `collectSnapshot` gathers "light" data (`getStats`, memory, throughput, latency, storage, per-queue counts) then the full detail set on every call. Queue counts are requested once with `getAllQueueJobCounts(queueNames)` and reused across queue configs, statistics, and analytics instead of rescanning global collections per queue.
 2. `collectLiveJobs` iterates every queue × every state in `ALL_STATES` (up to 1000 jobs per queue per state) and maps each domain job to snapshot shape; `paused` is collected so a paused queue's ready jobs still appear instead of vanishing (`snapshotHelpers.ts:30-44,161`).
 3. `enrichFailedJobDurations` back-fills `duration`/`completedAt`/`totalDuration` for failed jobs using the last DLQ attempt-history entry (`snapshotCollector.ts:93`).
 4. Throughput/backlog analytics are **delta-based**: module-level `prevQueueTotals` / `prevQueueWaiting` maps hold the previous snapshot's totals; rates require >0.5s (throughput) / >0.1min (backlog) elapsed to emit (`snapshotHelpers.ts:20-26,343,459`).

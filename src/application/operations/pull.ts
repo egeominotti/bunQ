@@ -38,14 +38,33 @@ export interface PullContext {
 }
 
 /** Result of trying to dequeue a job */
-type DequeueResult =
-  | { status: 'job'; job: Job }
-  | { status: 'skip' } // expired, try next
-  | { status: 'stop' }; // not ready or blocked
+type DequeueResult = { status: 'job'; job: Job } | { status: 'stop'; nextRunAt: number | null };
+
+interface PullAttempt {
+  job: Job | null;
+  nextRunAt: number | null;
+}
+
+interface BatchPullAttempt {
+  jobs: Job[];
+  nextRunAt: number | null;
+}
 
 /**
- * Try to dequeue next ready job from queue
- * Handles: expired skip, ready check, group blocking, timestamps
+ * Dequeue the highest-ranked eligible job without letting a delayed or
+ * group-blocked heap root stall unrelated work.
+ *
+ * The priority heap cannot encode time-varying readiness or active-group
+ * membership in its comparator. Temporarily park ineligible roots, select the
+ * first eligible entry (therefore the best eligible entry in heap order), and
+ * restore every parked job before leaving the shard critical section. Parked
+ * jobs remain logically queued throughout: their shard counters and jobIndex
+ * entries are deliberately untouched.
+ *
+ * Complexity is O((k + 1) log n) time and O(k) scratch space, where k is the
+ * number of higher-ranked ineligible jobs skipped. A separate delayed heap and
+ * per-group eligible-head heap can reduce this to O(log n), but this scan keeps
+ * the existing queue representation and state transitions intact.
  */
 function tryDequeueNextJob(
   shard: Shard,
@@ -54,67 +73,114 @@ function tryDequeueNextJob(
   ctx: PullContext
 ): DequeueResult {
   const q = shard.getQueue(queue);
-  const job = q.peek();
+  const parked: Job[] = [];
+  let nextRunAt: number | null = null;
 
-  if (!job) return { status: 'stop' };
+  try {
+    while (true) {
+      const job = q.peek();
+      if (!job) return { status: 'stop', nextRunAt };
 
-  // Skip expired jobs
-  if (isExpired(job, now)) {
-    q.pop();
-    shard.decrementQueued(job.id);
-    ctx.jobIndex.delete(job.id);
-    ctx.dashboardEmit?.('job:expired', {
-      queue,
-      jobId: String(job.id),
-      ttl: job.ttl,
-      age: now - job.createdAt,
-    });
-    return { status: 'skip' };
+      // Expired entries are not parked: they are genuinely removed from the
+      // logical queue and therefore update counters/index exactly once.
+      if (isExpired(job, now)) {
+        q.pop();
+        shard.decrementQueued(job.id);
+        ctx.jobIndex.delete(job.id);
+        ctx.dashboardEmit?.('job:expired', {
+          queue,
+          jobId: String(job.id),
+          ttl: job.ttl,
+          age: now - job.createdAt,
+        });
+        continue;
+      }
+
+      if (!isReady(job, now)) {
+        const delayed = q.pop();
+        if (delayed) parked.push(delayed);
+        nextRunAt = nextRunAt === null ? job.runAt : Math.min(nextRunAt, job.runAt);
+        continue;
+      }
+
+      if (job.groupId && shard.isGroupActive(queue, job.groupId)) {
+        const blocked = q.pop();
+        if (blocked) parked.push(blocked);
+        continue;
+      }
+
+      // Check capacity only after proving that an eligible job exists. Check
+      // concurrency first because that slot can be returned if rate limiting
+      // rejects; rate-limit tokens have no rollback operation.
+      if (!shard.tryAcquireConcurrency(queue)) {
+        ctx.dashboardEmit?.('concurrency:rejected', { queue });
+        return { status: 'stop', nextRunAt };
+      }
+      if (!shard.tryAcquireRateLimit(queue)) {
+        shard.releaseConcurrency(queue);
+        ctx.dashboardEmit?.('ratelimit:rejected', { queue });
+        return { status: 'stop', nextRunAt };
+      }
+
+      // Dequeue and update. q.peek() and q.pop() are synchronous under the
+      // shard write lock, so pop returns the same eligible entry selected above.
+      const dequeued = q.pop();
+      if (!dequeued) {
+        shard.releaseConcurrency(queue);
+        return { status: 'stop', nextRunAt };
+      }
+      shard.decrementQueued(dequeued.id);
+
+      if (dequeued.groupId) {
+        shard.activateGroup(queue, dequeued.groupId);
+      }
+
+      dequeued.startedAt = now;
+      dequeued.lastHeartbeat = now;
+      if (dequeued.timeline.length < MAX_TIMELINE_ENTRIES) {
+        dequeued.timeline.push({ state: 'active', timestamp: now });
+      }
+
+      // Make the queue -> processing transition atomic for observers. From the
+      // pop above, the job is no longer findable in the shard queue, so a
+      // jobIndex entry still saying 'queue' would make getJob/getJobState return
+      // a false null/'unknown' for an existing job (JOB -> null -> JOB(active)
+      // flicker), and cleanOrphanedJobIndex would even drop its index entry.
+      // Insert into processingShards and flip the index HERE, in the same
+      // synchronous critical section as the pop (the caller holds the shard
+      // write lock; JS is single-threaded, so no other task can interleave).
+      // Writing processingShards without its RWLock is safe: until this
+      // statement the index said 'queue', so no id-targeted critical section
+      // (ack/fail/discard operate only on ids they find as 'processing') can be
+      // mid-operation on this id; a sync Map.set cannot corrupt a paused
+      // critical section; and lock-free sync access to processingShards is
+      // established practice (stallDetection phases 1/2, collectActiveJobs,
+      // getJobProgress). Acquiring the async RWLock here would instead hold the
+      // hot shard write lock across an await.
+      const procIdx = processingShardIndex(dequeued.id);
+      ctx.processingShards[procIdx].set(dequeued.id, dequeued);
+      ctx.jobIndex.set(dequeued.id, { type: 'processing', shardIdx: procIdx });
+
+      return { status: 'job', job: dequeued };
+    }
+  } finally {
+    // Restore only the priority-queue membership. The logical queue counters,
+    // temporal index and global jobIndex never changed for parked entries.
+    for (const parkedJob of parked) q.push(parkedJob);
   }
+}
 
-  // Not ready yet (delayed)
-  if (!isReady(job, now)) return { status: 'stop' };
-
-  // FIFO group blocked
-  if (job.groupId && shard.isGroupActive(queue, job.groupId)) {
-    return { status: 'stop' };
-  }
-
-  // Dequeue and update
-  q.pop();
-  shard.decrementQueued(job.id);
-
-  if (job.groupId) {
-    shard.activateGroup(queue, job.groupId);
-  }
-
-  job.startedAt = now;
-  job.lastHeartbeat = now;
-  if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-    job.timeline.push({ state: 'active', timestamp: now });
-  }
-
-  // Make the queue -> processing transition atomic for observers. From the
-  // pop above, the job is no longer findable in the shard queue, so a
-  // jobIndex entry still saying 'queue' would make getJob/getJobState return
-  // a false null/'unknown' for an existing job (JOB -> null -> JOB(active)
-  // flicker), and cleanOrphanedJobIndex would even drop its index entry.
-  // Insert into processingShards and flip the index HERE, in the same
-  // synchronous critical section as the pop (the caller holds the shard
-  // write lock; JS is single-threaded, so no other task can interleave).
-  // Writing processingShards without its RWLock is safe: until this
-  // statement the index said 'queue', so no id-targeted critical section
-  // (ack/fail/discard operate only on ids they find as 'processing') can be
-  // mid-operation on this id; a sync Map.set cannot corrupt a paused
-  // critical section; and lock-free sync access to processingShards is
-  // established practice (stallDetection phases 1/2, collectActiveJobs,
-  // getJobProgress). Acquiring the async RWLock here would instead hold the
-  // hot shard write lock across an await.
-  const procIdx = processingShardIndex(job.id);
-  ctx.processingShards[procIdx].set(job.id, job);
-  ctx.jobIndex.set(job.id, { type: 'processing', shardIdx: procIdx });
-
-  return { status: 'job', job };
+/** Wait until either a notification arrives, the next delay matures, or the pull deadline. */
+async function waitForNextCandidate(
+  shard: Shard,
+  queue: string,
+  deadline: number,
+  now: number,
+  nextRunAt: number | null
+): Promise<void> {
+  const remaining = deadline - now;
+  const untilNextRun = nextRunAt === null ? remaining : Math.max(1, nextRunAt - now);
+  await shard.waitForJob(queue, Math.min(remaining, untilNextRun));
 }
 
 /**
@@ -189,7 +255,7 @@ async function requeueJob(job: Job, queue: string, idx: number, ctx: PullContext
     shard.getQueue(queue).push(job);
     shard.incrementQueued(job.id, false, job.createdAt, queue, job.runAt);
     ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: queue });
-    shard.notify();
+    shard.notify(queue);
     requeued = true;
   });
 
@@ -218,7 +284,8 @@ export async function pullJob(
   const idx = shardIndex(queue);
 
   while (true) {
-    const job = await tryPullFromShard(queue, idx, ctx);
+    const attempt = await tryPullFromShard(queue, idx, ctx);
+    const job = attempt.job;
 
     if (job) {
       let delivered = false;
@@ -242,46 +309,31 @@ export async function pullJob(
       return null;
     }
 
-    // Wait for notification or timeout
-    const remaining = deadline - now;
-    await ctx.shards[idx].waitForJob(remaining);
+    await waitForNextCandidate(ctx.shards[idx], queue, deadline, now, attempt.nextRunAt);
   }
 }
 
 /**
  * Try to pull a job from a specific shard
  */
-async function tryPullFromShard(queue: string, idx: number, ctx: PullContext): Promise<Job | null> {
+async function tryPullFromShard(
+  queue: string,
+  idx: number,
+  ctx: PullContext
+): Promise<PullAttempt> {
   return await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     const state = shard.getState(queue);
 
     if (state.paused) {
-      return null;
-    }
-
-    if (!shard.tryAcquireRateLimit(queue)) {
-      ctx.dashboardEmit?.('ratelimit:rejected', { queue });
-      return null;
-    }
-
-    if (!shard.tryAcquireConcurrency(queue)) {
-      ctx.dashboardEmit?.('concurrency:rejected', { queue });
-      return null;
+      return { job: null, nextRunAt: null };
     }
 
     const now = Date.now();
-
-    while (true) {
-      const result = tryDequeueNextJob(shard, queue, now, ctx);
-
-      if (result.status === 'job') return result.job;
-      if (result.status === 'stop') {
-        shard.releaseConcurrency(queue);
-        return null;
-      }
-      // status === 'skip': continue loop
-    }
+    const result = tryDequeueNextJob(shard, queue, now, ctx);
+    return result.status === 'job'
+      ? { job: result.job, nextRunAt: null }
+      : { job: null, nextRunAt: result.nextRunAt };
   });
 }
 
@@ -299,7 +351,8 @@ export async function pullJobBatch(
   const idx = shardIndex(queue);
 
   while (true) {
-    const jobs = await tryPullBatchFromShard(queue, idx, count, ctx);
+    const attempt = await tryPullBatchFromShard(queue, idx, count, ctx);
+    const jobs = attempt.jobs;
 
     if (jobs.length > 0) {
       let delivered: Job[];
@@ -331,9 +384,7 @@ export async function pullJobBatch(
       return [];
     }
 
-    // Wait for notification or timeout
-    const remaining = deadline - now;
-    await ctx.shards[idx].waitForJob(remaining);
+    await waitForNextCandidate(ctx.shards[idx], queue, deadline, now, attempt.nextRunAt);
   }
 }
 
@@ -345,37 +396,28 @@ async function tryPullBatchFromShard(
   idx: number,
   count: number,
   ctx: PullContext
-): Promise<Job[]> {
+): Promise<BatchPullAttempt> {
   return await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     const state = shard.getState(queue);
     const jobs: Job[] = [];
 
-    if (state.paused) return jobs;
+    if (state.paused) return { jobs, nextRunAt: null };
 
     const now = Date.now();
+    let nextRunAt: number | null = null;
 
     while (jobs.length < count) {
-      // Check limits per job
-      if (!shard.tryAcquireRateLimit(queue)) {
-        break;
-      }
-      if (!shard.tryAcquireConcurrency(queue)) {
-        break;
-      }
-
       const result = tryDequeueNextJob(shard, queue, now, ctx);
 
       if (result.status === 'job') {
         jobs.push(result.job);
       } else {
-        // 'stop' or 'skip': release the concurrency slot since no job was taken
-        shard.releaseConcurrency(queue);
-        if (result.status === 'stop') break;
-        // 'skip': continue loop to try next job
+        nextRunAt = result.nextRunAt;
+        break;
       }
     }
 
-    return jobs;
+    return { jobs, nextRunAt };
   });
 }

@@ -164,8 +164,10 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
   const mem = process.memoryUsage();
 
   const queueNames = queueManager.listQueues();
-  const queues = queueNames.map((name) => {
-    const counts = queueManager.getQueueJobCounts(name);
+  const countsByQueue = queueManager.getAllQueueJobCounts();
+  const queues = queueNames.flatMap((name) => {
+    const counts = countsByQueue.get(name);
+    if (!counts) return [];
     return {
       name,
       waiting: counts.waiting,

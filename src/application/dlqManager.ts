@@ -345,6 +345,6 @@ function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
   ctx.completedJobs.delete(job.id);
   ctx.jobResults.delete(job.id);
   ctx.storage?.updateForRetry(job);
-  shard.notify();
+  shard.notify(job.queue);
   return 1;
 }

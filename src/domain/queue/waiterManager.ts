@@ -1,78 +1,125 @@
 /**
- * WaiterManager - Manages job availability notifications
- * Handles worker polling with timeout-based waiting
+ * WaiterManager - Manages queue-scoped job availability notifications.
+ * Handles worker polling with timeout-based waiting.
  */
 
-/** Threshold for triggering full waiters cleanup */
-const WAITERS_CLEANUP_THRESHOLD = 1000;
+const DEFAULT_QUEUE = '';
+const COMPACT_MIN_HEAD = 1024;
+
+interface Waiter {
+  resolve: () => void;
+  timer: ReturnType<typeof setTimeout>;
+  cancelled: boolean;
+}
+
+interface QueueWaiters {
+  entries: Waiter[];
+  head: number;
+  active: number;
+  pending: boolean;
+}
 
 export class WaiterManager {
-  /** Waiter entries with cancellation flag for O(1) cleanup */
-  private readonly waiters: Array<{ resolve: () => void; cancelled: boolean }> = [];
+  private readonly queues = new Map<string, QueueWaiters>();
+  private activeWaiters = 0;
 
-  /** Pending notification counter - incremented when notify() is called with no waiters */
-  private pendingNotifications = 0;
-
-  /** Notify that multiple jobs are available - wakes up to `count` waiters */
-  notifyBatch(count: number): void {
-    for (let i = 0; i < count; i++) {
-      this.notify();
-    }
+  notify(queue?: string): void {
+    this.notifyQueue(queue ?? DEFAULT_QUEUE, 1);
   }
 
-  /** Notify that jobs are available - wakes first non-cancelled waiter */
-  notify(): void {
-    // Clean up leading cancelled waiters first
-    while (this.waiters.length > 0 && this.waiters[0].cancelled) {
-      this.waiters.shift();
-    }
-
-    // Wake the first active waiter
-    const waiter = this.waiters.shift();
-    if (waiter && !waiter.cancelled) {
-      waiter.resolve();
-    } else {
-      // No active waiter - increment pending counter so next waitForJob returns immediately
-      this.pendingNotifications++;
-    }
-
-    // Periodic full cleanup when array grows too large
-    if (this.waiters.length > WAITERS_CLEANUP_THRESHOLD) {
-      this.cleanupWaiters();
-    }
+  notifyBatch(count: number): void;
+  notifyBatch(queue: string, count: number): void;
+  notifyBatch(queueOrCount: string | number, maybeCount?: number): void {
+    const queue = typeof queueOrCount === 'string' ? queueOrCount : DEFAULT_QUEUE;
+    const count = typeof queueOrCount === 'number' ? queueOrCount : (maybeCount ?? 0);
+    if (count <= 0) return;
+    this.notifyQueue(queue, count);
   }
 
-  /** Wait for a job to become available (with timeout) */
-  waitForJob(timeoutMs: number): Promise<void> {
+  waitForJob(timeoutMs: number): Promise<void>;
+  waitForJob(queue: string, timeoutMs: number): Promise<void>;
+  waitForJob(queueOrTimeout: string | number, maybeTimeout?: number): Promise<void> {
+    const queue = typeof queueOrTimeout === 'string' ? queueOrTimeout : DEFAULT_QUEUE;
+    const timeoutMs = typeof queueOrTimeout === 'number' ? queueOrTimeout : (maybeTimeout ?? 0);
     if (timeoutMs <= 0) return Promise.resolve();
 
-    // Check for pending notifications - if any, decrement and return immediately
-    if (this.pendingNotifications > 0) {
-      this.pendingNotifications--;
+    const state = this.queues.get(queue);
+    if (state?.pending) {
+      state.pending = false;
+      this.deleteIdleQueue(queue, state);
       return Promise.resolve();
     }
 
     return new Promise<void>((resolve) => {
-      const waiter = { resolve, cancelled: false };
-      const cleanup = () => {
+      const queueState = state ?? this.createQueue(queue);
+      const waiter = {
+        resolve,
+        cancelled: false,
+        timer: undefined as unknown as ReturnType<typeof setTimeout>,
+      };
+      waiter.timer = setTimeout(() => {
         if (waiter.cancelled) return;
         waiter.cancelled = true;
+        queueState.active--;
+        this.activeWaiters--;
         resolve();
-      };
-      this.waiters.push(waiter);
-      setTimeout(cleanup, timeoutMs);
+        this.compact(queue, queueState);
+      }, timeoutMs);
+      queueState.entries.push(waiter);
+      queueState.active++;
+      this.activeWaiters++;
     });
   }
 
-  /** Remove all cancelled waiters from the array */
-  private cleanupWaiters(): void {
-    const active = this.waiters.filter((w) => !w.cancelled);
-    this.waiters.length = 0;
-    this.waiters.push(...active);
+  private notifyQueue(queue: string, count: number): void {
+    const state = this.queues.get(queue);
+    if (!state) {
+      this.createQueue(queue).pending = true;
+      return;
+    }
+
+    let remaining = count;
+    while (remaining > 0 && state.active > 0) {
+      const waiter = state.entries[state.head++];
+      if (!waiter || waiter.cancelled) continue;
+      waiter.cancelled = true;
+      clearTimeout(waiter.timer);
+      state.active--;
+      this.activeWaiters--;
+      remaining--;
+      waiter.resolve();
+    }
+
+    // Availability is edge-triggered: surplus notifications coalesce into one
+    // retry hint instead of accumulating an unbounded notification debt.
+    if (remaining > 0) state.pending = true;
+    this.compact(queue, state);
   }
 
-  /** Current number of waiters */
+  private createQueue(queue: string): QueueWaiters {
+    const state = { entries: [], head: 0, active: 0, pending: false };
+    this.queues.set(queue, state);
+    return state;
+  }
+
+  private compact(queue: string, state: QueueWaiters): void {
+    if (state.active === 0) {
+      state.entries = [];
+      state.head = 0;
+      this.deleteIdleQueue(queue, state);
+      return;
+    }
+    if (state.head >= COMPACT_MIN_HEAD && state.head * 2 >= state.entries.length) {
+      state.entries = state.entries.slice(state.head);
+      state.head = 0;
+    }
+  }
+
+  private deleteIdleQueue(queue: string, state: QueueWaiters): void {
+    if (state.active === 0 && !state.pending) this.queues.delete(queue);
+  }
+
   get length(): number {
-    return this.waiters.length;
+    return this.activeWaiters;
   }
 }

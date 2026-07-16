@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import react from '@astrojs/react';
-import remarkGfm from 'remark-gfm';
+import { unified } from '@astrojs/markdown-remark';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -18,7 +18,9 @@ try {
   // Fallback: try reading version from docs package.json
   try {
     pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-  } catch {}
+  } catch {
+    // Keep the explicit 0.0.0 fallback when neither manifest is available.
+  }
 }
 
 // Real per-page lastmod for the sitemap, from git history. A fake
@@ -59,12 +61,10 @@ function lastmodForUrl(url) {
 export default defineConfig({
   site: 'https://bunqueue.dev',
 
-  // GFM (tables, strikethrough, autolinks) for .mdx pages too: Starlight's
-  // internal MDX pipeline extends this markdown config, and without the
-  // explicit plugin GFM tables in .mdx files were emitted as literal |---|
-  // text (affected sdks/benchmarks/mcp/deployment/comparison).
+  // Use Astro's current processor API. GFM is explicit so tables,
+  // strikethrough and autolinks render consistently in .md and .mdx pages.
   markdown: {
-    remarkPlugins: [remarkGfm],
+    processor: unified({ gfm: true }),
   },
 
   // Performance optimizations
@@ -89,8 +89,13 @@ export default defineConfig({
   integrations: [
     react(),
     starlight({
+      // The docs collection provides its own /404 page. Let Starlight's
+      // catch-all render that entry instead of also injecting a competing
+      // framework route for the same path.
+      disable404Route: true,
       title: 'bunqueue',
-      description: 'High-performance job queue for Bun & AI agents. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups. Zero external dependencies.',
+      description:
+        'High-performance job queue for Bun & AI agents. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups. Zero external infrastructure.',
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: false,
@@ -165,9 +170,7 @@ export default defineConfig({
         },
         {
           label: 'SDKs · Any Language',
-          items: [
-            { label: 'TypeScript, Python, PHP & Go', link: '/guide/sdks/' },
-          ],
+          items: [{ label: 'TypeScript, Python, PHP & Go', link: '/guide/sdks/' }],
         },
         {
           label: 'Run in Production',
@@ -262,7 +265,10 @@ export default defineConfig({
             { label: 'S3 Backup & Disaster Recovery', link: '/blog/s3-backup-recovery/' },
             { label: 'Job Pipelines with FlowProducer', link: '/blog/job-pipelines-flows/' },
             { label: 'Rate Limiting & Concurrency', link: '/blog/rate-limiting-concurrency/' },
-            { label: 'Workflow Engine: Orchestration Without Temporal', link: '/blog/workflow-engine/' },
+            {
+              label: 'Workflow Engine: Orchestration Without Temporal',
+              link: '/blog/workflow-engine/',
+            },
           ],
         },
         {
@@ -282,7 +288,8 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             name: 'keywords',
-            content: 'bun, job queue, message queue, task queue, background jobs, sqlite, redis alternative, bullmq alternative, typescript, cron, scheduler, worker, dlq, dead letter queue, ai agents, mcp server, model context protocol, agentic workflows, claude, cursor, windsurf, ai automation, ai task scheduler, llm tools, workflow engine, orchestration, saga pattern, compensation, human in the loop, step functions alternative, temporal alternative, inngest alternative, multi-step workflows, branching workflows',
+            content:
+              'bun, job queue, message queue, task queue, background jobs, sqlite, redis alternative, bullmq alternative, typescript, cron, scheduler, worker, dlq, dead letter queue, ai agents, mcp server, model context protocol, agentic workflows, claude, cursor, windsurf, ai automation, ai task scheduler, llm tools, workflow engine, orchestration, saga pattern, compensation, human in the loop, step functions alternative, temporal alternative, inngest alternative, multi-step workflows, branching workflows',
           },
         },
         {
@@ -360,7 +367,8 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image:alt',
-            content: 'bunqueue - High-performance job queue for Bun & AI agents. Native MCP server.',
+            content:
+              'bunqueue - High-performance job queue for Bun & AI agents. Native MCP server.',
           },
         },
         // Twitter
@@ -396,7 +404,8 @@ export default defineConfig({
             '@type': 'SoftwareApplication',
             name: 'bunqueue',
             alternateName: 'bunQ',
-            description: 'High-performance job queue for Bun & AI agents. Workflow engine with saga compensation and branching. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups.',
+            description:
+              'High-performance job queue for Bun & AI agents. Workflow engine with saga compensation and branching. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups.',
             applicationCategory: 'DeveloperApplication',
             operatingSystem: 'Cross-platform',
             softwareVersion: pkg.version,
@@ -432,7 +441,22 @@ export default defineConfig({
             ],
             programmingLanguage: ['TypeScript', 'JavaScript'],
             runtimePlatform: 'Bun',
-            keywords: ['job queue', 'message queue', 'bun', 'sqlite', 'typescript', 'bullmq alternative', 'ai agents', 'mcp server', 'agentic workflows', 'workflow engine', 'saga pattern', 'orchestration', 'temporal alternative', 'step functions alternative'],
+            keywords: [
+              'job queue',
+              'message queue',
+              'bun',
+              'sqlite',
+              'typescript',
+              'bullmq alternative',
+              'ai agents',
+              'mcp server',
+              'agentic workflows',
+              'workflow engine',
+              'saga pattern',
+              'orchestration',
+              'temporal alternative',
+              'step functions alternative',
+            ],
           }),
         },
         // JSON-LD Structured Data - WebSite
@@ -446,7 +470,8 @@ export default defineConfig({
             '@type': 'WebSite',
             name: 'bunqueue Documentation',
             url: 'https://bunqueue.dev/',
-            description: 'Official documentation for bunqueue - High-performance job queue for Bun & AI agents',
+            description:
+              'Official documentation for bunqueue - High-performance job queue for Bun & AI agents',
           }),
         },
         // Canonical will be auto-generated by Starlight

@@ -266,7 +266,7 @@ export async function moveJobToDelayed(
     shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
     // The freed slot may unblock waiting jobs for long-pollers.
-    shard.notify();
+    shard.notify(job.queue);
   });
 
   // Persist the move so the delay survives a restart: the on-disk row was
@@ -328,7 +328,7 @@ export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promi
         // lockManager.ts), so the DLQ entry never keeps it.
         shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId);
         // The freed slot may unblock waiting jobs for long-pollers.
-        shard.notify();
+        shard.notify(validJob.queue);
       } else if (validJob.uniqueKey) {
         // Queue branch: the waiting job never acquired a slot or group at
         // pull, so a full releaseJobResources would free a slot legitimately

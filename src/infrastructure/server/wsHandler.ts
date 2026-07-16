@@ -18,6 +18,7 @@ import type { JobEvent } from '../../domain/types/queue';
 import { handleCommand, type HandlerContext } from './handler';
 import { parseCommand, serializeResponse, errorResponse } from './protocol';
 import { throughputTracker } from '../../application/throughputTracker';
+import { QueueCountsScheduler } from './queueCountsScheduler';
 
 const textDecoder = new TextDecoder();
 
@@ -188,7 +189,7 @@ export class WsHandler {
   private statsInterval: ReturnType<typeof setInterval> | null = null;
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   private storageInterval: ReturnType<typeof setInterval> | null = null;
-  private queueManager: QueueManager | null = null;
+  private queueCountsScheduler: QueueCountsScheduler | null = null;
   droppedMessages = 0;
 
   get size(): number {
@@ -217,7 +218,17 @@ export class WsHandler {
 
   /** Start periodic broadcasts */
   startBroadcasts(qm: QueueManager): void {
-    this.queueManager = qm;
+    this.queueCountsScheduler ??= new QueueCountsScheduler(qm, (queue, counts) => {
+      this.emit('queue:counts', {
+        queue,
+        waiting: counts.waiting,
+        prioritized: counts.prioritized,
+        active: counts.active,
+        completed: counts.completed,
+        failed: counts.failed,
+        delayed: counts.delayed,
+      });
+    });
 
     this.statsInterval ??= setInterval(() => {
       if (this.clients.size > 0) this.broadcastStats(qm);
@@ -234,6 +245,8 @@ export class WsHandler {
 
   /** Stop periodic broadcasts */
   stopBroadcasts(): void {
+    this.queueCountsScheduler?.stop();
+    this.queueCountsScheduler = null;
     if (this.statsInterval) {
       clearInterval(this.statsInterval);
       this.statsInterval = null;
@@ -369,19 +382,9 @@ export class WsHandler {
 
     for (const id of dead) this.clients.delete(id);
 
-    // Emit queue:counts on every job state change
-    if (this.queueManager) {
-      const counts = this.queueManager.getQueueJobCounts(event.queue);
-      this.emit('queue:counts', {
-        queue: event.queue,
-        waiting: counts.waiting,
-        prioritized: counts.prioritized,
-        active: counts.active,
-        completed: counts.completed,
-        failed: counts.failed,
-        delayed: counts.delayed,
-      });
-    }
+    // Counts are eventually exact, but coalesced so a PUSHB does not perform
+    // one full queue scan per inserted job.
+    this.queueCountsScheduler?.schedule(event.queue);
   }
 
   // ── Connection lifecycle ─────────────────────────────────

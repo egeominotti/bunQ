@@ -291,7 +291,7 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
 
     // Insert to shard
     insertJobToShard(job, queue, shard, idx, ctx);
-    shard.notify();
+    shard.notify(queue);
     result = { job, persisted: true };
   });
 
@@ -368,7 +368,7 @@ export async function pushJobBatch(
     }
 
     if (jobsToInsert.length > 0) {
-      shard.notifyBatch(jobsToInsert.length);
+      shard.notifyBatch(queue, jobsToInsert.length);
     }
   });
 

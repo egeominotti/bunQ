@@ -333,8 +333,10 @@ export const COMMANDS: Partial<Record<string, Handler>> = {
   // --- Queue list ---
   'queue:list': (qm) => {
     const queueNames = qm.listQueues();
-    const queues = queueNames.map((name) => {
-      const counts = qm.getQueueJobCounts(name);
+    const countsByQueue = qm.getAllQueueJobCounts();
+    const queues = queueNames.flatMap((name) => {
+      const counts = countsByQueue.get(name);
+      if (!counts) return [];
       return {
         name,
         waiting: counts.waiting,

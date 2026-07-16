@@ -34,7 +34,7 @@ curl http://localhost:6790/prometheus
 
 Compute percentiles in Prometheus with `histogram_quantile()`:
 
-```promql
+```text
 # p99 push latency
 histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m]))
 
@@ -79,7 +79,7 @@ The real response also includes `delayed`, `dlq`, `completed`, `failed`, `uptime
 
 These rates are not part of the `/prometheus` output. In Prometheus, derive rates from the counters instead:
 
-```promql
+```text
 rate(bunqueue_jobs_pushed_total[5m])
 ```
 
@@ -87,7 +87,7 @@ rate(bunqueue_jobs_pushed_total[5m])
 
 The per-queue gauges (`bunqueue_queue_jobs_waiting{queue="..."}` and friends, listed in [Monitoring](/guide/monitoring/#per-queue-metrics)) let you build per-queue dashboards and alerts:
 
-```promql
+```text
 bunqueue_queue_jobs_waiting{queue="emails"}   # backlog of one queue
 sum(bunqueue_queue_jobs_active)                # active jobs across all queues
 topk(5, bunqueue_queue_jobs_waiting)           # top 5 queues by backlog

@@ -86,7 +86,7 @@ Hashing functions (`src/shared/hash.ts`):
 - `processingShardIndex(jobId: string): number` → `fnv1a(jobId) & SHARD_MASK` (`hash.ts:54`).
 - `SHARD_COUNT` / `SHARD_MASK` (`hash.ts:44-45`), `uuid()` → `Bun.randomUUIDv7()` (`hash.ts:62`), `constantTimeEqual(a, b)` (`hash.ts:70`).
 
-`Shard` (exported class, `shard.ts:41`) — selected methods: `getQueue(name)` (`shard.ts:97`), `getState`/`isPaused`/`pause`/`resume` (`shard.ts:106-121`), unique-key methods (`shard.ts:125-155`), FIFO group methods (`shard.ts:159-173`), `releaseJobResources(queue, uniqueKey, groupId)` (`shard.ts:216`), DLQ delegates (`shard.ts:248-335`), `getStats()` (`shard.ts:368`), `incrementQueued`/`decrementQueued` (`shard.ts:383-395`), `drain(queue)` (`shard.ts:449`), `obliterate(queue)` (`shard.ts:466`).
+`Shard` (exported class, `shard.ts:41`) — selected methods: `getQueue(name)` (`shard.ts:97`), `getState`/`isPaused`/`pause`/`resume` (`shard.ts:106-121`), unique-key methods (`shard.ts:125-155`), FIFO group methods (`shard.ts:159-173`), `releaseJobResources(queue, uniqueKey, groupId)` (`shard.ts:216`), queue-scoped `notify`/`notifyBatch`/`waitForJob`, DLQ delegates, counters, `drain(queue)`, and `obliterate(queue)`.
 
 `ShardCounters` (exported, `shardCounters.ts:19`) + `ShardStats` interface (`shardCounters.ts:10`).
 
@@ -128,7 +128,7 @@ See [data-model](../data-model.md) for full definitions. Most relevant here:
 
 **Obliterate (`queueManager.ts:870-940`):** Clears the shard's waiting/delayed queue and DLQ, then explicitly sweeps every global index (`jobIndex`, `completedJobs`, `completedJobsData`, `jobResults`, `jobLogs`, `jobLocks`, flow maps, `repeatChain`, `customIdMap`), purges per-queue metrics + persisted queue-state row, deletes processing-shard entries for the queue, and removes SQLite rows. This is the documented way to reclaim ALL state for a queue.
 
-**Counters (`shardCounters.ts`):** `incrementQueued`/`decrementQueued` keep `queuedJobs`/`delayedJobs` in sync and feed the `TemporalManager` for the delayed heap + age index, giving O(1) `getStats()`. `refreshDelayedCount` reconciles delayed→ready transitions.
+**Counters and snapshots:** `incrementQueued`/`decrementQueued` keep shard totals in sync and feed `TemporalManager`. Public global/per-queue state snapshots still classify current `runAt` values so a matured delayed job cannot be counted as both delayed and ready before the periodic counter refresh. `queueStatsAggregator.ts` batches all requested queue counts into one pass over shared collections; WS/SSE count events are coalesced by `QueueCountsScheduler`.
 
 ## Concurrency & Locking
 

@@ -34,13 +34,15 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 13', () => {
-    expect(SCHEMA_VERSION).toBe(13);
+  test('schema version is 14', () => {
+    expect(SCHEMA_VERSION).toBe(14);
   });
 
   test('idx_jobs_state_started index exists (stall detection)', () => {
     const indexes = db
-      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_state_started'")
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_state_started'"
+      )
       .all();
 
     expect(indexes.length).toBe(1);
@@ -49,7 +51,9 @@ describe('SQLite Performance Indexes', () => {
 
   test('idx_jobs_group_id index exists (group operations)', () => {
     const indexes = db
-      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_group_id'")
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_group_id'"
+      )
       .all();
 
     expect(indexes.length).toBe(1);
@@ -58,16 +62,33 @@ describe('SQLite Performance Indexes', () => {
 
   test('idx_jobs_pending_priority index exists (priority-ordered retrieval)', () => {
     const indexes = db
-      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_pending_priority'")
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_pending_priority'"
+      )
       .all();
 
     expect(indexes.length).toBe(1);
     expect(indexes[0].name).toBe('idx_jobs_pending_priority');
   });
 
+  test('getJobs stable pagination indexes exist', () => {
+    const indexes = db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_jobs_queue_created', 'idx_jobs_queue_state_created') ORDER BY name"
+      )
+      .all();
+
+    expect(indexes.map((row) => row.name)).toEqual([
+      'idx_jobs_queue_created',
+      'idx_jobs_queue_state_created',
+    ]);
+  });
+
   test('idx_dlq_entered_at index exists (DLQ expiration)', () => {
     const indexes = db
-      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_dlq_entered_at'")
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_dlq_entered_at'"
+      )
       .all();
 
     expect(indexes.length).toBe(1);
@@ -79,6 +100,8 @@ describe('SQLite Performance Indexes', () => {
       'idx_jobs_state_started',
       'idx_jobs_group_id',
       'idx_jobs_pending_priority',
+      'idx_jobs_queue_created',
+      'idx_jobs_queue_state_created',
       'idx_dlq_entered_at',
     ];
 
@@ -141,5 +164,22 @@ describe('SQLite Performance Indexes', () => {
     // Note: SQLite may or may not use the index depending on table size
     // The important thing is the index exists and CAN be used
     expect(plan.length).toBeGreaterThan(0);
+  });
+
+  test('logical getJobs query uses the stable-order index without a temp sort', () => {
+    const now = Date.now();
+    const plan = db
+      .query<{ detail: string }, [string, number, number, number]>(
+        `EXPLAIN QUERY PLAN
+         SELECT * FROM jobs INDEXED BY idx_jobs_queue_created
+         WHERE queue = ?
+           AND (state IN ('waiting', 'delayed') AND run_at <= ? AND priority > 0)
+         ORDER BY created_at ASC, id ASC
+         LIMIT ? OFFSET ?`
+      )
+      .all('test', now, 10, 0);
+
+    expect(plan.some((row) => row.detail.includes('idx_jobs_queue_created'))).toBe(true);
+    expect(plan.some((row) => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 });

@@ -16,6 +16,7 @@ import type { QueueManager } from '../../application/queueManager';
 import type { JobEvent } from '../../domain/types/queue';
 import { throughputTracker } from '../../application/throughputTracker';
 import { uuid } from '../../shared/hash';
+import { QueueCountsScheduler } from './queueCountsScheduler';
 
 const textEncoder = new TextEncoder();
 
@@ -67,6 +68,7 @@ export class SseHandler {
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   private storageInterval: ReturnType<typeof setInterval> | null = null;
   private queueManager: QueueManager | null = null;
+  private queueCountsScheduler: QueueCountsScheduler | null = null;
   private readonly eventBuffer: BufferedEvent[] = [];
 
   /** Get client count */
@@ -79,6 +81,17 @@ export class SseHandler {
   /** Start heartbeat + periodic broadcasts (stats, health, storage) */
   startBroadcasts(qm: QueueManager): void {
     this.queueManager = qm;
+    this.queueCountsScheduler ??= new QueueCountsScheduler(qm, (queue, counts) => {
+      this.sendTypedEvent('queue:counts', {
+        queue,
+        waiting: counts.waiting,
+        prioritized: counts.prioritized,
+        active: counts.active,
+        completed: counts.completed,
+        failed: counts.failed,
+        delayed: counts.delayed,
+      });
+    });
 
     this.heartbeatTimer ??= setInterval(() => {
       this.sendHeartbeat();
@@ -106,6 +119,8 @@ export class SseHandler {
 
   /** Stop all timers */
   private stopTimers(): void {
+    this.queueCountsScheduler?.stop();
+    this.queueCountsScheduler = null;
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -185,19 +200,9 @@ export class SseHandler {
 
     for (const clientId of disconnected) this.clients.delete(clientId);
 
-    // Emit queue:counts on every job state change (mirrors wsHandler)
-    if (this.queueManager) {
-      const counts = this.queueManager.getQueueJobCounts(event.queue);
-      this.sendTypedEvent('queue:counts', {
-        queue: event.queue,
-        waiting: counts.waiting,
-        prioritized: counts.prioritized,
-        active: counts.active,
-        completed: counts.completed,
-        failed: counts.failed,
-        delayed: counts.delayed,
-      });
-    }
+    // Counts are eventually exact, but coalesced so a PUSHB does not perform
+    // one full queue scan per inserted job.
+    this.queueCountsScheduler?.schedule(event.queue);
   }
 
   // ── Dashboard / system event broadcasting ──────────────────

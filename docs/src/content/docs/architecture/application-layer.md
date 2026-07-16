@@ -129,13 +129,14 @@ src/application/
   <div class="bq-diag-layer">1. Acquire shard write lock, 2. queue paused, return null, 3. rate limit exceeded, return null, 4. concurrency at limit, return null</div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-group">
-    <span class="bq-diag-group-label">5. dequeue loop, peek head of priority queue</span>
+    <span class="bq-diag-group-label">5. dequeue loop, inspect priority-ordered candidates</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">TTL expired <i>drop, try next</i></div>
-      <div class="bq-diag-cell">Not ready, delayed <i>stop, head is the earliest, nothing ready</i></div>
-      <div class="bq-diag-cell">FIFO group active <i>stop, head stays queued to preserve group order</i></div>
+      <div class="bq-diag-cell">Not ready, delayed <i>temporarily park, track earliest runAt, inspect next candidate</i></div>
+      <div class="bq-diag-cell">FIFO group active <i>temporarily park, inspect work from another eligible group</i></div>
       <div class="bq-diag-cell">Valid job <i>pop, continue</i></div>
     </div>
+    <p class="bq-diag-note">Parked jobs remain logically queued: counters, temporal indexes and jobIndex do not change. They are restored to the heap before the shard lock is released, so a blocked root cannot hide unrelated ready work.</p>
   </div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-row">

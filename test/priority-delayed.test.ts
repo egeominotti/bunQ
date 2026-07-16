@@ -7,6 +7,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Queue, Worker, shutdownManager } from '../src/client';
+import { QueueManager } from '../src/application/queueManager';
 
 describe('Priority & Delayed Jobs - Embedded', () => {
   afterEach(() => {
@@ -145,6 +146,44 @@ describe('Priority & Delayed Jobs - Embedded', () => {
     queue.close();
   }, 30000);
 
+  test('delayed high-priority job does not block a ready lower-priority job', async () => {
+    const qm = new QueueManager();
+
+    try {
+      const delayed = await qm.push('prio-delayed-work-conserving', {
+        data: { label: 'delayed' },
+        priority: 100,
+        delay: 10_000,
+      });
+      const ready = await qm.push('prio-delayed-work-conserving', {
+        data: { label: 'ready' },
+        priority: 1,
+      });
+
+      expect((await qm.pull('prio-delayed-work-conserving', 0))?.id).toBe(ready.id);
+      expect(await qm.getJobState(delayed.id)).toBe('delayed');
+    } finally {
+      qm.shutdown();
+    }
+  });
+
+  test('long-poll wakes when the next delayed job becomes ready', async () => {
+    const qm = new QueueManager();
+
+    try {
+      const delayed = await qm.push('prio-delayed-wakeup', {
+        data: { label: 'delayed' },
+        delay: 100,
+      });
+      const startedAt = Date.now();
+
+      expect((await qm.pull('prio-delayed-wakeup', 1_500))?.id).toBe(delayed.id);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      qm.shutdown();
+    }
+  });
+
   test('4. promote delayed job -- promoted job processed immediately', async () => {
     const queue = new Queue<{ value: number }>('prio-promote', { embedded: true });
     queue.obliterate();
@@ -232,31 +271,24 @@ describe('Priority & Delayed Jobs - Embedded', () => {
     queue.close();
   }, 30000);
 
-  test('6. mixed priority and delay -- correct ordering with both dimensions', async () => {
+  test('6. mixed priority and delay -- ready work remains work-conserving', async () => {
     const queue = new Queue<{ label: string }>('prio-mixed', { embedded: true });
     queue.obliterate();
 
     const processedOrder: string[] = [];
 
-    // In this queue system, delayed jobs with higher priority sit at the top of
-    // the priority heap and block lower-priority immediate jobs from being pulled
-    // until the delay expires. This test verifies that behavior:
-    //
-    // 1. A delayed high-priority job blocks immediate low-priority jobs
-    // 2. Once the delay expires, the high-priority job is processed first
-    // 3. Among same-priority immediate jobs, order is FIFO
+    // Delay is an eligibility constraint: while DelMed is unavailable, the
+    // worker should continue with the highest-priority ready jobs. Once DelMed
+    // matures, its priority applies normally.
 
     // Add immediate low-priority jobs
     await queue.add('imm-low-1', { label: 'ImmLow1' }, { priority: 1 });
     await queue.add('imm-low-2', { label: 'ImmLow2' }, { priority: 1 });
 
-    // Add delayed medium-priority job (short delay so test is fast)
-    await queue.add('del-med', { label: 'DelMed' }, { priority: 50, delay: 300 });
+    // Leave enough time for all three immediate jobs to finish deterministically.
+    await queue.add('del-med', { label: 'DelMed' }, { priority: 50, delay: 750 });
 
-    // Add immediate high-priority job (higher priority than low, lower than delayed)
-    // Since DelMed has highest priority, it sits at top of heap and blocks all pulls
-    // until its delay expires. But ImmHigh has lower priority (10), so once DelMed
-    // is processed, ImmHigh goes next, then the low-priority jobs.
+    // Add an immediate job that outranks the other ready jobs.
     await queue.add('imm-high', { label: 'ImmHigh' }, { priority: 10 });
 
     // Start worker with concurrency 1
@@ -279,16 +311,7 @@ describe('Priority & Delayed Jobs - Embedded', () => {
 
     expect(processedOrder.length).toBe(4);
 
-    // DelMed (priority 50, delayed 300ms) blocks the queue and processes first once ready
-    expect(processedOrder[0]).toBe('DelMed');
-
-    // After DelMed, ImmHigh (priority 10) should come before ImmLow (priority 1)
-    const immHighIdx = processedOrder.indexOf('ImmHigh');
-    const immLow1Idx = processedOrder.indexOf('ImmLow1');
-    const immLow2Idx = processedOrder.indexOf('ImmLow2');
-
-    expect(immHighIdx).toBeLessThan(immLow1Idx);
-    expect(immHighIdx).toBeLessThan(immLow2Idx);
+    expect(processedOrder).toEqual(['ImmHigh', 'ImmLow1', 'ImmLow2', 'DelMed']);
 
     queue.obliterate();
     queue.close();
@@ -302,7 +325,11 @@ describe('Priority & Delayed Jobs - Embedded', () => {
 
     // Push 20 jobs with varied priorities
     // 5 high (priority 100), 5 medium (priority 50), 10 low (priority 1)
-    const jobs: Array<{ name: string; data: { priority: number; index: number }; opts: { priority: number } }> = [];
+    const jobs: Array<{
+      name: string;
+      data: { priority: number; index: number };
+      opts: { priority: number };
+    }> = [];
 
     for (let i = 0; i < 5; i++) {
       jobs.push({

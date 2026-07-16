@@ -77,7 +77,7 @@ Key methods (real signatures):
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
-`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 13`, `MIGRATIONS`.
+`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 14`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -109,9 +109,9 @@ State transitions and the flush-before-update invariant: `markActive`/`markCompl
 
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
-Recovery (consumer side, `backgroundTasks.ts:227-434`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds()`, then paginates `loadActiveJobs` (Phase 1: stalled → retry-with-backoff or DLQ; cron `preventOverlap` rows and DLQ-duplicate rows are dropped), `loadPendingJobs` (Phase 2: enqueue ready, park unmet deps in `waitingDeps`, restore `customId`/`uniqueKey` dedup), `loadDlq` (restore DLQ), `loadQueueState` (re-apply pause/rate/concurrency — in-memory only, no write-back loop), and `loadCompletedJobs` capped at `maxCompletedJobs` (Phase 3, issue #84).
+Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds`, then repeatedly reads active jobs from offset zero. Every handled active row leaves `state='active'`, so advancing an offset over that shrinking result would skip rows; the fixed first-page loop drains all active jobs without deep-offset cost. Recovered retries are persisted in Phase 1 and enqueued exactly once by Phase 2. Pending pages use `priority DESC, run_at ASC, id ASC`, so equal scheduling keys have a deterministic boundary. The remaining phases restore the DLQ, queue control state, and the bounded completed cache.
 
-Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (13) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 13 adds the `stacktrace` blob (server-side failure stack, issue #74).
+Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (14) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 14 adds stable queue pagination indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)`.
 
 Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 
@@ -134,7 +134,7 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **Id type round-trip.** `brandId` preserves non-string id types without conversion (msgpackr can round-trip bigint), preserving id equality on the critical-loss → DLQ → restart path (`sqliteSerializer.ts:162-164`).
 - **Completed-without-result.** A job acked with no result has `state='completed'` but no `job_results` row; `loadCompletedJobIds` unions both sources so dependency recovery still unblocks dependents (`sqlite.ts:568-579`).
 - **Shutdown loss reporting.** `WriteBuffer.stop()` / `stopGracefully(timeoutMs=5000)` flush remaining jobs and report anything still buffered via `reportLostJobs` → `onCriticalError`, so nothing is silently dropped on shutdown (`sqliteBatch.ts:390-486`).
-- **Memory bounds.** Recovery loads are paginated (`limit/offset`, default batch 10000) to avoid memory spikes; completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
+- **Memory bounds.** Recovery loads are paginated (default batch 10,000) to avoid memory spikes; active recovery drains offset zero because it mutates the scanned state, while non-mutating pending/completed loads advance stable pages. Completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
 
 ## Configuration
 
@@ -142,7 +142,7 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **PRAGMAs** (`schema.ts:6-14`, fixed at startup): `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000` (~64 MB), `temp_store=MEMORY`, `mmap_size=268435456` (256 MB), `page_size=4096`, `busy_timeout=5000`.
 - **WriteBuffer**: `writeBufferSize` (default 100 rows → force flush), `writeBufferFlushMs` (effective default 10 ms). Throughput/durability trade-off: buffered ≈ up to 10 ms of loss on crash; `durable: true` job option bypasses the buffer for zero-loss writes at lower throughput.
 - **`onCriticalLoss`** callback for surfacing dropped jobs to ops tooling.
-- Indexes maintained by the schema: `idx_jobs_queue_state`, partial `idx_jobs_run_at WHERE state IN ('waiting','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority`, `idx_jobs_completed_order`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
+- Indexes maintained by the schema: `idx_jobs_queue_state`, `idx_jobs_queue_created`, `idx_jobs_queue_state_created`, partial `idx_jobs_run_at WHERE state IN ('waiting','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority`, `idx_jobs_completed_order`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
 
 ## Related Docs
 

@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_jobs_queue_state
     ON jobs(queue, state);
+-- Stable createdAt/id pagination for unfiltered and logical-state queue views
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_created
+    ON jobs(queue, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_state_created
+    ON jobs(queue, state, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_run_at
     ON jobs(run_at) WHERE state IN ('waiting', 'delayed');
 CREATE INDEX IF NOT EXISTS idx_jobs_unique
@@ -137,7 +142,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -192,5 +197,12 @@ ALTER TABLE cron_jobs ADD COLUMN job_options BLOB;
   // Migration 13: Persist the last failure's stacktrace on jobs (issue #74)
   13: `
 ALTER TABLE jobs ADD COLUMN stacktrace BLOB;
+`,
+  // Migration 14: Stable, index-backed getJobs ordering and pagination
+  14: `
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_created
+    ON jobs(queue, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_state_created
+    ON jobs(queue, state, created_at, id);
 `,
 };

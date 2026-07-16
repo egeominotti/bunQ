@@ -1,6 +1,6 @@
 # Stats, Metrics & Monitoring
 
-> **Category:** Observability · **Source:** `src/application/statsManager.ts`, `src/application/metricsExporter.ts`, `src/application/throughputTracker.ts`, `src/application/latencyTracker.ts`
+> **Category:** Observability · **Source:** `src/application/statsManager.ts`, `src/application/queueStatsAggregator.ts`, `src/infrastructure/server/queueCountsScheduler.ts`, `src/application/metricsExporter.ts`, `src/application/throughputTracker.ts`, `src/application/latencyTracker.ts`
 
 ## Purpose
 
@@ -10,7 +10,8 @@ This module computes and exposes the server's operational telemetry: queue depth
 
 Owns:
 
-- **Snapshot aggregation** (`statsManager.ts`): `getStats`, `getMemoryStats`, `getPerQueueStats`, `getQueueJobCounts`, `compactMemory`.
+- **Snapshot aggregation** (`statsManager.ts`, `queueStatsAggregator.ts`): global and batch per-queue counts, memory statistics, and compaction.
+- **Realtime count coalescing** (`queueCountsScheduler.ts`): batches queue names touched by WS/SSE events into one aggregation per 10 ms window.
 - **Throughput rates** (`throughputTracker.ts`): EMA-smoothed push/pull/complete/fail rates per second via a global singleton `throughputTracker`.
 - **Latency histograms** (`latencyTracker.ts`): push/pull/ack duration histograms exposing averages and p50/p95/p99 via a global singleton `latencyTracker`.
 - **Prometheus exposition format** (`metricsExporter.ts`): `generatePrometheusMetrics` builds the full text/plain Prometheus payload (gauges, counters, per-queue labelled series, and latency histograms).
@@ -26,7 +27,7 @@ Does NOT own:
 
 Internal:
 
-- `../shared/hash` — `SHARD_COUNT` and `shardIndex(name)` to iterate shards and locate a queue's owning shard (`statsManager.ts:6`).
+- `../shared/hash` — `SHARD_COUNT` and `shardIndex(name)` to iterate shards and locate a queue's owning shard.
 - `./types` — `StatsContext`, the read-only view of QueueManager internals (`statsManager.ts:7`, defined at `src/application/types.ts:133`).
 - `../shared/histogram` — the `Histogram` class backing each latency series (`latencyTracker.ts:6`, `src/shared/histogram.ts`).
 - `./latencyTracker` — imported by `metricsExporter.ts:9` to append histogram lines.
@@ -38,7 +39,7 @@ External / runtime:
 
 ## Public Interface
 
-### Exported functions — `statsManager.ts`
+### Exported functions — `statsManager.ts` and `queueStatsAggregator.ts`
 
 ```typescript
 function getStats(
@@ -50,14 +51,18 @@ function getMemoryStats(ctx: StatsContext): MemoryStats          // statsManager
 
 function getPerQueueStats(
   ctx: StatsContext, queueNames: Set<string>
-): Map<string, PerQueueStats>                                    // statsManager.ts:171
+): Map<string, PerQueueStats>
+
+function getAllQueueJobCounts(
+  queueNames: Iterable<string>, ctx: StatsContext
+): Map<string, QueueJobCounts>
 
 function getQueueJobCounts(queueName: string, ctx: StatsContext): {
   waiting; prioritized; delayed; active; completed; failed;
   'waiting-children'; totalCompleted; totalFailed;             // all number
-}                                                                // statsManager.ts:219
+}
 
-function compactMemory(ctx: StatsContext): void                  // statsManager.ts:305
+function compactMemory(ctx: StatsContext): void
 ```
 
 ### Exported from `metricsExporter.ts`
@@ -131,7 +136,11 @@ See [data-model](../data-model.md) for full definitions. Key shapes defined here
 
 **`QueueStats`** (`statsManager.ts:18`): `waiting`, `prioritized`, `delayed`, `active`, `dlq`, `completed`, `'waiting-children'` (numbers); `totalPushed`/`totalPulled`/`totalCompleted`/`totalFailed` (**`bigint`**); `uptime` (ms), `cronJobs`, `cronPending`.
 
-**`PerQueueStats`** (`statsManager.ts:35`): `waiting`, `prioritized`, `delayed`, `active`, `dlq`.
+**`PerQueueStats`** (`queueStatsAggregator.ts`): `waiting`, `prioritized`, `delayed`, `active`, `dlq`.
+
+**`QueueJobCounts`** (`queueStatsAggregator.ts`): `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed`, `'waiting-children'`, `totalCompleted`, `totalFailed`.
+
+**Queue summary entry** (`QueueManager.getQueuesSummary`): `{ name, paused, counts }`, where `counts` contains `waiting`, `prioritized`, `delayed`, `active`, `completed`, and `failed`. `prioritized` remains separate from `waiting`, matching `QueueJobCounts`; omitting it would make ready jobs with `priority > 0` disappear from the summary.
 
 **`MemoryStats`** (`statsManager.ts:43`): sizes of `jobIndex`, `completedJobs`, `jobResults`, `jobLogs`, `customIdMap`, `jobLocks`, `clientJobs`, `clientJobsTotal`, `pendingDepChecks`, `stalledCandidates`, plus per-shard aggregates `processingTotal`, `queuedTotal`, `waitingDepsTotal`, `temporalIndexTotal`, `delayedHeapTotal`.
 
@@ -141,18 +150,20 @@ See [data-model](../data-model.md) for full definitions. Key shapes defined here
 
 ### `getStats` (`statsManager.ts:64`)
 
-1. Loop over all `SHARD_COUNT` shards. Per shard accumulate `delayedJobs`, `dlqJobs` (from `shard.getStats()`) and `active` from `processingShards[i].size` (`:78-81`).
-2. `waiting-children` = `shard.waitingChildren.size + shard.waitingDeps.size` summed over shards (`:85`). Both sets are counted because `getJobState`/`getJobs` report flow parents *and* dependency-blocked jobs under the single `waiting-children` state — counting only one undercounts versus state/list (the "#95 class" invariant).
-3. Split ready jobs into `waiting` vs `prioritized` by scanning every queue's jobs: only jobs with `runAt <= now` count; `priority > 0` → prioritized, else waiting (`:88-98`). This is an O(total queued jobs) scan.
+1. Loop over all `SHARD_COUNT` shards. Accumulate DLQ, active, and both parked dependency maps.
+2. Classify every queued job from its current `runAt`: future jobs are `delayed`; due jobs are `prioritized` when `priority > 0`, otherwise `waiting`. This avoids double-counting a delayed job whose deadline matured before the delayed counter refresh.
+3. `waiting-children` is the sum of `waitingChildren` and `waitingDeps`, matching the state/list APIs.
 4. Pull cron totals from `cronScheduler.getStats()` and read cumulative counters off `ctx.metrics.*.value` (bigint). `uptime = Date.now() - ctx.startTime`.
 
-### `getQueueJobCounts` (`statsManager.ts:219`)
+### Batch per-queue aggregation (`queueStatsAggregator.ts`)
 
-Locates the queue's owning shard via `shardIndex(queueName)`, classifies its jobs (here `runAt > now` → delayed, else priority split — note this includes delayed in the queue scan, unlike `getStats` which only counts ready jobs), counts active by scanning **all** processing shards for matching `job.queue` (`:256-262`), counts `completed` by scanning the entire `jobIndex` for `type==='completed'` entries that are still in `completedJobs` (`:266-270`), and reads `failed` from `shard.getDlq(queueName).length`. `'waiting-children'` uses the `countByQueue` helper (`:10`) over both waiting sets. Per-queue cumulative totals come from `ctx.perQueueMetrics` (populated by ack — `operations/ack.ts:126`).
+`getAllQueueJobCounts` initializes every requested queue, then scans each shared collection once: requested run queues, all processing shards, the completed entries in `jobIndex`, and both parked dependency maps. Lookups into the requested result map make unrelated queues O(1) skips. `getPerQueueStats` and the single-queue `getQueueJobCounts` wrapper reuse the same implementation, so dashboards and cloud snapshots can aggregate hundreds of queues without repeating global scans once per queue.
 
-### `getPerQueueStats` (`statsManager.ts:171`)
+`QueueManager.getQueuesSummary` also consumes this batch aggregation and projects each queue into `{ name, paused, counts }`. Its HTTP consumer, `GET /queues/summary`, returns that array directly, so all projected per-state fields—including `prioritized`—are part of the endpoint contract.
 
-For each name in `queueNames`, look up its shard queue and classify (`runAt > now` → delayed). DLQ via `shard.getDlqCount(name)`. A final pass over all processing shards increments `active` per matching queue (`:204-211`).
+### Realtime count scheduling (`queueCountsScheduler.ts`)
+
+WebSocket and SSE event handlers add the affected queue to a `Set`. A single 10 ms timer drains the set, calls `QueueManager.getQueueJobCountsBatch`, and emits one current count snapshot per queue. Repeated events for the same queue therefore coalesce, timers are cancelled on transport shutdown, and event bursts do not synchronously rescan global state.
 
 ### Prometheus exposition (`metricsExporter.ts:29`)
 
@@ -180,8 +191,8 @@ These aggregation functions are **lock-free reads** that iterate live structures
 
 - **bigint vs number:** `QueueStats` totals are `bigint`; the TCP `Stats`/`Metrics` handlers and HTTP JSON endpoints coerce with `Number(...)`, which loses precision above 2^53. Prometheus interpolates the `bigint` directly (exact).
 - **`waiting-children` double-set invariant:** counting only `waitingChildren` or only `waitingDeps` undercounts vs `getJobState`/`getJobs`. Both `getStats:85` and `getQueueJobCounts` include both (the "#95 class" comment).
-- **delayed classification differs:** `getStats` counts only `runAt <= now` jobs toward waiting/prioritized and never adds delayed from the queue scan (delayed comes from `shard.getStats().delayedJobs`), while `getQueueJobCounts`/`getPerQueueStats` classify `runAt > now` jobs as `delayed` from the queue scan. Keep this in mind when reconciling global vs per-queue numbers.
-- **O(N) / O(Q·N) scans:** `getStats` scans all queued jobs; `getQueueJobCounts` scans the whole `jobIndex` for completed and all processing shards for active. Calling these per dashboard event over many queues can degrade to O(N²) — historically a source of the SSE/per-event regression (`sseHandler.ts:153` comment; the SSE handler early-returns with zero connected clients to avoid it).
+- **Current-time classification:** global and per-queue snapshots classify delayed jobs directly from `runAt > now`; they do not trust a refreshable delayed counter for the public state split.
+- **Aggregation cost:** a snapshot remains O(total live jobs), but multi-queue consumers use one shared pass instead of O(queues × global jobs). WS/SSE count refreshes are additionally coalesced over 10 ms; they are eventually current rather than emitted synchronously for every event.
 - **EMA warm-up & idle:** the first `getRate()` seeds `lastRate` directly (no smoothing); if `elapsed < 0.1s` it returns the stale `lastRate` to avoid divide-by-tiny blowups (`throughputTracker.ts:29`). During idle gaps, rate decays toward 0 only when next sampled. The internal `count` resets on every `getRate`, so calling it from multiple consumers (HTTP poll + WS/SSE interval + `/dashboard`) splits observations across callers and can understate rates.
 - **Histogram is unbounded-in-time:** counters/sum never auto-reset (only `reset()` exists, unused in the hot path), so percentiles/averages are lifetime values, not windowed. Percentiles are bucket-granular (return a bucket boundary, not interpolated) and cap at the largest bucket (10000 ms).
 - **Empty histogram:** `getAverages` guards `count > 0` returning 0; `percentile` returns 0 when count is 0.

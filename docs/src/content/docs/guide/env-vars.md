@@ -114,7 +114,7 @@ S3_ENDPOINT=http://localhost:9000 S3_BACKUP_ENABLED=1 bunqueue start
 |----------|------|---------|-------------|
 | `SHUTDOWN_TIMEOUT_MS` | number | `30000` | How long graceful shutdown waits for active jobs |
 | `STATS_INTERVAL_MS` | number | `300000` | Stats logging interval |
-| `WORKER_TIMEOUT_MS` | number | `30000` | Default job processing timeout |
+| `WORKER_TIMEOUT_MS` | number | `30000` | Worker-registration freshness window. Older heartbeats mark a worker stale; cleanup removes it after 3× this value |
 | `LOCK_TIMEOUT_MS` | number | `5000` | Timeout for acquiring internal locks |
 | `WORKER_CLEANUP_INTERVAL_MS` | number | `60000` | Interval for removing inactive worker registrations |
 | `TCP_IDLE_TIMEOUT_MS` | number | `60000` | Slowloris mitigation: close a connection that starts a frame but makes no progress within this window. Idle connections with no partial frame are never affected. `0` disables |
@@ -139,7 +139,7 @@ Protects the server itself from misbehaving clients (per TCP connection or HTTP 
 
 ## Monitoring thresholds
 
-These control the real-time monitoring events (`queue:idle`, `queue:threshold`, `worker:overloaded`, `server:memory-warning`, `storage:size-warning`) delivered over WebSocket/SSE. See the [HTTP API events reference](/api/http/#all-events-60-total).
+These control the real-time monitoring events (`queue:idle`, `queue:threshold`, `worker:overloaded`, `server:memory-warning`, `storage:size-warning`) delivered over WebSocket/SSE. See the [HTTP API events reference](/api/http/#explicit-subscription-events-86).
 
 | Variable | Default | Description |
 |----------|---------|-------------|

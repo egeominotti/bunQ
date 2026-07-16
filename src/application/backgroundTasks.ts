@@ -237,10 +237,11 @@ export function recover(ctx: BackgroundContext): void {
 
   // === PHASE 1: Recover active jobs (were processing when server stopped) ===
   // These jobs are considered "stalled" and need to be retried or moved to DLQ
-  let activeOffset = 0;
-
   while (true) {
-    const activeJobs = ctx.storage.loadActiveJobs(RECOVERY_BATCH_SIZE, activeOffset);
+    // Every successfully handled row leaves state='active' (retry -> waiting, or
+    // delete -> DLQ/discard). Always read the first page: advancing OFFSET over
+    // this shrinking result set would skip up to half of the active rows.
+    const activeJobs = ctx.storage.loadActiveJobs(RECOVERY_BATCH_SIZE, 0);
     if (activeJobs.length === 0) break;
 
     for (const job of activeJobs) {
@@ -293,24 +294,22 @@ export function recover(ctx: BackgroundContext): void {
         ctx.storage.saveDlqEntry(entry);
         ctx.storage.deleteJob(job.id);
       } else {
-        // Retry: put back in queue with backoff (uses backoffConfig if present)
+        // Persist the retry here, but let Phase 2 be the single authoritative
+        // enqueue path. Enqueuing in both phases replaces the priority-queue entry
+        // by ID but increments queued/delayed counters twice.
         job.runAt = now + calculateBackoff(job);
-        shard.getQueue(job.queue).push(job);
-        const isDelayed = job.runAt > now;
-        shard.incrementQueued(job.id, isDelayed, job.createdAt, job.queue, job.runAt);
-        ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: job.queue });
         ctx.storage.updateForRetry(job);
       }
 
       ctx.registerQueueName(job.queue);
     }
 
-    activeOffset += activeJobs.length;
     if (activeJobs.length < RECOVERY_BATCH_SIZE) break;
   }
 
   // === PHASE 2: Load pending jobs ===
   let offset = 0;
+  const corruptPendingJobs: Job[] = [];
 
   // Load pending jobs in batches to avoid memory spikes
   while (true) {
@@ -325,7 +324,10 @@ export function recover(ctx: BackgroundContext): void {
       // Route the job to the DLQ rather than enqueuing it as ready (out-of-order
       // execution) or parking it in waitingDeps forever (unbounded leak).
       if (isCorruptDependsOn(job)) {
-        quarantineCorruptDependsOn(ctx, job);
+        // Keep the SQLite pending result set stable until OFFSET pagination has
+        // finished. Deleting this row now shifts a healthy row across the next
+        // page boundary and leaves it absent from the in-memory queue.
+        corruptPendingJobs.push(job);
         continue;
       }
 
@@ -373,6 +375,12 @@ export function recover(ctx: BackgroundContext): void {
 
     // If we got less than batch size, we're done
     if (jobs.length < RECOVERY_BATCH_SIZE) break;
+  }
+
+  // Quarantine only after the paginated scan so deletions cannot move page
+  // boundaries. loadDlq() below restores these entries into memory exactly once.
+  for (const job of corruptPendingJobs) {
+    quarantineCorruptDependsOn(ctx, job);
   }
 
   // Load DLQ entries

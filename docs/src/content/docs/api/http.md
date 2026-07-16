@@ -1,6 +1,6 @@
 ---
-title: "HTTP REST API Reference: 83 Endpoints, 60 Events"
-description: "Complete HTTP REST API reference for bunqueue on port 6790: 83 JSON endpoints, 60 real-time pub/sub events, WebSocket and SSE streams, Bearer auth."
+title: "HTTP REST API Reference: 83 Endpoints + Live Events"
+description: "Complete HTTP REST API reference for bunqueue on port 6790: 83 endpoints, WebSocket and SSE real-time events, Bearer auth, payloads, and examples."
 head:
   - tag: meta
     attrs:
@@ -14,7 +14,7 @@ head:
   <p class="bq-hero-sub">The bunqueue HTTP API runs on port <code>6790</code> by default, configurable via the <code>HTTP_PORT</code> environment variable. All request and response bodies use JSON (<code>Content-Type: application/json</code>) unless otherwise noted.</p>
 </div>
 
-**Response contract:** Every response includes an `ok` boolean field. Successful responses return `"ok": true` with operation-specific data. Failed responses return `"ok": false` with an `"error"` string describing the failure reason.
+**Response contract:** Unless an endpoint explicitly documents another media type or shape, JSON command responses include an `ok` boolean. Successful responses return `"ok": true` with operation-specific data; failures return `"ok": false` with an `"error"` string. `GET /queues/summary` is the intentional JSON exception: it returns the summary array directly. Health probe text, Prometheus output, SSE, and WebSocket frames use their documented formats.
 
 ```json
 // Success
@@ -912,7 +912,7 @@ GET /queues/summary
   {
     "name": "emails",
     "paused": false,
-    "counts": {"waiting": 125, "active": 5, "completed": 10234, "failed": 23, "delayed": 2}
+    "counts": {"waiting": 125, "prioritized": 7, "active": 5, "completed": 10234, "failed": 23, "delayed": 2}
   }
 ]
 ```
@@ -971,7 +971,7 @@ curl "http://localhost:6790/queues/emails/jobs/list?status=failed,completed"
 }
 ```
 
-Jobs are returned in priority order (highest first).
+Jobs are ordered by `createdAt` ascending (oldest first), with the job ID as a deterministic tie-breaker. State filtering happens before `offset` and `limit`, so pages are stable even when `createdAt` values match.
 
 ---
 
@@ -991,7 +991,7 @@ GET /queues/:queue/counts
 ```
 
 :::tip
-For real-time count updates without polling, subscribe to `queue:counts` via [WebSocket pub/sub](#websocket-pubsub). This event fires on every job state change.
+For real-time count updates without polling, subscribe to `queue:counts` via [WebSocket pub/sub](#websocket-pubsub). A count refresh is scheduled after job lifecycle events; updates for the same queue within 10ms are coalesced into one latest-value event.
 :::
 
 ---
@@ -1607,7 +1607,7 @@ GET /health
   "ok": true,
   "status": "healthy",
   "uptime": 86400,
-  "version": "2.8.30",
+  "version": "x.y.z",
   "queues": {"waiting": 150, "active": 12, "delayed": 30, "completed": 50000, "dlq": 3},
   "connections": {"tcp": 8, "ws": 4, "sse": 2},
   "memory": {"heapUsed": 45, "heapTotal": 64, "rss": 82}
@@ -1808,7 +1808,7 @@ ws://localhost:6790/ws
 ws://localhost:6790/ws/queues/:queue
 ```
 
-WebSocket supports **pub/sub subscriptions** with **60 event types** across 10 categories. Clients subscribe to specific events and receive only matching data, **zero polling needed**.
+WebSocket supports **86 explicit event names** across 19 namespaces, plus namespace and global wildcards. Clients subscribe to specific events and receive only matching data, **zero polling needed**.
 
 #### Event Format
 
@@ -1859,21 +1859,32 @@ After connecting, send a `Subscribe` command to start receiving events:
 
 | Pattern | Matches |
 |---|---|
-| `*` | All 60 events |
-| `job:*` | All 15 job events |
+| `*` | Every emitted event |
+| `job:*` | All 21 explicit job events, plus compatibility emissions described below |
 | `queue:*` | All 10 queue events, including `queue:counts` |
 | `flow:*` | Both flow events |
-| `worker:*` | All 5 worker events |
-| `dlq:*` | All 4 DLQ events |
+| `worker:*` | All 7 worker events |
+| `dlq:*` | All 6 DLQ events |
 | `cron:*` | All 6 cron events |
 | `stats:*` | `stats:snapshot` |
 | `health:*` | `health:status` |
-| `storage:*` | `storage:status`, `storage:size-warning` |
+| `storage:*` | All 5 storage events |
 | `config:*` | Both config events |
-| `ratelimit:*` | All rate limit events |
-| `concurrency:*` | All concurrency events |
-| `webhook:*` | All 4 webhook events |
-| `server:*` | `server:started`, `server:shutdown`, `server:memory-warning` |
+| `ratelimit:*` | All 4 rate-limit events |
+| `concurrency:*` | All 3 concurrency events |
+| `webhook:*` | All 6 webhook events |
+| `batch:*` | Both batch events |
+| `client:*` | Both client events |
+| `auth:*` | `auth:failed` |
+| `cleanup:*` | Both cleanup events |
+| `server:*` | All 4 server events |
+| `memory:*` | `memory:compacted` |
+
+`job:*` and `*` may also receive `job:waiting` and `job:duplicated` from the
+legacy job-event bridge. They are compatibility emission names, not entries in
+the explicit subscription allow-list, so subscribing to either exact name is
+currently rejected. Use `job:deduplicated` for an exact deduplication
+subscription.
 
 #### Legacy Mode
 
@@ -1981,9 +1992,14 @@ function pauseQueue(queue) {
 }
 ```
 
-### All Events (60 total)
+### Explicit Subscription Events (86)
 
-#### Job Lifecycle (15 events)
+The following names can be supplied directly in a WebSocket `Subscribe`
+command. Payload fields listed with `?` are present only on the path that has
+that information; the outer event envelope always supplies `event`, `ts`, and
+`data`.
+
+#### Job Lifecycle (21 events)
 
 | Event | Payload | Description |
 |---|---|---|
@@ -1991,23 +2007,29 @@ function pauseQueue(queue) {
 | `job:active` | `queue, jobId` | Worker picked up job |
 | `job:completed` | `queue, jobId` | Job finished successfully |
 | `job:failed` | `queue, jobId, error` | Job errored |
-| `job:removed` | `queue, jobId` | Job cancelled/deleted |
+| `job:removed` | `queue, jobId, prev?` | Job cancelled/deleted |
 | `job:promoted` | `jobId` | Delayed job moved to waiting |
 | `job:progress` | `queue, jobId, progress` | Worker reported progress (0-100) |
 | `job:delayed` | `queue, jobId, delay` | Job moved to delayed state |
-| `job:stalled` | `queue, jobId` | Stall detected (no heartbeat) |
-| `job:retried` | `queue, jobId` | Failed job retried |
+| `job:stalled` | `queue, jobId, stallCount?, action?` | Stall detected (no heartbeat) |
+| `job:retried` | `queue, jobId, prev?` | Failed job retried |
 | `job:discarded` | `jobId` | Job sent to DLQ via discard |
 | `job:priority-changed` | `jobId, newPriority` | Priority updated |
 | `job:data-updated` | `jobId` | Job payload modified |
 | `job:delay-changed` | `jobId, newDelay` | Delay modified |
+| `job:timeout` | `queue, jobId, timeout` | Active job exceeded its processing timeout |
+| `job:lock-expired` | `queue, jobId, renewalCount` | Ownership lock expired |
+| `job:deduplicated` | `queue, jobId, strategy` | Push reused an existing deduplicated job |
+| `job:waiting-children` | `queue, jobId, dependsOn?` | Job is waiting for dependencies |
+| `job:dependencies-resolved` | `queue, jobId` | All dependencies became complete |
+| `job:moved-to-delayed` | `jobId, delay` | Active job was explicitly moved to delayed |
 | `job:expired` | `queue, jobId, ttl, age` | Job TTL expired (distinguished from fail) |
 
 #### Queue (10 events)
 
 | Event | Payload | Description |
 |---|---|---|
-| `queue:counts` | `queue, waiting, active, completed, failed, delayed` | **Fired on every job state change.** Eliminates N+1 polling. |
+| `queue:counts` | `queue, waiting, prioritized, active, completed, failed, delayed` | Latest counts after lifecycle activity; updates within 10ms are coalesced. |
 | `queue:paused` | `queue` | Queue paused |
 | `queue:resumed` | `queue` | Queue resumed |
 | `queue:drained` | `queue, count` | All waiting/delayed jobs removed |
@@ -2025,14 +2047,16 @@ function pauseQueue(queue) {
 | `flow:completed` | `parentJobId, queue, childrenCount` | All children of a flow completed successfully |
 | `flow:failed` | `parentJobId, failedChildId, queue, error` | A child in a flow failed permanently (moved to DLQ) |
 
-#### DLQ (4 events)
+#### DLQ (6 events)
 
 | Event | Payload | Description |
 |---|---|---|
 | `dlq:added` | `queue, jobId, reason` | Job moved to DLQ |
-| `dlq:retried` | `queue, jobId` | Single DLQ entry retried |
+| `dlq:retried` | `queue, jobId, count` | Single DLQ entry retried |
 | `dlq:retry-all` | `queue, count` | All DLQ entries retried |
 | `dlq:purged` | `queue, count` | DLQ emptied |
+| `dlq:auto-retried` | `queue, count` | Maintenance retried eligible DLQ entries |
+| `dlq:expired` | `queue, count` | Maintenance purged expired DLQ entries |
 
 #### Cron (6 events)
 
@@ -2045,46 +2069,69 @@ function pauseQueue(queue) {
 | `cron:missed` | `name, queue, error` | Cron missed execution window |
 | `cron:skipped` | `name, queue, reason` | Cron skipped due to overlap (previous instance still within interval) |
 
-#### Worker (5 events)
+#### Worker (7 events)
 
 | Event | Payload | Description |
 |---|---|---|
-| `worker:connected` | `workerId, name, queues` | Worker registered |
-| `worker:disconnected` | `workerId` | Worker gone |
+| `worker:connected` | `workerId, name, queues, hostname?, pid?` | Worker registered |
+| `worker:disconnected` | `workerId, name?, clientId?` | Worker gone |
 | `worker:heartbeat` | `workerId` | Worker alive signal |
+| `worker:idle` | `workerId, processedJobs` | Worker reached zero active jobs |
+| `worker:removed-stale` | `workerId, name` | Stale registration removed |
 | `worker:overloaded` | `workerId, name, activeJobs, concurrency, overloadedSeconds` | Worker at max concurrency for N seconds. Configure via `WORKER_OVERLOAD_THRESHOLD_MS` (default: 30000). |
 | `worker:error` | `workerId, name, failedJobs, processedJobs, failureRate` | Worker failure rate is high (emitted at thresholds: 5, 10, 25, 50, 100 failures) |
 
-#### Rate Limiting & Concurrency (5 events)
+#### Rate Limiting & Concurrency (7 events)
 
 | Event | Payload | Description |
 |---|---|---|
 | `ratelimit:set` | `queue, max` | Rate limit configured |
 | `ratelimit:cleared` | `queue` | Rate limit removed |
-| `ratelimit:hit` | `queue, jobId` | Job throttled by rate limit |
+| `ratelimit:hit` | `clientId` | TCP/HTTP client exceeded the protocol request limit |
+| `ratelimit:rejected` | `queue` | Pull found eligible work but the queue token bucket rejected it |
 | `concurrency:set` | `queue, concurrency` | Concurrency limit configured |
 | `concurrency:cleared` | `queue` | Concurrency limit removed |
+| `concurrency:rejected` | `queue` | Pull found eligible work but no queue concurrency slot was available |
 
-#### Webhook (4 events)
+#### Webhook (6 events)
 
 | Event | Payload | Description |
 |---|---|---|
 | `webhook:added` | `id, url, events` | Webhook created |
 | `webhook:removed` | `id` | Webhook deleted |
-| `webhook:fired` | `id, event, statusCode` | Webhook delivered |
-| `webhook:failed` | `id, event, error` | Webhook delivery failed |
+| `webhook:fired` | `webhookId, url, event` | Webhook delivered |
+| `webhook:failed` | `webhookId, url, event, error` | Webhook delivery failed |
+| `webhook:enabled` | `webhookId` | Webhook enabled without recreating it |
+| `webhook:disabled` | `webhookId` | Webhook disabled without deleting it |
 
-#### System (7 events)
+#### Batch, Client, Auth & Cleanup (7 events)
+
+| Event | Payload | Description |
+|---|---|---|
+| `batch:pushed` | `queue, total, inserted, duplicates` | Multi-job push inserted at least one job |
+| `batch:pulled` | `queue, count` | Batch pull delivered more than one job |
+| `client:connected` | `clientId, transport` | TCP client connected |
+| `client:disconnected` | `clientId, transport` | TCP client disconnected |
+| `auth:failed` | `clientId?` or `transport` | TCP command or HTTP authentication failed |
+| `cleanup:orphans-removed` | `count` | Orphaned processing entries removed |
+| `cleanup:stale-deps-removed` | `count` | Stale dependency entries removed |
+
+#### Periodic, Storage, Server & Memory (12 events)
 
 | Event | Payload | Description |
 |---|---|---|
 | `stats:snapshot` | `waiting, active, completed, dlq, totalPushed, totalCompleted, totalFailed, pushPerSec, pullPerSec, uptime, queues, workers, cronJobs` | Every 5s |
 | `health:status` | `ok, uptime, memory: { rss, heapUsed }, connections` | Every 10s |
 | `storage:status` | `collections, diskFull` | Every 30s |
-| `server:started` | `version, startedAt` | Server boot |
-| `server:shutdown` | `reason` | Graceful shutdown |
-| `server:memory-warning` | `heapUsedMB, thresholdMB, rssMB` | Heap exceeds threshold. Configure via `MEMORY_WARNING_MB` (default: 0 = disabled). |
+| `storage:backup-started` | `bucket` | S3 backup started |
+| `storage:backup-completed` | `bucket, key` | S3 backup completed |
+| `storage:backup-failed` | `bucket, error` | S3 backup failed |
 | `storage:size-warning` | `sizeMB, thresholdMB` | SQLite DB exceeds threshold. Configure via `STORAGE_WARNING_MB` (default: 0 = disabled). |
+| `server:started` | `tcpPort, httpPort, shards` | Server listeners started |
+| `server:shutdown` | `signal` | Graceful shutdown began |
+| `server:recovered` | `queues, jobs` | Persistent queues and jobs recovered on startup |
+| `server:memory-warning` | `heapUsedMB, thresholdMB, rssMB` | Heap exceeds threshold. Configure via `MEMORY_WARNING_MB` (default: 0 = disabled). |
+| `memory:compacted` | _(empty object)_ | Manual memory compaction completed |
 
 #### Config (2 events)
 
@@ -2095,7 +2142,7 @@ function pauseQueue(queue) {
 
 ### The `queue:counts` Event
 
-This is the most impactful event for dashboards. It fires automatically on **every job state change** and provides the current counts for the affected queue:
+This is the most impactful event for dashboards. Job lifecycle activity schedules a refresh for the affected queue; refreshes within a 10ms window are coalesced, and the emitted payload contains the latest counts:
 
 ```json
 {
@@ -2104,6 +2151,7 @@ This is the most impactful event for dashboards. It fires automatically on **eve
   "data": {
     "queue": "payments",
     "waiting": 15,
+    "prioritized": 4,
     "active": 2,
     "completed": 100,
     "failed": 0,
@@ -2257,7 +2305,7 @@ This is the most impactful event for dashboards. It fires automatically on **eve
 |---|---|---|
 | SSE | `/events` | All events (legacy format) |
 | SSE | `/events/queues/:q` | Queue-filtered events |
-| WebSocket | `/ws` | Pub/sub + commands (60 events, wildcards) |
+| WebSocket | `/ws` | Pub/sub + commands (86 explicit events, wildcards) |
 | WebSocket | `/ws/queues/:q` | Queue-filtered pub/sub |
 
 :::tip[Related]

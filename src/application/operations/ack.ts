@@ -90,7 +90,11 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
 
   const idx = shardIndex(job.queue);
   await withWriteLock(ctx.shardLocks[idx], () => {
-    ctx.shards[idx].releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    const shard = ctx.shards[idx];
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    // Releasing either queue concurrency or an active FIFO group can make a
+    // parked job eligible. Wake only waiters for this queue.
+    shard.notify(job.queue);
   });
 
   // Release customId so it can be reused
@@ -260,6 +264,10 @@ export async function failJob(
     } else {
       moveFailedJobToDlq(job, jobId, error, shard, ctx);
     }
+
+    // Terminal failure and retry both release queue concurrency (and possibly
+    // an active FIFO group), so another job may now be eligible.
+    shard.notify(job.queue);
   });
 
   ctx.broadcast({
@@ -325,6 +333,9 @@ export async function ackJobBatch(jobIds: JobId[], ctx: AckContext): Promise<voi
   // Step 3-4: Group by queue shard and release
   const byQueueShard = groupByQueueShard(extractedJobs);
   await releaseResources(byQueueShard, batchCtx);
+  for (const [idx, jobs] of byQueueShard) {
+    notifyReleasedQueues(ctx.shards[idx], jobs);
+  }
 
   // Step 5: Finalize
   finalizeBatchAck(extractedJobs, ctx, false);
@@ -359,7 +370,19 @@ export async function ackJobBatchWithResults(
   // Step 3-4: Group by queue shard and release
   const byQueueShard = groupByQueueShard(extractedJobs);
   await releaseResources(byQueueShard, batchCtx);
+  for (const [idx, jobs] of byQueueShard) {
+    notifyReleasedQueues(ctx.shards[idx], jobs);
+  }
 
   // Step 5: Finalize with results
   finalizeBatchAck(extractedJobs, ctx, true);
+}
+
+/** Wake queue-scoped waiters for concurrency/group slots released by a batch. */
+function notifyReleasedQueues(shard: Shard, jobs: Job[]): void {
+  const releasedByQueue = new Map<string, number>();
+  for (const job of jobs) {
+    releasedByQueue.set(job.queue, (releasedByQueue.get(job.queue) ?? 0) + 1);
+  }
+  for (const [queue, count] of releasedByQueue) shard.notifyBatch(queue, count);
 }

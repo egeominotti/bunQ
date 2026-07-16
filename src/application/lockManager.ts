@@ -216,7 +216,7 @@ function requeueExpiredJob(opts: RequeueOptions): void {
   const isDelayed = job.runAt > now;
   shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
   ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
-  shard.notify();
+  shard.notify(job.queue);
 
   ctx.eventsManager.broadcast({
     eventType: EventType.Stalled,

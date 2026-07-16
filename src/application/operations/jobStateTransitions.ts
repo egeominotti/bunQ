@@ -41,7 +41,7 @@ export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext):
     shard.getQueue(job.queue).push(job);
     shard.incrementQueued(jobId, false, job.createdAt, job.queue, job.runAt);
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
-    shard.notify();
+    shard.notify(job.queue);
   });
 
   ctx.eventsManager.broadcast({

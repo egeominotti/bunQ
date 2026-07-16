@@ -1584,7 +1584,7 @@ export class QueueManager {
         queue.push(parentJob);
         shard.incrementQueued(parentId, false, parentJob.createdAt, parentJob.queue, now);
         this.jobIndex.set(parentId, { type: 'queue', shardIdx: idx, queueName: parentJob.queue });
-        shard.notify();
+        shard.notify(parentJob.queue);
         promoted = true;
       }
     });
@@ -1711,7 +1711,7 @@ export class QueueManager {
         shard.getQueue(parentJob.queue).push(parentJob);
         shard.incrementQueued(parentId, false, parentJob.createdAt, parentJob.queue, now);
         this.jobIndex.set(parentId, { type: 'queue', shardIdx: idx, queueName: parentJob.queue });
-        shard.notify();
+        shard.notify(parentJob.queue);
         promoted = true;
       }
     });
@@ -1807,7 +1807,14 @@ export class QueueManager {
   getQueuesSummary(): Array<{
     name: string;
     paused: boolean;
-    counts: { waiting: number; active: number; completed: number; failed: number; delayed: number };
+    counts: {
+      waiting: number;
+      prioritized: number;
+      active: number;
+      completed: number;
+      failed: number;
+      delayed: number;
+    };
   }> {
     const ctx = this.contextFactory.getStatsContext();
     const queues = this.listQueues();
@@ -1816,19 +1823,23 @@ export class QueueManager {
       paused: boolean;
       counts: {
         waiting: number;
+        prioritized: number;
         active: number;
         completed: number;
         failed: number;
         delayed: number;
       };
     }> = [];
+    const countsByQueue = statsMgr.getAllQueueJobCounts(queues, ctx);
     for (const name of queues) {
-      const c = statsMgr.getQueueJobCounts(name, ctx);
+      const c = countsByQueue.get(name);
+      if (!c) continue;
       result.push({
         name,
         paused: this.isPaused(name),
         counts: {
           waiting: c.waiting,
+          prioritized: c.prioritized,
           active: c.active,
           completed: c.completed,
           failed: c.failed,
@@ -1837,6 +1848,17 @@ export class QueueManager {
       });
     }
     return result;
+  }
+
+  /** Get counts for every registered queue with one global aggregation pass. */
+  getAllQueueJobCounts() {
+    return this.getQueueJobCountsBatch(this.queueNamesCache);
+  }
+
+  /** Aggregate a selected group of queues without repeating global scans. */
+  getQueueJobCountsBatch(queueNames: Iterable<string>) {
+    const ctx = this.contextFactory.getStatsContext();
+    return statsMgr.getAllQueueJobCounts(queueNames, ctx);
   }
 
   /** Get job counts for a specific queue */

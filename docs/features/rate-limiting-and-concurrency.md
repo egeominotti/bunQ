@@ -123,14 +123,15 @@ Persisted in the `queue_state` SQLite table (`src/infrastructure/persistence/sch
 
 ### Per-queue server limiting (pull path)
 
-`tryPullFromShard` (`src/application/operations/pull.ts:254`) runs entirely inside the shard write lock:
+`tryPullFromShard` (`src/application/operations/pull.ts`) runs entirely inside the shard write lock:
 
-1. If `state.paused` → return `null` (no job). (`pull.ts:259`)
-2. `shard.tryAcquireRateLimit(queue)` — token bucket. On miss, emit `ratelimit:rejected` and return `null` so the puller waits. (`pull.ts:263`)
-3. `shard.tryAcquireConcurrency(queue)` — atomically increments the active slot count. On miss, emit `concurrency:rejected` and return `null`. (`pull.ts:268`)
-4. Loop `tryDequeueNextJob`: on `'job'` keep the acquired concurrency slot and return the job; on `'stop'` call `releaseConcurrency` (no job taken) and return `null`; on `'skip'` continue the loop reusing the already-acquired slot. (`pull.ts:273-284`)
+1. If `state.paused`, return no job.
+2. Scan priority-ordered entries, temporarily parking delayed jobs and jobs whose FIFO group is active; expired jobs are removed. This proves an eligible job exists before consuming capacity.
+3. `shard.tryAcquireConcurrency(queue)` atomically reserves the active slot. On miss, emit `concurrency:rejected` and return no job.
+4. `shard.tryAcquireRateLimit(queue)` consumes the token only after the concurrency check; if it rejects, release the just-acquired concurrency slot because rate-limit tokens have no rollback operation.
+5. Pop the selected job and keep its concurrency slot for the entire active lifetime. Restore every parked queue entry in `finally` without touching logical counters or indexes.
 
-Batch pull (`tryPullBatchFromShard`, `pull.ts:343`) acquires **one rate token + one concurrency slot per job** in the loop and releases the slot when a dequeue yields `'stop'`/`'skip'` (`pull.ts:358-375`). The concurrency slot taken at pull is released only when the job exits the active state — ack, fail-to-DLQ, stall handling, lock expiry, cancel, and the claim ops `moveActiveToWait`/`moveToWaitingChildren`/`moveJobToDelayed`/`discardJob` — all routed through `shard.releaseJobResources` → `releaseConcurrency` (`src/domain/queue/shard.ts:216`). A requeue (push-back after a failed `moveToProcessing`) also releases the slot before re-pushing (`pull.ts:186`).
+Batch pull repeats the same selection and acquires **one rate token + one concurrency slot per delivered job**. The concurrency slot is released only when the job exits the active state — ack, fail-to-DLQ, stall handling, lock expiry, and the claim operations — all routed through `shard.releaseJobResources` → `releaseConcurrency`. Each release also notifies the same queue, so a long-poll waiter blocked by the cap retries immediately; another queue sharing the shard cannot consume that wake-up.
 
 **Token bucket math** (`RateLimiter.refill`, `src/domain/types/queue.ts:50`): capacity = refillRate = `limit`. On each `tryAcquire`, tokens are topped up by `elapsedSeconds * limit` (capped at `limit`), then one token is consumed if `tokens >= 1`. So `limit` is **jobs/second**, allowing a burst up to `limit` then a sustained `limit`/sec. The bucket is consumed at pull time, not at completion.
 

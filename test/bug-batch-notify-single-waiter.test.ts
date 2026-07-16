@@ -5,8 +5,8 @@
  * This means only 1 of M waiting workers wakes up immediately.
  * The other M-1 workers stay blocked until their timeout expires.
  *
- * Additionally, pendingNotification is a boolean (not a counter),
- * so multiple pushes with no waiters only remember 1 notification.
+ * Notifications without active waiters intentionally coalesce: jobs already
+ * present in the queue are observed by pull before it starts waiting.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
@@ -65,7 +65,7 @@ describe('Bug: batch push only notifies 1 waiter', () => {
     }
   });
 
-  test('multiple single pushes with no waiters should remember all notifications', async () => {
+  test('multiple single pushes with no waiters remain immediately consumable', async () => {
     const PUSH_COUNT = 5;
 
     // Push 5 jobs while no workers are waiting
@@ -76,7 +76,7 @@ describe('Bug: batch push only notifies 1 waiter', () => {
     // Now start 5 workers — each should return immediately (not wait for timeout)
     const pullPromises = Array.from({ length: PUSH_COUNT }, async (_, i) => {
       const start = Date.now();
-      // timeout=500ms, but should return immediately if notification is pending
+      // timeout=500ms, but the queued job is observed before waiting
       const job = await qm.pull(QUEUE, 500);
       const duration = Date.now() - start;
       return { worker: i, job, duration };
@@ -125,9 +125,7 @@ describe('Bug: batch push only notifies 1 waiter', () => {
     expect(fastWaiters.length).toBe(WAITER_COUNT);
   });
 
-  test('pendingNotification as boolean loses notifications', async () => {
-    // Direct test: push multiple notifications with no waiters,
-    // then check that all are consumed
+  test('notifications without waiters coalesce into one retry hint', async () => {
     const { Shard } = await import('../src/domain/queue/shard');
     const shard = new Shard();
 
@@ -138,18 +136,12 @@ describe('Bug: batch push only notifies 1 waiter', () => {
       shard.notify();
     }
 
-    // Now start 3 waiters — they should all return immediately
-    const results: number[] = [];
-    for (let i = 0; i < NOTIFICATION_COUNT; i++) {
-      const start = Date.now();
-      await shard.waitForJob(1000);
-      results.push(Date.now() - start);
-    }
+    const firstStart = Date.now();
+    await shard.waitForJob(100);
+    expect(Date.now() - firstStart).toBeLessThan(50);
 
-    // All 3 should resolve instantly (< 50ms), not wait for timeout
-    // With the bug: only the first resolves instantly, others wait 1000ms
-    for (let i = 0; i < NOTIFICATION_COUNT; i++) {
-      expect(results[i]).toBeLessThan(50);
-    }
+    const secondStart = Date.now();
+    await shard.waitForJob(30);
+    expect(Date.now() - secondStart).toBeGreaterThanOrEqual(20);
   });
 });

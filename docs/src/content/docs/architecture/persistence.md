@@ -80,6 +80,8 @@ head:
     <span class="bq-diag-group-label">indexes</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">(queue, state) <i>PULL queries</i></div>
+      <div class="bq-diag-cell">(queue, created_at, id) <i>stable unfiltered pagination</i></div>
+      <div class="bq-diag-cell">(queue, state, created_at, id) <i>stable state pagination</i></div>
       <div class="bq-diag-cell">(run_at) <i>delayed job scheduler</i></div>
       <div class="bq-diag-cell">(queue, unique_key) <i>deduplication</i></div>
       <div class="bq-diag-cell">(custom_id) <i>idempotency</i></div>
@@ -104,7 +106,7 @@ head:
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Startup recovery</b><span>crash recovery on boot, batches of 10,000 rows</span></div>
-  <div class="bq-diag-layer bq-diag-accent">1. Recover active jobs <i>each counts as one stall: stallCount++ and attempts++; below maxStalls it is requeued with backoff, at maxStalls it moves to the DLQ. Cron-spawned preventOverlap jobs are dropped, the scheduler recreates them</i></div>
+  <div class="bq-diag-layer bq-diag-accent">1. Recover active jobs <i>read repeated 10k batches from offset zero because each handled row leaves the active result set; each counts as one stall: stallCount++ and attempts++; below maxStalls it is requeued with backoff, at maxStalls it moves to the DLQ. Cron-spawned preventOverlap jobs are dropped, the scheduler recreates them</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">2. Load pending jobs <i>state waiting/delayed: jobs with unmet dependencies go to waitingDeps, the rest to their shard queue; jobIndex, customId and uniqueKey mappings restored</i></div>
   <div class="bq-diag-arrow">↓</div>

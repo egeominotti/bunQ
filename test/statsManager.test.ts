@@ -99,6 +99,16 @@ describe('StatsManager', () => {
       expect(stats.delayed).toBe(1);
     });
 
+    test('should not double-count a delayed job after it matures', async () => {
+      await qm.push('matured-stats', { data: { id: 1 }, delay: 20 });
+      await Bun.sleep(40);
+
+      const stats = qm.getStats();
+      expect(stats.waiting).toBe(1);
+      expect(stats.delayed).toBe(0);
+      expect(stats.waiting + stats.prioritized + stats.delayed).toBe(1);
+    });
+
     test('should track DLQ count after max retries exceeded', async () => {
       await qm.push('test-queue', { data: { id: 1 }, maxAttempts: 1 });
       const job = await qm.pull('test-queue');
@@ -297,7 +307,7 @@ describe('StatsManager', () => {
 
       // Pull 2
       const pulled1 = await qm.pull('test-queue');
-      const pulled2 = await qm.pull('test-queue');
+      await qm.pull('test-queue');
 
       mem = qm.getMemoryStats();
       expect(mem.processingTotal).toBe(2);

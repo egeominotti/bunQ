@@ -1,6 +1,6 @@
 # Data Structures (PriorityQueue, heaps, maps)
 
-> **Category:** Engine · **Source:** `src/domain/queue/priorityQueue.ts`, `src/domain/queue/temporalManager.ts`, `src/shared/minHeap.ts`, `src/shared/skipList.ts`, `src/shared/lruMap.ts`, `src/shared/lruSet.ts`, `src/shared/boundedMap.ts`, `src/shared/boundedSet.ts`, `src/shared/ttlMap.ts`, `src/shared/histogram.ts`, `src/shared/lru.ts`
+> **Category:** Engine · **Source:** `src/domain/queue/priorityQueue.ts`, `src/domain/queue/temporalManager.ts`, `src/domain/queue/temporalIndex.ts`, `src/shared/minHeap.ts`, `src/shared/skipList.ts`, `src/shared/lruMap.ts`, `src/shared/lruSet.ts`, `src/shared/boundedMap.ts`, `src/shared/boundedSet.ts`, `src/shared/ttlMap.ts`, `src/shared/histogram.ts`, `src/shared/lru.ts`
 
 ## Purpose
 
@@ -10,7 +10,8 @@ This module provides the in-memory data structures the engine is built on: an in
 
 Owns:
 - `IndexedPriorityQueue` — the per-(shard, queue) ready-job ordering and O(1) lookup-by-id index.
-- `TemporalManager` — the `createdAt`-ordered cleanup index (skip list) and the `runAt`-ordered delayed-job tracker (min-heap + sets).
+- `TemporalManager` — the `createdAt`-ordered cleanup index and the `runAt`-ordered delayed-job tracker (min-heap + sets).
+- `TemporalIndex` — one skip list per queue plus a reverse job-ID map for queue-local range scans and direct removal.
 - `MinHeap<T>` — generic 4-ary min-heap used by `TemporalManager`, `TTLMap`, and `CronScheduler`.
 - `SkipList<T>` — generic probabilistic sorted multiset/set with range queries.
 - `LRUMap` / `LRUSet` / `BoundedMap` / `BoundedSet` / `TTLMap` — eviction-bounded containers.
@@ -26,7 +27,7 @@ Does NOT own:
 
 Internal:
 - `IndexedPriorityQueue` and `TemporalManager` depend only on `src/domain/types/job` (`Job`, `JobId`).
-- `TemporalManager` depends on `MinHeap` (`src/shared/minHeap`) and `SkipList` (`src/shared/skipList`).
+- `TemporalManager` depends on `MinHeap` and `TemporalIndex`; `TemporalIndex` depends on `SkipList`.
 - `TTLMap` depends on `MinHeap`.
 - `BoundedMap` reuses the `MapLike` interface from `lruMap`; `BoundedSet` reuses `SetLike` from `lruSet`.
 - `src/shared/lru.ts` is the barrel re-exporting `LRUMap`, `LRUSet`, `BoundedMap`, `BoundedSet`, `TTLMap`.
@@ -58,6 +59,13 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - `refreshDelayed(now: number): number` — O(k), returns count that became ready
 - `get indexSize`, `get delayedCount`, `clearDelayed()`, `clear()`, `getSizes()`
 - Exported type: `interface TemporalEntry { createdAt: number; jobId: JobId; queue: string }`
+
+### `TemporalIndex` (`src/domain/queue/temporalIndex.ts`)
+- `add(createdAt, jobId, queue): void`
+- `getOldJobs(queue, threshold, limit): Array<{ jobId, createdAt }>` — O(log q + k), where `q` is that queue's index size
+- `remove(jobId): void` — reverse lookup plus O(log q) skip-list deletion
+- `clearQueue(queue): void`, `cleanOrphaned(validJobIds): number`, `clear(): void`
+- `get size: number`
 
 ### `MinHeap<T>` (`src/shared/minHeap.ts`)
 - `constructor(compare: (a: T, b: T) => number)`
@@ -109,10 +117,10 @@ Each `push`/`updatePriority`/`updateRunAt` assigns a monotonically increasing `b
 
 One `IndexedPriorityQueue` is created lazily per queue name inside a shard (`shard.ts:97`-`:100`); `push`/`pop`/`find`/`remove` are driven by `src/application/operations/*` (e.g. `push.ts:208`, `ack.ts:235`).
 
-### Temporal index & delayed refresh (`temporalManager.ts`)
-- The cleanup index is a `SkipList<TemporalEntry>` with a **total-order** comparator `createdAt → jobId` (`:46`). The `jobId` tie-break is load-bearing: `addBulk` captures `now` once, so many entries share one `createdAt`; without the tie-break, `SkipList.insert`'s duplicate scan degrades to O(n) (→ O(n²) per batch) and `delete` would remove the wrong same-`createdAt` node. Equality for dedup is still by `jobId` (`:50`).
-- `getOldJobs` (`:76`) walks `values()` in order, stops once `createdAt > threshold`, filters by `queue`, caps at `limit`. Used by clean (`queueControl.ts:109`).
-- Delayed jobs are tracked in three structures kept in sync: `delayedJobIds: Set`, `delayedHeap: MinHeap<DelayedEntry>` (by `runAt`), and `delayedRunAt: Map<JobId, number>` (current `runAt`). `refreshDelayed(now)` (`:152`) pops the heap while `top.runAt <= now`, and for each popped entry checks `delayedRunAt` to detect staleness (job removed → `undefined`; `runAt` changed → mismatch) before counting it ready. `removeDelayed` (`:138`) is lazy: it clears the set/map but leaves the heap entry for `refreshDelayed` to discard.
+### Temporal index & delayed refresh
+- `TemporalIndex` owns a `SkipList<TemporalEntry>` per queue, ordered by the total key `createdAt → jobId`. A reverse `Map<JobId, TemporalEntry[]>` locates removals without scanning unrelated queues. `getOldJobs` starts directly in the requested queue's list and stops at the age threshold, preserving O(log q + k) multi-queue cleanup.
+- Delayed jobs are tracked in three structures kept in sync: `delayedJobIds: Set`, `delayedHeap: MinHeap<DelayedEntry>` (by `runAt`), and `delayedRunAt: Map<JobId, number>` (current `runAt`). `refreshDelayed(now)` pops due entries and verifies `delayedRunAt` to reject stale removals or old deadlines.
+- Delayed removal remains lazy, but `maybeCompactDelayedHeap` bounds retained stale entries. It clears immediately when no delayed jobs remain; otherwise, once at least 256 entries are stale and stale entries are at least as numerous as live entries, it rebuilds in O(n) with `MinHeap.buildFrom()`.
 
 ### Heaps
 `MinHeap` and `IndexedPriorityQueue` are both 4-ary (`D = 4`): parent at `floor((idx-1)/4)`, children at `4*idx+1 .. 4*idx+4`. 4-ary is chosen for cache locality (children contiguous, fewer levels). `bubbleDown` scans up to 4 children sequentially picking the smallest (`minHeap.ts:114`). `MinHeap` backs `TemporalManager.delayedHeap`, `TTLMap.expiryHeap` (`ttlMap.ts:42`), and `CronScheduler.cronHeap` (`cronScheduler.ts:51`).
@@ -136,10 +144,9 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
 
 - **Stale heap entries (priority queue):** `remove`/`update` invalidate via generation rather than splicing, so the heap can grow beyond `size`. If `compact()` is never called the heap leaks memory; background cleanup/stats call `needsCompaction(0.2)`/`(0.1)` then `compact()` to bound it.
 - **Generation overflow:** uses `bigint`, so it cannot overflow even at sustained extreme throughput.
-- **`TemporalManager.clear()` (`:190`) uses `removeAll(() => true)`** with the comment "SkipList doesn't have a clear method" — but `SkipList.clear()` exists (`skipList.ts:317`). Functionally correct (both empty the list), but the O(n) `removeAll` is slower than `clear()`'s O(1) reset; a known minor inefficiency/stale comment.
-- **Delayed-job staleness:** `removeDelayed`/`updateRunAt` leave dead `DelayedEntry` records in `delayedHeap`; they are discarded lazily in `refreshDelayed` by comparing against `delayedRunAt`. A job whose `runAt` is updated keeps the new value authoritative; the old heap entry is ignored.
-- **Skip-list duplicate handling:** without an `equals` fn, equal-comparator values form a multiset (multiple entries allowed). `TemporalManager` supplies `equals` by `jobId` so re-inserting the same job is a no-op (`insert` returns `false`).
-- **`deleteWhere`/`removeAll`/`removeWhere` are O(n):** `removeFromIndex` calls `deleteWhere` (`temporalManager.ts:98`), linear in index size; acceptable because it is off the hot path.
+- **Delayed-job staleness:** dead `DelayedEntry` records are rejected against `delayedRunAt` and periodically rebuilt; heap memory is therefore proportional to live delayed work plus a bounded stale threshold, not lifetime churn.
+- **Same job ID at multiple timestamps:** the reverse map stores an entry array. `remove(jobId)` removes its earliest temporal entry, preserving the previous one-at-a-time semantics when tests or recovery insert multiple timestamps for one ID.
+- **Queue-local clear:** `clearQueue` detaches reverse-map entries while deleting the queue skip list; `cleanOrphaned` removes every entry for IDs absent from the supplied valid set.
 - **`TTLMap` interval leak:** the cleanup `setInterval` keeps the instance alive; failing to call `stop()` leaks memory (documented invariant at the top of `ttlMap.ts`).
 - **Memory bounds** are enforced by capacity-constructed containers in `QueueManager` (`queueManager.ts:151`-`:163`): `completedJobsData` (`BoundedMap`), `completedJobs`/`depCompletions`/`timedOutJobs` (`BoundedSet`), `jobResults`/`customIdMap`/`jobLogs`/`perQueueMetrics` (`LRUMap`). Eviction is silent (LRU drops oldest-touched; Bounded drops oldest-inserted 10% batch).
 - **`Histogram.percentile`** returns `0` for an empty histogram and clamps to the largest finite bucket for high percentiles; it reports bucket boundaries, not interpolated values.
@@ -156,7 +163,7 @@ These structures take sizes as constructor arguments; defaults that bind them co
 | `jobLogs` | `LRUMap` | `maxJobLogs = 10_000` | `types.ts:36` |
 | `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `types.ts:37` |
 
-Other tunables: `SkipList` `maxLevel = 16`, `probability = 0.5`; `MinHeap`/`IndexedPriorityQueue` branching `D = 4`; `TTLMap` `cleanupIntervalMs = 60_000`, compaction `threshold = 0.5` / `minSize = 100`; priority-queue compaction thresholds `0.2` (cleanup) and `0.1` (stats); `Histogram` `DEFAULT_BUCKETS` `[0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms. No environment variables affect this module directly.
+Other tunables: `SkipList` `maxLevel = 16`, `probability = 0.5`; `MinHeap`/`IndexedPriorityQueue` branching `D = 4`; delayed-heap compaction minimum `256` stale entries with `stale >= live`; `TTLMap` `cleanupIntervalMs = 60_000`, compaction `threshold = 0.5` / `minSize = 100`; priority-queue compaction thresholds `0.2` (cleanup) and `0.1` (stats); `Histogram` `DEFAULT_BUCKETS` `[0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms. No environment variables affect this module directly.
 
 > Note: the memory-bounds table in the project README lists `jobResults` at 5,000; the code default is `10,000` (`types.ts:35`). The code value is authoritative.
 

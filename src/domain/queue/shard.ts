@@ -80,16 +80,27 @@ export class Shard {
 
   // ============ Waiter Management (delegated) ============
 
-  notify(): void {
-    this.waiterManager.notify();
+  notify(queue?: string): void {
+    this.waiterManager.notify(queue);
   }
 
-  notifyBatch(count: number): void {
-    this.waiterManager.notifyBatch(count);
+  notifyBatch(count: number): void;
+  notifyBatch(queue: string, count: number): void;
+  notifyBatch(queueOrCount: string | number, maybeCount?: number): void {
+    if (typeof queueOrCount === 'number') {
+      this.waiterManager.notifyBatch(queueOrCount);
+    } else {
+      this.waiterManager.notifyBatch(queueOrCount, maybeCount ?? 0);
+    }
   }
 
-  waitForJob(timeoutMs: number): Promise<void> {
-    return this.waiterManager.waitForJob(timeoutMs);
+  waitForJob(timeoutMs: number): Promise<void>;
+  waitForJob(queue: string, timeoutMs: number): Promise<void>;
+  waitForJob(queueOrTimeout: string | number, maybeTimeout?: number): Promise<void> {
+    if (typeof queueOrTimeout === 'number') {
+      return this.waiterManager.waitForJob(queueOrTimeout);
+    }
+    return this.waiterManager.waitForJob(queueOrTimeout, maybeTimeout ?? 0);
   }
 
   // ============ Queue Operations ============
@@ -117,7 +128,7 @@ export class Shard {
 
   resume(name: string): void {
     this.limiterManager.resume(name);
-    this.waiterManager.notify();
+    this.waiterManager.notify(name);
   }
 
   // ============ Unique Key Management (delegated) ============

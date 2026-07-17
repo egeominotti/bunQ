@@ -204,7 +204,7 @@ jobs:
           go test -race -run 'Hardening|Regression|Worker' ./...
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "go run ./drivers/go"
+        run: bun runner.ts --driver "go -C drivers/go run ."
       - name: Weekly sustained SDK soak
         if: github.event_name == 'schedule'
         working-directory: sdk/go

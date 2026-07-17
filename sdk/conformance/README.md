@@ -29,13 +29,19 @@ A client cannot pass by misreading the protocol consistently.
 bun runner.ts --driver "bun drivers/typescript.ts"          # TypeScript SDK
 bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"  # Python SDK
 bun runner.ts --driver "php drivers/php.php"                # PHP SDK
-(cd drivers/go && go build -o ../go-driver .)               # build the Go driver binary once
-bun runner.ts --driver "./drivers/go-driver"                # Go SDK
+bun runner.ts --driver "go -C drivers/go run ."             # Go SDK
 bun runner.ts --driver \
   "cargo run --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver" # Rust
 bun runner.ts --driver \
   "cd ../elixir && mix run ../conformance/drivers/elixir.exs" # Elixir
 ```
+
+Driver commands always start with `sdk/conformance` as their working directory.
+Drivers backed by a nested language module must therefore select that module
+explicitly. For Go, `go -C drivers/go run .` enters the driver's module before
+resolving `go.mod`; `go run ./drivers/go` is invalid because Go would search for
+a module from `sdk/conformance`. The isolated SDK sandbox may instead prebuild
+the same driver and pass `./drivers/go-driver`.
 
 Output: one `PASS`/`FAIL` line per check and a final verdict. Exit code 0 =
 conformant.

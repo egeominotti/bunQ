@@ -19,6 +19,7 @@ COPY --chown=bun:bun src ./src
 COPY --chown=bun:bun test ./test
 COPY --chown=bun:bun scripts ./scripts
 COPY --chown=bun:bun bench ./bench
+COPY --chown=bun:bun .github/workflows/sdk.yml ./.github/workflows/sdk.yml
 
 ENV CI=1 \
     HOME=/tmp \

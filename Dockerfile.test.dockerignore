@@ -14,3 +14,6 @@
 !scripts/**
 !bench/
 !bench/**
+!.github/
+!.github/workflows/
+!.github/workflows/sdk.yml

@@ -74,6 +74,20 @@ mix test --slowest 20 && mix hex.build
 Every suite then runs its language driver through all 17 shared conformance
 checks against a fresh real broker.
 
+The conformance runner starts every driver command with `sdk/conformance` as
+its working directory. Commands for nested language modules must select their
+module explicitly: Go CI uses `go -C drivers/go run .`, while the isolated SDK
+sandbox may prebuild the driver and execute `./drivers/go-driver`. Do not use
+`go run ./drivers/go`; Go resolves `go.mod` from the command's working directory,
+not from the package path, so that form fails before the driver can connect.
+The core test image copies this workflow file so its command contract is also
+covered by the unit-suite regression test.
+
+TCP test harnesses pass `port: 0` and read the listener's assigned port so the
+kernel chooses and binds it atomically. Random high-port probing is not safe
+under the parallel unit gate because another listener can claim the port before
+the server bind.
+
 ## Model-based broker verification
 
 `bun run test:model` runs the `fast-check` asynchronous command model described

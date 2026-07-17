@@ -1,6 +1,6 @@
 {
   "name": "bunqueue",
-  "version": "2.8.33",
+  "version": "2.8.34",
   "description": "High-performance job queue for Bun & AI agents. SQLite persistence, cron scheduling, priorities, retries, DLQ, webhooks, native MCP server. Zero external infrastructure.",
   "type": "module",
   "main": "dist/main.js",
@@ -57,6 +57,7 @@
     "build": "bun build --compile --minify src/main.ts --outfile dist/bunqueue",
     "build:lib": "tsc -p tsconfig.build.json",
     "test": "BUNQUEUE_EMBEDDED=1 bun test",
+    "test:sandbox": "bun run scripts/test-sandbox.ts",
     "bench": "bun run bench/throughput.ts && bun run bench/latency.ts",
     "bench:throughput": "bun run bench/throughput.ts",
     "bench:latency": "bun run bench/latency.ts",

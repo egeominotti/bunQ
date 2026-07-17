@@ -405,6 +405,12 @@ export class Shard {
     this.counters.decrementQueued(jobId);
   }
 
+  /** Remove a promoted job from delayed tracking without changing queue depth. */
+  promoteDelayed(jobId: JobId): void {
+    this.temporalManager.removeDelayed(jobId);
+    this.counters.syncDelayedCount();
+  }
+
   incrementDlq(): void {
     this.counters.incrementDlq();
   }

@@ -208,21 +208,6 @@ export async function changeJobPriority(
   });
 }
 
-/** Promote delayed job to waiting */
-export async function promoteJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean> {
-  const location = ctx.jobIndex.get(jobId);
-  if (location?.type !== 'queue') return false;
-
-  return withWriteLock(ctx.shardLocks[location.shardIdx], () => {
-    const q = ctx.shards[location.shardIdx].getQueue(location.queueName);
-    const job = q.find(jobId);
-    if (!job || job.runAt <= Date.now()) return false;
-
-    q.updateRunAt(jobId, Date.now());
-    return true;
-  });
-}
-
 /** Move active job back to delayed */
 export async function moveJobToDelayed(
   jobId: JobId,

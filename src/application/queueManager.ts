@@ -26,6 +26,7 @@ import { pullJob, pullJobBatch } from './operations/pull';
 import { ackJob, ackJobBatch, ackJobBatchWithResults, failJob } from './operations/ack';
 import * as queueControl from './operations/queueControl';
 import * as jobMgmt from './operations/jobManagement';
+import * as jobPromotion from './operations/jobPromotion';
 import * as jobTransitions from './operations/jobStateTransitions';
 import * as queryOps from './operations/queryOperations';
 import * as dlqOps from './dlqManager';
@@ -1165,7 +1166,11 @@ export class QueueManager {
   }
 
   async promote(jobId: JobId): Promise<boolean> {
-    return jobMgmt.promoteJob(jobId, this.contextFactory.getJobMgmtContext());
+    return jobPromotion.promoteJob(jobId, this.contextFactory.getJobMgmtContext());
+  }
+
+  async promoteJobs(queue: string, count?: number): Promise<number> {
+    return jobPromotion.promoteJobs(queue, count, this.contextFactory.getJobMgmtContext());
   }
 
   async moveToDelayed(jobId: JobId, delay: number): Promise<boolean> {

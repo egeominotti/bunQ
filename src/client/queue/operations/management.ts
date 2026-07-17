@@ -123,16 +123,7 @@ export async function promoteJobs(
   opts?: { count?: number }
 ): Promise<number> {
   if (ctx.embedded) {
-    // Get delayed jobs and promote them one by one
-    const manager = getSharedManager();
-    const jobs = manager.getJobs(ctx.name, { state: 'delayed' });
-    const count = opts?.count ?? jobs.length;
-    let promoted = 0;
-    for (let i = 0; i < Math.min(count, jobs.length); i++) {
-      const success = await manager.promote(jobs[i].id);
-      if (success) promoted++;
-    }
-    return promoted;
+    return getSharedManager().promoteJobs(ctx.name, opts?.count);
   }
 
   const response = await ctx.tcp!.send({

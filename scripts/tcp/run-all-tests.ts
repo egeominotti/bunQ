@@ -1,202 +1,271 @@
 #!/usr/bin/env bun
-/**
- * Run All TCP Functional Tests
- * Starts the server, runs tests, then shuts down
- */
+/** Run every TCP functional test against a fresh server and SQLite database. */
 
 import { spawn, type Subprocess } from 'bun';
-import { readdir } from 'fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const SCRIPTS_DIR = import.meta.dir;
 const PROJECT_ROOT = `${SCRIPTS_DIR}/../..`;
-const TCP_PORT = 16789; // Use different port to avoid conflicts
-const HTTP_PORT = 16790;
+const FILE_TIMEOUT_MS = Number(Bun.env.BUNQUEUE_TEST_FILE_TIMEOUT_MS ?? 180_000);
 
-let serverProcess: Subprocess | null = null;
+interface ServerHandle {
+  process: Subprocess;
+  tempDir: string;
+  tcpPort: number;
+  httpPort: number;
+}
 
-async function waitForServer(maxWaitMs = 10000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
+interface TestResult {
+  name: string;
+  success: boolean;
+  output: string;
+  passed: number;
+  failed: number;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+let activeServer: ServerHandle | null = null;
+let activeTest: Subprocess | null = null;
+let stopping = false;
+
+function safeBaseEnv(): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of [
+    'PATH',
+    'HOME',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+    'CI',
+    'TERM',
+    'TZ',
+    'LANG',
+    'LC_ALL',
+  ]) {
+    const value = Bun.env[key];
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+function getFreePort(): number {
+  const listener = Bun.listen({
+    hostname: '127.0.0.1',
+    port: 0,
+    socket: {
+      data() {
+        // Port reservation only; no payload is expected.
+      },
+    },
+  });
+  const port = listener.port;
+  listener.stop(true);
+  return port;
+}
+
+async function waitForServer(httpPort: number, maxWaitMs = 15_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < maxWaitMs) {
     try {
-      const response = await fetch(`http://localhost:${HTTP_PORT}/health`);
-      if (response.ok) return true;
+      const response = await fetch(`http://127.0.0.1:${httpPort}/health`);
+      if (response.ok) return;
     } catch {
-      // Server not ready yet
+      // Server has not bound the port yet.
     }
     await Bun.sleep(100);
   }
-  return false;
+  throw new Error(`server failed to start on HTTP port ${httpPort}`);
 }
 
-async function startServer(): Promise<void> {
-  console.log('🚀 Starting bunqueue server...');
-
-  serverProcess = spawn(['bun', 'run', 'src/main.ts'], {
-    cwd: PROJECT_ROOT,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: {
-      ...process.env,
-      TCP_PORT: String(TCP_PORT),
-      HTTP_PORT: String(HTTP_PORT),
-      // No DATA_PATH = in-memory mode
-    },
-  });
-
-  const ready = await waitForServer();
-  if (!ready) {
-    throw new Error('Server failed to start within timeout');
+async function stopProcess(process: Subprocess | null): Promise<void> {
+  if (!process) return;
+  try {
+    process.kill();
+  } catch {
+    return;
   }
-  console.log(`✅ Server ready on TCP:${TCP_PORT} HTTP:${HTTP_PORT}\n`);
+  const exited = await Promise.race([
+    process.exited.then(() => true),
+    Bun.sleep(5_000).then(() => false),
+  ]);
+  if (!exited) {
+    try {
+      process.kill(9);
+      await process.exited;
+    } catch {
+      // It exited between the timeout and SIGKILL.
+    }
+  }
+}
+
+async function startServer(testFile: string): Promise<ServerHandle> {
+  const tempDir = await mkdtemp(join(tmpdir(), 'bunqueue-tcp-'));
+  const tcpPort = getFreePort();
+  let httpPort = getFreePort();
+  while (httpPort === tcpPort) httpPort = getFreePort();
+
+  const env = {
+    ...safeBaseEnv(),
+    BUNQUEUE_DATA_PATH: join(tempDir, 'queue.db'),
+    HOST: '127.0.0.1',
+    HTTP_PORT: String(httpPort),
+    LOG_LEVEL: 'error',
+    NODE_ENV: 'test',
+    TCP_PORT: String(tcpPort),
+    ...(testFile === 'test-authentication.ts' && {
+      AUTH_TOKENS: 'valid-token-1,valid-token-2',
+      TEST_TOKEN: 'valid-token-1',
+    }),
+  };
+  const proc = spawn([process.execPath, 'run', 'src/main.ts'], {
+    cwd: PROJECT_ROOT,
+    stdout: 'ignore',
+    stderr: 'inherit',
+    env,
+  });
+  const handle = { process: proc, tempDir, tcpPort, httpPort };
+  activeServer = handle;
+
+  try {
+    await waitForServer(httpPort);
+    return handle;
+  } catch (error) {
+    await stopProcess(proc);
+    await rm(tempDir, { recursive: true, force: true });
+    activeServer = null;
+    throw error;
+  }
 }
 
 async function stopServer(): Promise<void> {
-  if (serverProcess) {
-    console.log('\n🛑 Stopping server...');
-    serverProcess.kill();
-    await serverProcess.exited;
-    serverProcess = null;
-  }
+  const server = activeServer;
+  activeServer = null;
+  if (!server) return;
+  await stopProcess(server.process);
+  await rm(server.tempDir, { recursive: true, force: true });
 }
 
-async function runTest(scriptPath: string): Promise<{ name: string; success: boolean; output: string }> {
-  const name = scriptPath.replace('.ts', '').replace('test-', '');
+async function runTest(testFile: string, server: ServerHandle): Promise<TestResult> {
+  const startedAt = performance.now();
+  const name = testFile.replace('.ts', '').replace('test-', '');
+  const env = {
+    ...safeBaseEnv(),
+    BUNQUEUE_EMBEDDED: '',
+    HTTP_PORT: String(server.httpPort),
+    NODE_ENV: 'test',
+    TCP_PORT: String(server.tcpPort),
+    ...(testFile === 'test-authentication.ts' && { TEST_TOKEN: 'valid-token-1' }),
+  };
+  const proc = spawn([process.execPath, 'run', testFile], {
+    cwd: SCRIPTS_DIR,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env,
+  });
+  activeTest = proc;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try {
+      proc.kill(9);
+    } catch {
+      // The test finished at the timeout boundary.
+    }
+  }, FILE_TIMEOUT_MS);
 
-  try {
-    const proc = spawn(['bun', 'run', scriptPath], {
-      cwd: SCRIPTS_DIR,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: {
-        ...process.env,
-        TCP_PORT: String(TCP_PORT),
-        HTTP_PORT: String(HTTP_PORT),
-        // NO BUNQUEUE_EMBEDDED - use TCP mode
-      },
-    });
-
-    const output = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
-
-    return {
-      name,
-      success: exitCode === 0,
-      output: output + (stderr ? `\nSTDERR: ${stderr}` : ''),
-    };
-  } catch (e) {
-    return {
-      name,
-      success: false,
-      output: `Error running test: ${e}`,
-    };
-  }
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  clearTimeout(timeout);
+  activeTest = null;
+  const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
+  const passed = Number(output.match(/Passed: (\d+)/)?.[1] ?? 0);
+  const failed = Number(output.match(/Failed: (\d+)/)?.[1] ?? (exitCode === 0 ? 0 : 1));
+  return {
+    name,
+    success: exitCode === 0 && !timedOut,
+    output,
+    passed,
+    failed,
+    timedOut,
+    durationMs: performance.now() - startedAt,
+  };
 }
 
-async function main() {
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║         bunqueue TCP Functional Test Suite                 ║');
-  console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-  try {
-    await startServer();
-
-    // Get all test files
-    const files = await readdir(SCRIPTS_DIR);
-    const testFiles = files
-      .filter(f => f.startsWith('test-') && f.endsWith('.ts'))
-      .sort();
-
-    console.log(`Found ${testFiles.length} test files:\n`);
-    testFiles.forEach(f => console.log(`  • ${f}`));
-    console.log('\n' + '─'.repeat(60) + '\n');
-
-    const results: Array<{ name: string; success: boolean; passed: number; failed: number }> = [];
-
-    for (const file of testFiles) {
-      console.log(`\n▶ Running: ${file}\n`);
-
-      const result = await runTest(file);
-
-      // Extract passed/failed counts from output
-      const passedMatch = result.output.match(/Passed: (\d+)/);
-      const failedMatch = result.output.match(/Failed: (\d+)/);
-
-      const passed = passedMatch ? parseInt(passedMatch[1]) : 0;
-      const failed = failedMatch ? parseInt(failedMatch[1]) : (result.success ? 0 : 1);
-
-      results.push({
-        name: result.name,
-        success: result.success,
-        passed,
-        failed,
-      });
-
-      // Print condensed output
-      const lines = result.output.split('\n');
-      const summaryStart = lines.findIndex(l => l.includes('=== Summary ==='));
-      if (summaryStart > 0) {
-        console.log(lines.slice(summaryStart).join('\n'));
-      }
-
-      const status = result.success ? '✅ PASSED' : '❌ FAILED';
-      console.log(`\n${status}: ${file}`);
-      console.log('─'.repeat(60));
-    }
-
-    // Final summary
-    console.log('\n' + '═'.repeat(60));
-    console.log('\n📊 FINAL SUMMARY (TCP Mode)\n');
-
-    const totalPassed = results.reduce((sum, r) => sum + r.passed, 0);
-    const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
-    const totalTests = results.length;
-    const passedTests = results.filter(r => r.success).length;
-    const failedTests = results.filter(r => !r.success).length;
-
-    console.log('┌─────────────────────────────────────┬────────┬────────┐');
-    console.log('│ Test Suite                          │ Passed │ Failed │');
-    console.log('├─────────────────────────────────────┼────────┼────────┤');
-
-    for (const r of results) {
-      const name = r.name.padEnd(35);
-      const passed = String(r.passed).padStart(6);
-      const failed = String(r.failed).padStart(6);
-      const status = r.success ? '✓' : '✗';
-      console.log(`│ ${status} ${name} │ ${passed} │ ${failed} │`);
-    }
-
-    console.log('├─────────────────────────────────────┼────────┼────────┤');
-    console.log(`│ ${'TOTAL'.padEnd(35)} │ ${String(totalPassed).padStart(6)} │ ${String(totalFailed).padStart(6)} │`);
-    console.log('└─────────────────────────────────────┴────────┴────────┘');
-
-    console.log(`\n📁 Test Suites: ${passedTests}/${totalTests} passed`);
-    console.log(`📋 Individual Tests: ${totalPassed}/${totalPassed + totalFailed} passed`);
-
-    await stopServer();
-
-    if (failedTests > 0) {
-      console.log('\n❌ Some tests failed!\n');
-      console.log('Failed suites:');
-      results.filter(r => !r.success).forEach(r => {
-        console.log(`  • ${r.name}`);
-      });
-      process.exit(1);
-    } else {
-      console.log('\n✅ All TCP tests passed!\n');
-      process.exit(0);
-    }
-  } catch (e) {
-    console.error('Fatal error:', e);
-    await stopServer();
-    process.exit(1);
+function printResult(testFile: string, result: TestResult): void {
+  const lines = result.output.split('\n');
+  const summaryStart = lines.findIndex((line) => line.includes('=== Summary ==='));
+  if (result.success && summaryStart >= 0) console.log(lines.slice(summaryStart).join('\n'));
+  if (!result.success) {
+    console.log(result.output.trim() || '(no test output)');
+    if (result.timedOut) console.log(`Timed out after ${FILE_TIMEOUT_MS}ms`);
   }
+  console.log(
+    `TEST_FILE_RESULT ${JSON.stringify({ file: testFile, passed: result.passed, failed: result.failed, durationMs: Math.round(result.durationMs) })}`
+  );
+  console.log(`\n${result.success ? 'PASSED' : 'FAILED'}: ${testFile}`);
+  console.log('-'.repeat(60));
 }
 
-// Handle interrupts
-process.on('SIGINT', async () => {
+async function cleanupAndExit(code: number): Promise<never> {
+  if (stopping) process.exit(code);
+  stopping = true;
+  await stopProcess(activeTest);
+  activeTest = null;
   await stopServer();
-  process.exit(1);
-});
+  process.exit(code);
+}
 
-main().catch(console.error);
+process.on('SIGINT', () => void cleanupAndExit(130));
+process.on('SIGTERM', () => void cleanupAndExit(143));
+
+async function main(): Promise<void> {
+  console.log('bunqueue TCP functional tests (fresh server + SQLite per file)\n');
+  const testFiles = (await readdir(SCRIPTS_DIR))
+    .filter((file) => file.startsWith('test-') && file.endsWith('.ts'))
+    .sort();
+  console.log(`Found ${testFiles.length} test files.\n`);
+
+  const results: TestResult[] = [];
+  for (const testFile of testFiles) {
+    console.log(`Running ${testFile}...`);
+    try {
+      const server = await startServer(testFile);
+      const result = await runTest(testFile, server);
+      results.push(result);
+      printResult(testFile, result);
+    } catch (error) {
+      const result: TestResult = {
+        name: testFile.replace('.ts', '').replace('test-', ''),
+        success: false,
+        output: String(error),
+        passed: 0,
+        failed: 1,
+        timedOut: false,
+        durationMs: 0,
+      };
+      results.push(result);
+      printResult(testFile, result);
+    } finally {
+      await stopServer();
+    }
+  }
+
+  const failed = results.filter((result) => !result.success);
+  const passedAssertions = results.reduce((sum, result) => sum + result.passed, 0);
+  const failedAssertions = results.reduce((sum, result) => sum + result.failed, 0);
+  console.log('\nTCP FINAL SUMMARY');
+  console.log(`Suites: ${results.length - failed.length}/${results.length} passed`);
+  console.log(`Assertions: ${passedAssertions}/${passedAssertions + failedAssertions} passed`);
+  if (failed.length > 0) {
+    console.log(`Failed suites: ${failed.map((result) => result.name).join(', ')}`);
+  }
+  await cleanupAndExit(failed.length > 0 ? 1 : 0);
+}
+
+void main();

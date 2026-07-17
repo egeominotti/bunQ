@@ -1,0 +1,16 @@
+*
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.json
+!tsconfig.test.json
+!tsconfig.build.json
+!biome.json
+!src/
+!src/**
+!test/
+!test/**
+!scripts/
+!scripts/**
+!bench/
+!bench/**

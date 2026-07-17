@@ -402,13 +402,7 @@ export async function handlePromoteJobs(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
-  const delayed = ctx.queueManager.getJobs(cmd.queue, { state: 'delayed' });
-  const limit = cmd.count ?? delayed.length;
-  let count = 0;
-  for (let i = 0; i < Math.min(limit, delayed.length); i++) {
-    const success = await ctx.queueManager.promote(delayed[i].id);
-    if (success) count++;
-  }
+  const count = await ctx.queueManager.promoteJobs(cmd.queue, cmd.count);
   return { ok: true, count, reqId };
 }
 

@@ -373,6 +373,15 @@ the current before/after methodology, results, and remaining hot paths.
 
 ## Reliability & Battle-Testing
 
+The fast development loop runs targeted tests natively. The authoritative local
+gate, `bun run test:sandbox`, builds the current worktree once and runs unit,
+TCP, and embedded suites in three disposable non-root containers without host
+mounts or external networking. CI provides an equivalent fresh VM per suite.
+The TCP functional runner adds a second boundary: every test file receives a
+new server, dynamic ports, and a unique SQLite directory that is removed in
+`finally`. See [Test Isolation and Reproducibility](./testing.md) for the threat
+model, commands, cleanup behavior, and native-only benchmark policy.
+
 Beyond the functional unit/integration suites, a set of adversarial "24/7
 readiness" suites under `test/repro-*.test.ts` assert the delivery and resource
 guarantees a continuously-running deployment depends on. Each drives a real
@@ -391,6 +400,9 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 | Long-running semantics | `repro-longrunning-semantics` | Cron next-run does not drift across thousands of ticks (incl. DST); `jobResults` and the custom-id dedup map stay bounded under pressure (oldest evicted, newest retained); the DLQ is bounded to `maxEntries` and remains retryable. |
 
 ## Module Map
+
+### Engineering tooling
+- [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
 
 ### Core engine & data structures
 - [Core Queue Engine (QueueManager & Shards)](./features/core-queue-engine.md) — Central coordinator that shards queues, owns global job indexes, and orchestrates all job operations by delegating to operation modules via context objects.

@@ -6,7 +6,7 @@
 import { Queue, Worker } from '../../src/client';
 
 const QUEUE_NAME = 'tcp-test-bullmq-queue-methods';
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 
 async function main() {
   console.log('=== Test BullMQ v5 Queue Methods (TCP) ===\n');
@@ -110,9 +110,9 @@ async function main() {
     queue.obliterate();
     await Bun.sleep(100);
 
-    await queue.add('waiting-1', { value: 1 });
-    await queue.add('waiting-2', { value: 2 });
-    await queue.add('delayed-1', { value: 3 }, { delay: 60000 });
+    await queue.add('waiting-1', { value: 1 }, { durable: true });
+    await queue.add('waiting-2', { value: 2 }, { durable: true });
+    await queue.add('delayed-1', { value: 3 }, { delay: 60000, durable: true });
 
     const waiting = await queue.getWaitingAsync();
     const delayed = await queue.getDelayedAsync();
@@ -171,9 +171,13 @@ async function main() {
     await queue.add('clean-1', { value: 1 });
     await queue.add('clean-2', { value: 2 });
 
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      return { done: true };
-    }, { concurrency: 5, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async () => {
+        return { done: true };
+      },
+      { concurrency: 5, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(1000);
     await worker.close();
@@ -200,14 +204,29 @@ async function main() {
     await queue.add('promote-2', { value: 2 }, { delay: 60000 });
 
     const beforeDelayed = await queue.getDelayedCount();
+    const promotedWithZeroLimit = await queue.promoteJobs({ count: 0 });
+    const afterZeroLimit = await queue.getDelayedCount();
     const promoted = await queue.promoteJobs();
     const afterDelayed = await queue.getDelayedCount();
     const afterWaiting = await queue.getWaitingCount();
+    const listedDelayed = await queue.getDelayedAsync();
+    const listedWaiting = await queue.getWaitingAsync();
 
-    console.log(`   Before: ${beforeDelayed} delayed, After: ${afterDelayed} delayed, ${afterWaiting} waiting`);
+    console.log(
+      `   Before: ${beforeDelayed} delayed, After: ${afterDelayed} delayed, ${afterWaiting} waiting`
+    );
     console.log(`   Promoted: ${promoted}`);
 
-    if (afterWaiting >= beforeDelayed - afterDelayed) {
+    if (
+      beforeDelayed === 2 &&
+      promotedWithZeroLimit === 0 &&
+      afterZeroLimit === 2 &&
+      promoted === 2 &&
+      afterDelayed === 0 &&
+      afterWaiting === 2 &&
+      listedDelayed.length === 0 &&
+      listedWaiting.length === 2
+    ) {
       console.log('   [PASS] promoteJobs works');
       passed++;
     } else {
@@ -239,7 +258,7 @@ async function main() {
     console.log(`   Logs: ${logs.logs.join(', ')}`);
 
     // Logs may have [info] prefix
-    const hasLog1 = logs.logs.some(l => l.includes('Log entry 1'));
+    const hasLog1 = logs.logs.some((l) => l.includes('Log entry 1'));
     if (logs.count === 3 && hasLog1) {
       console.log('   [PASS] getJobLogs/addJobLog works');
       passed++;
@@ -265,16 +284,20 @@ async function main() {
     let progressUpdated = false;
     let progressValue = 0;
 
-    const job = await queue.add('progress-test', { value: 1 });
+    await queue.add('progress-test', { value: 1 });
 
     // Create a worker that will pull and update progress
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async (j) => {
-      await j.updateProgress(50);
-      progressUpdated = true;
-      progressValue = 50;
-      await Bun.sleep(100);
-      return { done: true };
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async (j) => {
+        await j.updateProgress(50);
+        progressUpdated = true;
+        progressValue = 50;
+        await Bun.sleep(100);
+        return { done: true };
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     // Wait for worker to process
     await Bun.sleep(1000);
@@ -377,9 +400,9 @@ async function main() {
     queue.obliterate();
     await Bun.sleep(100);
 
-    await queue.add('p1', { value: 1 }, { priority: 1 });
-    await queue.add('p5', { value: 2 }, { priority: 5 });
-    await queue.add('p10', { value: 3 }, { priority: 10 });
+    await queue.add('p1', { value: 1 }, { priority: 1, durable: true });
+    await queue.add('p5', { value: 2 }, { priority: 5, durable: true });
+    await queue.add('p10', { value: 3 }, { priority: 10, durable: true });
 
     const prioritized = await queue.getPrioritized();
     const count = await queue.getPrioritizedCount();
@@ -406,12 +429,16 @@ async function main() {
     // Use unique scheduler name to avoid conflicts
     const schedulerName = `tcp-test-scheduler-${Date.now()}`;
 
-    const scheduler = await queue.upsertJobScheduler(schedulerName, {
-      every: 60000,
-    }, {
-      name: 'scheduled-job',
-      data: { value: 42 },
-    });
+    const scheduler = await queue.upsertJobScheduler(
+      schedulerName,
+      {
+        every: 60000,
+      },
+      {
+        name: 'scheduled-job',
+        data: { value: 42 },
+      }
+    );
 
     console.log(`   Created scheduler: ${scheduler?.id}`);
 
@@ -431,7 +458,9 @@ async function main() {
       console.log('   [PASS] Job Scheduler methods work');
       passed++;
     } else {
-      console.log(`   [FAIL] Job Scheduler methods failed (scheduler=${!!scheduler}, retrieved=${!!retrieved}, removed=${removed})`);
+      console.log(
+        `   [FAIL] Job Scheduler methods failed (scheduler=${!!scheduler}, retrieved=${!!retrieved}, removed=${removed})`
+      );
       failed++;
     }
   } catch (e) {

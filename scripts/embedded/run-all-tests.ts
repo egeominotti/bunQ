@@ -11,8 +11,11 @@ import { readdir } from 'fs/promises';
 
 const SCRIPTS_DIR = import.meta.dir;
 
-async function runTest(scriptPath: string): Promise<{ name: string; success: boolean; output: string }> {
+async function runTest(
+  scriptPath: string
+): Promise<{ name: string; success: boolean; output: string; durationMs: number }> {
   const name = scriptPath.replace('.ts', '').replace('test-', '');
+  const startedAt = performance.now();
 
   try {
     const proc = spawn(['bun', 'run', scriptPath], {
@@ -30,12 +33,14 @@ async function runTest(scriptPath: string): Promise<{ name: string; success: boo
       name,
       success: exitCode === 0,
       output: output + (stderr ? `\nSTDERR: ${stderr}` : ''),
+      durationMs: performance.now() - startedAt,
     };
   } catch (e) {
     return {
       name,
       success: false,
       output: `Error running test: ${e}`,
+      durationMs: performance.now() - startedAt,
     };
   }
 }
@@ -47,15 +52,19 @@ async function main() {
 
   // Get all test files
   const files = await readdir(SCRIPTS_DIR);
-  const testFiles = files
-    .filter(f => f.startsWith('test-') && f.endsWith('.ts'))
-    .sort();
+  const testFiles = files.filter((f) => f.startsWith('test-') && f.endsWith('.ts')).sort();
 
   console.log(`Found ${testFiles.length} test files:\n`);
-  testFiles.forEach(f => console.log(`  • ${f}`));
+  for (const file of testFiles) console.log(`  • ${file}`);
   console.log('\n' + '─'.repeat(60) + '\n');
 
-  const results: Array<{ name: string; success: boolean; passed: number; failed: number }> = [];
+  const results: Array<{
+    name: string;
+    success: boolean;
+    passed: number;
+    failed: number;
+    durationMs: number;
+  }> = [];
 
   for (const file of testFiles) {
     console.log(`\n▶ Running: ${file}\n`);
@@ -66,24 +75,28 @@ async function main() {
     const passedMatch = result.output.match(/Passed: (\d+)/);
     const failedMatch = result.output.match(/Failed: (\d+)/);
 
-    const passed = passedMatch ? parseInt(passedMatch[1]) : 0;
-    const failed = failedMatch ? parseInt(failedMatch[1]) : (result.success ? 0 : 1);
+    const passed = passedMatch ? parseInt(passedMatch[1], 10) : 0;
+    const failed = failedMatch ? parseInt(failedMatch[1], 10) : result.success ? 0 : 1;
 
     results.push({
       name: result.name,
       success: result.success,
       passed,
       failed,
+      durationMs: result.durationMs,
     });
 
     // Print condensed output
     const lines = result.output.split('\n');
-    const summaryStart = lines.findIndex(l => l.includes('=== Summary ==='));
+    const summaryStart = lines.findIndex((l) => l.includes('=== Summary ==='));
     if (summaryStart > 0) {
       console.log(lines.slice(summaryStart).join('\n'));
     }
 
     const status = result.success ? '✅ PASSED' : '❌ FAILED';
+    console.log(
+      `TEST_FILE_RESULT ${JSON.stringify({ file, passed, failed, durationMs: Math.round(result.durationMs) })}`
+    );
     console.log(`\n${status}: ${file}`);
     console.log('─'.repeat(60));
   }
@@ -95,8 +108,8 @@ async function main() {
   const totalPassed = results.reduce((sum, r) => sum + r.passed, 0);
   const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
   const totalTests = results.length;
-  const passedTests = results.filter(r => r.success).length;
-  const failedTests = results.filter(r => !r.success).length;
+  const passedTests = results.filter((r) => r.success).length;
+  const failedTests = results.filter((r) => !r.success).length;
 
   console.log('┌─────────────────────────────────────┬────────┬────────┐');
   console.log('│ Test Suite                          │ Passed │ Failed │');
@@ -111,7 +124,9 @@ async function main() {
   }
 
   console.log('├─────────────────────────────────────┼────────┼────────┤');
-  console.log(`│ ${'TOTAL'.padEnd(35)} │ ${String(totalPassed).padStart(6)} │ ${String(totalFailed).padStart(6)} │`);
+  console.log(
+    `│ ${'TOTAL'.padEnd(35)} │ ${String(totalPassed).padStart(6)} │ ${String(totalFailed).padStart(6)} │`
+  );
   console.log('└─────────────────────────────────────┴────────┴────────┘');
 
   console.log(`\n📁 Test Suites: ${passedTests}/${totalTests} passed`);
@@ -120,9 +135,11 @@ async function main() {
   if (failedTests > 0) {
     console.log('\n❌ Some tests failed!\n');
     console.log('Failed suites:');
-    results.filter(r => !r.success).forEach(r => {
-      console.log(`  • ${r.name}`);
-    });
+    results
+      .filter((r) => !r.success)
+      .forEach((r) => {
+        console.log(`  • ${r.name}`);
+      });
     process.exit(1);
   } else {
     console.log('\n✅ All tests passed!\n');

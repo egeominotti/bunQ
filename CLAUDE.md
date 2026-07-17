@@ -2,7 +2,13 @@
 
 "When I report a bug, don't start by trying to fix it. Instead, start by writing a test that reproduces the bug. Then, have subagents try to fix the bug and prove it with a passing test."
 
-**MANDATORY: After ANY code modification, ALWAYS run ALL THREE test suites before committing:**
+**MANDATORY: After ANY code modification, run the isolated validation before committing:**
+
+```bash
+bun run test:sandbox
+```
+
+It builds the current worktree once and runs ALL THREE required suites concurrently in separate disposable containers:
 
 ```bash
 bun test                                # Unit tests (~5000 tests)
@@ -11,6 +17,22 @@ bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites
 ```
 
 Never commit without all three passing. No exceptions.
+
+### Test isolation rules
+
+- Use native targeted tests for the fast edit/debug loop; use `bun run test:sandbox` as the authoritative full gate.
+- The three top-level suite containers run in parallel by default; use `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose resource contention.
+- Isolation covers processes, writable filesystems, `/tmp`, network namespaces, ports, databases, and environment. It is not physical isolation: containers share the OrbStack VM kernel plus host CPU, memory, and disk scheduling. Reproduce parallel-only failures sequentially before classifying them as application bugs.
+- Use `artifacts/test-sandbox/<timestamp>/` for complete, untruncated suite logs; failed containers remain available for inspection.
+- Every sandbox run must also preserve per-suite resource samples (`*.metrics.ndjson`), per-suite JSON, and aggregate `summary.json`/`summary.md`. Review CPU, memory, PID, I/O, duration, slow-test, OOM, and anomaly KPIs before handoff.
+- Container memory growth is an investigation signal, not automatic proof of a leak; individual tests share the same process and heap. Confirm leaks with focused repeated-process and post-GC evidence.
+- The sandbox must not mount the repository, Docker socket, credentials, or the user's home, and test containers must have no external network.
+- Every TCP functional test file gets a fresh server, dynamic TCP/HTTP ports, and a unique temporary SQLite directory. Never reuse a developer server or database.
+- CI pins the same Bun version and frozen lockfile as the sandbox. Do not replace either with `latest` or an unlocked install.
+- Docker Compose is only for functional tests that require external services, with a unique project name and disposable volumes.
+- Benchmarks are always native, never Docker/VM. Every sample needs a fresh server, database, ports, queues, and competitor state.
+
+Full rationale and commands: `docs/testing.md`.
 
 **MANDATORY: Keep the technical documentation in `/docs` in sync with the code.**
 
@@ -459,9 +481,11 @@ CREATE INDEX idx_jobs_run_at ON jobs(run_at) WHERE state IN ('waiting','delayed'
 ## Testing
 
 ```bash
-bun test                           # All tests (~5065 tests)
-bun scripts/tcp/run-all-tests.ts   # TCP tests (~52 suites)
-bun run bench                      # Benchmarks
+bun run test:sandbox                    # Authoritative isolated full gate
+bun test                                # Native unit diagnostics
+bun scripts/tcp/run-all-tests.ts        # Native TCP diagnostics; isolated per file
+bun scripts/embedded/run-all-tests.ts   # Native embedded diagnostics
+bun run bench                           # Native benchmarks only
 ```
 
 ## Publishing

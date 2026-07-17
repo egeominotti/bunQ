@@ -14,6 +14,7 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | --- | --- |
 | [Architecture](./architecture.md) | System overview, technology stack & rationale, layered design, component diagram, deployment modes, request data flows (PUSH/PULL/ACK/FAIL), sharding, lock hierarchy, persistence model, performance characteristics, and the full module map. |
 | [Data Model](./data-model.md) | Authoritative reference for the `Job` model & state machine, `JobOptions`, queue/DLQ/cron/worker/webhook types, the TCP `Command`/`Response` wire shapes, the complete SQLite schema (tables, indexes, migrations), and the in-memory collections with their eviction bounds. |
+| [Test Isolation](./testing.md) | Parallel disposable Docker validation, per-file TCP server/SQLite isolation, resource telemetry and anomaly KPIs, CI equivalence, cleanup guarantees, and the separate native-only benchmark policy. |
 | [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
 
 **Suggested reading order:** Architecture → Data Model → the feature docs for the area you are touching.
@@ -118,7 +119,11 @@ src/
 └── config/          # Config resolution + entrypoint glue
 ```
 
-Source directories under `src/benchmark/`, `bench/`, and `test/` are tooling (benchmarks and tests) and are intentionally **not** covered by feature docs; see the *Performance Characteristics* and *Testing* sections of [Architecture](./architecture.md).
+Source directories under `src/benchmark/`, `bench/`, and `test/` are tooling
+rather than runtime feature modules. They are covered by [Test
+Isolation](./testing.md), the *Performance Characteristics* and *Reliability &
+Battle-Testing* sections of [Architecture](./architecture.md), and the
+reproducible reports under `benchmarks/`.
 
 ---
 

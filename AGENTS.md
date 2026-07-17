@@ -75,8 +75,15 @@ biome check src test/path-to-test.test.ts
 git diff --check
 ```
 
-**MANDATORY: After ANY code modification, ALWAYS run ALL THREE test suites
-before committing:**
+**MANDATORY: After ANY code modification, run the isolated validation before
+committing:**
+
+```bash
+bun run test:sandbox
+```
+
+The sandbox builds the current worktree and runs ALL THREE required suites in
+parallel, in separate disposable containers:
 
 ```bash
 bun test                                # Unit tests (~5000 tests)
@@ -86,12 +93,38 @@ bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites
 
 Do not commit if any suite fails or could not be run. No exceptions.
 
+The exact native commands are a diagnostic fallback when Docker is unavailable,
+not proof that sandbox isolation passed. Report the unavailable sandbox as a
+blocker before commit.
+
 Add regression tests for every confirmed bug. A useful regression test should
 fail on the buggy implementation, exercise the public or real persistence path,
 and assert both the returned result and any affected counters/state.
 
 ## Test hygiene
 
+- Prefer targeted native tests during iteration; use the sandbox for the final
+  full gate. Never run one container per individual unit test.
+- The three top-level suites run concurrently by default. Use
+  `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose possible resource contention;
+  it runs the same commands with the same isolation.
+- Treat the sandbox as process, filesystem, network, database, port, and
+  environment isolation, not as separate physical machines. Suite containers
+  still share the OrbStack VM kernel, Docker daemon scheduling, CPU, memory,
+  and disk I/O. A failure seen only under parallel load must be reproduced with
+  `BUNQUEUE_TEST_SEQUENTIAL=1` before attributing it to application behavior.
+- Read complete suite output from `artifacts/test-sandbox/<timestamp>/`. On
+  failure, preserve the runner's retained container until the cause is known.
+- Every sandbox run must emit complete logs, per-suite NDJSON resource samples,
+  per-suite JSON, and the aggregate `summary.json`/`summary.md`. Review reported
+  anomalies and slow-test rankings before handoff; do not report only pass/fail.
+- Treat memory slope or end-to-start growth as an investigation signal, not
+  proof of a leak. Individual tests share a process and heap; confirm suspected
+  leaks with a focused repeated-process, post-GC reproduction.
+- Never mount the repository, Docker socket, credentials, or the user's home
+  directory into a test container. Tests need no external network access.
+- TCP functional files must use a fresh server, dynamic ports, and a unique
+  temporary SQLite directory. Do not connect tests to an existing server.
 - Use unique queue names and unique temporary SQLite paths.
 - Close `QueueManager`, Queue, Worker, server, and database instances in cleanup.
 - Remove SQLite `.db`, `-wal`, and `-shm` files created by the test.
@@ -99,6 +132,10 @@ and assert both the returned result and any affected counters/state.
   delays or long-polling, use generous bounds and deterministic timestamps.
 - Do not weaken an existing test merely to make a behavior change pass; update
   it only when the intended contract has explicitly changed.
+- Never publish benchmark results from Docker or a VM. Run benchmarks natively,
+  with a fresh process, database, ports, queues, and competitor state per sample.
+  Docker Compose is only for functional tests requiring external services and
+  must use a unique project name and disposable volumes.
 
 ## Commits and handoff
 

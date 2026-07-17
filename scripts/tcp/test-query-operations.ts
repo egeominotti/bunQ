@@ -9,7 +9,7 @@
 
 import { Queue, Worker } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 const queues: Queue[] = [];
@@ -40,10 +40,14 @@ async function main() {
       console.log('   Job in waiting state (no attempts, no return value)');
 
       let processedId: string | null = null;
-      const worker = new Worker('tcp-qops-getstate', async (j) => {
-        processedId = j.id;
-        return { processed: true };
-      }, { concurrency: 1, connection: connOpts, useLocks: false });
+      const worker = new Worker(
+        'tcp-qops-getstate',
+        async (j) => {
+          processedId = j.id;
+          return { processed: true };
+        },
+        { concurrency: 1, connection: connOpts, useLocks: false }
+      );
 
       await Bun.sleep(1000);
       await worker.close();
@@ -74,9 +78,13 @@ async function main() {
 
     const job = await queue.add('result-test', { value: 42 });
 
-    const worker = new Worker('tcp-qops-getresult', async (j) => {
-      return { sum: (j.data as { value: number }).value, processed: true };
-    }, { concurrency: 1, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-qops-getresult',
+      async (j) => {
+        return { sum: (j.data as { value: number }).value, processed: true };
+      },
+      { concurrency: 1, connection: connOpts, useLocks: false }
+    );
 
     await Bun.sleep(1000);
     await worker.close();
@@ -102,9 +110,9 @@ async function main() {
     queue.obliterate();
     await Bun.sleep(200);
 
-    await queue.add('job-1', { value: 1 });
-    await queue.add('job-2', { value: 2 });
-    await queue.add('delayed-job', { value: 3 }, { delay: 60000 });
+    await queue.add('job-1', { value: 1 }, { durable: true });
+    await queue.add('job-2', { value: 2 }, { durable: true });
+    await queue.add('delayed-job', { value: 3 }, { delay: 60000, durable: true });
 
     const waitingJobs = await queue.getJobsAsync({ state: 'waiting' });
     const delayedJobs = await queue.getJobsAsync({ state: 'delayed' });
@@ -116,7 +124,9 @@ async function main() {
       console.log('   [PASS] GetJobs state filter works');
       passed++;
     } else {
-      console.log(`   [FAIL] Expected >=2 waiting and >=1 delayed, got ${waitingJobs.length} waiting and ${delayedJobs.length} delayed`);
+      console.log(
+        `   [FAIL] Expected >=2 waiting and >=1 delayed, got ${waitingJobs.length} waiting and ${delayedJobs.length} delayed`
+      );
       failed++;
     }
   } catch (e) {
@@ -132,7 +142,7 @@ async function main() {
     await Bun.sleep(200);
 
     for (let i = 0; i < 10; i++) {
-      await queue.add(`job-${i}`, { value: i });
+      await queue.add(`job-${i}`, { value: i }, { durable: true });
     }
 
     const firstPage = await queue.getJobsAsync({ start: 0, end: 3 });
@@ -144,8 +154,8 @@ async function main() {
     console.log(`   All jobs: ${allJobs.length} jobs`);
 
     if (firstPage.length === 3 && secondPage.length === 3 && allJobs.length === 10) {
-      const firstIds = new Set(firstPage.map(j => j.id));
-      const hasOverlap = secondPage.some(j => firstIds.has(j.id));
+      const firstIds = new Set(firstPage.map((j) => j.id));
+      const hasOverlap = secondPage.some((j) => firstIds.has(j.id));
 
       if (!hasOverlap) {
         console.log('   [PASS] GetJobs pagination works correctly');
@@ -188,7 +198,9 @@ async function main() {
       console.log('   [PASS] GetCountsPerPriority works correctly');
       passed++;
     } else {
-      console.log(`   [FAIL] Expected p1=2, p5=3, p10=1, got p1=${p1Count}, p5=${p5Count}, p10=${p10Count}`);
+      console.log(
+        `   [FAIL] Expected p1=2, p5=3, p10=1, got p1=${p1Count}, p5=${p5Count}, p10=${p10Count}`
+      );
       failed++;
     }
   } catch (e) {
@@ -210,7 +222,9 @@ async function main() {
 
     if (retrievedById) {
       console.log(`   Job created with ID: ${job.id}`);
-      console.log(`   Retrieved job data value: ${(retrievedById.data as { value: number }).value}`);
+      console.log(
+        `   Retrieved job data value: ${(retrievedById.data as { value: number }).value}`
+      );
 
       if ((retrievedById.data as { value: number }).value === 42) {
         console.log('   [PASS] GetJobByCustomId works correctly');

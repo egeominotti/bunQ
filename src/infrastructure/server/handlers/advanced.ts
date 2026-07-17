@@ -243,8 +243,17 @@ export function handleRateLimit(
 ): Response {
   const limit = toFiniteNumber(cmd.limit);
   if (limit === undefined) return resp.error('limit must be a finite number', reqId);
-  ctx.queueManager.setRateLimit(cmd.queue, limit);
-  ctx.queueManager.emitDashboardEvent('ratelimit:set', { queue: cmd.queue, max: limit });
+  // Optional window/TTL: invalid values degrade to the defaults (1s window,
+  // permanent limit) inside the limiter rather than failing the command.
+  const duration = toFiniteNumber(cmd.duration);
+  const ttl = toFiniteNumber(cmd.ttl);
+  ctx.queueManager.setRateLimit(cmd.queue, limit, duration, ttl);
+  ctx.queueManager.emitDashboardEvent('ratelimit:set', {
+    queue: cmd.queue,
+    max: limit,
+    ...(duration !== undefined && { duration }),
+    ...(ttl !== undefined && { ttl }),
+  });
   return resp.ok(undefined, reqId);
 }
 

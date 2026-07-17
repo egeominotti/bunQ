@@ -326,6 +326,81 @@ describe('DLQ Operations', () => {
     });
   });
 
+  // ---- async variants (awaitable, return the server count over TCP too) ----
+  describe('retryDlqAsync / purgeDlqAsync', () => {
+    it('retryDlqAsync should retry all entries and resolve with the count', async () => {
+      await addAndFailJob(queue, QUEUE_NAME, { asyncRetry: 1 });
+      await addAndFailJob(queue, QUEUE_NAME, { asyncRetry: 2 });
+
+      const retried = await queue.retryDlqAsync();
+      expect(retried).toBeGreaterThanOrEqual(2);
+      expect(queue.getDlq().length).toBe(0);
+    });
+
+    it('purgeDlqAsync should purge and resolve with the count', async () => {
+      await addAndFailJob(queue, QUEUE_NAME, { asyncPurge: 1 });
+
+      const purged = await queue.purgeDlqAsync();
+      expect(purged).toBeGreaterThanOrEqual(1);
+      expect(queue.getDlq().length).toBe(0);
+    });
+
+    it('both resolve with 0 on an empty DLQ', async () => {
+      expect(await queue.retryDlqAsync()).toBe(0);
+      expect(await queue.purgeDlqAsync()).toBe(0);
+    });
+
+    it('retryDlqAsync(id) retries only the requested entry', async () => {
+      const first = await addAndFailJob(queue, QUEUE_NAME, { pick: 1 });
+      await addAndFailJob(queue, QUEUE_NAME, { pick: 2 });
+
+      const retried = await queue.retryDlqAsync(first);
+      expect(retried).toBe(1);
+
+      const remaining = queue.getDlq();
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]!.job.id).not.toBe(first);
+    });
+
+    it('retryDlqAsync with an unknown id resolves with 0', async () => {
+      await addAndFailJob(queue, QUEUE_NAME, { keep: true });
+      expect(await queue.retryDlqAsync('no-such-job-id')).toBe(0);
+      expect(queue.getDlq().length).toBe(1);
+    });
+  });
+
+  describe('getDlqJobsAsync', () => {
+    it('returns the dead jobs as public Job objects', async () => {
+      const deadId = await addAndFailJob(queue, QUEUE_NAME, { dead: true });
+
+      const jobs = await queue.getDlqJobsAsync();
+      expect(jobs.length).toBeGreaterThanOrEqual(1);
+
+      const dead = jobs.find((j) => j.id === deadId);
+      expect(dead).toBeDefined();
+      expect(dead!.data).toMatchObject({ dead: true });
+      expect(dead!.queueName).toBe(QUEUE_NAME);
+    });
+
+    it('honours the count cap and returns [] on an empty DLQ', async () => {
+      expect(await queue.getDlqJobsAsync()).toEqual([]);
+
+      await addAndFailJob(queue, QUEUE_NAME, { n: 1 });
+      await addAndFailJob(queue, QUEUE_NAME, { n: 2 });
+      expect((await queue.getDlqJobsAsync(1)).length).toBe(1);
+    });
+  });
+
+  describe('setDlqConfigAsync', () => {
+    it('round-trips through getDlqConfig', async () => {
+      await queue.setDlqConfigAsync({ autoRetry: true, maxEntries: 123 });
+
+      const config = queue.getDlqConfig();
+      expect(config.autoRetry).toBe(true);
+      expect(config.maxEntries).toBe(123);
+    });
+  });
+
   // ---- DLQ config behavior ----
   describe('DLQ auto-retry config', () => {
     it('should configure auto-retry settings', () => {

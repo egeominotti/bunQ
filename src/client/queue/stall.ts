@@ -35,6 +35,21 @@ export function setStallConfig(ctx: StallContext, config: Partial<StallConfig>):
   }
 }
 
+/** Set stall detection configuration and resolve once the server has applied it. */
+export async function setStallConfigAsync(
+  ctx: StallContext,
+  config: Partial<StallConfig>
+): Promise<void> {
+  if (ctx.embedded) {
+    dlqOps.setStallConfigEmbedded(ctx.name, config);
+    return;
+  }
+  if (!ctx.tcp) return;
+  const current = tcpConfigCache.get(ctx.name) ?? { ...DEFAULT_STALL_CONFIG };
+  tcpConfigCache.set(ctx.name, { ...current, ...config });
+  await ctx.tcp.send({ cmd: 'SetStallConfig', queue: ctx.name, config });
+}
+
 /** Get stall detection configuration */
 export function getStallConfig(ctx: StallContext): StallConfig {
   if (ctx.embedded) {

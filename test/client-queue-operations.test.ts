@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Queue, Worker, shutdownManager } from '../src/client';
+import { getSharedManager } from '../src/client/manager';
 
 // ============================================================
 // ADD OPERATIONS (src/client/queue/operations/add.ts)
@@ -117,11 +118,7 @@ describe('Add Operations', () => {
     });
 
     it('should add a job with repeat option (every)', async () => {
-      const job = await queue.add(
-        'repeat-task',
-        { value: 1 },
-        { repeat: { every: 60000 } }
-      );
+      const job = await queue.add('repeat-task', { value: 1 }, { repeat: { every: 60000 } });
 
       expect(job.id).toBeDefined();
     });
@@ -147,16 +144,20 @@ describe('Add Operations', () => {
     });
 
     it('should add a job with all options combined', async () => {
-      const job = await queue.add('full-opts', { value: 42 }, {
-        priority: 5,
-        delay: 1000,
-        attempts: 3,
-        backoff: 500,
-        timeout: 10000,
-        removeOnComplete: true,
-        removeOnFail: false,
-        durable: true,
-      });
+      const job = await queue.add(
+        'full-opts',
+        { value: 42 },
+        {
+          priority: 5,
+          delay: 1000,
+          attempts: 3,
+          backoff: 500,
+          timeout: 10000,
+          removeOnComplete: true,
+          removeOnFail: false,
+          durable: true,
+        }
+      );
 
       expect(job.id).toBeDefined();
       expect(job.name).toBe('full-opts');
@@ -904,9 +905,7 @@ describe('Management Operations', () => {
 
         const db = new Database(dbPath, { readonly: true });
         try {
-          const jobs = db
-            .query<{ count: number }, []>('SELECT COUNT(*) as count FROM jobs')
-            .get();
+          const jobs = db.query<{ count: number }, []>('SELECT COUNT(*) as count FROM jobs').get();
           const dlq = db.query<{ count: number }, []>('SELECT COUNT(*) as count FROM dlq').get();
           const results = db
             .query<{ count: number }, []>('SELECT COUNT(*) as count FROM job_results')
@@ -1237,6 +1236,147 @@ describe('Control Operations', () => {
       queue.obliterate();
 
       expect(queue.count()).toBe(0);
+    });
+  });
+
+  describe('obliterateAsync()', () => {
+    it('should remove all queue data and resolve when processed', async () => {
+      await queue.add('task1', { value: 1 });
+      await queue.add('delayed', { value: 2 }, { delay: 60000 });
+
+      await queue.obliterateAsync();
+
+      const counts = queue.getJobCounts();
+      expect(counts.waiting).toBe(0);
+      expect(counts.delayed).toBe(0);
+    });
+
+    it('jobs added right after resolution are not wiped', async () => {
+      await queue.add('old', { value: 1 });
+
+      await queue.obliterateAsync();
+      const job = await queue.add('fresh', { value: 2 });
+
+      expect(await queue.getJob(job.id)).not.toBeNull();
+      expect(queue.count()).toBe(1);
+    });
+  });
+
+  describe('pauseAsync() / resumeAsync()', () => {
+    it('should pause and resume, observable immediately after resolution', async () => {
+      await queue.pauseAsync();
+      expect(queue.isPaused()).toBe(true);
+
+      await queue.resumeAsync();
+      expect(queue.isPaused()).toBe(false);
+    });
+  });
+
+  describe('drainAsync()', () => {
+    it('should remove waiting jobs and resolve with the count', async () => {
+      await queue.add('task1', { value: 1 });
+      await queue.add('task2', { value: 2 });
+
+      const drained = await queue.drainAsync();
+
+      expect(drained).toBe(2);
+      expect(queue.count()).toBe(0);
+    });
+
+    it('should resolve with 0 on an empty queue', async () => {
+      expect(await queue.drainAsync()).toBe(0);
+    });
+
+    it('jobs added right after resolution are not drained', async () => {
+      await queue.add('old', { value: 1 });
+
+      await queue.drainAsync();
+      const job = await queue.add('fresh', { value: 2 });
+
+      expect(await queue.getJob(job.id)).not.toBeNull();
+      expect(queue.count()).toBe(1);
+    });
+  });
+
+  describe('rate limit / concurrency async setters', () => {
+    it('setGlobalRateLimitAsync applies limit and window, removeGlobalRateLimitAsync clears it', async () => {
+      const manager = getSharedManager();
+      for (let i = 0; i < 3; i++) await queue.add('task', { i });
+
+      await queue.setGlobalRateLimitAsync(2, 60_000);
+      expect(await manager.pull(queue.name)).not.toBeNull();
+      expect(await manager.pull(queue.name)).not.toBeNull();
+      expect(await manager.pull(queue.name)).toBeNull();
+
+      await queue.removeGlobalRateLimitAsync();
+      expect(await manager.pull(queue.name)).not.toBeNull();
+    });
+
+    it('setGlobalConcurrencyAsync applies and removeGlobalConcurrencyAsync clears', async () => {
+      const manager = getSharedManager();
+
+      await queue.setGlobalConcurrencyAsync(7);
+      expect(manager.getQueueLimits(queue.name).concurrencyLimit).toBe(7);
+
+      await queue.removeGlobalConcurrencyAsync();
+      expect(manager.getQueueLimits(queue.name).concurrencyLimit).toBeNull();
+    });
+
+    it('setStallConfigAsync round-trips through getStallConfig', async () => {
+      await queue.setStallConfigAsync({ stallInterval: 12_345, maxStalls: 7 });
+
+      const config = queue.getStallConfig();
+      expect(config.stallInterval).toBe(12_345);
+      expect(config.maxStalls).toBe(7);
+    });
+
+    it('rateLimit() rejects non-positive or non-finite expireTimeMs', async () => {
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(queue.rateLimit(bad)).rejects.toThrow('expireTimeMs');
+      }
+    });
+
+    it('rateLimit() expires broker-side without any client timer', async () => {
+      const manager = getSharedManager();
+      for (let i = 0; i < 3; i++) await queue.add('task', { i });
+
+      await queue.rateLimit(300);
+      expect(await manager.pull(queue.name)).not.toBeNull();
+      expect(await manager.pull(queue.name)).toBeNull();
+
+      await Bun.sleep(450);
+      expect(await manager.pull(queue.name)).not.toBeNull();
+      expect(manager.getQueueLimits(queue.name).rateLimit).toBeNull();
+    });
+  });
+
+  describe('async control edge cases', () => {
+    it('pauseAsync and resumeAsync are idempotent', async () => {
+      await queue.pauseAsync();
+      await queue.pauseAsync();
+      expect(queue.isPaused()).toBe(true);
+
+      await queue.resumeAsync();
+      await queue.resumeAsync();
+      expect(queue.isPaused()).toBe(false);
+    });
+
+    it('drainAsync and obliterateAsync on a never-used queue resolve cleanly', async () => {
+      const ghost = new Queue('ghost-queue-async');
+      expect(await ghost.drainAsync()).toBe(0);
+      await ghost.obliterateAsync();
+      expect(ghost.count()).toBe(0);
+    });
+
+    it('drainAsync counts every removed job, delayed included', async () => {
+      await queue.add('now', { value: 1 });
+      await queue.add('later', { value: 2 }, { delay: 60_000 });
+
+      const drained = await queue.drainAsync();
+
+      expect(drained).toBe(2);
+      const counts = queue.getJobCounts();
+      expect(counts.waiting + counts.delayed).toBe(0);
     });
   });
 

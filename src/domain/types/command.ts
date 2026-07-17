@@ -296,6 +296,10 @@ export interface RateLimitCommand extends BaseCommand {
   readonly cmd: 'RateLimit';
   readonly queue: string;
   readonly limit: number;
+  /** Window in ms the limit applies to (default 1000: `limit` per second). */
+  readonly duration?: number;
+  /** Auto-expiry in ms: the limit clears itself broker-side after this long. */
+  readonly ttl?: number;
 }
 
 export interface SetConcurrencyCommand extends BaseCommand {

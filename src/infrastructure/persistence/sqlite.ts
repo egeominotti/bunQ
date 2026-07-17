@@ -835,14 +835,25 @@ export class SqliteStorage {
    */
   saveQueueState(
     name: string,
-    paused: boolean,
-    rateLimit: number | null,
-    concurrencyLimit: number | null
+    state: {
+      paused: boolean;
+      rateLimit: number | null;
+      concurrencyLimit: number | null;
+      rateLimitDuration?: number | null;
+      rateLimitExpiresAt?: number | null;
+    }
   ): void {
     this.safeWrite(() => {
       this.statements
         .get('upsertQueueState')!
-        .run(name, paused ? 1 : 0, rateLimit, concurrencyLimit);
+        .run(
+          name,
+          state.paused ? 1 : 0,
+          state.rateLimit,
+          state.concurrencyLimit,
+          state.rateLimitDuration ?? null,
+          state.rateLimitExpiresAt ?? null
+        );
     });
   }
 
@@ -852,6 +863,8 @@ export class SqliteStorage {
     paused: boolean;
     rateLimit: number | null;
     concurrencyLimit: number | null;
+    rateLimitDuration: number | null;
+    rateLimitExpiresAt: number | null;
   }> {
     const rows = this.statements.get('loadQueueState')!.all() as DbQueueState[];
     return rows.map((row) => ({
@@ -859,6 +872,8 @@ export class SqliteStorage {
       paused: row.paused === 1,
       rateLimit: row.rate_limit,
       concurrencyLimit: row.concurrency_limit,
+      rateLimitDuration: row.rate_limit_duration ?? null,
+      rateLimitExpiresAt: row.rate_limit_expires_at ?? null,
     }));
   }
 

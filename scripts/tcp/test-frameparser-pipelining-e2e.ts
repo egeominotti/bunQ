@@ -48,8 +48,7 @@ async function main() {
       ...conn,
       autoBatch: { enabled: false }, // force one frame per add -> coalescing on the wire
     });
-    q.obliterate();
-    await Bun.sleep(150);
+    await q.obliterateAsync();
 
     const N = 2000;
     const adds = [];
@@ -70,8 +69,7 @@ async function main() {
   console.log('\n2. Large payloads (256KB) — frames span multiple TCP reads...');
   {
     const q = new Queue<{ i: number; data: string }>('fp-e2e-large', conn);
-    q.obliterate();
-    await Bun.sleep(150);
+    await q.obliterateAsync();
 
     const SIZE = 256 * 1024; // > typical socket read chunk -> multi-segment frame
     const M = 20;
@@ -97,14 +95,16 @@ async function main() {
   console.log('\n3. Bulk push + worker exactly-once + integrity...');
   {
     const q = new Queue<{ i: number; tag: string }>('fp-e2e-proc', conn);
-    q.obliterate();
-    await Bun.sleep(150);
+    await q.obliterateAsync();
 
     const TOTAL = 5000;
     const BULK = 100;
     // mix bulk frames (large) with the worker pulling/acking (more frames) concurrently
     const jobsTemplate = (off: number) =>
-      Array.from({ length: BULK }, (_, k) => ({ name: 'b', data: { i: off + k, tag: payload(off + k, 64) } }));
+      Array.from({ length: BULK }, (_, k) => ({
+        name: 'b',
+        data: { i: off + k, tag: payload(off + k, 64) },
+      }));
 
     const seen = new Map<number, number>(); // i -> times processed
     const worker = new Worker<{ i: number; tag: string }>(
@@ -131,7 +131,11 @@ async function main() {
     // no integrity errors surfaced as failed jobs
     await Bun.sleep(200);
     const counts = await q.getJobCounts();
-    check(counts.failed === 0, 'zero failed jobs (no payload mismatches)', `(${counts.failed} failed)`);
+    check(
+      counts.failed === 0,
+      'zero failed jobs (no payload mismatches)',
+      `(${counts.failed} failed)`
+    );
 
     await worker.close();
     q.obliterate();
@@ -143,8 +147,7 @@ async function main() {
   console.log('\n4. Many mid-size jobs (variable sizes) round-trip intact...');
   {
     const q = new Queue<{ i: number; data: string }>('fp-e2e-vary', conn);
-    q.obliterate();
-    await Bun.sleep(150);
+    await q.obliterateAsync();
 
     const sizes = [1, 3, 7, 4095, 4096, 4097, 65535, 65536, 65537, 131072];
     const ids: string[] = [];

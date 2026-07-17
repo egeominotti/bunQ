@@ -272,7 +272,7 @@ async function computeDependencies(
   return { processed, unprocessed };
 }
 
-interface SimpleJobContext {
+export interface SimpleJobContext {
   queueName: string;
   /** Execution mode — determines whether to use embedded manager or TCP */
   embedded?: boolean;

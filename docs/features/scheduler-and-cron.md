@@ -155,18 +155,18 @@ At the manager layer, `addCron` first calls `removeOrphanedCronJob` when `preven
 ### Event-driven wake (`scheduleNext`, `cronScheduler.ts:262-289`)
 Clears the current timer, pops stale heap entries (generation mismatch), then arms a single `setTimeout` for `max(0, nextRun - now)` on the soonest live cron. Re-run after every mutation (add/remove/load/tick).
 
-### Tick / fire (`tick`, `cronScheduler.ts:296-402`)
+### Tick / fire (`tick`, `cronScheduler.ts:296-440`)
 1. Drain heap entries whose `nextRun <= now` (`O(k log n)`).
 2. Skip stale entries (generation mismatch from a removed/updated cron).
 3. If `isAtLimit`, mark for removal from the map and drop.
-4. **Compute `newExecutions` and `newNextRun` before pushing.** Interval crons anchor `newNextRun` to the *scheduled* slot, not wall-clock now, so a slow job does not cumulatively drift the schedule (`cronScheduler.ts:330-342`, M4).
-5. **Persist state first** (`persistCron`). If persist throws: emit `cron:missed`, do **not** push, re-insert to retry next tick (`cronScheduler.ts:344-362`).
-6. Update in-memory `executions`/`nextRun`, then `fireCronJob`. If the push throws: state was already persisted, the job for this slot is lost, emit `cron:missed`, re-insert to continue (no duplicate on retry) (`cronScheduler.ts:373-387`).
-7. Re-insert processed entries, delete limit-reached names, `scheduleNext()`.
+4. **Compute `newExecutions` and `newNextRun` before pushing.** Interval crons anchor `newNextRun` to the *scheduled* slot, not wall-clock now, so a slow job does not cumulatively drift the schedule (M4).
+5. **Skip gating BEFORE the budget increment** (`getSkipReason`): `skipIfNoWorker` (no workers registered for the queue → reason `no-worker`) and overlap detection (last fire for this name within `interval * 0.8`, `interval = repeatEvery ?? 60000` → reason `overlap`). A skipped fire advances `nextRun` (persist best-effort, in-memory always) and emits `cron:skipped`, but does **not** touch `executions`: skips never consume the `maxLimit` budget. Before this ordering, a `skipIfNoWorker` cron with no worker burned its entire budget with zero deliveries. Corollary: a `skipIfNoWorker` cron with a `maxLimit` whose queue never gets a worker defers forever — it never increments, never reaches its cap, and never self-removes; it keeps waking the scheduler once per interval until a worker appears or the cron is deleted.
+6. **Persist state first** (`persistCron` with `newExecutions`). If persist throws: emit `cron:missed`, do **not** push, re-insert to retry next tick.
+7. Update in-memory `executions`/`nextRun`, then `fireCronJob`. If the push throws: state was already persisted, the job for this slot is lost, emit `cron:missed`, re-insert to continue (no duplicate on retry).
+8. Re-insert processed entries, delete limit-reached names, `scheduleNext()`.
 
-### Fire gating (`fireCronJob`, `cronScheduler.ts:404-447`)
-- **`skipIfNoWorker`**: if set and no workers registered for the queue, emit `cron:skipped` (reason `no-worker`) and return without pushing.
-- **Overlap detection**: if the last fire for this name was within `interval * 0.8` (`interval = repeatEvery ?? 60000`), emit `cron:skipped` (reason `overlap`) and return.
+### Fire (`fireCronJob`, `cronScheduler.ts`)
+- Skip decisions live in `getSkipReason` (see tick step 5), not here: by the time `fireCronJob` runs the push is committed.
 - **`preventOverlap`**: when no explicit `uniqueKey`, auto-derives `cron:<name>` so the dedup layer blocks a new push while the prior job is still active.
 - Push with `data`, `priority`, `uniqueKey`, `dedup`, and the `jobOptions` subset; record `lastFiredAt`; emit `cron:fired`.
 

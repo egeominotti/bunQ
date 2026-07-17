@@ -1018,8 +1018,8 @@ export class QueueManager {
 
   // ============ Rate Limiting ============
 
-  setRateLimit(queue: string, limit: number): void {
-    this.shards[shardIndex(queue)].setRateLimit(queue, limit);
+  setRateLimit(queue: string, limit: number, durationMs?: number, ttlMs?: number): void {
+    this.shards[shardIndex(queue)].setRateLimit(queue, limit, durationMs, ttlMs);
     this.persistQueueState(queue);
   }
 
@@ -1054,12 +1054,21 @@ export class QueueManager {
       this.storage.deleteQueueState(queue);
       return;
     }
-    this.storage.saveQueueState(queue, state.paused, state.rateLimit, state.concurrencyLimit);
+    this.storage.saveQueueState(queue, {
+      paused: state.paused,
+      rateLimit: state.rateLimit,
+      concurrencyLimit: state.concurrencyLimit,
+      rateLimitDuration: state.rateLimitDuration,
+      rateLimitExpiresAt: state.rateLimitExpiresAt,
+    });
   }
 
   /** Get rate limit and concurrency limit for a queue */
   getQueueLimits(queue: string): { rateLimit: number | null; concurrencyLimit: number | null } {
-    const state = this.shards[shardIndex(queue)].getState(queue);
+    const shard = this.shards[shardIndex(queue)];
+    // Lazy TTL expiry so reads never report a limit that no longer throttles.
+    shard.expireRateLimitIfNeeded(queue);
+    const state = shard.getState(queue);
     return { rateLimit: state.rateLimit, concurrencyLimit: state.concurrencyLimit };
   }
 

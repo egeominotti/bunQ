@@ -8,6 +8,10 @@ export interface QueueState {
   readonly name: string;
   paused: boolean;
   rateLimit: number | null;
+  /** Rate-limit window in ms (null = default 1000ms bucket). */
+  rateLimitDuration: number | null;
+  /** Epoch ms after which the rate limit self-expires (null = permanent). */
+  rateLimitExpiresAt: number | null;
   concurrencyLimit: number | null;
   activeCount: number;
 }
@@ -18,6 +22,8 @@ export function createQueueState(name: string): QueueState {
     name,
     paused: false,
     rateLimit: null,
+    rateLimitDuration: null,
+    rateLimitExpiresAt: null,
     concurrencyLimit: null,
     activeCount: 0,
   };

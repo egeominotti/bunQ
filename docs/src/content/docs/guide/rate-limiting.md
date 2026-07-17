@@ -34,11 +34,16 @@ bunqueue rate-limit clear emails     # back to unlimited
 Or from the SDK (works in both embedded and TCP mode):
 
 ```typescript
-queue.setGlobalRateLimit(100);  // 100 jobs/second
+queue.setGlobalRateLimit(100);          // 100 jobs per second
+queue.setGlobalRateLimit(100, 60_000);  // 100 jobs per minute
 queue.removeGlobalRateLimit();
+
+// Awaitable variants: resolve after the server applied the change
+await queue.setGlobalRateLimitAsync(100, 60_000);
+await queue.removeGlobalRateLimitAsync();
 ```
 
-The server-side window is fixed at **1 second**, implemented as a token bucket that refills continuously.
+The limit is a token bucket that refills continuously: `max` tokens spread over the `duration` window (default 1 second).
 
 ## Set a concurrency limit
 
@@ -64,7 +69,7 @@ const worker = new Worker('emails', processor, {
 
 ## Custom time windows (per worker)
 
-Need "100 jobs per minute" instead of per second? The queue-level limit only supports a 1-second window, but each worker can enforce a sliding window of any duration with the `limiter` option:
+The queue-level limit above already supports any window via the `duration` argument. If you instead want the cap enforced per single worker, use the `limiter` option:
 
 ```typescript
 const worker = new Worker('emails', processor, {
@@ -82,15 +87,19 @@ Agents connected via [MCP](/guide/mcp/) can set and clear both limits in natural
 
 | Control | Scope | Window | How |
 |---------|-------|--------|-----|
-| Rate limit | Queue (all workers) | Fixed 1 second | `bunqueue rate-limit set`, `queue.setGlobalRateLimit(max)` |
+| Rate limit | Queue (all workers) | Any duration (default 1s) | `bunqueue rate-limit set`, `queue.setGlobalRateLimit(max, duration?)` |
 | Concurrency limit | Queue (all workers) | n/a | `bunqueue concurrency set`, `queue.setGlobalConcurrency(n)` |
 | Worker concurrency | One worker | n/a | `new Worker(..., { concurrency })` |
 | Worker limiter | One worker | Any duration | `new Worker(..., { limiter: { max, duration } })` |
 
 ## Gotchas
 
-:::caution[The queue-level duration argument is ignored]
-`queue.setGlobalRateLimit(max, duration?)` accepts a `duration` argument for BullMQ API compatibility, but the server ignores it: the queue-level limit is always `max` jobs **per second**. For a custom window, use the per-worker `limiter` option above.
+:::note[Older servers ignore the duration]
+Servers older than 2.8.35 ignore the `duration` argument and always use a 1-second window. Upgrade the server to get custom windows; the client remains compatible in both directions.
+:::
+
+:::note[Temporary throttle expires server-side]
+`await queue.rateLimit(ms)` throttles the queue to ~1 job/sec and the **server** clears it after `ms` on its own, in embedded and TCP mode alike. It throws if `ms` is not a positive finite number.
 :::
 
 For rate limiting that must be shared with code outside the queue (for example, an API budget also consumed by web requests), use an external limiter inside your processor:

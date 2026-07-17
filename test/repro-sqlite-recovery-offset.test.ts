@@ -106,6 +106,8 @@ function readyCount(manager: QueueManager, queue: string): number {
 
 describe('SQLite startup recovery pagination', () => {
   for (const activeCount of [ACTIVE_JOB_COUNT, RECOVERY_BATCH_SIZE * 2]) {
+    // Seeding + recovering 20k rows takes >5s (the default per-test budget) on
+    // slow CI runners; the 10k case alone measured ~2.6s there.
     test(`recovers all ${activeCount.toLocaleString('en-US')} active jobs exactly once`, () => {
       const dbPath = join(tmpdir(), `bunqueue-recovery-offset-${randomUUID()}.db`);
       let manager: QueueManager | null = null;
@@ -138,7 +140,7 @@ describe('SQLite startup recovery pagination', () => {
         manager?.shutdown();
         removeDbFiles(dbPath);
       }
-    });
+    }, 20_000);
   }
 
   test('enqueues one recovered active job and increments delayed counters only once', () => {

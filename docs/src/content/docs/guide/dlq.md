@@ -42,7 +42,7 @@ bunqueue dlq purge emails
 ```
 
 :::note[Embedded vs TCP]
-The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server. To inspect a remote server's DLQ, use the CLI or the dashboard.
+The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server and always return 0. The `Async` variants work in both modes: `await queue.getDlqJobsAsync(count?)` lists the dead jobs of a remote server (as plain Job objects, without DLQ metadata like the failure reason), `await queue.retryDlqAsync()` / `await queue.purgeDlqAsync()` wait for the command and return the real count, and `await queue.setDlqConfigAsync()` waits for the config to apply. For full DLQ metadata on a remote server, use the CLI or the dashboard.
 :::
 
 ## Common Tasks
@@ -63,6 +63,7 @@ queue.getDlq({ limit: 10, offset: 20 });                   // pagination
 queue.retryDlq();                                          // retry everything
 queue.retryDlq('job-123');                                 // retry one job
 queue.retryDlqByFilter({ reason: 'timeout' });             // retry by filter
+const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
 ```
 
 ### Check DLQ health
@@ -86,7 +87,8 @@ setInterval(() => {
 ### Purge
 
 ```typescript
-const purged = queue.purgeDlq();  // permanently deletes all entries
+const purged = queue.purgeDlq();             // permanently deletes all entries
+const n = await queue.purgeDlqAsync();       // same, but waits and returns the count (TCP too)
 ```
 
 ## Automatic Retry

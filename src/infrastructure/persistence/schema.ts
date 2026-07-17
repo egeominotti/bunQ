@@ -129,7 +129,9 @@ CREATE TABLE IF NOT EXISTS queue_state (
     name TEXT PRIMARY KEY,
     paused INTEGER NOT NULL DEFAULT 0,
     rate_limit INTEGER,
-    concurrency_limit INTEGER
+    concurrency_limit INTEGER,
+    rate_limit_duration INTEGER,
+    rate_limit_expires_at INTEGER
 );
 `;
 
@@ -142,7 +144,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 16;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -204,5 +206,16 @@ CREATE INDEX IF NOT EXISTS idx_jobs_queue_created
     ON jobs(queue, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_queue_state_created
     ON jobs(queue, state, created_at, id);
+`,
+  // Migrations 15-16: Rate-limit window (duration) + TTL auto-expiry on
+  // queue_state. One ALTER per migration ON PURPOSE: each runs in its own
+  // db.run with its own error-swallow, so a crash between the two leaves a
+  // retryable state (a two-ALTER string would abort at the first "duplicate
+  // column" on re-run and never execute the second statement).
+  15: `
+ALTER TABLE queue_state ADD COLUMN rate_limit_duration INTEGER;
+`,
+  16: `
+ALTER TABLE queue_state ADD COLUMN rate_limit_expires_at INTEGER;
 `,
 };

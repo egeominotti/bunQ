@@ -1583,7 +1583,7 @@ List all registered webhooks.
 
 #### RateLimit
 
-Set a rate limit on a queue (max jobs processed per second).
+Set a rate limit on a queue: `limit` jobs per `duration` ms (default 1000, so jobs per second).
 
 **Request:**
 
@@ -1591,9 +1591,13 @@ Set a rate limit on a queue (max jobs processed per second).
 {
   cmd: 'RateLimit',
   queue: string,
-  limit: number          // Jobs per second
+  limit: number,         // Max jobs per window
+  duration?: number,     // Window in ms (default 1000)
+  ttl?: number           // Auto-expiry in ms: the server clears the limit itself
 }
 ```
+
+Invalid `duration` or `ttl` values (non-finite or not positive) fall back to the defaults (1 second window, permanent limit) instead of failing. Servers older than 2.8.35 ignore both optional fields.
 
 **Response:**
 

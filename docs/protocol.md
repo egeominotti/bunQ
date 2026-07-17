@@ -270,8 +270,14 @@ entries.
 - `RemoveWebhook` takes **`webhookId`**; `SetWebhookEnabled` takes **`id`**.
   Yes, they differ; both are normative.
 - `ListWebhooks` → `{data: {webhooks}}`.
-- `RateLimit` takes `queue` and **`limit`** (no duration field exists);
-  `RateLimitClear` clears it. `SetConcurrency`/`ClearConcurrency` use `limit`.
+- `RateLimit` takes `queue`, **`limit`**, and two optional fields (both since
+  server 2.8.35): **`duration`** (window in ms the limit applies to, default
+  1000 = `limit` per second) and **`ttl`** (auto-expiry in ms: the broker
+  clears the limit itself after this long, lazily on the next pull or limit
+  read). Non-finite or non-positive values degrade to the defaults (1s
+  window, permanent) instead of failing the command. Older servers ignore
+  both fields. `RateLimitClear` clears the limit.
+  `SetConcurrency`/`ClearConcurrency` use `limit`.
 - `ListWorkers` → `{data: {workers}}`; `Stats` → `{stats}`; `Metrics` →
   `{metrics}`; `ListQueues` → `{queues}` (names as strings); `Ping` →
   `{data: {pong}}`.

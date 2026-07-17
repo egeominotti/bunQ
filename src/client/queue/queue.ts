@@ -313,14 +313,26 @@ export class Queue<T = unknown> {
   pause() {
     controlOps.pause(this.ctx);
   }
+  pauseAsync() {
+    return controlOps.pauseAsync(this.ctx);
+  }
   resume() {
     controlOps.resume(this.ctx);
+  }
+  resumeAsync() {
+    return controlOps.resumeAsync(this.ctx);
   }
   drain() {
     controlOps.drain(this.ctx);
   }
+  drainAsync() {
+    return controlOps.drainAsync(this.ctx);
+  }
   obliterate() {
     controlOps.obliterate(this.ctx);
+  }
+  obliterateAsync() {
+    return controlOps.obliterateAsync(this.ctx);
   }
   isPaused() {
     return controlOps.isPaused(this.ctx);
@@ -396,6 +408,9 @@ export class Queue<T = unknown> {
   setStallConfig(config: Partial<StallConfig>) {
     stallOps.setStallConfig(this.ctx, config);
   }
+  setStallConfigAsync(config: Partial<StallConfig>) {
+    return stallOps.setStallConfigAsync(this.ctx, config);
+  }
   getStallConfig(): StallConfig {
     return stallOps.getStallConfig(this.ctx);
   }
@@ -407,6 +422,9 @@ export class Queue<T = unknown> {
   setDlqConfig(config: Partial<DlqConfig>) {
     dlqOps.setDlqConfig(this.ctx, config);
   }
+  setDlqConfigAsync(config: Partial<DlqConfig>) {
+    return dlqOps.setDlqConfigAsync(this.ctx, config);
+  }
   getDlqConfig(): DlqConfig {
     return dlqOps.getDlqConfig(this.ctx);
   }
@@ -416,17 +434,26 @@ export class Queue<T = unknown> {
   getDlq(filter?: DlqFilter): DlqEntry<T>[] {
     return dlqOps.getDlq<T>(this.ctx, filter);
   }
+  getDlqJobsAsync(count?: number) {
+    return dlqOps.getDlqJobsAsync<T>(this.queryCtx, count);
+  }
   getDlqStats(): DlqStats {
     return dlqOps.getDlqStats(this.ctx);
   }
   retryDlq(id?: string) {
     return dlqOps.retryDlq(this.ctx, id);
   }
+  retryDlqAsync(id?: string) {
+    return dlqOps.retryDlqAsync(this.ctx, id);
+  }
   retryDlqByFilter(filter: DlqFilter) {
     return dlqOps.retryDlqByFilter(this.ctx, filter);
   }
   purgeDlq() {
     return dlqOps.purgeDlq(this.ctx);
+  }
+  purgeDlqAsync() {
+    return dlqOps.purgeDlqAsync(this.ctx);
   }
   retryCompleted(id?: string) {
     return dlqOps.retryCompleted(this.ctx, id);
@@ -439,8 +466,14 @@ export class Queue<T = unknown> {
   setGlobalConcurrency(concurrency: number) {
     rateLimitOps.setGlobalConcurrency(this.ctx, concurrency);
   }
+  setGlobalConcurrencyAsync(concurrency: number) {
+    return rateLimitOps.setGlobalConcurrencyAsync(this.ctx, concurrency);
+  }
   removeGlobalConcurrency() {
     rateLimitOps.removeGlobalConcurrency(this.ctx);
+  }
+  removeGlobalConcurrencyAsync() {
+    return rateLimitOps.removeGlobalConcurrencyAsync(this.ctx);
   }
   getGlobalConcurrency() {
     return rateLimitOps.getGlobalConcurrency(this.ctx);
@@ -448,8 +481,14 @@ export class Queue<T = unknown> {
   setGlobalRateLimit(max: number, duration?: number) {
     rateLimitOps.setGlobalRateLimit(this.ctx, max, duration);
   }
+  setGlobalRateLimitAsync(max: number, duration?: number) {
+    return rateLimitOps.setGlobalRateLimitAsync(this.ctx, max, duration);
+  }
   removeGlobalRateLimit() {
     rateLimitOps.removeGlobalRateLimit(this.ctx);
+  }
+  removeGlobalRateLimitAsync() {
+    return rateLimitOps.removeGlobalRateLimitAsync(this.ctx);
   }
   getGlobalRateLimit() {
     return rateLimitOps.getGlobalRateLimit(this.ctx);

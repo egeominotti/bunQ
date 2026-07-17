@@ -175,8 +175,9 @@ describe('skipIfNoWorker', () => {
 
     // nextRun should have advanced (cron state updated even though job was skipped)
     expect(cron!.nextRun).toBeGreaterThan(Date.now());
-    // executions should have incremented
-    expect(cron!.executions).toBe(6);
+    // A skipped fire pushes no job, so it must NOT consume the maxLimit
+    // budget: executions counts deliveries, not skip slots.
+    expect(cron!.executions).toBe(5);
 
     scheduler.stop();
   });

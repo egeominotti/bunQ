@@ -48,8 +48,7 @@ async function main() {
   console.log('1. Testing CHAIN SEQUENTIAL EXECUTION...');
   {
     const q = new Queue('tcp-flow-chain-seq', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const order: number[] = [];
     const worker = await withWorker('tcp-flow-chain-seq', async (job) => {
@@ -71,7 +70,13 @@ async function main() {
     } else {
       await Bun.sleep(4000);
 
-      if (order.length === 4 && order[0] === 0 && order[1] === 1 && order[2] === 2 && order[3] === 3) {
+      if (
+        order.length === 4 &&
+        order[0] === 0 &&
+        order[1] === 1 &&
+        order[2] === 2 &&
+        order[3] === 3
+      ) {
         ok(`Chain executed in order: ${order.join(' -> ')}`);
       } else {
         fail(`Expected [0,1,2,3], got [${order.join(',')}]`);
@@ -89,8 +94,7 @@ async function main() {
   console.log('\n2. Testing FAN-OUT / FAN-IN...');
   {
     const q = new Queue('tcp-flow-fanout', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const executed: string[] = [];
     const worker = await withWorker(
@@ -139,8 +143,7 @@ async function main() {
   console.log('\n3. Testing DEEP TREE (parent-child)...');
   {
     const q = new Queue('tcp-flow-tree', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const executed: string[] = [];
     const worker = await withWorker(
@@ -207,9 +210,8 @@ async function main() {
   {
     const q1 = new Queue('tcp-flow-xq-a', { connection: connOpts });
     const q2 = new Queue('tcp-flow-xq-b', { connection: connOpts });
-    q1.obliterate();
-    q2.obliterate();
-    await Bun.sleep(100);
+    await q1.obliterateAsync();
+    await q2.obliterateAsync();
 
     const results: Array<{ queue: string; step: string }> = [];
 
@@ -259,8 +261,7 @@ async function main() {
   console.log('\n5. Testing CONCURRENT CHAINS...');
   {
     const q = new Queue('tcp-flow-concurrent', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const flowResults = new Map<string, number[]>();
     const worker = await withWorker(
@@ -298,7 +299,13 @@ async function main() {
     let allComplete = true;
     for (const id of ['A', 'B', 'C']) {
       const steps = flowResults.get(id);
-      if (!steps || steps.length !== 3 || !steps.includes(0) || !steps.includes(1) || !steps.includes(2)) {
+      if (
+        !steps ||
+        steps.length !== 3 ||
+        !steps.includes(0) ||
+        !steps.includes(1) ||
+        !steps.includes(2)
+      ) {
         allComplete = false;
         fail(`Flow ${id} incomplete: ${steps ? steps.join(',') : 'missing'}`);
       }
@@ -318,8 +325,7 @@ async function main() {
   console.log('\n6. Testing PRIORITY IN FLOW STEPS...');
   {
     const q = new Queue('tcp-flow-priority', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     // Push two independent chains, one with higher priority
     const results: string[] = [];
@@ -365,8 +371,7 @@ async function main() {
   console.log('\n7. Testing DELAYED STEP IN CHAIN...');
   {
     const q = new Queue('tcp-flow-delayed', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const timestamps: Array<{ step: number; ts: number }> = [];
     const worker = await withWorker('tcp-flow-delayed', async (job) => {
@@ -408,8 +413,7 @@ async function main() {
   console.log('\n8. Testing HIGH-THROUGHPUT PIPELINE (20 chains x 3 steps)...');
   {
     const q = new Queue('tcp-flow-throughput', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     let completedChains = 0;
     const worker = await withWorker(
@@ -459,8 +463,7 @@ async function main() {
   console.log('\n9. Testing GET FLOW TREE...');
   {
     const q = new Queue('tcp-flow-gettree', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const worker = await withWorker(
       'tcp-flow-gettree',
@@ -491,7 +494,9 @@ async function main() {
       const names = retrieved.children.map((c) => c.job.name).sort();
       ok(`getFlow returned tree: root -> [${names.join(', ')}]`);
     } else {
-      fail(`getFlow returned unexpected: ${JSON.stringify(retrieved?.job?.name)}, children=${retrieved?.children?.length}`);
+      fail(
+        `getFlow returned unexpected: ${JSON.stringify(retrieved?.job?.name)}, children=${retrieved?.children?.length}`
+      );
     }
 
     await worker.close();
@@ -505,8 +510,7 @@ async function main() {
   console.log('\n10. Testing WORKER EVENTS IN FLOW...');
   {
     const q = new Queue('tcp-flow-events', { connection: connOpts });
-    q.obliterate();
-    await Bun.sleep(100);
+    await q.obliterateAsync();
 
     const events: Array<{ type: string; name: string }> = [];
 
@@ -527,8 +531,12 @@ async function main() {
     const activeNames = events.filter((e) => e.type === 'active').map((e) => e.name);
     const completedNames = events.filter((e) => e.type === 'completed').map((e) => e.name);
 
-    if (activeNames.includes('alpha') && activeNames.includes('beta') &&
-        completedNames.includes('alpha') && completedNames.includes('beta')) {
+    if (
+      activeNames.includes('alpha') &&
+      activeNames.includes('beta') &&
+      completedNames.includes('alpha') &&
+      completedNames.includes('beta')
+    ) {
       ok(`Events fired: ${events.map((e) => `${e.type}:${e.name}`).join(', ')}`);
     } else {
       fail(`Missing events: active=${activeNames}, completed=${completedNames}`);

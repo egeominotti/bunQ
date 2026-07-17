@@ -341,6 +341,35 @@ export class CronScheduler {
           newNextRun = executionTime;
         }
 
+        // Skip decision comes BEFORE the executions increment: a skipped fire
+        // pushes no job, so it must not consume the maxLimit budget (a cron
+        // with maxLimit=N must deliver N jobs, not N-minus-skips — worst case
+        // skipIfNoWorker used to burn the whole budget with zero deliveries).
+        // The schedule still advances so the heap doesn't hot-loop on it.
+        const skipReason = this.getSkipReason(cron, now);
+        if (skipReason) {
+          if (this.persistCron) {
+            try {
+              this.persistCron(cron.name, cron.executions, newNextRun);
+            } catch (persistErr) {
+              // Benign here: nothing was pushed, in-memory advance is enough;
+              // the next successful persist catches the row up.
+              cronLog.error('Failed to persist cron nextRun on skip', {
+                name: cron.name,
+                error: String(persistErr),
+              });
+            }
+          }
+          cron.nextRun = newNextRun;
+          this.dashboardEmit?.('cron:skipped', {
+            name: cron.name,
+            queue: cron.queue,
+            reason: skipReason,
+          });
+          toReinsert.push(entry);
+          continue;
+        }
+
         // PERSIST STATE FIRST (before pushing job to prevent duplicates)
         if (this.persistCron) {
           try {
@@ -402,29 +431,25 @@ export class CronScheduler {
   }
 
   /** Fire a cron job with overlap and worker detection */
-  private async fireCronJob(cron: CronJob, now: number): Promise<void> {
+  /**
+   * Reasons a due cron must not push right now. Evaluated BEFORE the
+   * executions increment in tick(), so skips never consume maxLimit budget.
+   */
+  private getSkipReason(cron: CronJob, now: number): 'no-worker' | 'overlap' | null {
     // skipIfNoWorker: skip if no workers registered for this queue
     if (cron.skipIfNoWorker && this.hasWorkers && !this.hasWorkers(cron.queue)) {
-      this.dashboardEmit?.('cron:skipped', {
-        name: cron.name,
-        queue: cron.queue,
-        reason: 'no-worker',
-      });
-      return;
+      return 'no-worker';
     }
-
     // Overlap detection: skip if last fire was within repeatEvery window
     const lastFire = this.lastFiredAt.get(cron.name);
     const interval = cron.repeatEvery ?? 60000;
     if (lastFire && now - lastFire < interval * 0.8) {
-      this.dashboardEmit?.('cron:skipped', {
-        name: cron.name,
-        queue: cron.queue,
-        reason: 'overlap',
-      });
-      return;
+      return 'overlap';
     }
+    return null;
+  }
 
+  private async fireCronJob(cron: CronJob, now: number): Promise<void> {
     // preventOverlap: auto-set uniqueKey to block pushes while previous job is active
     const effectiveUniqueKey =
       cron.uniqueKey ?? (cron.preventOverlap ? `cron:${cron.name}` : undefined);

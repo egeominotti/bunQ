@@ -44,21 +44,50 @@ export class LimiterManager {
 
   // ============ Rate Limiting ============
 
-  /** Set rate limit for queue */
-  setRateLimit(queue: string, limit: number): void {
-    this.rateLimiters.set(queue, new RateLimiter(limit));
-    this.getState(queue).rateLimit = limit;
+  /**
+   * Set rate limit for queue.
+   * @param durationMs window the limit applies to (default 1000ms): `limit`
+   *   tokens refill over `durationMs`. Non-finite or non-positive → default.
+   * @param ttlMs auto-expiry: the limit clears itself after this many ms
+   *   (lazy, checked on acquire/read). Non-finite or non-positive → permanent.
+   */
+  setRateLimit(queue: string, limit: number, durationMs?: number, ttlMs?: number): void {
+    const duration = Number.isFinite(durationMs) && (durationMs as number) > 0 ? durationMs! : null;
+    const ttl = Number.isFinite(ttlMs) && (ttlMs as number) > 0 ? ttlMs! : null;
+    const windowSeconds = (duration ?? 1000) / 1000;
+    this.rateLimiters.set(queue, new RateLimiter(limit, limit / windowSeconds));
+    const state = this.getState(queue);
+    state.rateLimit = limit;
+    state.rateLimitDuration = duration;
+    state.rateLimitExpiresAt = ttl === null ? null : Date.now() + ttl;
   }
 
   /** Clear rate limit */
   clearRateLimit(queue: string): void {
     this.rateLimiters.delete(queue);
     const state = this.queueState.get(queue);
-    if (state) state.rateLimit = null;
+    if (state) {
+      state.rateLimit = null;
+      state.rateLimitDuration = null;
+      state.rateLimitExpiresAt = null;
+    }
+  }
+
+  /**
+   * Drop the rate limit if its TTL has elapsed. Lazy expiry: called from the
+   * acquire path and from limit reads, so no timer is needed and an expired
+   * limit can never throttle a pull.
+   */
+  expireRateLimitIfNeeded(queue: string): void {
+    const expiresAt = this.queueState.get(queue)?.rateLimitExpiresAt;
+    if (expiresAt !== null && expiresAt !== undefined && Date.now() >= expiresAt) {
+      this.clearRateLimit(queue);
+    }
   }
 
   /** Try to acquire rate limit token */
   tryAcquireRateLimit(queue: string): boolean {
+    this.expireRateLimitIfNeeded(queue);
     const limiter = this.rateLimiters.get(queue);
     return !limiter || limiter.tryAcquire();
   }

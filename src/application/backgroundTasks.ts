@@ -404,7 +404,16 @@ export function recover(ctx: BackgroundContext): void {
   for (const qs of ctx.storage.loadQueueState()) {
     const shard = ctx.shards[shardIndex(qs.name)];
     if (qs.paused) shard.pause(qs.name);
-    if (qs.rateLimit !== null) shard.setRateLimit(qs.name, qs.rateLimit);
+    if (qs.rateLimit !== null) {
+      // TTL'd limits are temporary by definition: an already-expired one must
+      // not resurrect as permanent. A still-live one is restored with its
+      // remaining TTL so it keeps expiring broker-side.
+      const remainingTtl =
+        qs.rateLimitExpiresAt === null ? undefined : qs.rateLimitExpiresAt - Date.now();
+      if (remainingTtl === undefined || remainingTtl > 0) {
+        shard.setRateLimit(qs.name, qs.rateLimit, qs.rateLimitDuration ?? undefined, remainingTtl);
+      }
+    }
     if (qs.concurrencyLimit !== null) shard.setConcurrency(qs.name, qs.concurrencyLimit);
     ctx.registerQueueName(qs.name);
   }

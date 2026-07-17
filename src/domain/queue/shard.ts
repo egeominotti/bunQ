@@ -186,12 +186,16 @@ export class Shard {
 
   // ============ Rate & Concurrency Limiting (delegated) ============
 
-  setRateLimit(queue: string, limit: number): void {
-    this.limiterManager.setRateLimit(queue, limit);
+  setRateLimit(queue: string, limit: number, durationMs?: number, ttlMs?: number): void {
+    this.limiterManager.setRateLimit(queue, limit, durationMs, ttlMs);
   }
 
   clearRateLimit(queue: string): void {
     this.limiterManager.clearRateLimit(queue);
+  }
+
+  expireRateLimitIfNeeded(queue: string): void {
+    this.limiterManager.expireRateLimitIfNeeded(queue);
   }
 
   tryAcquireRateLimit(queue: string): boolean {

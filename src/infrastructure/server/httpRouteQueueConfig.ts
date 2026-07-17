@@ -92,6 +92,8 @@ export async function routeQueueConfigRoutes(
         cmd: 'RateLimit',
         queue,
         limit: body['limit'] as number,
+        duration: body['duration'] as number | undefined,
+        ttl: body['ttl'] as number | undefined,
       },
       ctx
     );

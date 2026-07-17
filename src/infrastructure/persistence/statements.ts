@@ -97,9 +97,10 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
 
   // Queue control-state persistence (#100): paused / rate-limit / concurrency.
   upsertQueueState:
-    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit) VALUES (?, ?, ?, ?)',
+    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at) VALUES (?, ?, ?, ?, ?, ?)',
 
-  loadQueueState: 'SELECT name, paused, rate_limit, concurrency_limit FROM queue_state',
+  loadQueueState:
+    'SELECT name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at FROM queue_state',
 
   deleteQueueState: 'DELETE FROM queue_state WHERE name = ?',
 };
@@ -177,4 +178,6 @@ export interface DbQueueState {
   paused: number;
   rate_limit: number | null;
   concurrency_limit: number | null;
+  rate_limit_duration: number | null;
+  rate_limit_expires_at: number | null;
 }

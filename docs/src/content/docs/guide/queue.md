@@ -248,10 +248,15 @@ Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding ar
 ## Control the queue
 
 ```typescript
-queue.pause();            // Workers stop pulling
-queue.resume();           // Back to normal
-queue.drain();            // Remove all waiting jobs
-queue.obliterate();       // Remove ALL queue data
+queue.pause();            // Workers stop pulling (fire-and-forget)
+queue.resume();           // Back to normal (fire-and-forget)
+queue.drain();            // Remove all waiting jobs (fire-and-forget)
+queue.obliterate();       // Remove ALL queue data (fire-and-forget)
+
+await queue.pauseAsync();      // Pause and wait for it
+await queue.resumeAsync();     // Resume and wait for it
+const n = await queue.drainAsync();    // Drain, wait, get removed count
+await queue.obliterateAsync(); // Remove ALL queue data and wait for it
 
 queue.remove('job-id');            // Remove one job (fire-and-forget)
 await queue.removeAsync('job-id'); // Remove one job and wait for it
@@ -259,6 +264,8 @@ await queue.removeAsync('job-id'); // Remove one job and wait for it
 await queue.waitUntilReady();      // Wait until queue/server is ready
 queue.close();                     // Close TCP connection (no-op in embedded mode)
 ```
+
+Gotcha: in TCP mode the fire-and-forget forms return before the server has processed them. If you drain or obliterate and immediately add new jobs, the wipe can land after the add and delete the new job. Use the `Async` variants when the next step depends on the command being done.
 
 ## Maintenance
 
@@ -312,18 +319,20 @@ await queue.moveJobToWaitingChildren('job-id', token);
 // Cap parallel processing across ALL workers on this queue
 queue.setGlobalConcurrency(10);
 queue.removeGlobalConcurrency();
+await queue.setGlobalConcurrencyAsync(10);   // same, but waits for the server
 
-// Cap throughput (token bucket, refilled per second)
-queue.setGlobalRateLimit(100); // max 100 jobs per second
+// Cap throughput: max jobs per window (default window: 1 second)
+queue.setGlobalRateLimit(100);          // max 100 jobs per second
+queue.setGlobalRateLimit(100, 60_000);  // max 100 jobs per minute
 queue.removeGlobalRateLimit();
+await queue.setGlobalRateLimitAsync(100, 60_000); // same, but waits for the server
 
-// Temporary throttle to ~1 job/sec
+// Temporary throttle to ~1 job/sec; the server clears it after 5s on its own
 await queue.rateLimit(5000);
 ```
 
 :::caution[Semantics and stubs]
-- `setGlobalRateLimit(max, duration?)`: the `duration` argument is accepted for BullMQ compatibility but ignored, the window is always 1 second.
-- `rateLimit(ms)`: in embedded mode the throttle clears itself after `ms`; in TCP mode it does not, call `removeGlobalRateLimit()` to lift it.
+- `rateLimit(ms)` throws on non-positive or non-finite `ms`. The expiry lives on the server, so it also survives your process exiting.
 - `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they return `null` / `null` / `0` / `false` regardless of actual server state.
 :::
 

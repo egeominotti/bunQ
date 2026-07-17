@@ -1261,15 +1261,17 @@ Per-queue controls for throughput and parallelism. These are queue-level setting
 
 ### Set Rate Limit
 
-Limit the number of jobs that can be processed per second from a queue.
+Limit the number of jobs that can be processed from a queue: `limit` jobs per `duration` ms (default 1000, so jobs per second).
 
 ```
 PUT /queues/:queue/rate-limit
 ```
 
 ```json
-{ "limit": 100 }
+{ "limit": 100, "duration": 60000, "ttl": 30000 }
 ```
+
+`duration` and `ttl` are optional. `duration` sets the window in ms; `ttl` makes the limit temporary, the server clears it by itself after that many ms. Invalid values fall back to the defaults (1 second window, permanent limit).
 
 When the rate limit is hit, workers pulling from this queue receive `null` until the next window opens.
 

@@ -231,18 +231,24 @@ See [Deduplication & Unique Jobs](./features/deduplication-and-unique.md).
 Defined in `src/domain/types/queue.ts`.
 
 ```typescript
-export interface QueueState {       // queue.ts:7-13
+export interface QueueState {       // queue.ts:7-19
   readonly name: string;
   paused: boolean;
-  rateLimit: number | null;         // token-bucket capacity (jobs/sec)
+  rateLimit: number | null;         // token-bucket capacity
+  rateLimitDuration: number | null; // window ms (null = 1000ms default)
+  rateLimitExpiresAt: number | null; // epoch ms auto-expiry (null = permanent)
   concurrencyLimit: number | null;  // max active jobs
   activeCount: number;
 }
 ```
 
-`createQueueState` (`queue.ts:16-24`) defaults everything off (`paused:false`,
-limits `null`, `activeCount:0`). This is the row persisted in `queue_state`
-(see schema) for control-state recovery (#100).
+`createQueueState` defaults everything off (`paused:false`, limits `null`,
+`activeCount:0`). This is the row persisted in `queue_state` (see schema) for
+control-state recovery (#100). `rateLimitDuration` makes the limit mean
+"`rateLimit` per `duration` ms" (refill rate = `limit / (duration/1000)`
+tokens/sec); `rateLimitExpiresAt` is checked lazily on acquire and on limit
+reads — an expired limit clears itself broker-side, and recovery skips
+already-expired rows (restoring live ones with their remaining TTL).
 
 Two runtime limiter classes back the config:
 
@@ -728,19 +734,23 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
 
 Row type `DbCron` at `statements.ts:155-172`.
 
-### `queue_state` (schema.ts:123-128)
+### `queue_state` (schema.ts:128-135)
 
 ```sql
 CREATE TABLE IF NOT EXISTS queue_state (
     name TEXT PRIMARY KEY,
     paused INTEGER NOT NULL DEFAULT 0,
     rate_limit INTEGER,
-    concurrency_limit INTEGER
+    concurrency_limit INTEGER,
+    rate_limit_duration INTEGER,   -- window ms (migration 15)
+    rate_limit_expires_at INTEGER  -- epoch ms auto-expiry (migration 16)
 );
 ```
 
 Persists queue control-state for recovery (#100); row type `DbQueueState`
-(`statements.ts:175-180`).
+(`statements.ts:175-183`). On boot, recovery skips rate-limit rows whose
+`rate_limit_expires_at` is already in the past and restores still-live TTL'd
+limits with their remaining time.
 
 ### `migrations` (schema.ts:132-137)
 
@@ -751,9 +761,9 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 ```
 
-### Migrations (schema.ts:140-196)
+### Migrations (schema.ts:140-210)
 
-`SCHEMA_VERSION = 14`. The migrate routine (`sqlite.ts:255-278`) reads
+`SCHEMA_VERSION = 16`. The migrate routine (`sqlite.ts:255-278`) reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -772,6 +782,8 @@ then records `SCHEMA_VERSION`.
 | 12      | `cron_jobs.job_options` BLOB (per-cron retry/cleanup policy, #86) |
 | 13      | `jobs.stacktrace` BLOB (persist last failure stack, #74)          |
 | 14      | Stable `getJobs` indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)` |
+| 15      | `queue_state.rate_limit_duration` (rate-limit window)            |
+| 16      | `queue_state.rate_limit_expires_at` (rate-limit TTL auto-expiry; split from 15 so each ALTER retries idempotently) |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 

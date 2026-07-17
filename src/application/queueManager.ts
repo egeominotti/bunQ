@@ -9,7 +9,7 @@ import type { JobLocation, JobEvent } from '../domain/types/queue';
 import { EventType } from '../domain/types/queue';
 import type { CronJob, CronJobInput } from '../domain/types/cron';
 import type { JobLogEntry, CreateWorkerOptions } from '../domain/types/worker';
-import type { StallConfig } from '../domain/types/stall';
+import { DEFAULT_STALL_CONFIG, type StallConfig } from '../domain/types/stall';
 import type { DlqConfig, DlqEntry, DlqFilter, DlqStats } from '../domain/types/dlq';
 import { FailureReason } from '../domain/types/dlq';
 import { Shard } from '../domain/queue/shard';
@@ -869,13 +869,16 @@ export class QueueManager {
   }
 
   obliterate(queue: string): void {
-    queueControl.obliterateQueue(queue, this.contextFactory.getQueueControlContext());
+    const shardJobs = queueControl.obliterateQueue(
+      queue,
+      this.contextFactory.getQueueControlContext()
+    );
     dlqOps.purgeDlqJobs(queue, this.contextFactory.getDlqContext());
 
-    // obliterateQueue() clears the waiting/delayed shard only. Active jobs in
-    // processingShards, plus completed/result/log/lock state in global indexes,
-    // plus SQLite rows, all survive unless we purge them here.
-    const toDrop = new Set<JobId>();
+    // obliterateQueue() returns every queued, DLQ, and dependency-gated job it
+    // removed. Active jobs in processingShards, plus completed/result/log/lock
+    // state in global indexes, still need to be discovered and purged here.
+    const toDrop = new Set<JobId>(shardJobs);
     for (const [jid, loc] of this.jobIndex) {
       if (loc.type === 'processing') {
         const job = this.processingShards[loc.shardIdx]?.get(jid);
@@ -1046,11 +1049,22 @@ export class QueueManager {
   private persistQueueState(queue: string): void {
     if (!this.storage) return;
     const state = this.shards[shardIndex(queue)].getState(queue);
+    const stallConfig = this.shards[shardIndex(queue)].getStallConfig(queue);
+    const hasCustomStallConfig =
+      stallConfig.enabled !== DEFAULT_STALL_CONFIG.enabled ||
+      stallConfig.stallInterval !== DEFAULT_STALL_CONFIG.stallInterval ||
+      stallConfig.maxStalls !== DEFAULT_STALL_CONFIG.maxStalls ||
+      stallConfig.gracePeriod !== DEFAULT_STALL_CONFIG.gracePeriod;
     // When control-state returns fully to default (not paused, no limits), drop
     // the row instead of persisting an all-default placeholder. Keeps the table
     // free of noise rows for ephemeral queues that only ever call resume/clear*,
     // and recovers identically (absent row → default state).
-    if (!state.paused && state.rateLimit === null && state.concurrencyLimit === null) {
+    if (
+      !state.paused &&
+      state.rateLimit === null &&
+      state.concurrencyLimit === null &&
+      !hasCustomStallConfig
+    ) {
       this.storage.deleteQueueState(queue);
       return;
     }
@@ -1060,6 +1074,7 @@ export class QueueManager {
       concurrencyLimit: state.concurrencyLimit,
       rateLimitDuration: state.rateLimitDuration,
       rateLimitExpiresAt: state.rateLimitExpiresAt,
+      stallConfig,
     });
   }
 
@@ -1095,6 +1110,7 @@ export class QueueManager {
 
   setStallConfig(queue: string, config: Record<string, unknown>): void {
     this.shards[shardIndex(queue)].setStallConfig(queue, config);
+    this.persistQueueState(queue);
   }
 
   getStallConfig(queue: string): StallConfig {

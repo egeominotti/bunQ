@@ -31,6 +31,10 @@ bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"  # Python 
 bun runner.ts --driver "php drivers/php.php"                # PHP SDK
 (cd drivers/go && go build -o ../go-driver .)               # build the Go driver binary once
 bun runner.ts --driver "./drivers/go-driver"                # Go SDK
+bun runner.ts --driver \
+  "cargo run --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver" # Rust
+bun runner.ts --driver \
+  "cd ../elixir && mix run ../conformance/drivers/elixir.exs" # Elixir
 ```
 
 Output: one `PASS`/`FAIL` line per check and a final verdict. Exit code 0 =

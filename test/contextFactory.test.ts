@@ -789,13 +789,15 @@ describe('ContextFactory', () => {
       expect(ctx.storage).toBe(deps.storage);
     });
 
-    test('should be a minimal context with only 3 fields', () => {
+    test('should include terminal-job auxiliary indexes', () => {
       const ctx = factory.getDlqContext();
       const keys = Object.keys(ctx);
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
+      expect(keys).toContain('jobResults');
+      expect(keys).toContain('jobLogs');
       expect(keys).toContain('storage');
-      expect(keys.length).toBe(3);
+      expect(keys.length).toBe(5);
     });
   });
 
@@ -830,9 +832,10 @@ describe('ContextFactory', () => {
     test('should extend DlqContext with completedJobs and jobResults', () => {
       const ctx = factory.getRetryCompletedContext();
       const keys = Object.keys(ctx);
-      expect(keys.length).toBe(5);
+      expect(keys.length).toBe(6);
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
+      expect(keys).toContain('jobLogs');
       expect(keys).toContain('storage');
       expect(keys).toContain('completedJobs');
       expect(keys).toContain('jobResults');

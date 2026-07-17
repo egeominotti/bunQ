@@ -45,6 +45,8 @@ export function consoleLogger(min: LogLevel = 'info'): Logger {
 }
 
 /** A single telemetry data point. A discriminated union keyed on `type`. */
+export type TelemetryErrorOperation = 'connect' | 'socket' | 'write' | 'serialization';
+
 export type TelemetryEvent =
   | { type: 'command'; cmd: string; reqId: string; durationMs: number; ok: boolean }
   | { type: 'command_timeout'; cmd: string; reqId: string }
@@ -52,7 +54,14 @@ export type TelemetryEvent =
   | { type: 'disconnect'; host: string; port: number; generation: number }
   | { type: 'reconnect_scheduled'; host: string; port: number; attempt: number; delayMs: number }
   | { type: 'auth'; ok: boolean }
-  | { type: 'backpressure'; inFlight: number; maxInFlight: number };
+  | { type: 'backpressure'; inFlight: number; maxInFlight: number }
+  | {
+      type: 'error';
+      operation: TelemetryErrorOperation;
+      errorType: string;
+      message: string;
+      code?: string;
+    };
 
 export type TelemetryHandler = (event: TelemetryEvent) => void;
 
@@ -73,6 +82,13 @@ export interface Observability {
 
 /** High-resolution monotonic clock (Node/Bun/Deno all expose `performance`). */
 export const nowMs = (): number => performance.now();
+
+const ERROR_MESSAGES: Record<TelemetryErrorOperation, string> = {
+  connect: 'connection failed',
+  socket: 'socket failed',
+  write: 'socket write failed',
+  serialization: 'command serialization failed',
+};
 
 /**
  * Fans a telemetry event out to (1) the telemetry sink, (2) the logger, and
@@ -145,6 +161,48 @@ export class Telemetry {
 
   backpressure(inFlight: number, maxInFlight: number): void {
     this.dispatch({ type: 'backpressure', inFlight, maxInFlight });
+  }
+
+  /**
+   * Report transport failures without forwarding raw messages: those can
+   * contain remote-controlled text or application data in third-party errors.
+   */
+  error(operation: TelemetryErrorOperation, error: unknown): void {
+    const errorType =
+      error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(error.name)
+        ? error.name
+        : 'Error';
+    const rawCode =
+      typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+    const code =
+      typeof rawCode === 'string' && /^[A-Z0-9_]{1,32}$/.test(rawCode) ? rawCode : undefined;
+    const event: TelemetryEvent = {
+      type: 'error',
+      operation,
+      errorType,
+      message: ERROR_MESSAGES[operation],
+      ...(code ? { code } : {}),
+    };
+    this.logger.error(event.message, { operation, errorType, ...(code ? { code } : {}) });
+    this.dispatch(event);
+  }
+
+  capture<T>(operation: TelemetryErrorOperation, fn: () => T): T {
+    try {
+      return fn();
+    } catch (error) {
+      this.error(operation, error);
+      throw error;
+    }
+  }
+
+  async captureAsync<T>(operation: TelemetryErrorOperation, promise: Promise<T>): Promise<T> {
+    try {
+      return await promise;
+    } catch (error) {
+      this.error(operation, error);
+      throw error;
+    }
   }
 
   private dispatch(event: TelemetryEvent): void {

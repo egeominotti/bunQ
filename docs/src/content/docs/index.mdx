@@ -1,6 +1,6 @@
 ---
 title: "The SQLite Job Queue: Zero Infrastructure, No Redis"
-description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups. TypeScript, Python, PHP and Go clients."
+description: "A complete job queue in one process, persisted to one SQLite file. No Redis: priorities, retries, cron, DLQ, S3 backups. Six official client SDKs."
 template: splash
 head:
   - tag: meta
@@ -180,7 +180,7 @@ docker run -d --name bunqueue \
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">polyglot clients</span>
   <h2 class="bq-h2">One queue, any language.</h2>
-  <p class="bq-lede">The server owns every queue semantic, so clients stay thin and identical in spirit: add a job in one language, process it in another, same options, same guarantees. Official SDKs for TypeScript, Python, PHP and Go, built on a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire protocol</a>.</p>
+  <p class="bq-lede">The server owns every queue semantic, so clients stay thin and identical in spirit: add a job in one language, process it in another, same options, same guarantees. Official SDKs for TypeScript, Python, PHP, Go, Rust and Elixir, built on a <a href="https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md">formal wire protocol</a>.</p>
   <div class="bq-actions" style="margin-top: 1.4rem;">
     <button type="button" class="bq-hero-install" aria-label="Copy install command">npm install bunqueue-client</button>
     <a class="bq-btn-ghost" href="/guide/sdks/">SDK guide</a>

@@ -3,7 +3,8 @@
 A flaky order pipeline with retries and poison jobs landing in the DLQ
 (zero-loss accounting), a limit-bounded Simple Mode interval digest, a
 batched-ACK throughput worker, and a long job that outlives its lock TTL
-thanks to heartbeat lock renewal.
+thanks to heartbeat lock renewal. The invoice burst verifies that concurrent
+processing never crosses persisted results.
 """
 
 from __future__ import annotations
@@ -137,5 +138,45 @@ def realistic_heartbeat_keeps_long_job_leased(server: Server) -> None:
             assert invocations["n"] == 1, (
                 f"lock renewal must prevent a stall retry, ran {invocations['n']} times"
             )
+        finally:
+            worker.close(timeout=15)
+
+
+@test
+def realistic_concurrent_invoice_results_are_not_crossed(server: Server) -> None:
+    with Queue(unique_name("invoices"), port=server.port) as queue:
+        worker = Worker(
+            queue.name,
+            lambda job: {
+                "invoice": job.data["invoice"],
+                "total": job.data["cents"] * 2,
+            },
+            port=server.port,
+            concurrency=12,
+            batch_size=32,
+            poll_timeout_ms=300,
+        )
+        try:
+            worker.start()
+            jobs = queue.add_bulk(
+                [
+                    {
+                        "name": "reconcile",
+                        "data": {"invoice": invoice, "cents": 101 + invoice},
+                    }
+                    for invoice in range(64)
+                ]
+            )
+            assert wait_until(
+                lambda: queue.get_job_counts().get("completed") == len(jobs), 30
+            ), "the invoice burst did not fully complete"
+
+            checksum = 0
+            for invoice, job_id in enumerate(jobs):
+                result = queue.get_result(job_id)
+                assert result["invoice"] == invoice, "result crossed between invoices"
+                assert result["total"] == (101 + invoice) * 2, "invoice amount changed"
+                checksum += result["total"]
+            assert checksum == 16_960, "not every persisted result was counted exactly once"
         finally:
             worker.close(timeout=15)

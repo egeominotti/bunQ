@@ -77,7 +77,7 @@ Key methods (real signatures):
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
-`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 14`, `MIGRATIONS`.
+`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 21`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -86,11 +86,11 @@ No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by
 
 DB-row types are defined in `statements.ts` and converted to/from domain types in `sqliteSerializer.ts`. See [data-model](../data-model.md) for full domain shapes. Tables (`schema.ts:17-129`):
 
-- `jobs` — `id TEXT PK`, `queue`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, `stall_timeout`, `last_heartbeat`, `timeline BLOB`, `stacktrace BLOB`.
+- `jobs` — `id TEXT PK`, `queue`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, `stall_timeout`, `last_heartbeat`, `stall_count` (default 0), `timeline BLOB`, `stacktrace BLOB`.
 - `job_results` — `job_id TEXT PK`, `result BLOB`, `completed_at`.
 - `dlq` — `id INTEGER PK AUTOINCREMENT`, `job_id`, `queue`, `entry BLOB` (full `DlqEntry`), `entered_at`. Note `dlq` is append-only by `id`; a single `job_id` can have multiple rows.
 - `cron_jobs` — keyed by `name`, includes `dedup BLOB`, `skip_missed_on_restart`, `skip_if_no_worker`, `prevent_overlap` (default 1), `job_options BLOB`.
-- `queue_state` (#100) — `name TEXT PK`, `paused`, `rate_limit`, `concurrency_limit`.
+- `queue_state` (#100) — `name TEXT PK`, `paused`, `rate_limit`, `concurrency_limit`, rate-window fields, and nullable `stall_enabled` / `stall_interval` / `max_stalls` / `stall_grace_period` for a custom crash-recovery policy.
 - `migrations` — `version PK`, `applied_at`.
 
 All blob columns store MessagePack. `rowToJob` (`sqliteSerializer.ts:71-151`) rehydrates a full `Job`, defaulting BullMQ-compat fields that are intentionally not persisted (`backoffConfig`, `stackTraceLimit`, dedup/debounce flags, etc.).
@@ -101,17 +101,24 @@ Buffered write (default path):
 1. `insertJob(job)` → `writeBuffer.add(job)` pushes onto the active buffer (`sqlite.ts:287-293`, `sqliteBatch.ts:230-235`).
 2. The buffer auto-flushes every `writeBufferFlushMs` (10ms) via `setInterval`, or immediately when `activeBuffer.length >= bufferSize` (`sqliteBatch.ts:217-245`).
 3. `flush()` does an atomic double-buffer swap (active → flush buffer, new active = []) under a `flushing` guard, then calls `BatchInsertManager.insertJobsBatch` (`sqliteBatch.ts:257-337`).
-4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/24) = 41` rows (SQLite ~999 bound variables, `COLS_PER_ROW=24`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-128`). The multi-row `INSERT` is an upsert (`ON CONFLICT(id) DO UPDATE`), so a colliding `id` overwrites the existing row in place instead of throwing `UNIQUE` and failing the whole flush.
+4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/25) = 39` rows (SQLite ~999 bound variables, `COLS_PER_ROW=25`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-128`). The multi-row `INSERT` is an upsert (`ON CONFLICT(id) DO UPDATE`), so a colliding `id` overwrites the existing row in place instead of throwing `UNIQUE` and failing the whole flush.
 
 Durable write (`durable: true`): bypasses the buffer entirely. `insertJobImmediate` runs the single prepared `insertJob` statement under `safeWrite`; `insertJobsBatch(jobs, true)` runs the whole batch inside one explicit `db.transaction` so a mid-batch failure rolls back all rows (`sqlite.ts:296-300`, `sqlite.ts:589-603`). This is the lower-throughput, no-loss mode.
 
-State transitions and the flush-before-update invariant: `markActive`/`markCompleted`/`markFailed` first call `flushIfBuffered(jobId)` (`sqlite.ts:341-352`). If the row's INSERT is still buffered, the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite the state change with the original `waiting`/`delayed` state. `flushIfBuffered` checks `writeBuffer.hasPending(id)` and flushes first.
+Persistence normalizes an omitted `Job.stallCount` to `0` on single inserts,
+buffered/batch inserts, retry updates, and row decoding. This preserves
+compatibility with low-level integrations and legacy fixtures created before
+the field existed while retaining the schema's
+`stall_count INTEGER NOT NULL DEFAULT 0` invariant; current domain-created jobs
+still always provide the field explicitly.
+
+State transitions and the flush-before-update invariant: `markActive`/`markCompleted`/`markFailed`, `updateJobData`, `updateJobPriority`, and delay updates first call `flushIfBuffered(jobId)` (`sqlite.ts`). If the row's INSERT is still buffered, the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite the state, payload, or scheduling fields with the original values. Priority persistence writes both `priority` and the effective `lifo` tie-break so recovery reconstructs the same heap order. `flushIfBuffered` checks `writeBuffer.hasPending(id)` and flushes first.
 
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
-Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds`, then repeatedly reads active jobs from offset zero. Every handled active row leaves `state='active'`, so advancing an offset over that shrinking result would skip rows; the fixed first-page loop drains all active jobs without deep-offset cost. Recovered retries are persisted in Phase 1 and enqueued exactly once by Phase 2. Pending pages use `priority DESC, run_at ASC, id ASC`, so equal scheduling keys have a deterministic boundary. The remaining phases restore the DLQ, queue control state, and the bounded completed cache.
+Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds`, then repeatedly reads active jobs from offset zero. Every handled active row leaves `state='active'`, so advancing an offset over that shrinking result would skip rows; the fixed first-page loop drains all active jobs without deep-offset cost. Each interrupted active job increments `attempts` and persisted `stall_count`; reaching either `max_attempts` or `maxStalls` is terminal and writes exactly one DLQ entry instead of requeueing. Recovered retries are persisted in Phase 1 and enqueued exactly once by Phase 2. Pending pages use `priority DESC, run_at ASC, id ASC`, so equal scheduling keys have a deterministic boundary. The remaining phases restore the DLQ, queue control state, and the bounded completed cache.
 
-Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (14) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 14 adds stable queue pagination indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)`.
+Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (21) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 17 adds `jobs.stall_count INTEGER NOT NULL DEFAULT 0`; existing jobs start at zero, while subsequent retry writes preserve the cumulative recovery bound. Migrations 18–21 persist the four `StallConfig` fields separately so each interrupted `ALTER TABLE` remains retryable.
 
 Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 

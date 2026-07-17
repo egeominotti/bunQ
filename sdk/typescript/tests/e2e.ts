@@ -24,6 +24,7 @@ import './e2e-spec-align.ts';
 import './e2e-realistic.ts';
 import './e2e-observability.ts';
 import './e2e-resilience.ts';
+import './e2e-hardening.ts';
 
 import { runSuite } from './harness.ts';
 

@@ -24,12 +24,13 @@ both are mandatory for every change here.
 
 | File | Role |
 |---|---|
-| `src/Wire/Protocol.php` | Frame consts, `compact`, `jsSafe`, `jobPayload`, `nowMs` |
-| `src/Connection.php` | Socket, framing, Auth-first, lazy reconnect, TLS (verified by default), timeout teardown |
+| `src/Wire/Protocol.php` | Frame consts, depth-bounded `jsSafe`, recursive ext-0 normalization, `jobPayload`, `nowMs` |
+| `src/Connection.php` + `ConnectionTLS.php` | Socket, framing, Auth-first, lazy reconnect, verified TLS, absolute write/read deadline and timeout teardown |
+| `src/ConnectionTelemetry.php` | Optional payload-free lifecycle/command telemetry with callback isolation |
 | `src/Options.php` | SDK options → wire fields (`attempts`→`maxAttempts`, dedup, debounce); unknown keys throw |
 | `src/Job.php` | Job wrapper + per-id ops (progress, log, extendLock) |
 | `src/Queue.php` + `QueueQuery/Control/Admin` traits | Produce, query, control, DLQ, schedulers, webhooks, monitoring |
-| `src/Worker.php` | Sequential worker: `run()` loop / `runOnce()` batch, time-based heartbeats, clamps, signal handlers |
+| `src/Worker.php` + `WorkerEvents.php` | Sequential worker: `run()` / `runOnce()`, time-based heartbeats, safe registration, clamps, events and signal handlers |
 | `src/FlowProducer.php` + `FlowNode.php` | Trees, chains, getFlow, rollback |
 | `src/Exception/*` + `UnrecoverableError.php` | Error hierarchy |
 | `tests/harness.php` | Server fixture, registry, asserts, `waitUntil` |
@@ -56,6 +57,10 @@ both are mandatory for every change here.
 ```bash
 composer install
 for f in $(find src tests -name '*.php'); do php -l $f; done
-php tests/run-e2e.php     # 33 tests, real server + dedicated auth server
+php tests/run-e2e.php     # real server + dedicated auth/race processes
+BUNQUEUE_SDK_SOAK_SECONDS=3600 php tests/soak.php
 cd ../conformance && bun runner.ts --driver "php drivers/php.php"
+cd ../.. && bun run test:sandbox:sdk
 ```
+
+Any SDK change must finish with the isolated `test:sandbox:sdk` gate.

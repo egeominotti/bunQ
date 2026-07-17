@@ -1,15 +1,32 @@
 import { describe, test, expect, afterEach } from 'bun:test';
-import { Bunqueue, shutdownManager } from '../src/client';
+import { Bunqueue, shutdownManager, type BunqueueOptions } from '../src/client';
 
-afterEach(() => {
-  shutdownManager();
+const openBunqueues = new Set<Bunqueue<unknown, unknown>>();
+
+function createBunqueue<T = unknown, R = unknown>(
+  name: string,
+  options: BunqueueOptions<T, R>
+): Bunqueue<T, R> {
+  const bunqueue = new Bunqueue<T, R>(name, options);
+  openBunqueues.add(bunqueue as Bunqueue<unknown, unknown>);
+  return bunqueue;
+}
+
+afterEach(async () => {
+  const instances = [...openBunqueues];
+  openBunqueues.clear();
+  try {
+    await Promise.all(instances.map((bunqueue) => bunqueue.close(true)));
+  } finally {
+    shutdownManager();
+  }
 });
 
 // ============ Basic ============
 
 describe('Bunqueue', () => {
   test('should create queue and worker together', () => {
-    const bq = new Bunqueue('test-basic', {
+    const bq = createBunqueue('test-basic', {
       processor: async () => ({ ok: true }),
     });
 
@@ -22,7 +39,7 @@ describe('Bunqueue', () => {
   test('should add and process jobs', async () => {
     const processed: string[] = [];
 
-    const bq = new Bunqueue<{ email: string }, { sent: boolean }>('test-process', {
+    const bq = createBunqueue<{ email: string }, { sent: boolean }>('test-process', {
       processor: async (job) => {
         processed.push(job.data.email);
         return { sent: true };
@@ -49,7 +66,7 @@ describe('Bunqueue', () => {
   test('should emit completed events', async () => {
     const results: unknown[] = [];
 
-    const bq = new Bunqueue<{ v: number }, { doubled: number }>('test-events', {
+    const bq = createBunqueue<{ v: number }, { doubled: number }>('test-events', {
       processor: async (job) => ({ doubled: job.data.v * 2 }),
     });
 
@@ -74,7 +91,7 @@ describe('Bunqueue', () => {
   test('should emit failed events', async () => {
     const errors: Error[] = [];
 
-    const bq = new Bunqueue('test-fail', {
+    const bq = createBunqueue('test-fail', {
       processor: async () => {
         throw new Error('boom');
       },
@@ -101,7 +118,7 @@ describe('Bunqueue', () => {
   test('should support addBulk', async () => {
     let count = 0;
 
-    const bq = new Bunqueue<{ i: number }>('test-bulk', {
+    const bq = createBunqueue<{ i: number }>('test-bulk', {
       processor: async () => {
         count++;
         return { ok: true };
@@ -128,7 +145,7 @@ describe('Bunqueue', () => {
   });
 
   test('should support pause and resume', () => {
-    const bq = new Bunqueue('test-pause', {
+    const bq = createBunqueue('test-pause', {
       processor: async () => ({ ok: true }),
     });
 
@@ -140,7 +157,7 @@ describe('Bunqueue', () => {
   });
 
   test('should close gracefully', async () => {
-    const bq = new Bunqueue('test-close', {
+    const bq = createBunqueue('test-close', {
       processor: async () => ({ ok: true }),
     });
 
@@ -150,7 +167,7 @@ describe('Bunqueue', () => {
   });
 
   test('should support concurrency option', () => {
-    const bq = new Bunqueue('test-concurrency', {
+    const bq = createBunqueue('test-concurrency', {
       processor: async () => ({ ok: true }),
       concurrency: 10,
     });
@@ -159,7 +176,7 @@ describe('Bunqueue', () => {
   });
 
   test('should expose getJob', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-getjob', {
+    const bq = createBunqueue<{ v: number }>('test-getjob', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -172,7 +189,7 @@ describe('Bunqueue', () => {
   });
 
   test('should expose getJobCounts', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-counts', {
+    const bq = createBunqueue<{ v: number }>('test-counts', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -187,7 +204,7 @@ describe('Bunqueue', () => {
   test('should support progress updates', async () => {
     const progressValues: number[] = [];
 
-    const bq = new Bunqueue<{ v: number }>('test-progress', {
+    const bq = createBunqueue<{ v: number }>('test-progress', {
       processor: async (job) => {
         await job.updateProgress(50);
         await job.updateProgress(100);
@@ -215,7 +232,7 @@ describe('Bunqueue', () => {
   });
 
   test('should chain on() calls', () => {
-    const bq = new Bunqueue('test-chain', {
+    const bq = createBunqueue('test-chain', {
       processor: async () => ({ ok: true }),
     });
 
@@ -230,7 +247,7 @@ describe('Bunqueue', () => {
   test('should support once()', async () => {
     let readyCount = 0;
 
-    const bq = new Bunqueue('test-once', {
+    const bq = createBunqueue('test-once', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -246,7 +263,7 @@ describe('Bunqueue', () => {
   });
 
   test('should support off()', () => {
-    const bq = new Bunqueue('test-off', {
+    const bq = createBunqueue('test-off', {
       processor: async () => ({ ok: true }),
     });
 
@@ -258,7 +275,7 @@ describe('Bunqueue', () => {
   });
 
   test('should support defaultJobOptions', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-defaults', {
+    const bq = createBunqueue<{ v: number }>('test-defaults', {
       processor: async () => ({ ok: true }),
       autorun: false,
       defaultJobOptions: { priority: 10 },
@@ -270,13 +287,13 @@ describe('Bunqueue', () => {
 
   test('should throw if no processor/routes/batch', () => {
     expect(() => {
-      new Bunqueue('test-err', {} as never);
+      createBunqueue('test-err', {} as never);
     }).toThrow('requires');
   });
 
   test('should throw if multiple processor modes', () => {
     expect(() => {
-      new Bunqueue('test-err2', {
+      createBunqueue('test-err2', {
         processor: async () => ({}),
         routes: { a: async () => ({}) },
       } as never);
@@ -290,7 +307,7 @@ describe('Bunqueue - Routes', () => {
   test('should route jobs by name', async () => {
     const log: string[] = [];
 
-    const bq = new Bunqueue<{ to: string }>('test-routes', {
+    const bq = createBunqueue<{ to: string }>('test-routes', {
       routes: {
         'send-email': async (job) => {
           log.push(`email:${job.data.to}`);
@@ -323,7 +340,7 @@ describe('Bunqueue - Routes', () => {
   test('should fail for unknown route', async () => {
     const errors: Error[] = [];
 
-    const bq = new Bunqueue('test-no-route', {
+    const bq = createBunqueue('test-no-route', {
       routes: {
         known: async () => ({ ok: true }),
       },
@@ -350,7 +367,7 @@ describe('Bunqueue - Routes', () => {
   test('should handle multiple routes with different data', async () => {
     const results: unknown[] = [];
 
-    const bq = new Bunqueue<{ value: number }>('test-routes-data', {
+    const bq = createBunqueue<{ value: number }>('test-routes-data', {
       routes: {
         double: async (job) => ({ result: job.data.value * 2 }),
         triple: async (job) => ({ result: job.data.value * 3 }),
@@ -384,7 +401,7 @@ describe('Bunqueue - Middleware', () => {
   test('should execute middleware around processor', async () => {
     const order: string[] = [];
 
-    const bq = new Bunqueue<{ v: number }>('test-mw', {
+    const bq = createBunqueue<{ v: number }>('test-mw', {
       processor: async (job) => {
         order.push(`process:${job.data.v}`);
         return { ok: true };
@@ -415,7 +432,7 @@ describe('Bunqueue - Middleware', () => {
   test('should chain multiple middlewares in order', async () => {
     const order: string[] = [];
 
-    const bq = new Bunqueue('test-mw-chain', {
+    const bq = createBunqueue('test-mw-chain', {
       processor: async () => {
         order.push('core');
         return { ok: true };
@@ -453,7 +470,7 @@ describe('Bunqueue - Middleware', () => {
   test('middleware can modify the result', async () => {
     const results: unknown[] = [];
 
-    const bq = new Bunqueue<{ v: number }>('test-mw-modify', {
+    const bq = createBunqueue<{ v: number }>('test-mw-modify', {
       processor: async (job) => ({ value: job.data.v }),
     });
 
@@ -483,7 +500,7 @@ describe('Bunqueue - Middleware', () => {
   test('middleware can catch errors', async () => {
     const recovered: unknown[] = [];
 
-    const bq = new Bunqueue('test-mw-catch', {
+    const bq = createBunqueue('test-mw-catch', {
       processor: async () => {
         throw new Error('oops');
       },
@@ -520,7 +537,7 @@ describe('Bunqueue - Middleware', () => {
   test('middleware works with routes', async () => {
     const log: string[] = [];
 
-    const bq = new Bunqueue<{ v: number }>('test-mw-routes', {
+    const bq = createBunqueue<{ v: number }>('test-mw-routes', {
       routes: {
         double: async (job) => {
           log.push('route');
@@ -549,13 +566,11 @@ describe('Bunqueue - Middleware', () => {
   });
 
   test('use() should be chainable', () => {
-    const bq = new Bunqueue('test-mw-chain-api', {
+    const bq = createBunqueue('test-mw-chain-api', {
       processor: async () => ({ ok: true }),
     });
 
-    const result = bq
-      .use(async (_job, next) => next())
-      .use(async (_job, next) => next());
+    const result = bq.use(async (_job, next) => next()).use(async (_job, next) => next());
 
     expect(result).toBe(bq);
   });
@@ -565,7 +580,7 @@ describe('Bunqueue - Middleware', () => {
 
 describe('Bunqueue - Cron', () => {
   test('should add a cron job', async () => {
-    const bq = new Bunqueue<{ type: string }>('test-cron', {
+    const bq = createBunqueue<{ type: string }>('test-cron', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -578,7 +593,7 @@ describe('Bunqueue - Cron', () => {
   });
 
   test('should add a repeating job with every()', async () => {
-    const bq = new Bunqueue<{ type: string }>('test-every', {
+    const bq = createBunqueue<{ type: string }>('test-every', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -591,7 +606,7 @@ describe('Bunqueue - Cron', () => {
   });
 
   test('should list cron jobs', async () => {
-    const bq = new Bunqueue('test-cron-list', {
+    const bq = createBunqueue('test-cron-list', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -605,7 +620,7 @@ describe('Bunqueue - Cron', () => {
   });
 
   test('should remove a cron job', async () => {
-    const bq = new Bunqueue('test-cron-remove', {
+    const bq = createBunqueue('test-cron-remove', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
@@ -619,14 +634,19 @@ describe('Bunqueue - Cron', () => {
   });
 
   test('should support timezone in cron', async () => {
-    const bq = new Bunqueue('test-cron-tz', {
+    const bq = createBunqueue('test-cron-tz', {
       processor: async () => ({ ok: true }),
       autorun: false,
     });
 
-    const info = await bq.cron('tz-job', '0 9 * * *', { type: 'report' }, {
-      timezone: 'Europe/Rome',
-    });
+    const info = await bq.cron(
+      'tz-job',
+      '0 9 * * *',
+      { type: 'report' },
+      {
+        timezone: 'Europe/Rome',
+      }
+    );
 
     expect(info).not.toBeNull();
   });
@@ -636,9 +656,9 @@ describe('Bunqueue - Cron', () => {
 
 describe('Bunqueue - Batch Processing', () => {
   test('should accumulate jobs and process as batch', async () => {
-    let batchSizes: number[] = [];
+    const batchSizes: number[] = [];
 
-    const bq = new Bunqueue<{ i: number }, { ok: boolean }>('test-batch', {
+    const bq = createBunqueue<{ i: number }, { ok: boolean }>('test-batch', {
       batch: {
         size: 3,
         timeout: 500,
@@ -669,7 +689,7 @@ describe('Bunqueue - Batch Processing', () => {
   test('should flush partial batch on timeout', async () => {
     let processed = false;
 
-    const bq = new Bunqueue<{ i: number }, { ok: boolean }>('test-batch-timeout', {
+    const bq = createBunqueue<{ i: number }, { ok: boolean }>('test-batch-timeout', {
       batch: {
         size: 100, // large size, won't fill
         timeout: 100, // short timeout
@@ -694,7 +714,7 @@ describe('Bunqueue - Advanced Retry', () => {
     let attempts = 0;
     const results: unknown[] = [];
 
-    const bq = new Bunqueue('test-retry-jitter', {
+    const bq = createBunqueue('test-retry-jitter', {
       processor: async () => {
         attempts++;
         if (attempts < 3) throw new Error('fail');
@@ -726,7 +746,7 @@ describe('Bunqueue - Advanced Retry', () => {
   test('should retry with fibonacci strategy', async () => {
     let attempts = 0;
 
-    const bq = new Bunqueue('test-retry-fib', {
+    const bq = createBunqueue('test-retry-fib', {
       processor: async () => {
         attempts++;
         if (attempts < 2) throw new Error('fail');
@@ -745,7 +765,10 @@ describe('Bunqueue - Advanced Retry', () => {
 
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
-        if (results.length >= 1) { clearInterval(check); resolve(); }
+        if (results.length >= 1) {
+          clearInterval(check);
+          resolve();
+        }
       }, 10);
     });
 
@@ -756,7 +779,7 @@ describe('Bunqueue - Advanced Retry', () => {
     let attempts = 0;
     const errors: Error[] = [];
 
-    const bq = new Bunqueue('test-retry-if', {
+    const bq = createBunqueue('test-retry-if', {
       processor: async () => {
         attempts++;
         throw new Error('permanent');
@@ -781,7 +804,7 @@ describe('Bunqueue - Advanced Retry', () => {
     const delays: number[] = [];
     let lastTime = Date.now();
 
-    const bq = new Bunqueue('test-retry-custom', {
+    const bq = createBunqueue('test-retry-custom', {
       processor: async () => {
         const now = Date.now();
         if (attempts > 0) delays.push(now - lastTime);
@@ -803,7 +826,10 @@ describe('Bunqueue - Advanced Retry', () => {
 
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
-        if (results.length >= 1) { clearInterval(check); resolve(); }
+        if (results.length >= 1) {
+          clearInterval(check);
+          resolve();
+        }
       }, 10);
     });
 
@@ -815,9 +841,7 @@ describe('Bunqueue - Advanced Retry', () => {
 
 describe('Bunqueue - Cancellation', () => {
   test('should cancel a running job', async () => {
-    const errors: Error[] = [];
-
-    const bq = new Bunqueue('test-cancel', {
+    const bq = createBunqueue('test-cancel', {
       processor: async (job) => {
         // Long-running job: check signal periodically
         const signal = bq.getSignal(job.id);
@@ -829,27 +853,31 @@ describe('Bunqueue - Cancellation', () => {
       },
     });
 
-    bq.on('failed', (_j, e) => errors.push(e));
-
-    const job = await bq.add('long-task', {});
-
-    // Wait for job to start processing
-    await Bun.sleep(50);
-    bq.cancel(job.id);
-
-    await new Promise<void>((resolve) => {
-      const check = setInterval(() => {
-        if (errors.length >= 1) { clearInterval(check); resolve(); }
-      }, 10);
+    const active = new Promise<string>((resolve) => {
+      bq.on('active', (runningJob) => resolve(runningJob.id));
+    });
+    const failed = new Promise<Error>((resolve) => {
+      bq.once('failed', (_job, error) => resolve(error));
     });
 
-    expect(errors[0].message).toContain('cancelled');
+    try {
+      const job = await bq.add('long-task', {});
+
+      // Cancellation is defined for a running job: wait for the worker's
+      // observable active transition instead of racing its poll interval.
+      expect(await active).toBe(job.id);
+      bq.cancel(job.id);
+
+      expect((await failed).message).toContain('cancelled');
+    } finally {
+      await bq.close(true);
+    }
   });
 
   test('isCancelled should return correct state', async () => {
     let jobStarted = false;
 
-    const bq = new Bunqueue('test-cancel-check', {
+    const bq = createBunqueue('test-cancel-check', {
       processor: async () => {
         jobStarted = true;
         await Bun.sleep(2000); // long job
@@ -862,7 +890,10 @@ describe('Bunqueue - Cancellation', () => {
     // Wait for the processor to start
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
-        if (jobStarted) { clearInterval(check); resolve(); }
+        if (jobStarted) {
+          clearInterval(check);
+          resolve();
+        }
       }, 5);
     });
 
@@ -878,14 +909,16 @@ describe('Bunqueue - Circuit Breaker', () => {
   test('should open circuit after threshold failures', async () => {
     let openCalled = false;
 
-    const bq = new Bunqueue('test-cb', {
+    const bq = createBunqueue('test-cb', {
       processor: async () => {
         throw new Error('service down');
       },
       circuitBreaker: {
         threshold: 3,
         resetTimeout: 500,
-        onOpen: () => { openCalled = true; },
+        onOpen: () => {
+          openCalled = true;
+        },
       },
     });
 
@@ -900,7 +933,7 @@ describe('Bunqueue - Circuit Breaker', () => {
   });
 
   test('should reset circuit manually', () => {
-    const bq = new Bunqueue('test-cb-reset', {
+    const bq = createBunqueue('test-cb-reset', {
       processor: async () => ({ ok: true }),
       circuitBreaker: { threshold: 1 },
     });
@@ -917,7 +950,7 @@ describe('Bunqueue - Event Triggers', () => {
   test('should create job B when job A completes', async () => {
     const processed: string[] = [];
 
-    const bq = new Bunqueue<{ step: string }>('test-trigger', {
+    const bq = createBunqueue<{ step: string }>('test-trigger', {
       routes: {
         'step-a': async () => ({ result: 'a-done' }),
         'step-b': async (job) => {
@@ -937,7 +970,10 @@ describe('Bunqueue - Event Triggers', () => {
 
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
-        if (processed.length >= 1) { clearInterval(check); resolve(); }
+        if (processed.length >= 1) {
+          clearInterval(check);
+          resolve();
+        }
       }, 10);
     });
 
@@ -947,10 +983,10 @@ describe('Bunqueue - Event Triggers', () => {
   test('should respect trigger condition', async () => {
     const created: string[] = [];
 
-    const bq = new Bunqueue<{ amount: number }>('test-trigger-cond', {
+    const bq = createBunqueue<{ amount: number }>('test-trigger-cond', {
       routes: {
-        'payment': async (job) => ({ amount: job.data.amount }),
-        'notify': async (job) => {
+        payment: async (job) => ({ amount: job.data.amount }),
+        notify: async (job) => {
           created.push(`notify:${job.data.amount}`);
           return { ok: true };
         },
@@ -973,7 +1009,7 @@ describe('Bunqueue - Event Triggers', () => {
   });
 
   test('trigger() should be chainable', () => {
-    const bq = new Bunqueue('test-trigger-chain', {
+    const bq = createBunqueue('test-trigger-chain', {
       processor: async () => ({ ok: true }),
     });
 
@@ -991,7 +1027,7 @@ describe('Bunqueue - Job TTL', () => {
   test('should reject expired jobs', async () => {
     const errors: Error[] = [];
 
-    const bq = new Bunqueue('test-ttl', {
+    const bq = createBunqueue('test-ttl', {
       processor: async () => ({ ok: true }),
       autorun: false,
       ttl: { defaultTtl: 50 }, // 50ms TTL
@@ -1014,16 +1050,16 @@ describe('Bunqueue - Job TTL', () => {
     const completed: string[] = [];
     const failed: string[] = [];
 
-    const bq = new Bunqueue('test-ttl-pernam', {
+    const bq = createBunqueue('test-ttl-pernam', {
       routes: {
-        'fast': async () => ({ ok: true }),
-        'slow': async () => ({ ok: true }),
+        fast: async () => ({ ok: true }),
+        slow: async () => ({ ok: true }),
       },
       autorun: false,
       ttl: {
         perName: {
-          'fast': 50, // 50ms
-          'slow': 10000, // 10s — won't expire
+          fast: 50, // 50ms
+          slow: 10000, // 10s — won't expire
         },
       },
     });
@@ -1043,7 +1079,7 @@ describe('Bunqueue - Job TTL', () => {
   });
 
   test('setDefaultTtl should update TTL at runtime', () => {
-    const bq = new Bunqueue('test-ttl-set', {
+    const bq = createBunqueue('test-ttl-set', {
       processor: async () => ({ ok: true }),
       ttl: { defaultTtl: 1000 },
     });
@@ -1058,7 +1094,7 @@ describe('Bunqueue - Job TTL', () => {
 
 describe('Bunqueue - Priority Aging', () => {
   test('should construct with priority aging config', () => {
-    const bq = new Bunqueue('test-aging', {
+    const bq = createBunqueue('test-aging', {
       processor: async () => ({ ok: true }),
       autorun: false,
       priorityAging: {
@@ -1074,7 +1110,7 @@ describe('Bunqueue - Priority Aging', () => {
   });
 
   test('should boost priority of old waiting jobs', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-aging-boost', {
+    const bq = createBunqueue<{ v: number }>('test-aging-boost', {
       processor: async () => ({ ok: true }),
       autorun: false,
       priorityAging: {
@@ -1096,7 +1132,7 @@ describe('Bunqueue - Priority Aging', () => {
   });
 
   test('should close cleanly with aging timer', async () => {
-    const bq = new Bunqueue('test-aging-close', {
+    const bq = createBunqueue('test-aging-close', {
       processor: async () => ({ ok: true }),
       priorityAging: { interval: 50 },
     });
@@ -1110,7 +1146,7 @@ describe('Bunqueue - Priority Aging', () => {
 
 describe('Bunqueue - Deduplication', () => {
   test('should deduplicate jobs with same name and data', async () => {
-    const bq = new Bunqueue<{ key: string }>('test-dedup', {
+    const bq = createBunqueue<{ key: string }>('test-dedup', {
       processor: async () => ({ ok: true }),
       embedded: true,
       autorun: false,
@@ -1130,7 +1166,7 @@ describe('Bunqueue - Deduplication', () => {
   });
 
   test('should allow explicit dedup override per-job', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-dedup-override', {
+    const bq = createBunqueue<{ v: number }>('test-dedup-override', {
       processor: async () => ({ ok: true }),
       embedded: true,
       autorun: false,
@@ -1154,7 +1190,7 @@ describe('Bunqueue - Debouncing', () => {
   test('should apply debounce config to jobs automatically', async () => {
     const processed: number[] = [];
 
-    const bq = new Bunqueue<{ seq: number }>('test-debounce', {
+    const bq = createBunqueue<{ seq: number }>('test-debounce', {
       processor: async (job) => {
         processed.push(job.data.seq);
         return { ok: true };
@@ -1184,7 +1220,7 @@ describe('Bunqueue - Debouncing', () => {
   });
 
   test('should not debounce when per-job override is set', async () => {
-    const bq = new Bunqueue<{ v: number }>('test-debounce-override', {
+    const bq = createBunqueue<{ v: number }>('test-debounce-override', {
       processor: async () => ({ ok: true }),
       embedded: true,
       autorun: false,
@@ -1204,7 +1240,7 @@ describe('Bunqueue - Debouncing', () => {
 
 describe('Bunqueue - Rate Limiting', () => {
   test('should accept rateLimit option', () => {
-    const bq = new Bunqueue('test-rate-limit', {
+    const bq = createBunqueue('test-rate-limit', {
       processor: async () => ({ ok: true }),
       embedded: true,
       rateLimit: { max: 5, duration: 1000 },
@@ -1212,11 +1248,10 @@ describe('Bunqueue - Rate Limiting', () => {
 
     // Worker should have been created with limiter
     expect(bq.worker).toBeDefined();
-    bq.close();
   });
 
   test('should expose setGlobalRateLimit and removeGlobalRateLimit', () => {
-    const bq = new Bunqueue('test-rate-api', {
+    const bq = createBunqueue('test-rate-api', {
       processor: async () => ({ ok: true }),
       embedded: true,
     });
@@ -1224,8 +1259,6 @@ describe('Bunqueue - Rate Limiting', () => {
     // Should not throw
     expect(() => bq.setGlobalRateLimit(10, 1000)).not.toThrow();
     expect(() => bq.removeGlobalRateLimit()).not.toThrow();
-
-    bq.close();
   });
 });
 
@@ -1233,7 +1266,7 @@ describe('Bunqueue - Rate Limiting', () => {
 
 describe('Bunqueue - DLQ', () => {
   test('should configure DLQ via constructor option', () => {
-    const bq = new Bunqueue('test-dlq-config', {
+    const bq = createBunqueue('test-dlq-config', {
       processor: async () => ({ ok: true }),
       embedded: true,
       dlq: {
@@ -1250,12 +1283,10 @@ describe('Bunqueue - DLQ', () => {
     expect(config.maxAutoRetries).toBe(5);
     expect(config.maxAge).toBe(86400000);
     expect(config.maxEntries).toBe(500);
-
-    bq.close();
   });
 
   test('should expose DLQ query and control methods', async () => {
-    const bq = new Bunqueue('test-dlq-api', {
+    const bq = createBunqueue('test-dlq-api', {
       processor: async () => {
         throw new Error('always fail');
       },
@@ -1283,7 +1314,7 @@ describe('Bunqueue - DLQ', () => {
   });
 
   test('should update DLQ config at runtime', () => {
-    const bq = new Bunqueue('test-dlq-update', {
+    const bq = createBunqueue('test-dlq-update', {
       processor: async () => ({ ok: true }),
       embedded: true,
     });
@@ -1292,7 +1323,5 @@ describe('Bunqueue - DLQ', () => {
     const config = bq.getDlqConfig();
     expect(config.autoRetry).toBe(true);
     expect(config.maxAutoRetries).toBe(10);
-
-    bq.close();
   });
 });

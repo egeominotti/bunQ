@@ -16,6 +16,8 @@ import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 export interface DlqContext {
   shards: Shard[];
   jobIndex: Map<JobId, JobLocation>;
+  jobResults: { delete(id: JobId): boolean };
+  jobLogs: { delete(id: JobId): boolean };
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
   storage: SqliteStorage | null;
@@ -263,28 +265,57 @@ export function processAutoRetry(queue: string, ctx: DlqContext): number {
 export function purgeExpiredDlq(queue: string, ctx: DlqContext): number {
   const idx = shardIndex(queue);
   const shard = ctx.shards[idx];
+  const now = Date.now();
 
-  // Get expired entries before purging (to delete from SQLite)
-  const expiredEntries = shard.getExpiredEntries(queue);
-  const count = shard.purgeExpired(queue);
+  // Use one timestamp for the snapshot and mutation so every purged entry is
+  // represented in the cleanup set.
+  const expiredEntries = shard.getExpiredEntries(queue, now);
+  if (expiredEntries.length === 0) return 0;
 
-  // Delete from SQLite
-  if (ctx.storage && expiredEntries.length > 0) {
-    for (const entry of expiredEntries) {
-      ctx.storage.deleteDlqEntry(entry.job.id);
-    }
-  }
+  cleanupPurgedEntries(queue, expiredEntries, ctx, false);
+  shard.purgeExpired(queue, now);
 
-  return count;
+  return expiredEntries.length;
 }
 
 /** Purge all jobs from DLQ */
 export function purgeDlqJobs(queue: string, ctx: DlqContext): number {
   const idx = shardIndex(queue);
-  const count = ctx.shards[idx].clearDlq(queue);
-  // Clear from SQLite
-  ctx.storage?.clearDlqQueue(queue);
-  return count;
+  const shard = ctx.shards[idx];
+  const entries = shard.getDlqEntries(queue);
+
+  cleanupPurgedEntries(queue, entries, ctx, true);
+  shard.clearDlq(queue);
+  return entries.length;
+}
+
+/** Remove every durable and global reference owned by terminal DLQ entries. */
+function cleanupPurgedEntries(
+  queue: string,
+  entries: readonly DlqEntry[],
+  ctx: DlqContext,
+  clearQueue: boolean
+): void {
+  const jobIds = [...new Set(entries.map((entry) => entry.job.id))];
+  const terminalJobIds = jobIds.filter((jobId) => {
+    const location = ctx.jobIndex.get(jobId);
+    return location === undefined || (location.type === 'dlq' && location.queueName === queue);
+  });
+
+  // One SQLite transaction removes DLQ rows, any orphan jobs/result rows, and
+  // pending buffered inserts before in-memory references become unobservable.
+  // A newer live generation can reuse the same custom id; its jobs row and
+  // auxiliary state must survive cleanup of the stale terminal generation.
+  ctx.storage?.purgeDlqEntries(queue, jobIds, terminalJobIds, clearQueue);
+
+  for (const jobId of terminalJobIds) {
+    const location = ctx.jobIndex.get(jobId);
+    if (location?.type === 'dlq' && location.queueName === queue) {
+      ctx.jobIndex.delete(jobId);
+    }
+    ctx.jobResults.delete(jobId);
+    ctx.jobLogs.delete(jobId);
+  }
 }
 
 /** Configure DLQ for a queue */

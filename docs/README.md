@@ -15,6 +15,7 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | [Architecture](./architecture.md) | System overview, technology stack & rationale, layered design, component diagram, deployment modes, request data flows (PUSH/PULL/ACK/FAIL), sharding, lock hierarchy, persistence model, performance characteristics, and the full module map. |
 | [Data Model](./data-model.md) | Authoritative reference for the `Job` model & state machine, `JobOptions`, queue/DLQ/cron/worker/webhook types, the TCP `Command`/`Response` wire shapes, the complete SQLite schema (tables, indexes, migrations), and the in-memory collections with their eviction bounds. |
 | [Test Isolation](./testing.md) | Parallel disposable Docker validation, per-file TCP server/SQLite isolation, resource telemetry and anomaly KPIs, CI equivalence, cleanup guarantees, and the separate native-only benchmark policy. |
+| [Model-Based Queue Verification](./features/model-based-testing.md) | `fast-check` command state machine against a real TCP broker and SQLite, with shrinking, seed replay, aggregate invariants, dependency flows, and actual `SIGKILL` recovery. |
 | [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
 
 **Suggested reading order:** Architecture → Data Model → the feature docs for the area you are touching.
@@ -62,6 +63,9 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | Document | Purpose |
 | --- | --- |
 | [Wire Protocol Specification](./protocol.md) | The normative, versioned client-facing spec of the TCP protocol (framing, envelope, command shapes, semantics, conformance requirements) — the contract every SDK is certified against via `sdk/conformance/`. |
+| [Rust Client SDK](./features/rust-sdk.md) | Official Rust Queue/Worker/Flow client, verified TLS transport, and protocol conformance driver. |
+| [Elixir Client SDK](./features/elixir-sdk.md) | Official OTP-native Queue/Worker/Flow client, verified TLS transport, telemetry, and protocol conformance driver. |
+| [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) | Shared production invariants, telemetry behavior, regression coverage, and isolated SDK validation gate. |
 | [TCP Wire Protocol & Framing](./features/tcp-protocol.md) | Binary length-prefixed MessagePack transport that frames, pipelines, and backpressure-manages all TCP client/server commands and responses. |
 | [TCP Server Command Handlers](./features/tcp-server-handlers.md) | Request-handling layer that authenticates decoded commands, dispatches them through category routers to thin handler adapters, and shapes results into typed responses; also wires the full server in bootstrap. |
 | [HTTP / REST / SSE / WebSocket API](./features/http-api.md) | HTTP transport (port 6790) exposing the queue control surface as REST plus SSE/WebSocket real-time event streams, diagnostics, and metrics — all over the shared `handleCommand` dispatcher. |

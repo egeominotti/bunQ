@@ -176,6 +176,8 @@ function performDlqMaintenance(ctx: BackgroundContext): void {
   const dlqCtx = {
     shards: ctx.shards,
     jobIndex: ctx.jobIndex,
+    jobResults: ctx.jobResults,
+    jobLogs: ctx.jobLogs,
     storage: ctx.storage,
   };
 
@@ -232,6 +234,16 @@ export function recover(ctx: BackgroundContext): void {
   // Load DLQ job IDs so Phase 1 can skip stale active rows for DLQ'd jobs
   // (legacy DBs predate the DLQ-row cleanup fix in failJob).
   const dlqJobIds = ctx.storage.loadDlqJobIds();
+  const queueStates = ctx.storage.loadQueueState();
+
+  // Recovery bounds are needed before Phase 1 classifies interrupted active
+  // jobs. Restore the stall policy first; paused/limiter state can wait until
+  // the queues themselves have been rebuilt below.
+  for (const qs of queueStates) {
+    if (qs.stallConfig) {
+      ctx.shards[shardIndex(qs.name)].setStallConfig(qs.name, qs.stallConfig);
+    }
+  }
 
   const now = Date.now();
 
@@ -281,16 +293,24 @@ export function recover(ctx: BackgroundContext): void {
       job.startedAt = null;
       job.lastHeartbeat = now;
 
-      // Check if exceeded max stalls
+      // A crash consumes one processing attempt and one stall allowance. Both
+      // bounds are terminal: requeueing after either reaches its configured
+      // maximum would make attempts/stalls unbounded across restart loops.
       const maxStalls = stallConfig.maxStalls ?? 3;
-      if (job.stallCount >= maxStalls) {
+      const attemptsExhausted = job.attempts >= job.maxAttempts;
+      const stallsExhausted = maxStalls > 0 && job.stallCount >= maxStalls;
+      if (attemptsExhausted || stallsExhausted) {
         // Move to DLQ
-        const entry = shard.addToDlq(
-          job,
-          FailureReason.Stalled,
-          `Job stalled ${job.stallCount} times (recovered at startup)`
-        );
-        ctx.jobIndex.set(job.id, { type: 'dlq', queueName: job.queue });
+        const reason = attemptsExhausted
+          ? FailureReason.MaxAttemptsExceeded
+          : FailureReason.Stalled;
+        const error = attemptsExhausted
+          ? `Job reached max attempts (${job.maxAttempts}) during startup recovery`
+          : `Job stalled ${job.stallCount} times (recovered at startup)`;
+        // Persist only here; the later loadDlq() phase is the single in-memory
+        // restore path. Adding to the shard now and restoring the same row below
+        // would duplicate the DLQ entry after every terminal crash recovery.
+        const entry = createDlqEntry(job, reason, error, shard.getDlqConfig(job.queue));
         ctx.storage.saveDlqEntry(entry);
         ctx.storage.deleteJob(job.id);
       } else {
@@ -401,7 +421,7 @@ export function recover(ctx: BackgroundContext): void {
   // Map; without this load every queue silently un-pauses and loses its limits
   // on restart. Applied directly to the owning shard (in-memory only — these
   // setters do not re-persist, so there is no write-back loop).
-  for (const qs of ctx.storage.loadQueueState()) {
+  for (const qs of queueStates) {
     const shard = ctx.shards[shardIndex(qs.name)];
     if (qs.paused) shard.pause(qs.name);
     if (qs.rateLimit !== null) {

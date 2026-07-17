@@ -170,7 +170,7 @@ export default defineConfig({
         },
         {
           label: 'SDKs · Any Language',
-          items: [{ label: 'TypeScript, Python, PHP & Go', link: '/guide/sdks/' }],
+          items: [{ label: 'TypeScript, Python, PHP, Go, Rust & Elixir', link: '/guide/sdks/' }],
         },
         {
           label: 'Run in Production',
@@ -243,6 +243,7 @@ export default defineConfig({
             { label: 'Application Layer', link: '/architecture/application-layer/' },
             { label: 'TCP Protocol', link: '/architecture/tcp-protocol/' },
             { label: 'Persistence', link: '/architecture/persistence/' },
+            { label: 'Model-Based Testing', link: '/architecture/model-based-testing/' },
             { label: 'Data Structures', link: '/architecture/data-structures/' },
             { label: 'Cron Scheduler', link: '/architecture/cron-scheduler/' },
           ],

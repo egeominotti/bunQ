@@ -5,9 +5,9 @@
 
 import type { Database } from 'bun:sqlite';
 import type { Job } from '../../domain/types/job';
-import { pack } from './sqliteSerializer';
+import { pack, persistedStallCount } from './sqliteSerializer';
 
-const COLS_PER_ROW = 24;
+const COLS_PER_ROW = 25;
 // SQLite has a limit of ~999 variables, so batch in chunks
 const MAX_ROWS_PER_INSERT = Math.floor(999 / COLS_PER_ROW);
 
@@ -93,7 +93,7 @@ export class BatchInsertManager {
     let stmt = this.cache.get(size);
     if (!stmt) {
       const rowPlaceholder =
-        '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       const placeholders = Array(size).fill(rowPlaceholder).join(', ');
       // ON CONFLICT(id) DO UPDATE (upsert): a colliding id overwrites in place instead
       // of failing the whole flush. Without it, one stale ORPHAN row (left when
@@ -104,7 +104,8 @@ export class BatchInsertManager {
       const sql = `INSERT INTO jobs (
         id, queue, data, priority, created_at, run_at, attempts, max_attempts,
         backoff, ttl, timeout, unique_key, custom_id, depends_on, parent_id,
-        children_ids, tags, state, lifo, group_id, remove_on_complete, remove_on_fail, stall_timeout, timeline
+        children_ids, tags, state, lifo, group_id, remove_on_complete, remove_on_fail,
+        stall_timeout, stall_count, timeline
       ) VALUES ${placeholders}
       ON CONFLICT(id) DO UPDATE SET
         queue=excluded.queue, data=excluded.data, priority=excluded.priority,
@@ -114,7 +115,8 @@ export class BatchInsertManager {
         depends_on=excluded.depends_on, parent_id=excluded.parent_id, children_ids=excluded.children_ids,
         tags=excluded.tags, state=excluded.state, lifo=excluded.lifo, group_id=excluded.group_id,
         remove_on_complete=excluded.remove_on_complete, remove_on_fail=excluded.remove_on_fail,
-        stall_timeout=excluded.stall_timeout, timeline=excluded.timeline,
+        stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
+        timeline=excluded.timeline,
         started_at=excluded.started_at, completed_at=excluded.completed_at,
         progress=excluded.progress, progress_msg=excluded.progress_msg,
         last_heartbeat=excluded.last_heartbeat, stacktrace=excluded.stacktrace`;
@@ -158,6 +160,7 @@ export class BatchInsertManager {
         job.removeOnComplete ? 1 : 0,
         job.removeOnFail ? 1 : 0,
         job.stallTimeout,
+        persistedStallCount(job),
         job.timeline.length > 0 ? pack(job.timeline) : null
       );
     }

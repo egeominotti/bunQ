@@ -135,10 +135,20 @@ function processExpiredLockInner(
   job.lastHeartbeat = now;
   job.stallCount++;
 
-  // Check if max stalls exceeded
+  // A lost lock consumes both retry budgets. Never requeue beyond either bound.
   const stallConfig = shard.getStallConfig(job.queue);
-  if (stallConfig.maxStalls > 0 && job.stallCount >= stallConfig.maxStalls) {
-    handleMaxStallsExceeded({ jobId, job, lock, shard, ctx, now });
+  const attemptsExhausted = job.attempts >= job.maxAttempts;
+  const stallsExhausted = stallConfig.maxStalls > 0 && job.stallCount >= stallConfig.maxStalls;
+  if (attemptsExhausted || stallsExhausted) {
+    handleRecoveryBoundExceeded({
+      jobId,
+      job,
+      lock,
+      shard,
+      ctx,
+      now,
+      attemptsExhausted,
+    });
   } else {
     requeueExpiredJob({ jobId, job, lock, queue, idx: shardIdx, ctx, now });
   }
@@ -154,26 +164,29 @@ function processExpiredLockInner(
 }
 
 /** Options for handling max stalls exceeded */
-interface MaxStallsOptions {
+interface RecoveryBoundOptions {
   jobId: JobId;
   job: Job;
   lock: JobLock;
   shard: LockContext['shards'][number];
   ctx: LockContext;
   now: number;
+  attemptsExhausted: boolean;
 }
 
-/** Move job to DLQ when max stalls exceeded */
-function handleMaxStallsExceeded(opts: MaxStallsOptions): void {
-  const { jobId, job, lock, shard, ctx, now } = opts;
+/** Move job to DLQ when either crash-recovery budget is exhausted. */
+function handleRecoveryBoundExceeded(opts: RecoveryBoundOptions): void {
+  const { jobId, job, lock, shard, ctx, now, attemptsExhausted } = opts;
   // Release the concurrency slot (+group+uniqueKey) acquired at pull before
   // moving to DLQ — otherwise the slot leaks (mirrors
   // stallDetection.moveStalliedJobToDlq).
   shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
   const entry = shard.addToDlq(
     job,
-    FailureReason.Stalled,
-    `Lock expired after ${lock.renewalCount} renewals`
+    attemptsExhausted ? FailureReason.MaxAttemptsExceeded : FailureReason.Stalled,
+    attemptsExhausted
+      ? `Lock expired at max attempts (${job.maxAttempts})`
+      : `Lock expired after ${lock.renewalCount} renewals`
   );
   ctx.jobIndex.set(jobId, { type: 'dlq', queueName: job.queue });
   // Persist the DLQ move like the sibling paths (ack.moveFailedJobToDlq,
@@ -189,7 +202,9 @@ function handleMaxStallsExceeded(opts: MaxStallsOptions): void {
     jobId,
     queue: job.queue,
     timestamp: now,
-    error: 'Lock expired (max stalls reached)',
+    error: attemptsExhausted
+      ? 'Lock expired (max attempts reached)'
+      : 'Lock expired (max stalls reached)',
   });
 }
 

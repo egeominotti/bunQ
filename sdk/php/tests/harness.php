@@ -135,12 +135,15 @@ function runRegistered(Server $server): int
 {
     $failed = 0;
     foreach ($GLOBALS['__bq_tests'] as $name => $fn) {
+        $started = microtime(true);
         try {
             $fn($server);
-            echo "PASS {$name}\n";
+            $durationMs = (int) round((microtime(true) - $started) * 1000);
+            echo "PASS {$name} ({$durationMs}ms)\n";
         } catch (\Throwable $e) {
             $failed++;
-            echo "FAIL {$name}: {$e->getMessage()}\n";
+            $durationMs = (int) round((microtime(true) - $started) * 1000);
+            echo "FAIL {$name} ({$durationMs}ms): {$e->getMessage()}\n";
             echo '  at ' . $e->getFile() . ':' . $e->getLine() . "\n";
         }
     }

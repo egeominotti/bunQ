@@ -70,10 +70,27 @@ Run the narrowest relevant tests while iterating:
 
 ```bash
 BUNQUEUE_EMBEDDED=1 bun test test/path-to-test.test.ts
+bun run test:model
 bun run typecheck
 biome check src test/path-to-test.test.ts
 git diff --check
 ```
+
+**MANDATORY: Run `bun run test:model` after every change that can affect job
+lifecycle, persistence/recovery, scheduling/order, dependencies, deduplication,
+leases, rate/concurrency limits, counters, temporal indexes, or `jobIndex`.**
+This command runs the `fast-check` asynchronous command model against a real
+TCP broker and SQLite. It is targeted iteration evidence, not a replacement for
+the final sandbox (the sandbox's unit suite runs it again).
+
+The model must continue to enforce conservation, no loss/resurrection,
+exclusive delivery, custom-ID idempotency, retry/stall bounds, legal
+transitions, priority/FIFO/LIFO/delay/group/dependency ordering, unique keys,
+rate/concurrency/TTL resource rules, counter/index coherence, idempotent
+recovery, and DLQ exactly-once. When it fails, record the printed seed,
+counterexample, and replay path. Distinguish a model error from an engine
+divergence; for a confirmed engine bug, preserve the minimized sequence as a
+deterministic `test/repro-model-*.test.ts` regression before fixing it.
 
 **MANDATORY: After ANY code modification, run the isolated validation before
 committing:**
@@ -93,6 +110,19 @@ bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites
 
 Do not commit if any suite fails or could not be run. No exceptions.
 
+**MANDATORY: After ANY modification under `sdk/`, run the isolated SDK
+validation before handoff (and again before committing if more SDK edits were
+made):**
+
+```bash
+bun run test:sandbox:sdk
+```
+
+This second gate runs the native tests and shared protocol conformance checks
+for every official external SDK in separate disposable containers. Both
+`test:sandbox` and `test:sandbox:sdk` are required after SDK changes; a targeted
+native SDK test is diagnostic feedback, not a replacement for the sandbox.
+
 The exact native commands are a diagnostic fallback when Docker is unavailable,
 not proof that sandbox isolation passed. Report the unavailable sandbox as a
 blocker before commit.
@@ -105,6 +135,11 @@ and assert both the returned result and any affected counters/state.
 
 - Prefer targeted native tests during iteration; use the sandbox for the final
   full gate. Never run one container per individual unit test.
+- Model campaigns can be deepened without editing source:
+  `BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150
+  BUNQUEUE_MODEL_SEED=<signed-seed> bun run test:model`. Preserve the sign
+  printed by `fast-check`. Never remove or weaken an invariant merely to make a
+  generated history pass.
 - The three top-level suites run concurrently by default. Use
   `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose possible resource contention;
   it runs the same commands with the same isolation.
@@ -115,6 +150,8 @@ and assert both the returned result and any affected counters/state.
   `BUNQUEUE_TEST_SEQUENTIAL=1` before attributing it to application behavior.
 - Read complete suite output from `artifacts/test-sandbox/<timestamp>/`. On
   failure, preserve the runner's retained container until the cause is known.
+- Read SDK-gate output from `artifacts/test-sandbox-sdk/<timestamp>/` with the
+  same anomaly and retained-container discipline.
 - Every sandbox run must emit complete logs, per-suite NDJSON resource samples,
   per-suite JSON, and the aggregate `summary.json`/`summary.md`. Review reported
   anomalies and slow-test rankings before handoff; do not report only pass/fail.

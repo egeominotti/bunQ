@@ -15,9 +15,9 @@ in-memory `PriorityQueue`, and a `WriteBuffer` persists it to the `jobs` table
 where mutable/structured fields (`data`, `depends_on`, `children_ids`, `tags`,
 `timeline`, `stacktrace`) are stored as MessagePack BLOBs. These three shapes
 are **not identical** — several runtime-only fields (e.g. `backoffConfig`,
-`childrenCompleted`, the BullMQ-v5 flow flags, `stallCount`) are reconstructed
-with defaults on reload rather than persisted. The per-field notes below call
-this out explicitly.
+`childrenCompleted`, and the BullMQ-v5 flow flags) are reconstructed with
+defaults on reload rather than persisted. Recovery-critical `stallCount` is
+persisted so repeated process crashes cannot reset the stall budget.
 
 Cross-references: [Job Lifecycle](./features/job-lifecycle.md),
 [Persistence](./features/persistence.md),
@@ -86,7 +86,7 @@ export interface Job {
   // Stall detection
   lastHeartbeat: number;
   readonly stallTimeout: number | null;
-  stallCount: number;            // runtime only; reset to 0 on reload
+  stallCount: number;            // persisted; cumulative across restarts
 
   // BullMQ v5 additional options (runtime only unless noted)
   readonly stackTraceLimit: number;            // default 10
@@ -105,6 +105,12 @@ export interface Job {
   timeline: JobTimelineEntry[];  // state-transition log (persisted as BLOB)
 }
 ```
+
+`customId` is a broker-wide identity key, not a per-queue key. When supplied it
+also becomes `jobs.id`, whose SQLite primary key is global. Re-adding a live
+custom ID from any queue returns the existing generation; after a terminal
+generation, reuse first retires the completed/DLQ record and then admits one new
+generation. At no point may two rows or two live jobs share the same custom ID.
 
 Notable supporting types:
 
@@ -139,6 +145,9 @@ the `JobState` enum (see `JobCounts`, `response.ts:73-82`):
 
 - `waiting-children` — parked in `shard.waitingDeps` or `shard.waitingChildren`
   (flow dependency not yet satisfied). Derived in `queryOperations.ts:210`.
+  The public `Queue.getJobCounts()` / `getJobCountsAsync()` result includes the
+  same `'waiting-children'` bucket (including `0` for an empty queue), so job
+  state, listing, and count surfaces use one classification.
 - `paused` — present in `JobCounts` for BullMQ parity; pausing is a queue-level
   flag (`QueueState.paused`), jobs are not individually re-stated.
 
@@ -655,16 +664,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     remove_on_fail INTEGER DEFAULT 0,
     stall_timeout INTEGER,
     last_heartbeat INTEGER,
+    stall_count INTEGER NOT NULL DEFAULT 0,
     timeline BLOB,
     stacktrace BLOB
 );
 ```
 
 The row type `DbJob` (`statements.ts:121-152`) mirrors this (BLOB → `Uint8Array`).
-Note: `backoffConfig`, `childrenCompleted`, `stallCount`, `repeat`, and the
-BullMQ-v5 flow flags are **not columns**; `rowToJob` (`sqliteSerializer.ts:71-151`)
-reconstructs them with defaults (`stackTraceLimit:10`, flags `false`,
-`childrenCompleted:0`, `stallCount:0`).
+Note: `backoffConfig`, `childrenCompleted`, `repeat`, and the BullMQ-v5 flow
+flags are **not columns**; `rowToJob` (`sqliteSerializer.ts`) reconstructs them
+with defaults (`stackTraceLimit:10`, flags `false`, `childrenCompleted:0`).
+`stallCount` maps to `jobs.stall_count`; legacy rows receive the migration's
+safe zero default once, then every recovery retry persists its increment.
 
 Indexes on `jobs`:
 
@@ -743,14 +754,20 @@ CREATE TABLE IF NOT EXISTS queue_state (
     rate_limit INTEGER,
     concurrency_limit INTEGER,
     rate_limit_duration INTEGER,   -- window ms (migration 15)
-    rate_limit_expires_at INTEGER  -- epoch ms auto-expiry (migration 16)
+    rate_limit_expires_at INTEGER, -- epoch ms auto-expiry (migration 16)
+    stall_enabled INTEGER,         -- nullable for legacy/default policy
+    stall_interval INTEGER,
+    max_stalls INTEGER,
+    stall_grace_period INTEGER
 );
 ```
 
 Persists queue control-state for recovery (#100); row type `DbQueueState`
 (`statements.ts:175-183`). On boot, recovery skips rate-limit rows whose
 `rate_limit_expires_at` is already in the past and restores still-live TTL'd
-limits with their remaining time.
+limits with their remaining time. The four nullable stall columns persist a
+complete custom `StallConfig`; recovery applies it before classifying active
+rows, so the same `maxStalls` bound governs the crash that triggered recovery.
 
 ### `migrations` (schema.ts:132-137)
 
@@ -763,7 +780,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (schema.ts:140-210)
 
-`SCHEMA_VERSION = 16`. The migrate routine (`sqlite.ts:255-278`) reads
+`SCHEMA_VERSION = 21`. The migrate routine (`sqlite.ts:255-278`) reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -784,6 +801,11 @@ then records `SCHEMA_VERSION`.
 | 14      | Stable `getJobs` indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)` |
 | 15      | `queue_state.rate_limit_duration` (rate-limit window)            |
 | 16      | `queue_state.rate_limit_expires_at` (rate-limit TTL auto-expiry; split from 15 so each ALTER retries idempotently) |
+| 17      | `jobs.stall_count` (cumulative crash/stall budget across recovery) |
+| 18      | `queue_state.stall_enabled`                                     |
+| 19      | `queue_state.stall_interval`                                    |
+| 20      | `queue_state.max_stalls`                                        |
+| 21      | `queue_state.stall_grace_period`                                |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 

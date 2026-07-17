@@ -29,6 +29,36 @@ from bunqueue.errors import (
 )
 
 
+@test
+def test_outgoing_frame_rejects_protocol_oversize(_server: Server) -> None:
+    """An oversized command must fail before it is registered or written."""
+    import bunqueue.transport as transport_module
+
+    class SinkSocket:
+        def sendall(self, _frame: bytes) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    original_limit = transport_module.MAX_FRAME_SIZE
+    transport_module.MAX_FRAME_SIZE = 32
+    conn = Connection(command_timeout=0.01)
+    conn._connected = True
+    conn._sock = SinkSocket()
+    try:
+        raised = False
+        try:
+            conn._send({"cmd": "Ping", "blob": "x" * 128})
+        except SerializationError:
+            raised = True
+        assert raised, "oversized frame must raise SerializationError before write"
+        assert not conn._pending, "rejected frame must not leak a pending future"
+    finally:
+        transport_module.MAX_FRAME_SIZE = original_limit
+        conn.close()
+
+
 # ------------------------------------------------------------------ H1 addBulk
 @test
 def test_h1_addbulk_preserves_custom_id(server: Server) -> None:

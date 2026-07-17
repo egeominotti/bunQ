@@ -14,6 +14,7 @@ from .connection import Connection, TlsOption, _compact
 from .errors import CommandError
 from .job import Job
 from .options import job_options, job_payload
+from .telemetry import TelemetryHandler
 
 
 class FlowNode:
@@ -38,8 +39,11 @@ class FlowProducer:
         token: Optional[str] = None,
         tls: TlsOption = None,
         connection: Optional[Connection] = None,
+        on_telemetry: Optional[TelemetryHandler] = None,
     ) -> None:
-        self.connection = connection or Connection(host=host, port=port, token=token, tls=tls)
+        self.connection = connection or Connection(
+            host=host, port=port, token=token, tls=tls, on_telemetry=on_telemetry
+        )
         self._owns_connection = connection is None
 
     # ------------------------------------------------------------------- api

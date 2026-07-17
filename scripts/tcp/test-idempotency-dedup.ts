@@ -3,13 +3,13 @@
  * Test Idempotency & Deduplication (TCP Mode)
  *
  * Tests for custom jobId deduplication, concurrent duplicate pushes,
- * data preservation on dedup, cross-queue isolation, bulk dedup,
+ * data preservation on dedup, broker-global custom IDs, bulk dedup,
  * and retry compatibility with custom jobIds.
  */
 
 import { Queue, Worker } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -148,10 +148,10 @@ async function main() {
   }
 
   // ─────────────────────────────────────────────────
-  // Test 4: Custom jobId across queues — dedup is per-queue
-  // Push jobs with same jobId to different queues, verify both created
+  // Test 4: Custom jobId across queues — the jobs.id key is broker-global.
+  // A live ID remains owned by its first queue and the second push is a no-op.
   // ─────────────────────────────────────────────────
-  console.log('\n4. Testing CUSTOM JOBID ACROSS QUEUES (per-queue isolation)...');
+  console.log('\n4. Testing CUSTOM JOBID ACROSS QUEUES (global idempotency)...');
   {
     const qA = makeQueue('tcp-dedup-cross-a');
     const qB = makeQueue('tcp-dedup-cross-b');
@@ -164,10 +164,10 @@ async function main() {
       const jobA = await qA.add('task', { source: 'A' }, { jobId: sharedJobId });
       const jobB = await qB.add('task', { source: 'B' }, { jobId: sharedJobId });
 
-      if (jobA.id && jobB.id) {
-        ok('Both jobs created in different queues');
+      if (jobA.id === jobB.id) {
+        ok('Both adds returned the same broker-global job ID');
       } else {
-        fail(`Job creation failed: jobA=${jobA.id}, jobB=${jobB.id}`);
+        fail(`Expected the same ID, got jobA=${jobA.id}, jobB=${jobB.id}`);
       }
 
       const countsA = await qA.getJobCountsAsync();
@@ -175,10 +175,10 @@ async function main() {
       const waitA = countsA?.waiting ?? -1;
       const waitB = countsB?.waiting ?? -1;
 
-      if (waitA === 1 && waitB === 1) {
-        ok('Each queue has exactly 1 waiting job');
+      if (waitA === 1 && waitB === 0) {
+        ok('The first queue retains the only live generation');
       } else {
-        fail(`Expected 1 each, got qA=${waitA}, qB=${waitB}`);
+        fail(`Expected qA=1 and qB=0, got qA=${waitA}, qB=${waitB}`);
       }
     } catch (e) {
       fail(`Cross-queue jobId test failed: ${e}`);
@@ -276,11 +276,15 @@ async function main() {
       const customId = 'retry-dedup-test-id';
       let attemptCount = 0;
 
-      const job = await q.add('task', { value: 42 }, {
-        jobId: customId,
-        attempts: 3,
-        backoff: 100,
-      });
+      const job = await q.add(
+        'task',
+        { value: 42 },
+        {
+          jobId: customId,
+          attempts: 3,
+          backoff: 100,
+        }
+      );
 
       if (job.id) {
         ok(`Job created with custom jobId: ${job.id}`);

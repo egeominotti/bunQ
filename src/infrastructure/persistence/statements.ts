@@ -18,6 +18,7 @@ export type StatementName =
   | 'insertDlq'
   | 'loadDlq'
   | 'deleteDlqEntry'
+  | 'deleteDlqEntryForQueue'
   | 'clearDlqQueue'
   | 'insertCron'
   | 'updateCron'
@@ -38,12 +39,12 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       id, queue, data, priority, created_at, run_at, attempts,
       max_attempts, backoff, ttl, timeout, unique_key, custom_id,
       depends_on, parent_id, children_ids, tags, state, lifo, group_id,
-      remove_on_complete, remove_on_fail, stall_timeout, timeline
+      remove_on_complete, remove_on_fail, stall_timeout, stall_count, timeline
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?
+      ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       queue=excluded.queue, data=excluded.data, priority=excluded.priority,
@@ -53,7 +54,8 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       depends_on=excluded.depends_on, parent_id=excluded.parent_id, children_ids=excluded.children_ids,
       tags=excluded.tags, state=excluded.state, lifo=excluded.lifo, group_id=excluded.group_id,
       remove_on_complete=excluded.remove_on_complete, remove_on_fail=excluded.remove_on_fail,
-      stall_timeout=excluded.stall_timeout, timeline=excluded.timeline,
+      stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
+      timeline=excluded.timeline,
       -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
       -- resolves to each column's DEFAULT (NULL / 0) — i.e. the fresh-job value. Reset
       -- them too, otherwise an upsert over an ORPHAN row would leave a brand-new job
@@ -85,6 +87,8 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
 
   deleteDlqEntry: 'DELETE FROM dlq WHERE job_id = ?',
 
+  deleteDlqEntryForQueue: 'DELETE FROM dlq WHERE job_id = ? AND queue = ?',
+
   clearDlqQueue: 'DELETE FROM dlq WHERE queue = ?',
 
   insertCron: `
@@ -97,10 +101,10 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
 
   // Queue control-state persistence (#100): paused / rate-limit / concurrency.
   upsertQueueState:
-    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 
   loadQueueState:
-    'SELECT name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at FROM queue_state',
+    'SELECT name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period FROM queue_state',
 
   deleteQueueState: 'DELETE FROM queue_state WHERE name = ?',
 };
@@ -148,6 +152,7 @@ export interface DbJob {
   remove_on_fail: number;
   stall_timeout: number | null;
   last_heartbeat: number | null;
+  stall_count: number;
   timeline: Uint8Array | null;
   stacktrace: Uint8Array | null; // MessagePack BLOB (#74)
 }
@@ -180,4 +185,8 @@ export interface DbQueueState {
   concurrency_limit: number | null;
   rate_limit_duration: number | null;
   rate_limit_expires_at: number | null;
+  stall_enabled: number | null;
+  stall_interval: number | null;
+  max_stalls: number | null;
+  stall_grace_period: number | null;
 }

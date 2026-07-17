@@ -5,6 +5,29 @@ All notable changes to `bunqueue-client` (Python SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Reject MessagePack payloads larger than the protocol's 64 MiB frame cap
+  locally with `SerializationError`, before registering a pending request or
+  writing to the socket.
+- Recursively validate commands before writing: cyclic containers, non-string
+  map keys, and integers beyond float64 range now raise `SerializationError`
+  without leaking pending requests. Shared containers remain valid; binary
+  values and list/tuple arrays keep their wire representation.
+
+### Added
+
+- Dependency-free structured transport telemetry through the optional
+  `on_telemetry` callback, with lifecycle, auth, command latency, timeout,
+  reconnect, and error events. Consumer exceptions are isolated.
+- Focused real-server telemetry tests. Connection lifecycle and frame helpers
+  were split into single-responsibility modules below the 300-line source cap.
+- Add independent-thread idempotency and single-lease races, fixed-seed
+  generated payload invariants, malformed mutation fuzzing, and an opt-in
+  sustained producer profile.
+
 ## [0.1.4] - 2026-07-14
 
 Conformance-suite driven: the SDK is now certified by the cross-language

@@ -16,6 +16,9 @@ export class CommandTimeoutError extends BunqueueError {}
 /** The server answered ok=false; message carries the server error. */
 export class CommandError extends BunqueueError {}
 
+/** A command cannot be encoded within the protocol's wire constraints. */
+export class SerializationError extends BunqueueError {}
+
 /** Authentication with the server failed. */
 export class AuthError extends BunqueueError {}
 

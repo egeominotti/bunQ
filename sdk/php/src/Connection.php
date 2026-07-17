@@ -22,6 +22,9 @@ use MessagePack\Packer;
  */
 final class Connection
 {
+    use ConnectionTelemetry;
+    use ConnectionTLS;
+
     private mixed $socket = null;
     private int $generation = -1;
     private int $reqCounter = 0;
@@ -34,8 +37,10 @@ final class Connection
     private readonly bool|array $tls;
     private readonly float $connectTimeout;
     private readonly float $commandTimeout;
+    /** @var (callable(array<string, mixed>): void)|null */
+    private $onEvent;
 
-    /** @param array{host?: string, port?: int, token?: string, tls?: bool|array, connectTimeout?: float, commandTimeout?: float} $options */
+    /** @param array{host?: string, port?: int, token?: string, tls?: bool|array, connectTimeout?: float, commandTimeout?: float, onEvent?: callable} $options */
     public function __construct(array $options = [])
     {
         $this->host = $options['host'] ?? 'localhost';
@@ -44,6 +49,11 @@ final class Connection
         $this->tls = $options['tls'] ?? false;
         $this->connectTimeout = $options['connectTimeout'] ?? 10.0;
         $this->commandTimeout = $options['commandTimeout'] ?? 30.0;
+        $callback = $options['onEvent'] ?? null;
+        if ($callback !== null && !\is_callable($callback)) {
+            throw new \InvalidArgumentException('onEvent must be callable');
+        }
+        $this->onEvent = $callback;
         $this->packer = new Packer();
     }
 
@@ -69,14 +79,26 @@ final class Connection
     /** Send a command and return the decoded response. Throws on `ok: false`. */
     public function call(array $command, ?float $timeout = null): array
     {
-        if ($this->socket === null) {
-            $this->connect();
+        $started = microtime(true);
+        $name = (string) ($command['cmd'] ?? '');
+        try {
+            if ($this->socket === null) {
+                $this->connect();
+            }
+            $command['reqId'] = 'php-' . (++$this->reqCounter);
+            $response = $this->roundTrip($command, $timeout ?? $this->commandTimeout);
+            if (($response['ok'] ?? false) !== true) {
+                throw new CommandException((string) ($response['error'] ?? 'unknown server error'));
+            }
+        } catch (\Throwable $error) {
+            if ($error instanceof CommandTimeoutException) {
+                $this->emitTelemetry('timeout', $name, $started, $error);
+            }
+            $this->emitTelemetry('command', $name, $started, $error);
+            $this->emitTelemetry('error', $name, $started, $error);
+            throw $error;
         }
-        $command['reqId'] = 'php-' . (++$this->reqCounter);
-        $response = $this->roundTrip($command, $timeout ?? $this->commandTimeout);
-        if (($response['ok'] ?? false) !== true) {
-            throw new CommandException((string) ($response['error'] ?? 'unknown server error'));
-        }
+        $this->emitTelemetry('command', $name, $started);
         return $response;
     }
 
@@ -101,6 +123,7 @@ final class Connection
         if ($this->socket !== null) {
             @fclose($this->socket);
             $this->socket = null;
+            $this->emitTelemetry('close');
         }
     }
 
@@ -119,80 +142,87 @@ final class Connection
             $context
         );
         if ($socket === false) {
-            throw new ConnectionException(
+            $error = new ConnectionException(
                 sprintf('connect to %s:%d failed: %s (%d)', $this->host, $this->port, $errstr, $errno)
             );
+            $this->emitTelemetry('error', '', microtime(true), $error);
+            throw $error;
         }
+        $reconnecting = $this->generation >= 0;
         $this->socket = $socket;
         $this->generation++;
+        if ($reconnecting) {
+            $this->emitTelemetry('reconnect');
+        }
+        $this->emitTelemetry('connected');
         if ($this->token !== null) {
             $this->authenticate();
         }
     }
 
-    /** @return array<string, mixed> */
-    private function sslOptions(): array
-    {
-        // Certificates are VERIFIED by default (issue #109 class): opting out
-        // requires an explicit verifyPeer: false.
-        $opts = \is_array($this->tls) ? $this->tls : [];
-        $verify = $opts['verifyPeer'] ?? true;
-        $ssl = [
-            'verify_peer' => $verify,
-            'verify_peer_name' => $verify,
-            'allow_self_signed' => false,
-        ];
-        if (isset($opts['caFile'])) {
-            $ssl['cafile'] = $opts['caFile'];
-        }
-        if (isset($opts['peerName'])) {
-            $ssl['peer_name'] = $opts['peerName'];
-        }
-        return $ssl;
-    }
-
     private function authenticate(): void
     {
         $command = ['cmd' => 'Auth', 'token' => $this->token, 'reqId' => 'php-auth'];
-        $response = $this->roundTrip($command, $this->commandTimeout);
+        $started = microtime(true);
+        try {
+            $response = $this->roundTrip($command, $this->commandTimeout);
+        } catch (\Throwable $error) {
+            $this->emitTelemetry('auth', 'Auth', $started, $error);
+            throw $error;
+        }
         if (($response['ok'] ?? false) !== true) {
             $this->close();
-            throw new AuthException((string) ($response['error'] ?? 'authentication failed'));
+            $error = new AuthException((string) ($response['error'] ?? 'authentication failed'));
+            $this->emitTelemetry('auth', 'Auth', $started, $error);
+            throw $error;
         }
+        $this->emitTelemetry('auth', 'Auth', $started);
     }
 
     private function roundTrip(array $command, float $timeout): array
     {
-        $frame = $this->packer->pack(Protocol::jsSafe(Protocol::compact($command)));
-        if (\strlen($frame) + 4 > Protocol::MAX_FRAME_SIZE) {
+        try {
+            $frame = $this->packer->pack(Protocol::jsSafe(Protocol::compact($command)));
+        } catch (\Throwable $error) {
+            throw new ConnectionException('msgpack encode failed: ' . $error->getMessage(), 0, $error);
+        }
+        if (!Protocol::isPayloadLengthAllowed(\strlen($frame))) {
             throw new CommandException('frame exceeds the 64MB protocol limit');
         }
-        $this->write(pack('N', \strlen($frame)) . $frame);
+        $deadline = microtime(true) + $timeout;
+        $this->write(pack('N', \strlen($frame)) . $frame, $deadline);
         // Responses to a sequential client arrive in order; still match reqId
         // defensively (e.g. a server-side push racing a reply would be
         // skipped). The deadline is a GLOBAL budget: a stream of mismatched
         // frames must not reset the timeout on every frame.
         $expected = $command['reqId'];
-        $deadline = microtime(true) + $timeout;
         while (true) {
-            $remaining = $deadline - microtime(true);
-            if ($remaining <= 0) {
+            if ($deadline - microtime(true) <= 0) {
                 $this->timeoutTeardown();
             }
-            $response = $this->readFrame($remaining);
+            $response = $this->readFrame($deadline);
             if (!isset($response['reqId']) || $response['reqId'] === $expected) {
                 return $response;
             }
         }
     }
 
-    private function write(string $bytes): void
+    private function write(string $bytes, float $deadline): void
     {
         $offset = 0;
         $length = \strlen($bytes);
         while ($offset < $length) {
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                $this->timeoutTeardown();
+            }
+            $this->setStreamTimeout($remaining);
             $written = @fwrite($this->socket, substr($bytes, $offset));
+            $meta = @stream_get_meta_data($this->socket);
             if ($written === false || $written === 0) {
+                if (($meta['timed_out'] ?? false) || microtime(true) >= $deadline) {
+                    $this->timeoutTeardown();
+                }
                 $this->close();
                 throw new ConnectionException('socket write failed (connection lost)');
             }
@@ -200,50 +230,59 @@ final class Connection
         }
     }
 
-    private function readFrame(float $timeout): array
+    private function readFrame(float $deadline): array
     {
-        $header = $this->readExactly(4, $timeout);
+        $header = $this->readExactly(4, $deadline);
         $length = unpack('N', $header)[1];
         if ($length > Protocol::MAX_FRAME_SIZE) {
             $this->close();
             throw new ConnectionException("oversized frame from server ({$length} bytes)");
         }
-        $body = $this->readExactly($length, $timeout);
-        $unpacker = new BufferUnpacker($body);
-        $decoded = $unpacker->unpack();
+        $body = $this->readExactly($length, $deadline);
+        try {
+            $decoded = (new BufferUnpacker($body))->unpack();
+        } catch (\Throwable $error) {
+            $this->close();
+            throw new ConnectionException('msgpack decode failed: ' . $error->getMessage(), 0, $error);
+        }
         if (!\is_array($decoded)) {
             $this->close();
             throw new ConnectionException('malformed response frame (not a msgpack map)');
         }
-        return $decoded;
+        return Protocol::normalizeIncoming($decoded);
     }
 
-    private function readExactly(int $length, float $timeout): string
+    private function readExactly(int $length, float $deadline): string
     {
         $buffer = '';
-        $deadline = microtime(true) + $timeout;
         while (\strlen($buffer) < $length) {
             $remaining = $deadline - microtime(true);
             if ($remaining <= 0) {
                 $this->timeoutTeardown();
             }
-            stream_set_timeout(
-                $this->socket,
-                (int) $remaining,
-                (int) (($remaining - (int) $remaining) * 1_000_000)
-            );
+            $this->setStreamTimeout($remaining);
             $chunk = @fread($this->socket, $length - \strlen($buffer));
             $meta = @stream_get_meta_data($this->socket);
+            if (($chunk === false || $chunk === '')
+                && (($meta['timed_out'] ?? false) || microtime(true) >= $deadline)) {
+                $this->timeoutTeardown();
+            }
             if ($chunk === false || ($chunk === '' && ($meta === false || $meta['eof']))) {
                 $this->close();
                 throw new ConnectionException('connection closed by server');
             }
-            if ($chunk === '' && ($meta['timed_out'] ?? false)) {
-                $this->timeoutTeardown();
-            }
             $buffer .= $chunk;
         }
         return $buffer;
+    }
+
+    private function setStreamTimeout(float $remaining): void
+    {
+        stream_set_timeout(
+            $this->socket,
+            (int) $remaining,
+            (int) (($remaining - (int) $remaining) * 1_000_000)
+        );
     }
 
     private function timeoutTeardown(): never

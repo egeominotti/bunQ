@@ -16,6 +16,7 @@ from .options import job_options, job_payload
 from .queue_admin import QueueAdminOps
 from .queue_query import QueueQueryOps
 from .worker_runtime import MAX_STACK_LINES
+from .telemetry import TelemetryHandler
 
 
 class Queue(QueueQueryOps, QueueAdminOps):
@@ -31,10 +32,16 @@ class Queue(QueueQueryOps, QueueAdminOps):
         connection: Optional[Connection] = None,
         command_timeout: float = 10.0,
         prefix_key: str = "",
+        on_telemetry: Optional[TelemetryHandler] = None,
     ) -> None:
         self.name = prefix_key + name
         self.connection = connection or Connection(
-            host=host, port=port, token=token, tls=tls, command_timeout=command_timeout
+            host=host,
+            port=port,
+            token=token,
+            tls=tls,
+            command_timeout=command_timeout,
+            on_telemetry=on_telemetry,
         )
         self._owns_connection = connection is None
 

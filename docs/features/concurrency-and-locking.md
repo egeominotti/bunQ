@@ -174,6 +174,14 @@ Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall
 2. **Renew** — `JobHeartbeat`/`ExtendLock` → `renewJobLock`. Fails if no lock, token mismatch, or already expired (in which case the stale lock is deleted) (lockOperations.ts:48–73). On success it also refreshes `job.lastHeartbeat` for legacy stall detection (lockOperations.ts:66–69).
 3. **Release** — `ACK`/`FAIL` → `releaseLock`. Returns `true` when there is nothing to release; if a `token` is supplied it must match (lockOperations.ts:96–107).
 
+Manual management claims are also terminal for the current lease even when the
+job itself is requeued. `releaseClaimedJobOwnership` removes the `jobLocks`
+entry and detaches the id from every `clientJobs` owner in the same synchronous
+processing-map claim used by `moveActiveToWait`, `moveToWaitingChildren`,
+`moveJobToDelayed`, and active `discardJob`. Both deletions are idempotent, so a
+concurrent disconnect cleanup cannot leave a lease behind or release the
+requeued job a second time.
+
 ### ACK ownership check + #101 grace window
 
 `ack` rejects a token only when `verifyLock` fails **and** `isExpiredButOwned` is false (queueManager.ts:350–356). `isExpiredButOwned` (queueManager.ts:562) grants a late ACK iff all hold: (1) job still `processing`, (2) lock token still matches, (3) `job.startedAt <= lock.createdAt` — the **re-lease guard**. If a stall retry re-pulled the job, `startedAt` is newer than the lingering lock's `createdAt`, condition 3 fails, and the timed-out worker's late ACK is rejected to prevent double-completion. `throwIfOwnershipConflict` (queueManager.ts:529) raises only when the job is still `processing` with a live lock; if the background sweep already requeued it, the failed verification is swallowed silently.
@@ -187,10 +195,10 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:88–96
 3. **Process** under `withWriteLock(shardLocks[shardIdx])` → `withWriteLock(processingLocks[procIdx])` (lockManager.ts:87–97). For each job (`processExpiredLockInner`, lockManager.ts:105):
    - Remove from processing.
    - `cron:` jobs with preventOverlap are **discarded**, not requeued (#75) — release resources, drop from index, delete from SQLite (lockManager.ts:124–130).
-   - Otherwise: `attempts++`, `startedAt = null`, `stallCount++`. If `stallCount >= maxStalls` → `handleMaxStallsExceeded` (DLQ), else `requeueExpiredJob`.
+   - Otherwise: `attempts++`, `startedAt = null`, `stallCount++`. If `attempts >= maxAttempts` or `stallCount >= maxStalls` → terminal DLQ; otherwise `requeueExpiredJob`.
    - Delete the lock and emit `job:lock-expired`.
 
-`handleMaxStallsExceeded` (lockManager.ts:167) calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-INSERTs it, throwing `UNIQUE constraint failed: jobs.id` (#97, lockManager.ts:182–185). Those two writes only execute if the caller's `LockContext` carries `storage`: the background sweep's `getLockContext` (backgroundTasks.ts) omitted it until #110, so the persistence silently no-op'd on the only production path (`LockContext.storage` is optional — the omission compiled unnoticed). `requeueExpiredJob` (lockManager.ts:208) releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
+`handleRecoveryBoundExceeded` calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-INSERTs it, throwing `UNIQUE constraint failed: jobs.id` (#97). Those two writes only execute if the caller's `LockContext` carries `storage`: the background sweep's `getLockContext` (backgroundTasks.ts) omitted it until #110, so the persistence silently no-op'd on the only production path (`LockContext.storage` is optional — the omission compiled unnoticed). `requeueExpiredJob` releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
 
 ### `checkStalledJobs` (two-phase stall detection)
 
@@ -201,7 +209,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 
 `getStallAction` → `checkStall` (stall.ts:41): returns `Keep` if `startedAt === null`, still inside `gracePeriod`, or `now - lastHeartbeat <= stallInterval` (per-job `job.stallTimeout` overrides the config interval). Otherwise increments a hypothetical count and returns `MoveToDlq` when `>= maxStalls`, else `Retry`.
 
-`handleStalledJob` (stallDetection.ts:79) re-acquires `shardLocks[idx]` → `processingLocks[procIdx]`, re-verifies the job is still in processing (stallDetection.ts:94) before acting, then calls `moveStalliedJobToDlq` or `retryStalliedJob`. Events/webhooks are broadcast **after** the locked section, only if `handled` (stallDetection.ts:111). `retryStalliedJob` (stallDetection.ts:160) bumps stall count + attempts, computes `runAt = now + calculateBackoff(job)` (exponential w/ jitter), appends timeline entries (capped at `MAX_TIMELINE_ENTRIES`), re-pushes, and persists via `updateForRetry`. Both stall paths discard `cron:` preventOverlap jobs instead of retrying/DLQ-ing (#73, stallDetection.ts:143/169).
+`handleStalledJob` (stallDetection.ts:79) re-acquires `shardLocks[idx]` → `processingLocks[procIdx]`, re-verifies the job is still in processing (stallDetection.ts:94) before acting, then calls `moveStalliedJobToDlq` or `retryStalliedJob`. A confirmed stall that would make `attempts >= maxAttempts` is terminal even when the stall-count action alone said retry. Events/webhooks are broadcast **after** the locked section, only if `handled` (stallDetection.ts:111). `retryStalliedJob` bumps stall count + attempts, computes `runAt = now + calculateBackoff(job)` (exponential w/ jitter), appends timeline entries (capped at `MAX_TIMELINE_ENTRIES`), re-pushes, and persists both retry counters via `updateForRetry`. Both stall paths discard `cron:` preventOverlap jobs instead of retrying/DLQ-ing.
 
 ## Concurrency & Locking
 
@@ -220,13 +228,13 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 ## Edge Cases & Failure Modes
 
 - **Lock timeout** — `acquire`/`acquireRead`/`acquireWrite` throw `LockTimeoutError` after `LOCK_TIMEOUT_MS` (default 5 s). Callers using `withWriteLock` propagate the rejection; background sweeps wrap calls in `.catch(...)` (backgroundTasks.ts:93).
-- **Resource-slot leaks** — every reclaim path (`handleMaxStallsExceeded`, `requeueExpiredJob`, `moveStalliedJobToDlq`, `retryStalliedJob`) calls `shard.releaseJobResources(queue, uniqueKey, groupId)` before moving the job; omitting it wedges the queue's concurrency limiter (lockManager.ts:172/214, stallDetection.ts:140/194).
+- **Resource-slot leaks** — every reclaim path (`handleRecoveryBoundExceeded`, `requeueExpiredJob`, `moveStalliedJobToDlq`, `retryStalliedJob`) calls `shard.releaseJobResources(queue, uniqueKey, groupId)` before moving the job; omitting it wedges the queue's concurrency limiter.
 - **Orphan SQLite rows (#97)** — DLQ moves must `saveDlqEntry` + `deleteJob`; missing the delete leaves a `jobs` row that collides on retry with `UNIQUE constraint failed: jobs.id`.
 - **Cron preventOverlap (#73/#75)** — `cron:`-prefixed jobs are discarded rather than requeued/DLQ'd on stall or lock expiry, since the scheduler re-creates them on the next tick; requeuing would cause "starts right away on reconnect".
 - **False-positive suppression** — single-cycle hiccups never trigger action thanks to two-phase detection plus the `gracePeriod` after job start.
 - **Idempotent `createLock`** — returns `null` if a lock already exists or the job isn't in `processing`, so a buggy double-pull cannot mint a second token.
 - **Token-less heartbeat** — `jobHeartbeat`/`renewJobLock` without a token just bumps `job.lastHeartbeat`; only the heartbeat-stall path (not the lease-TTL path) is then satisfied.
-- **`stallCount` monotonic** — both reclaim mechanisms increment `stallCount`, so a job flapping between stall and lock-expiry still converges to `maxStalls` → DLQ.
+- **`stallCount` monotonic and durable** — all reclaim mechanisms increment `stallCount`, and `updateForRetry` writes it to `jobs.stall_count`; a job flapping between stall, lock-expiry, and process restart still converges to `maxStalls` → DLQ instead of resetting to zero.
 - **Invariant:** `processingLocks` are never acquired before `shardLocks`; violating this risks deadlock against the lifecycle paths in [Job Lifecycle](./job-lifecycle.md).
 
 ## Configuration

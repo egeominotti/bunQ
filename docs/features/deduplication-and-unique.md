@@ -112,11 +112,16 @@ Client → wire mapping (`src/client/queue/operations/add.ts:108-117`): `uniqueK
 
 SQLite columns: `jobs.unique_key`, `jobs.custom_id` (`schema.ts:34-35`). Note `idx_jobs_unique ON jobs(queue, unique_key) WHERE unique_key IS NOT NULL` (`schema.ts:58-59`) is a **non-unique** index for lookup speed — uniqueness is enforced in memory, not by the database. Custom-id idempotency is backstopped by the `jobs.id` PRIMARY KEY (the custom id becomes the row id).
 
+Consequently, custom IDs are broker-wide rather than queue-scoped. A live
+generation suppresses the same ID even when the next push names another queue;
+the existing job and its original data win. `uniqueKey`, by contrast, remains
+scoped by queue.
+
 ## Business Logic / Control Flow
 
 Single push: `pushJob` takes the shard write lock and runs both checks inside it (`push.ts:257-296`).
 
-### 1. Custom-ID idempotency — `handleCustomId` (`push.ts:61`)
+### 1. Custom-ID idempotency — `handleCustomId` (`customId.ts`)
 
 1. No `customId` → return a fresh generated id (`push.ts:62-64`).
 2. `id = jobId(input.customId)` (the custom id *is* the job id). Look up `customIdMap`. If the prior job is still **unfinished** (and not in `completedJobs`), the re-add is an idempotent no-op (BullMQ parity) — never a second insert of the same deterministic id, which would otherwise collide on the `jobs.id` PRIMARY KEY (durable → `UNIQUE constraint failed: jobs.id`; buffered → the write buffer silently drops the colliding insert). Three unfinished states are covered (`push.ts:82-95`):
@@ -124,9 +129,10 @@ Single push: `pushJob` takes the shard write lock and runs both checks inside it
    - **waiting-children** — `jobIndex` type `queue` but held in `shard.waitingDeps` (its row is already persisted, so it is *not* in the PriorityQueue) → idempotent skip via the existing id.
    - **active (processing)** — `jobIndex` type `processing`; the job was popped from the queue and is still running on a worker, with its row still on disk → idempotent skip via the existing id.
    For the latter two, `PushContext` has no `processingShards`, so it cannot fetch the live `Job`; `pushJob` / `pushJobBatch` rebuild a placeholder `{ ...job, id }` after `createJob` (mirrors `handleDeduplication`'s active path) and insert nothing. **Completed (#92) and DLQ jobs are terminal** and fall through to the reuse path below.
-3. **Reuse path (#92):** if the same id sits in `completedJobs`, its row survives on disk (`markCompleted` is an UPDATE, not DELETE). Evict it from `completedJobs`, `completedJobsData`, `jobResults`, `jobIndex`, and `storage.deleteJob(id)` so the recycled id starts fresh as `waiting` rather than reporting `completed` (`push.ts:105-111`). This delete is gated on `completedJobs` — it is **not** run on every push, which would tax the customId hot path with a synchronous DELETE + buffer scan inside the shard lock (a measured ~2× push/addBulk regression).
-4. Clear any stale timeout marker for the recycled id so stall-retry recovery is not wrongly discarded (guards against #33/#75 duplicate execution) (`push.ts:124`).
-5. Record `customIdMap.set(customId, id)` and proceed (`push.ts:125`).
+3. **Completed reuse path (#92):** if the same id sits in `completedJobs`, its row survives on disk (`markCompleted` is an UPDATE, not DELETE). Evict it from `completedJobs`, `completedJobsData`, `jobResults`, `jobIndex`, and `storage.deleteJob(id)` so the recycled id starts fresh as `waiting` rather than reporting `completed`. This delete is gated on `completedJobs` — it is **not** run on every push, which would tax the customId hot path with a synchronous DELETE + buffer scan inside the shard lock.
+4. **DLQ reuse path:** if `jobIndex` identifies the prior generation as `dlq`, remove that exact `(queue, id)` entry from its owning shard, decrement the shard DLQ counter once, delete the index entry, and call `storage.deleteDlqEntry(id)` before admitting the replacement. The new generation therefore cannot coexist with its terminal predecessor in memory or SQLite; reuse in another queue does not clear unrelated DLQ entries.
+5. Clear any stale timeout marker for the recycled id so stall-retry recovery is not wrongly discarded (guards against #33/#75 duplicate execution).
+6. Record `customIdMap.set(customId, id)` and proceed.
 
 ### 2. Unique-key dedup — `handleDeduplication` (`push.ts:133`)
 
@@ -157,7 +163,7 @@ If a `Bunqueue` instance is configured with `deduplication`/`debounce`, `merge` 
 
 ## Concurrency & Locking
 
-Both `handleCustomId` and `handleDeduplication` execute **inside** the per-shard write lock (`withWriteLock(ctx.shardLocks[idx], …)`, `push.ts:257`, `:338`) — the comment at `push.ts:249` and `:321` notes this is deliberate to prevent check-then-insert races on the same custom id / unique key. The `customIdMap` write and the unique-key registration are therefore atomic with the queue insert.
+Both `handleCustomId` and `handleDeduplication` execute inside write locks acquired by `withPushWriteLocks`. The helper always locks the target queue shard; when a custom id identifies a live queued or DLQ generation owned by another shard, it also locks that owning shard, in ascending shard order, and revalidates the required set after acquisition. Cross-queue live lookup and terminal removal therefore never mutate or inspect shard-private state unlocked, and cannot invert lock order. The `customIdMap` write and unique-key registration remain atomic with the queue insert.
 
 Lock order follows the global hierarchy (`jobIndex` → `completedJobs` → `shards[N]`); the unique-key registry is private state of the held shard, so no extra lock is needed. See [Concurrency & Locking](./concurrency-and-locking.md).
 
@@ -172,6 +178,7 @@ Lifecycle / release:
 - **TTL semantics:** `ttl` undefined ⇒ `expiresAt = null` ⇒ never expires (`calculateExpiration`, `deduplication.ts:60`). Expiry is lazy on read plus a periodic sweep.
 - **Re-add of an active / waiting-children custom id is idempotent:** when the prior job has been popped from the PriorityQueue (active = `jobIndex` type `processing`; or waiting-children = type `queue` but held in `shard.waitingDeps`) its row is still on disk, so re-adding the same `jobId` must NOT take the reuse path — that would re-insert the same deterministic id and collide on the `jobs.id` PRIMARY KEY (durable → throws `UNIQUE constraint failed: jobs.id`; buffered → the write buffer silently drops the insert, turning the intended no-op into a reject). `handleCustomId` instead returns the existing job (or, when the live `Job` is unreachable without `processingShards`, a `{ ...job, id }` placeholder) and inserts nothing (`push.ts:82-95`). This is the custom-id twin of the unique-key fix #69. The guard is `!ctx.completedJobs.has(id)` plus a `queue`/`processing` location check, so completed (#92) and DLQ jobs still fall through to reuse.
 - **Custom-id reuse after completion (#92):** completed rows survive on disk; the reuse path evicts them so the recycled id does not falsely report `completed` or collide on the PK at flush (`push.ts:105-111`).
+- **Custom-id reuse after DLQ:** a terminal DLQ generation is retired from the owning shard, `jobIndex`, its O(1) counter, and SQLite before the replacement jobs row is inserted. Both `PUSH` and `PUSHB` share this path, so the deterministic id has exactly one observable generation and the old entry cannot keep `failed` inflated or reappear after restart.
 - **Orphan-row reconciliation via upsert:** a durable `jobs` row can outlive its in-memory tracking when `obliterate()` (a fire-and-forget `void` over TCP — there is no `obliterateAsync`) or a write-buffer flush is reordered relative to an in-flight durable insert: the `customIdMap` / `jobIndex` entries are cleared but the row survives. A later re-add of the same custom id finds no mapping → reuse path → insert. To stop the recycled id colliding on the PK (`UNIQUE constraint failed: jobs.id`), **both** insert statements use `ON CONFLICT(id) DO UPDATE` (upsert): the orphan row is overwritten in place at insert time. The `DO UPDATE SET` clause covers **all** non-id columns — including the per-execution fields `started_at` / `completed_at` / `progress` / `progress_msg` / `last_heartbeat` / `stacktrace`, which are absent from the INSERT column list so `excluded.<col>` resolves to their DEFAULT (the fresh-job value). Without resetting these, an upsert over a previously-completed orphan would leave a brand-new `waiting` job reporting `progress=100` / a stale `completed_at` / a prior life's `stacktrace`. A brand-new id is a plain INSERT with **zero** extra cost, so the customId hot path is not taxed (`statements.ts` `insertJob`, `sqliteBatch.ts` batch insert). In the buffered batch path this also prevents one collision from failing the whole flush and dropping every innocent job batched in the same window (`reportLostJobs`). `jobs` has no triggers/FKs, so `DO UPDATE` has no cascade (unlike `REPLACE`). Covered by `test/repro-idem-active-readd.test.ts`.
 - **Recycled-id timeout marker (#33/#75):** stale `timedOutJobs` entries are cleared on reuse so the new job's stall-retry recovery is not silently dropped (`push.ts:124`).
 - **`extend` with vanished owner:** throws `Duplicate unique_key (extended TTL)` rather than silently inserting (`push.ts:180`).

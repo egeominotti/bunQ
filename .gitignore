@@ -33,6 +33,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 artifacts/test-sandbox/
+artifacts/test-sandbox-sdk/
 
 # Test coverage
 coverage/

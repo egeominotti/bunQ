@@ -96,11 +96,33 @@ the processor: `$job->extendLock(60_000);`
 | Control | `pause`, `resume`, `isPaused`, `drain`, `clean`, `obliterate`, `remove`, `discard`, `promote`, `retryJob`, `changePriority`, `changeDelay`, `updateJobData`, `moveJobToFailed` |
 | DLQ | `getDlq`, `retryDlq`, `purgeDlq` |
 | Schedulers | `upsertJobScheduler` (cron pattern or `every`, execution `limit`), `getJobScheduler`, `getJobSchedulers`, `removeJobScheduler` |
-| Admin | webhooks, `setRateLimit`, `getWorkers`, `getStats`, `listQueues`, `ping` |
+| Admin | webhooks, `setRateLimit(limit, durationMs, ttlMs)`, `getWorkers`, `getStats`, `listQueues`, `ping` |
 | Flows | `FlowProducer`: parent/child trees, `addChain`, `getFlow`, automatic rollback |
 
 TLS: `['tls' => true]` (system CAs, verified) or
 `['tls' => ['caFile' => './ca.pem']]`. Auth: `['token' => '...']`.
+
+### Telemetry
+
+Pass an optional payload-free callback to `Queue`, `Worker` or `Connection`:
+
+```php
+$queue = new Queue('emails', [
+    'onEvent' => function (array $event): void {
+        error_log(sprintf(
+            '%s command=%s duration=%.2fms error=%s',
+            $event['type'],
+            $event['command'] ?? '',
+            $event['durationMs'] ?? 0,
+            $event['error'] ?? '',
+        ));
+    },
+]);
+```
+
+It receives `connected`, `reconnect`, `auth`, `command`, `timeout`, `error`
+and `close` events without tokens or command payloads. Callback exceptions are isolated
+from queue correctness.
 
 ## Quality assurance
 
@@ -109,9 +131,16 @@ cross-language [conformance suite](../conformance/):
 
 ```bash
 composer install
-php tests/run-e2e.php                                # 33 e2e tests
+php tests/run-e2e.php                                # 48 e2e tests
+BUNQUEUE_SDK_SOAK_SECONDS=3600 php tests/soak.php   # sustained profile
 cd ../conformance && bun runner.ts --driver "php drivers/php.php"   # 17/17
+cd ../.. && bun run test:sandbox:sdk
 ```
+
+The native suite includes multi-process custom-id and single-lease races,
+fixed-seed generated payloads, malformed depth fuzzing, a 512-job spike, and
+SIGKILL/reconnect durability. The soak profile reuses one connection; adjust
+`BUNQUEUE_SDK_SOAK_BATCH` for stress diagnostics.
 
 ## License
 

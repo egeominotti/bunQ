@@ -121,10 +121,23 @@ trait QueueAdmin
 
     // ------------------------------------------------------------ rate limit
 
-    /** The wire accepts only `limit` (jobs/sec); no duration field exists. */
-    public function setRateLimit(int $limit): void
+    /**
+     * Limit delivery per duration window, optionally expiring broker-side.
+     * Non-positive/non-finite duration and TTL degrade to server defaults.
+     */
+    public function setRateLimit(
+        int $limit,
+        int|float|null $durationMs = null,
+        int|float|null $ttlMs = null,
+    ): void
     {
-        $this->call(['cmd' => 'RateLimit', 'queue' => $this->name, 'limit' => $limit]);
+        $this->call([
+            'cmd' => 'RateLimit',
+            'queue' => $this->name,
+            'limit' => $limit,
+            'duration' => $durationMs,
+            'ttl' => $ttlMs,
+        ]);
     }
 
     public function clearRateLimit(): void

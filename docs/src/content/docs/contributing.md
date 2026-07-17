@@ -56,11 +56,26 @@ Other useful invocations:
 # Run a specific test file
 bun test test/queueManager.test.ts
 
+# Run the generated real-broker state model
+bun run test:model
+
+# Reproduce or deepen a model campaign
+BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150 \
+BUNQUEUE_MODEL_SEED=-1959189325 bun run test:model
+
 # Run with coverage
 bun test --coverage
 ```
 
 Note: `bun test` preloads `test/preload.ts`, which sets `BUNQUEUE_EMBEDDED=1`. Tests that need real TCP behavior must opt out with an explicit `embedded: false` and spawn a server.
+
+Changes to queue lifecycle, persistence/recovery, scheduling, dependencies,
+deduplication, leases, limits, TTL, counters, or indexes must run
+`bun run test:model` during iteration. The model uses real TCP, SQLite, and
+`SIGKILL`; failures include a seed and minimized command history. Preserve every
+confirmed engine divergence as a deterministic `test/repro-model-*.test.ts`
+before fixing it. The model run is required in addition to the final isolated
+`bun run test:sandbox` gate.
 
 ### Code Style
 
@@ -105,7 +120,8 @@ test: add DLQ filtering tests
 2. Make your changes
 3. Add/update tests
 4. Update documentation
-5. Run all three test suites (`bun test`, `bun scripts/tcp/run-all-tests.ts`, `bun scripts/embedded/run-all-tests.ts`) and `bun run check:biome`
+5. Run `bun run test:model` for core queue changes, then the authoritative
+   `bun run test:sandbox` gate and `bun run check:biome`
 6. Push and create a PR
 
 ### PR Template
@@ -191,6 +207,7 @@ describe('Feature', () => {
 - Edge cases
 - Error handling
 - Concurrent operations
+- Generated state transitions and crash/recovery invariants for core queue changes
 
 ## Documentation
 

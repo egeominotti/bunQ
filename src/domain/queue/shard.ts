@@ -484,15 +484,20 @@ export class Shard {
     return { count, jobIds };
   }
 
-  obliterate(queue: string): void {
+  obliterate(queue: string): JobId[] {
+    const removed = new Set<JobId>(this.dependencyTracker.removeQueue(queue));
     const q = this.queues.get(queue);
     if (q) {
       for (const job of q.values()) {
+        removed.add(job.id);
         this.temporalManager.removeDelayed(job.id);
       }
       this.counters.adjustQueued(-q.size);
     }
 
+    for (const entry of this.dlqManager.getEntries(queue)) {
+      removed.add(entry.job.id);
+    }
     const dlqCount = this.dlqManager.deleteQueue(queue);
     if (dlqCount > 0) {
       this.counters.adjustDlq(-dlqCount);
@@ -505,5 +510,6 @@ export class Shard {
     this.uniqueKeyManager.clearQueue(queue);
     this.limiterManager.deleteQueue(queue);
     this.activeGroups.delete(queue);
+    return Array.from(removed);
   }
 }

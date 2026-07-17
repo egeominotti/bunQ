@@ -487,6 +487,7 @@ describe('rowToJob', () => {
       remove_on_fail: 0,
       stall_timeout: null,
       last_heartbeat: now,
+      stall_count: 0,
       ...overrides,
     };
   }
@@ -521,6 +522,7 @@ describe('rowToJob', () => {
     expect(job.backoffConfig).toBeNull();
     expect(job.repeat).toBeNull();
     expect(job.stallCount).toBe(0);
+    expect(rowToJob(createDbRow({ stall_count: 4 })).stallCount).toBe(4);
   });
 
   test('should decode data field from MessagePack', () => {
@@ -844,6 +846,7 @@ describe('SQL_STATEMENTS', () => {
       'insertDlq',
       'loadDlq',
       'deleteDlqEntry',
+      'deleteDlqEntryForQueue',
       'clearDlqQueue',
       'insertCron',
       'updateCron',
@@ -882,9 +885,9 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertJob).toContain('jobs');
     });
 
-    test('should have 24 placeholder parameters', () => {
+    test('should have 25 placeholder parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertJob.match(/\?/g) || []).length;
-      expect(paramCount).toBe(24);
+      expect(paramCount).toBe(25);
     });
 
     test('should include all required columns', () => {
@@ -894,7 +897,7 @@ describe('SQL_STATEMENTS', () => {
         'attempts', 'max_attempts', 'backoff', 'ttl', 'timeout',
         'unique_key', 'custom_id', 'depends_on', 'parent_id',
         'children_ids', 'tags', 'state', 'lifo', 'group_id',
-        'remove_on_complete', 'remove_on_fail', 'stall_timeout',
+        'remove_on_complete', 'remove_on_fail', 'stall_timeout', 'stall_count',
       ];
       for (const col of requiredColumns) {
         expect(sql).toContain(col);
@@ -1106,6 +1109,7 @@ describe('prepareStatements', () => {
         0,                       // remove_on_complete
         0,                       // remove_on_fail
         null,                    // stall_timeout
+        0,                       // stall_count
         null                     // timeline
       );
     }).not.toThrow();
@@ -1309,6 +1313,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       1,
       1,
       15000,
+      2,
       null
     );
 
@@ -1340,6 +1345,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
     expect(job.removeOnComplete).toBe(true);
     expect(job.removeOnFail).toBe(true);
     expect(job.stallTimeout).toBe(15000);
+    expect(job.stallCount).toBe(2);
   });
 
   test('should handle a job with all null optional fields', () => {
@@ -1369,6 +1375,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       0,
       0,
       null,
+      0,
       null
     );
 

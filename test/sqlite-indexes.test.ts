@@ -34,8 +34,16 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 16', () => {
-    expect(SCHEMA_VERSION).toBe(16);
+  test('schema version is 21', () => {
+    expect(SCHEMA_VERSION).toBe(21);
+  });
+
+  test('jobs persist cumulative stall counts', () => {
+    const columns = db
+      .query<{ name: string }, []>('PRAGMA table_info(jobs)')
+      .all()
+      .map((row) => row.name);
+    expect(columns).toContain('stall_count');
   });
 
   test('idx_jobs_state_started index exists (stall detection)', () => {

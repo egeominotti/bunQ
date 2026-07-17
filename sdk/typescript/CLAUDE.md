@@ -40,8 +40,8 @@ by design: they require the in-process Bun runtime).
 | `src/flow.ts` / `src/flow-types.ts` | FlowProducer: tree/chain/fan-in, UpdateParent, rollback |
 | `src/bunqueue/*.ts` | Simple Mode (`Bunqueue`): 1:1 port of `src/client/bunqueue*` — core+api (prototype merge), retry, circuit-breaker, batch, triggers, aging, cancellation, ttl, dedup-debounce, dlq-rate-limit, rate-gate |
 | `tests/harness.ts` | Shared registry/asserts/server fixture/runner |
-| `tests/integration.ts` | Smoke suite (8 tests, own entrypoint) |
-| `tests/e2e.ts` | E2e entrypoint importing `e2e-{query,control,worker,flow,admin,edge,scenario,simple,simple-extras,auth}.ts` (72 tests) |
+| `tests/integration.ts` | Smoke suite (10 tests, own entrypoint) |
+| `tests/e2e.ts` | E2e entrypoint importing the full API, edge, realistic, telemetry, resilience, and hardening suites (116 tests) |
 
 ## Wire protocol (VITAL gotchas)
 
@@ -77,6 +77,7 @@ bun tests/integration.ts          # smoke
 bun tests/e2e.ts                  # full e2e
 node --experimental-strip-types tests/e2e.ts
 deno run -A tests/e2e.ts
+BUNQUEUE_SDK_SOAK_SECONDS=3600 bun tests/soak.ts
 ```
 
 Tests spawn a real server (`bun src/main.ts` from the repo root, random

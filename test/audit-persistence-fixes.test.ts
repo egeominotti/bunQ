@@ -257,6 +257,7 @@ describe('BUG H3: corrupt dependsOn blob must not silently become an empty-deps 
       remove_on_fail: 0,
       stall_timeout: null,
       last_heartbeat: null,
+      stall_count: 0,
       timeline: null,
     };
 

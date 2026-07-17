@@ -1,4 +1,5 @@
 import { readdir } from 'node:fs/promises';
+import { parseCount, parseFiles, parseSdkCounts, parseTests } from './test-sandbox-log-parser';
 
 export interface ResourceSample {
   timestamp: string;
@@ -154,49 +155,6 @@ function percentile(values: number[], ratio: number): number {
   return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)];
 }
 
-function parseDuration(value: string, unit: string): number {
-  const amount = Number(value);
-  if (unit === 's') return amount * 1000;
-  if (unit === 'us' || unit === 'µs') return amount / 1000;
-  return amount;
-}
-
-function parseTests(log: string): TestMetric[] {
-  const tests: TestMetric[] = [];
-  let file = 'unknown';
-  for (const line of log.split('\n')) {
-    const fileMatch = line.match(/^(test\/[^:]+\.ts):$/);
-    if (fileMatch) file = fileMatch[1];
-    const testMatch = line.match(/^\((pass|fail|skip)\) (.*?)(?: \[([\d.]+)(ms|s|us|µs)\])?$/);
-    if (!testMatch) continue;
-    tests.push({
-      file,
-      name: testMatch[2],
-      status: testMatch[1] as TestMetric['status'],
-      ...(testMatch[3] && { durationMs: parseDuration(testMatch[3], testMatch[4]) }),
-    });
-  }
-  return tests;
-}
-
-function parseFiles(log: string): FileMetric[] {
-  const files: FileMetric[] = [];
-  for (const line of log.split('\n')) {
-    if (!line.startsWith('TEST_FILE_RESULT ')) continue;
-    try {
-      files.push(JSON.parse(line.slice('TEST_FILE_RESULT '.length)) as FileMetric);
-    } catch {
-      // A malformed marker remains visible in the complete suite log.
-    }
-  }
-  return files;
-}
-
-function parseCount(log: string, label: string): number {
-  const matches = [...log.matchAll(new RegExp(`^\\s*(\\d+) ${label}$`, 'gm'))];
-  return Number(matches.at(-1)?.[1] ?? 0);
-}
-
 function slope(samples: ResourceSample[]): number {
   if (samples.length < 2) return 0;
   const start = Date.parse(samples[0].timestamp);
@@ -221,7 +179,7 @@ export async function createSuiteTelemetry(input: {
   samples: ResourceSample[];
 }): Promise<SuiteTelemetry> {
   const log = await Bun.file(input.logPath).text();
-  const cases = parseTests(log);
+  const cases = parseTests(log, input.suite);
   const files = parseFiles(log);
   const samples = input.samples.filter((sample) => sample.memoryUsedBytes > 0 || sample.pids > 0);
   const memory = samples.map((sample) => sample.memoryUsedBytes);
@@ -241,9 +199,14 @@ export async function createSuiteTelemetry(input: {
     anomalies.push('memory growth signal: end minus start exceeds 128 MiB and 50%');
   if (samples.length === 0) anomalies.push('no resource samples captured');
 
-  const passed = parseCount(log, 'pass') || files.reduce((sum, file) => sum + file.passed, 0);
-  const failed = parseCount(log, 'fail') || files.reduce((sum, file) => sum + file.failed, 0);
-  const skipped = parseCount(log, 'skip');
+  const sdkCounts = parseSdkCounts(input.suite, log);
+  const passed =
+    sdkCounts?.passed ??
+    (parseCount(log, 'pass') || files.reduce((sum, file) => sum + file.passed, 0));
+  const failed =
+    sdkCounts?.failed ??
+    (parseCount(log, 'fail') || files.reduce((sum, file) => sum + file.failed, 0));
+  const skipped = sdkCounts?.skipped ?? parseCount(log, 'skip');
   return {
     schemaVersion: 1,
     suite: input.suite,

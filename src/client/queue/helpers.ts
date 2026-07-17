@@ -18,6 +18,8 @@ export const FORCE_EMBEDDED = Bun.env.BUNQUEUE_EMBEDDED === '1';
 interface ManagerInternals {
   shards: Shard[];
   storage: SqliteStorage | null;
+  jobResults: { delete(id: string): boolean };
+  jobLogs: { delete(id: string): boolean };
 }
 
 /** Extract shards from manager (embedded mode only, accesses private property) */
@@ -36,6 +38,8 @@ export function getDlqContext(manager: ReturnType<typeof getSharedManager>): dlq
   return {
     shards: getShards(manager),
     jobIndex: manager.getJobIndex(),
+    jobResults: (manager as unknown as ManagerInternals).jobResults,
+    jobLogs: (manager as unknown as ManagerInternals).jobLogs,
     // #110-class: without storage, retryDlqByFilter's deleteDlqEntry/insertJob
     // silently no-op — filtered retries were never persisted in embedded mode
     // (dlq rows resurrected the jobs into the DLQ on restart).

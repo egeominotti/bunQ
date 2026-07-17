@@ -35,7 +35,7 @@ Internal:
 - `RWLock` / `withWriteLock` from `src/shared/lock.ts` (see [Concurrency & Locking](./concurrency-and-locking.md)).
 - `LRUMap`, `BoundedSet`, `BoundedMap` from `src/shared/lru.ts` (see [Data Structures](./data-structures.md)).
 - `ContextFactory` (`src/application/contextFactory.ts`) — builds the per-operation context objects passed to delegated modules.
-- Operation modules: `operations/push`, `operations/pull`, `operations/ack`, `operations/queueControl`, `operations/jobManagement`, `operations/jobStateTransitions`, `operations/queryOperations`.
+- Operation modules: `operations/push`, `operations/pull`, `operations/ack`, `operations/queueControl`, `operations/jobManagement`, `operations/jobMoveOperations`, `operations/jobClaim`, `operations/jobStateTransitions`, `operations/queryOperations`.
 - Managers: `WebhookManager`, `WorkerManager`, `EventsManager`, `CronScheduler`, `dlqManager`, `jobLogsManager`, `lockManager`, `statsManager`, `backgroundTasks`, `dependencyProcessor`.
 - `SqliteStorage` (`src/infrastructure/persistence/sqlite.ts`) — optional; only constructed when `config.dataPath` is set (`queueManager.ts:148`).
 

@@ -5,6 +5,29 @@ All notable changes to `bunqueue/client` (PHP SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optional payload-free connection telemetry (`onEvent`) for connection,
+  reconnection, authentication, command, timeout, error and close events.
+- Rate-limit duration windows and broker-side TTL forwarding.
+- Add multi-process idempotency and single-lease races, generated payload
+  invariants, malformed depth fuzzing, a 512-job spike, and an opt-in soak.
+
+### Fixed
+
+- Normalize nested MessagePack ext type 0 values to `null`.
+- Reject cyclic/excessively nested values and non-string map keys before
+  recursive traversal, then wrap serialization failures in the SDK exception
+  hierarchy.
+- Apply one absolute command deadline across writes and reads, configure write
+  timeouts, classify `fread(false)` timeout results correctly and apply the
+  64 MiB limit to payload bytes only.
+- Clamp negative poll timeouts and non-finite heartbeat intervals safely.
+- Require successful worker registration before pulling and avoid stale
+  registration state across reconnects.
+
 ## [0.1.0] - 2026-07-14
 
 First release. Full producer + sequential worker + flows over the native

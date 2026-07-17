@@ -1,14 +1,30 @@
 name: SDK
 
-# CI for the polyglot client SDKs (sdk/typescript, sdk/python). Both spawn a
-# real server (bun src/main.ts) and run their e2e suites against it.
+# CI for the polyglot client SDKs. Integration and conformance jobs spawn a
+# real server from the current worktree.
 
 on:
+  schedule:
+    - cron: '0 2 * * 0'
   push:
     branches: [main, master]
-    paths: ['sdk/**', 'src/**', '.github/workflows/sdk.yml']
+    paths:
+      - 'sdk/**'
+      - 'src/**'
+      - 'Dockerfile.sdk-test'
+      - 'Dockerfile.sdk-test.dockerignore'
+      - 'scripts/test-sdk-sandbox.ts'
+      - 'scripts/test-sandbox-telemetry.ts'
+      - '.github/workflows/sdk.yml'
   pull_request:
-    paths: ['sdk/**', 'src/**', '.github/workflows/sdk.yml']
+    paths:
+      - 'sdk/**'
+      - 'src/**'
+      - 'Dockerfile.sdk-test'
+      - 'Dockerfile.sdk-test.dockerignore'
+      - 'scripts/test-sdk-sandbox.ts'
+      - 'scripts/test-sandbox-telemetry.ts'
+      - '.github/workflows/sdk.yml'
 
 concurrency:
   group: sdk-${{ github.ref }}
@@ -26,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -35,15 +51,19 @@ jobs:
         with:
           deno-version: v2.x
       - name: Install server deps (for bun src/main.ts)
-        run: bun install --frozen-lockfile || bun install
+        run: bun install --frozen-lockfile
       - name: Install + build SDK
         working-directory: sdk/typescript
         run: |
-          bun install --frozen-lockfile || bun install
+          bun install --frozen-lockfile
           bun run build
       - name: Lint (biome)
         working-directory: sdk/typescript
         run: bun run check
+      - name: Validate package contents
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        run: mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package
       - name: Integration + e2e (bun)
         if: matrix.runtime == 'bun'
         working-directory: sdk/typescript
@@ -62,6 +82,24 @@ jobs:
         run: |
           deno run -A tests/integration.ts
           deno run -A tests/e2e.ts
+      - name: Protocol conformance
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/conformance
+        run: bun runner.ts --driver "bun drivers/typescript.ts"
+      - name: Cloudflare Workers package e2e
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        env:
+          CLOUDFLARE_CF_FETCH_ENABLED: 'false'
+          WRANGLER_SEND_METRICS: 'false'
+        run: bun run test:workers
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule' && matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: bun tests/soak.ts
 
   python:
     name: Python ${{ matrix.python }}
@@ -69,24 +107,245 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.12']
+        python: ['3.9', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install server deps (for bun src/main.ts)
-        run: bun install --frozen-lockfile || bun install
-      - name: Set up venv + msgpack
+        run: bun install --frozen-lockfile
+      - name: Set up SDK environment
         working-directory: sdk/python
         run: |
           python -m venv .venv
-          .venv/bin/pip install --quiet msgpack
+          .venv/bin/pip install --quiet build hatchling
+          .venv/bin/pip install --quiet -e .
       - name: Integration + e2e
         working-directory: sdk/python
         run: |
+          .venv/bin/python -m compileall -q bunqueue tests
+          .venv/bin/python -m build --no-isolation --outdir /tmp/python-package
           .venv/bin/python tests/test_integration.py
           .venv/bin/python tests/run_e2e.py
+      - name: Protocol conformance
+        working-directory: sdk/conformance
+        run: bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule' && matrix.python == '3.13'
+        working-directory: sdk/python
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: .venv/bin/python tests/soak.py
+
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer
+      - name: Install server dependencies
+        run: bun install --frozen-lockfile
+      - name: Install SDK dependencies
+        working-directory: sdk/php
+        run: composer install --no-interaction --no-progress
+      - name: Syntax and e2e
+        working-directory: sdk/php
+        run: |
+          composer validate --strict --no-check-publish
+          find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
+          php tests/run-e2e.php
+      - name: Protocol conformance
+        working-directory: sdk/conformance
+        run: bun runner.ts --driver "php drivers/php.php"
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule' && matrix.php == '8.4'
+        working-directory: sdk/php
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: php tests/soak.php
+
+  go:
+    name: Go 1.26.5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+          cache-dependency-path: sdk/go/go.sum
+      - name: Install server dependencies
+        run: bun install --frozen-lockfile
+      - name: Format, vet, and test
+        working-directory: sdk/go
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go list ./...
+          go test -v ./...
+          go test -race -run 'Hardening|Regression|Worker' ./...
+      - name: Protocol conformance
+        working-directory: sdk/conformance
+        run: bun runner.ts --driver "go run ./drivers/go"
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule'
+        working-directory: sdk/go
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: go test -run '^TestSDKSoak$' -count=1 -v
+      - name: Weekly native fuzzing
+        if: github.event_name == 'schedule'
+        working-directory: sdk/go
+        run: go test -run '^$' -fuzz '^FuzzHardeningPortableWirePayload$' -fuzztime 60s
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+      - name: Install server dependencies
+        run: bun install --frozen-lockfile
+      - name: Format, lint, and test
+        working-directory: sdk/rust
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+          cargo package --locked --allow-dirty --no-verify
+      - name: Protocol conformance
+        working-directory: sdk/conformance
+        run: >-
+          bun runner.ts --driver
+          "cargo run --locked --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule'
+        working-directory: sdk/rust
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: cargo test --locked --test soak -- --ignored
+
+  elixir:
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: '1.15.8'
+            otp: '26.2'
+          - elixir: '1.20.1'
+            otp: '28.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - name: Install server dependencies
+        run: bun install --frozen-lockfile
+      - name: Install, format, compile, and test
+        working-directory: sdk/elixir
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+          mix deps.compile
+          mix format --check-formatted
+          mix compile --warnings-as-errors
+          mix test --slowest 20
+          mix hex.build
+      - name: Protocol conformance
+        working-directory: sdk/conformance
+        run: bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"
+      - name: Weekly sustained SDK soak
+        if: github.event_name == 'schedule' && matrix.elixir == '1.20.1'
+        working-directory: sdk/elixir
+        env:
+          BUNQUEUE_SDK_SOAK_SECONDS: '900'
+          BUNQUEUE_SDK_SOAK_BATCH: '100'
+        run: mix test --include soak test/soak_test.exs
+
+  security:
+    name: Weekly SDK dependency advisories
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.20.1'
+          otp-version: '28.0'
+      - name: TypeScript advisory audit
+        working-directory: sdk/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun audit
+      - name: Python advisory audit
+        run: |
+          python -m venv /tmp/python-audit
+          /tmp/python-audit/bin/pip install --quiet ./sdk/python pip-audit
+          /tmp/python-audit/bin/pip-audit --local
+      - name: PHP advisory audit
+        working-directory: sdk/php
+        run: |
+          composer install --no-interaction --no-progress
+          composer audit --locked
+      - name: Go vulnerability analysis
+        working-directory: sdk/go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Rust advisory audit
+        working-directory: sdk/rust
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+      - name: Elixir retired-package audit
+        working-directory: sdk/elixir
+        run: |
+          mix local.hex --force
+          mix deps.get
+          mix hex.audit

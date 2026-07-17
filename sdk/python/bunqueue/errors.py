@@ -18,9 +18,12 @@ class CommandError(BunqueueError):
 
 
 class SerializationError(BunqueueError):
-    """A command payload cannot be msgpack-serialized (e.g. datetime in job
-    data). Raised before anything is written to the wire; the original
-    msgpack error is chained as ``__cause__``."""
+    """A command payload cannot be encoded within the wire constraints.
+
+    Raised before anything is written when msgpack serialization fails or the
+    encoded payload exceeds the protocol frame cap. Serialization failures
+    retain the original error as ``__cause__``.
+    """
 
 
 class AuthError(BunqueueError):

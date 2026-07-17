@@ -222,7 +222,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 | `ttl` | `number` | - | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year. |
 | `timeout` | `number` | - | Processing timeout in milliseconds. If a worker doesn't ACK within this time, the job is considered stalled. Max: 1 day. |
 | `uniqueKey` | `string` | - | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored. |
-| `jobId` | `string` | - | Custom job ID. If a job with this ID already exists, the push is idempotent (returns the existing ID). |
+| `jobId` | `string` | - | Broker-wide custom job ID. If a live job with this ID already exists in any queue, the push is idempotent and returns the existing ID. |
 | `tags` | `string[]` | `[]` | Metadata tags for filtering and querying. |
 | `groupId` | `string` | - | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially. |
 | `lifo` | `boolean` | `false` | Last-in-first-out ordering. When true, the job is processed before other jobs at the same priority. |
@@ -238,7 +238,9 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 { "ok": true, "id": "019ce9d7-6983-7000-946f-48737be2b0f9" }
 ```
 
-The `id` is a UUID v7 (time-ordered, sortable). If `jobId` was provided and a job with that ID already exists, the existing job's ID is returned (idempotent).
+The `id` is a UUID v7 (time-ordered, sortable). If `jobId` was provided and a
+live job with that broker-wide ID already exists, including in another queue,
+the existing job's ID is returned (idempotent).
 
 **Error responses:**
 

@@ -35,9 +35,9 @@ The bunqueue server runs on Bun, distributed as a binary or a Docker image. This
 
 | Runtime | Status | Notes |
 |---|---|---|
-| Node.js 20 or later | Supported, 110/110 e2e and 8/8 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
-| Bun | Supported, 110/110 e2e and 8/8 integration tests | No additional configuration required |
-| Deno 2 or later | Supported, 110/110 e2e and 8/8 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
+| Node.js 20 or later | Supported, 116/116 e2e and 10/10 integration tests | ESM. TypeScript files run directly on Node 22 or later via `--experimental-strip-types` |
+| Bun | Supported, 116/116 e2e and 10/10 integration tests | No additional configuration required |
+| Deno 2 or later | Supported, 116/116 e2e and 10/10 integration tests | Uses `node:` builtins and the npm `msgpackr` package |
 | tsx, ts-node, vitest, jest | Supported | These environments execute on Node.js |
 | Cloudflare Workers | Supported, 16/16 e2e tests inside workerd, including Simple Mode and the full API surface | Requires the `nodejs_compat` compatibility flag. The runtime is request scoped, so long lived worker loops are not available: consume in batches from Cron Triggers or Durable Object alarms, a pattern covered by the test suite. TLS connections require a publicly trusted certificate |
 | Browser | Not supported | Raw TCP sockets are unavailable. Use the server HTTP API instead |
@@ -309,8 +309,9 @@ import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
 const queue = new Queue('emails', {
   logger: consoleLogger('info'), // or your own { debug, info, warn, error }
   onTelemetry: (e: TelemetryEvent) => {
-    // per-command latency, connect/disconnect/reconnect, auth, backpressure
+    // command latency, lifecycle, auth, backpressure and sanitized errors
     if (e.type === 'command') metrics.observe(e.cmd, e.durationMs, e.ok);
+    if (e.type === 'error') metrics.increment(`bunqueue.${e.operation}.errors`);
   },
 });
 
@@ -318,6 +319,12 @@ const queue = new Queue('emails', {
 queue.connection.on('reconnect_scheduled', (i) => log.warn('reconnecting', i));
 queue.connection.on('disconnect', () => log.warn('link down'));
 ```
+
+`error` telemetry covers connect, socket, write, and serialization failures.
+Its `message`, `errorType`, and optional system `code` are safe metadata: raw
+error messages, authentication tokens, commands, and payloads are never sent to
+the telemetry callback. Telemetry and logger callback failures are isolated
+from transport operations.
 
 ## Throughput and resilience
 
@@ -337,6 +344,13 @@ const worker = new Worker('emails', process, {
 Always attach a `worker.on('error', …)` listener: per Node `EventEmitter` semantics an unhandled `error` event throws. The worker frees each job's concurrency slot before emitting, so even a throwing listener cannot degrade throughput — but the error itself is yours to observe.
 
 Half-open links are detected via TCP keepalive and a consecutive-timeout teardown, so a silently dropped connection (cloud LB/NAT idle drop) recovers in seconds rather than minutes.
+
+Malformed or oversized commands reject with `SerializationError` before they
+occupy an in-flight slot or write to the socket. This keeps bounded connections
+usable after a local MessagePack encoding failure. Payloads may contain plain
+objects, arrays, string-keyed maps, valid dates, and binary values; `BigInt`,
+cycles, non-string map keys, symbols, functions, accessors, non-finite numbers,
+and custom object types are rejected as non-portable.
 
 ## Typed responses
 
@@ -372,9 +386,17 @@ bun tests/e2e.ts                                    # full surface, edge cases, 
 node --experimental-strip-types tests/e2e.ts        # identical suite on Node 22 or later
 deno run -A tests/e2e.ts                            # identical suite on Deno 2 or later
 bun run test:workers                                # full suite inside workerd, the Cloudflare Workers runtime
+BUNQUEUE_SDK_SOAK_SECONDS=3600 bun run test:soak    # opt-in sustained connection profile
 ```
 
-The e2e suite includes payload limits, unicode integrity, pipelining under concurrency, server crash and restart with automatic reconnection, and a realistic multi queue production scenario with zero loss accounting. Engineering standards: Biome, a maximum of 250 lines per file, and relative imports with explicit `.js` extensions for NodeNext resolution. See `CLAUDE.md` for the full development guide and wire protocol notes.
+The e2e suite includes payload limits, unicode integrity, pipelining under
+concurrency, 24-way idempotent retries, 12-way single-lease contention,
+fixed-seed generated payloads, malformed mutation fuzzing, a 1500-job spike,
+server crash/restart, and realistic zero-loss accounting. `test:soak` reuses
+one pooled client; tune `BUNQUEUE_SDK_SOAK_BATCH` for stress diagnostics.
+Engineering standards: Biome, a maximum of 250 lines per file, and relative
+imports with explicit `.js` extensions for NodeNext resolution. See
+`CLAUDE.md` for the full development guide and wire protocol notes.
 
 ## License
 

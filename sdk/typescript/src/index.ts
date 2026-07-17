@@ -34,6 +34,7 @@ export {
   CommandError,
   CommandTimeoutError,
   ConnectionClosedError,
+  SerializationError,
   UnrecoverableError,
 } from './errors.js';
 export { FlowProducer } from './flow.js';
@@ -51,6 +52,7 @@ export type {
   Logger,
   LogLevel,
   Observability,
+  TelemetryErrorOperation,
   TelemetryEvent,
   TelemetryHandler,
 } from './observability.js';

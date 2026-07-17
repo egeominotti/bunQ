@@ -50,13 +50,15 @@ func (q *Queue) PurgeDlq() (int, error) {
 // SchedulerRepeat configures a recurring scheduler: exactly one of Pattern
 // (cron) or EveryMs must be set. Limit travels as wire maxLimit (#111 class).
 type SchedulerRepeat struct {
-	Pattern             string
-	EveryMs             int
-	Limit               int
-	Timezone            string
-	Immediately         bool
-	SkipIfNoWorker      bool
-	SkipMissedOnRestart bool
+	Pattern        string
+	EveryMs        int
+	Limit          int
+	Timezone       string
+	Immediately    bool
+	SkipIfNoWorker bool
+	// Pointer booleans preserve explicit false separately from omission.
+	SkipMissedOnRestart *bool
+	PreventOverlap      *bool
 }
 
 // SchedulerTemplate is the job template a scheduler stamps on every fire.
@@ -96,15 +98,23 @@ func (q *Queue) UpsertJobScheduler(schedulerID string, repeat SchedulerRepeat, t
 	if repeat.SkipIfNoWorker {
 		command["skipIfNoWorker"] = true
 	}
-	if repeat.SkipMissedOnRestart {
-		command["skipMissedOnRestart"] = true
+	if repeat.SkipMissedOnRestart != nil {
+		command["skipMissedOnRestart"] = *repeat.SkipMissedOnRestart
+	}
+	if repeat.PreventOverlap != nil {
+		command["preventOverlap"] = *repeat.PreventOverlap
 	}
 	if priority, ok := template.Opts["priority"]; ok {
 		command["priority"] = priority
 	}
+	if uniqueKey, ok := template.Opts["uniqueKey"]; ok {
+		command["uniqueKey"] = uniqueKey
+	}
 	if dedup, ok := template.Opts["deduplication"]; ok {
 		fields := asMap(dedup)
-		command["uniqueKey"] = fields["id"]
+		if _, present := command["uniqueKey"]; !present {
+			command["uniqueKey"] = fields["id"]
+		}
 		inner := compact(map[string]any{
 			"ttl": fields["ttl"], "extend": fields["extend"], "replace": fields["replace"],
 		})
@@ -191,10 +201,21 @@ func (q *Queue) SetWebhookEnabled(webhookID string, enabled bool) error {
 
 // ---------------------------------------------------------------- rate limit
 
-// SetRateLimit caps this queue's delivery rate. The wire accepts only
-// `limit` (jobs/sec); no duration field exists.
-func (q *Queue) SetRateLimit(limit int) error {
-	_, err := q.call(map[string]any{"cmd": "RateLimit", "queue": q.Name, "limit": limit})
+// RateLimitOptions configures the delivery window and optional broker-side
+// expiry. Non-positive/non-finite values degrade to server defaults.
+type RateLimitOptions struct {
+	DurationMs float64
+	TTLms      float64
+}
+
+// SetRateLimit caps delivery. With no options it means limit per second.
+func (q *Queue) SetRateLimit(limit int, options ...RateLimitOptions) error {
+	command := map[string]any{"cmd": "RateLimit", "queue": q.Name, "limit": limit}
+	if len(options) > 0 {
+		command["duration"] = options[0].DurationMs
+		command["ttl"] = options[0].TTLms
+	}
+	_, err := q.call(command)
 	return err
 }
 

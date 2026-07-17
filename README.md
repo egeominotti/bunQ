@@ -830,8 +830,20 @@ full feature parity, so producers and workers can live anywhere in your stack:
 
 | Where your code runs | Install | Status |
 | -------------------- | ------- | ------ |
-| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) | 100/100 e2e per runtime + 16/16 inside workerd |
-| **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` | 78/78 e2e |
+| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) | Native integration/e2e + protocol conformance |
+| **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` | Native integration/e2e + protocol conformance |
+| **PHP ≥ 8.1** | Packagist coming soon — today: use [`sdk/php`](./sdk/php) | Native e2e + protocol conformance |
+| **Go 1.26.5** | `go get github.com/egeominotti/bunqueue/sdk/go` | Native tests + protocol conformance |
+| **Rust ≥ 1.85** | crates.io coming soon — today: use [`sdk/rust`](./sdk/rust) as a path dependency | Native unit/integration + protocol conformance |
+| **Elixir ≥ 1.15** | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency | ExUnit integration + protocol conformance |
+
+All six SDKs run the same production hardening matrix: independent-connection
+idempotency and single-lease races, generated payload invariants,
+malformed-input fuzz corpora, broker SIGKILL/reconnect durability, bounded
+spikes, structured telemetry, and 17 shared protocol checks. Weekly CI adds
+runtime compatibility, live dependency advisories, native Go race/fuzz checks,
+and a 15-minute sustained profile per SDK. See
+[`docs/testing.md`](./docs/testing.md#sdk-hardening-matrix).
 
 ```typescript
 // Node.js / Deno / Cloudflare Workers

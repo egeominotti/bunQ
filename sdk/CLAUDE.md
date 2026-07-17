@@ -10,6 +10,8 @@ sdk/
 ├── python/        bunqueue-client (PyPI) — sync + threads
 ├── php/           bunqueue/client (Composer) — sync + sequential worker
 ├── go/            github.com/egeominotti/bunqueue/sdk/go — goroutine worker
+├── rust/          bunqueue-client — bounded threaded worker + rustls
+├── elixir/        bunqueue_client — BEAM processes + OTP TCP/SSL
 └── conformance/   the conformance suite: runner + one driver per SDK
 ```
 
@@ -27,7 +29,7 @@ sdk/
 2. **`sdk/conformance/` is the certification gate.** An SDK is not done,
    and a change to an SDK is not shippable, until its driver passes the
    suite: `cd sdk/conformance && bun runner.ts --driver "<cmd>"` →
-   `VERDICT: CONFORMANT`. All four official drivers must stay green; a new
+   `VERDICT: CONFORMANT`. All official drivers must stay green; a new
    language becomes "official" by adding a driver and passing, nothing else.
 
 ## Writing an SDK for a new language — the checklist
@@ -71,10 +73,19 @@ sdk/
   changelogs in each SDK's `CHANGELOG.md`. The core package version never
   bumps for SDK-only changes.
 - Everything (code, comments, docs, commit fragments) in English.
+- Every official SDK keeps bounded race/idempotency, generated-property,
+  malformed-input fuzz, crash/reconnect, and spike coverage in its native
+  suite. Each also exposes an opt-in `BUNQUEUE_SDK_SOAK_SECONDS` profile.
+  Database disk-full, WAL/power-loss and schema-migration injection stay in the
+  broker suite; SDKs assert only the observable durable/reconnect contract.
 
 ## Gate before any SDK commit
 
 1. The SDK's own e2e suite green (every supported runtime for TS).
 2. `bun runner.ts --driver ...` → CONFORMANT for every SDK you touched.
 3. Lint/format clean (`bun run check` / `php -l` / `go vet` + `gofmt`).
-4. Skeptic agent review (repo rule — no exceptions).
+4. `bun run test:sandbox:sdk` passes every official SDK in isolated containers;
+   review `artifacts/test-sandbox-sdk/<timestamp>/summary.md`, not only the exit
+   code.
+5. The repository-wide `bun run test:sandbox` gate is also green.
+6. Skeptic agent review (repo rule — no exceptions).

@@ -13,33 +13,31 @@ from __future__ import annotations
 import socket
 import struct
 import threading
-import time
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any, Dict, Optional
 
 import msgpack
 
+from .connection_lifecycle import ConnectionLifecycle
 from .errors import (
-    AuthError,
     CommandError,
     CommandTimeoutError,
     ConnectionClosedError,
-    SerializationError,
 )
+from .telemetry import Telemetry, TelemetryHandler
+from .transport import encode_command
 from .wire import (
     MAX_FRAME_SIZE,
     PROTOCOL_VERSION,
     TlsOption,
-    _build_ssl_context,
     _compact,
-    _js_safe,
 )
 
 __all__ = ["Connection", "TlsOption", "_compact", "PROTOCOL_VERSION", "MAX_FRAME_SIZE"]
 
 
-class Connection:
+class Connection(ConnectionLifecycle):
     """A single pipelined TCP connection to a bunqueue server."""
 
     def __init__(
@@ -50,6 +48,7 @@ class Connection:
         tls: TlsOption = None,
         connect_timeout: float = 5.0,
         command_timeout: float = 10.0,
+        on_telemetry: Optional[TelemetryHandler] = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -57,6 +56,7 @@ class Connection:
         self.tls = tls
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
+        self._telemetry = Telemetry(on_telemetry)
 
         self._sock: Optional[socket.socket] = None
         self._connected = False
@@ -75,101 +75,6 @@ class Connection:
         # the socket is presumed dead and torn down so the next call reconnects.
         self._max_command_timeouts = 3
         self._consecutive_timeouts = 0
-
-    # ------------------------------------------------------------- lifecycle
-
-    @property
-    def generation(self) -> int:
-        """Monotonic counter bumped on every successful (re)connect.
-
-        Consumers holding per-connection server state (e.g. a Worker
-        registration) compare it between operations and re-establish that
-        state after a reconnect.
-        """
-        return self._generation
-
-    def connect(self) -> None:
-        """Open the socket (and authenticate) if not already connected."""
-        with self._conn_lock:
-            if self._connected:
-                return
-            if self._closed:
-                raise ConnectionClosedError("connection closed by client")
-            # Fast-fail inside the reconnect backoff window: without this a
-            # producer calling add() against a downed server pays the full
-            # connect timeout on EVERY call (reconnect storm).
-            now = time.monotonic()
-            if now < self._next_attempt_at:
-                remaining = int((self._next_attempt_at - now) * 1000)
-                raise ConnectionClosedError(f"server unreachable, retry in {remaining}ms")
-
-            try:
-                raw = socket.create_connection(
-                    (self.host, self.port), timeout=self.connect_timeout
-                )
-            except OSError as exc:
-                self._note_connect_failure()
-                raise ConnectionClosedError(f"connect failed: {exc}") from exc
-            raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self._enable_keepalive(raw)
-            ctx = _build_ssl_context(self.tls, self.host)
-            if ctx is not None:
-                # The TLS handshake is part of connection establishment: a
-                # failure must close the raw socket (no fd leak), count into
-                # the reconnect backoff like a plain connect failure, and
-                # surface as the SDK's connection error, not a raw ssl.SSLError.
-                try:
-                    raw = ctx.wrap_socket(raw, server_hostname=self.host)
-                except OSError as exc:  # ssl.SSLError is an OSError subclass
-                    try:
-                        raw.close()  # no-op if wrap_socket already detached the fd
-                    except OSError:
-                        pass
-                    self._note_connect_failure()
-                    raise ConnectionClosedError(f"TLS handshake failed: {exc}") from exc
-            self._failed_attempts = 0
-            self._next_attempt_at = 0.0
-            raw.settimeout(None)  # reader thread blocks on recv
-
-            self._sock = raw
-            self._generation += 1
-            self._consecutive_timeouts = 0
-            reader = threading.Thread(target=self._read_loop, args=(raw,), daemon=True)
-            reader.start()
-
-            # Authenticate as the FIRST command, still holding the connection
-            # lock and BEFORE flipping _connected — otherwise a concurrent
-            # thread that observes _connected==True could send a command ahead
-            # of the Auth frame, which the server rejects ('Not authenticated').
-            if self.token:
-                try:
-                    self._send({"cmd": "Auth", "token": self.token})
-                except CommandError as exc:
-                    self._teardown()
-                    raise AuthError(str(exc)) from exc
-                except (CommandTimeoutError, ConnectionClosedError) as exc:
-                    self._teardown()
-                    raise ConnectionClosedError(f"auth failed: {exc}") from exc
-
-            self._connected = True
-
-    def _note_connect_failure(self) -> None:
-        """Count a failed connection attempt into the exponential backoff.
-
-        Shared by the plain-TCP and TLS-handshake failure paths so both feed
-        the same fast-fail window in :meth:`connect`."""
-        self._failed_attempts += 1
-        backoff = min(0.5 * (2 ** (self._failed_attempts - 1)), 5.0)
-        self._next_attempt_at = time.monotonic() + backoff
-
-    def close(self) -> None:
-        """Close the connection permanently; pending commands fail."""
-        self._closed = True
-        self._teardown()
-
-    @property
-    def connected(self) -> bool:
-        return self._connected
 
     # ------------------------------------------------------------- commands
 
@@ -190,22 +95,16 @@ class Connection:
         :meth:`connect`, to send the initial Auth before ``_connected`` flips).
         """
         gen = self._generation  # snapshot: a timeout must not tear down a newer conn
+        started_at = self._telemetry.now_ms()
         with self._pending_lock:
             self._req_counter = (self._req_counter + 1) & 0x7FFFFFFF
             req_id = str(self._req_counter)
 
-        # Serialize BEFORE registering the pending future: msgpack rejects
-        # unsupported types (e.g. datetime in job data), and a future
-        # registered ahead of a failed packb would leak in _pending forever.
         try:
-            payload = msgpack.packb(
-                _js_safe({**_compact(command), "reqId": req_id}), use_bin_type=True
-            )
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise SerializationError(
-                f"cannot msgpack-serialize {command.get('cmd')} payload: {exc}"
-            ) from exc
-        frame = struct.pack(">I", len(payload)) + payload
+            frame = encode_command(command, req_id)
+        except Exception as exc:
+            self._telemetry.emit("error", operation="serialize", error=str(exc))
+            raise
 
         with self._pending_lock:
             fut: Future = Future()
@@ -221,6 +120,7 @@ class Connection:
             with self._pending_lock:
                 self._pending.pop(req_id, None)
             self._teardown()
+            self._telemetry.emit("error", operation="write", error=str(exc))
             raise ConnectionClosedError(f"send failed: {exc}") from exc
 
         try:
@@ -229,11 +129,21 @@ class Connection:
             with self._pending_lock:
                 self._pending.pop(req_id, None)
             self._note_timeout(gen)
+            self._telemetry.emit(
+                "command_timeout", cmd=command.get("cmd"), req_id=req_id
+            )
             raise CommandTimeoutError(f"no response for {command.get('cmd')} within timeout") from None
 
         self._consecutive_timeouts = 0
         if isinstance(response, BaseException):
             raise response
+        self._telemetry.emit(
+            "command",
+            cmd=command.get("cmd"),
+            req_id=req_id,
+            duration_ms=self._telemetry.now_ms() - started_at,
+            ok=bool(response.get("ok")),
+        )
         if not response.get("ok"):
             raise CommandError(str(response.get("error", "unknown server error")))
         return response
@@ -254,26 +164,6 @@ class Connection:
         self._consecutive_timeouts += 1
         if self._consecutive_timeouts >= self._max_command_timeouts:
             self._teardown()
-
-    @staticmethod
-    def _enable_keepalive(raw: socket.socket) -> None:
-        """Enable TCP keepalive (~15s idle) to surface half-open links fast."""
-        try:
-            raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        except OSError:
-            return
-        for name, value in (
-            ("TCP_KEEPIDLE", 15),   # Linux: idle before first probe
-            ("TCP_KEEPINTVL", 5),   # Linux: interval between probes
-            ("TCP_KEEPCNT", 3),     # Linux: dead after this many failed probes
-            ("TCP_KEEPALIVE", 15),  # macOS: idle before first probe
-        ):
-            code = getattr(socket, name, None)
-            if code is not None:
-                try:
-                    raw.setsockopt(socket.IPPROTO_TCP, code, value)
-                except OSError:
-                    pass
 
     def ping(self) -> bool:
         try:
@@ -331,6 +221,7 @@ class Connection:
 
     def _teardown(self) -> None:
         with self._conn_lock:
+            was_connected = self._connected
             self._connected = False
             sock, self._sock = self._sock, None
         if sock is not None:
@@ -343,3 +234,7 @@ class Connection:
         for fut in pending.values():
             if not fut.done():
                 fut.set_result(ConnectionClosedError("connection lost"))
+        if was_connected:
+            self._telemetry.emit(
+                "disconnect", host=self.host, port=self.port, generation=self._generation
+            )

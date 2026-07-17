@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     remove_on_fail INTEGER DEFAULT 0,
     stall_timeout INTEGER,
     last_heartbeat INTEGER,
+    stall_count INTEGER NOT NULL DEFAULT 0,
     timeline BLOB,
     stacktrace BLOB
 );
@@ -131,7 +132,11 @@ CREATE TABLE IF NOT EXISTS queue_state (
     rate_limit INTEGER,
     concurrency_limit INTEGER,
     rate_limit_duration INTEGER,
-    rate_limit_expires_at INTEGER
+    rate_limit_expires_at INTEGER,
+    stall_enabled INTEGER,
+    stall_interval INTEGER,
+    max_stalls INTEGER,
+    stall_grace_period INTEGER
 );
 `;
 
@@ -144,7 +149,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 21;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -217,5 +222,23 @@ ALTER TABLE queue_state ADD COLUMN rate_limit_duration INTEGER;
 `,
   16: `
 ALTER TABLE queue_state ADD COLUMN rate_limit_expires_at INTEGER;
+`,
+  // Migration 17: preserve the cumulative stall bound across restarts.
+  17: `
+ALTER TABLE jobs ADD COLUMN stall_count INTEGER NOT NULL DEFAULT 0;
+`,
+  // Migrations 18-21: persist the complete per-queue stall policy. One ALTER
+  // per version keeps interrupted upgrades retryable (same rule as 15-16).
+  18: `
+ALTER TABLE queue_state ADD COLUMN stall_enabled INTEGER;
+`,
+  19: `
+ALTER TABLE queue_state ADD COLUMN stall_interval INTEGER;
+`,
+  20: `
+ALTER TABLE queue_state ADD COLUMN max_stalls INTEGER;
+`,
+  21: `
+ALTER TABLE queue_state ADD COLUMN stall_grace_period INTEGER;
 `,
 };

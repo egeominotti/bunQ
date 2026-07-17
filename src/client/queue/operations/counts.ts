@@ -22,6 +22,7 @@ export interface JobCounts {
   failed: number;
   delayed: number;
   paused: number;
+  'waiting-children': number;
 }
 
 /**
@@ -50,6 +51,7 @@ export function getJobCounts(ctx: CountsContext): JobCounts | Promise<JobCounts>
     failed: counts.failed,
     delayed: counts.delayed,
     paused: pv.paused,
+    'waiting-children': counts['waiting-children'],
   };
 }
 
@@ -68,6 +70,7 @@ export async function getJobCountsAsync(ctx: CountsContext): Promise<JobCounts> 
       failed: 0,
       delayed: 0,
       paused: 0,
+      'waiting-children': 0,
     };
   }
 
@@ -80,6 +83,7 @@ export async function getJobCountsAsync(ctx: CountsContext): Promise<JobCounts> 
         failed?: number;
         delayed?: number;
         paused?: number;
+        'waiting-children'?: number;
       }
     | undefined;
 
@@ -91,6 +95,7 @@ export async function getJobCountsAsync(ctx: CountsContext): Promise<JobCounts> 
     failed: counts?.failed ?? 0,
     delayed: counts?.delayed ?? 0,
     paused: counts?.paused ?? 0,
+    'waiting-children': counts?.['waiting-children'] ?? 0,
   };
 }
 

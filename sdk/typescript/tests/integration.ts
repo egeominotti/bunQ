@@ -7,7 +7,14 @@
  *   deno run -A tests/integration.ts
  */
 
-import { CommandError, Connection, type Job } from '../dist/index.js';
+import { frame } from '../dist/frame.js';
+import {
+  CommandError,
+  Connection,
+  type Job,
+  MAX_FRAME_SIZE,
+  SerializationError,
+} from '../dist/index.js';
 import {
   assert,
   assertEq,
@@ -15,9 +22,94 @@ import {
   makeQueue,
   makeWorker,
   runSuite,
+  sleep,
   test,
   waitFor,
 } from './harness.ts';
+
+test('outgoing frames reject payloads above the 64 MiB protocol cap', () => {
+  let error: unknown;
+  try {
+    frame(new Uint8Array(MAX_FRAME_SIZE + 1));
+  } catch (caught) {
+    error = caught;
+  }
+  assert(error instanceof SerializationError, 'oversized frame must fail before allocation/write');
+});
+
+test('serialization failure does not retain an in-flight slot', async () => {
+  const telemetry: import('../dist/index.js').TelemetryEvent[] = [];
+  const conn = new Connection({
+    host: '127.0.0.1',
+    port: getPort(),
+    commandTimeoutMs: 1000,
+    maxInFlight: 1,
+    onTelemetry: (event) => telemetry.push(event),
+  });
+  try {
+    assert(await conn.ping(), 'connection should be ready before the regression');
+    let error: unknown;
+    try {
+      await conn.call({ cmd: 'Ping', payload: new Uint8Array(MAX_FRAME_SIZE) });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof SerializationError, 'oversized command must be typed');
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    error = undefined;
+    try {
+      await conn.call({ cmd: 'Ping', payload: cyclic });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof SerializationError, 'MessagePack encoder failures must be typed');
+    error = undefined;
+    try {
+      await conn.call({
+        cmd: 'Ping',
+        payload: { nested: 2n ** 62n, secret: 'must-not-reach-telemetry' },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof SerializationError, 'BigInt must never reach the JavaScript broker');
+    const serializationEvent = telemetry.find(
+      (event) => event.type === 'error' && event.operation === 'serialization'
+    );
+    assert(serializationEvent?.type === 'error', 'serialization failure emits error telemetry');
+    assert(
+      serializationEvent?.type === 'error' &&
+        serializationEvent.message === 'command serialization failed' &&
+        !JSON.stringify(serializationEvent).includes('must-not-reach-telemetry'),
+      'serialization error telemetry is sanitized'
+    );
+    error = undefined;
+    try {
+      await conn.call({ cmd: 'Ping', payload: new Map([[1, 'non-string key']]) });
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof SerializationError, 'MessagePack map keys must be strings');
+    const supported = await conn.call({
+      cmd: 'Ping',
+      payload: {
+        binary: new Uint8Array([1, 2, 3]),
+        date: new Date(0),
+        map: new Map([['key', ['plain', { nested: true }]]]),
+      },
+    });
+    assert(supported.ok, 'portable binary, Date, Map, object, and array values must remain valid');
+    await Promise.race([
+      conn.ping(),
+      sleep(250).then(() => {
+        throw new Error('serialization retained the only in-flight slot');
+      }),
+    ]);
+  } finally {
+    conn.close();
+  }
+});
 
 test('ping + hello', async () => {
   const conn = new Connection({ host: '127.0.0.1', port: getPort() });

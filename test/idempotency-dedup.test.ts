@@ -89,7 +89,7 @@ describe('Idempotency & Deduplication - Embedded', () => {
     queue.close();
   }, 30000);
 
-  test('4. custom jobId across queues — dedup is per-queue', async () => {
+  test('4. a live custom jobId is globally idempotent across queues', async () => {
     const queueA = new Queue<{ source: string }>('idemp-dedup-4a', { embedded: true });
     const queueB = new Queue<{ source: string }>('idemp-dedup-4b', { embedded: true });
     queueA.obliterate();
@@ -100,15 +100,16 @@ describe('Idempotency & Deduplication - Embedded', () => {
     const jobA = await queueA.add('task', { source: 'A' }, { jobId: sharedJobId });
     const jobB = await queueB.add('task', { source: 'B' }, { jobId: sharedJobId });
 
-    // Both should be created (different queues, different jobs)
-    expect(jobA.id).toBeDefined();
-    expect(jobB.id).toBeDefined();
+    // jobs.id is the custom ID and is globally unique in the broker database:
+    // the second queue cannot create another live generation.
+    expect(jobB.id).toBe(jobA.id);
+    expect(jobB.data).toEqual({ source: 'A' });
 
-    // Each queue should have exactly 1 job
     const countsA = queueA.getJobCounts();
     const countsB = queueB.getJobCounts();
     expect(countsA.waiting).toBe(1);
-    expect(countsB.waiting).toBe(1);
+    expect(countsB.waiting).toBe(0);
+    expect((await queueA.getJob(jobA.id))?.data).toEqual({ source: 'A' });
 
     queueA.close();
     queueB.close();
@@ -121,18 +122,21 @@ describe('Idempotency & Deduplication - Embedded', () => {
     const customId = 'reuse-after-complete';
 
     // Add first job with removeOnComplete so the dedup key is freed
-    const job1 = await queue.add('task', { attempt: 1 }, {
-      jobId: customId,
-      removeOnComplete: true,
-    });
+    const job1 = await queue.add(
+      'task',
+      { attempt: 1 },
+      {
+        jobId: customId,
+        removeOnComplete: true,
+      }
+    );
     expect(job1.id).toBeDefined();
 
     // Process and complete the first job
-    const worker1 = new Worker(
-      'idemp-dedup-5',
-      async () => ({ done: true }),
-      { embedded: true, concurrency: 1 }
-    );
+    const worker1 = new Worker('idemp-dedup-5', async () => ({ done: true }), {
+      embedded: true,
+      concurrency: 1,
+    });
 
     // Wait for completion
     for (let i = 0; i < 100; i++) {
@@ -143,9 +147,13 @@ describe('Idempotency & Deduplication - Embedded', () => {
     await worker1.close();
 
     // Now add another job with the same jobId — should succeed
-    const job2 = await queue.add('task', { attempt: 2 }, {
-      jobId: customId,
-    });
+    const job2 = await queue.add(
+      'task',
+      { attempt: 2 },
+      {
+        jobId: customId,
+      }
+    );
     expect(job2.id).toBeDefined();
     // The job should use the same custom ID
     expect(job2.id).toBe(customId);
@@ -212,11 +220,15 @@ describe('Idempotency & Deduplication - Embedded', () => {
     let attemptCount = 0;
 
     // Add a job that will fail first 2 times and succeed on the 3rd
-    const job = await queue.add('task', { value: 42 }, {
-      jobId: customId,
-      attempts: 3,
-      backoff: 100,
-    });
+    const job = await queue.add(
+      'task',
+      { value: 42 },
+      {
+        jobId: customId,
+        attempts: 3,
+        backoff: 100,
+      }
+    );
     expect(job.id).toBeDefined();
 
     const worker = new Worker(

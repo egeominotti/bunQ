@@ -5,6 +5,29 @@ All notable changes to `bunqueue-client` (TypeScript SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add independent-connection idempotency and single-lease race tests,
+  fixed-seed generated payload invariants, malformed mutation fuzzing, and an
+  opt-in sustained producer profile.
+
+### Fixed
+
+- Emit dependency-free, typed, sanitized `error` telemetry for connection,
+  socket, write, and serialization failures without forwarding raw error
+  messages, tokens, commands, or payloads.
+- Reject MessagePack payloads larger than the protocol's 64 MiB frame cap
+  locally with `SerializationError`, before allocating or writing the framed
+  buffer.
+- Normalize MessagePack encoder failures to `SerializationError` and serialize
+  commands before registering their timer, pending entry, or backpressure slot,
+  preventing malformed commands from reducing connection capacity.
+- Validate command values recursively: reject `BigInt`, non-string map keys,
+  cycles, non-finite numbers, accessors, symbols, functions, and non-portable
+  object types while retaining standard objects, arrays, dates, and binary.
+
 ## [0.1.9] - 2026-07-14
 
 Conformance-suite driven: the SDK is now certified by the cross-language

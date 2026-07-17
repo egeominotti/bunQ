@@ -56,6 +56,12 @@ const worker = new Worker('queue', processor, {
 
 Keep `heartbeatInterval` well below `stallInterval`, otherwise healthy jobs get flagged as stalled.
 
+With SQLite persistence enabled, a custom stall policy and every job's
+cumulative stall count survive process restarts. A crash consumes one
+`attempts` slot and one `stallCount` slot; reaching either `maxAttempts` or
+`maxStalls` is terminal and moves the job to the DLQ. Repeated crashes therefore
+cannot reset either retry budget.
+
 ## Long-running jobs
 
 Jobs longer than 30 seconds need a wider stall window, or they will be re-queued while still running:

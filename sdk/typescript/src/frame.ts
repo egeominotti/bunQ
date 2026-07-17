@@ -3,7 +3,7 @@
  * prefix + msgpack payload. Runtime-neutral (plain Buffer operations).
  */
 
-import { ConnectionClosedError } from './errors.js';
+import { ConnectionClosedError, SerializationError } from './errors.js';
 
 export const PROTOCOL_VERSION = 2;
 export const MAX_FRAME_SIZE = 64 * 1024 * 1024; // mirror server-side limit
@@ -19,6 +19,9 @@ export function compact<T extends Record<string, unknown>>(obj: T): T {
 
 /** Frame a msgpack payload with the 4-byte big-endian length prefix. */
 export function frame(payload: Uint8Array): Buffer {
+  if (payload.length > MAX_FRAME_SIZE) {
+    throw new SerializationError(`frame size ${payload.length} exceeds maximum ${MAX_FRAME_SIZE}`);
+  }
   const framed = Buffer.allocUnsafe(4 + payload.length);
   framed.writeUInt32BE(payload.length, 0);
   framed.set(payload, 4);

@@ -22,6 +22,7 @@ from .ack_batcher import AckBatcher
 from .connection import Connection, TlsOption
 from .errors import CommandTimeoutError, ConnectionClosedError
 from .events import EventEmitter
+from .telemetry import TelemetryHandler
 from .job import Job
 from .worker_runtime import MAX_POLL_TIMEOUT_MS, RECONNECT_BACKOFF_S, WorkerRuntime
 
@@ -54,6 +55,7 @@ class Worker(EventEmitter, WorkerRuntime):
         autorun: bool = True,
         name: Optional[str] = None,
         ack_batch: Optional[Dict[str, Any]] = None,
+        on_telemetry: Optional[TelemetryHandler] = None,
     ) -> None:
         super().__init__()
         if concurrency < 1:
@@ -70,7 +72,9 @@ class Worker(EventEmitter, WorkerRuntime):
         self.worker_id = f"py-{_socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.name = name or self.worker_id
 
-        self.connection = Connection(host=host, port=port, token=token, tls=tls)
+        self.connection = Connection(
+            host=host, port=port, token=token, tls=tls, on_telemetry=on_telemetry
+        )
 
         # Opt-in ACKB batching, ack_batch={"max_size": 50, "max_delay_ms": 5}
         # (TS parity); the dict is the opt-in, {"enabled": False} disables.

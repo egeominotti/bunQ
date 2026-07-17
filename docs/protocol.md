@@ -38,8 +38,10 @@ The words MUST / MUST NOT / SHOULD are used as in RFC 2119.
   equivalent; strict decoders that reject unknown extensions will fail on
   otherwise-valid responses (observed on Auth and GetJob replies). Clients
   MUST NOT send ext types themselves.
-- Maximum frame size is **64 MiB** (`LEN <= 67108864`). A client MUST NOT
-  send a larger frame; the server closes the connection on oversized frames.
+- Maximum frame size is **64 MiB** (`LEN <= 67108864`). After MessagePack
+  encoding and before allocating or writing the framed buffer, a client MUST
+  reject a larger payload locally; the server closes connections that send
+  oversized frames.
 - Frames MAY be pipelined: a client may send multiple requests before reading
   responses. Responses carry the request's `reqId` back (section 3), and MAY
   arrive out of order when pipelined. A strictly sequential client can rely
@@ -194,10 +196,10 @@ Client MUSTs:
 | `PULL` | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?` | `{job, token}` — top-level, both `null`-ish when empty |
 | `PULLB` | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?` | `{jobs: [], tokens: []}` |
 | `ACK` | `id`, `token`, `result?` | `{}` |
-| `ACKB` | `ids: []`, `tokens: []`, `results?` | `{count}` |
+| `ACKB` | `ids: []`, `tokens: []`, `results?` | `{}` — success is top-level `ok: true` |
 | `FAIL` | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool` | `{}` |
 | `Heartbeat` | `id` (= workerId), `activeJobs`, `processed`, `failed` | `{data: {pong}}` |
-| `JobHeartbeatB` | `ids: []`, `tokens: []` | `{count}` — renews the jobs' locks |
+| `JobHeartbeatB` | `ids: []`, `tokens: []` | `{data: {ok, count}}` — renews the jobs' locks |
 | `RegisterWorker` | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}` |
 | `UnregisterWorker` | `workerId` | `{}` |
 | `ExtendLock` | `id`, `token`, `duration` | `{}` |
@@ -351,7 +353,8 @@ The machine-checkable version of this document is the conformance suite in
 [`sdk/conformance/`](../sdk/conformance/). A client is **conformant** when
 its driver passes every check against a real server. The suite is the
 gatekeeper for calling a client "official": reference SDKs (TypeScript,
-Python, PHP, Go) are kept green in CI-style runs before every release.
+Python, PHP, Go, Rust, Elixir) are kept green in CI-style runs before every
+release.
 
 ## 12. Versioning
 

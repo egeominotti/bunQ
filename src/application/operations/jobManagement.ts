@@ -3,15 +3,17 @@
  * Cancel, update progress, change priority, promote, move to delayed, discard
  */
 
-import type { Job, JobId } from '../../domain/types/job';
+import type { Job, JobId, JobLock } from '../../domain/types/job';
 import { type JobLocation, EventType } from '../../domain/types/queue';
 import type { Shard } from '../../domain/queue/shard';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { WebhookManager } from '../webhookManager';
 import type { EventsManager } from '../eventsManager';
-import { shardIndex, processingShardIndex } from '../../shared/hash';
+import { processingShardIndex } from '../../shared/hash';
 import { webhookLog } from '../../shared/logger';
 import { type RWLock, withWriteLock } from '../../shared/lock';
+
+export { discardJob, moveJobToDelayed } from './jobMoveOperations';
 
 /** Context for job management operations */
 export interface JobManagementContext {
@@ -21,6 +23,8 @@ export interface JobManagementContext {
   processingShards: Map<JobId, Job>[];
   processingLocks: RWLock[];
   jobIndex: Map<JobId, JobLocation>;
+  jobLocks: Map<JobId, JobLock>;
+  clientJobs: Map<string, Set<JobId>>;
   webhookManager: WebhookManager;
   eventsManager: EventsManager;
   repeatChain?: Map<JobId, JobId>;
@@ -142,6 +146,7 @@ export async function updateJobData(
       const job = shard.getQueue(location.queueName).find(jobId) ?? shard.waitingDeps.get(jobId);
       if (job) {
         (job as { data: unknown }).data = data;
+        ctx.storage?.updateJobData(jobId, data);
         return true;
       }
       return false;
@@ -152,6 +157,7 @@ export async function updateJobData(
       const job = ctx.processingShards[procIdx].get(jobId);
       if (job) {
         (job as { data: unknown }).data = data;
+        ctx.storage?.updateJobData(jobId, data);
         return true;
       }
       return false;
@@ -186,6 +192,7 @@ async function updateRepeatSuccessor(
       .find(successorId);
     if (job) {
       (job as { data: unknown }).data = data;
+      ctx.storage?.updateJobData(successorId, data);
       return true;
     }
     return false;
@@ -204,131 +211,14 @@ export async function changeJobPriority(
 
   return withWriteLock(ctx.shardLocks[location.shardIdx], () => {
     const q = ctx.shards[location.shardIdx].getQueue(location.queueName);
-    return q.updatePriority(jobId, priority, lifo);
-  });
-}
+    if (!q.updatePriority(jobId, priority, lifo)) return false;
 
-/** Move active job back to delayed */
-export async function moveJobToDelayed(
-  jobId: JobId,
-  delay: number,
-  ctx: JobManagementContext
-): Promise<boolean> {
-  const location = ctx.jobIndex.get(jobId);
-  if (location?.type !== 'processing') return false;
-
-  const procIdx = processingShardIndex(jobId);
-
-  // First remove from processing with lock
-  const job = await withWriteLock(ctx.processingLocks[procIdx], () => {
-    const job = ctx.processingShards[procIdx].get(jobId);
-    if (job) {
-      ctx.processingShards[procIdx].delete(jobId);
-    }
-    return job;
-  });
-
-  if (!job) return false;
-
-  // Then add back to queue with lock
-  const now = Date.now();
-  job.runAt = now + delay;
-  job.startedAt = null;
-  const idx = shardIndex(job.queue);
-  const queueName = job.queue;
-
-  await withWriteLock(ctx.shardLocks[idx], () => {
-    const shard = ctx.shards[idx];
-    // Release the concurrency slot (+group+uniqueKey) acquired at pull before
-    // re-queueing, mirroring moveActiveToWait (jobStateTransitions.ts) --
-    // otherwise the slot leaks and setConcurrency(N) wedges after N moves.
-    // Dropping the uniqueKey reservation on requeue matches the sibling
-    // requeue paths (failJob retry, moveActiveToWait, requeueExpiredJob).
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
-    shard.getQueue(job.queue).push(job);
-    // Update running counters for O(1) stats and temporal index (job is delayed since delay > 0)
-    const isDelayed = job.runAt > now;
-    shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
-    ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
-    // The freed slot may unblock waiting jobs for long-pollers.
-    shard.notify(job.queue);
-  });
-
-  // Persist the move so the delay survives a restart: the on-disk row was
-  // `state='active'` with the old run_at, which recovery would otherwise treat as a
-  // stalled active job. updateRunAt re-derives 'delayed' from the future run_at and
-  // clears started_at.
-  ctx.storage?.updateRunAt(jobId, job.runAt);
-
-  // Emit delayed event (BullMQ v5)
-  ctx.eventsManager.broadcast({
-    eventType: EventType.Delayed,
-    jobId,
-    queue: queueName,
-    timestamp: Date.now(),
-    delay,
-  });
-
-  return true;
-}
-
-/** Discard job to DLQ */
-export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean> {
-  const location = ctx.jobIndex.get(jobId);
-  if (!location) return false;
-
-  let job: Job | null = null;
-
-  if (location.type === 'queue') {
-    job = await withWriteLock(ctx.shardLocks[location.shardIdx], () => {
-      const shard = ctx.shards[location.shardIdx];
-      const removed = shard.getQueue(location.queueName).remove(jobId);
-      if (removed) {
-        // Update running counters for O(1) stats
-        shard.decrementQueued(jobId);
-      }
-      return removed;
-    });
-  } else if (location.type === 'processing') {
-    const procIdx = processingShardIndex(jobId);
-    job = await withWriteLock(ctx.processingLocks[procIdx], () => {
-      const j = ctx.processingShards[procIdx].get(jobId) ?? null;
-      if (j) ctx.processingShards[procIdx].delete(jobId);
-      return j;
-    });
-  }
-
-  if (job) {
-    const validJob = job; // Local reference for closure
-    const idx = shardIndex(validJob.queue);
-    const fromProcessing = location.type === 'processing';
-    const entry = await withWriteLock(ctx.shardLocks[idx], () => {
-      const shard = ctx.shards[idx];
-      if (fromProcessing) {
-        // The pull that activated this job acquired a concurrency slot (and
-        // possibly a FIFO group); return them before the DLQ move or the slot
-        // leaks and setConcurrency(N) wedges after N discards. The uniqueKey
-        // is freed too: every sibling terminal DLQ path releases the full
-        // reservation on entry (failJob, ack.ts; handleMaxStallsExceeded,
-        // lockManager.ts), so the DLQ entry never keeps it.
-        shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId);
-        // The freed slot may unblock waiting jobs for long-pollers.
-        shard.notify(validJob.queue);
-      } else if (validJob.uniqueKey) {
-        // Queue branch: the waiting job never acquired a slot or group at
-        // pull, so a full releaseJobResources would free a slot legitimately
-        // held by ANOTHER active job. Release only the uniqueKey reservation,
-        // matching cancelJob and the DLQ-entry semantics above.
-        shard.releaseUniqueKey(validJob.queue, validJob.uniqueKey);
-      }
-      // addToDlq already updates dlq counter and returns entry
-      const dlqEntry = shard.addToDlq(validJob);
-      ctx.jobIndex.set(jobId, { type: 'dlq', queueName: validJob.queue });
-      return dlqEntry;
-    });
-    ctx.storage?.saveDlqEntry(entry);
-    ctx.storage?.deleteJob(jobId);
+    // updatePriority replaces the immutable Job held by the indexed heap.
+    // Persist the effective LIFO value from that replacement so an omitted
+    // optional argument preserves the existing tie-break across recovery.
+    const updatedJob = q.find(jobId);
+    if (!updatedJob) return false;
+    ctx.storage?.updateJobPriority(jobId, updatedJob.priority, updatedJob.lifo);
     return true;
-  }
-  return false;
+  });
 }

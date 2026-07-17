@@ -3,7 +3,8 @@
  * pipeline with retries and poison jobs landing in the DLQ (zero-loss
  * accounting), a limit-bounded Simple Mode interval digest, a 1500-job burst
  * through a >1000-slot worker (server-clamped PULLB), and a long job that
- * outlives its lock TTL thanks to heartbeat lock renewal.
+ * outlives its lock TTL thanks to heartbeat lock renewal. The invoice burst
+ * verifies that concurrent processing never crosses persisted results.
  */
 
 import { Bunqueue, UnrecoverableError } from '../dist/index.js';
@@ -133,6 +134,38 @@ test('realistic: heartbeats keep a long job leased past its lock TTL', async () 
     const job = await queue.add('crunch', { size: 'xl' }, { attempts: 3 });
     await waitFor(async () => (await queue.getJobState(job.id)) === 'completed', 30_000);
     assertEq(invocations, 1, 'lock renewal must prevent a stall retry (single execution)');
+  } finally {
+    await worker.close();
+    await queue.obliterate();
+    queue.close();
+  }
+});
+
+test('realistic: concurrent invoice burst preserves every persisted result', async () => {
+  const name = qname('invoices');
+  const queue = namedQueue<{ invoice: number; cents: number }>(name);
+  const worker = makeWorker<{ invoice: number; cents: number }, { invoice: number; total: number }>(
+    name,
+    async (job) => ({ invoice: job.data.invoice, total: job.data.cents * 2 }),
+    { concurrency: 12, batchSize: 32, pollTimeoutMs: 300 }
+  );
+  try {
+    const jobs = await queue.addBulk(
+      Array.from({ length: 64 }, (_, invoice) => ({
+        name: 'reconcile',
+        data: { invoice, cents: 101 + invoice },
+      }))
+    );
+    await waitFor(async () => (await queue.getJobCounts()).completed === jobs.length, 30_000);
+
+    let checksum = 0;
+    for (let invoice = 0; invoice < jobs.length; invoice++) {
+      const result = await queue.getResult<{ invoice: number; total: number }>(jobs[invoice].id);
+      assertEq(result.invoice, invoice, `result ${invoice} belongs to its originating invoice`);
+      assertEq(result.total, (101 + invoice) * 2, `result ${invoice} preserves its amount`);
+      checksum += result.total;
+    }
+    assertEq(checksum, 16_960, 'all 64 persisted results contribute exactly once');
   } finally {
     await worker.close();
     await queue.obliterate();

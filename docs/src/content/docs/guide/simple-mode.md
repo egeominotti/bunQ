@@ -164,6 +164,11 @@ app.cancel(job.id, 5000);  // cancel after 5s grace period
 
 The signal works with `fetch` too: `await fetch(url, { signal })`.
 
+Cancellation applies once the job is running and its controller has been
+registered. If code adds and immediately cancels a job, wait for the Worker's
+`active` event first; sleeping for a fixed interval races worker polling.
+Calling `cancel()` for an unknown, queued, or finished id is a no-op.
+
 ## Circuit breaker
 
 When a downstream service is down, retrying every job just burns attempts. A circuit breaker pauses the worker after too many consecutive failures, then probes periodically until the service recovers:

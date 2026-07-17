@@ -14,6 +14,9 @@ release gate:
 2. Before a commit, run `bun run test:sandbox`. It builds the current worktree
    into one test image and runs the required unit, TCP, and embedded suites in
    three independent disposable containers in parallel.
+3. When an external SDK changes, also run `bun run test:sandbox:sdk`. It builds
+   dedicated TypeScript, Python, PHP, Go, Rust, and Elixir images, then runs
+   each SDK's native tests and shared protocol conformance checks in parallel.
 
 The sandbox executes these exact commands:
 
@@ -26,6 +29,133 @@ bun scripts/embedded/run-all-tests.ts
 The Docker build includes uncommitted files from the current worktree, so the
 validated source is the source being reviewed. It never bind-mounts the host
 repository into a test container.
+
+The SDK gate writes complete `*.build.log` and suite logs plus the same NDJSON,
+per-suite JSON, and aggregate report schema under
+`artifacts/test-sandbox-sdk/<timestamp>/`. A failed image build also produces a
+failure summary instead of exiting without artifacts. `Dockerfile.sdk-test`
+uses one target per toolchain so SDK dependencies and language versions remain
+isolated; runtime containers have no external network, credentials, home
+mount, repository mount, or Docker socket. The minimal build context retains
+the root `.gitignore` because Biome's VCS-aware SDK checks require the same
+ignore boundary used in the worktree. Cloudflare's local runtime receives
+`CLOUDFLARE_CF_FETCH_ENABLED=false`, preventing its optional `Request.cf`
+metadata fetch from weakening the no-network guarantee or delaying the gate.
+The TypeScript target also includes Node 22, matching CI, because Wrangler's
+`unstable_dev` runner is a Node process even though the SDK and broker use Bun.
+
+The six SDK suites execute:
+
+```bash
+# TypeScript
+bun run build && bun run check && bun pm pack
+bun tests/integration.ts && bun tests/e2e.ts
+bun run test:workers
+# Python
+python -m compileall -q bunqueue tests
+python -m build --no-isolation --outdir /tmp/python-package
+python tests/test_integration.py && python tests/run_e2e.py
+# PHP / Go
+composer validate --strict --no-check-publish
+find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
+php tests/run-e2e.php
+test -z "$(gofmt -l .)" && go vet ./... && go list ./...
+go test -v ./...
+go test -race -run 'Hardening|Regression|Worker' ./...
+# Rust / Elixir
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo package --locked --offline --allow-dirty --no-verify
+mix format --check-formatted && mix compile --warnings-as-errors
+mix test --slowest 20 && mix hex.build
+```
+
+Every suite then runs its language driver through all 17 shared conformance
+checks against a fresh real broker.
+
+## Model-based broker verification
+
+`bun run test:model` runs the `fast-check` asynchronous command model described
+in [Model-Based Queue Verification](./features/model-based-testing.md). Each
+property run owns a fresh broker subprocess, dynamic ports, queue, TCP client,
+and temporary SQLite database. Commands execute only when their model
+precondition is valid; after each command the test compares API state, aggregate
+counts, lock ownership, SQLite rows, DLQ rows, payloads, priorities, and
+persisted queue controls.
+
+The default campaign uses 150 runs and at most 80 generated commands. It is part
+of plain `bun test`, so the mandatory `test:sandbox` unit container executes it
+without a separate container. For deeper native investigation:
+
+```bash
+BUNQUEUE_MODEL_RUNS=500 \
+BUNQUEUE_MODEL_COMMANDS=150 \
+BUNQUEUE_MODEL_SEED=424242 \
+bun run test:model
+```
+
+Failures report a seed, a minimized command history, and a replay path. Convert
+every confirmed engine divergence into a deterministic
+`test/repro-model-*.test.ts` regression before applying the fix. Model
+expectation errors remain model fixes; for example `JobHeartbeatB` deliberately
+returns its count in `data.count`, while `ACKB` deliberately returns only the
+top-level success envelope and no count.
+
+Each generated run uses a separate broker and an adjacent TCP/HTTP port pair.
+Startup is complete only after both HTTP `/ready` and TCP `Hello` succeed. The
+harness captures subprocess stderr and retries only a confirmed bind collision;
+timeouts and all other startup failures retain their diagnostics and fail the
+test instead of being hidden by a generic port-wait timeout.
+
+## SDK hardening matrix
+
+The native suites use each public SDK against real disposable brokers. Every
+language covers the same failure classes, with idiomatic mechanics:
+
+| Layer | Required SDK evidence |
+| --- | --- |
+| Unit / integration / E2E | Pure option and wire logic, real TCP framing, Queue/Worker/Flow business paths, and permanent regressions for fixed bugs |
+| Contract | All 17 independent producer/consumer conformance checks |
+| Race / idempotency | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded |
+| Property / fuzz | Fixed-seed generated portable payloads preserve invariants; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
+| Chaos / recovery | Hard process termination, half-open timeout, reconnect and durable-job visibility after restart |
+| Load / spike | Bounded bulk and worker bursts run in the normal gate, including 512-1500 job spikes |
+| Soak / stress | One long-lived SDK connection repeatedly adds, queries, and resets batches for a configurable duration and batch size |
+| Security / compatibility | Auth-first and CA-verification regressions, weekly dependency advisories, and the runtime version matrix in `.github/workflows/sdk.yml` |
+
+The bounded cases belong in `test:sandbox:sdk`. Sustained profiles are opt-in
+because hours-long tests are not a useful per-edit gate. They run weekly in CI
+for 900 seconds per SDK and can be reproduced natively:
+
+```bash
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 bun sdk/typescript/tests/soak.ts
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 python sdk/python/tests/soak.py
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 php sdk/php/tests/soak.php
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 go test ./sdk/go -run '^TestSDKSoak$' -v
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 \
+  cargo test --manifest-path sdk/rust/Cargo.toml --test soak -- --ignored
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 \
+  sh -c 'cd sdk/elixir && mix test --include soak test/soak_test.exs'
+```
+
+Raise `BUNQUEUE_SDK_SOAK_BATCH` to explore client backpressure and the practical
+breaking point. That is a diagnostic stress profile, not a stable performance
+threshold. Go also exposes `FuzzHardeningPortableWirePayload`; CI fuzzes it for
+60 seconds weekly. Other SDKs execute deterministic mutation corpora in the
+normal gate so their results remain reproducible.
+
+Database power-loss, disk-full, WAL integrity, and schema upgrade/downgrade
+tests belong to the broker's persistence suite, not to network clients that
+cannot control SQLite. SDK crash tests assert the client-visible contract:
+durable work survives broker SIGKILL, reconnect succeeds, and the job remains
+queryable exactly once. Delivery remains at-least-once; processors must be
+idempotent because a crash after side effects but before ACK can re-run a job.
+
+Weekly dependency audits require live advisory databases and therefore run in
+CI, not inside the deliberately offline sandbox. Performance-regression
+thresholds likewise use fresh native processes; Docker/VM measurements are
+diagnostic only and must never be published as benchmark results.
 
 ## Test image
 
@@ -82,6 +212,11 @@ test names and durations, which powers the slow-test ranking in `summary.md`.
 That human-readable report also surfaces sample counts, observed tests per
 second, the complete memory profile and slope, block I/O, and network I/O; the
 JSON and NDJSON artifacts remain the authoritative machine-readable values.
+SDK summaries combine each language's native test result with shared
+conformance checks. For Elixir, the current `Result: N passed` summary is
+authoritative (including failed/skipped fields when present); the legacy
+`N tests, M failures` format is parsed only when no current summary exists, so
+mixed logs are not double-counted.
 
 The report flags non-zero exits, OOM kills, memory or PID pressure above 80%, a
 strong end-to-start memory-growth signal, and material duration or peak-memory

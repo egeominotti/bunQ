@@ -1,6 +1,6 @@
 # Job Queries & Queue Control
 
-> **Category:** Jobs · **Source:** `src/application/operations/queryOperations.ts`, `src/application/operations/jobManagement.ts`, `src/application/operations/queueControl.ts`, `src/shared/pausedView.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/queryOperations.ts`, `src/application/operations/jobManagement.ts`, `src/application/operations/jobMoveOperations.ts`, `src/application/operations/jobClaim.ts`, `src/application/operations/queueControl.ts`, `src/shared/pausedView.ts`
 
 ## Purpose
 
@@ -13,7 +13,7 @@ Owns:
 - Job lookups across every location: in-shard run queue, `waitingDeps`/`waitingChildren` maps, processing shards, completed cache, and DLQ — plus SQLite fallback after restart (`queryOperations.ts:30`).
 - State resolution including BullMQ v5 distinctions (`waiting` vs `prioritized` by priority, `delayed` by `runAt`, `waiting-children`) and the paused-view derivation (`pausedView.ts`).
 - Paginated, multi-source, state-filtered list queries with offset-correct merging (`getJobs`, `queryOperations.ts:467`).
-- Single-job mutations on non-terminal jobs: `cancelJob`, `updateJobProgress`, `updateJobData`, `changeJobPriority`, `promoteJob`, `moveJobToDelayed`, `discardJob` (`jobManagement.ts`).
+- Single-job mutations on non-terminal jobs: `cancelJob`, `updateJobProgress`, `updateJobData`, `changeJobPriority`, `promoteJob` (`jobManagement.ts`), plus `moveJobToDelayed` and `discardJob` (`jobMoveOperations.ts`).
 - Queue control: `pauseQueue`, `resumeQueue`, `isQueuePaused`, `drainQueue`, `obliterateQueue`, `cleanQueue`, `getQueueCount`, `listAllQueues` (`queueControl.ts`).
 
 Does NOT own:
@@ -74,7 +74,7 @@ function pauseQueue(queue: string, ctx: QueueControlContext): void
 function resumeQueue(queue: string, ctx: QueueControlContext): void
 function isQueuePaused(queue: string, ctx: QueueControlContext): boolean
 function drainQueue(queue: string, ctx: QueueControlContext): number
-function obliterateQueue(queue: string, ctx: QueueControlContext): void
+function obliterateQueue(queue: string, ctx: QueueControlContext): JobId[]
 function listAllQueues(ctx: QueueControlContext): string[]
 function cleanQueue(queue: string, graceMs: number, ctx: QueueControlContext, state?: string, limit?: number): JobId[]
 function getQueueCount(queue: string, ctx: QueueControlContext): number
@@ -103,9 +103,24 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 
 - `cancelJob` → `EventType.Removed` with `prev: 'waiting'` (`jobManagement.ts:75`).
 - `updateJobProgress` → `progress` event + `job.progress` webhook (`jobManagement.ts:108`).
-- `moveJobToDelayed` → `EventType.Delayed` (`jobManagement.ts:280`).
+- `moveJobToDelayed` → `EventType.Delayed` (`jobMoveOperations.ts`).
 - `QueueManager.pause`/`resume` wrap `pauseQueue`/`resumeQueue` and emit `EventType.Paused`/`EventType.Resumed` plus dashboard events `queue:paused`/`queue:resumed` (`queueManager.ts:836`).
 - Dashboard-only events from handlers: `job:priority-changed`, `job:promoted`, `job:discarded`, `job:data-updated`, `job:moved-to-delayed`, `queue:drained`, `queue:obliterated`, `queue:removed`, `queue:cleaned`.
+
+`updateJobData` mutates and persists the payload while holding the job's owning
+shard lock. This applies to queued jobs, active jobs, and the queued successor
+resolved through `repeatChain`, so a successful `Update` response is durable
+across broker restarts. SQLite flushes a pending buffered insert before updating
+the data blob; otherwise an update performed immediately after a non-durable
+push could match no row and the later insert would restore the original payload.
+
+`changeJobPriority` updates the indexed heap and persists both the effective
+`priority` and `lifo` tie-break while holding the owning shard lock. The
+effective `lifo` value comes from the heap's replacement `Job`, so omitting the
+optional flag preserves its current value on disk. As with other post-insert
+mutations, SQLite first flushes a pending buffered insert. A successful
+`ChangePriority` therefore retains identical scheduling order after broker
+recovery.
 
 ## Data Models
 
@@ -157,11 +172,11 @@ Only acts on `type === 'queue'`. Under a write lock it tries three locations in 
 
 On success emits `Removed`. Returns `false` for active/completed/DLQ jobs.
 
-### moveJobToDelayed (`jobManagement.ts:227`)
+### moveJobToDelayed (`jobMoveOperations.ts`)
 
 Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Inside the shard-lock section, before the re-push, it calls `shard.releaseJobResources(queue, uniqueKey, groupId)` and then `shard.notify()`, mirroring `moveActiveToWait`: the concurrency slot (+group+uniqueKey) acquired at pull is returned, otherwise `setConcurrency(N)` wedges after N moves (repro: `test/repro-slot-release-claim-paths.test.ts`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
 
-### discardJob (`jobManagement.ts:291`)
+### discardJob (`jobMoveOperations.ts`)
 
 Removes the job from its run queue (with `decrementQueued`) or from the processing shard, then under the destination shard lock releases the job's reservations, calls `addToDlq`, sets the index to `dlq`, persists the DLQ entry, and deletes the jobs-table row. The release is branch-specific: a **processing** job returns the full set via `releaseJobResources` (concurrency slot + group + uniqueKey, matching the fail-to-DLQ paths in `failJob` and `handleMaxStallsExceeded`, which free the reservation on DLQ entry) followed by `shard.notify()`; a **queued** job only releases its `uniqueKey` (parity with `cancelJob`), because it never acquired a slot or group at pull and a full release would free a slot held by another active job.
 
@@ -169,7 +184,7 @@ Removes the job from its run queue (with `decrementQueued`) or from the processi
 
 - `drainQueue` (`queueControl.ts:45`): `shard.drain` returns `{count, jobIds}`; the operation then deletes each `jobIndex` entry and calls `safeDeleteJob` so a buffered/on-disk add cannot resurrect a drained job.
 - `cleanQueue` (`queueControl.ts:188`): normalizes `wait`→`waiting`, dispatches to `cleanWaitingLike` (`:100`, also covers `delayed`/`prioritized`/`paused`/undefined), `cleanCompleted` (`:124`), or `cleanFailed` (`:152`). Each respects `graceMs` (age threshold) and `maxJobs` (default 1000). Returns removed `JobId[]`.
-- `obliterateQueue` (`queueControl.ts:60`): only calls `shard.obliterate(queue)` (clears the run queue, DLQ, unique keys, limiter, temporal index for that shard). The wider purge of processing/completed/results/logs/locks/customIdMap/metrics/queue-state is done by `QueueManager.obliterate` (`queueManager.ts:870`).
+- `obliterateQueue` (`queueControl.ts:60`): calls `shard.obliterate(queue)`, which clears the run queue, DLQ, dependency-gated `waitingDeps`/`waitingChildren` jobs, reverse dependency registrations, unique keys, limiters, and temporal indexes. It returns every removed id so `QueueManager.obliterate` can purge global indexes and SQLite even if a prior inconsistency left an id out of `jobIndex`. The manager also discovers and purges processing/completed/results/logs/locks/customIdMap/metrics/queue-state (`queueManager.ts:870`).
 
 ## Concurrency & Locking
 
@@ -193,7 +208,8 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 - **`updateJobData` repeat-chain follow:** when the target id is completed/missing, it follows `repeatChain` to patch the successor job created by `handleRepeat` (`jobManagement.ts:170`).
 - **SQLite write failures swallowed:** `safeDeleteJob`/`safeDeleteDlqEntry` (`queueControl.ts:83`) catch errors (e.g. `SQLITE_FULL`); in-memory state is already cleared and the orphan row is GC'd by crash-recovery on restart.
 - **Memory-bound visibility:** completed-job queries depend on bounded LRU/Set collections — `completedJobs` (50k), `jobResults` (10k), `jobLogs` (10k), `customIdMap` (50k). Once evicted, results/custom-id lookups fall back to SQLite or return `null`. `getJobByCustomId` returns `null` if the LRU has evicted the mapping.
-- **Known invariant gap (obliterate):** `shard.obliterate` (`shard.ts:466`) clears the run queue/DLQ/unique-keys/temporal index but does NOT clear `waitingDeps`/`waitingChildren` maps; the manager loop deletes their `jobIndex`/SQLite entries but the shard maps can retain ghost flow-chain dependents. Tracked as audit follow-up FP-2.
+- **Dependency-safe obliterate:** `shard.obliterate` removes queue-owned jobs from both `waitingDeps` and `waitingChildren`. Removing a `waitingDeps` job goes through `DependencyTracker.removeWaitingJob`, so its waiter id is also deleted from every reverse `dependencyIndex` entry. The returned id set then drives global-index and SQLite cleanup; no `waiting-children` ghost remains queryable after the operation.
+- **Dependency counts on the public Queue client:** `Queue.getJobCounts()` and `getJobCountsAsync()` expose the server/manager's `'waiting-children'` bucket in both embedded and TCP modes. An empty or obliterated queue returns the key with value `0`, preserving a stable shape and allowing count/list conservation checks at the public boundary.
 - **`finishedOn`/`processedOn` on list queries (#104):** these fields are populated client-side. `getJob` (single) already returned them via `buildJobProperties`, but list paths build results with `createSimpleJob`, which hard-codes them `undefined`. The fix patches `src/client/queue/operations/query.ts` to mirror the single-job mapping (numeric `startedAt`/`completedAt` → `processedOn`/`finishedOn`, `null`→`undefined`). Failed jobs intentionally keep `finishedOn` undefined (no `completedAt`). See [Client SDK: Queue](./client-queue-sdk.md).
 
 ## Configuration

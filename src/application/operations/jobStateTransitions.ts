@@ -11,6 +11,7 @@ import type { EventType } from '../../domain/types/queue';
 import type { JobManagementContext } from './jobManagement';
 import { shardIndex, processingShardIndex } from '../../shared/hash';
 import { withWriteLock } from '../../shared/lock';
+import { releaseClaimedJobOwnership } from './jobClaim';
 
 /** Move active job back to waiting */
 export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext): Promise<boolean> {
@@ -23,6 +24,7 @@ export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext):
     const job = ctx.processingShards[procIdx].get(jobId);
     if (job) {
       ctx.processingShards[procIdx].delete(jobId);
+      releaseClaimedJobOwnership(jobId, ctx);
     }
     return job;
   });
@@ -94,6 +96,7 @@ export async function moveToWaitingChildren(
     const job = ctx.processingShards[procIdx].get(jobId);
     if (job) {
       ctx.processingShards[procIdx].delete(jobId);
+      releaseClaimedJobOwnership(jobId, ctx);
     }
     return job;
   });

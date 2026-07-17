@@ -87,6 +87,7 @@ async function handleStalledJob(
   // Lock order: shardLocks BEFORE processingLocks (per lock hierarchy in CLAUDE.md)
   // Broadcast events AFTER verifying job is still stalled to avoid false positives
   let handled = false;
+  let handledAction = action;
 
   await withWriteLock(ctx.shardLocks[idx], async () => {
     await withWriteLock(ctx.processingLocks[procIdx], () => {
@@ -96,9 +97,11 @@ async function handleStalledJob(
       }
 
       const shard = ctx.shards[idx];
+      const attemptsExhausted = job.attempts + 1 >= job.maxAttempts;
 
-      if (action === StallAction.MoveToDlq) {
-        moveStalliedJobToDlq(job, ctx, shard, procIdx, idx);
+      if (action === StallAction.MoveToDlq || attemptsExhausted) {
+        handledAction = StallAction.MoveToDlq;
+        moveStalliedJobToDlq(job, ctx, shard, procIdx, attemptsExhausted);
       } else {
         retryStalliedJob(job, ctx, shard, procIdx, idx);
       }
@@ -112,18 +115,18 @@ async function handleStalledJob(
     ctx.dashboardEmit?.('job:stalled', {
       jobId: String(job.id),
       queue: job.queue,
-      stallCount: job.stallCount + 1,
-      action,
+      stallCount: job.stallCount,
+      action: handledAction,
     });
     ctx.eventsManager.broadcast({
       eventType: EventType.Stalled,
       queue: job.queue,
       jobId: job.id,
       timestamp: Date.now(),
-      data: { stallCount: job.stallCount + 1, action },
+      data: { stallCount: job.stallCount, action: handledAction },
     });
     void ctx.webhookManager.trigger('stalled' as WebhookEvent, String(job.id), job.queue, {
-      data: { stallCount: job.stallCount + 1, action },
+      data: { stallCount: job.stallCount, action: handledAction },
     });
   }
 }
@@ -134,7 +137,7 @@ function moveStalliedJobToDlq(
   ctx: BackgroundContext,
   shard: BackgroundContext['shards'][number],
   procIdx: number,
-  _idx: number
+  attemptsExhausted: boolean
 ): void {
   ctx.processingShards[procIdx].delete(job.id);
   shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
@@ -146,10 +149,16 @@ function moveStalliedJobToDlq(
     return;
   }
 
+  incrementStallCount(job);
+  job.attempts++;
+  job.startedAt = null;
+  job.lastHeartbeat = Date.now();
   const entry = shard.addToDlq(
     job,
-    FailureReason.Stalled,
-    `Job stalled ${job.stallCount + 1} times`
+    attemptsExhausted ? FailureReason.MaxAttemptsExceeded : FailureReason.Stalled,
+    attemptsExhausted
+      ? `Job stalled at max attempts (${job.maxAttempts})`
+      : `Job stalled ${job.stallCount} times`
   );
   ctx.jobIndex.set(job.id, { type: 'dlq', queueName: job.queue });
   ctx.storage?.saveDlqEntry(entry);

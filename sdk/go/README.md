@@ -11,7 +11,7 @@
 Native TCP protocol (msgpack), goroutine-based worker concurrency, one runtime dependency.
 
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/LICENSE)
-[![go](https://img.shields.io/badge/go-1.22%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)
+[![go](https://img.shields.io/badge/go-1.26.5%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)
 
 [Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [TypeScript SDK](https://www.npmjs.com/package/bunqueue-client) · [Python SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [PHP SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/php)
 
@@ -53,7 +53,9 @@ func main() {
 	worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
 		fmt.Println("processing", job.Data())
 		return map[string]any{"sent": true}, nil
-	}, bunqueue.WorkerOptions{Port: 6789, Concurrency: 8})
+	}, bunqueue.WorkerOptions{
+		Port: 6789, Concurrency: 8, HeartbeatIntervalS: 10,
+	})
 	worker.On("completed", func(args ...any) {
 		fmt.Println("completed", args[0].(*bunqueue.Job).ID())
 	})
@@ -67,16 +69,61 @@ Return `bunqueue.NewUnrecoverableError("...")` from a processor to skip retries 
 
 Queues (add, bulk, custom ids, deduplication), query (jobs, states, results, progress, `WaitForJob`), control (pause, drain, clean, obliterate, promote, retry), DLQ (`GetDlq`, `RetryDlq`, `PurgeDlq`), schedulers (cron pattern or fixed interval, execution `Limit`), webhooks, rate limit, monitoring (`GetWorkers`, `GetStats`), and flows (`FlowProducer`: parent/children trees, chains, rollback).
 
+Rate limits accept the delivery window and broker-side expiry:
+
+```go
+queue.SetRateLimit(100, bunqueue.RateLimitOptions{
+	DurationMs: 60_000,
+	TTLms:      300_000,
+})
+```
+
+`SchedulerRepeat.SkipMissedOnRestart` and `PreventOverlap` are pointers so
+both explicit `false` and omission reach the broker correctly.
+
 TLS: pass `TLS: &bunqueue.TLSOptions{...}` — certificates are verified by default; use `CAFile` for a private CA.
+
+## Worker leases and telemetry
+
+Workers use independent pull, command and heartbeat connections, so a long
+poll cannot delay ACK/FAIL or lock renewal. Set a positive
+`HeartbeatIntervalS` to enable automatic renewal; zero, negative, NaN and
+infinite values disable it.
+
+Connection telemetry is optional, synchronous and payload-free:
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{
+	OnEvent: func(event bunqueue.TelemetryEvent) {
+		log.Printf("%s command=%s duration=%s error=%s",
+			event.Type, event.Command, event.Duration, event.Error)
+	},
+})
+```
+
+The callback receives `connected`, `reconnect`, `auth`, `command`, `timeout`,
+`error` and `close` events. Callback panics are isolated from command and worker
+correctness; handlers should still return quickly.
 
 ## Testing
 
 ```bash
 go vet ./...
-go test ./... -count=1
+go test -v ./... -count=1
+go test -race -run 'Hardening|Regression|Worker' ./...
+BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -v
+go test -run '^$' -fuzz '^FuzzHardeningPortableWirePayload$' -fuzztime 60s
+cd ../.. && bun run test:sandbox:sdk
 ```
 
-The e2e suite spawns a real bunqueue server (requires [Bun](https://bun.sh) and the repo checkout) and covers the full surface: wire framing, auth, retries, DLQ, flows, schedulers, unicode and 1MB payloads, int64 safety, crash + restart reconnection, and the protocol spec-alignment checks shared with the other official SDKs.
+The suite spawns real bunqueue servers (requires [Bun](https://bun.sh) and the
+repo checkout) and covers the full surface: wire framing and 64 MiB
+boundaries, auth, telemetry, retries, DLQ, flows, schedulers, rate-limit TTL,
+unicode and 1 MiB payloads, cyclic-input rejection, recursive typed int64 and
+timestamp safety, worker lease isolation, crash/restart reconnection and shared
+protocol alignment. Hardening adds independent-connection idempotency and
+single-lease contention, 500 generated wire cases, a 512-job spike, the Go
+race detector, native fuzzing, and an opt-in sustained profile.
 
 ## License
 

@@ -40,10 +40,6 @@ import { QueueManager } from '../src/application/queueManager';
 import { createTcpServer, type TcpServer } from '../src/infrastructure/server/tcp';
 import { TcpClient } from '../src/client/tcp/client';
 
-function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 25000);
-}
-
 /** Poll `fn` until truthy or deadline; returns last value (false on timeout). */
 async function waitFor<T>(
   fn: () => T | Promise<T>,
@@ -70,8 +66,10 @@ let harness: Harness | null = null;
 
 async function startServer(): Promise<Harness> {
   const qm = new QueueManager(); // in-memory, no dataPath
-  const port = randomPort();
-  const server = createTcpServer(qm, { hostname: '127.0.0.1', port });
+  // Let the kernel allocate and bind the port atomically. Choosing a random
+  // number first leaves a probe-to-bind race with parallel sandbox tests.
+  const server = createTcpServer(qm, { hostname: '127.0.0.1', port: 0 });
+  const port = server.server.port;
   const h: Harness = { qm, server, port, clients: [] };
   harness = h;
   return h;
@@ -177,11 +175,20 @@ describe('REPRO pool-pull-ownership-double-exec', () => {
     // Assert: the SAME job id becomes pullable again from the second connection,
     // DESPITE the fresh heartbeat. If this returns the job, a second consumer
     // would run it concurrently with worker-A → double execution.
-    const rePulled = await waitFor(async () => {
-      const r = await connB.send({ cmd: 'PULL', queue: QUEUE, owner: 'worker-B', lockTtl: 30000 });
-      const j = r.job as { id?: string } | null;
-      return j && String(j.id) === targetId ? r : null;
-    }, 4000, 30);
+    const rePulled = await waitFor(
+      async () => {
+        const r = await connB.send({
+          cmd: 'PULL',
+          queue: QUEUE,
+          owner: 'worker-B',
+          lockTtl: 30000,
+        });
+        const j = r.job as { id?: string } | null;
+        return j && String(j.id) === targetId ? r : null;
+      },
+      4000,
+      30
+    );
 
     // Snapshot final state for the diff regardless of outcome.
     const finalState = await ctrl.send({ cmd: 'GetState', id: targetId });

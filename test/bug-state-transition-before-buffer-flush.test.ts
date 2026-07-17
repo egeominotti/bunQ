@@ -94,12 +94,15 @@ describe('State-transition writes coordinate with WriteBuffer', () => {
 
     const db = new Database(dbPath, { readonly: true });
     const row = db
-      .prepare<{ state: string }, [string]>('SELECT state FROM jobs WHERE id = ?')
+      .prepare<{ state: string; stall_count: number }, [string]>(
+        'SELECT state, stall_count FROM jobs WHERE id = ?'
+      )
       .get(String(job.id));
     db.close();
 
     expect(row).not.toBeNull();
     expect(row!.state).toBe('active');
+    expect(row!.stall_count).toBe(0);
   });
 
   test('markCompleted on a buffered job persists as completed', () => {
@@ -118,6 +121,14 @@ describe('State-transition writes coordinate with WriteBuffer', () => {
     expect(row).not.toBeNull();
     expect(row!.state).toBe('completed');
     expect(row!.completed_at).not.toBeNull();
+  });
+
+  test('updateJobData on a buffered job persists the new payload', () => {
+    const job = newJob(4);
+    storage.insertJob(job);
+    storage.updateJobData(job.id, { v: 'updated' });
+
+    expect(storage.getJob(job.id)?.data).toEqual({ v: 'updated' });
   });
 
   test('flush-on-transition does not regress unrelated non-buffered jobs', () => {

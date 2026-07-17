@@ -32,60 +32,6 @@ func compact(command map[string]any) map[string]any {
 	return out
 }
 
-// jsSafe is the BigInt-killer guard: a Go int outside the int32 range travels
-// as msgpack int64/uint64, which the server (msgpackr) decodes as BigInt and
-// then crashes on mixed arithmetic (e.g. ListWorkers uptime). Convert such
-// values to float64 — exact up to 2^53, same as a JavaScript number. Applied
-// recursively to every outgoing frame. NEVER remove this conversion.
-func jsSafe(value any) any {
-	switch v := value.(type) {
-	case int:
-		return jsSafeInt64(int64(v))
-	case int8, int16, int32:
-		return v
-	case int64:
-		return jsSafeInt64(v)
-	case uint:
-		return jsSafeUint64(uint64(v))
-	case uint8, uint16:
-		return v
-	case uint32:
-		return jsSafeUint64(uint64(v))
-	case uint64:
-		return jsSafeUint64(v)
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = jsSafe(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = jsSafe(item)
-		}
-		return out
-	case []string:
-		return v
-	default:
-		return v
-	}
-}
-
-func jsSafeInt64(v int64) any {
-	if v < int32Min || v > int32Max {
-		return float64(v)
-	}
-	return v
-}
-
-func jsSafeUint64(v uint64) any {
-	if v > int32Max {
-		return float64(v)
-	}
-	return v
-}
-
 // jobPayload mirrors the JS SDK: the job name travels INSIDE `data`.
 // Non-map data is wrapped so the payload always stays a msgpack map.
 func jobPayload(name string, data any) map[string]any {

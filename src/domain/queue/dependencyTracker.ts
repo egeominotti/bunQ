@@ -116,6 +116,25 @@ export class DependencyTracker {
   }
 
   /**
+   * Remove every dependency-gated job owned by a queue.
+   * Returns the removed ids so the caller can purge global indexes and storage.
+   */
+  removeQueue(queue: string): JobId[] {
+    const removed: JobId[] = [];
+    for (const [jobId, job] of this.waitingDeps) {
+      if (job.queue !== queue) continue;
+      this.removeWaitingJob(jobId);
+      removed.push(jobId);
+    }
+    for (const [jobId, job] of this.waitingChildren) {
+      if (job.queue !== queue) continue;
+      this.waitingChildren.delete(jobId);
+      removed.push(jobId);
+    }
+    return removed;
+  }
+
+  /**
    * Get a parent job waiting for children
    */
   getWaitingParent(jobId: JobId): Job | undefined {

@@ -1,14 +1,8 @@
-/**
- * TCP connection to a bunqueue server — cross-runtime (Node.js, Bun, Deno).
- *
- * Requests carry a `reqId` string; the server echoes it back, enabling
- * pipelining (many in-flight commands per socket). Uses only `node:`
- * builtins (net/tls), which Node, Bun and Deno all support.
- */
+/** Cross-runtime TCP connection with reqId-based request pipelining. */
 
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
-import { pack, unpack } from 'msgpackr';
+import { unpack } from 'msgpackr';
 import { Backpressure } from './backpressure.js';
 import type {
   Command,
@@ -18,18 +12,16 @@ import type {
   TlsOption,
 } from './connection-types.js';
 import { AuthError, CommandError, CommandTimeoutError, ConnectionClosedError } from './errors.js';
-import { compact, FrameParser, frame, PROTOCOL_VERSION } from './frame.js';
+import { FrameParser, PROTOCOL_VERSION } from './frame.js';
 import { nowMs, Telemetry } from './observability.js';
+import { serializeCommand } from './serialization.js';
 import { openSocket } from './socket-factory.js';
 
 export type { Command, ConnectionOptions, Response, TlsOption } from './connection-types.js';
 
 /**
- * A single pipelined TCP connection to a bunqueue server.
- *
- * Emits typed lifecycle events for observability: `connect`, `disconnect` and
- * `reconnect_scheduled` (payloads mirror the telemetry events). Attach a
- * telemetry sink via the `onTelemetry` option for per-command latency metrics.
+ * A pipelined connection with lifecycle events and an optional structured
+ * telemetry sink.
  */
 export class Connection extends EventEmitter {
   readonly host: string;
@@ -49,8 +41,7 @@ export class Connection extends EventEmitter {
   private connectGeneration = 0;
   private failedAttempts = 0;
   private nextAttemptAt = 0;
-  // Half-open recovery (#94): after this many consecutive command timeouts the
-  // socket is presumed dead and torn down so the next call reconnects.
+  // Half-open recovery: repeated command timeouts force lazy reconnection.
   private readonly maxCommandTimeouts = 3;
   private consecutiveTimeouts = 0;
   private readonly telemetry: Telemetry;
@@ -75,11 +66,7 @@ export class Connection extends EventEmitter {
     return this.connected;
   }
 
-  /**
-   * Monotonic counter, incremented on every successful (re)connect. Consumers
-   * that hold per-connection server state (e.g. a Worker registration) compare
-   * it between operations and re-establish that state after a reconnect.
-   */
+  /** Successful-connect generation used to restore per-connection state. */
   get generation(): number {
     return this.connectGeneration;
   }
@@ -117,16 +104,21 @@ export class Connection extends EventEmitter {
 
   private async doConnect(): Promise<void> {
     const startMs = nowMs();
-    const socket = await openSocket(this.host, this.port, this.tls, this.connectTimeoutMs);
+    const socket = await this.telemetry.captureAsync(
+      'connect',
+      openSocket(this.host, this.port, this.tls, this.connectTimeoutMs)
+    );
     socket.setNoDelay(true);
-    // TCP keepalive (~15s idle) surfaces a half-open link (cloud LB/NAT idle
-    // drop with no FIN/RST) in seconds instead of ~tcp_retries2 minutes.
+    // TCP keepalive surfaces half-open cloud LB/NAT links promptly.
     socket.setKeepAlive(true, 15_000);
     this.parser.clear();
     this.socket = socket;
 
     socket.on('data', (chunk: Buffer) => this.handleData(chunk));
-    socket.on('error', () => this.teardown());
+    socket.on('error', (error) => {
+      this.telemetry.error('socket', error);
+      this.teardown();
+    });
     socket.on('close', () => this.teardown());
 
     this.connected = true;
@@ -159,6 +151,11 @@ export class Connection extends EventEmitter {
    */
   async call<R = Response>(command: Command, timeoutMs?: number): Promise<R> {
     if (!this.connected) await this.connect();
+    this.reqCounter = (this.reqCounter + 1) & 0x7fffffff;
+    const reqId = String(this.reqCounter);
+    const outbound = this.telemetry.capture('serialization', () =>
+      serializeCommand(command, reqId)
+    );
     // Backpressure: park here if too many commands are already in flight. The
     // socket may be torn down while parked, so re-check after the gate.
     const gate = this.backpressure.acquire(this.pending.size);
@@ -166,9 +163,6 @@ export class Connection extends EventEmitter {
     const socket = this.socket;
     if (!this.connected || !socket) throw new ConnectionClosedError('not connected');
 
-    this.reqCounter = (this.reqCounter + 1) & 0x7fffffff;
-    const reqId = String(this.reqCounter);
-    const payload = pack({ ...compact(command), reqId });
     const gen = this.connectGeneration; // snapshot: a timeout must not tear down a newer conn
     const startMs = nowMs();
 
@@ -199,8 +193,9 @@ export class Connection extends EventEmitter {
         timer,
       });
 
-      socket.write(frame(payload), (err) => {
+      socket.write(outbound, (err) => {
         if (err) {
+          this.telemetry.error('write', err);
           const entry = this.pending.get(reqId);
           this.pending.delete(reqId);
           this.backpressure.release();

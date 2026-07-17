@@ -119,4 +119,47 @@ describe('test sandbox telemetry', () => {
     expect(markdown).toContain('Block read / write');
     expect(markdown).toContain('Tests/s');
   });
+
+  test('counts ExUnit result summaries alongside SDK conformance checks', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bunqueue-exunit-telemetry-'));
+    directories.push(directory);
+    const logPath = join(directory, 'elixir.log');
+    await Bun.write(logPath, 'Result: 24 passed\n\n17/17 checks passed\n');
+    const telemetry = await createSuiteTelemetry({
+      suite: 'elixir',
+      command: ['mix', 'test'],
+      container: 'elixir-test',
+      logPath,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-01T00:00:01.000Z',
+      exitCode: 0,
+      oomKilled: false,
+      samples: [sample('2026-01-01T00:00:00.000Z', 32 * 1024 ** 2)],
+    });
+
+    expect(telemetry.tests).toMatchObject({ passed: 41, failed: 0, skipped: 0 });
+  });
+
+  test('prefers ExUnit result summaries without double counting legacy output', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bunqueue-exunit-result-'));
+    directories.push(directory);
+    const logPath = join(directory, 'elixir.log');
+    await Bun.write(
+      logPath,
+      '24 tests, 2 failures, 1 excluded\nResult: 21 passed, 2 failed, 1 skipped\n'
+    );
+    const telemetry = await createSuiteTelemetry({
+      suite: 'elixir',
+      command: ['mix', 'test'],
+      container: 'elixir-test',
+      logPath,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-01T00:00:01.000Z',
+      exitCode: 1,
+      oomKilled: false,
+      samples: [sample('2026-01-01T00:00:00.000Z', 32 * 1024 ** 2)],
+    });
+
+    expect(telemetry.tests).toMatchObject({ passed: 21, failed: 2, skipped: 1 });
+  });
 });

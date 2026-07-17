@@ -70,7 +70,8 @@ by design: they require the in-process Bun runtime).
 ```bash
 python3 -m venv .venv && .venv/bin/pip install msgpack   # once
 .venv/bin/python tests/test_integration.py   # smoke (8) — also pytest-compatible
-.venv/bin/python tests/run_e2e.py            # full e2e (78)
+.venv/bin/python tests/run_e2e.py            # full e2e (112)
+BUNQUEUE_SDK_SOAK_SECONDS=3600 .venv/bin/python tests/soak.py
 ```
 
 Both spawn a real server (`bun src/main.ts` from the repo root, random port,

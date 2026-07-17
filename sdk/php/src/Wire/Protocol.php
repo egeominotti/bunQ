@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bunqueue\Wire;
 
+use MessagePack\Type\Ext;
+
 /**
  * Wire-level helpers shared by the whole client.
  *
@@ -20,6 +22,7 @@ final class Protocol
 
     private const INT32_MIN = -2147483648;
     private const INT32_MAX = 2147483647;
+    private const MAX_NESTING = 128;
 
     private function __construct()
     {
@@ -40,6 +43,14 @@ final class Protocol
      */
     public static function jsSafe(mixed $value): mixed
     {
+        return self::jsSafeAt($value, 0);
+    }
+
+    private static function jsSafeAt(mixed $value, int $depth): mixed
+    {
+        if ($depth > self::MAX_NESTING) {
+            throw new \InvalidArgumentException('cyclic or excessively nested payload');
+        }
         if (\is_int($value)) {
             return ($value < self::INT32_MIN || $value > self::INT32_MAX)
                 ? (float) $value
@@ -47,12 +58,48 @@ final class Protocol
         }
         if (\is_array($value)) {
             $out = [];
+            $isList = array_is_list($value);
             foreach ($value as $key => $item) {
-                $out[$key] = self::jsSafe($item);
+                if (!$isList && !\is_string($key)) {
+                    throw new \InvalidArgumentException(
+                        'associative arrays require string keys on the wire'
+                    );
+                }
+                $out[$key] = self::jsSafeAt($item, $depth + 1);
             }
             return $out;
         }
         return $value;
+    }
+
+    /** Recursively map msgpackr's ext type 0 (`undefined`) to PHP null. */
+    public static function normalizeIncoming(mixed $value): mixed
+    {
+        return self::normalizeIncomingAt($value, 0);
+    }
+
+    private static function normalizeIncomingAt(mixed $value, int $depth): mixed
+    {
+        if ($depth > self::MAX_NESTING) {
+            throw new \InvalidArgumentException('cyclic or excessively nested response');
+        }
+        if ($value instanceof Ext && $value->type === 0) {
+            return null;
+        }
+        if (\is_array($value)) {
+            $out = [];
+            foreach ($value as $key => $item) {
+                $out[$key] = self::normalizeIncomingAt($item, $depth + 1);
+            }
+            return $out;
+        }
+        return $value;
+    }
+
+    /** The protocol limit applies to LEN, excluding the four-byte header. */
+    public static function isPayloadLengthAllowed(int $length): bool
+    {
+        return $length >= 0 && $length <= self::MAX_FRAME_SIZE;
     }
 
     /** Mirror the JS SDK: the job name travels INSIDE `data`. */

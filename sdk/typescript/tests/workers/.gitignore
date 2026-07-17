@@ -1,5 +1,5 @@
 .wrangler/
 node_modules/
 *.tgz
-bun.lock
+!bun.lock
 package-lock.json

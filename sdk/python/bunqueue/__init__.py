@@ -34,6 +34,7 @@ from .flow import FlowNode, FlowProducer
 from .job import Job
 from .queue import Queue
 from .simple import Bunqueue, CancellationManager, CancelSignal
+from .telemetry import TelemetryEvent, TelemetryHandler
 from .worker import Worker
 
 # Library logging convention: a NullHandler on the package logger so the SDK
@@ -60,6 +61,8 @@ __all__ = [
     "Job",
     "Queue",
     "SerializationError",
+    "TelemetryEvent",
+    "TelemetryHandler",
     "UnrecoverableError",
     "Worker",
     "__version__",

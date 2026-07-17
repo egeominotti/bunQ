@@ -57,9 +57,9 @@ export function drainQueue(queue: string, ctx: QueueControlContext): number {
 }
 
 /** Remove all queue data */
-export function obliterateQueue(queue: string, ctx: QueueControlContext): void {
+export function obliterateQueue(queue: string, ctx: QueueControlContext): JobId[] {
   const idx = shardIndex(queue);
-  ctx.shards[idx].obliterate(queue);
+  return ctx.shards[idx].obliterate(queue);
 }
 
 /** List all queue names */

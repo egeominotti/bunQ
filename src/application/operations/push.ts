@@ -3,23 +3,18 @@
  * Job push and batch push logic
  */
 
-import {
-  type Job,
-  type JobId,
-  type JobInput,
-  createJob,
-  generateJobId,
-  jobId,
-} from '../../domain/types/job';
+import { type Job, type JobId, type JobInput, createJob } from '../../domain/types/job';
 import { type JobLocation, EventType } from '../../domain/types/queue';
 import type { Shard } from '../../domain/queue/shard';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { RWLock } from '../../shared/lock';
-import { withWriteLock } from '../../shared/lock';
 import { shardIndex } from '../../shared/hash';
 import type { SetLike, MapLike } from '../../shared/lru';
 import { latencyTracker } from '../latencyTracker';
 import { throughputTracker } from '../throughputTracker';
+import { handleCustomId } from './customId';
+import { insertJobToShard } from './pushInsert';
+import { withPushWriteLocks } from './pushLocks';
 
 /** Push operation context */
 export interface PushContext {
@@ -45,86 +40,8 @@ export interface PushContext {
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
 }
 
-/** Result of checking custom ID */
-type CustomIdResult =
-  | { skip: true; existingJob: Job }
-  | { skip: true; existingId: JobId }
-  | { skip: false; id: JobId };
-
 /** Result of deduplication check */
 type DedupResult = { skip: true; existingId: JobId } | { skip: false };
-
-/**
- * Handle custom ID idempotency check
- * Returns existing job if found, or new ID to use
- */
-function handleCustomId(input: JobInput, shard: Shard, ctx: PushContext): CustomIdResult {
-  if (!input.customId) {
-    return { skip: false, id: generateJobId() };
-  }
-
-  const id = jobId(input.customId);
-  const existing = ctx.customIdMap.get(input.customId);
-
-  // Re-adding an existing custom id while its job is UNFINISHED is an idempotent
-  // no-op (BullMQ parity): return the existing job, never a second insert of the
-  // same deterministic id (which would collide on the jobs.id PRIMARY KEY). Three
-  // unfinished states are covered:
-  //   • waiting/delayed/prioritized — live in the priority queue → return the job.
-  //   • waiting-children — tracked under 'queue' but held in shard.waitingDeps (its
-  //     row is already persisted) → idempotent skip via the existing id.
-  //   • active (processing) — popped from the queue, still running on a worker; its
-  //     row survives on disk → idempotent skip via the existing id.
-  // PushContext has no processingShards, so for the latter two we cannot fetch the
-  // live Job here; pushJob rebuilds a placeholder { ...job, id } after createJob,
-  // exactly like handleDeduplication's active path. Completed (#92) and DLQ jobs
-  // are terminal and fall through to the reuse path below.
-  if (existing && !ctx.completedJobs.has(id)) {
-    const location = ctx.jobIndex.get(existing);
-    if (location?.type === 'queue') {
-      const existingJob = shard.getQueue(location.queueName).find(existing);
-      if (existingJob) {
-        return { skip: true, existingJob };
-      }
-      if (shard.waitingDeps.has(existing)) {
-        return { skip: true, existingId: id };
-      }
-    } else if (location?.type === 'processing') {
-      return { skip: true, existingId: id };
-    }
-  }
-
-  // Reuse path: the id is free in the queue (no mapping, or the prior job is
-  // processing/completed). If the prior job COMPLETED, its row survives on disk
-  // (markCompleted does an UPDATE, not a DELETE) and it is still in completedJobs.
-  // Reusing the same deterministic id would then (a) make getJobState return
-  // 'completed' for the brand-new job and (b) collide on the `jobs.id` PRIMARY KEY
-  // at flush time. Evict the stale completed job so the reused id starts fresh as
-  // 'waiting' (#92). Checked regardless of customIdMap state — the mapping may have
-  // been cleared on completion, which would otherwise skip this path entirely.
-  if (ctx.completedJobs.has(id)) {
-    ctx.completedJobs.delete(id);
-    ctx.completedJobsData.delete(id);
-    ctx.jobResults.delete(id);
-    ctx.jobIndex.delete(id);
-    ctx.storage?.deleteJob(id); // removes the surviving row + result + any buffered insert
-  }
-  // NOTE on ORPHAN rows: a durable jobs row can outlive its in-memory tracking when
-  // obliterate() (fire-and-forget void over TCP) or a buffer flush races an in-flight
-  // durable insert. Reaching the reuse path with such a stale row no longer throws —
-  // the insert statements use ON CONFLICT(id) DO UPDATE (upsert), so the orphan is
-  // overwritten in place at insert time with ZERO per-push cost. We deliberately do
-  // NOT pre-delete here: deleteJob() is a synchronous DELETE + O(buffer) scan inside
-  // the shard lock and would halve customId push/addBulk throughput.
-  // A recycled custom id may carry a stale timeout marker from a prior job (which
-  // may have DLQ'd, so it is NOT in completedJobs above). Clear it so the new
-  // job's stall-retry recovery is not wrongly discarded — otherwise the
-  // timeout-resurrection guard would reintroduce #33/#75 duplicate execution for
-  // reused ids.
-  ctx.timedOutJobs?.delete(id);
-  ctx.customIdMap.set(input.customId, id);
-  return { skip: false, id };
-}
 
 /**
  * Handle unique key deduplication
@@ -206,45 +123,6 @@ function handleDeduplication(
 }
 
 /**
- * Insert job into shard (queue or waitingDeps)
- */
-function insertJobToShard(
-  job: Job,
-  queue: string,
-  shard: Shard,
-  shardIdx: number,
-  ctx: PushContext
-): void {
-  const hasDeps = job.dependsOn.length > 0;
-  const needsWaiting =
-    hasDeps &&
-    !job.dependsOn.every(
-      (depId) => ctx.completedJobs.has(depId) || (ctx.depCompletions?.has(depId) ?? false)
-    );
-
-  const now = Date.now();
-  if (needsWaiting) {
-    shard.waitingDeps.set(job.id, job);
-    shard.registerDependencies(job.id, job.dependsOn);
-    job.timeline.push({ state: 'waiting-children', timestamp: now });
-    ctx.dashboardEmit?.('job:waiting-children', {
-      jobId: String(job.id),
-      queue,
-      dependsOn: job.dependsOn.map(String),
-    });
-  } else {
-    shard.getQueue(queue).push(job);
-    const isDelayed = job.runAt > now;
-    shard.incrementQueued(job.id, isDelayed, job.createdAt, queue, job.runAt);
-    // Timeline: initial state based on scheduling and priority
-    const state = isDelayed ? 'delayed' : job.priority > 0 ? 'prioritized' : 'waiting';
-    job.timeline.push({ state, timestamp: now });
-  }
-
-  ctx.jobIndex.set(job.id, { type: 'queue', shardIdx, queueName: queue });
-}
-
-/**
  * Push a single job to queue
  * NOTE: customId check happens INSIDE lock to prevent race conditions
  */
@@ -254,11 +132,11 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
   const now = Date.now();
   let result: { job: Job; persisted: boolean } | undefined;
 
-  await withWriteLock(ctx.shardLocks[idx], () => {
+  await withPushWriteLocks(queue, [input], ctx, (lockedShardIndexes) => {
     const shard = ctx.shards[idx];
 
     // Check custom ID idempotency INSIDE lock to prevent race conditions
-    const customIdResult = handleCustomId(input, shard, ctx);
+    const customIdResult = handleCustomId(input, ctx, lockedShardIndexes);
     if (customIdResult.skip) {
       // Idempotent re-add: return the live queued job if we have it, otherwise
       // (active / waiting-children) a placeholder carrying the existing id so the
@@ -335,12 +213,12 @@ export async function pushJobBatch(
   // downgrades the documented "durable" guarantee.
   const durableJobs: Job[] = [];
 
-  await withWriteLock(ctx.shardLocks[idx], () => {
+  await withPushWriteLocks(queue, inputs, ctx, (lockedShardIndexes) => {
     const shard = ctx.shards[idx];
 
     for (const input of inputs) {
       // Check custom ID idempotency
-      const customIdResult = handleCustomId(input, shard, ctx);
+      const customIdResult = handleCustomId(input, ctx, lockedShardIndexes);
       if (customIdResult.skip) {
         // Idempotent re-add (queued, active, or waiting-children) — no insert.
         resultIds.push(

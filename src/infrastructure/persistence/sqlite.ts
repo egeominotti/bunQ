@@ -6,6 +6,7 @@
 
 import { Database } from 'bun:sqlite';
 import type { Job, JobId, JobTimelineEntry } from '../../domain/types/job';
+import type { StallConfig } from '../../domain/types/stall';
 import type { CronJob } from '../../domain/types/cron';
 import { type DlqEntry, FailureReason, createDlqEntry } from '../../domain/types/dlq';
 import { PRAGMA_SETTINGS, SCHEMA, MIGRATION_TABLE, SCHEMA_VERSION, MIGRATIONS } from './schema';
@@ -16,7 +17,13 @@ import {
   type DbCron,
   type DbQueueState,
 } from './statements';
-import { pack, unpack, rowToJob, reconstructDlqEntry } from './sqliteSerializer';
+import {
+  pack,
+  persistedStallCount,
+  reconstructDlqEntry,
+  rowToJob,
+  unpack,
+} from './sqliteSerializer';
 import { BatchInsertManager, WriteBuffer } from './sqliteBatch';
 import { storageLog } from '../../shared/logger';
 
@@ -327,6 +334,7 @@ export class SqliteStorage {
         job.removeOnComplete ? 1 : 0,
         job.removeOnFail ? 1 : 0,
         job.stallTimeout,
+        persistedStallCount(job),
         job.timeline.length > 0 ? pack(job.timeline) : null
       );
   }
@@ -404,6 +412,39 @@ export class SqliteStorage {
     });
   }
 
+  /**
+   * Permanently purge terminal DLQ jobs in one transaction.
+   * Pending buffered inserts are removed first so a purged job cannot be
+   * written back after the transaction commits.
+   */
+  purgeDlqEntries(
+    queue: string,
+    dlqJobIds: readonly JobId[],
+    terminalJobIds: readonly JobId[],
+    clearQueue: boolean
+  ): void {
+    for (const jobId of terminalJobIds) this.writeBuffer.removePending(jobId);
+
+    this.safeWrite(() => {
+      const deleteDlq = this.statements.get('deleteDlqEntryForQueue')!;
+      const clearDlq = this.statements.get('clearDlqQueue')!;
+      const deleteJob = this.statements.get('deleteJob')!;
+      const deleteResult = this.statements.get('deleteJobResult')!;
+      const tx = this.db.transaction(() => {
+        if (clearQueue) {
+          clearDlq.run(queue);
+        } else {
+          for (const jobId of dlqJobIds) deleteDlq.run(jobId, queue);
+        }
+        for (const jobId of terminalJobIds) {
+          deleteJob.run(jobId);
+          deleteResult.run(jobId);
+        }
+      });
+      tx();
+    });
+  }
+
   /** Load all DLQ entries */
   loadDlq(): Map<string, DlqEntry[]> {
     interface DbDlqRow {
@@ -436,10 +477,11 @@ export class SqliteStorage {
     this.safeWrite(() => {
       this.db
         .prepare(
-          'UPDATE jobs SET attempts = ?, run_at = ?, state = ?, timeline = ?, stacktrace = ? WHERE id = ?'
+          'UPDATE jobs SET attempts = ?, stall_count = ?, run_at = ?, state = ?, timeline = ?, stacktrace = ? WHERE id = ?'
         )
         .run(
           job.attempts,
+          persistedStallCount(job),
           job.runAt,
           'waiting',
           job.timeline.length > 0 ? pack(job.timeline) : null,
@@ -470,8 +512,19 @@ export class SqliteStorage {
 
   /** Update a job's data blob (e.g. after adding __parentId) */
   updateJobData(jobId: JobId, data: unknown): void {
+    this.flushIfBuffered(jobId);
     this.safeWrite(() => {
       this.db.prepare('UPDATE jobs SET data = ? WHERE id = ?').run(pack(data), jobId);
+    });
+  }
+
+  /** Persist priority ordering, including its LIFO tie-break, across recovery. */
+  updateJobPriority(jobId: JobId, priority: number, lifo: boolean): void {
+    this.flushIfBuffered(jobId);
+    this.safeWrite(() => {
+      this.db
+        .prepare('UPDATE jobs SET priority = ?, lifo = ? WHERE id = ?')
+        .run(priority, lifo ? 1 : 0, jobId);
     });
   }
 
@@ -841,6 +894,7 @@ export class SqliteStorage {
       concurrencyLimit: number | null;
       rateLimitDuration?: number | null;
       rateLimitExpiresAt?: number | null;
+      stallConfig?: StallConfig | null;
     }
   ): void {
     this.safeWrite(() => {
@@ -852,7 +906,15 @@ export class SqliteStorage {
           state.rateLimit,
           state.concurrencyLimit,
           state.rateLimitDuration ?? null,
-          state.rateLimitExpiresAt ?? null
+          state.rateLimitExpiresAt ?? null,
+          state.stallConfig === null || state.stallConfig === undefined
+            ? null
+            : state.stallConfig.enabled
+              ? 1
+              : 0,
+          state.stallConfig?.stallInterval ?? null,
+          state.stallConfig?.maxStalls ?? null,
+          state.stallConfig?.gracePeriod ?? null
         );
     });
   }
@@ -865,6 +927,7 @@ export class SqliteStorage {
     concurrencyLimit: number | null;
     rateLimitDuration: number | null;
     rateLimitExpiresAt: number | null;
+    stallConfig: StallConfig | null;
   }> {
     const rows = this.statements.get('loadQueueState')!.all() as DbQueueState[];
     return rows.map((row) => ({
@@ -874,6 +937,18 @@ export class SqliteStorage {
       concurrencyLimit: row.concurrency_limit,
       rateLimitDuration: row.rate_limit_duration ?? null,
       rateLimitExpiresAt: row.rate_limit_expires_at ?? null,
+      stallConfig:
+        row.stall_enabled === null ||
+        row.stall_interval === null ||
+        row.max_stalls === null ||
+        row.stall_grace_period === null
+          ? null
+          : {
+              enabled: row.stall_enabled === 1,
+              stallInterval: row.stall_interval,
+              maxStalls: row.max_stalls,
+              gracePeriod: row.stall_grace_period,
+            },
     }));
   }
 

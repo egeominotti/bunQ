@@ -140,11 +140,13 @@ describe('SqliteStorage', () => {
       storage.insertJobImmediate(job);
 
       job.attempts = 2;
+      job.stallCount = 1;
       job.runAt = Date.now() + 5000;
       storage.updateForRetry(job);
 
       const retrieved = storage.getJob(job.id);
       expect(retrieved?.attempts).toBe(2);
+      expect(retrieved?.stallCount).toBe(1);
       expect(retrieved?.runAt).toBe(job.runAt);
     });
   });

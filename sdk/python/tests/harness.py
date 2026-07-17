@@ -95,11 +95,14 @@ def wait_until(predicate: Callable[[], bool], timeout: float = 15.0, interval: f
 def run_registered(server: Server) -> int:
     failed = 0
     for name, fn in TESTS:
+        started = time.monotonic()
         try:
             fn(server)
-            print(f"PASS {name}")
+            duration_ms = (time.monotonic() - started) * 1000
+            print(f"PASS {name} ({duration_ms:.1f}ms)")
         except Exception:  # noqa: BLE001
             failed += 1
-            print(f"FAIL {name}")
+            duration_ms = (time.monotonic() - started) * 1000
+            print(f"FAIL {name} ({duration_ms:.1f}ms)")
             traceback.print_exc()
     return failed

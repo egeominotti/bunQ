@@ -1,20 +1,14 @@
 package bunqueue
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"reflect"
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 // TLSOptions configures the client side of a TLS connection. Certificates
@@ -34,6 +28,7 @@ type Options struct {
 	TLS            *TLSOptions
 	ConnectTimeout time.Duration // default 10s
 	CommandTimeout time.Duration // default 30s
+	OnEvent        TelemetryCallback
 }
 
 func (o Options) withDefaults() Options {
@@ -56,11 +51,13 @@ func (o Options) withDefaults() Options {
 // out, one frame in. A read timeout tears the socket down (half-open guard)
 // and the next call transparently reconnects and re-authenticates.
 type Connection struct {
-	opts       Options
-	mu         sync.Mutex
-	conn       net.Conn
-	generation int
-	reqCounter int
+	opts          Options
+	mu            sync.Mutex
+	conn          net.Conn
+	generation    int
+	hasConnected  bool
+	reqCounter    int
+	pendingEvents []TelemetryEvent
 }
 
 // NewConnection builds a lazy connection: the socket opens on the first call.
@@ -86,8 +83,11 @@ func (c *Connection) IsConnected() bool {
 // EnsureConnected opens (and authenticates) the socket now.
 func (c *Connection) EnsureConnected() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ensureConnectedLocked()
+	err := c.ensureConnectedLocked()
+	events := c.takeEventsLocked()
+	c.mu.Unlock()
+	c.deliverEvents(events)
+	return err
 }
 
 // Call sends a command and returns the decoded response map.
@@ -101,15 +101,26 @@ func (c *Connection) CallTimeout(command map[string]any, timeout time.Duration) 
 	if timeout <= 0 {
 		timeout = c.opts.CommandTimeout
 	}
+	started := time.Now()
+	name := commandName(command)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if err := c.ensureConnectedLocked(); err != nil {
+		c.queueEventLocked("command", name, time.Since(started), err)
+		c.queueEventLocked("error", name, time.Since(started), err)
+		events := c.takeEventsLocked()
+		c.mu.Unlock()
+		c.deliverEvents(events)
 		return nil, err
 	}
 	c.reqCounter++
 	command["reqId"] = "go-" + strconv.Itoa(c.reqCounter)
 	response, err := c.roundTripLocked(command, timeout)
 	if err != nil {
+		c.queueEventLocked("command", name, time.Since(started), err)
+		c.queueEventLocked("error", name, time.Since(started), err)
+		events := c.takeEventsLocked()
+		c.mu.Unlock()
+		c.deliverEvents(events)
 		return nil, err
 	}
 	if !asBool(response["ok"]) {
@@ -117,8 +128,18 @@ func (c *Connection) CallTimeout(command map[string]any, timeout time.Duration) 
 		if message == "" {
 			message = "unknown server error"
 		}
-		return nil, &CommandError{Message: message}
+		commandErr := &CommandError{Message: message}
+		c.queueEventLocked("command", name, time.Since(started), commandErr)
+		c.queueEventLocked("error", name, time.Since(started), commandErr)
+		events := c.takeEventsLocked()
+		c.mu.Unlock()
+		c.deliverEvents(events)
+		return nil, commandErr
 	}
+	c.queueEventLocked("command", name, time.Since(started), nil)
+	events := c.takeEventsLocked()
+	c.mu.Unlock()
+	c.deliverEvents(events)
 	return response, nil
 }
 
@@ -143,8 +164,10 @@ func (c *Connection) Ping() (bool, error) {
 // Close shuts the socket down; the next Call reconnects.
 func (c *Connection) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.closeLocked()
+	events := c.takeEventsLocked()
+	c.mu.Unlock()
+	c.deliverEvents(events)
 }
 
 // ---------------------------------------------------------------- internals
@@ -153,6 +176,7 @@ func (c *Connection) closeLocked() {
 	if c.conn != nil {
 		_ = c.conn.Close()
 		c.conn = nil
+		c.queueEventLocked("close", "", 0, nil)
 	}
 }
 
@@ -169,10 +193,18 @@ func (c *Connection) ensureConnectedLocked() error {
 		conn, err = net.DialTimeout("tcp", address, c.opts.ConnectTimeout)
 	}
 	if err != nil {
-		return &ConnectionError{Message: fmt.Sprintf("connect to %s failed: %v", address, err)}
+		connectionErr := &ConnectionError{Message: fmt.Sprintf("connect to %s failed: %v", address, err)}
+		c.queueEventLocked("error", "", 0, connectionErr)
+		return connectionErr
 	}
+	reconnecting := c.hasConnected
 	c.conn = conn
 	c.generation++
+	c.hasConnected = true
+	if reconnecting {
+		c.queueEventLocked("reconnect", "", 0, nil)
+	}
+	c.queueEventLocked("connected", "", 0, nil)
 	if c.opts.Token != "" {
 		if err := c.authenticateLocked(); err != nil {
 			return err
@@ -210,6 +242,7 @@ func (c *Connection) authenticateLocked() error {
 		c.opts.CommandTimeout,
 	)
 	if err != nil {
+		c.queueEventLocked("auth", "Auth", 0, err)
 		return err
 	}
 	if !asBool(response["ok"]) {
@@ -218,105 +251,10 @@ func (c *Connection) authenticateLocked() error {
 		if message == "" {
 			message = "authentication failed"
 		}
-		return &AuthError{Message: message}
+		authErr := &AuthError{Message: message}
+		c.queueEventLocked("auth", "Auth", 0, authErr)
+		return authErr
 	}
+	c.queueEventLocked("auth", "Auth", 0, nil)
 	return nil
-}
-
-// jsUndefined stands in for msgpackr's ext id 0 (JS `undefined`); the asX
-// decode helpers treat it like an absent value.
-type jsUndefined struct{}
-
-func init() {
-	// msgpackr packs JS `undefined` as ext id 0: decode it as a placeholder
-	// instead of failing the whole frame with "unknown ext id".
-	msgpack.RegisterExtDecoder(0, jsUndefined{}, func(d *msgpack.Decoder, v reflect.Value, extLen int) error {
-		skip := make([]byte, extLen)
-		_, err := io.ReadFull(d.Buffered(), skip)
-		return err
-	})
-}
-
-// encodeFrame marshals with compact ints: without it, Go int64 values travel
-// as msgpack int64 even when tiny, and the server (msgpackr) decodes them as
-// BigInt — crashing validation and JSON serialization (BigInt-killer class).
-func encodeFrame(value any) ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := msgpack.NewEncoder(&buf)
-	encoder.UseCompactInts(true)
-	if err := encoder.Encode(value); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func (c *Connection) roundTripLocked(command map[string]any, timeout time.Duration) (map[string]any, error) {
-	frame, err := encodeFrame(jsSafe(compact(command)))
-	if err != nil {
-		return nil, &ConnectionError{Message: "encode failed: " + err.Error()}
-	}
-	if len(frame)+4 > MaxFrameSize {
-		return nil, &CommandError{Message: "frame exceeds the 64MB protocol limit"}
-	}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(frame)))
-	deadline := time.Now().Add(timeout)
-	_ = c.conn.SetWriteDeadline(deadline)
-	if _, err := c.conn.Write(append(header, frame...)); err != nil {
-		c.closeLocked()
-		return nil, &ConnectionError{Message: "socket write failed: " + err.Error()}
-	}
-	expected := asString(command["reqId"])
-	for {
-		response, err := c.readFrameLocked(deadline)
-		if err != nil {
-			return nil, err
-		}
-		reqID, present := response["reqId"]
-		if !present || asString(reqID) == expected {
-			return response, nil
-		}
-	}
-}
-
-func (c *Connection) readFrameLocked(deadline time.Time) (map[string]any, error) {
-	header, err := c.readExactlyLocked(4, deadline)
-	if err != nil {
-		return nil, err
-	}
-	length := binary.BigEndian.Uint32(header)
-	if length > MaxFrameSize {
-		c.closeLocked()
-		return nil, &ConnectionError{Message: fmt.Sprintf("oversized frame from server (%d bytes)", length)}
-	}
-	body, err := c.readExactlyLocked(int(length), deadline)
-	if err != nil {
-		return nil, err
-	}
-	var decoded map[string]any
-	if err := msgpack.Unmarshal(body, &decoded); err != nil {
-		c.closeLocked()
-		return nil, &ConnectionError{Message: "malformed response frame: " + err.Error()}
-	}
-	return decoded, nil
-}
-
-func (c *Connection) readExactlyLocked(length int, deadline time.Time) ([]byte, error) {
-	buffer := make([]byte, length)
-	offset := 0
-	_ = c.conn.SetReadDeadline(deadline)
-	for offset < length {
-		n, err := c.conn.Read(buffer[offset:])
-		if err != nil {
-			c.closeLocked()
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// Half-open guard (issue #94 class): a timed-out socket can no
-				// longer be trusted for framing — tear down, reconnect later.
-				return nil, &CommandTimeoutError{Message: "command timed out (socket torn down, will reconnect)"}
-			}
-			return nil, &ConnectionError{Message: "connection closed by server: " + err.Error()}
-		}
-		offset += n
-	}
-	return buffer, nil
 }

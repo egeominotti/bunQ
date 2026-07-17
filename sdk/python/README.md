@@ -22,8 +22,8 @@ Native TCP protocol (msgpack, pipelined), one runtime dependency (`msgpack`), sy
 Python client for [bunqueue](https://github.com/egeominotti/bunqueue), the
 high-performance job queue server for Bun. Talks the native TCP protocol
 (msgpack, pipelined) with the same core API as the TypeScript SDK, including
-opt-in ACK batching. Connection pooling and the observability hooks are
-TypeScript-only for now.
+opt-in ACK batching and dependency-free structured transport telemetry.
+Connection pooling remains TypeScript-only for now.
 
 The bunqueue **server** runs on Bun (or as a compiled binary / Docker). This
 SDK lets any Python service produce and consume jobs on it: *one queue, any
@@ -94,7 +94,7 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
   dedup/debounce defaults, cron shorthands — 1:1 with the official client
   (TCP mode; `embedded` raises)
 - **Connection**: auth token, TLS (`tls=True`, `{"ca_file": ...}`,
-  `{"verify": False}`), pipelining, lazy reconnect
+  `{"verify": False}`), pipelining, lazy reconnect, structured telemetry
 
 Not applicable outside Bun (by design): embedded mode, sandboxed workers,
 `QueueEvents` (in-process subscription; use webhooks or SSE/WS on the HTTP
@@ -118,6 +118,21 @@ The SDK logs its otherwise-silent failure points (swallowed command errors,
 raising listeners, failed registrations) at warning level on the `bunqueue`
 logger; attach a handler to see them.
 
+### Structured telemetry
+
+Pass `on_telemetry` to `Connection` or `Queue` to bridge transport metrics to
+OpenTelemetry, Prometheus, or your logger without adding an SDK dependency:
+
+```python
+queue = Queue("emails", on_telemetry=lambda event: metrics.record(event))
+```
+
+Events cover `connect`, `disconnect`, `reconnect_scheduled`, `auth`, `command`,
+`command_timeout`, and `error`. Command events contain the command name,
+request id, outcome, and monotonic duration. Payloads and authentication tokens
+are never included. A telemetry callback that raises is isolated from the
+transport and cannot fail a queue operation.
+
 ## Protocol notes
 
 - Wire: 4-byte big-endian length prefix + standard msgpack map per message;
@@ -126,13 +141,24 @@ logger; attach a handler to see them.
   msgpack decoder turns int64 into `BigInt`, which its arithmetic rejects.
   The SDK handles this automatically. Consequence: integers larger than 2^53
   (e.g. 64-bit snowflake IDs) lose precision — pass them as **strings**.
+- Command maps require string keys at every nesting level. Cyclic containers
+  and integers outside the float64 range raise `SerializationError` locally,
+  before a pending request is registered or any bytes are written. Binary
+  values and array-like lists/tuples are preserved by the wire normalizer.
 
 ## Tests
 
 ```bash
 python -m venv .venv && .venv/bin/pip install msgpack
 .venv/bin/python tests/test_integration.py   # basic (8)
-.venv/bin/python tests/run_e2e.py            # full e2e vs real server (78)
+.venv/bin/python tests/run_e2e.py            # full e2e vs real server (112)
+BUNQUEUE_SDK_SOAK_SECONDS=3600 .venv/bin/python tests/soak.py
 ```
 
-Both spawn a real bunqueue server (`bun src/main.ts` from the repo root).
+Both spawn a real bunqueue server (`bun src/main.ts` from the repo root). The
+E2E runner emits a monotonic duration for each case so the isolated SDK gate
+can rank slow tests without relying on timing assertions. Hardening covers
+independent-connection idempotency and single-lease contention, fixed-seed
+generated payloads, malformed mutation corpora, 1000-job bursts, and
+crash/restart recovery. The opt-in soak keeps one connection alive; set
+`BUNQUEUE_SDK_SOAK_BATCH` to increase load.

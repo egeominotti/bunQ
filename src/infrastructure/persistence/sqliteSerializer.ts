@@ -27,6 +27,15 @@ export function unpack<T>(buffer: Uint8Array | null, fallback: T, context: strin
 }
 
 /**
+ * Normalize jobs constructed by pre-stallCount integrations at the persistence
+ * boundary. The database keeps its NOT NULL invariant while an omitted legacy
+ * field receives the same zero default as a freshly created Job.
+ */
+export function persistedStallCount(job: Pick<Job, 'stallCount'>): number {
+  return job.stallCount ?? 0;
+}
+
+/**
  * Symbol marker stamped on a Job whose `depends_on` blob failed to decode.
  *
  * A corrupt dependency list must NOT collapse into `dependsOn: []` (which the
@@ -113,7 +122,7 @@ export function rowToJob(row: DbJob): Job {
     repeat: null,
     lastHeartbeat: row.last_heartbeat ?? row.created_at,
     stallTimeout: row.stall_timeout,
-    stallCount: 0,
+    stallCount: row.stall_count ?? 0,
     // BullMQ v5 additional fields (not persisted in DB, use defaults)
     stackTraceLimit: 10,
     keepLogs: null,

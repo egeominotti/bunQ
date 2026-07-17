@@ -18,12 +18,56 @@ bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites
 
 Never commit without all three passing. No exceptions.
 
+**MANDATORY for core queue semantics: run the real-broker model before the
+sandbox:**
+
+```bash
+bun run test:model
+```
+
+Run it after every change to lifecycle transitions, SQLite/write buffering,
+startup or stall recovery, priority/FIFO/LIFO/delay scheduling, FIFO groups,
+dependencies, dedup/custom IDs, leases, limits, TTL, counters, temporal indexes,
+or `jobIndex`. The `fast-check` model executes generated command histories
+against a fresh TCP broker and SQLite database, including actual `SIGKILL`
+restarts. It checks conservation, no loss/resurrection/duplicate active lease,
+retry and stall bounds, legal transitions, ordering, resource limits,
+counter/index coherence, idempotent recovery, and DLQ exactly-once.
+
+On failure, retain the seed, minimized command history, and replay path. If the
+engine is wrong, add a deterministic `test/repro-model-*.test.ts` that fails
+before changing runtime code; if the specification is wrong, correct the model
+with evidence. Never weaken an invariant to make a campaign green. Deeper replay:
+
+```bash
+BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150 \
+BUNQUEUE_MODEL_SEED=-1959189325 bun run test:model
+```
+
+This targeted command does not replace `bun run test:sandbox`; plain `bun test`
+inside the sandbox runs the model again.
+
+**MANDATORY: After ANY modification under `sdk/`, run before handoff (and run
+again before committing if the SDK changed afterward):**
+
+```bash
+bun run test:sandbox:sdk
+```
+
+It runs every official external SDK's native tests and shared protocol
+conformance checks in isolated disposable containers. SDK changes require both
+full gates (`test:sandbox` and `test:sandbox:sdk`); targeted native tests do not
+replace either one. Review `artifacts/test-sandbox-sdk/<timestamp>/summary.md`
+and its JSON/NDJSON artifacts before handoff.
+
 ### Test isolation rules
 
 - Use native targeted tests for the fast edit/debug loop; use `bun run test:sandbox` as the authoritative full gate.
 - The three top-level suite containers run in parallel by default; use `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose resource contention.
 - Isolation covers processes, writable filesystems, `/tmp`, network namespaces, ports, databases, and environment. It is not physical isolation: containers share the OrbStack VM kernel plus host CPU, memory, and disk scheduling. Reproduce parallel-only failures sequentially before classifying them as application bugs.
 - Use `artifacts/test-sandbox/<timestamp>/` for complete, untruncated suite logs; failed containers remain available for inspection.
+- Use `artifacts/test-sandbox-sdk/<timestamp>/` for the equivalent SDK logs,
+  telemetry and retained failed containers.
 - Every sandbox run must also preserve per-suite resource samples (`*.metrics.ndjson`), per-suite JSON, and aggregate `summary.json`/`summary.md`. Review CPU, memory, PID, I/O, duration, slow-test, OOM, and anomaly KPIs before handoff.
 - Container memory growth is an investigation signal, not automatic proof of a leak; individual tests share the same process and heap. Confirm leaks with focused repeated-process and post-GC evidence.
 - The sandbox must not mount the repository, Docker socket, credentials, or the user's home, and test containers must have no external network.

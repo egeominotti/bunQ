@@ -24,6 +24,9 @@ type testServer struct {
 var shared *testServer
 
 func TestMain(m *testing.M) {
+	if os.Getenv("BUNQUEUE_TEST_UNIT_ONLY") == "1" {
+		os.Exit(m.Run())
+	}
 	shared = newTestServer(nil)
 	if err := shared.start(); err != nil {
 		fmt.Fprintln(os.Stderr, "server start failed:", err)

@@ -5,9 +5,6 @@
   "scripts": {
     "test": "node run.mjs"
   },
-  "dependencies": {
-    "bunqueue-client": "file:./bunqueue-client.tgz"
-  },
   "devDependencies": {
     "wrangler": "^4"
   }

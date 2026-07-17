@@ -5,6 +5,8 @@ from __future__ import annotations
 import ssl
 from typing import Any, Dict, Optional, Union
 
+from .errors import SerializationError
+
 PROTOCOL_VERSION = 2
 MAX_FRAME_SIZE = 64 * 1024 * 1024  # mirror server-side limit
 
@@ -23,15 +25,61 @@ def _compact(command: Dict[str, Any]) -> Dict[str, Any]:
 _INT32_MIN, _INT32_MAX = -(2**31), 2**31 - 1
 
 
-def _js_safe(value: Any) -> Any:
+def _js_safe(
+    value: Any,
+    _active: Optional[set[int]] = None,
+    _path: str = "$",
+) -> Any:
+    """Normalize a command for msgpackr without silently changing map keys.
+
+    Only containers on the active recursion path are tracked. Reusing the same
+    list or map in two independent branches is valid, while an actual cycle is
+    rejected before msgpack serialization or socket writes.
+    """
     if isinstance(value, bool):
         return value
     if isinstance(value, int) and not (_INT32_MIN <= value <= _INT32_MAX):
-        return float(value)
+        try:
+            return float(value)
+        except OverflowError as exc:
+            raise SerializationError(f"integer at {_path} exceeds float64 range") from exc
+    if _active is None:
+        _active = set()
     if isinstance(value, dict):
-        return {k: _js_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_js_safe(v) for v in value]
+        identity = id(value)
+        if identity in _active:
+            raise SerializationError(f"cyclic container at {_path}")
+        _active.add(identity)
+        try:
+            normalized = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise SerializationError(f"map key at {_path} must be a string")
+                normalized[key] = _js_safe(item, _active, f"{_path}.{key}")
+            return normalized
+        finally:
+            _active.remove(identity)
+    if isinstance(value, list):
+        identity = id(value)
+        if identity in _active:
+            raise SerializationError(f"cyclic container at {_path}")
+        _active.add(identity)
+        try:
+            return [_js_safe(item, _active, f"{_path}[{index}]") for index, item in enumerate(value)]
+        finally:
+            _active.remove(identity)
+    if isinstance(value, tuple):
+        identity = id(value)
+        if identity in _active:
+            raise SerializationError(f"cyclic container at {_path}")
+        _active.add(identity)
+        try:
+            return tuple(
+                _js_safe(item, _active, f"{_path}[{index}]")
+                for index, item in enumerate(value)
+            )
+        finally:
+            _active.remove(identity)
     return value
 
 

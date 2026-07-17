@@ -219,6 +219,8 @@ export class ContextFactory {
       processingShards: this.deps.processingShards,
       processingLocks: this.deps.processingLocks,
       jobIndex: this.deps.jobIndex,
+      jobLocks: this.deps.jobLocks,
+      clientJobs: this.deps.clientJobs,
       webhookManager: this.deps.webhookManager,
       eventsManager: this.deps.eventsManager,
       repeatChain: this.deps.repeatChain,
@@ -244,6 +246,8 @@ export class ContextFactory {
     return {
       shards: this.deps.shards,
       jobIndex: this.deps.jobIndex,
+      jobResults: this.deps.jobResults,
+      jobLogs: this.deps.jobLogs,
       storage: this.deps.storage,
     };
   }
@@ -252,6 +256,7 @@ export class ContextFactory {
     return {
       shards: this.deps.shards,
       jobIndex: this.deps.jobIndex,
+      jobLogs: this.deps.jobLogs,
       storage: this.deps.storage,
       completedJobs: this.deps.completedJobs,
       jobResults: this.deps.jobResults,

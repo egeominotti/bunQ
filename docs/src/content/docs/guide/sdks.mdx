@@ -1,6 +1,6 @@
 ---
-title: "SDKs: Node.js, Deno, Python, PHP, Go, Workers"
-description: "Official SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers: one wire protocol, the same Queue and Worker API everywhere."
+title: "SDKs: TypeScript, Python, PHP, Go, Rust, Elixir"
+description: "Six production-grade official SDKs for Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers."
 head:
   - tag: meta
     attrs:
@@ -13,10 +13,10 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · sdks</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Client SDKs for every <em>runtime.</em></h1>
-  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers. Each one speaks the native TCP protocol, msgpack and pipelined, with the same Queue and Worker API in every language.</p>
+  <p class="bq-hero-sub">Official client SDKs for Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers. Each speaks the native TCP protocol and MessagePack through an idiomatic Queue and Worker API.</p>
 
   <div class="bq-proof">
-    <span><b>6</b> languages and runtimes, one queue</span>
+    <span><b>6</b> official SDKs, one queue</span>
     <span><b>1</b> formal, versioned wire protocol</span>
     <span>produce in one language, <b>consume in another</b></span>
     <span>retries, priorities, cron, DLQ: <b>all server-side</b></span>
@@ -36,8 +36,17 @@ against the same queue, with no shared runtime and no translation layer.
 | Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.9 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
 | Python ≥ 3.9 | `bunqueue-client` | 0.1.4 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
 | PHP ≥ 8.1 | `bunqueue/client` | 0.1.0 | Packagist upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) |
-| Go ≥ 1.22 | `github.com/egeominotti/bunqueue/sdk/go` | 0.1.0 | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
+| Go 1.26.5 | `github.com/egeominotti/bunqueue/sdk/go` | 0.1.0 | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
+| Rust ≥ 1.85 | `bunqueue-client` | 0.1.0 | crates.io upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) |
+| Elixir ≥ 1.15 | `bunqueue_client` | 0.1.0 | Hex upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) |
 | Bun, embedded in process, no server | `bunqueue` | - | [Quick Start](/guide/quickstart/) |
+
+WebAssembly is a feasible target, but not one portable runtime. Browser WASM
+has no standard raw-TCP API, so a browser SDK needs a bunqueue HTTP/WebSocket
+bridge or a host-specific socket capability. WASI can reuse the Rust protocol
+core only where the host grants sockets and TLS. A WASM target will become
+official only when it can run the same conformance suite without weakening
+authentication, TLS, framing, or telemetry guarantees.
 
 Every SDK is versioned independently from the server and follows semantic
 versioning. The wire protocol is versioned too (`protocolVersion: 2`,
@@ -172,6 +181,22 @@ go get github.com/egeominotti/bunqueue/sdk/go
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```bash
+# crates.io release upcoming; use sdk/rust as a path dependency today
+cargo add bunqueue-client --path ../bunqueue/sdk/rust
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Hex release upcoming; use sdk/elixir as a path dependency today
+{:bunqueue_client, path: "../bunqueue/sdk/elixir"}
+```
+
+</TabItem>
 </Tabs>
 
 ### 3. Produce jobs
@@ -217,6 +242,25 @@ queue := bunqueue.NewQueue("emails", bunqueue.Options{})
 defer queue.Close()
 
 queue.Add("welcome", map[string]any{"to": "user@example.com"}, nil)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value};
+
+let queue = Queue::new("emails", ConnectionOptions::default());
+let data = Value::Map(vec![(Value::from("to"), Value::from("user@example.com"))]);
+queue.add("welcome", data, JobOptions::default())?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+{:ok, _job} = Bunqueue.Queue.add(queue, "welcome", %{to: "user@example.com"})
 ```
 
 </TabItem>
@@ -279,6 +323,37 @@ worker.Run()
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ProcessError, Value, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "emails",
+    |job| {
+        deliver(job.data())
+            .map(|_| Value::from(true))
+            .map_err(|error| ProcessError::retryable(error.to_string()))
+    },
+    WorkerOptions::default(),
+);
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    send_email(job.data)
+    {:ok, %{sent: true}}
+  end, concurrency: 8)
+
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
 </Tabs>
 
 Run either file with the runtime you already use:
@@ -290,6 +365,8 @@ deno run -A app.ts                        # Deno 2 or later
 python app.py                             # Python
 php worker.php                            # PHP
 go run .                                  # Go
+cargo run                                # Rust
+mix run app.exs                          # Elixir
 ```
 
 Producer and worker are usually separate services, often in different
@@ -311,8 +388,8 @@ Understanding four facts about the transport explains most SDK behavior:
 3. **Authentication-first**, when a token is configured, `Auth` is
    guaranteed to be the first frame on every (re)connection, in every SDK:
    TypeScript through synchronous write ordering, Python through a
-   connection lock (safe under free-threaded concurrency), PHP and Go
-   inside the connect sequence itself.
+   connection lock (safe under free-threaded concurrency), and PHP, Go,
+   Rust, and Elixir inside the connect sequence itself.
 4. **The job name travels inside `data`**, `add('welcome', {to})` is
    encoded as `data: { name: 'welcome', to }`. Non-object payloads are
    wrapped as `{ name, payload }`.
@@ -377,24 +454,60 @@ queue := bunqueue.NewQueue("emails", bunqueue.Options{
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::{path::PathBuf, time::Duration};
+use bunqueue_client::{ConnectionOptions, Queue, TlsOptions};
+
+let queue = Queue::new("emails", ConnectionOptions {
+    host: "queue.example.com".into(),
+    port: 6789,
+    token: std::env::var("BUNQUEUE_TOKEN").ok(),
+    tls: Some(TlsOptions { ca_file: Some(PathBuf::from("./ca.pem")) }),
+    connect_timeout: Duration::from_secs(10),
+    command_timeout: Duration::from_secs(30),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue =
+  Bunqueue.queue("emails",
+    host: "queue.example.com",
+    port: 6789,
+    token: System.fetch_env!("BUNQUEUE_TOKEN"),
+    tls: true,
+    ca_file: "./ca.pem",
+    timeout: 30_000
+  )
+```
+
+</TabItem>
 </Tabs>
 
 The command timeout governs how long each in-flight command waits for a
-response. In TypeScript and Python the TCP connect timeout is internal
-(5 seconds); PHP and Go expose it as an option (10 seconds by default).
+response. TypeScript and Python keep the TCP connect timeout internal; PHP, Go,
+and Rust expose it separately. Elixir applies its timeout to connect and
+command exchange.
 
 ### Connection resilience
 
-Every SDK implements the same production-grade recovery model:
+Every SDK preserves the same recovery invariants; implementation details follow
+the runtime:
 
-| Mechanism | Behavior |
+| Mechanism | Availability and behavior |
 |---|---|
-| Lazy reconnect | A lost connection reconnects transparently on the next call; workers re-register automatically after every reconnect (generation counter) |
-| Reconnect backoff | Exponential 500 ms → 5 s with a fast-fail window, so a producer calling `add()` against a downed server does not pay the full connect timeout on every call |
-| TCP keepalive | Enabled at ~15 s idle: a half-open link (cloud NAT / load-balancer idle drop with no FIN/RST) is detected in seconds instead of the OS-level ~15 minutes |
-| Timeout-driven teardown | Three consecutive command timeouts tear the socket down so the next call reconnects, generation-guarded, so a stale timeout can never abort a freshly reconnected socket |
-| Backpressure (TypeScript) | With `maxInFlight` set, callers park until an in-flight slot frees instead of growing memory without bound under a fast producer / slow server |
-| Auth ordering | No command can race ahead of the `Auth` frame on a reconnect, a dropped ACK caused by that race would otherwise resurface as a silent duplicate execution |
+| Lazy reconnect | All six: a lost connection reconnects on the next call; workers re-register after every connection generation |
+| Worker retry backoff | All six retry a failed pull loop without spinning; TypeScript, Python, PHP, Go, and Rust use bounded backoff, while Elixir uses a short fixed delay |
+| Producer fast-fail window | TypeScript and Python throttle repeated failed connection attempts (500 ms → 5 s) |
+| TCP keepalive | TypeScript and Python enable an approximately 15 s idle probe where the OS exposes the controls |
+| Timeout-driven teardown | All six discard a stream whose framing state is ambiguous; TypeScript/Python tolerate a configurable consecutive-timeout threshold, PHP/Go/Rust/Elixir tear down immediately |
+| Backpressure | TypeScript optionally parks callers at `maxInFlight`; the synchronous clients naturally serialize/bound calls |
+| Auth ordering | All six prevent any command racing ahead of `Auth` after a reconnect |
 
 ## Producing jobs
 
@@ -404,8 +517,9 @@ Every option is validated server-side; identical semantics in every SDK.
 Naming follows each language's idiom: TypeScript and PHP use camelCase keys
 (`attempts`, `jobId`, `removeOnComplete`), Python uses snake_case
 (`attempts`, `job_id`, `remove_on_complete`), Go takes a
-`bunqueue.JobOptions` map with the camelCase keys. Unknown options raise an
-error in every SDK instead of being silently dropped.
+`bunqueue.JobOptions` map with the camelCase keys, Rust uses typed
+`JobOptions` fields, and Elixir accepts keyword or map options. Unknown options
+raise an error in every SDK instead of being silently dropped.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
@@ -538,17 +652,17 @@ throughput: one round-trip for the whole batch.
 
 | Option | Default | Notes |
 |---|---|---|
-| `concurrency` | 4 | Jobs processed in parallel (TypeScript, Python, Go; the PHP worker is sequential by design, scale it with more processes) |
-| `batchSize` | 10 | Jobs fetched per `PULLB`, capped by free slots and the server max (1000) |
-| `pollTimeoutMs` | 5000 | Server-side long-poll; max 30 000 |
+| `concurrency` | 4 in TypeScript/Python/Go/Rust; 1 in Elixir/PHP | Jobs processed in parallel except PHP, which is sequential by design |
+| `batchSize` | usually 10; Elixir defaults to concurrency | Jobs fetched per `PULLB`, capped by free slots and the server max (1000) |
+| `pollTimeoutMs` | usually 5000; Elixir 1000 | Server-side long-poll; max 30 000 |
 | `lockTtlMs` | 30 000 | Job lease TTL |
-| `heartbeatIntervalS` | 10 | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
+| `heartbeatIntervalS` | 10; Go defaults to disabled | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
 | `ackBatch` | off | Opt-in ACK batching (below; TypeScript and Python) |
-| `autorun` | true | Start the pull loop at construction (TypeScript and Python; PHP and Go start explicitly with `run()` / `Run()`) |
+| `autorun` | true where exposed | TypeScript/Python can start at construction; PHP, Go, Rust, and Elixir start explicitly |
 
-Same names in every SDK, adapted to the language: Python snake_case
-(`poll_timeout_ms`), PHP an options array with the camelCase keys, Go a
-`WorkerOptions` struct (`PollTimeoutMs`, `LockTtlMs`, ...).
+Names follow each language: Python, Rust, and Elixir use snake_case; PHP uses
+camelCase array keys; Go uses a `WorkerOptions` struct
+(`PollTimeoutMs`, `LockTtlMs`, ...).
 
 ### Lease model
 
@@ -557,6 +671,11 @@ job's lock on the heartbeat interval, so a job that legitimately runs
 longer than the lock TTL survives. If the worker dies, the lease expires
 and the server requeues the job (or moves it to the DLQ once `maxStalls`
 is exceeded), at-least-once delivery, so make handlers idempotent.
+
+PHP is the deliberate sequential exception: it can heartbeat between jobs,
+but it cannot interrupt a running user callback. A PHP handler that can exceed
+`lockTtlMs` must call `$job->extendLock(...)` from the callback or split the
+work into shorter jobs.
 
 ### Failures
 
@@ -628,9 +747,9 @@ the retry/backoff policy and eventually the [dead letter queue](/guide/dlq/).
 
 ### Worker events
 
-Every SDK emits `ready`, `active`, `completed`, `failed`, `drained`,
-`error` and `closed`; TypeScript and Python additionally emit `progress`
-and `cancelled`.
+TypeScript, Python, PHP, and Go expose worker lifecycle listeners. Rust and
+Elixir use their structured telemetry callback for transport/command lifecycle
+and normal language control flow for per-job handler outcomes.
 
 <Tabs syncKey="lang">
 <TabItem label="TypeScript">
@@ -762,11 +881,13 @@ worker.Close() // unregister and close the connection
 
 ## Query, control and operations
 
-The full management surface is available in every SDK with identical
-semantics: TypeScript and PHP in camelCase, Python in snake_case, Go in
-exported Go style (`GetJobCounts`, `RetryDlq`, ...). The per-state helpers
-(`getWaiting`, `getActive`, ...) exist in TypeScript and Python; PHP and Go
-pass the state to `getJobs` / `GetJobs` directly.
+All SDKs implement the core producer, lookup, wait, queue-control, DLQ,
+scheduler, rate-limit, and global-concurrency operations with identical server
+semantics. TypeScript and PHP use camelCase, Python/Rust/Elixir use snake_case,
+and Go uses exported Go style (`GetJobCounts`, `RetryDlq`, ...). The broader
+webhook/stats/metrics convenience surface remains richest in TypeScript,
+Python, PHP, and Go; Rust and Elixir can always use the documented protocol or
+HTTP operations until typed helpers are added.
 
 | Area | Methods |
 |---|---|
@@ -829,6 +950,32 @@ counts, _ := queue.GetJobCounts()        // map[string]int{"waiting": ..., ...}
 _ = queue.Pause()
 dropped, _ := queue.Drain()              // number of removed jobs
 _, _ = queue.RetryDlq("", 0)             // re-queue dead-lettered jobs
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let job = queue.get_job(&id)?;            // None when missing
+let state = queue.get_state(&id)?;
+let result = queue.wait_for_job(&id, 30_000)?;
+let counts = queue.get_job_counts()?;
+queue.pause()?;
+let dropped = queue.drain()?;
+queue.retry_dlq(None, None)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, job} = Bunqueue.Queue.get_job(queue, id)       # nil when missing
+{:ok, state} = Bunqueue.Queue.get_state(queue, id)
+{:ok, result} = Bunqueue.Queue.wait_for_job(queue, id, 30_000)
+{:ok, counts} = Bunqueue.Queue.get_job_counts(queue)
+:ok = Bunqueue.Queue.pause(queue)
+{:ok, dropped} = Bunqueue.Queue.drain(queue)
+{:ok, _count} = Bunqueue.Queue.retry_dlq(queue)
 ```
 
 </TabItem>
@@ -953,6 +1100,42 @@ node, err := flow.Add(bunqueue.FlowJob{
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{
+    ChainStep, ConnectionOptions, FlowProducer, JobOptions, Value,
+};
+
+let flow = FlowProducer::new(ConnectionOptions::default());
+let step = |name: &str| ChainStep {
+    name: name.into(),
+    queue_name: "etl".into(),
+    data: Value::Nil,
+    options: JobOptions::default(),
+};
+let ids = flow.add_chain(vec![
+    step("extract"),
+    step("transform"),
+    step("load"),
+])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+flow = Bunqueue.FlowProducer.new()
+
+{:ok, ids} =
+  Bunqueue.FlowProducer.add_chain(flow, [
+    %{name: "extract", queue: "etl"},
+    %{name: "transform", queue: "etl"},
+    %{name: "load", queue: "etl"}
+  ])
+```
+
+</TabItem>
 </Tabs>
 
 Fan-in (`addBulkThen`, N parallel jobs converging into one final job) is
@@ -966,11 +1149,13 @@ always returns the surviving partial tree instead of throwing.
 
 ## Observability
 
-The TypeScript SDK exposes a zero-dependency observability layer
-(TypeScript only): you bring OpenTelemetry, Prometheus or your own logger,
-the SDK stays silent by default and consumer errors are isolated so a
-throwing sink can never break the transport. In every other language,
-scrape the server's HTTP `/metrics` endpoint for the same picture.
+All six SDKs expose opt-in, dependency-free structured telemetry. Bring
+OpenTelemetry, Prometheus, `Logger`, `tracing`, or your own collector; SDKs stay
+silent by default. Consumer callback exceptions and Rust callback panics are
+isolated so an observer can never break transport or worker correctness.
+
+<Tabs syncKey="lang">
+<TabItem label="TypeScript">
 
 ```typescript
 import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
@@ -989,10 +1174,66 @@ queue.connection.on('disconnect', (i) => log.warn('link down', i));
 queue.connection.on('reconnect_scheduled', (i) => log.warn('retrying', i));
 ```
 
-`TelemetryEvent` is a typed union: `command` (per-command latency and
-outcome), `command_timeout`, `connect`, `disconnect`,
-`reconnect_scheduled`, `auth`, `backpressure`. For server-side metrics,
-scrape the HTTP `/metrics` endpoint (Prometheus format).
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue = Queue("emails", on_telemetry=lambda event: metrics.observe(event))
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue = new Queue('emails', [
+    'onEvent' => fn (array $event) => $metrics->observe($event),
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{
+    OnEvent: func(event bunqueue.TelemetryEvent) {
+        metrics.Observe(event)
+    },
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::sync::Arc;
+use bunqueue_client::{ConnectionOptions, Queue, TelemetryCallback};
+
+let telemetry: TelemetryCallback = Arc::new(|event| tracing::debug!(?event));
+let queue = Queue::new("emails", ConnectionOptions {
+    telemetry: Some(telemetry),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue =
+  Bunqueue.queue("emails",
+    event_handler: fn event -> Logger.info("bunqueue", bunqueue: event) end
+  )
+```
+
+</TabItem>
+</Tabs>
+
+The idiomatic event sets cover connection/reconnection, authentication,
+command latency and outcome, timeout, transport error, and close as applicable
+to each runtime; worker retry events are added where the client has a retry
+loop. Tokens, job payloads, results, private keys, and CA contents are never
+recorded. Scrape the server's HTTP `/metrics` endpoint for authoritative queue
+and broker metrics.
 
 ## Simple Mode
 
@@ -1157,31 +1398,62 @@ queue := bunqueue.NewQueue("emails", bunqueue.Options{
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::path::PathBuf;
+use bunqueue_client::{ConnectionOptions, Queue, TlsOptions};
+
+let queue = Queue::new("emails", ConnectionOptions {
+    host: "queue.example.com".into(),
+    token: std::env::var("BUNQUEUE_TOKEN").ok(),
+    tls: Some(TlsOptions { ca_file: Some(PathBuf::from("./ca.pem")) }),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue =
+  Bunqueue.queue("emails",
+    host: "queue.example.com",
+    token: System.fetch_env!("BUNQUEUE_TOKEN"),
+    tls: true,
+    ca_file: "./ca.pem"
+  )
+```
+
+</TabItem>
 </Tabs>
 
 Certificate verification is **on by default** for every TLS connection in
 every SDK, a wrong or missing CA rejects the connection instead of
 silently connecting; only an explicit opt-out
 (`rejectUnauthorized: false` in TypeScript, `{"verify": False}` in Python,
-`['verifyPeer' => false]` in PHP, `InsecureSkipVerify: true` in Go)
-switches to encryption-only mode for development. Start the server with
+`['verifyPeer' => false]` in PHP, `InsecureSkipVerify: true` in Go,
+`verify: false` in Elixir) switches to encryption-only mode for development.
+Rust deliberately exposes no insecure TLS mode. Start the server with
 `AUTH_TOKENS` to require authentication, and with `TLS_CERT_FILE` plus
-`TLS_KEY_FILE` for encrypted transport. Full hardening guidance lives in
-the [deployment guide](/guide/deployment/).
+`TLS_KEY_FILE` for encrypted transport. Full hardening guidance lives in the
+[deployment guide](/guide/deployment/).
 
 ## Errors and guarantees
 
-Every SDK exposes the same typed error hierarchy, so retry logic can
-branch precisely (PHP: exception classes under `Bunqueue\Exception`; Go:
-error types matched with `errors.As`):
+Every SDK exposes typed equivalents of the same error categories, so retry
+logic can branch precisely (PHP uses exception classes under
+`Bunqueue\Exception`; Go uses `errors.As`; Rust uses the `Error` enum; Elixir
+returns `{:error, exception}` or raises through bang APIs):
 
 | Error | Meaning |
 |---|---|
-| `ConnectionClosedError` | Link lost or server unreachable (in-flight commands reject; the next call reconnects) |
-| `CommandTimeoutError` | No response within the command timeout, also thrown by `waitForJob` on timeout |
-| `CommandError` | The server answered `ok: false` (validation error, not-found on write ops, failed job in `waitForJob`) |
-| `AuthError` | Token rejected during the connection handshake |
-| `UnrecoverableError` | Thrown *by your processor* to skip retries and fail terminally |
+| Connection | Link lost or server unreachable (in-flight commands reject; the next call reconnects) |
+| Timeout | No response within the command timeout, including `waitForJob` timeout |
+| Command | The server answered `ok: false` (validation, failed wait, or a write-side not-found) |
+| Authentication | Token rejected during the connection handshake |
+| Protocol / serialization | Invalid map, frame, MessagePack extension, or oversized outgoing body |
+| Unrecoverable processing | Raised/returned *by your processor* to skip retries and fail terminally |
 
 Delivery is **at-least-once**: a worker crash after processing but before
 the ACK means the job runs again, design handlers to be idempotent (the
@@ -1190,9 +1462,9 @@ the ACK means the job runs again, design handlers to be idempotent (the
 - **JavaScript** numbers are IEEE 754 doubles, exact up to 2⁵³. Pass larger
   64-bit identifiers (snowflake ids) as strings; never put `BigInt` in job
   data.
-- **Python, PHP and Go** integers outside the int32 range are automatically
-  encoded as float64 on the wire (exact up to 2⁵³, safe for millisecond
-  timestamps); the same string rule applies to larger identifiers.
+- **Python, PHP, Go, Rust, and Elixir** integers outside the int32 range are
+  recursively encoded as float64 on the wire (exact up to 2⁵³, safe for
+  millisecond timestamps); the same string rule applies to larger identifiers.
 
 ## Write a client in any language
 
@@ -1205,13 +1477,51 @@ and certify it with the
 point its runner at your client and it tells you exactly what to fix. The
 official SDKs are built and certified the same way.
 
+Conformance is complemented by realistic end-to-end workloads for every
+official SDK. These tests bulk-ingest distinct business records, process them
+through the language's actual worker concurrency model, read every persisted
+result by job id, and verify zero-loss checksums. Retry/DLQ, heartbeat,
+graceful-shutdown, authentication, TLS, telemetry, and flow rollback scenarios
+also run against disposable real brokers in `bun run test:sandbox:sdk`.
+
+## Production test contract
+
+Every official SDK passes the same layered contract:
+
+| Layer | What is exercised |
+|---|---|
+| Functional | Unit, real-broker integration, complete E2E flows, 17 shared contract checks, and permanent bug regressions |
+| Concurrency | Independent connections race one custom id and one available lease; worker slots, ACK/FAIL, and heartbeats stay bounded |
+| Fault tolerance | Half-open timeouts, malformed frames, broker SIGKILL, durable restart visibility, lazy reconnect, TLS and authentication failures |
+| Generated inputs | Fixed-seed portable payload invariants plus malformed/deep/cyclic/extension mutation corpora; Go adds native fuzzing |
+| Capacity | Bounded 512-1500 job spikes in the normal gate and opt-in sustained load with configurable duration and batch size |
+| Non-functional | Weekly compatibility, dependency-advisory, race, fuzz and 15-minute soak jobs |
+
+The normal `bun run test:sandbox:sdk` run is isolated, offline and
+deterministic. Hours-long soak and stress runs are opt-in:
+
+```bash
+# choose the matching tests/soak.* entrypoint for the SDK
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 bun sdk/typescript/tests/soak.ts
+```
+
+Increasing the batch explores backpressure and the practical breaking point;
+it is not a portable benchmark. Publish performance numbers only from fresh
+native processes, never Docker or a VM.
+
+Database disk-full, WAL/power-loss and schema migration tests run in the
+broker's persistence suite. A remote SDK cannot inject those filesystem
+failures; its responsibility is typed failure, reconnect, durable visibility
+and idempotent retry. Delivery is at-least-once, so a handler must still be
+idempotent if it can crash after its side effects but before ACK.
+
 Browsers are not supported, raw TCP sockets are unavailable there, so
 route through your own API instead.
 
 ## Resources
 
 - [`bunqueue-client` on npm](https://www.npmjs.com/package/bunqueue-client), the full step by step README, from server start to production
-- Changelogs: [TypeScript](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Python](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md) · [PHP](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/CHANGELOG.md)
+- Changelogs: [TypeScript](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Python](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md) · [PHP](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/CHANGELOG.md) · [Go](https://github.com/egeominotti/bunqueue/blob/main/sdk/go/CHANGELOG.md) · [Rust](https://github.com/egeominotti/bunqueue/blob/main/sdk/rust/CHANGELOG.md) · [Elixir](https://github.com/egeominotti/bunqueue/blob/main/sdk/elixir/CHANGELOG.md)
 - [Queue API](/guide/queue/), every job option explained
 - [Worker](/guide/worker/), concurrency, events, graceful shutdown
 - [Simple Mode](/guide/simple-mode/), everything in one object
@@ -1221,4 +1531,4 @@ route through your own API instead.
 - [Deployment guide](/guide/deployment/), Docker, TLS, authentication, monitoring
 - [Wire protocol specification](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md), the normative contract every SDK implements
 - [Conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance), certify a client in any language
-- SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [`sdk/php`](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) · [`sdk/go`](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)
+- SDK sources: [`sdk/typescript`](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) · [`sdk/python`](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [`sdk/php`](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) · [`sdk/go`](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) · [`sdk/rust`](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) · [`sdk/elixir`](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir)

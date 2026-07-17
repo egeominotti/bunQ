@@ -80,7 +80,9 @@ client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
   global indexes, and managers, and delegates every operation to pure modules
   through context objects built by `ContextFactory`
   ([`src/application/queueManager.ts:50`](../src/application/queueManager.ts),
-  [`operations/`](../src/application/operations)). Houses DLQ, Events, Worker,
+  [`operations/`](../src/application/operations)). Active-job management claims
+  are split into `jobMoveOperations.ts` (state/resource transitions) and
+  `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
   JobLogs, Stats managers, the batch `QueueStatsAggregator`, and background-task wiring.
 - **`infrastructure/`** — `SqliteStorage` (+ `WriteBuffer`, `BatchInsertManager`),
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
@@ -377,6 +379,21 @@ The fast development loop runs targeted tests natively. The authoritative local
 gate, `bun run test:sandbox`, builds the current worktree once and runs unit,
 TCP, and embedded suites in three disposable non-root containers without host
 mounts or external networking. CI provides an equivalent fresh VM per suite.
+The companion `bun run test:sandbox:sdk` gate builds six language-specific
+images and runs TypeScript, Python, PHP, Go, Rust, and Elixir
+native/conformance suites with the same containment and telemetry format.
+Those suites include independent-connection lease/idempotency races,
+fixed-seed property corpora, malformed-input fuzz corpora, bounded spikes,
+and durable SIGKILL/restart recovery. Go additionally runs its race detector.
+Long-lived soak/stress profiles and live dependency-advisory checks are weekly
+CI jobs because the local release gate is bounded and networkless.
+The unit suite also runs a
+[model-based state machine](./features/model-based-testing.md) against a fresh
+real TCP broker and SQLite database per property run. Generated lifecycle,
+batch, dependency, limiter, DLQ, and queue-control histories are checked after
+every command at the API, aggregate-count, lock-token, and physical-storage
+layers; histories can include an actual `SIGKILL` and are shrunk to a replayable
+minimal counterexample.
 The TCP functional runner adds a second boundary: every test file receives a
 new server, dynamic ports, and a unique SQLite directory that is removed in
 `finally`. See [Test Isolation and Reproducibility](./testing.md) for the threat
@@ -390,6 +407,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 | Category | File | What it proves |
 | --- | --- | --- |
+| Model-based state machine | `model-based/queue-model` | Generated valid command histories agree with a compact specification across API state, counts, SQLite/DLQ membership, payload/priority persistence, leases, dependencies, limiters, and `SIGKILL` recovery; failures shrink and replay by seed. |
 | Protocol fuzzing | `repro-fuzz-protocol` | Malformed frames, corrupt MessagePack, lying length prefixes, >64 MB frames, torn/coalesced frames, and pre-auth commands never crash or wedge the server; the pre-auth gate never leaks. |
 | Chaos / fault injection | `repro-chaos-fault-injection` | At-least-once redelivery when a worker dies mid-job; a heartbeated-then-dropped job is not double-dispatched but is reclaimed by lock-expiry; lock-expiry under contention loses nothing; cron next-run is monotonic under clock skew/DST. |
 | Race / concurrency | `repro-race-concurrency` | N concurrent PULLs on one job → exactly one delivery; concurrent same-`jobId` PUSH → exactly one job; active re-add is an idempotent skip (no UNIQUE crash); cancel-during-active is a safe no-op; stale ACK vs lock-expiry never double-completes; K-workers×M-jobs drain processes each exactly once. |
@@ -403,6 +421,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 ### Engineering tooling
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
+- [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.
 
 ### Core engine & data structures
 - [Core Queue Engine (QueueManager & Shards)](./features/core-queue-engine.md) — Central coordinator that shards queues, owns global job indexes, and orchestrates all job operations by delegating to operation modules via context objects.
@@ -435,6 +454,9 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Client Transport (TCP pool, reconnect, batching)](./features/client-transport.md) — Wire-level TCP transport (pool, pipelining, reconnect, health, TLS, add-batching) used by the Queue and Worker SDKs.
 - [Client SDK: Queue](./features/client-queue-sdk.md) — Producer-side BullMQ-style Queue<T> SDK that transparently drives embedded (in-process QueueManager) and TCP (msgpack-over-pool) backends.
 - [Client SDK: Worker (& sandboxed)](./features/client-worker-sdk.md) — BullMQ-style consumer worker that pulls jobs (embedded or TCP), runs the user processor, and reports ack/fail — plus a process-isolated SandboxedWorker variant.
+- [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) — Shared production invariants, telemetry contract, native regression coverage, and isolated six-language release gate.
+- [Rust Client SDK](./features/rust-sdk.md) — Standalone synchronous Queue, bounded-thread Worker, FlowProducer, rustls transport, and shared conformance driver.
+- [Elixir Client SDK](./features/elixir-sdk.md) — OTP-native Queue, concurrent Worker, FlowProducer, verified TLS transport, structured telemetry, and shared conformance driver.
 - [Simple Mode (Bunqueue all-in-one)](./features/simple-mode.md) — Thin all-in-one wrapper pairing a Queue and Worker with opt-in conveniences (routes, middleware, retry, circuit breaker, batching, aging, TTL, triggers, dedup, DLQ).
 - [Store-and-Forward & BullMQ Compatibility](./features/store-and-forward.md) — Client-side edge store-and-forward (drain a local queue to a remote bunqueue server, idempotently) plus partial BullMQ v5 read-API shims on Queue.
 

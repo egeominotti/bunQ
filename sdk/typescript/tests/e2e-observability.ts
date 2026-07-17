@@ -59,9 +59,11 @@ test('observability: connection emits connect + disconnect lifecycle events', as
 test('observability: reconnect_scheduled telemetry fires when a connect fails', async () => {
   const port = await closedPort();
   const events: TelemetryEvent[] = [];
+  const secret = 'must-not-reach-connect-telemetry';
   const queue = new Queue(qname('obs-recon'), {
     host: '127.0.0.1',
     port,
+    token: secret,
     onTelemetry: (e) => events.push(e),
   });
   try {
@@ -70,6 +72,30 @@ test('observability: reconnect_scheduled telemetry fires when a connect fails', 
       events.some((e) => e.type === 'reconnect_scheduled'),
       'reconnect_scheduled telemetry fires on a failed connect'
     );
+    const error = events.find((e) => e.type === 'error' && e.operation === 'connect');
+    assert(error?.type === 'error', 'a refused connection emits transport error telemetry');
+    assert(
+      error?.type === 'error' &&
+        error.message === 'connection failed' &&
+        !JSON.stringify(error).includes(secret),
+      'connection error telemetry is sanitized'
+    );
+  } finally {
+    queue.close();
+  }
+});
+
+test('observability: consumer callback failures never alter commands', async () => {
+  const queue = new Queue(qname('obs-throw'), {
+    host: '127.0.0.1',
+    port: getPort(),
+    onTelemetry: () => {
+      throw new Error('consumer telemetry failed');
+    },
+  });
+  try {
+    const job = await queue.add('t', { x: 1 });
+    assert(job.id.length > 0, 'command succeeds even when telemetry throws');
   } finally {
     queue.close();
   }

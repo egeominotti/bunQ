@@ -10,9 +10,12 @@ use Bunqueue\Queue;
 require __DIR__ . '/harness.php';
 require __DIR__ . '/e2e-core.php';
 require __DIR__ . '/e2e-worker.php';
+require __DIR__ . '/e2e-realistic.php';
 require __DIR__ . '/e2e-flow.php';
 require __DIR__ . '/e2e-edge.php';
 require __DIR__ . '/e2e-spec.php';
+require __DIR__ . '/e2e-production.php';
+require __DIR__ . '/e2e-hardening.php';
 
 $count = \count($GLOBALS['__bq_tests']);
 echo "collected {$count} shared-server tests + 2 auth tests\n\n";

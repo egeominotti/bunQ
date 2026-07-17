@@ -1,0 +1,30 @@
+# Changelog
+
+## 0.1.0
+
+- Add OTP-owned plain TCP and verified TLS connections with auth-first lazy
+  reconnect, request correlation, command timeouts, and stream teardown.
+- Add recursive JavaScript-safe integer encoding, ext-0 tolerance, and
+  incoming/outgoing 64 MiB frame limits.
+- Add queue producing, query, control, DLQ, scheduler, rate-limit, worker, job,
+  and flow APIs.
+- Add structured connection telemetry, ExUnit coverage, and the shared
+  conformance driver.
+- Keep request-sequence state available to connection error recovery and add
+  the formatter configuration used by the isolated validation gate.
+- Bound pulled leases by processing concurrency, make concurrent worker stops
+  race-free, and exercise e2e, authentication, reconnect, and CA-verified TLS
+  against disposable real brokers.
+- Make worker stop idempotent, clamp client polling to 30 seconds, and map
+  integers beyond the float64 range to a typed protocol error.
+- Drain active handler executions through an OTP lifecycle barrier before
+  unregistering or closing worker connections.
+- Emit a payload-free structured `close` event when a connection terminates.
+- Terminate the worker lifecycle process after draining while preserving
+  race-safe, idempotent repeated stops.
+- Include the MIT license in the Hex package contents.
+- Ignore Mix build, dependency, documentation, coverage, and Hex archive
+  outputs in the SDK worktree.
+- Pin development/test dependencies and add concurrent idempotency and
+  single-lease races, generated payloads, malformed-term fuzzing, a 512-job
+  spike, durable SIGKILL recovery, and a tagged sustained profile.

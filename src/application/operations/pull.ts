@@ -84,6 +84,11 @@ function tryDequeueNextJob(
       // Expired entries are not parked: they are genuinely removed from the
       // logical queue and therefore update counters/index exactly once.
       if (isExpired(job, now)) {
+        // Delete persistence before mutating the in-memory indexes. deleteJob
+        // also removes a pending buffered INSERT, so the expired job cannot be
+        // flushed after this pull or resurrect during crash recovery. This is
+        // synchronous and therefore keeps the shard critical section await-free.
+        ctx.storage?.deleteJob(job.id);
         q.pop();
         shard.decrementQueued(job.id);
         ctx.jobIndex.delete(job.id);

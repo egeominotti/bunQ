@@ -96,7 +96,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 ### PUSH (`pushJob`, `push.ts:251`)
 
 1. Compute `idx = shardIndex(queue)`; take `shardLocks[idx]` (write).
-2. **customId idempotency** (`handleCustomId`, `push.ts:61`): if `input.customId` maps to a job still in the queue, skip and return the existing job. On reuse where the prior job COMPLETED, the surviving completed row is evicted from `completedJobs`/`completedJobsData`/`jobResults`/`jobIndex` and disk (`push.ts:105`) so the recycled id starts fresh as `waiting` (#92); any stale timeout marker is cleared (`push.ts:124`) to avoid resurrecting the #33/#75 duplicate-execution guard.
+2. **customId idempotency** (`handleCustomId`, `customId.ts`): if `input.customId` maps to a live job, skip and return the existing id. On terminal reuse, a completed generation is evicted from its completed collections and `jobs` row, while a DLQ generation is removed from its owning shard, DLQ counter, `jobIndex`, and SQLite before the new generation is admitted. The recycled id therefore starts fresh as `waiting` with exactly one observable generation; any stale timeout marker is also cleared to avoid resurrecting the #33/#75 duplicate-execution guard.
 3. `createJob(id, queue, input, now)`.
 4. **Deduplication** (`handleDeduplication`, `push.ts:133`): only if `job.uniqueKey` is set. Strategies — `replace` (remove old, register new), `extend` (reset TTL, return existing), default BullMQ-style (return existing if it is still waiting or active; broadcast `Duplicated`). If the existing job is completed/failed, a fresh insert is allowed.
 5. **Insert** (`insertJobToShard`, `push.ts:211`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), the job goes to `shard.waitingDeps` and dependencies are registered (timeline `waiting-children`). Otherwise it is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
@@ -107,7 +107,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 1. `deadline = timeoutMs > 0 ? now + timeoutMs : 0`. Loop:
 2. `tryPullFromShard` (`pull.ts:253`) under `shardLocks[idx]`: return `null` if `state.paused`; then `tryAcquireRateLimit` and `tryAcquireConcurrency` gate (each rejection emits a dashboard event and returns null). Then loop `tryDequeueNextJob`.
-3. `tryDequeueNextJob` (`pull.ts`): inspect jobs in priority order. Expired entries are discarded. Delayed jobs and jobs whose FIFO group is already active are temporarily set aside while the scan looks for another eligible job, then restored before returning. The first eligible job is activated and moved to `processingShards`; this makes the pull work-conserving across groups (for order A1, A2, B1, an active A group no longer hides B1). The queue pop, processing insert, and `jobIndex` flip remain in the same synchronous shard critical section.
+3. `tryDequeueNextJob` (`pull.ts`): inspect jobs in priority order. Expired entries are discarded exactly once from persistence, the heap, counters, and `jobIndex`. The synchronous `deleteJob` runs before the in-memory transition and also removes a pending buffered INSERT, so an expired job cannot be flushed later or resurrected after restart. Delayed jobs and jobs whose FIFO group is already active are temporarily set aside while the scan looks for another eligible job, then restored before returning. The first eligible job is activated and moved to `processingShards`; this makes the pull work-conserving across groups (for order A1, A2, B1, an active A group no longer hides B1). The queue pop, processing insert, and `jobIndex` flip remain in the same synchronous shard critical section.
 4. `finalizeProcessing` (`pull.ts:132`): `storage.markActive(...)` (non-fatal on error — in-memory is source of truth), bump counters, broadcast `pulled`. Returns `false` when the job is no longer in `processingShards` — a management op (`discardJob`, `moveJobToDelayed`) claimed it between the dequeue and the handoff; the pull then does NOT deliver it to a worker (`pullJob` tries the next job, `pullJobBatch` drops it from the delivered set).
 5. If no job and deadline not reached, `await shard.waitForJob(queue, remaining)` and loop; otherwise return `null`.
 
@@ -142,7 +142,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 ### Manual transitions (`jobStateTransitions.ts`)
 
-`moveActiveToWait` (`:16`): processing → queue (`runAt = now`, `startedAt = null`, release resources, push, broadcast `waiting` prev `active`). `changeWaitingDelay` (`:59`): updates `runAt` of an in-queue job via `q.updateRunAt`. `moveToWaitingChildren` (`:84`): processing → `shard.waitingChildren` (release resources; jobIndex stays `queue`-typed).
+`moveActiveToWait` (`:16`): processing → queue (`runAt = now`, `startedAt = null`, release resources, push, broadcast `waiting` prev `active`). `changeWaitingDelay` (`:59`): updates `runAt` of an in-queue job via `q.updateRunAt`. `moveToWaitingChildren` (`:84`): processing → `shard.waitingChildren` (release resources; jobIndex stays `queue`-typed). Every management claim of an active job (`moveActiveToWait`, `moveToWaitingChildren`, `moveJobToDelayed`, and active `discardJob`) also calls the shared `releaseClaimedJobOwnership` helper while removing the processing entry. The helper deletes the live `jobLocks` lease and removes the id from `clientJobs` (pruning empty owner sets), so a job that is no longer active cannot retain an observable lease or be acted on again by disconnect cleanup.
 
 ## Concurrency & Locking
 
@@ -158,10 +158,10 @@ Lock-token verification, the **#101 grace window** (`isExpiredButOwned`: an expi
 
 ## Edge Cases & Failure Modes
 
-- **Idempotent push**: a queued `customId` returns the existing job (no insert). A recycled completed `customId` evicts the stale completed row first (#92) so state queries don't wrongly report `completed`, and clears any timeout marker (#33/#75).
+- **Idempotent push**: a live `customId` returns the existing job (no insert). A recycled terminal `customId` evicts the stale completed row or DLQ entry first, including persisted terminal state and counters, so state queries expose only the new generation; timeout markers are cleared too (#33/#75).
 - **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`push.ts:200`); the returned placeholder carries the correct existing id (`push.ts:286`).
 - **Pull loss prevention**: `requeueJob` restores any job that fails to move to processing.
-- **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered.
+- **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered. Their SQLite row (or pending buffered INSERT) is deleted before the heap/counter/index removal, preventing restart resurrection while keeping the shard critical section synchronous.
 - **markActive / persistence errors** during pull are swallowed — in-memory `processingShards` is the source of truth; SQLite recovery reconciles on restart.
 - **Late / stale ACK**: `ackJob` throws when the job is no longer in processing. `QueueManager` recovers via `completeStallRetriedJob` to prevent duplicate execution (#33/#75), EXCEPT when the job is in `timedOutJobs` (a timeout sweep re-queued it for retry, which must win — the late ack is discarded, `queueManager.ts:372`).
 - **Retry vs. terminal**: `canRetry` uses `attempts < maxAttempts` after `attempts++`; `unrecoverable=true` (from `failJob`) forces the terminal path regardless of attempts.

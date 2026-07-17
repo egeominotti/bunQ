@@ -2,10 +2,9 @@ package bunqueue
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
-	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 )
@@ -26,9 +25,10 @@ type WorkerOptions struct {
 	BatchSize          int     // default 10, clamped to [1, 1000] (server PULLB cap)
 	PollTimeoutMs      int     // default 5000, capped at 30000
 	LockTtlMs          int     // default 30000
-	HeartbeatIntervalS float64 // default 10; negative disables heartbeats
-	DisableHeartbeat   bool    // explicit off (Go zero-values make 0 mean "default")
+	HeartbeatIntervalS float64 // positive seconds enable heartbeats; zero/negative/non-finite disables
+	DisableHeartbeat   bool    // explicit off, even when HeartbeatIntervalS is positive
 	Name               string
+	OnEvent            TelemetryCallback
 }
 
 // Worker pulls jobs over TCP and runs a processor with bounded concurrency.
@@ -38,13 +38,15 @@ type Worker struct {
 	WorkerID   string
 	Connection *Connection
 
-	processor          Processor
-	concurrency        int
-	batchSize          int
-	pollTimeoutMs      int
-	lockTtlMs          int
-	heartbeatIntervalS float64
-	name               string
+	processor           Processor
+	commandConnection   *Connection
+	heartbeatConnection *Connection
+	concurrency         int
+	batchSize           int
+	pollTimeoutMs       int
+	lockTtlMs           int
+	heartbeatIntervalS  float64
+	name                string
 
 	mu                   sync.Mutex
 	active               map[string]string // job id -> lock token
@@ -55,10 +57,11 @@ type Worker struct {
 	processed            int
 	failed               int
 
-	slots     chan struct{}
-	inFlight  sync.WaitGroup
-	stopHb    chan struct{}
-	hbStarted bool
+	slots       chan struct{}
+	inFlight    sync.WaitGroup
+	stopHb      chan struct{}
+	heartbeatWG sync.WaitGroup
+	hbStarted   bool
 }
 
 const workerMaxStackLines = 10 // server persists the FIRST stackTraceLimit lines (default 10)
@@ -78,7 +81,9 @@ func NewWorker(queue string, processor Processor, opts WorkerOptions) *Worker {
 	}
 	batchSize = min(max(1, batchSize), 1000)
 	pollTimeout := opts.PollTimeoutMs
-	if pollTimeout == 0 {
+	if pollTimeout < 0 {
+		pollTimeout = 0
+	} else if pollTimeout == 0 {
 		pollTimeout = 5000
 	}
 	pollTimeout = min(pollTimeout, 30_000)
@@ -87,10 +92,7 @@ func NewWorker(queue string, processor Processor, opts WorkerOptions) *Worker {
 		lockTtl = 30_000
 	}
 	heartbeat := opts.HeartbeatIntervalS
-	if heartbeat == 0 {
-		heartbeat = 10
-	}
-	if heartbeat < 0 || opts.DisableHeartbeat {
+	if heartbeat <= 0 || math.IsNaN(heartbeat) || math.IsInf(heartbeat, 0) || opts.DisableHeartbeat {
 		heartbeat = 0 // disabled: no ticker at all (never a 0-interval storm)
 	}
 	hostname, _ := os.Hostname()
@@ -99,12 +101,15 @@ func NewWorker(queue string, processor Processor, opts WorkerOptions) *Worker {
 	if name == "" {
 		name = workerID
 	}
+	connectionOptions := Options{
+		Host: opts.Host, Port: opts.Port, Token: opts.Token, TLS: opts.TLS, OnEvent: opts.OnEvent,
+	}
 	return &Worker{
-		Queue:    queue,
-		WorkerID: workerID,
-		Connection: NewConnection(Options{
-			Host: opts.Host, Port: opts.Port, Token: opts.Token, TLS: opts.TLS,
-		}),
+		Queue:                queue,
+		WorkerID:             workerID,
+		Connection:           NewConnection(connectionOptions),
+		commandConnection:    NewConnection(connectionOptions),
+		heartbeatConnection:  NewConnection(connectionOptions),
 		processor:            processor,
 		concurrency:          concurrency,
 		batchSize:            batchSize,
@@ -116,7 +121,6 @@ func NewWorker(queue string, processor Processor, opts WorkerOptions) *Worker {
 		listeners:            map[string][]func(...any){},
 		registeredGeneration: -1,
 		slots:                make(chan struct{}, concurrency),
-		stopHb:               make(chan struct{}),
 	}
 }
 
@@ -141,7 +145,9 @@ func (w *Worker) Run() {
 	w.mu.Lock()
 	w.stopped = false
 	w.mu.Unlock()
-	w.safeRegister()
+	if err := w.safeRegister(); err != nil {
+		w.emit("error", err)
+	}
 	w.startHeartbeat()
 	w.emit("ready")
 	backoffIdx := 0
@@ -168,16 +174,21 @@ func (w *Worker) Stop() {
 // Close unregisters (when registered), stops heartbeats and drops the socket.
 func (w *Worker) Close() {
 	w.mu.Lock()
+	w.stopped = true
 	if w.hbStarted {
 		close(w.stopHb)
 		w.hbStarted = false
 	}
 	registered := w.registeredGeneration >= 0
+	w.registeredGeneration = -1
 	w.mu.Unlock()
-	if registered {
+	w.heartbeatWG.Wait()
+	if registered && w.Connection.IsConnected() {
 		_, _ = w.Connection.Call(map[string]any{"cmd": "UnregisterWorker", "workerId": w.WorkerID})
 	}
 	w.Connection.Close()
+	w.commandConnection.Close()
+	w.heartbeatConnection.Close()
 	w.emit("closed")
 }
 
@@ -194,7 +205,9 @@ func (w *Worker) pollOnce() error {
 	// reconnect (generation change). isConnected covers the very first poll,
 	// where both generations are still -1.
 	if !w.Connection.IsConnected() || w.Connection.Generation() != w.registeredGenerationSnapshot() {
-		w.safeRegister()
+		if err := w.safeRegister(); err != nil {
+			return err
+		}
 	}
 	free := w.freeSlots()
 	if free <= 0 {
@@ -256,191 +269,4 @@ func (w *Worker) registeredGenerationSnapshot() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.registeredGeneration
-}
-
-func (w *Worker) runJob(raw map[string]any, token string) {
-	defer w.inFlight.Done()
-	defer func() { <-w.slots }()
-	job := newJob(raw, w.Connection, token)
-	w.emit("active", job)
-	result, procErr := w.invokeProcessor(job, raw)
-	if procErr != nil {
-		w.failJob(job, token, procErr, raw)
-		return
-	}
-	_, err := w.Connection.Call(compact(map[string]any{
-		"cmd": "ACK", "id": job.ID(), "token": token, "result": result,
-	}))
-	// Free the slot BEFORE emitting: a panicking listener must not leak it.
-	w.finishJob(job.ID())
-	if err != nil {
-		// The ACK never reached the server: only 'error' fires (lock expiry
-		// will retry the job) — never claim a completion.
-		w.emit("error", err)
-		return
-	}
-	w.mu.Lock()
-	w.processed++
-	w.mu.Unlock()
-	w.emit("completed", job, result)
-}
-
-// invokeProcessor runs the processor converting panics into failures whose
-// stack still points at the panic site (captured inside the deferred call,
-// before the stack unwinds).
-func (w *Worker) invokeProcessor(job *Job, raw map[string]any) (result any, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if unrec, ok := recovered.(*UnrecoverableError); ok {
-				err = &panicError{message: unrec.Message, stack: debug.Stack(), unrecoverable: true}
-				return
-			}
-			err = &panicError{message: fmt.Sprint(recovered), stack: debug.Stack()}
-		}
-	}()
-	return w.processor(job)
-}
-
-type panicError struct {
-	message       string
-	stack         []byte
-	unrecoverable bool
-}
-
-func (e *panicError) Error() string { return e.message }
-
-func (w *Worker) failJob(job *Job, token string, procErr error, raw map[string]any) {
-	cap := asInt(raw["stackTraceLimit"])
-	if cap <= 0 {
-		cap = workerMaxStackLines
-	}
-	message := procErr.Error()
-	// Lead with the message (Go/JS convention): the server persists the
-	// FIRST stackTraceLimit lines.
-	stack := []string{errorTypeName(procErr) + ": " + message}
-	var unrecoverable any
-	if pErr, ok := procErr.(*panicError); ok {
-		stack = append([]string{"panic: " + message}, strings.Split(strings.TrimSpace(string(pErr.stack)), "\n")...)
-		if pErr.unrecoverable {
-			unrecoverable = true
-		}
-	}
-	var unrec *UnrecoverableError
-	if asUnrecoverable(procErr, &unrec) {
-		unrecoverable = true
-	}
-	if len(stack) > cap {
-		stack = stack[:cap]
-	}
-	_, err := w.Connection.Call(compact(map[string]any{
-		"cmd":           "FAIL",
-		"id":            job.ID(),
-		"token":         token,
-		"error":         message,
-		"stack":         stack,
-		"unrecoverable": unrecoverable,
-	}))
-	w.finishJob(job.ID())
-	if err != nil {
-		w.emit("error", err)
-		return
-	}
-	w.mu.Lock()
-	w.failed++
-	w.mu.Unlock()
-	w.emit("failed", job, procErr)
-}
-
-func (w *Worker) finishJob(id string) {
-	w.mu.Lock()
-	delete(w.active, id)
-	w.mu.Unlock()
-}
-
-func (w *Worker) startHeartbeat() {
-	// 0 (or negative) disables heartbeats entirely.
-	if w.heartbeatIntervalS <= 0 {
-		return
-	}
-	w.mu.Lock()
-	w.hbStarted = true
-	w.mu.Unlock()
-	ticker := time.NewTicker(time.Duration(w.heartbeatIntervalS * float64(time.Second)))
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-w.stopHb:
-				return
-			case <-ticker.C:
-				w.sendHeartbeat()
-			}
-		}
-	}()
-}
-
-func (w *Worker) sendHeartbeat() {
-	w.mu.Lock()
-	ids := make([]any, 0, len(w.active))
-	tokens := make([]any, 0, len(w.active))
-	for id, token := range w.active {
-		ids = append(ids, id)
-		tokens = append(tokens, token)
-	}
-	activeCount, processed, failed := len(w.active), w.processed, w.failed
-	w.mu.Unlock()
-	if _, err := w.Connection.Call(map[string]any{
-		"cmd": "Heartbeat", "id": w.WorkerID,
-		"activeJobs": activeCount, "processed": processed, "failed": failed,
-	}); err != nil {
-		w.emit("error", err)
-		return
-	}
-	if len(ids) > 0 {
-		if _, err := w.Connection.Call(map[string]any{
-			"cmd": "JobHeartbeatB", "ids": ids, "tokens": tokens,
-		}); err != nil {
-			w.emit("error", err)
-		}
-	}
-}
-
-// safeRegister registers the worker; the generation is marked ONLY on
-// success (snapshot from BEFORE the call: if the call itself reconnected,
-// the stale value forces one harmless duplicate registration).
-func (w *Worker) safeRegister() {
-	if err := w.Connection.EnsureConnected(); err != nil {
-		w.emit("error", err)
-		return
-	}
-	generation := w.Connection.Generation()
-	hostname, _ := os.Hostname()
-	if _, err := w.Connection.Call(map[string]any{
-		"cmd":         "RegisterWorker",
-		"name":        w.name,
-		"queues":      []string{w.Queue},
-		"concurrency": w.concurrency,
-		"workerId":    w.WorkerID,
-		"hostname":    hostname,
-		"pid":         os.Getpid(),
-		"startedAt":   nowMs(),
-	}); err != nil {
-		w.emit("error", err)
-		return
-	}
-	w.mu.Lock()
-	w.registeredGeneration = generation
-	w.mu.Unlock()
-}
-
-func (w *Worker) emit(event string, args ...any) {
-	w.mu.Lock()
-	callbacks := append([]func(...any){}, w.listeners[event]...)
-	w.mu.Unlock()
-	for _, fn := range callbacks {
-		func() {
-			defer func() { _ = recover() }() // a panicking listener never kills the loop
-			fn(args...)
-		}()
-	}
 }

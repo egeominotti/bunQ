@@ -134,7 +134,15 @@ await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
 
 ### With `jobId` (idempotent adds)
 
-Give a job a custom `jobId` and adding it twice does nothing: if a job with that id is still queued (`waiting` / `delayed` / `prioritized`), the existing job is returned instead of creating a duplicate. This makes `add()` safe to call repeatedly, which is what "idempotent" means. Works in embedded and TCP modes, BullMQ-compatible.
+Give a job a custom `jobId` and adding it twice does nothing: while a generation
+with that ID is live (`waiting`, `delayed`, `prioritized`,
+`waiting-children`, or `active`), the existing job is returned instead of
+creating a duplicate. Custom IDs are broker-wide because they are also the
+global persisted job primary key, so this remains idempotent even if the second
+add targets another queue. Once the prior generation is terminal, the ID may be
+reused; bunqueue retires its completed/DLQ state before admitting exactly one
+fresh generation. This makes `add()` safe to call repeatedly in embedded and
+TCP modes.
 
 ```typescript
 const job1 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });

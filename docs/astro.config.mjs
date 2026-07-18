@@ -61,9 +61,15 @@ function lastmodForUrl(url) {
 export default defineConfig({
   site: 'https://bunqueue.dev',
 
-  // Use Astro's current processor API. GFM is explicit so tables,
-  // strikethrough and autolinks render consistently in .md and .mdx pages.
+  // The processor renders .md pages only. Starlight's MDX pipeline instead
+  // reads the legacy top-level `markdown.gfm` flag, which has no default in
+  // Astro 6 (z.boolean().optional()) — leave it out and every GFM table in a
+  // .mdx page is emitted as literal |---| text. Keep both the processor and
+  // the explicit flag until MDX inherits processor options. Do NOT follow the
+  // deprecation warning's advice to move `gfm` onto unified() only: MDX
+  // ignores processor options entirely and .mdx tables would break again.
   markdown: {
+    gfm: true,
     processor: unified({ gfm: true }),
   },
 

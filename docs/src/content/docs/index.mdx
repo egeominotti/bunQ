@@ -35,6 +35,7 @@ head:
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import VersionPill from '@components/VersionPill.astro';
+import BootTerminal from '@components/BootTerminal.astro';
 import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
@@ -44,9 +45,30 @@ import BqIcon from '@components/BqIcon.astro';
       <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
       <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
 
-      <p class="bq-install-label">1 · Install, in your language</p>
+      <div class="bq-hero-steps">
+        <div class="bq-hero-step">
+          <p class="bq-install-label">1 · Start the server <span style="font-weight: 400; opacity: 0.7;">(skip on Bun: it runs embedded)</span></p>
 
-      <Tabs syncKey="runtime">
+          <Tabs syncKey="server">
+            <TabItem label="Terminal">
+              <BootTerminal />
+            </TabItem>
+            <TabItem label="Docker">
+
+```bash
+docker run -d --name bunqueue \
+  -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:latest
+```
+
+            </TabItem>
+          </Tabs>
+        </div>
+        <div class="bq-hero-step">
+          <p class="bq-install-label">2 · Install the client, in your language</p>
+
+          <Tabs syncKey="runtime">
         <TabItem label="Bun">
 
 ```bash
@@ -103,30 +125,9 @@ cargo add bunqueue-client --path ../bunqueue/sdk/rust   # crates.io upcoming
 ```
 
         </TabItem>
-      </Tabs>
-
-      <p class="bq-install-label" style="margin-top: 2.2rem;">2 · Start the server <span style="font-weight: 400; opacity: 0.7;">(on Bun, skip: it runs embedded, no server at all)</span></p>
-
-      <Tabs syncKey="server">
-        <TabItem label="Terminal">
-
-```bash
-bun add -g bunqueue   # install once
-bunqueue start
-```
-
-        </TabItem>
-        <TabItem label="Docker">
-
-```bash
-docker run -d --name bunqueue \
-  -p 6789:6789 -p 6790:6790 \
-  -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:latest
-```
-
-        </TabItem>
-      </Tabs>
+          </Tabs>
+        </div>
+      </div>
 
       <div class="bq-actions">
         <a class="bq-btn" href="#quickstart">Get started in 60s</a>
@@ -135,30 +136,6 @@ docker run -d --name bunqueue \
       <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers</p>
     </div>
 
-    <div class="bq-hero-right">
-      <div class="bq-bench-card">
-        <p class="bq-bench-title">Pushing 100-job batches over TCP</p>
-        <p class="bq-bench-sub">throughput in ops/sec vs BullMQ + Redis, identical workloads</p>
-        <div class="bq-bar-row">
-          <div class="bq-bar-label"><span>bunqueue · 85,700 ops/s</span><b>3.5x</b></div>
-          <div class="bq-bar" style="width: 100%"></div>
-        </div>
-        <div class="bq-bar-row">
-          <div class="bq-bar-label"><span>BullMQ + Redis · 24,800 ops/s</span></div>
-          <div class="bq-bar bq-bar-them" style="width: 29%"></div>
-        </div>
-        <p class="bq-bench-title" style="margin-top: 1.6rem;">p99 push latency, lower is better</p>
-        <div class="bq-bar-row">
-          <div class="bq-bar-label"><span>bunqueue · 6.3 ms</span><b>1.8x lower</b></div>
-          <div class="bq-bar" style="width: 57%"></div>
-        </div>
-        <div class="bq-bar-row">
-          <div class="bq-bar-label"><span>BullMQ + Redis · 11.1 ms</span></div>
-          <div class="bq-bar bq-bar-them" style="width: 100%"></div>
-        </div>
-        <p class="bq-bench-foot">Apple M1 Max · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">methodology</a> · <a href="/guide/benchmarks/">all benchmarks →</a></p>
-      </div>
-    </div>
   </div>
 
   <div class="bq-sim" aria-hidden="true">
@@ -363,11 +340,14 @@ claude mcp add bunqueue \
 <div class="bq-wrap bq-section" id="quickstart">
   <span class="bq-eyebrow">quickstart</span>
   <h2 class="bq-h2">Write ten lines. Run.</h2>
-  <p class="bq-lede">Nothing to provision: the queue starts inside your process and persists itself to a SQLite file. From install to a working queue and worker in under a minute.</p>
+  <p class="bq-lede">The same ten lines in every language: a queue, a worker, a job. On Bun it all runs embedded in your process; from any other language the code talks to the server you started with one command.</p>
 
   <div class="bq-steps">
     <div class="bq-step">
-      <div class="bq-step-head"><span class="bq-step-num">1</span><h3>Write <code>app.ts</code>, a queue and a worker</h3></div>
+      <div class="bq-step-head"><span class="bq-step-num">1</span><h3>Write a queue and a worker</h3></div>
+
+      <Tabs syncKey="lang">
+        <TabItem label="Bun">
 
 ```typescript
 import { Queue, Worker }
@@ -385,16 +365,182 @@ await queue.add('welcome',
   { to: 'a@b.co' }, { attempts: 3 });
 ```
 
+        </TabItem>
+        <TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker }
+  from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+new Worker('emails', async (job) => {
+  console.log(`to ${job.data.to}`);
+  return { sent: true };
+});
+
+await queue.add('welcome',
+  { to: 'a@b.co' }, { attempts: 3 });
+```
+
+        </TabItem>
+        <TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails")
+queue.add("welcome",
+    {"to": "a@b.co"}, attempts=3)
+
+def process(job):
+    print(f"to {job.data['to']}")
+    return {"sent": True}
+
+Worker("emails", process,
+    concurrency=10).run()
+```
+
+        </TabItem>
+        <TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('emails');
+$queue->add('welcome',
+    ['to' => 'a@b.co'],
+    ['attempts' => 3]);
+
+$worker = new Worker('emails',
+    function (Bunqueue\Job $job) {
+        return ['sent' => true];
+    });
+$worker->run();
+```
+
+        </TabItem>
+        <TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails",
+    bunqueue.Options{})
+queue.Add("welcome",
+    map[string]any{"to": "a@b.co"},
+    bunqueue.JobOptions{"attempts": 3})
+
+worker := bunqueue.NewWorker("emails",
+  func(job *bunqueue.Job) (any, error) {
+    return map[string]any{"sent": true}, nil
+  }, bunqueue.WorkerOptions{Concurrency: 8})
+worker.Run()
+```
+
+        </TabItem>
+        <TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions,
+    JobOptions, Queue, Value, Worker,
+    WorkerOptions};
+
+let queue = Queue::new("emails",
+    ConnectionOptions::default());
+queue.add("welcome", data,
+    JobOptions::default())?;
+
+let worker = Worker::new("emails",
+    |job| Ok(Value::from(true)),
+    WorkerOptions::default());
+worker.run()?;
+```
+
+        </TabItem>
+        <TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "welcome",
+    %{to: "a@b.co"})
+
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    {:ok, %{sent: true}}
+  end, concurrency: 8)
+
+Bunqueue.Worker.run(worker)
+```
+
+        </TabItem>
+      </Tabs>
+
     </div>
     <div class="bq-step">
       <div class="bq-step-head"><span class="bq-step-num">2</span><h3>Run</h3></div>
 
+      <Tabs syncKey="lang">
+        <TabItem label="Bun">
+
 ```bash
-bun app.ts
-# sending to a@b.co
+bun app.ts        # no server: embedded
+# to a@b.co
 ```
 
-      <p class="bq-step-note">That's the whole setup. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>, and one <code>dataPath</code> option persists everything to a single SQLite file. Not on Bun? Same code with <code>bunqueue-client</code> against the server. <a href="/guide/quickstart/">Full quickstart</a></p>
+        </TabItem>
+        <TabItem label="Node.js / Deno">
+
+```bash
+bunx bunqueue start                      # server, once
+node --experimental-strip-types app.ts   # Node 22+; or: deno run -A app.ts
+```
+
+        </TabItem>
+        <TabItem label="Python">
+
+```bash
+bunx bunqueue start   # server, once
+python app.py
+```
+
+        </TabItem>
+        <TabItem label="PHP">
+
+```bash
+bunx bunqueue start   # server, once
+php worker.php
+```
+
+        </TabItem>
+        <TabItem label="Go">
+
+```bash
+bunx bunqueue start   # server, once
+go run .
+```
+
+        </TabItem>
+        <TabItem label="Rust">
+
+```bash
+bunx bunqueue start   # server, once
+cargo run
+```
+
+        </TabItem>
+        <TabItem label="Elixir">
+
+```bash
+bunx bunqueue start   # server, once
+mix run app.exs
+```
+
+        </TabItem>
+      </Tabs>
+
+      <p class="bq-step-note">That's the whole setup, in any of the six languages. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>; on the server, <code>--data-path</code> persists everything to a single SQLite file. <a href="/guide/quickstart/">Full quickstart</a> · <a href="/guide/sdks/">SDK guide</a></p>
     </div>
   </div>
 </div>
@@ -423,6 +569,29 @@ bun app.ts
       </div>
       <p class="bq-vs-sum">1 file<small>cp to back up, sqlite3 to inspect</small></p>
     </div>
+  </div>
+
+  <div class="bq-bench-card" style="margin-top: 2.4rem;">
+    <p class="bq-bench-title">Pushing 100-job batches over TCP</p>
+    <p class="bq-bench-sub">throughput in ops/sec vs BullMQ + Redis, identical workloads</p>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>bunqueue · 85,700 ops/s</span><b>3.5x</b></div>
+      <div class="bq-bar" style="width: 100%"></div>
+    </div>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>BullMQ + Redis · 24,800 ops/s</span></div>
+      <div class="bq-bar bq-bar-them" style="width: 29%"></div>
+    </div>
+    <p class="bq-bench-title" style="margin-top: 1.6rem;">p99 push latency, lower is better</p>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>bunqueue · 6.3 ms</span><b>1.8x lower</b></div>
+      <div class="bq-bar" style="width: 57%"></div>
+    </div>
+    <div class="bq-bar-row">
+      <div class="bq-bar-label"><span>BullMQ + Redis · 11.1 ms</span></div>
+      <div class="bq-bar bq-bar-them" style="width: 100%"></div>
+    </div>
+    <p class="bq-bench-foot">Apple M1 Max · Bun 1.3.14 · BullMQ 5.79.3 · Redis 8.8.0 · <a href="https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts">methodology</a> · <a href="/guide/benchmarks/">all benchmarks →</a></p>
   </div>
 
   <div class="bq-actions" style="margin-top: 2rem;">
@@ -487,15 +656,10 @@ bun app.ts
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">developer experience</span>
   <h2 class="bq-h2">A queue and a worker, ten lines.</h2>
-  <p class="bq-lede">Familiar Queue and Worker API, end to end TypeScript, and 3.5x the bulk push throughput of BullMQ measured on identical workloads, methodology below. Migrating takes minutes, the mental model is the same.</p>
+  <p class="bq-lede">The same familiar Queue and Worker API in six languages, and 3.5x the bulk push throughput of BullMQ measured on identical workloads, methodology below. Migrating takes minutes, the mental model is the same.</p>
 
-  <div class="bq-terminal">
-    <div class="bq-terminal-bar">
-      <span class="bq-dot" style="background: var(--bq-red)"></span>
-      <span class="bq-dot" style="background: var(--bq-amber)"></span>
-      <span class="bq-dot" style="background: var(--bq-green)"></span>
-      <span style="margin-left: 0.5rem">app.ts</span>
-    </div>
+  <Tabs syncKey="lang">
+    <TabItem label="Bun">
 
 ```typescript
 import { Queue, Worker }
@@ -515,7 +679,123 @@ const worker = new Worker('emails', async (job) => {
 worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
 ```
 
-  </div>
+    </TabItem>
+    <TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+await queue.add('welcome',
+  { to: 'a@b.co' }, { attempts: 3 });
+
+const worker = new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { concurrency: 5 });
+
+worker.on('completed', (job, result) => console.log(`done: ${job.id}`));
+```
+
+    </TabItem>
+    <TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails")
+queue.add("welcome", {"to": "a@b.co"}, attempts=3)
+
+def process(job):
+    send_email(job.data)
+    return {"sent": True}
+
+worker = Worker("emails", process, concurrency=5)
+worker.on("completed", lambda job, result: print(f"done: {job.id}"))
+worker.run()
+```
+
+    </TabItem>
+    <TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('emails');
+$queue->add('welcome', ['to' => 'a@b.co'], ['attempts' => 3]);
+
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    sendEmail($job->data());
+    return ['sent' => true];
+});
+$worker->on('completed', fn ($job, $r) => print("done: {$job->id()}\n"));
+$worker->run();
+```
+
+    </TabItem>
+    <TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+queue.Add("welcome", map[string]any{"to": "a@b.co"},
+    bunqueue.JobOptions{"attempts": 3})
+
+worker := bunqueue.NewWorker("emails",
+    func(job *bunqueue.Job) (any, error) {
+        return sendEmail(job.Data())
+    }, bunqueue.WorkerOptions{Concurrency: 5})
+
+worker.On("completed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    log.Printf("done: %s", job.ID())
+})
+worker.Run()
+```
+
+    </TabItem>
+    <TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions,
+    ProcessError, Queue, Value, Worker, WorkerOptions};
+
+let queue = Queue::new("emails", ConnectionOptions::default());
+queue.add("welcome", data, JobOptions::default())?;
+
+let worker = Worker::new(
+    "emails",
+    |job| {
+        deliver(job.data())
+            .map(|_| Value::from(true))
+            .map_err(|e| ProcessError::retryable(e.to_string()))
+    },
+    WorkerOptions::default(),
+);
+worker.run()?;
+```
+
+    </TabItem>
+    <TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "welcome", %{to: "a@b.co"})
+
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    send_email(job.data)
+    {:ok, %{sent: true}}
+  end, concurrency: 5)
+
+Bunqueue.Worker.run(worker)
+```
+
+    </TabItem>
+  </Tabs>
 </div>
 
 <div class="bq-wrap bq-section">

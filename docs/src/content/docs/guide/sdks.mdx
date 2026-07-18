@@ -63,8 +63,9 @@ at all.
 bunx bunqueue start
 ```
 
-One command, no install. Data persists to `./data/bunq.db` by default;
-change it with `--data-path` or `BUNQUEUE_DATA_PATH`.
+One command, no install. Without `--data-path` (or `BUNQUEUE_DATA_PATH`)
+the queue is in-memory: pass it, e.g. `--data-path ./data/bunq.db`, to
+persist jobs to SQLite.
 
 </TabItem>
 <TabItem label="Docker">

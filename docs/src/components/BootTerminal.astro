@@ -1,0 +1,196 @@
+---
+import { readFileSync } from 'fs';
+import path from 'path';
+
+// Same version source as VersionPill: repo root package.json, resolved from
+// the build cwd (docs/), so the banner never goes stale on release.
+let version = '';
+for (const candidate of ['../package.json', '../../package.json']) {
+  try {
+    const pkg = JSON.parse(readFileSync(path.resolve(process.cwd(), candidate), 'utf-8'));
+    if (pkg.name === 'bunqueue' && pkg.version) {
+      version = pkg.version;
+      break;
+    }
+  } catch {
+    /* try next candidate */
+  }
+}
+
+// Stylized render of src/infrastructure/server/bootstrap.ts printBanner()
+// with default config: same values, reflowed to two columns for height.
+---
+
+<div class="bq-term" role="img" tabindex="0" aria-label={`Terminal running bunqueue start: bunqueue v${version} listening on TCP 6789 and HTTP 6790. Activate to replay the animation.`}>
+  <div class="bq-term-bar">
+    <i></i><i></i><i></i>
+    <em>bunqueue start</em>
+    <span class="bq-term-replay" aria-hidden="true">↻ replay</span>
+  </div>
+  <pre class="bq-term-body" aria-hidden="true"><span class="bq-tl bq-tl-cmd"><b class="bq-tg">❯</b> <span class="bq-term-cmd">bunx bunqueue start</span></span>
+<span class="bq-tl" style="--i:1"><span class="bq-tm">   (\(\</span></span>
+<span class="bq-tl" style="--i:2"><span class="bq-tm">   ( -.-)    </span><b class="bq-tw">bunqueue</b> <span class="bq-td">v{version}</span></span>
+<span class="bq-tl" style="--i:3"><span class="bq-tm">   o_(")(")  </span><span class="bq-td">High-performance job queue for Bun</span></span>
+<span class="bq-tl" style="--i:4"><span class="bq-td">────────────────────────────────────────────</span></span>
+<span class="bq-tl" style="--i:5"> <i class="bq-tg">●</i> TCP    <b class="bq-tw">0.0.0.0:6789</b>   <i class="bq-ty">●</i> TLS   <span class="bq-td">disabled</span></span>
+<span class="bq-tl" style="--i:6"> <i class="bq-tg">●</i> HTTP   <b class="bq-tw">0.0.0.0:6790</b>   <i class="bq-ty">●</i> Auth  <span class="bq-td">disabled</span></span>
+<span class="bq-tl" style="--i:7"> <i class="bq-ty">●</i> Socket <span class="bq-td">disabled</span>       <i class="bq-ty">●</i> S3    <span class="bq-td">disabled</span></span>
+<span class="bq-tl" style="--i:8"> <i class="bq-ty">●</i> Data   in-memory      <i class="bq-ty">●</i> Cloud <span class="bq-td">disabled</span></span>
+<span class="bq-tl" style="--i:9"> <i class="bq-td">●</i> Shards <b class="bq-tw">16</b> <span class="bq-td">(10 CPU cores)</span></span>
+<span class="bq-tl" style="--i:10"><span class="bq-td">────────────────────────────────────────────</span></span>
+<span class="bq-tl" style="--i:11"><span class="bq-cursor">▍</span></span></pre>
+</div>
+
+<style>
+  /* A terminal is dark in both site themes: constant palette, real chrome. */
+  .bq-term {
+    background: #17191f;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 0.6rem;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  }
+
+  .bq-term:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 2px;
+  }
+
+  .bq-term-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.42rem;
+    padding: 0.55rem 0.8rem;
+    background: #20232b;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .bq-term-bar i {
+    width: 0.62rem;
+    height: 0.62rem;
+    border-radius: 50%;
+    background: #3a3f4b;
+  }
+
+  .bq-term-bar i:nth-child(1) { background: #f16a5d; }
+  .bq-term-bar i:nth-child(2) { background: #f5bf4f; }
+  .bq-term-bar i:nth-child(3) { background: #58c364; }
+
+  .bq-term-bar em {
+    margin-inline: auto;
+    font-style: normal;
+    font-family: var(--bq-mono);
+    font-size: 0.68rem;
+    color: #8a90a0;
+  }
+
+  .bq-term-replay {
+    font-family: var(--bq-mono);
+    font-size: 0.62rem;
+    color: #6d7381;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .bq-term:hover .bq-term-replay {
+    opacity: 1;
+  }
+
+  .bq-term-body {
+    margin: 0;
+    padding: 0.65rem 0.9rem 0.7rem;
+    background: transparent;
+    font-family: var(--bq-mono);
+    font-size: 0.7rem;
+    line-height: 1.42;
+    color: #c9ccd4;
+    overflow-x: auto;
+  }
+
+  .bq-tl {
+    display: block;
+    min-height: 1.42em;
+  }
+
+  .bq-term-cmd {
+    display: inline-block;
+    vertical-align: bottom;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  /* animation only runs with JS (.bq-play): no-JS keeps everything visible */
+  .bq-play .bq-tl:not(.bq-tl-cmd) {
+    opacity: 0;
+    animation: bq-term-line 0.01s linear forwards;
+    animation-delay: calc(var(--i) * 90ms + 1150ms);
+  }
+
+  .bq-play .bq-term-cmd {
+    width: 0;
+    animation: bq-term-typing 0.85s steps(19, end) 250ms forwards;
+  }
+
+  .bq-term-body i {
+    font-style: normal;
+  }
+
+  .bq-tw { color: #f3f4f8; font-weight: 700; }
+  .bq-td { color: #6d7381; }
+  .bq-tm { color: #f472b6; }
+  .bq-tg { color: #46c98a; font-weight: 700; }
+  .bq-ty { color: #e8a33d; }
+
+  .bq-cursor {
+    color: #c9ccd4;
+    animation: bq-term-blink 1.1s steps(1) infinite;
+  }
+
+  @keyframes bq-term-line {
+    to { opacity: 1; }
+  }
+
+  @keyframes bq-term-typing {
+    from { width: 0; }
+    to { width: 19ch; }
+  }
+
+  @keyframes bq-term-blink {
+    0%, 55% { opacity: 1; }
+    56%, 100% { opacity: 0; }
+  }
+
+</style>
+
+<script>
+  // Boot animation: run when the terminal scrolls into view, replay on
+  // click / Enter. Opacity fades and a typewriter only — no spatial motion,
+  // so it stays on under prefers-reduced-motion. Without JS: fully static.
+  document.querySelectorAll<HTMLElement>('.bq-term').forEach((term) => {
+    const play = () => {
+      term.classList.remove('bq-play');
+      void term.offsetWidth; // restart CSS animations
+      term.classList.add('bq-play');
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            play();
+            io.disconnect();
+          }
+        }
+      },
+      { threshold: 0.35 }
+    );
+    io.observe(term);
+    term.style.cursor = 'pointer';
+    term.addEventListener('click', play);
+    term.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        play();
+      }
+    });
+  });
+</script>

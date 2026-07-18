@@ -14,6 +14,30 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.38] - 2026-07-18
+
+### Changed: adoption-first npm README
+
+The package README was rewritten from a 958-line reference dump into a
+~370-line adoption path: quickstart (embedded and server in the first
+screen), why/when comparison, the two modes, the six-language SDK table,
+Simple Mode and Workflow teasers, and a short MCP setup, each section
+deep-linking to the corresponding bunqueue.dev guide. Duplicated
+sections, stale SDK lists and internal test details were removed; every
+surviving claim and code sample was re-verified against the current API.
+The README and the site now state explicitly that the server and the
+embedded queue run in-memory unless a data path is configured.
+
+### Changed: bunqueue.dev home covers all six SDKs
+
+The home hero now shows the real `bunx bunqueue start` boot output in an
+animated, replayable terminal next to the per-language install step, with
+Rust and Elixir added everywhere (install chips, language cards, trust
+line). The quickstart and developer-experience code examples switched to
+language tabs covering Bun, Node.js/Deno, Python, PHP, Go, Rust and
+Elixir, the benchmark card moved next to the BullMQ comparison, and the
+layout uses the full desktop width.
+
 ## [2.8.37] - 2026-07-17
 
 ### Fixed: Go SDK conformance in CI

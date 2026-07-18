@@ -1537,9 +1537,11 @@ main.bq-has-hero .content-panel:first-of-type {
 /* ── shared primitives ─────────────────────────────────────────────── */
 
 .bq-wrap {
-  max-width: 85rem;
+  /* effectively full width on desktops up to ~1920px; the cap only kicks
+     in on ultrawide monitors to keep line lengths sane */
+  max-width: 120rem;
   margin: 0 auto;
-  padding: 0 2rem;
+  padding: 0 3rem;
 }
 
 /* Splash pages that carry the custom home: let content run full width */
@@ -1602,9 +1604,38 @@ main.bq-has-hero .sl-container {
 
 .bq-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 3.5rem;
-  align-items: center;
+}
+
+/* hero: copy stays readable, the two installer steps sit side by side */
+.bq-hero-left {
+  max-width: none;
+}
+
+.bq-hero-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2.4rem;
+  align-items: start;
+}
+
+.bq-hero-step > .bq-install-label {
+  margin-top: 0;
+  margin-bottom: 0.55rem;
+}
+
+/* Starlight's sl-markdown-content sibling spacing adds 1rem to the second
+   grid cell; both step columns must start on the same row line */
+.bq-hero-steps > .bq-hero-step {
+  margin-top: 0 !important;
+}
+
+@media (max-width: 60rem) {
+  .bq-hero-steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.8rem;
+  }
 }
 
 .bq-hero-grid .bq-hero-h1 {
@@ -1659,20 +1690,84 @@ main.bq-has-hero .sl-container {
   margin-top: 0;
 }
 
-/* 8 runtime tabs in a ~28rem column: labels never break mid-word; whole
-   tabs wrap to a second row instead. Below 40rem the mobile block turns
-   the strip into nowrap+scroll and resets these gaps. */
+/* ── hero runtime selector ─────────────────────────────────────────────
+   Underline tabs can't hold 8 runtimes in a ~28rem column. Restyle them
+   as mono pill chips carrying the same per-runtime identity dots used by
+   the polyglot cards below: pink = Bun (runs bunqueue itself), language
+   colors = client runtimes. Selecting a chip tints it with its color.
+   The !important flags beat Starlight's Astro-scoped tab rules. */
+.bq-hero-left starlight-tabs .tablist-wrapper {
+  overflow: visible;
+}
+
 .bq-hero-left starlight-tabs [role='tablist'] {
   flex-wrap: wrap;
-  row-gap: 0.15rem;
-  column-gap: 1.1rem;
+  gap: 0.4rem;
+  border-bottom: 0;
+  padding: 0.1rem 0 0.15rem;
 }
 
-.bq-hero-left starlight-tabs [role='tab'] {
+.bq-hero-left starlight-tabs .tab {
+  margin-bottom: 0 !important;
+}
+
+.bq-hero-left starlight-tabs .tab > [role='tab'] {
+  font-family: var(--bq-mono);
+  font-size: 0.74rem;
+  line-height: 1;
   white-space: nowrap;
+  gap: 0.42rem;
+  padding: 0.4rem 0.75rem !important;
+  border: 1px solid var(--bq-line) !important;
+  border-radius: 999px;
+  box-shadow: none !important;
+  color: var(--sl-color-gray-3) !important;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
-/* narrow screens: tab labels never squash, the tab strip scrolls instead */
+.bq-hero-left starlight-tabs .tab > [role='tab']::before {
+  content: '';
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--bq-chip, var(--sl-color-gray-4));
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+
+.bq-hero-left starlight-tabs .tab > [role='tab']:hover {
+  color: var(--sl-color-text) !important;
+  border-color: color-mix(in srgb, var(--sl-color-text) 32%, transparent) !important;
+}
+
+.bq-hero-left starlight-tabs .tab > [role='tab'][aria-selected='true'] {
+  color: var(--sl-color-text) !important;
+  border-color: color-mix(in srgb, var(--bq-chip, var(--sl-color-text)) 55%, transparent) !important;
+  background: color-mix(in srgb, var(--bq-chip, var(--sl-color-text)) 10%, transparent);
+}
+
+.bq-hero-left starlight-tabs .tab > [role='tab'][aria-selected='true']::before {
+  opacity: 1;
+}
+
+/* per-runtime dot colors, TabItem source order (install step only, the
+   8-chip group): Bun, Node.js/Deno, Workers, Python, PHP, Go, Rust, Elixir */
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(1) [role='tab'] { --bq-chip: #e5397f; }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(2) [role='tab'] { --bq-chip: var(--bq-blue); }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(3) [role='tab'] { --bq-chip: #f38020; }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(4) [role='tab'] { --bq-chip: var(--bq-green); }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(5) [role='tab'] { --bq-chip: #777bb3; }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(6) [role='tab'] { --bq-chip: #00add8; }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(7) [role='tab'] { --bq-chip: #ce422b; }
+.bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(8) [role='tab'] { --bq-chip: #6e4a7e; }
+
+/* dark theme: lift the hardcoded dots that would sink into the background */
+:root[data-theme='dark'] .bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(5) [role='tab'] { --bq-chip: #9ba0e0; }
+:root[data-theme='dark'] .bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(7) [role='tab'] { --bq-chip: #e0684f; }
+:root[data-theme='dark'] .bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(8) [role='tab'] { --bq-chip: #a37fc9; }
+
+/* narrow screens: docs-page tab labels never squash, the strip scrolls
+   instead; the hero chips keep wrapping (higher-specificity override) */
 @media (max-width: 40rem) {
   starlight-tabs .tablist-wrapper {
     overflow-x: auto;
@@ -1684,11 +1779,9 @@ main.bq-has-hero .sl-container {
     min-width: max-content;
   }
 
-  /* undo the hero wrap-gaps on the mobile scroll strip (matches the
-     desktop rule's specificity, so no !important needed) */
   .bq-hero-left starlight-tabs [role='tablist'] {
-    column-gap: 0;
-    row-gap: 0;
+    flex-wrap: wrap !important;
+    min-width: 0;
   }
 
   starlight-tabs [role='tab'] {
@@ -1780,13 +1873,44 @@ main.bq-has-hero .sl-container {
 }
 
 .bq-btn {
-  background: var(--bq-brand);
+  position: relative;
+  background: linear-gradient(135deg, var(--bq-brand-soft, var(--bq-brand)), var(--bq-brand));
   color: #fff;
   font-weight: 600;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 4px 14px color-mix(in srgb, var(--bq-brand) 30%, transparent);
+}
+
+.bq-btn::after {
+  content: '→';
+  display: inline-block;
+  margin-left: 0.5em;
+  transition: transform 0.15s ease;
 }
 
 .bq-btn:hover {
   transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 22px color-mix(in srgb, var(--bq-brand) 42%, transparent);
+}
+
+.bq-btn:hover::after {
+  transform: translateX(0.2em);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bq-btn,
+  .bq-btn::after {
+    transition: none;
+  }
+  .bq-btn:hover {
+    transform: none;
+  }
+  .bq-btn:hover::after {
+    transform: none;
+  }
 }
 
 .bq-btn-ghost {
@@ -3011,7 +3135,9 @@ html {
 /* ── cta ───────────────────────────────────────────────────────────── */
 
 .bq-cta {
-  margin: 7rem 0 3rem;
+  /* keep the .bq-wrap auto side-margins: a bare `0` here un-centers the
+     whole section inside sl-markdown-content */
+  margin: 7rem auto 3rem;
   text-align: center;
 }
 
@@ -3083,6 +3209,12 @@ html {
     mask-image: linear-gradient(90deg, #000 calc(100% - 2.4rem), transparent);
   }
   starlight-tabs .tablist-wrapper::-webkit-scrollbar { display: none; }
+
+  /* hero chips wrap instead of scrolling: no fade mask needed there */
+  .bq-hero-left starlight-tabs .tablist-wrapper {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 
   /* actions: full-width, thumb-sized */
   .bq-hero-left .bq-actions { margin-top: 2rem; gap: 0.7rem; }

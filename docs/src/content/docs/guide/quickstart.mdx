@@ -1,0 +1,747 @@
+---
+title: "Quick Start: Your First Bun Job Queue in Minutes"
+description: "Get started with bunqueue in minutes. Create queues, add jobs, and process them with Workers. Includes SQLite persistence setup."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/quickstart.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · quickstart</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Working queue in <em>a minute.</em></h1>
+  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and turn on persistence. On Bun everything runs embedded in a single process with zero configuration; from any other language, start the server once and connect.</p>
+</div>
+
+## The smallest working queue
+
+Install the client for your runtime (see the [SDK guide](/guide/sdks/)), save the snippet as a file, run it. On Bun the queue runs embedded in your process; in every other language, start the server once with `bunx bunqueue start` first.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Queue, Worker } from 'bunqueue/client';
+
+// The queue: where you put jobs
+const queue = new Queue('emails', { embedded: true });
+
+// The worker: pulls jobs and runs your function on each one
+const worker = new Worker('emails', async (job) => {
+  console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
+  return { sent: true };
+}, { embedded: true });
+
+// Add a job
+await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+// The queue: where you put jobs (connects to localhost:6789 by default)
+const queue = new Queue('emails');
+
+// The worker: pulls jobs and runs your function on each one
+const worker = new Worker('emails', async (job) => {
+  console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
+  return { sent: true };
+});
+
+// Add a job
+await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+# The queue: where you put jobs (connects to localhost:6789 by default)
+queue = Queue("emails")
+queue.add("welcome", {"to": "user@example.com", "subject": "Welcome!"})
+
+# The worker: pulls jobs and runs your function on each one
+def process(job):
+    print(f"Sending {job.data['subject']} to {job.data['to']}")
+    return {"sent": True}
+
+Worker("emails", process).run()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+// The queue: where you put jobs (connects to localhost:6789 by default)
+$queue = new Queue('emails');
+$queue->add('welcome', ['to' => 'user@example.com', 'subject' => 'Welcome!']);
+
+// The worker: pulls jobs and runs your function on each one
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    $data = $job->data();
+    echo "Sending {$data['subject']} to {$data['to']}\n";
+    return ['sent' => true];
+});
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// The queue: where you put jobs (connects to localhost:6789 by default)
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+defer queue.Close()
+
+queue.Add("welcome", map[string]any{
+    "to": "user@example.com", "subject": "Welcome!",
+}, nil)
+
+// The worker: pulls jobs and runs your function on each one
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    data := job.Data()
+    fmt.Printf("Sending %v to %v\n", data["subject"], data["to"])
+    return map[string]any{"sent": true}, nil
+}, bunqueue.WorkerOptions{})
+worker.Run()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value, Worker, WorkerOptions};
+
+// The queue: where you put jobs (connects to localhost:6789 by default)
+let queue = Queue::new("emails", ConnectionOptions::default());
+let data = Value::Map(vec![
+    (Value::from("to"), Value::from("user@example.com")),
+    (Value::from("subject"), Value::from("Welcome!")),
+]);
+queue.add("welcome", data, JobOptions::default())?;
+
+// The worker: pulls jobs and runs your function on each one
+let worker = Worker::new(
+    "emails",
+    |job| {
+        println!("Sending {:?}", job.data());
+        Ok(Value::from(true))
+    },
+    WorkerOptions::default(),
+);
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# The queue: where you put jobs (connects to localhost:6789 by default)
+queue = Bunqueue.queue("emails")
+
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "welcome", %{to: "user@example.com", subject: "Welcome!"})
+
+# The worker: pulls jobs and runs your function on each one
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    IO.puts("Sending #{job.data["subject"]} to #{job.data["to"]}")
+    {:ok, %{sent: true}}
+  end)
+
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
+
+On Bun, `embedded: true` means the queue runs inside your process, no server needed. Every other client talks TCP to the server (`bunx bunqueue start`) and defaults to `localhost:6789`.
+
+:::danger[The one mistake everyone makes]
+On Bun, `Queue` and `Worker` must use the **same mode**. If one has `embedded: true` and the other doesn't, the other tries to connect to a TCP server that isn't running and fails with a "Command timeout" error.
+
+```typescript
+// ✅ Both embedded
+const queue = new Queue('tasks', { embedded: true });
+const worker = new Worker('tasks', handler, { embedded: true });
+
+// ❌ Mixed modes = timeout error
+const queue = new Queue('tasks', { embedded: true });
+const worker = new Worker('tasks', handler);  // Missing embedded: true!
+```
+:::
+
+## Add jobs with options
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Typed queue: job.data is type-checked
+interface EmailJob {
+  to: string;
+  subject: string;
+}
+const emailQueue = new Queue<EmailJob>('emails', { embedded: true });
+
+// Priority, delay, retries
+await emailQueue.add('send-email', { to: 'a@test.com', subject: 'Hi' }, {
+  priority: 10,   // Higher = processed first
+  delay: 5000,    // Wait 5 seconds before processing
+  attempts: 3,    // Retry up to 3 times if the processor throws
+  backoff: 1000,  // Wait 1 second between retries (grows on each attempt)
+});
+
+// Many jobs at once (one optimized batch)
+await emailQueue.addBulk([
+  { name: 'send-email', data: { to: 'a@test.com', subject: 'Hi' } },
+  { name: 'send-email', data: { to: 'b@test.com', subject: 'Hi' } },
+]);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Typed queue: job.data is type-checked
+interface EmailJob {
+  to: string;
+  subject: string;
+}
+const emailQueue = new Queue<EmailJob>('emails');
+
+// Priority, delay, retries
+await emailQueue.add('send-email', { to: 'a@test.com', subject: 'Hi' }, {
+  priority: 10,   // Higher = processed first
+  delay: 5000,    // Wait 5 seconds before processing
+  attempts: 3,    // Retry up to 3 times if the processor throws
+  backoff: 1000,  // Wait 1 second between retries (grows on each attempt)
+});
+
+// Many jobs at once (one optimized batch)
+await emailQueue.addBulk([
+  { name: 'send-email', data: { to: 'a@test.com', subject: 'Hi' } },
+  { name: 'send-email', data: { to: 'b@test.com', subject: 'Hi' } },
+]);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Priority, delay, retries
+queue.add("send-email", {"to": "a@test.com", "subject": "Hi"},
+    priority=10,   # Higher = processed first
+    delay=5000,    # Wait 5 seconds before processing
+    attempts=3,    # Retry up to 3 times if the processor raises
+    backoff=1000)  # Wait 1 second between retries (grows on each attempt)
+
+# Many jobs at once (one optimized batch)
+queue.add_bulk([
+    {"name": "send-email", "data": {"to": "a@test.com", "subject": "Hi"}},
+    {"name": "send-email", "data": {"to": "b@test.com", "subject": "Hi"}},
+])
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Priority, delay, retries
+$queue->add('send-email', ['to' => 'a@test.com', 'subject' => 'Hi'], [
+    'priority' => 10,   // Higher = processed first
+    'delay' => 5000,    // Wait 5 seconds before processing
+    'attempts' => 3,    // Retry up to 3 times if the processor throws
+    'backoff' => 1000,  // Wait 1 second between retries (grows on each attempt)
+]);
+
+// Many jobs at once (one optimized batch)
+$queue->addBulk([
+    ['name' => 'send-email', 'data' => ['to' => 'a@test.com', 'subject' => 'Hi']],
+    ['name' => 'send-email', 'data' => ['to' => 'b@test.com', 'subject' => 'Hi']],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Priority, delay, retries
+queue.Add("send-email", map[string]any{"to": "a@test.com", "subject": "Hi"},
+    bunqueue.JobOptions{
+        "priority": 10,   // Higher = processed first
+        "delay":    5000, // Wait 5 seconds before processing
+        "attempts": 3,    // Retry up to 3 times if the processor errors
+        "backoff":  1000, // Wait 1 second between retries (grows on each attempt)
+    })
+
+// Many jobs at once (one optimized batch)
+ids, err := queue.AddBulk([]bunqueue.BulkEntry{
+    {Name: "send-email", Data: map[string]any{"to": "a@test.com", "subject": "Hi"}},
+    {Name: "send-email", Data: map[string]any{"to": "b@test.com", "subject": "Hi"}},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Backoff, BulkEntry, JobOptions, Value};
+
+let data = Value::Map(vec![
+    (Value::from("to"), Value::from("a@test.com")),
+    (Value::from("subject"), Value::from("Hi")),
+]);
+
+// Priority, delay, retries
+queue.add("send-email", data.clone(), JobOptions {
+    priority: Some(10),                         // Higher = processed first
+    delay: Some(5000),                          // Wait 5 seconds before processing
+    attempts: Some(3),                          // Retry up to 3 times on failure
+    backoff: Some(Backoff::Milliseconds(1000)), // Wait 1 second between retries
+    ..Default::default()
+})?;
+
+// Many jobs at once (one optimized batch)
+queue.add_bulk(vec![
+    BulkEntry { name: "send-email".into(), data: data.clone(), options: JobOptions::default() },
+    BulkEntry { name: "send-email".into(), data, options: JobOptions::default() },
+])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Priority, delay, retries
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "send-email", %{to: "a@test.com", subject: "Hi"},
+    # Higher = processed first; wait 5s; retry 3 times; 1s between retries
+    priority: 10,
+    delay: 5000,
+    attempts: 3,
+    backoff: 1000
+  )
+
+# Many jobs at once (one optimized batch)
+{:ok, _ids} =
+  Bunqueue.Queue.add_bulk(queue, [
+    %{name: "send-email", data: %{to: "a@test.com", subject: "Hi"}},
+    %{name: "send-email", data: %{to: "b@test.com", subject: "Hi"}}
+  ])
+```
+
+</TabItem>
+</Tabs>
+
+All options are in the [Queue guide](/guide/queue/).
+
+## Do more inside the processor
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker<EmailJob>('emails', async (job) => {
+  await job.updateProgress(50, 'Sending email...');  // Report progress
+  await sendEmail(job.data);                          // Do the work
+  await job.log('Email sent successfully');           // Attach a log line
+  return { sent: true, timestamp: Date.now() };       // Result, stored and queryable
+}, {
+  embedded: true,
+  concurrency: 5,  // Process 5 jobs in parallel
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker<EmailJob>('emails', async (job) => {
+  await job.updateProgress(50, 'Sending email...');  // Report progress
+  await sendEmail(job.data);                          // Do the work
+  await job.log('Email sent successfully');           // Attach a log line
+  return { sent: true, timestamp: Date.now() };       // Result, stored and queryable
+}, {
+  concurrency: 5,  // Process 5 jobs in parallel
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    job.update_progress(50, "Sending email...")  # Report progress
+    send_email(job.data)                          # Do the work
+    job.log("Email sent successfully")            # Attach a log line
+    return {"sent": True}                         # Result, stored and queryable
+
+Worker("emails", process, concurrency=5).run()   # Process 5 jobs in parallel
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    $job->updateProgress(50, 'Sending email...');  // Report progress
+    sendEmail($job->data());                        // Do the work
+    $job->log('Email sent successfully');           // Attach a log line
+    return ['sent' => true];                        // Result, stored and queryable
+});
+$worker->run();  // The PHP worker is sequential by design (one job at a time)
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    job.UpdateProgress(50, "Sending email...") // Report progress
+    if err := sendEmail(job.Data()); err != nil { // Do the work
+        return nil, err
+    }
+    job.Log("Email sent successfully", "info") // Attach a log line
+    return map[string]any{"sent": true}, nil   // Result, stored and queryable
+}, bunqueue.WorkerOptions{Concurrency: 5})     // Process 5 jobs in parallel
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ProcessError, Value, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "emails",
+    |job| {
+        let _ = job.update_progress(50.0, Some("Sending email...")); // Report progress
+        send_email(job.data())                                        // Do the work
+            .map_err(|e| ProcessError::retryable(e.to_string()))?;
+        let _ = job.log("Email sent successfully", None);             // Attach a log line
+        Ok(Value::from(true))                                         // Result, stored
+    },
+    WorkerOptions { concurrency: 5, ..Default::default() }, // 5 jobs in parallel
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    Bunqueue.Job.update_progress(job, 50, "Sending email...")  # Report progress
+    send_email(job.data)                                        # Do the work
+    Bunqueue.Job.log(job, "Email sent successfully")            # Attach a log line
+    {:ok, %{sent: true}}                                        # Result, stored
+  end, concurrency: 5)                                          # 5 jobs in parallel
+```
+
+</TabItem>
+</Tabs>
+
+## React to events
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Job ${job.id} completed:`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Job ${job.id} failed:`, error.message);
+});
+
+worker.on('progress', (job, progress) => {
+  console.log(`Job ${job.id} progress: ${progress}%`);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Job ${job.id} completed:`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Job ${job.id} failed:`, error.message);
+});
+
+worker.on('progress', (job, progress) => {
+  console.log(`Job ${job.id} progress: ${progress}%`);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.on("completed", lambda job, result: print(f"Job {job.id} completed: {result}"))
+worker.on("failed", lambda job, err: print(f"Job {job.id} failed: {err}"))
+worker.on("progress", lambda job, progress: print(f"Job {job.id} progress: {progress}%"))
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->on('completed', function ($job, $result) {
+    echo "Job {$job->id()} completed\n";
+});
+
+$worker->on('failed', function ($job, $err) {
+    echo "Job {$job->id()} failed\n";
+});
+
+// The PHP worker has no 'progress' event; query progress via the Queue API.
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.On("completed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    fmt.Printf("Job %s completed\n", job.ID())
+})
+
+worker.On("failed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    fmt.Printf("Job %s failed\n", job.ID())
+})
+
+// The Go worker has no "progress" event; query progress via the Queue API.
+```
+
+</TabItem>
+</Tabs>
+
+*Rust and Elixir have no worker event emitter: use the structured telemetry callback for transport lifecycle and normal language control flow for per-job outcomes (see the [SDK guide](/guide/sdks/)).*
+
+The full event list is in the [Worker guide](/guide/worker/).
+
+## Turn on persistence
+
+Without a data path, jobs live in memory and disappear on restart. Point bunqueue at a SQLite file to survive restarts:
+
+```typescript
+// Option 1: dataPath option (recommended)
+const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
+const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
+
+// Option 2: environment variable
+// DATA_PATH=./data/bunqueue.db bun run app.ts
+```
+
+*`dataPath` applies to embedded (Bun) mode only. In server mode, persistence is configured on the server (`bunx bunqueue start --data-path ./data/bunq.db`); clients in every language need no changes.*
+
+## Shut down cleanly
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { shutdownManager } from 'bunqueue/client';
+
+process.on('SIGINT', async () => {
+  await worker.close();   // Finish active jobs
+  shutdownManager();      // Flush pending writes, close SQLite
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+process.on('SIGINT', async () => {
+  await worker.close();   // Stop pulling, drain in-flight jobs
+  queue.close();          // Close the connection
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.close()   # Stop pulling, wait for in-flight jobs to drain
+queue.close()    # Close the connection
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->installSignalHandlers(); // SIGTERM / SIGINT -> graceful stop
+$worker->run();                   // Returns after the in-flight job finishes
+$worker->close();                 // Unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.Stop()  // Stop pulling; in-flight jobs finish
+worker.Close() // Unregister and close the connection
+queue.Close()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+worker.stop();  // Stop pulling; in-flight jobs finish
+worker.close(); // Unregister and close the connection
+queue.close();
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Idempotent drain barrier: waits for active handlers, then unregisters and closes
+Bunqueue.Worker.stop(worker)
+```
+
+</TabItem>
+</Tabs>
+
+## Need more than one process?
+
+The Bun examples above run in a single process. When multiple services need to share one queue, run bunqueue as a standalone server instead:
+
+| | Embedded mode | Server mode |
+|---|---------------|-------------|
+| **Best for** | Single-process apps, serverless | Multi-process, microservices |
+| **Setup** | `embedded: true` | Run `bunqueue start`, drop the option |
+| **Clients** | Bun only (in process) | Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir, Cloudflare Workers |
+
+See the [Server guide](/guide/server/). All six official client SDKs speak the same protocol against the same queues, see the [SDK guide](/guide/sdks/).
+
+## Where to go next
+
+**Less boilerplate.** `Bunqueue` (Simple Mode) wraps Queue + Worker in one object with routes, middleware, and cron:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Bunqueue } from 'bunqueue/client';
+
+const app = new Bunqueue('notifications', {
+  embedded: true,
+  routes: {
+    'send-email': async (job) => ({ sent: true }),
+    'send-sms': async (job) => ({ sent: true }),
+  },
+  concurrency: 10,
+});
+
+await app.add('send-email', { to: 'alice@example.com' });
+await app.cron('daily-report', '0 9 * * *', { type: 'summary' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Bunqueue } from 'bunqueue-client';
+
+const app = new Bunqueue('notifications', {
+  routes: {
+    'send-email': async (job) => ({ sent: true }),
+    'send-sms': async (job) => ({ sent: true }),
+  },
+  concurrency: 10,
+});
+
+await app.add('send-email', { to: 'alice@example.com' });
+await app.cron('daily-report', '0 9 * * *', { type: 'summary' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Bunqueue
+
+app = Bunqueue(
+    "notifications",
+    routes={
+        "send-email": lambda job: {"sent": True},
+        "send-sms": lambda job: {"sent": True},
+    },
+    concurrency=10,
+)
+
+app.add("send-email", {"to": "alice@example.com"})
+app.cron("daily-report", "0 9 * * *", {"type": "summary"})
+```
+
+</TabItem>
+</Tabs>
+
+*Simple Mode is available in TypeScript and Python. In PHP, Go, Rust and Elixir, compose `Queue` and `Worker` directly.*
+
+See the [Simple Mode guide](/guide/simple-mode/).
+
+**Watch it live.** The web dashboard shows queues, jobs, failures, crons, and workers. One command:
+
+```bash
+bunx bunqueue-dashboard
+```
+
+Try the [live demo](https://egeominotti.github.io/bunqueue-dashboard/) without installing anything.
+
+**Connect AI agents.** bunqueue ships an MCP server with 73 tools, so agents like Claude can add jobs, manage crons, and monitor queues via natural language:
+
+```bash
+bun add bunqueue @modelcontextprotocol/sdk
+claude mcp add bunqueue -- bunx bunqueue-mcp
+```
+
+Setup for Claude Desktop, Cursor, and Windsurf is in the [MCP guide](/guide/mcp/).
+
+**Orchestrate multi-step processes.** The built-in workflow engine (Bun runtime) handles branching, parallel steps, rollback on failure, and human approvals:
+
+```typescript
+import { Workflow, Engine } from 'bunqueue/workflow';
+
+const flow = new Workflow('order')
+  .step('validate', async (ctx) => ({ ok: true }))
+  .step('charge', async (ctx) => ({ txId: 'tx_123' }))
+  .waitFor('manager-approval')  // Pauses until you send a signal
+  .step('ship', async (ctx) => ({ shipped: true }));
+
+const engine = new Engine({ embedded: true });
+engine.register(flow);
+await engine.start('order', { orderId: 'ORD-1' });
+```
+
+See the [Workflow Engine guide](/guide/workflow/).
+
+## Next steps
+
+- [Queue API](/guide/queue/), all job options and queue operations
+- [Worker API](/guide/worker/), concurrency, events, error handling
+- [Server Mode](/guide/server/), run bunqueue as a standalone server
+- [Client SDKs](/guide/sdks/), use the queue from Node.js, Deno, Python, PHP, Go, Rust, Elixir
+- [Code Examples & Recipes](/examples/), complete examples

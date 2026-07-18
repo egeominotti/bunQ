@@ -1,0 +1,467 @@
+---
+title: "Dead Letter Queue: What Happens to Failed Jobs"
+description: "bunqueue keeps failed jobs in a Dead Letter Queue with full error history. Inspect, retry manually or automatically, and expire old entries."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dlq</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Failed jobs, kept in the <em>DLQ.</em></h1>
+  <p class="bq-hero-sub">When a job runs out of retries, bunqueue does not throw it away. It lands in the Dead Letter Queue with its error and full attempt history, so you can see what went wrong and retry it.</p>
+</div>
+
+The Dead Letter Queue (DLQ) is a holding area for jobs that failed permanently, for example after exhausting all their retry attempts. Nothing is lost: each entry keeps the original job, the error message, and a record of every attempt.
+
+## Quick Start
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Queue } from 'bunqueue/client';
+
+const queue = new Queue('emails', { embedded: true });
+
+// See what failed and why
+const entries = queue.getDlq();
+for (const entry of entries) {
+  console.log(entry.job.id, entry.reason, entry.error);
+}
+
+// Put everything back in the queue for another try
+queue.retryDlq();
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+const jobs = await queue.getDlq();
+for (const job of jobs) {
+  console.log(job.id);
+}
+
+// Put everything back in the queue for another try
+await queue.retryDlq();
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("emails")
+
+# List the dead jobs (over TCP they arrive as plain jobs,
+# without DLQ metadata like the failure reason)
+for job in queue.get_dlq():
+    print(job["id"])
+
+# Put everything back in the queue for another try
+queue.retry_dlq()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$queue = new Queue('emails');
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+foreach ($queue->getDlq() as $job) {
+    echo $job['id'], PHP_EOL;
+}
+
+// Put everything back in the queue for another try
+$queue->retryDlq();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+defer queue.Close()
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+jobs, err := queue.GetDlq(0)
+for _, job := range jobs {
+    fmt.Println(job["id"])
+}
+
+// Put everything back in the queue for another try
+_, err = queue.RetryDlq("", 0)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, Queue};
+
+let queue = Queue::new("emails", ConnectionOptions::default());
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+let jobs = queue.get_dlq(None)?;
+println!("{} dead jobs", jobs.len());
+for job in &jobs {
+    println!("{job:?}");
+}
+
+// Put everything back in the queue for another try
+queue.retry_dlq(None, None)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+
+# List the dead jobs (over TCP they arrive as plain jobs,
+# without DLQ metadata like the failure reason)
+{:ok, jobs} = Bunqueue.Queue.dlq(queue)
+for job <- jobs, do: IO.puts(job["id"])
+
+# Put everything back in the queue for another try
+{:ok, _count} = Bunqueue.Queue.retry_dlq(queue)
+```
+
+</TabItem>
+</Tabs>
+
+From the CLI, against a running server:
+
+```bash
+bunqueue dlq list emails
+bunqueue dlq retry emails
+bunqueue dlq purge emails
+```
+
+:::note[Embedded vs TCP]
+The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server and always return 0. The `Async` variants work in both modes: `await queue.getDlqJobsAsync(count?)` lists the dead jobs of a remote server (as plain Job objects, without DLQ metadata like the failure reason), `await queue.retryDlqAsync()` / `await queue.purgeDlqAsync()` wait for the command and return the real count, and `await queue.setDlqConfigAsync()` waits for the config to apply. For full DLQ metadata on a remote server, use the CLI or the dashboard.
+:::
+
+## Common Tasks
+
+### Filter entries
+
+```typescript
+queue.getDlq({ reason: 'timeout' });                       // by failure reason
+queue.getDlq({ olderThan: Date.now() - 86400000 });        // older than 24h
+queue.getDlq({ newerThan: Date.now() - 3600000 });         // last hour
+queue.getDlq({ retriable: true });                         // still eligible for auto-retry
+queue.getDlq({ limit: 10, offset: 20 });                   // pagination
+```
+
+*Filter objects are an embedded-mode (Bun) API. Over TCP the SDKs accept only a count cap — `getDlq(10)` / `get_dlq(10)` / `GetDlq(10)` — and you filter client-side.*
+
+### Retry selectively
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.retryDlq();                                          // retry everything
+queue.retryDlq('job-123');                                 // retry one job
+queue.retryDlqByFilter({ reason: 'timeout' });             // retry by filter (embedded only)
+const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.retryDlq();                       // retry everything
+await queue.retryDlq('job-123');              // retry one job
+await queue.retryJobs({ count: 100 });        // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.retry_dlq()                    # retry everything
+queue.retry_dlq("job-123")           # retry one job
+queue.retry_dlq(count=100)           # retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->retryDlq();                  // retry everything
+$queue->retryDlq('job-123');         // retry one job
+$queue->retryDlq(null, 100);         // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+n, err := queue.RetryDlq("", 0)         // retry everything
+n, err = queue.RetryDlq("job-123", 0)   // retry one job
+n, err = queue.RetryDlq("", 100)        // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.retry_dlq(None, None)?;              // retry everything
+queue.retry_dlq(Some("job-123"), None)?;   // retry one job
+queue.retry_dlq(None, Some(100))?;         // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, n} = Bunqueue.Queue.retry_dlq(queue)               # retry everything
+{:ok, _} = Bunqueue.Queue.retry_dlq(queue, "job-123")    # retry one job
+{:ok, _} = Bunqueue.Queue.retry_dlq(queue, nil, 100)     # retry only the first 100
+```
+
+</TabItem>
+</Tabs>
+
+### Check DLQ health
+
+```typescript
+const stats = queue.getDlqStats();
+console.log(stats.total);         // total entries
+console.log(stats.byReason);      // { explicit_fail: 5, timeout: 2, ... }
+console.log(stats.pendingRetry);  // entries waiting for auto-retry
+```
+
+A simple alert loop:
+
+```typescript
+setInterval(() => {
+  const stats = queue.getDlqStats();
+  if (stats.total > 100) alertOps('High DLQ count', stats);
+}, 30000);
+```
+
+*`getDlqStats()` is an embedded-mode (Bun) API. Over TCP, count the entries returned by `getDlq()` or alert from the [monitoring endpoints](/guide/monitoring/).*
+
+### Purge
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const purged = queue.purgeDlq();             // permanently deletes all entries
+const n = await queue.purgeDlqAsync();       // same, but waits and returns the count (TCP too)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const purged = await queue.purgeDlq();       // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+purged = queue.purge_dlq()       # permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$purged = $queue->purgeDlq();    // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+purged, err := queue.PurgeDlq()  // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let purged = queue.purge_dlq()?; // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, purged} = Bunqueue.Queue.purge_dlq(queue)  # deletes all entries, returns the count
+```
+
+</TabItem>
+</Tabs>
+
+## Automatic Retry
+
+With `autoRetry` enabled, bunqueue re-queues DLQ entries on its own, spacing retries out with exponential backoff (each retry waits twice as long as the previous one):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 60000,  // base delay: 1 minute
+  maxAutoRetries: 3,
+});
+// 1st retry: 1 min after entering the DLQ
+// 2nd retry: 1 min after the 1st  (60s x 2^0)
+// 3rd retry: 2 min after the 2nd  (60s x 2^1)
+// After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 60000,  // base delay: 1 minute
+  maxAutoRetries: 3,
+});
+// 1st retry: 1 min after entering the DLQ
+// 2nd retry: 1 min after the 1st  (60s x 2^0)
+// 3rd retry: 2 min after the 2nd  (60s x 2^1)
+// After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Config keys are the wire names (camelCase)
+queue.set_dlq_config({
+    "autoRetry": True,
+    "autoRetryInterval": 60000,  # base delay: 1 minute
+    "maxAutoRetries": 3,
+})
+# 1st retry: 1 min after entering the DLQ
+# 2nd retry: 1 min after the 1st  (60s x 2^0)
+# 3rd retry: 2 min after the 2nd  (60s x 2^1)
+# After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+</Tabs>
+
+*The PHP, Go, Rust, and Elixir SDKs do not expose DLQ configuration helpers yet. The config lives server-side per queue, so setting it once from any TypeScript or Python client applies to jobs produced and consumed in every language.*
+
+A background task checks for due retries every minute and re-queues jobs with a reset attempt count.
+
+## Configuration
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 3600000,
+  maxAutoRetries: 3,
+  maxAge: 604800000,   // purge entries after 7 days (null = never)
+  maxEntries: 10000,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 3600000,
+  maxAutoRetries: 3,
+  maxAge: 604800000,   // purge entries after 7 days (null = never)
+  maxEntries: 10000,
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Config keys are the wire names (camelCase)
+queue.set_dlq_config({
+    "autoRetry": True,
+    "autoRetryInterval": 3600000,
+    "maxAutoRetries": 3,
+    "maxAge": 604800000,   # purge entries after 7 days (None = never)
+    "maxEntries": 10000,
+})
+```
+
+</TabItem>
+</Tabs>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `autoRetry` | `false` | Enable automatic retry |
+| `autoRetryInterval` | `3600000` | Base delay between auto-retries (1 hour) |
+| `maxAutoRetries` | `3` | Maximum auto-retry attempts |
+| `maxAge` | `604800000` | Auto-purge age (7 days, `null` = never) |
+| `maxEntries` | `10000` | Maximum DLQ entries per queue |
+
+## Reference
+
+### Why jobs end up in the DLQ
+
+| Reason | Description |
+|--------|-------------|
+| `explicit_fail` | The processor threw an error |
+| `max_attempts_exceeded` | Job exceeded its retry attempts |
+| `timeout` | Job timed out during processing |
+| `stalled` | Job stopped sending heartbeats (worker likely crashed) |
+| `ttl_expired` | Job expired before it was processed |
+| `worker_lost` | Worker disconnected during processing |
+| `unknown` | Fallback for unclassified failures |
+
+### Entry structure
+
+```typescript
+interface DlqEntry<T> {
+  job: Job<T>;                    // The failed job
+  enteredAt: number;              // When first moved to DLQ
+  reason: FailureReason;          // Why it failed
+  error: string | null;           // Error message
+  attempts: AttemptRecord[];      // Full attempt history
+  retryCount: number;             // Times retried from DLQ
+  lastRetryAt: number | null;     // Last DLQ retry time
+  nextRetryAt: number | null;     // Next scheduled auto-retry
+  expiresAt: number | null;       // When entry expires
+}
+```
+
+Each `AttemptRecord` carries the attempt number, start and failure timestamps, failure reason, error message, and duration in ms.
+
+:::tip[Related Guides]
+- [Stall Detection & Recovery](/guide/stall-detection/) - Stalled jobs are sent to the DLQ
+- [Worker API](/guide/worker/) - Configure retry behavior
+- [Monitoring & Prometheus Metrics](/guide/monitoring/) - Alert on DLQ size
+:::

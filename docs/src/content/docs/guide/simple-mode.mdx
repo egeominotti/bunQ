@@ -1,0 +1,1286 @@
+---
+title: "Simple Mode: Queue + Worker in One Object"
+description: "bunqueue Simple Mode combines Queue and Worker in one object: named routes, onion middleware, cron, events, and 12 built-in features with zero boilerplate."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/simple-mode.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · simple mode</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Queue and worker, <em>one object.</em></h1>
+  <p class="bq-hero-sub">Simple Mode gives you a Queue and a Worker in a single object. Add jobs, process them, add middleware, schedule crons, all from one place, one thing to close on shutdown.</p>
+</div>
+
+If your producer and consumer live in the same process, creating a `Queue` and a `Worker` separately is boilerplate. `Bunqueue` wraps both:
+
+*Simple Mode ships in the Bun package, the TypeScript client (`bunqueue-client`) and the Python SDK; in PHP, Go, Rust and Elixir compose Queue + Worker directly.*
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Bunqueue } from 'bunqueue/client';
+
+const app = new Bunqueue<{ to: string }>('emails', {
+  embedded: true,
+  processor: async (job) => {
+    console.log(`Sending to ${job.data.to}`);
+    return { sent: true };
+  },
+});
+
+await app.add('send', { to: 'alice@example.com' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Bunqueue } from 'bunqueue-client';
+
+// connects to localhost:6789 (embedded mode is Bun-only)
+const app = new Bunqueue<{ to: string }>('emails', {
+  processor: async (job) => {
+    console.log(`Sending to ${job.data.to}`);
+    return { sent: true };
+  },
+});
+
+await app.add('send', { to: 'alice@example.com' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Bunqueue
+
+def send(job):
+    print(f"Sending to {job.data['to']}")
+    return {"sent": True}
+
+# connects to localhost:6789 (embedded mode is Bun-only)
+app = Bunqueue("emails", processor=send)
+
+app.add("send", {"to": "alice@example.com"})
+```
+
+</TabItem>
+</Tabs>
+
+:::tip[When to use]
+Use `Bunqueue` when producer and consumer are in the **same process**. For distributed systems (separate producer and worker services), use [`Queue`](/guide/queue/) + [`Worker`](/guide/worker/) directly.
+:::
+
+Under the hood, `Bunqueue` is exactly `new Queue()` + `new Worker()` plus optional subsystems. Each job flows through: circuit breaker check → TTL check → cancellation setup → retry wrapper → middleware → your processor. Every subsystem is off until you configure it.
+
+## Routes
+
+Route jobs to different handlers by name:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue<{ to: string }>('notifications', {
+  embedded: true,
+  routes: {
+    'send-email': async (job) => {
+      await sendEmail(job.data.to);
+      return { channel: 'email' };
+    },
+    'send-sms': async (job) => {
+      await sendSMS(job.data.to);
+      return { channel: 'sms' };
+    },
+  },
+});
+
+await app.add('send-email', { to: 'alice' });
+await app.add('send-sms', { to: 'bob' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue<{ to: string }>('notifications', {
+  routes: {
+    'send-email': async (job) => {
+      await sendEmail(job.data.to);
+      return { channel: 'email' };
+    },
+    'send-sms': async (job) => {
+      await sendSMS(job.data.to);
+      return { channel: 'sms' };
+    },
+  },
+});
+
+await app.add('send-email', { to: 'alice' });
+await app.add('send-sms', { to: 'bob' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def email(job):
+    send_email(job.data["to"])
+    return {"channel": "email"}
+
+def sms(job):
+    send_sms(job.data["to"])
+    return {"channel": "sms"}
+
+app = Bunqueue(
+    "notifications",
+    routes={"send-email": email, "send-sms": sms},
+)
+
+app.add("send-email", {"to": "alice"})
+app.add("send-sms", {"to": "bob"})
+```
+
+</TabItem>
+</Tabs>
+
+:::caution
+Use **one** of `processor`, `routes`, or `batch`. Passing multiple or none throws an error.
+:::
+
+## Middleware
+
+Wraps every job execution, like middleware in a web framework. Each middleware receives the job and a `next()` function:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Timing middleware
+app.use(async (job, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${job.name}: ${Date.now() - start}ms`);
+  return result;
+});
+
+// Error recovery middleware
+app.use(async (job, next) => {
+  try {
+    return await next();
+  } catch (err) {
+    return { recovered: true, error: err.message };
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Timing middleware
+app.use(async (job, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${job.name}: ${Date.now() - start}ms`);
+  return result;
+});
+
+// Error recovery middleware
+app.use(async (job, next) => {
+  try {
+    return await next();
+  } catch (err) {
+    return { recovered: true, error: err.message };
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+import time
+
+# Timing middleware
+def timing(job, next_fn):
+    start = time.monotonic()
+    result = next_fn()
+    print(f"{job.name}: {int((time.monotonic() - start) * 1000)}ms")
+    return result
+
+app.use(timing)
+
+# Error recovery middleware
+def recover(job, next_fn):
+    try:
+        return next_fn()
+    except Exception as err:
+        return {"recovered": True, "error": str(err)}
+
+app.use(recover)
+```
+
+</TabItem>
+</Tabs>
+
+Execution order is onion-style: `mw1 → mw2 → processor → mw2 → mw1`. With no middleware added, there is zero overhead.
+
+## Batch processing
+
+Accumulate N jobs and process them together, ideal for bulk database inserts:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('db-inserts', {
+  embedded: true,
+  batch: {
+    size: 50,        // flush every 50 jobs
+    timeout: 2000,   // or every 2 seconds, whichever comes first
+    processor: async (jobs) => {
+      const rows = jobs.map(j => j.data.row);
+      await db.insertMany('table', rows);
+      return jobs.map(() => ({ inserted: true }));
+    },
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('db-inserts', {
+  concurrency: 50,  // batched jobs hold their slot until the batch flushes
+  batch: {
+    size: 50,        // flush every 50 jobs
+    timeout: 2000,   // or every 2 seconds, whichever comes first
+    processor: async (jobs) => {
+      const rows = jobs.map(j => j.data.row);
+      await db.insertMany('table', rows);
+      return jobs.map(() => ({ inserted: true }));
+    },
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def insert_rows(jobs):
+    rows = [job.data["row"] for job in jobs]
+    db.insert_many("table", rows)
+    return [{"inserted": True} for _ in jobs]
+
+app = Bunqueue(
+    "db-inserts",
+    concurrency=50,  # batched jobs hold their slot until the batch flushes
+    batch={
+        "size": 50,       # flush every 50 jobs
+        "timeout": 2000,  # or every 2 seconds, whichever comes first
+        "processor": insert_rows,
+    },
+)
+```
+
+</TabItem>
+</Tabs>
+
+On `close()`, remaining buffered jobs are flushed.
+
+## Advanced retry
+
+Five backoff strategies (how long to wait between retry attempts) plus a predicate to decide what is worth retrying:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('api-calls', {
+  embedded: true,
+  processor: async (job) => {
+    const res = await fetch(job.data.url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { status: res.status };
+  },
+  retry: {
+    maxAttempts: 5,
+    delay: 1000,
+    strategy: 'jitter',   // 'fixed' | 'exponential' | 'jitter' | 'fibonacci' | 'custom'
+    retryIf: (error) => error.message.includes('503'),  // only retry on 503
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('api-calls', {
+  processor: async (job) => {
+    const res = await fetch(job.data.url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { status: res.status };
+  },
+  retry: {
+    maxAttempts: 5,
+    delay: 1000,
+    strategy: 'jitter',   // 'fixed' | 'exponential' | 'jitter' | 'fibonacci' | 'custom'
+    retryIf: (error) => error.message.includes('503'),  // only retry on 503
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def call_api(job):
+    response = http_get(job.data["url"])  # your HTTP client
+    if response.status >= 400:
+        raise RuntimeError(f"HTTP {response.status}")
+    return {"status": response.status}
+
+app = Bunqueue(
+    "api-calls",
+    processor=call_api,
+    retry={
+        "max_attempts": 5,
+        "delay": 1000,
+        "strategy": "jitter",  # "fixed" | "exponential" | "jitter" | "fibonacci" | "custom"
+        "retry_if": lambda error, attempt: "503" in str(error),  # only retry on 503
+    },
+)
+```
+
+</TabItem>
+</Tabs>
+
+| Strategy | Formula | Use case |
+|----------|---------|----------|
+| `fixed` | `delay` every time | Rate-limited APIs |
+| `exponential` | `delay × 2^(attempt-1)` | General purpose |
+| `jitter` | `delay × 2^(attempt-1) × random(0.5-1.5)` | Avoid retry storms |
+| `fibonacci` | `delay × fib(attempt)` (1x, 2x, 3x, 5x, 8x, ...) | Gradual backoff |
+| `custom` | `customBackoff(attempt, error) → ms` | Anything |
+
+This is **in-process retry**: the job stays active while retrying. Different from core `attempts`/`backoff`, which re-queues the job.
+
+## Graceful cancellation
+
+Cancel running jobs via an AbortController signal (the standard way to tell async code to stop):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('encoding', {
+  embedded: true,
+  processor: async (job) => {
+    const signal = app.getSignal(job.id);
+    for (const chunk of chunks) {
+      if (signal?.aborted) throw new Error('Cancelled');
+      await encode(chunk);
+    }
+    return { done: true };
+  },
+});
+
+const job = await app.add('video', { file: 'big.mp4' });
+app.cancel(job.id);        // cancel immediately
+app.cancel(job.id, 5000);  // cancel after 5s grace period
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('encoding', {
+  processor: async (job) => {
+    const signal = app.getSignal(job.id);
+    for (const chunk of chunks) {
+      if (signal?.aborted) throw new Error('Cancelled');
+      await encode(chunk);
+    }
+    return { done: true };
+  },
+});
+
+const job = await app.add('video', { file: 'big.mp4' });
+app.cancel(job.id);        // cancel immediately
+app.cancel(job.id, 5000);  // cancel after 5s grace period
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def encode_video(job):
+    signal = app.get_signal(job.id)
+    for chunk in chunks:
+        if signal is not None and signal.aborted:
+            raise RuntimeError("Cancelled")
+        encode(chunk)
+    return {"done": True}
+
+app = Bunqueue("encoding", processor=encode_video)
+
+job = app.add("video", {"file": "big.mp4"})
+app.cancel(job.id)        # cancel immediately
+app.cancel(job.id, 5000)  # cancel after 5s grace period
+```
+
+</TabItem>
+</Tabs>
+
+In TypeScript the signal is a standard `AbortSignal`, so it works with `fetch` too: `await fetch(url, { signal })`. Python's `CancelSignal` exposes the same cooperative `aborted` flag.
+
+Cancellation applies once the job is running and its controller has been
+registered. If code adds and immediately cancels a job, wait for the Worker's
+`active` event first; sleeping for a fixed interval races worker polling.
+Calling `cancel()` for an unknown, queued, or finished id is a no-op.
+
+## Circuit breaker
+
+When a downstream service is down, retrying every job just burns attempts. A circuit breaker pauses the worker after too many consecutive failures, then probes periodically until the service recovers:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('payments', {
+  embedded: true,
+  processor: async (job) => paymentGateway.charge(job.data),
+  circuitBreaker: {
+    threshold: 5,         // open (pause) after 5 consecutive failures
+    resetTimeout: 30000,  // try again after 30s
+    onOpen: () => alert('Gateway down!'),
+    onClose: () => alert('Gateway recovered'),
+  },
+});
+
+app.getCircuitState();  // 'closed' | 'open' | 'half-open'
+app.resetCircuit();     // force close + resume worker
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('payments', {
+  processor: async (job) => paymentGateway.charge(job.data),
+  circuitBreaker: {
+    threshold: 5,         // open (pause) after 5 consecutive failures
+    resetTimeout: 30000,  // try again after 30s
+    onOpen: () => alert('Gateway down!'),
+    onClose: () => alert('Gateway recovered'),
+  },
+});
+
+app.getCircuitState();  // 'closed' | 'open' | 'half-open'
+app.resetCircuit();     // force close + resume worker
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "payments",
+    processor=lambda job: payment_gateway.charge(job.data),
+    circuit_breaker={
+        "threshold": 5,          # open (pause) after 5 consecutive failures
+        "reset_timeout": 30000,  # try again after 30s
+        "on_open": lambda failures: alert("Gateway down!"),
+        "on_close": lambda: alert("Gateway recovered"),
+    },
+)
+
+app.get_circuit_state()  # "closed" | "open" | "half-open"
+app.reset_circuit()      # force close + resume worker
+```
+
+</TabItem>
+</Tabs>
+
+When both retry and circuit breaker are active: one job exhausting all its retries counts as one circuit breaker failure.
+
+## Event triggers
+
+Create follow-up jobs automatically when a job completes or fails:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('orders', {
+  embedded: true,
+  routes: {
+    'place-order': async (job) => ({ orderId: job.data.id, total: 99 }),
+    'send-receipt': async (job) => ({ sent: true }),
+    'fraud-alert': async (job) => ({ alerted: true }),
+  },
+});
+
+// On complete → create follow-up
+app.trigger({
+  on: 'place-order',
+  create: 'send-receipt',
+  data: (result, job) => ({ id: job.data.id }),
+});
+
+// Conditional trigger; `result` is typed as unknown, cast it
+app.trigger({
+  on: 'place-order',
+  create: 'fraud-alert',
+  data: (result) => ({ amount: (result as { total: number }).total }),
+  condition: (result) => (result as { total: number }).total > 1000,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('orders', {
+  routes: {
+    'place-order': async (job) => ({ orderId: job.data.id, total: 99 }),
+    'send-receipt': async (job) => ({ sent: true }),
+    'fraud-alert': async (job) => ({ alerted: true }),
+  },
+});
+
+// On complete → create follow-up
+app.trigger({
+  on: 'place-order',
+  create: 'send-receipt',
+  data: (result, job) => ({ id: job.data.id }),
+});
+
+// Conditional trigger; `result` is typed as unknown, cast it
+app.trigger({
+  on: 'place-order',
+  create: 'fraud-alert',
+  data: (result) => ({ amount: (result as { total: number }).total }),
+  condition: (result) => (result as { total: number }).total > 1000,
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "orders",
+    routes={
+        "place-order": lambda job: {"order_id": job.data["id"], "total": 99},
+        "send-receipt": lambda job: {"sent": True},
+        "fraud-alert": lambda job: {"alerted": True},
+    },
+)
+
+# On complete -> create follow-up
+app.trigger({
+    "on": "place-order",
+    "create": "send-receipt",
+    "data": lambda result, job: {"id": job.data["id"]},
+})
+
+# Conditional trigger; both callbacks receive (result, job)
+app.trigger({
+    "on": "place-order",
+    "create": "fraud-alert",
+    "data": lambda result, job: {"amount": result["total"]},
+    "condition": lambda result, job: result["total"] > 1000,
+})
+```
+
+</TabItem>
+</Tabs>
+
+Triggers chain: `step-1 → step-2 → step-3`. For anything more complex, use the [Workflow Engine](/guide/workflow/).
+
+## Job TTL
+
+Expire jobs that waited too long, checked when the worker picks the job up:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('otp', {
+  embedded: true,
+  processor: async (job) => verifyOTP(job.data.code),
+  ttl: {
+    defaultTtl: 300000,           // 5 minutes for all jobs
+    perName: {
+      'verify-otp': 60000,       // 1 minute for OTP
+      'daily-report': 0,         // never expires
+    },
+  },
+});
+
+// Update at runtime
+app.setDefaultTtl(120000);
+app.setNameTtl('flash-sale', 30000);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('otp', {
+  processor: async (job) => verifyOTP(job.data.code),
+  ttl: {
+    defaultTtl: 300000,           // 5 minutes for all jobs
+    perName: {
+      'verify-otp': 60000,       // 1 minute for OTP
+      'daily-report': 0,         // never expires
+    },
+  },
+});
+
+// Update at runtime
+app.setDefaultTtl(120000);
+app.setNameTtl('flash-sale', 30000);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "otp",
+    processor=lambda job: verify_otp(job.data["code"]),
+    ttl={
+        "default_ttl": 300000,    # 5 minutes for all jobs
+        "per_name": {
+            "verify-otp": 60000,  # 1 minute for OTP
+            "daily-report": 0,    # never expires
+        },
+    },
+)
+
+# Update at runtime
+app.set_default_ttl(120000)
+app.set_name_ttl("flash-sale", 30000)
+```
+
+</TabItem>
+</Tabs>
+
+Resolution order: `perName[job.name]` → `defaultTtl` → `0` (no TTL).
+
+## Priority aging
+
+Low-priority jobs can starve behind a stream of high-priority ones. Priority aging automatically boosts jobs the longer they wait:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('tasks', {
+  embedded: true,
+  processor: async (job) => ({ done: true }),
+  priorityAging: {
+    interval: 60000,    // check every 60s
+    minAge: 300000,     // start boosting after 5 minutes
+    boost: 2,           // +2 priority per tick
+    maxPriority: 100,   // cap
+    maxScan: 200,       // max jobs per tick
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('tasks', {
+  processor: async (job) => ({ done: true }),
+  priorityAging: {
+    interval: 60000,    // check every 60s
+    minAge: 300000,     // start boosting after 5 minutes
+    boost: 2,           // +2 priority per tick
+    maxPriority: 100,   // cap
+    maxScan: 200,       // max jobs per tick
+  },
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "tasks",
+    processor=lambda job: {"done": True},
+    priority_aging={
+        "interval": 60000,    # check every 60s
+        "min_age": 300000,    # start boosting after 5 minutes
+        "boost": 2,           # +2 priority per tick
+        "max_priority": 100,  # cap
+        "max_scan": 200,      # max jobs per tick
+    },
+)
+```
+
+</TabItem>
+</Tabs>
+
+## Deduplication defaults
+
+Prevent duplicate jobs automatically: jobs with the same name + data get the same dedup ID within the TTL window:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('webhooks', {
+  embedded: true,
+  processor: async (job) => processWebhook(job.data),
+  deduplication: {
+    ttl: 60000,       // dedup window: 60 seconds
+  },
+});
+
+await app.add('hook', { event: 'user.created', userId: '123' });
+await app.add('hook', { event: 'user.created', userId: '123' }); // deduplicated!
+await app.add('hook', { event: 'user.updated', userId: '123' }); // different data → new job
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('webhooks', {
+  processor: async (job) => processWebhook(job.data),
+  deduplication: {
+    ttl: 60000,       // dedup window: 60 seconds
+  },
+});
+
+await app.add('hook', { event: 'user.created', userId: '123' });
+await app.add('hook', { event: 'user.created', userId: '123' }); // deduplicated!
+await app.add('hook', { event: 'user.updated', userId: '123' }); // different data → new job
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "webhooks",
+    processor=lambda job: process_webhook(job.data),
+    deduplication={
+        "ttl": 60000,  # dedup window: 60 seconds
+    },
+)
+
+app.add("hook", {"event": "user.created", "userId": "123"})
+app.add("hook", {"event": "user.created", "userId": "123"})  # deduplicated!
+app.add("hook", {"event": "user.updated", "userId": "123"})  # different data -> new job
+```
+
+</TabItem>
+</Tabs>
+
+Override per job: `await app.add('task', data, { deduplication: { id: 'my-id', ttl: 5000 } })` (Python: `app.add("task", data, deduplication={"id": "my-id", "ttl": 5000})`). Strategies (`extend`, `replace`) are explained in [Queue → Deduplication](/guide/queue/#deduplication).
+
+### Debounce
+
+The `debounce: { ttl }` option attaches a default debounce id (the job name) to every job. It is BullMQ-compatible metadata, visible via `job.opts.debounce`, but it does **not** suppress duplicates by itself in the current engine. To actually coalesce rapid duplicates, use `deduplication` with `replace: true` (last write wins).
+
+## Rate limiting
+
+Control processing speed:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('api', {
+  embedded: true,
+  processor: async (job) => callExternalAPI(job.data),
+  rateLimit: { max: 100, duration: 1000 },  // max 100 jobs per second
+});
+
+// Per-group limiting (e.g. per customer). With groupKey set, `max` becomes
+// a per-group concurrency cap (max active jobs per group) and duration is ignored.
+const app2 = new Bunqueue('api', {
+  embedded: true,
+  processor: async (job) => callAPI(job.data),
+  rateLimit: { max: 10, duration: 1000, groupKey: 'customerId' },
+});
+
+// Runtime updates
+app.setGlobalRateLimit(50, 1000);
+app.removeGlobalRateLimit();
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('api', {
+  processor: async (job) => callExternalAPI(job.data),
+  rateLimit: { max: 100, duration: 1000 },  // max 100 job starts per second
+});
+
+// Per-group limiting (e.g. per customer). With groupKey set, each group gets
+// its own sliding window: max 10 starts per second per customerId value.
+const app2 = new Bunqueue('api', {
+  processor: async (job) => callAPI(job.data),
+  rateLimit: { max: 10, duration: 1000, groupKey: 'customerId' },
+});
+
+// Runtime updates (server-side queue limit)
+await app.setGlobalRateLimit(50, 1000);
+await app.removeGlobalRateLimit();
+```
+
+*In `bunqueue-client` the constructor limiter is enforced client-side (sliding window per group); `setGlobalRateLimit` sets the server-side queue limit.*
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "api",
+    processor=lambda job: call_external_api(job.data),
+    rate_limit={"max": 100, "duration": 1000},  # max 100 job starts per second
+)
+
+# Per-group limiting (e.g. per customer). With group_key set, each group gets
+# its own sliding window: max 10 starts per second per customerId value.
+app2 = Bunqueue(
+    "api",
+    processor=lambda job: call_api(job.data),
+    rate_limit={"max": 10, "duration": 1000, "group_key": "customerId"},
+)
+
+# Runtime updates go through the underlying queue (server-side limit)
+app.queue.set_global_rate_limit(50)
+app.queue.remove_global_rate_limit()
+```
+
+*The Python constructor limiter is enforced client-side (sliding window per group); the `app.queue` methods set the server-side queue limit.*
+
+</TabItem>
+</Tabs>
+
+## DLQ (Dead Letter Queue)
+
+The DLQ collects jobs that failed permanently. Simple Mode can auto-retry and prune it:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const app = new Bunqueue('critical', {
+  embedded: true,
+  processor: async (job) => riskyOperation(job.data),
+  dlq: {
+    autoRetry: true,            // re-queue failed jobs periodically
+    autoRetryInterval: 3600000, // every hour
+    maxAutoRetries: 3,
+    maxAge: 604800000,          // purge entries older than 7 days
+    maxEntries: 10000,
+  },
+});
+
+// Query
+const entries = app.getDlq();
+const stats = app.getDlqStats();                    // { total, byReason, ... }
+const timeouts = app.getDlq({ reason: 'timeout' });
+
+// Act
+app.retryDlq();           // retry all
+app.retryDlq('job-id');   // retry one
+app.purgeDlq();           // clear all
+app.setDlqConfig({ autoRetry: false });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const app = new Bunqueue('critical', {
+  processor: async (job) => riskyOperation(job.data),
+  dlq: {
+    autoRetry: true,            // re-queue failed jobs periodically
+    autoRetryInterval: 3600000, // every hour
+    maxAutoRetries: 3,
+    maxAge: 604800000,          // purge entries older than 7 days
+    maxEntries: 10000,
+  },
+});
+
+// Query
+const entries = await app.getDlq();
+const stats = await app.getDlqStats();                    // { total, byReason }
+const timeouts = await app.getDlq({ reason: 'timeout' });
+
+// Act
+await app.retryDlq();           // retry all
+await app.retryDlq('job-id');   // retry one
+await app.purgeDlq();           // clear all
+await app.setDlqConfig({ autoRetry: false });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app = Bunqueue(
+    "critical",
+    processor=lambda job: risky_operation(job.data),
+    # the config dict travels to the server as-is, so keys stay camelCase
+    dlq={
+        "autoRetry": True,             # re-queue failed jobs periodically
+        "autoRetryInterval": 3600000,  # every hour
+        "maxAutoRetries": 3,
+        "maxAge": 604800000,           # purge entries older than 7 days
+        "maxEntries": 10000,
+    },
+)
+
+# Query and act through the underlying queue
+entries = app.queue.get_dlq()
+app.queue.retry_dlq()           # retry all
+app.queue.retry_dlq("job-id")   # retry one
+app.queue.purge_dlq()           # clear all
+app.queue.set_dlq_config({"autoRetry": False})
+```
+
+*`getDlqStats()` and reason filters are not available in the Python SDK yet.*
+
+</TabItem>
+</Tabs>
+
+Failure reasons tracked: `explicit_fail`, `max_attempts_exceeded`, `timeout`, `stalled`, `ttl_expired`, `worker_lost`, plus `unknown` as a fallback.
+
+## Cron jobs
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await app.cron('daily-report', '0 9 * * *', { type: 'report' });
+await app.cron('eu-digest', '0 8 * * 1', { type: 'weekly' }, { timezone: 'Europe/Rome' });
+await app.every('healthcheck', 30000, { type: 'ping' });
+
+await app.listCrons();
+await app.removeCron('healthcheck');
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await app.cron('daily-report', '0 9 * * *', { type: 'report' });
+await app.cron('eu-digest', '0 8 * * 1', { type: 'weekly' }, { timezone: 'Europe/Rome' });
+await app.every('healthcheck', 30000, { type: 'ping' });
+
+await app.listCrons();
+await app.removeCron('healthcheck');
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+app.cron("daily-report", "0 9 * * *", {"type": "report"})
+app.cron("eu-digest", "0 8 * * 1", {"type": "weekly"}, timezone="Europe/Rome")
+app.every("healthcheck", 30000, {"type": "ping"})
+
+app.list_crons()
+app.remove_cron("healthcheck")
+```
+
+</TabItem>
+</Tabs>
+
+See the [Cron guide](/guide/cron/) for advanced options.
+
+## Events, control, direct access
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Events (same as Worker)
+app.on('completed', (job, result) => { });
+app.on('failed', (job, error) => { });
+// also: active, progress, stalled, error, ready, drained, closed
+
+// Control
+app.pause();           // pause queue + worker
+app.resume();          // resume both
+await app.close();     // graceful shutdown
+await app.close(true); // force shutdown
+app.isRunning(); app.isPaused(); app.isClosed();
+
+// Escape hatch: the underlying Queue and Worker are yours
+app.queue.setStallConfig({ stallInterval: 30000 });
+app.worker.concurrency = 20;
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Events (same as Worker)
+app.on('completed', (job, result) => { });
+app.on('failed', (job, error) => { });
+// also: active, progress, error, ready, drained, closed
+
+// Control
+app.pause();           // pause queue + worker
+app.resume();          // resume both
+await app.close();     // graceful shutdown
+await app.close(true); // force shutdown
+app.isRunning(); app.isPaused(); app.isClosed();
+
+// Escape hatch: the underlying Queue and Worker are yours
+await app.queue.setStallConfig({ stallInterval: 30000 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Events (same as Worker)
+app.on("completed", lambda job, result: None)
+app.on("failed", lambda job, error: None)
+# also: active, progress, error, ready, drained, closed
+
+# Control
+app.pause()            # pause queue + worker
+app.resume()           # resume both
+app.close()            # graceful shutdown
+app.close(force=True)  # force shutdown
+app.is_running(); app.is_paused(); app.is_closed()
+
+# Escape hatch: the underlying Queue and Worker are yours
+app.queue.set_stall_config({"stallInterval": 30000})
+```
+
+</TabItem>
+</Tabs>
+
+## Full example
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Bunqueue, shutdownManager } from 'bunqueue/client';
+
+const app = new Bunqueue<{ payload: string }>('my-app', {
+  embedded: true,
+  routes: {
+    'process': async (job) => ({ id: job.data.payload, status: 'done' }),
+    'notify': async (job) => ({ sent: true }),
+    'alert': async (job) => ({ alerted: true }),
+  },
+  concurrency: 10,
+
+  retry: { maxAttempts: 3, delay: 1000, strategy: 'jitter' },
+  circuitBreaker: { threshold: 5, resetTimeout: 30000 },
+  ttl: { defaultTtl: 600000, perName: { 'verify-otp': 60000 } },
+  priorityAging: { interval: 60000, minAge: 300000, boost: 1 },
+  deduplication: { ttl: 5000 },
+  rateLimit: { max: 100, duration: 1000 },
+  dlq: { autoRetry: true, maxAge: 604800000 },
+});
+
+app.use(async (job, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${job.name}: ${Date.now() - start}ms`);
+  return result;
+});
+
+app
+  .trigger({ on: 'process', create: 'notify', data: (r) => ({ payload: (r as { id: string }).id }) })
+  .trigger({ on: 'process', event: 'failed', create: 'alert', data: (_, j) => j.data });
+
+await app.cron('cleanup', '0 2 * * *', { payload: 'nightly' });
+await app.add('process', { payload: 'ORD-001' });
+
+process.on('SIGINT', async () => {
+  await app.close();
+  shutdownManager();
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Bunqueue } from 'bunqueue-client';
+
+const app = new Bunqueue<{ payload: string }>('my-app', {
+  routes: {
+    'process': async (job) => ({ id: job.data.payload, status: 'done' }),
+    'notify': async (job) => ({ sent: true }),
+    'alert': async (job) => ({ alerted: true }),
+  },
+  concurrency: 10,
+
+  retry: { maxAttempts: 3, delay: 1000, strategy: 'jitter' },
+  circuitBreaker: { threshold: 5, resetTimeout: 30000 },
+  ttl: { defaultTtl: 600000, perName: { 'verify-otp': 60000 } },
+  priorityAging: { interval: 60000, minAge: 300000, boost: 1 },
+  deduplication: { ttl: 5000 },
+  rateLimit: { max: 100, duration: 1000 },
+  dlq: { autoRetry: true, maxAge: 604800000 },
+});
+
+app.use(async (job, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`${job.name}: ${Date.now() - start}ms`);
+  return result;
+});
+
+app
+  .trigger({ on: 'process', create: 'notify', data: (r) => ({ payload: (r as { id: string }).id }) })
+  .trigger({ on: 'process', event: 'failed', create: 'alert', data: (_, j) => j.data });
+
+await app.cron('cleanup', '0 2 * * *', { payload: 'nightly' });
+await app.add('process', { payload: 'ORD-001' });
+
+process.on('SIGINT', () => {
+  void app.close();
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+import signal
+
+from bunqueue import Bunqueue
+
+app = Bunqueue(
+    "my-app",
+    routes={
+        "process": lambda job: {"id": job.data["payload"], "status": "done"},
+        "notify": lambda job: {"sent": True},
+        "alert": lambda job: {"alerted": True},
+    },
+    concurrency=10,
+    retry={"max_attempts": 3, "delay": 1000, "strategy": "jitter"},
+    circuit_breaker={"threshold": 5, "reset_timeout": 30000},
+    ttl={"default_ttl": 600000, "per_name": {"verify-otp": 60000}},
+    priority_aging={"interval": 60000, "min_age": 300000, "boost": 1},
+    deduplication={"ttl": 5000},
+    rate_limit={"max": 100, "duration": 1000},
+    dlq={"autoRetry": True, "maxAge": 604800000},
+)
+
+def timing(job, next_fn):
+    result = next_fn()
+    print(f"{job.name} done")
+    return result
+
+app.use(timing)
+
+app.trigger({
+    "on": "process", "create": "notify",
+    "data": lambda result, job: {"payload": result["id"]},
+}).trigger({
+    "on": "process", "event": "failed", "create": "alert",
+    "data": lambda error, job: job.data,
+})
+
+app.cron("cleanup", "0 2 * * *", {"payload": "nightly"})
+app.add("process", {"payload": "ORD-001"})
+
+signal.signal(signal.SIGINT, lambda sig, frame: app.close())
+```
+
+</TabItem>
+</Tabs>
+
+## API reference
+
+*The tables below describe the TypeScript surface of the Bun package. The TypeScript client (`bunqueue-client`) exposes the same camelCase surface minus `embedded` (TCP only; DLQ filter/stats computed client-side). The Python SDK mirrors it in snake_case (`get_job_counts`, `set_default_ttl`, `priority_aging`, ...), with these differences: `embedded` is unavailable (TCP only), DLQ queries and rate-limit updates live on `app.queue`, and `getDlqStats` is not available yet.*
+
+### Constructor options
+
+**Processing mode** (pick one):
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `processor` | `(job) => Promise<R>` | Single handler |
+| `routes` | `Record<string, Processor>` | Named handlers |
+| `batch` | `{ size, timeout, processor }` | Batch processing |
+
+**Worker:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `concurrency` | `1` | Parallel jobs |
+| `embedded` | `false` | Use embedded SQLite (`BUNQUEUE_EMBEDDED=1` forces it on) |
+| `connection` | localhost:6789 | TCP server connection |
+| `autorun` | `true` | Start worker immediately |
+
+**Features:**
+
+| Option | Description |
+|--------|-------------|
+| `retry` | `{ maxAttempts, delay, strategy, retryIf, customBackoff }` |
+| `circuitBreaker` | `{ threshold, resetTimeout, onOpen, onClose, onHalfOpen }` |
+| `ttl` | `{ defaultTtl, perName }` |
+| `priorityAging` | `{ interval, minAge, boost, maxPriority, maxScan }` |
+| `deduplication` | `{ ttl, extend, replace }` |
+| `debounce` | `{ ttl }` |
+| `rateLimit` | `{ max, duration, groupKey }` |
+| `dlq` | `{ autoRetry, autoRetryInterval, maxAutoRetries, maxAge, maxEntries }` |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `add(name, data, opts?)` | Add a job |
+| `addBulk(jobs)` | Add multiple jobs |
+| `getJob(id)` | Get job by ID |
+| `getJobCounts()` / `count()` | Job counts |
+| `use(middleware)` | Add middleware |
+| `cron(id, pattern, data?, opts?)` | Schedule cron |
+| `every(id, ms, data?, opts?)` | Schedule interval |
+| `removeCron(id)` / `listCrons()` | Manage crons |
+| `cancel(id, grace?)` | Cancel running job |
+| `isCancelled(id)` / `getSignal(id)` | Cancellation state |
+| `getCircuitState()` / `resetCircuit()` | Circuit breaker |
+| `trigger(rule)` | Register event trigger |
+| `setDefaultTtl(ms)` / `setNameTtl(name, ms)` | TTL updates |
+| `setDlqConfig(config)` / `getDlqConfig()` | DLQ config |
+| `getDlq(filter?)` / `getDlqStats()` | Query DLQ |
+| `retryDlq(id?)` / `purgeDlq()` | DLQ actions |
+| `setGlobalRateLimit(max, duration?)` | Set rate limit |
+| `removeGlobalRateLimit()` | Remove rate limit |
+| `on(event, listener)` / `once()` / `off()` | Events |
+| `pause()` / `resume()` | Control |
+| `close(force?)` | Shutdown |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Queue name |
+| `queue` | `Queue<T>` | Internal Queue |
+| `worker` | `Worker<T, R>` | Internal Worker |

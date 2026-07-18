@@ -1,0 +1,1077 @@
+---
+title: "Bun Worker: Process Background Jobs with Retries"
+description: "Run a Bun worker: process background jobs with concurrency, retries, heartbeats, batch pulling and lock-based ownership."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker api</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Pull, process, ack, <em>repeat.</em></h1>
+  <p class="bq-hero-sub">A Worker takes jobs from a queue and runs your function on each one. This page covers concurrency, events, error handling, and the safety nets that recover jobs when things go wrong.</p>
+</div>
+
+## Create a worker
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Worker } from 'bunqueue/client';
+
+const worker = new Worker('my-queue', async (job) => {
+  // Process the job; the return value is stored as the job's result
+  return { success: true };
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Worker } from 'bunqueue-client';
+
+const worker = new Worker('my-queue', async (job) => {
+  // Process the job; the return value is stored as the job's result
+  return { success: true };
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Worker
+
+def process(job):
+    # Process the job; the return value is stored as the job's result
+    return {"success": True}
+
+worker = Worker("my-queue", process)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Worker;
+
+$worker = new Worker('my-queue', function (Bunqueue\Job $job) {
+    // Process the job; the return value is stored as the job's result
+    return ['success' => true];
+});
+
+$worker->run(); // blocking loop; or $worker->runOnce() from a cron tick
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("my-queue", func(job *bunqueue.Job) (any, error) {
+    // Process the job; the return value is stored as the job's result
+    return map[string]any{"success": true}, nil
+}, bunqueue.WorkerOptions{})
+
+worker.Run() // blocking pull loop
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Value, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "my-queue",
+    |_job| {
+        // Process the job; the returned Value is stored as the job's result
+        Ok(Value::from(true))
+    },
+    WorkerOptions::default(),
+);
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("my-queue", fn _job ->
+    # Process the job; the result is stored as the job's result
+    {:ok, %{success: true}}
+  end)
+
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
+
+The Bun, TypeScript, and Python workers start polling immediately (`autorun`); the PHP, Go, Rust, and Elixir workers start when you call their run function. If your processor throws, the job is retried automatically (up to the job's `attempts`, default 3) and then moved to the dead letter queue, a holding area for jobs that keep failing.
+
+:::caution[Embedded vs TCP]
+`embedded: true` runs in-process alongside an embedded Queue and is a Bun (`bunqueue/client`) feature. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode. The external SDKs are TCP-only.
+:::
+
+## Process jobs in parallel
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('my-queue', processor, {
+  embedded: true,
+  concurrency: 5,  // Up to 5 jobs at once (default: 1)
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('my-queue', processor, {
+  concurrency: 5,  // Up to 5 jobs at once (default: 4)
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker("my-queue", process, concurrency=5)  # default: 4
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// The PHP worker is sequential by design: one job at a time.
+// Scale out by running more worker processes instead:
+//   php worker.php & php worker.php &
+$worker = new Worker('my-queue', $processor);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("my-queue", processor, bunqueue.WorkerOptions{
+    Concurrency: 5, // Up to 5 jobs at once (default: 4)
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("my-queue", processor, WorkerOptions {
+    concurrency: 5, // Up to 5 jobs at once (default: 4)
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker = Bunqueue.Worker.new("my-queue", handler, concurrency: 5)  # default: 1
+```
+
+</TabItem>
+</Tabs>
+
+You can change concurrency at runtime, without restarting:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.concurrency = 10;  // Scale up under load
+worker.concurrency = 2;   // Scale back down (minimum: 1)
+```
+
+</TabItem>
+</Tabs>
+
+*Runtime concurrency changes are a Bun client feature; the external SDKs fix `concurrency` at construction.*
+
+## Use the job object
+
+Inside the processor you get the full job:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  job.id;           // Job ID
+  job.name;         // Job name
+  job.data;         // Job data (typed if you use Worker<T>)
+  job.attemptsMade; // Current attempt number
+  job.timestamp;    // When the job was created
+
+  await job.updateProgress(50, 'Halfway done');  // Report progress
+  await job.log('Processing step 1');             // Attach a log line
+
+  return result;
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  job.id;         // Job ID
+  job.name;       // Job name
+  job.data;       // Job data (typed if you use Worker<T>)
+  job.attempts;   // Attempts consumed so far
+  job.timestamp;  // When the job was created (epoch ms)
+
+  await job.updateProgress(50, 'Halfway done');  // Report progress
+  await job.log('Processing step 1');            // Attach a log line
+
+  return result;
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    job.id          # Job ID
+    job.name        # Job name
+    job.data        # Job data
+    job.attempts    # Attempts consumed so far
+    job.created_at  # When the job was created (epoch ms)
+
+    job.update_progress(50, "Halfway done")  # Report progress
+    job.log("Processing step 1")             # Attach a log line
+
+    return result
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', function (Bunqueue\Job $job) {
+    $job->id();            // Job ID
+    $job->name();          // Job name
+    $job->data();          // Job data (without the reserved name key)
+    $job->attemptsMade();  // Attempts consumed so far
+
+    $job->updateProgress(50, 'Halfway done');  // Report progress
+    $job->log('Processing step 1');            // Attach a log line
+
+    return $result;
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
+    job.ID()           // Job ID
+    job.Name()         // Job name
+    job.Data()         // Job data (without the reserved name key)
+    job.AttemptsMade() // Attempts consumed so far
+
+    job.UpdateProgress(50, "Halfway done") // Report progress
+    job.Log("Processing step 1", "")       // Attach a log line
+
+    return result, nil
+}, bunqueue.WorkerOptions{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new(
+    "queue",
+    |job| {
+        job.id();            // Job ID
+        job.name();          // Job name
+        job.data();          // Job data (without the reserved name key)
+        job.attempts_made(); // Attempts consumed so far
+
+        let _ = job.update_progress(50.0, Some("Halfway done")); // Report progress
+        let _ = job.log("Processing step 1", None);              // Attach a log line
+
+        Ok(result)
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", fn job ->
+    job.id             # Job ID
+    job.name           # Job name
+    job.data           # Job data
+    job.attempts_made  # Attempts consumed so far
+
+    Bunqueue.Job.update_progress(job, 50, "Halfway done")  # Report progress
+    Bunqueue.Job.log(job, "Processing step 1")             # Attach a log line
+
+    {:ok, result}
+  end)
+```
+
+</TabItem>
+</Tabs>
+
+## React to events
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Completed: ${job.id}`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Failed: ${job.id}`, error.message);
+});
+
+worker.on('progress', (job, progress) => {
+  console.log(`Progress: ${job.id} - ${progress}%`);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Completed: ${job.id}`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Failed: ${job.id}`, error.message);
+});
+
+worker.on('error', (err) => console.error(err)); // always attach
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.on("completed", lambda job, result: print("completed", job.id))
+worker.on("failed", lambda job, err: print("failed", job.id, err))
+worker.on("progress", lambda job, progress: print("progress", job.id, progress))
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->on('completed', fn ($job, $result) => print("completed {$job->id()}\n"));
+$worker->on('failed', fn ($job, $err) => print("failed {$job->id()}\n"));
+$worker->on('error', fn ($err) => print($err->getMessage() . "\n"));
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.On("completed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    log.Printf("completed %s", job.ID())
+})
+worker.On("error", func(args ...any) { log.Println(args[0]) })
+```
+
+</TabItem>
+</Tabs>
+
+*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+
+All Bun client events are fully typed. The complete list (external SDK event sets are listed in the [SDK guide](/guide/sdks/#worker-events)):
+
+| Event | Callback Parameters | Description |
+|-------|-------------------|-------------|
+| `ready` | `()` | Worker started polling |
+| `active` | `(job: Job<T>)` | Job started processing |
+| `completed` | `(job: Job<T>, result: R)` | Job completed successfully |
+| `failed` | `(job: Job<T>, error: Error)` | Job processing failed |
+| `progress` | `(job: Job<T> \| null, progress: number)` | Job progress updated |
+| `stalled` | `(jobId: string, reason: string)` | Job stalled (no heartbeat) |
+| `drained` | `()` | Queue has no more waiting jobs |
+| `error` | `(error: Error)` | Worker-level error |
+| `cancelled` | `({ jobId: string, reason: string })` | Job was cancelled |
+| `log` | `(job: Job<T>, message: string)` | Log written via `job.log()` |
+| `closed` | `()` | Worker shut down |
+
+Remove a listener with `worker.off('completed', handler)`.
+
+## Handle errors
+
+Throwing inside the processor fails the current attempt; bunqueue retries with backoff (a growing wait between attempts) until `attempts` is exhausted:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  await riskyOperation();  // Just let errors throw, retries are automatic
+}, { embedded: true });
+
+worker.on('failed', (job, error) => {
+  if (job.attemptsMade >= 3) {
+    alertOps(job, error);  // Final failure, tell someone
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  await riskyOperation();  // Just let errors throw, retries are automatic
+});
+
+worker.on('failed', (job, error) => {
+  if (job.attempts >= 3) {
+    alertOps(job, error);  // Final failure, tell someone
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    risky_operation()  # Just let exceptions raise, retries are automatic
+
+worker = Worker("queue", process)
+
+def on_failed(job, error):
+    if job.attempts >= 3:
+        alert_ops(job, error)  # Final failure, tell someone
+
+worker.on("failed", on_failed)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', function (Bunqueue\Job $job) {
+    riskyOperation(); // Just let exceptions throw, retries are automatic
+});
+
+$worker->on('failed', function ($job, $error) {
+    if ($job->attemptsMade() >= 3) {
+        alertOps($job, $error); // Final failure, tell someone
+    }
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
+    return nil, riskyOperation() // Return an error, retries are automatic
+}, bunqueue.WorkerOptions{})
+
+worker.On("failed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    if job.AttemptsMade() >= 3 {
+        alertOps(job, args[1]) // Final failure, tell someone
+    }
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ProcessError, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "queue",
+    |job| {
+        risky_operation(&job)
+            .map_err(|error| ProcessError::retryable(error.to_string()))
+        // ProcessError::unrecoverable(...) skips retries -> DLQ
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", fn job ->
+    # Return {:error, reason} (or raise), retries are automatic.
+    # Raising Bunqueue.UnrecoverableError skips retries -> DLQ.
+    risky_operation(job)
+  end)
+```
+
+</TabItem>
+</Tabs>
+
+*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+
+## Control and shut down
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.run();     // Start processing (if created with autorun: false)
+worker.pause();   // Stop pulling new jobs
+worker.resume();  // Resume
+
+await worker.close();      // Wait for active jobs, then stop
+await worker.close(true);  // Force close immediately
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.run();     // Start processing (if created with autorun: false)
+worker.pause();   // Stop pulling new jobs
+worker.resume();  // Resume
+
+await worker.close();      // Stop pulling, flush batched ACKs, drain in-flight jobs
+await worker.close(true);  // Force: skip the in-flight drain
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.run()             # Blocking loop (or autorun starts it in the background)
+worker.pause()           # Stop pulling new jobs
+worker.resume()          # Resume
+
+worker.close()           # Stop pulling, wait for in-flight jobs to drain
+worker.close(timeout=5)  # Bound the wait; the drain continues in the background
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->run();      // Blocking loop: pull, process, repeat
+$worker->runOnce();  // Pull and process one batch (cron-friendly)
+
+$worker->stop();     // Finish the in-flight job, then return from run()
+$worker->close();    // Unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.Run()   // Blocking pull loop
+worker.Stop()  // Stop pulling; in-flight jobs finish
+worker.Close() // Unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+worker.run()?;      // Blocking pull loop; returns after stop()
+worker.run_once()?; // Pull and process one batch
+worker.stop();      // Ask the loop to exit
+worker.close();     // Stop, unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+Bunqueue.Worker.run(worker)       # Blocking pull loop; returns after stop
+Bunqueue.Worker.run_once(worker)  # Pull and process one batch
+Bunqueue.Worker.stop(worker)      # Drain, unregister and close
+```
+
+</TabItem>
+</Tabs>
+
+For a clean process exit, hook your runtime's shutdown signal; in the Bun client, also shut down the shared machinery:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { shutdownManager, closeSharedTcpClient } from 'bunqueue/client';
+
+process.on('SIGINT', async () => {
+  await worker.close();
+  shutdownManager();       // Embedded mode: flush writes, close SQLite
+  closeSharedTcpClient();  // TCP mode: close the shared connection pool
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+process.on('SIGINT', async () => {
+  await worker.close(); // drains in-flight jobs and flushes batched ACKs
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+try:
+    worker.run()
+except KeyboardInterrupt:
+    worker.close()  # drains in-flight jobs
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->installSignalHandlers(); // SIGTERM / SIGINT -> graceful stop
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+go func() {
+    sig := make(chan os.Signal, 1)
+    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+    <-sig
+    worker.Stop() // Run() drains in-flight jobs, then closes
+}()
+worker.Run()
+```
+
+</TabItem>
+</Tabs>
+
+*In Rust and Elixir, calling `worker.stop()` / `Bunqueue.Worker.stop(worker)` from another thread or process makes the blocking run loop drain and return; there is no shared machinery to tear down.*
+
+## Options reference
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  concurrency: 5,
+  batchSize: 100,      // Pull up to 100 jobs per request
+  pollTimeout: 5000,   // Long-poll: wait up to 5s for jobs instead of busy polling
+  limiter: { max: 10, duration: 1000 },  // Max 10 jobs per second
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  concurrency: 5,
+  batchSize: 100,       // Pull up to 100 jobs per request
+  pollTimeoutMs: 5000,  // Long-poll: wait up to 5s for jobs (default)
+  lockTtlMs: 30000,     // Job lease TTL
+  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },  // Opt-in ACK batching
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker(
+    "queue",
+    processor,
+    concurrency=5,
+    batch_size=100,        # Pull up to 100 jobs per request
+    poll_timeout_ms=5000,  # Long-poll: wait up to 5s for jobs (default)
+    lock_ttl_ms=30000,     # Job lease TTL
+    ack_batch={"max_size": 50, "max_delay_ms": 5},  # Opt-in ACK batching
+)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'batchSize' => 100,           // Pull up to 100 jobs per request
+    'pollTimeoutMs' => 5000,      // Long-poll: wait up to 5s for jobs (default)
+    'lockTtlMs' => 30000,         // Job lease TTL
+    'heartbeatIntervalS' => 10.0, // Heartbeats fire between jobs (sequential worker)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    Concurrency:        5,
+    BatchSize:          100,   // Pull up to 100 jobs per request
+    PollTimeoutMs:      5000,  // Long-poll: wait up to 5s for jobs (default)
+    LockTtlMs:          30000, // Job lease TTL
+    HeartbeatIntervalS: 10,    // Heartbeats are disabled by default in Go
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::time::Duration;
+use bunqueue_client::{Worker, WorkerOptions};
+
+let worker = Worker::new("queue", processor, WorkerOptions {
+    concurrency: 5,
+    batch_size: 100,        // Pull up to 100 jobs per request
+    poll_timeout_ms: 5_000, // Long-poll: wait up to 5s for jobs (default)
+    lock_ttl_ms: 30_000,    // Job lease TTL
+    heartbeat_interval: Some(Duration::from_secs(10)),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", handler,
+    concurrency: 5,
+    batch_size: 100,          # Pull up to 100 jobs per request
+    poll_timeout: 5_000,      # Long-poll: wait up to 5s for jobs
+    lock_ttl: 30_000,         # Job lease TTL
+    heartbeat_interval: 10_000
+  )
+```
+
+</TabItem>
+</Tabs>
+
+The table below documents the Bun client's options; the external SDK worker options are tabulated in the [SDK guide](/guide/sdks/#worker-options).
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `embedded` | `boolean` | `false` | Use in-process mode |
+| `concurrency` | `number` | `1` | Parallel job processing |
+| `autorun` | `boolean` | `true` | Start polling automatically |
+| `heartbeatInterval` | `number` | `10000` | Heartbeat interval in ms (0 = disabled) |
+| `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
+| `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
+| `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
+| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max jobs per window. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
+| `lockDuration` | `number` | `30000` | Job lock TTL in ms |
+| `maxStalledCount` | `number` | `1` | Max stalls before the job moves to failed |
+| `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
+| `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
+| `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
+| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |
+| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Same behavior as `removeOnComplete` (boolean only) |
+| `connection` | `ConnectionOptions` | - | TCP connection (`host`, `port`, `token`, `poolSize`) |
+| `prefixKey` | `string` | - | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) |
+
+**Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
+
+## Heartbeats and stall detection
+
+While a job is processing, the worker automatically pings the queue ("I'm still working on this"). That ping is the heartbeat. If a job stops receiving heartbeats, for example because the worker crashed, the queue marks it stalled and recovers it, so no job is silently lost.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  heartbeatInterval: 5000, // Ping every 5 seconds (ms)
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  heartbeatIntervalS: 5, // Ping every 5 seconds (0 = disabled)
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker("queue", process, heartbeat_interval_s=5.0)  # 0 disables
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'heartbeatIntervalS' => 5.0, // Fires between jobs (sequential worker)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    HeartbeatIntervalS: 5, // Heartbeats are disabled by default in Go
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("queue", processor, WorkerOptions {
+    heartbeat_interval: Some(Duration::from_secs(5)), // None disables
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker = Bunqueue.Worker.new("queue", handler, heartbeat_interval: 5_000)  # ms
+```
+
+</TabItem>
+</Tabs>
+
+Keep the heartbeat interval shorter than the queue's `stallInterval` to avoid false positives. See [Stall Detection](/guide/stall-detection/).
+
+## Lock-based ownership
+
+With `useLocks: true` (the default), each pulled job gets a lock, a temporary claim that says "this worker owns this job". The lock is renewed by heartbeats (`lockDuration` sets its TTL) and must be presented when completing or failing the job. This prevents two workers from processing the same job, and prevents a slow worker's job from being grabbed by a faster one.
+
+Locks matter most in **server mode** with multiple workers. In embedded mode with a single process you can trade the safety for a bit of throughput:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  useLocks: false, // Rely on stall detection only
+});
+```
+
+</TabItem>
+</Tabs>
+
+*The external SDKs always use lock-based ownership: every pulled job carries a lock token whose TTL is set by `lockTtlMs` / `lock_ttl_ms` / `LockTtlMs` / `lock_ttl`, renewed by heartbeats. A single long-running handler can extend its own lease with `job.extendLock(ms)` (TypeScript, PHP), `job.extend_lock(ms)` (Python, Rust), or `job.ExtendLock(ms)` (Go).*
+
+In the Bun client, locks can also be extended explicitly: `worker.extendJobLocks(jobIds, tokens, duration)`.
+
+## Batch pulling
+
+For high-volume queues, pull many jobs per round-trip and long-poll while idle:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  batchSize: 100,     // Pull 100 jobs at once
+  pollTimeout: 5000,  // Wait up to 5s for jobs (long polling)
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  batchSize: 100,       // Pull 100 jobs at once
+  pollTimeoutMs: 5000,  // Wait up to 5s for jobs (long polling)
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker(
+    "queue",
+    process,
+    batch_size=100,        # Pull 100 jobs at once
+    poll_timeout_ms=5000,  # Wait up to 5s for jobs (long polling)
+)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'batchSize' => 100,       // Pull 100 jobs at once
+    'pollTimeoutMs' => 5000,  // Wait up to 5s for jobs (long polling)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    BatchSize:     100,  // Pull 100 jobs at once
+    PollTimeoutMs: 5000, // Wait up to 5s for jobs (long polling)
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("queue", processor, WorkerOptions {
+    batch_size: 100,        // Pull 100 jobs at once
+    poll_timeout_ms: 5_000, // Wait up to 5s for jobs (long polling)
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", handler,
+    batch_size: 100,     # Pull 100 jobs at once
+    poll_timeout: 5_000  # Wait up to 5s for jobs (long polling)
+  )
+```
+
+</TabItem>
+</Tabs>
+
+Bulk pushes wake idle long-polling workers immediately, they never wait out the timeout.
+
+## SandboxedWorker
+
+:::danger[Experimental, not recommended for production]
+`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are currently **experimental** in Bun. Known issues include unexpected memory growth and inconsistent behavior across Bun versions. For production workloads, use the standard `Worker`.
+:::
+
+`SandboxedWorker` runs each job in an isolated Bun Worker thread. If a job crashes (out of memory, infinite loop, uncaught exception), only that thread dies; the main process keeps running and the thread is restarted automatically. Use it for CPU-heavy or untrusted code. It is a Bun (`bunqueue/client`) feature.
+
+```typescript
+import { SandboxedWorker } from 'bunqueue/client';
+
+const worker = new SandboxedWorker('cpu-intensive', {
+  processor: './processor.ts',  // Path to processor file
+  concurrency: 4,               // 4 parallel worker threads
+  timeout: 60000,               // Per-job timeout (default: 30000, 0 = disabled)
+  maxMemory: 256,               // MB per worker (default: 256)
+});
+
+await worker.start();
+```
+
+**Processor file** (`processor.ts`):
+
+```typescript
+export default async (job: {
+  id: string;
+  data: any;
+  queue: string;
+  attempts: number;
+  parentId?: string;
+  progress: (value: number) => void;
+  log: (message: string) => void;
+  fail: (error: string | Error) => void;
+}) => {
+  job.progress(50);
+  const result = await heavyComputation(job.data);
+  job.progress(100);
+  return result;
+};
+```
+
+To connect to a remote server instead of running embedded, pass a `connection` option (`host`, `port`, `token`), everything else is the same.
+
+Control:
+
+```typescript
+await worker.start();
+worker.isRunning();
+const stats = worker.getStats(); // { total, busy, idle, recycled, restarts }
+await worker.stop();             // Graceful (waits for busy workers)
+await worker.stop(true);         // Force
+```
+
+If your jobs process large files (100MB+), raise `maxMemory` above the 256MB default to avoid OOM crashes.
+
+### SandboxedWorker options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `processor` | `string` | (required) | Path to processor file |
+| `concurrency` | `number` | `1` | Parallel worker threads |
+| `maxMemory` | `number` | `256` | Max memory per thread in MB (Bun smol mode if `<= 64`) |
+| `timeout` | `number` | `30000` | Per-job timeout in ms (0 = disabled) |
+| `autoRestart` | `boolean` | `true` | Auto-restart crashed threads |
+| `maxRestarts` | `number` | `10` | Max restart attempts per thread |
+| `pollInterval` | `number` | `10` | Job poll interval in ms |
+| `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat for stall detection / lock renewal |
+| `idleTimeout` | `number` | `0` | Stop the pool after this many idle ms (0 = disabled) |
+| `idleRecycleMs` | `number` | `30000` | Recycle idle threads after this many ms (0 = disabled) |
+| `autoStart` | `boolean` | `false` | Restart the pool when new jobs arrive after an idle shutdown |
+| `autoStartPollMs` | `number` | `5000` | Poll interval while idle-stopped |
+| `connection` | `ConnectionOptions` | - | TCP connection (omit for embedded) |
+
+SandboxedWorker emits 8 of the Worker events: `ready`, `active`, `completed`, `failed`, `progress`, `log`, `error`, `closed`. It does **not** emit `stalled`, `drained`, or `cancelled`.
+
+### Worker vs SandboxedWorker
+
+| | Worker | SandboxedWorker |
+|---|--------|-----------------|
+| **Production ready** | ✅ Stable, no experimental APIs | ⚠️ Depends on experimental Bun Workers |
+| **I/O-bound tasks** (HTTP, DB, APIs) | ✅ Best choice | Overkill |
+| **CPU-intensive tasks** | ⚠️ Blocks event loop | ✅ Runs in separate thread |
+| **Untrusted code** | ❌ Runs in main thread | ✅ Isolated |
+| **Crash isolation / memory limits** | ❌ | ✅ |
+| **Events** | 11 events | 8 events |
+| **Concurrency, retries, heartbeats** | ✅ | ✅ Same behavior |
+
+Most workloads are I/O-bound (API calls, database queries, file operations); for those, `Worker` is the right choice. If CPU-heavy work over TCP is dropping connections, see [CPU-Intensive Workers](/guide/cpu-intensive-workers/) for tuning patterns.
+
+:::tip[Related Guides]
+- [Queue API](/guide/queue/), add and manage jobs
+- [Stall Detection & Recovery](/guide/stall-detection/), handle unresponsive workers
+- [Monitoring & Prometheus Metrics](/guide/monitoring/), watch worker performance
+:::

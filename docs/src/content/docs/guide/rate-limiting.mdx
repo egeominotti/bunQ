@@ -1,0 +1,339 @@
+---
+title: "Rate Limiting & Concurrency for Bun Job Queues"
+description: Control job processing rates in bunqueue with per-queue rate limits and concurrency caps. Protect downstream services via CLI, SDK or MCP.
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/rate-limiting.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · rate limiting</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Rate limits and concurrency, under <em>control.</em></h1>
+  <p class="bq-hero-sub">Cap how many jobs start per second, or how many run at the same time, so a busy queue never overwhelms the API or database behind it.</p>
+</div>
+
+bunqueue gives you two independent knobs per queue:
+
+- **Rate limit**: how many jobs may *start* per second (throughput cap).
+- **Concurrency limit**: how many jobs may be *active at once* (parallelism cap).
+
+Neither is set by default, so queues run unlimited until you say otherwise.
+
+## Set a rate limit
+
+Cap a queue at 100 jobs per second:
+
+```bash
+bunqueue rate-limit set emails 100   # max 100 jobs/second
+bunqueue rate-limit clear emails     # back to unlimited
+```
+
+Or from the SDK (works in both embedded and TCP mode):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setGlobalRateLimit(100);          // 100 jobs per second
+queue.setGlobalRateLimit(100, 60_000);  // 100 jobs per minute
+queue.removeGlobalRateLimit();
+
+// Awaitable variants: resolve after the server applied the change
+await queue.setGlobalRateLimitAsync(100, 60_000);
+await queue.removeGlobalRateLimitAsync();
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setGlobalRateLimit(100);    // 100 jobs per second
+await queue.removeGlobalRateLimit();
+```
+
+*The TypeScript TCP SDK does not send a custom `duration` yet, so the window is always 1 second; set a custom window from the Bun client or the PHP, Go, Rust, or Elixir SDK.*
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.set_global_rate_limit(100)    # 100 jobs per second
+queue.remove_global_rate_limit()
+```
+
+*The Python SDK does not send a custom duration yet, so the window is always 1 second; set a custom window from the Bun client or the PHP, Go, Rust, or Elixir SDK.*
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->setRateLimit(100);           // 100 jobs per second
+$queue->setRateLimit(100, 60000);    // 100 jobs per minute
+$queue->clearRateLimit();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+err := queue.SetRateLimit(100)       // 100 jobs per second
+err = queue.SetRateLimit(100, bunqueue.RateLimitOptions{DurationMs: 60000}) // per minute
+err = queue.ClearRateLimit()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.set_rate_limit(100, None, None)?;          // 100 jobs per second
+queue.set_rate_limit(100, Some(60_000), None)?;  // 100 jobs per minute
+queue.clear_rate_limit()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+:ok = Bunqueue.Queue.set_rate_limit(queue, 100)                    # per second
+:ok = Bunqueue.Queue.set_rate_limit(queue, 100, duration: 60_000)  # per minute
+:ok = Bunqueue.Queue.clear_rate_limit(queue)
+```
+
+</TabItem>
+</Tabs>
+
+The limit is a token bucket that refills continuously: `max` tokens spread over the `duration` window (default 1 second).
+
+## Set a concurrency limit
+
+Cap a queue at 5 jobs running at the same time, across all workers:
+
+```bash
+bunqueue concurrency set emails 5
+bunqueue concurrency clear emails
+```
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setGlobalConcurrency(5);
+queue.removeGlobalConcurrency();
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setGlobalConcurrency(5);
+await queue.removeGlobalConcurrency();
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.set_global_concurrency(5)
+queue.remove_global_concurrency()
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+:ok = Bunqueue.Queue.set_concurrency(queue, 5)
+:ok = Bunqueue.Queue.clear_concurrency(queue)
+```
+
+</TabItem>
+</Tabs>
+
+*The PHP, Go, and Rust SDKs do not expose the global concurrency helpers yet. The cap lives server-side per queue, so set it with `bunqueue concurrency set` or from any other client and it applies to workers in every language.*
+
+This is a *queue-level* cap. Each worker also has its own `concurrency` option that limits how many jobs that one worker runs in parallel:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('emails', processor, {
+  concurrency: 5, // this worker runs at most 5 jobs at once
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('emails', processor, {
+  concurrency: 5, // this worker runs at most 5 jobs at once
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker("emails", process, concurrency=5)  # at most 5 jobs at once
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("emails", processor, bunqueue.WorkerOptions{
+    Concurrency: 5, // this worker runs at most 5 jobs at once
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("emails", processor, WorkerOptions {
+    concurrency: 5, // this worker runs at most 5 jobs at once
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker = Bunqueue.Worker.new("emails", processor, concurrency: 5)
+```
+
+</TabItem>
+</Tabs>
+
+*The PHP worker processes jobs sequentially by design and has no `concurrency` option; run more PHP worker processes to parallelize.*
+
+## Custom time windows (per worker)
+
+The queue-level limit above already supports any window via the `duration` argument. If you instead want the cap enforced per single worker, use the `limiter` option:
+
+```typescript
+const worker = new Worker('emails', processor, {
+  limiter: { max: 100, duration: 60_000 }, // 100 jobs per minute, per worker
+});
+```
+
+The limit is enforced client-side by each worker, so with 3 identical workers the effective rate is 3x.
+
+*The worker `limiter` option is available in the Bun client. In the TCP SDKs, use the queue-level rate limit above (which supports any window) or a client-side limiter of your own in the processor.*
+
+## Using AI agents?
+
+Agents connected via [MCP](/guide/mcp/) can set and clear both limits in natural language ("rate limit emails to 50 per second") through the `bunqueue_set_rate_limit`, `bunqueue_clear_rate_limit`, `bunqueue_set_concurrency`, and `bunqueue_clear_concurrency` tools.
+
+## Reference
+
+| Control | Scope | Window | How |
+|---------|-------|--------|-----|
+| Rate limit | Queue (all workers) | Any duration (default 1s) | `bunqueue rate-limit set`, `queue.setGlobalRateLimit(max, duration?)` |
+| Concurrency limit | Queue (all workers) | n/a | `bunqueue concurrency set`, `queue.setGlobalConcurrency(n)` |
+| Worker concurrency | One worker | n/a | `new Worker(..., { concurrency })` |
+| Worker limiter | One worker | Any duration | `new Worker(..., { limiter: { max, duration } })` |
+
+## Gotchas
+
+:::note[Older servers ignore the duration]
+Servers older than 2.8.35 ignore the `duration` argument and always use a 1-second window. Upgrade the server to get custom windows; the client remains compatible in both directions.
+:::
+
+:::note[Temporary throttle expires server-side]
+`await queue.rateLimit(ms)` throttles the queue to ~1 job/sec and the **server** clears it after `ms` on its own, in embedded and TCP mode alike. It throws if `ms` is not a positive finite number.
+:::
+
+For rate limiting that must be shared with code outside the queue (for example, an API budget also consumed by web requests), use an external limiter inside your processor:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('emails', async (job) => {
+  await ratelimit.limit('email-send'); // external limiter, e.g. Upstash
+  await sendEmail(job.data);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('emails', async (job) => {
+  await ratelimit.limit('email-send'); // external limiter, e.g. Upstash
+  await sendEmail(job.data);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    ratelimit.limit("email-send")  # your external limiter
+    send_email(job.data)
+
+worker = Worker("emails", process)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('emails', function (Bunqueue\Job $job) use ($ratelimit) {
+    $ratelimit->limit('email-send'); // your external limiter
+    sendEmail($job->data());
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    ratelimit.Limit("email-send") // your external limiter
+    return sendEmail(job.Data())
+}, bunqueue.WorkerOptions{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new(
+    "emails",
+    |job| {
+        ratelimit.limit("email-send"); // your external limiter
+        send_email(job.data());
+        Ok(Value::from(true))
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    :ok = RateLimit.limit("email-send")  # your external limiter
+    send_email(job.data)
+    {:ok, %{sent: true}}
+  end)
+```
+
+</TabItem>
+</Tabs>
+
+:::tip[Related Guides]
+- [Queue API](/guide/queue/) - Queue configuration options
+- [Worker API](/guide/worker/) - Worker concurrency settings
+- [Environment Variables](/guide/env-vars/) - Server-side rate limit defaults
+:::

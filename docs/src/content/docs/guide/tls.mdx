@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/tls.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · tls</span>
   <h1 class="bq-hero-h1 bq-bench-h1">TLS without the <em>reverse proxy.</em></h1>
@@ -51,6 +53,9 @@ The server fails fast at startup if the cert or key file is missing, or if only 
 
 ## Connect a client
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
@@ -70,7 +75,119 @@ const queue3 = new Queue('jobs', {
 });
 ```
 
-`Worker` accepts the same `connection.tls` options. The wire protocol is unchanged, TLS only wraps the transport.
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+// Public CA (Let's Encrypt etc.): verify with system CAs
+const queue = new Queue('jobs', { host: 'queue.example.com', port: 6789, tls: true });
+
+// Private CA or self-signed: trust a specific CA file
+const queue2 = new Queue('jobs', { host: '10.0.0.5', port: 6789, tls: { caFile: './ca.pem' } });
+
+// Dev only: skip verification
+const queue3 = new Queue('jobs', { host: 'localhost', port: 6789, tls: { rejectUnauthorized: false } });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+# Public CA (Let's Encrypt etc.): verify with system CAs
+queue = Queue("jobs", host="queue.example.com", port=6789, tls=True)
+
+# Private CA or self-signed: trust a specific CA file
+queue2 = Queue("jobs", host="10.0.0.5", port=6789, tls={"ca_file": "./ca.pem"})
+
+# Dev only: skip verification (a preconfigured ssl.SSLContext also works)
+queue3 = Queue("jobs", host="localhost", port=6789, tls={"verify": False})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+// Public CA (Let's Encrypt etc.): verify with system CAs
+$queue = new Queue('jobs', ['host' => 'queue.example.com', 'port' => 6789, 'tls' => true]);
+
+// Private CA or self-signed: trust a specific CA file
+$queue2 = new Queue('jobs', ['host' => '10.0.0.5', 'port' => 6789, 'tls' => ['caFile' => './ca.pem']]);
+
+// Dev only: skip verification
+$queue3 = new Queue('jobs', ['host' => 'localhost', 'port' => 6789, 'tls' => ['verifyPeer' => false]]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Public CA (Let's Encrypt etc.): verify with system CAs
+queue := bunqueue.NewQueue("jobs", bunqueue.Options{
+    Host: "queue.example.com", Port: 6789,
+    TLS:  &bunqueue.TLSOptions{},
+})
+
+// Private CA or self-signed: trust a specific CA file
+queue2 := bunqueue.NewQueue("jobs", bunqueue.Options{
+    Host: "10.0.0.5", Port: 6789,
+    TLS:  &bunqueue.TLSOptions{CAFile: "./ca.pem"},
+})
+
+// Dev only: skip verification
+queue3 := bunqueue.NewQueue("jobs", bunqueue.Options{
+    Host: "localhost", Port: 6789,
+    TLS:  &bunqueue.TLSOptions{InsecureSkipVerify: true},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::path::PathBuf;
+use bunqueue_client::{ConnectionOptions, Queue, TlsOptions};
+
+// Public CA (Let's Encrypt etc.): verify with system CAs
+let queue = Queue::new("jobs", ConnectionOptions {
+    host: "queue.example.com".into(),
+    tls: Some(TlsOptions::default()),
+    ..Default::default()
+});
+
+// Private CA or self-signed: trust a specific CA file
+let queue2 = Queue::new("jobs", ConnectionOptions {
+    host: "10.0.0.5".into(),
+    tls: Some(TlsOptions { ca_file: Some(PathBuf::from("./ca.pem")) }),
+    ..Default::default()
+});
+```
+
+*Rust deliberately exposes no insecure TLS mode, verification is always on. For a self-signed cert, trust it through `ca_file`.*
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Public CA (Let's Encrypt etc.): verify with system CAs
+queue = Bunqueue.queue("jobs", host: "queue.example.com", port: 6789, tls: true)
+
+# Private CA or self-signed: trust a specific CA file
+queue2 = Bunqueue.queue("jobs", host: "10.0.0.5", port: 6789, tls: true, ca_file: "./ca.pem")
+
+# Dev only: skip verification
+queue3 = Bunqueue.queue("jobs", host: "localhost", port: 6789, tls: true, verify: false)
+```
+
+</TabItem>
+</Tabs>
+
+Workers accept the same TLS options as queues in every SDK (in the Bun client, under `connection.tls`). The wire protocol is unchanged, TLS only wraps the transport.
 
 From the CLI:
 
@@ -91,11 +208,11 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
-Clients then connect with `tls: { caFile: './cert.pem' }` (the self-signed cert acts as its own CA). That keeps full verification, no `rejectUnauthorized: false` needed.
+Clients then connect with the CA-file option pointing at `cert.pem` (`caFile` in TypeScript and PHP, `ca_file` in Python, Rust, and Elixir, `CAFile` in Go): the self-signed cert acts as its own CA. That keeps full verification, no verification opt-out needed.
 
 ## Good to know
 
-- Certificate verification is on by default: the client rejects untrusted or mismatched server certs unless you explicitly pass `rejectUnauthorized: false` (encryption without authentication, dev only).
+- Certificate verification is on by default in every SDK: the client rejects untrusted or mismatched server certs unless you explicitly opt out (`rejectUnauthorized: false` in TypeScript, `{"verify": False}` in Python, `['verifyPeer' => false]` in PHP, `InsecureSkipVerify: true` in Go, `verify: false` in Elixir), encryption without authentication, dev only. Rust exposes no insecure mode at all.
 - TLS encrypts traffic but does not identify clients. Combine it with [auth tokens](/guide/env-vars/) for servers exposed beyond localhost.
 - A TLS-enabled server only accepts TLS clients; plaintext clients fail the handshake immediately (they do not hang).
 - HTTP endpoints (`/health`, dashboards, `/ws`, `/events`) are served over `https://`/`wss://` when TLS is enabled.

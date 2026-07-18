@@ -32,6 +32,10 @@ head:
 
 A workflow is a series of steps where each step's result feeds the next. The automatic undo is called the saga pattern: each step can declare a `compensate` handler, and when a later step fails, those handlers run in reverse order to roll back what already happened. Everything runs in your process on bunqueue's Queue and Worker, persisted to SQLite. No extra services, no YAML.
 
+:::note[Runtime]
+The workflow engine ships in the Bun `bunqueue` package only; it is not part of the polyglot [SDKs](/guide/sdks/). From other languages, orchestrate multi-step jobs via [flows](/guide/flow/) or call a Bun service that runs the engine.
+:::
+
 ## Quick Start
 
 ```bash

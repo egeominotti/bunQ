@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/stall-detection.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · stall-detection</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Stuck jobs <em>come back.</em></h1>
@@ -26,6 +28,9 @@ While a worker processes a job it sends periodic **heartbeats**, small "I'm stil
 
 ## Configuration
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 import { Queue } from 'bunqueue/client';
 
@@ -39,6 +44,43 @@ queue.setStallConfig({
 });
 ```
 
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('my-queue');
+
+await queue.setStallConfig({
+  enabled: true,         // on by default
+  stallInterval: 30000,  // stalled after 30s without a heartbeat
+  maxStalls: 3,          // move to DLQ after 3 stalls
+  gracePeriod: 5000,     // no stall checks in the first 5s of a job
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("my-queue")
+
+queue.set_stall_config({
+    "enabled": True,         # on by default
+    "stallInterval": 30000,  # stalled after 30s without a heartbeat
+    "maxStalls": 3,          # move to DLQ after 3 stalls
+    "gracePeriod": 5000,     # no stall checks in the first 5s of a job
+})
+```
+
+</TabItem>
+</Tabs>
+
+*The stall policy is server-side state per queue: a policy set from any client (or the HTTP API) governs jobs processed by workers in every language. The stall-config helper ships in the Bun, TypeScript, and Python clients; the PHP, Go, Rust, and Elixir SDKs do not expose one yet.*
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `enabled` | `true` | Enable/disable stall detection |
@@ -48,11 +90,69 @@ queue.setStallConfig({
 
 On the worker side, heartbeats are automatic:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const worker = new Worker('queue', processor, {
+  embedded: true,
   heartbeatInterval: 10000, // heartbeat every 10 seconds (default)
 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  heartbeatIntervalS: 10, // heartbeat every 10 seconds (default, 0 = disabled)
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker("queue", process, heartbeat_interval_s=10.0)  # default; 0 disables
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'heartbeatIntervalS' => 10.0, // Fires between jobs (sequential worker)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    HeartbeatIntervalS: 10, // Heartbeats are disabled by default in Go
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("queue", processor, WorkerOptions {
+    heartbeat_interval: Some(Duration::from_secs(10)), // None disables
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker = Bunqueue.Worker.new("queue", handler, heartbeat_interval: 10_000)  # ms
+```
+
+</TabItem>
+</Tabs>
 
 Keep `heartbeatInterval` well below `stallInterval`, otherwise healthy jobs get flagged as stalled.
 
@@ -65,6 +165,9 @@ cannot reset either retry budget.
 ## Long-running jobs
 
 Jobs longer than 30 seconds need a wider stall window, or they will be re-queued while still running:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 // Video processing may take hours
@@ -83,6 +186,51 @@ const worker = new Worker('video-processing', async (job) => {
   }
 }, { embedded: true, heartbeatInterval: 30000 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Video processing may take hours
+const videoQueue = new Queue('video-processing');
+
+await videoQueue.setStallConfig({
+  stallInterval: 300000,  // 5 minutes
+  maxStalls: 2,
+  gracePeriod: 60000,
+});
+
+const worker = new Worker('video-processing', async (job) => {
+  for (const chunk of video.chunks) {
+    await processChunk(chunk);
+    await job.updateProgress(chunk.progress); // also counts as a heartbeat
+  }
+}, { heartbeatIntervalS: 30 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Video processing may take hours
+video_queue = Queue("video-processing")
+
+video_queue.set_stall_config({
+    "stallInterval": 300000,  # 5 minutes
+    "maxStalls": 2,
+    "gracePeriod": 60000,
+})
+
+def process(job):
+    for chunk in video.chunks:
+        process_chunk(chunk)
+        job.update_progress(chunk.progress)  # also counts as a heartbeat
+
+worker = Worker("video-processing", process, heartbeat_interval_s=30.0)
+```
+
+</TabItem>
+</Tabs>
 
 Two things reset the stall timer: the worker's automatic heartbeat (every `heartbeatInterval` ms) and any `job.updateProgress()` call. For long jobs without natural progress points, the automatic heartbeat is enough.
 
@@ -108,12 +256,20 @@ In TCP mode, use the Worker's `stalled` event or subscribe via [webhooks](/guide
 
 ## Monitoring
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const stats = queue.getDlqStats();
 console.log('Stalled jobs in DLQ:', stats.byReason.stalled);
 
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
 ```
+
+</TabItem>
+</Tabs>
+
+*The aggregate `getDlqStats()` and the `reason` filter are Bun-client conveniences. The external SDKs list DLQ entries with `getDlq(count?)` / `get_dlq()` / `GetDlq(count)` and each entry carries a `reason` field (`'stalled'` for stall evictions) you can filter on client-side.*
 
 ## SandboxedWorker
 

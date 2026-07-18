@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/troubleshooting.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · troubleshooting</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Troubleshooting, cause and <em>fix.</em></h1>
@@ -184,14 +186,91 @@ queue.setStallConfig({
 2. Is there a worker for this queue?
 3. Is rate limiting blocking jobs?
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 // Check if paused
 const isPaused = await queue.isPausedAsync();
 
 // Check counts
+const counts = await queue.getJobCountsAsync();
+console.log(counts);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Check if paused
+const isPaused = await queue.isPaused();
+
+// Check counts
 const counts = await queue.getJobCounts();
 console.log(counts);
 ```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Check if paused
+is_paused = queue.is_paused()
+
+# Check counts
+counts = queue.get_job_counts()
+print(counts)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Check if paused
+$isPaused = $queue->isPaused();
+
+// Check counts
+$counts = $queue->getJobCounts();
+var_dump($counts);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Check if paused
+paused, _ := queue.IsPaused()
+
+// Check counts
+counts, _ := queue.GetJobCounts()
+fmt.Println(paused, counts)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Check if paused
+let paused = queue.is_paused()?;
+
+// Check counts
+let counts = queue.get_job_counts()?;
+println!("{paused} {counts:?}");
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Check if paused
+{:ok, paused} = Bunqueue.Queue.is_paused(queue)
+
+# Check counts
+{:ok, counts} = Bunqueue.Queue.get_job_counts(queue)
+```
+
+</TabItem>
+</Tabs>
 
 ### "Job is not active" when calling updateProgress
 
@@ -211,6 +290,9 @@ Job listings (`getJobs`, `GetJobs` over TCP) read from SQLite, while pushes go t
 
 Check the error in failed event:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 worker.on('failed', (job, error) => {
   console.error('Job failed:', error);
@@ -218,6 +300,55 @@ worker.on('failed', (job, error) => {
   console.error('Attempts:', job.attemptsMade);
 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.on('failed', (job, error) => {
+  console.error('Job failed:', error);
+  console.error('Job data:', job.data);
+  console.error('Attempts:', job.attempts);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def on_failed(job, err):
+    print("Job failed:", err)
+    print("Job data:", job.data)
+    print("Attempts:", job.attempts)
+
+worker.on("failed", on_failed)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->on('failed', function ($job, $error) {
+    error_log('Job failed: ' . $error->getMessage());
+    error_log('Attempts: ' . $job->attemptsMade());
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.On("failed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    err := args[1].(error)
+    log.Printf("job %s failed after %d attempts: %v", job.ID(), job.AttemptsMade(), err)
+})
+```
+
+</TabItem>
+</Tabs>
+
+*Worker lifecycle events exist in TypeScript, Python, PHP, and Go; in Rust and Elixir, handler failures surface through normal control flow and the telemetry callback.*
 
 ### Memory usage keeps growing
 
@@ -322,6 +453,9 @@ curl -H "Authorization: Bearer your-token" \
 2. Use batch operations
 3. Check database I/O
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 // Increase concurrency
 const worker = new Worker('queue', processor, {
@@ -334,6 +468,102 @@ await queue.addBulk([...jobs]);
 // Workers batch pulls and acks automatically; tune the batch size
 const batchWorker = new Worker('queue', processor, { batchSize: 100 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Increase concurrency
+const worker = new Worker('queue', processor, {
+  concurrency: 20,
+});
+
+// Use bulk add
+await queue.addBulk([...jobs]);
+
+// Workers batch pulls automatically; tune the batch size
+const batchWorker = new Worker('queue', processor, { batchSize: 100 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Increase concurrency
+worker = Worker("queue", process, concurrency=20)
+
+# Use bulk add
+queue.add_bulk(jobs)
+
+# Workers batch pulls automatically; tune the batch size
+batch_worker = Worker("queue", process, batch_size=100)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// The PHP worker is sequential by design; scale by running more worker processes
+
+// Use bulk add
+$queue->addBulk($jobs);
+
+// Workers batch pulls automatically; tune the batch size
+$worker = new Worker('queue', $processor, ['batchSize' => 100]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Increase concurrency
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{Concurrency: 20})
+
+// Use bulk add
+ids, err := queue.AddBulk(entries)
+
+// Workers batch pulls automatically; tune the batch size
+batchWorker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{BatchSize: 100})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Worker, WorkerOptions};
+
+// Increase concurrency
+let worker = Worker::new("queue", processor, WorkerOptions {
+    concurrency: 20,
+    ..Default::default()
+});
+
+// Use bulk add
+let ids = queue.add_bulk(entries)?;
+
+// Workers batch pulls automatically; tune the batch size
+let batch_worker = Worker::new("queue", processor, WorkerOptions {
+    batch_size: 100,
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Increase concurrency
+worker = Bunqueue.Worker.new("queue", processor, concurrency: 20)
+
+# Use bulk add
+{:ok, ids} = Bunqueue.Queue.add_bulk(queue, jobs)
+
+# Workers batch pulls automatically; tune the batch size
+worker = Bunqueue.Worker.new("queue", processor, batch_size: 100)
+```
+
+</TabItem>
+</Tabs>
 
 ### High latency on pull
 

@@ -28,6 +28,19 @@ surviving claim and code sample was re-verified against the current API.
 The README and the site now state explicitly that the server and the
 embedded queue run in-memory unless a data path is configured.
 
+### Changed: every docs example in all supported languages
+
+Twenty guide pages now show each client example in synced language tabs
+covering Bun, Node.js/Deno, Python, PHP, Go, Rust and Elixir: the queue,
+worker, quickstart, cron, DLQ, rate-limiting, flows, Simple Mode, TLS,
+stall-detection, webhooks, troubleshooting, FAQ, security, migration,
+installation, introduction, databases, examples and use-cases pages.
+Every non-TypeScript sample was verified against the SDK sources; where
+a feature does not exist in a language the docs say so explicitly
+instead of showing code that would not compile. Bun-only pages
+(workflow engine, QueueGroup, IoT forward(), Elysia/Hono, sandboxed
+workers) carry an explicit runtime callout.
+
 ### Changed: bunqueue.dev home covers all six SDKs
 
 The home hero now shows the real `bunx bunqueue start` boot output in an

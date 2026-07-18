@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/databases.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · storage</span>
   <h1 class="bq-hero-h1 bq-bench-h1">SQLite by default, tuned for <em>queues.</em></h1>
@@ -29,6 +31,8 @@ BUNQUEUE_DATA_PATH=/data/bunq.db bunqueue start
 // Embedded mode (queue runs inside your app's process)
 const queue = new Queue('jobs', { embedded: true, dataPath: '/data/jobs.db' });
 ```
+
+*Embedded mode (and `queue.forward()` below) ships in the Bun `bunqueue` package only. From every other language, run the server and connect with a [client SDK](/guide/sdks/), as in Option 3.*
 
 The rest of this page covers hosts where the disk does not survive restarts.
 
@@ -69,6 +73,9 @@ If the central server is unreachable, jobs stay local and retry; permanent failu
 
 Run a single bunqueue server on a host with a durable disk. Producers and workers connect over TCP and hold no state themselves:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const queue = new Queue('jobs', { connection: { host: 'queue.internal', port: 6789 } });
 const worker = new Worker('jobs', processor, {
@@ -76,7 +83,82 @@ const worker = new Worker('jobs', processor, {
 });
 ```
 
-Clients exist for Node.js, Deno, Python, and Cloudflare Workers, see [SDKs](/guide/sdks/).
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('jobs', { host: 'queue.internal', port: 6789 });
+const worker = new Worker('jobs', processor, { host: 'queue.internal', port: 6789 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("jobs", host="queue.internal", port=6789)
+worker = Worker("jobs", process, host="queue.internal", port=6789)
+worker.run()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('jobs', ['host' => 'queue.internal', 'port' => 6789]);
+$worker = new Worker('jobs', $processor, ['host' => 'queue.internal', 'port' => 6789]);
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("jobs", bunqueue.Options{Host: "queue.internal", Port: 6789})
+
+worker := bunqueue.NewWorker("jobs", processor, bunqueue.WorkerOptions{
+    Host: "queue.internal",
+    Port: 6789,
+})
+worker.Run()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, Queue, Worker, WorkerOptions};
+
+let connection = ConnectionOptions {
+    host: "queue.internal".into(),
+    port: 6789,
+    ..Default::default()
+};
+let queue = Queue::new("jobs", connection.clone());
+let worker = Worker::new("jobs", processor, WorkerOptions { connection, ..Default::default() });
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("jobs", host: "queue.internal", port: 6789)
+
+worker = Bunqueue.Worker.new("jobs", processor, host: "queue.internal", port: 6789)
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
+
+Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare Workers, see [SDKs](/guide/sdks/).
 
 ### Choosing
 

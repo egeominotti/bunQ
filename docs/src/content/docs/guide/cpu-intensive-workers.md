@@ -16,6 +16,10 @@ head:
 
 If your jobs do heavy synchronous computation (image processing, crypto, parsing large files) and your workers connect over TCP, read this page. It explains a failure mode you will otherwise meet in production, and three ways to avoid it.
 
+:::note[Runtime]
+The code on this page uses the Bun `bunqueue` package, and `SandboxedWorker` is built on Bun Workers, so it is Bun-only. The underlying failure mode, a blocked event loop starving connection health checks, applies to any single-threaded runtime; in other languages, prefer moving CPU-heavy work off the worker's main thread.
+:::
+
 ## The quick fix
 
 Relax the connection health checks so CPU bursts do not look like a dead connection:

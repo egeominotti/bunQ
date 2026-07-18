@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/faq.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · faq</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Asked, <em>answered.</em></h1>
@@ -28,7 +30,7 @@ One less server. There is nothing to install, monitor, or pay hosting for, jobs 
 
 ### Does it run on Node.js?
 
-No. bunqueue uses Bun-only APIs (`bun:sqlite`, `Bun.serve`, `Bun.listen`) that do not exist in Node. Your job producers can still be anywhere: any process that can open a TCP connection can talk to a bunqueue server, and official SDKs exist for [TypeScript and Python](/guide/sdks/).
+The server is Bun-only (`bun:sqlite`, `Bun.serve`, `Bun.listen` do not exist in Node), but your producers and workers run anywhere: official SDKs exist for [TypeScript (Node.js, Deno, Bun, Cloudflare Workers), Python, PHP, Go, Rust and Elixir](/guide/sdks/), all speaking the same TCP protocol.
 
 ### What are the requirements?
 
@@ -80,17 +82,124 @@ Three knobs, in order of impact: raise worker `concurrency` (parallel jobs per w
 
 Pass a `jobId`. Adding the same `jobId` twice returns the existing job instead of creating a duplicate, same behavior as BullMQ. This makes webhook handlers and restart-recovery code safe to re-run:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 await queue.add('charge', data, { jobId: `order-${orderId}` }); // idempotent
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.add('charge', data, { jobId: `order-${orderId}` }); // idempotent
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add("charge", data, job_id=f"order-{order_id}")  # idempotent
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('charge', $data, ['jobId' => "order-{$orderId}"]); // idempotent
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("charge", data, bunqueue.JobOptions{"jobId": "order-" + orderID}) // idempotent
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// idempotent
+queue.add("charge", data, JobOptions {
+    job_id: Some(format!("order-{order_id}")),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# idempotent
+{:ok, _job} = Bunqueue.Queue.add(queue, "charge", data, jobId: "order-#{order_id}")
+```
+
+</TabItem>
+</Tabs>
 
 ### How do retries and backoff work?
 
 `attempts` sets the maximum tries, `backoff` sets the wait between them. A plain number means exponential backoff (waits roughly double each retry: ~2s, ~4s, ~8s with a 1000ms base); the object form `{ type: 'fixed' | 'exponential', delay }` matches BullMQ. All delays get automatic jitter, a small random spread so thousands of failed jobs do not retry in the same instant, and are capped at 1 hour by default.
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 await queue.add('task', data, { attempts: 5, backoff: 1000 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.add('task', data, { attempts: 5, backoff: 1000 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add("task", data, attempts=5, backoff=1000)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('task', $data, ['attempts' => 5, 'backoff' => 1000]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("task", data, bunqueue.JobOptions{"attempts": 5, "backoff": 1000})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Backoff, JobOptions};
+
+queue.add("task", data, JobOptions {
+    attempts: Some(5),
+    backoff: Some(Backoff::Milliseconds(1000)),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, _job} = Bunqueue.Queue.add(queue, "task", data, attempts: 5, backoff: 1000)
+```
+
+</TabItem>
+</Tabs>
 
 ### What happens when a worker crashes mid-job?
 

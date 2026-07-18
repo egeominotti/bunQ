@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/introduction.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · introduction</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The queue that is <em>a file.</em></h1>
@@ -17,6 +19,9 @@ head:
 A job queue lets your app hand off slow work (sending emails, processing images, calling APIs) to run in the background instead of blocking a request. bunqueue gives you that with one `bun add`, no external infrastructure.
 
 ## See it in 10 lines
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
@@ -31,7 +36,116 @@ const worker = new Worker('emails', async (job) => {
 await queue.add('welcome', { to: 'user@example.com' });
 ```
 
-Run it with `bun run app.ts`. That is a complete, working queue. The [Quick Start](/guide/quickstart/) walks through it step by step.
+Run it with `bun run app.ts`. No server: the queue runs embedded in your process.
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+const worker = new Worker('emails', async (job) => {
+  console.log('Sending to', job.data.to);
+  return { sent: true };
+});
+
+await queue.add('welcome', { to: 'user@example.com' });
+```
+
+Start the server once (`bunx bunqueue start`), then run the file with
+`node --experimental-strip-types app.ts` (Node 22+) or `deno run -A app.ts`.
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("emails")
+queue.add("welcome", {"to": "user@example.com"})
+
+def process(job):
+    print("Sending to", job.data["to"])
+    return {"sent": True}
+
+Worker("emails", process).run()
+```
+
+Start the server once (`bunx bunqueue start`), then `python app.py`.
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('emails');
+$queue->add('welcome', ['to' => 'user@example.com']);
+
+$worker = new Worker('emails', function (Bunqueue\Job $job) {
+    return ['sent' => true];
+});
+$worker->run();
+```
+
+Start the server once (`bunx bunqueue start`), then `php worker.php`.
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+defer queue.Close()
+queue.Add("welcome", map[string]any{"to": "user@example.com"}, nil)
+
+worker := bunqueue.NewWorker("emails", func(job *bunqueue.Job) (any, error) {
+    return map[string]any{"sent": true}, nil
+}, bunqueue.WorkerOptions{})
+worker.Run()
+```
+
+Start the server once (`bunx bunqueue start`), then `go run .`.
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value, Worker, WorkerOptions};
+
+let queue = Queue::new("emails", ConnectionOptions::default());
+let data = Value::Map(vec![(Value::from("to"), Value::from("user@example.com"))]);
+queue.add("welcome", data, JobOptions::default())?;
+
+let worker = Worker::new("emails", |_job| Ok(Value::from(true)), WorkerOptions::default());
+worker.run()?;
+```
+
+Start the server once (`bunx bunqueue start`), then `cargo run`.
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+{:ok, _job} = Bunqueue.Queue.add(queue, "welcome", %{to: "user@example.com"})
+
+worker =
+  Bunqueue.Worker.new("emails", fn _job ->
+    {:ok, %{sent: true}}
+  end)
+
+Bunqueue.Worker.run(worker)
+```
+
+Start the server once (`bunx bunqueue start`), then `mix run app.exs`.
+
+</TabItem>
+</Tabs>
+
+That is a complete, working queue. The [Quick Start](/guide/quickstart/) walks through it step by step.
 
 ## Why bunqueue?
 
@@ -66,13 +180,91 @@ const worker = new Worker('tasks', async (job) => { /* ... */ }, { embedded: tru
 bunqueue start --data-path ./data/queue.db
 ```
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 // No embedded option = connects to localhost:6789
 const queue = new Queue('tasks');
 const worker = new Worker('tasks', async (job) => { /* ... */ });
 ```
 
-Server mode also unlocks clients in other runtimes: Node.js, Deno, Python, and Cloudflare Workers via the [client SDKs](/guide/sdks/).
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('tasks'); // connects to localhost:6789
+const worker = new Worker('tasks', async (job) => { /* ... */ });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("tasks")  # connects to localhost:6789
+
+def process(job):
+    ...
+
+Worker("tasks", process).run()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('tasks'); // connects to localhost:6789
+$worker = new Worker('tasks', function (Bunqueue\Job $job) {
+    // ...
+});
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("tasks", bunqueue.Options{}) // localhost:6789
+
+worker := bunqueue.NewWorker("tasks", func(job *bunqueue.Job) (any, error) {
+    // ...
+    return nil, nil
+}, bunqueue.WorkerOptions{})
+worker.Run()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, Queue, Value, Worker, WorkerOptions};
+
+let queue = Queue::new("tasks", ConnectionOptions::default()); // localhost:6789
+let worker = Worker::new("tasks", |_job| Ok(Value::Nil), WorkerOptions::default());
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("tasks")  # connects to localhost:6789
+
+worker = Bunqueue.Worker.new("tasks", fn _job -> {:ok, %{}} end)
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
+
+Server mode also unlocks clients in other runtimes: Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare Workers via the [client SDKs](/guide/sdks/).
 
 ## Compared to BullMQ
 

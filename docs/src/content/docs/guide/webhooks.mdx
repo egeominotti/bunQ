@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/webhooks.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · webhooks</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Job events, delivered as <em>webhooks.</em></h1>
@@ -40,6 +42,89 @@ That is enough to see events flowing. In production, always verify the signature
 
 ## Common Tasks
 
+### Manage webhooks from an SDK
+
+The TypeScript, Python, PHP, and Go SDKs expose the same webhook surface programmatically:
+
+<Tabs syncKey="lang">
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+// Registered webhooks are scoped to this queue unless you pass `queue`
+const { webhookId } = await queue.addWebhook({
+  url: 'https://api.example.com/hooks/bunqueue',
+  events: ['job.completed', 'job.failed'],
+  secret: 'my-webhook-secret',   // optional
+});
+
+const hooks = await queue.listWebhooks();
+await queue.setWebhookEnabled(webhookId, false);  // pause delivery
+await queue.removeWebhook(webhookId);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("emails")
+
+# queue=None registers a global webhook; pass queue="emails" to scope it
+webhook_id = queue.add_webhook(
+    "https://api.example.com/hooks/bunqueue",
+    ["job.completed", "job.failed"],
+    secret="my-webhook-secret",   # optional
+)
+
+hooks = queue.list_webhooks()
+queue.set_webhook_enabled(webhook_id, False)  # pause delivery
+queue.remove_webhook(webhook_id)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$queue = new Queue('emails');
+
+$webhookId = $queue->addWebhook(
+    'https://api.example.com/hooks/bunqueue',
+    ['job.completed', 'job.failed']
+);
+
+$hooks = $queue->listWebhooks();
+$queue->setWebhookEnabled($webhookId, false); // pause delivery
+$queue->removeWebhook($webhookId);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+
+webhookID, _ := queue.AddWebhook(
+    "https://api.example.com/hooks/bunqueue",
+    []string{"job.completed", "job.failed"},
+)
+
+hooks, _ := queue.ListWebhooks()
+_ = queue.SetWebhookEnabled(webhookID, false) // pause delivery
+_ = queue.RemoveWebhook(webhookID)
+```
+
+</TabItem>
+</Tabs>
+
+*The PHP and Go helpers register global, unsigned webhooks (`url` + `events` only); use the CLI or HTTP API to set a `secret` or a queue scope from those languages. The Bun package, Rust, and Elixir have no typed webhook helpers yet: use the CLI above, the HTTP API, or the raw TCP commands.*
+
 ### Scope a webhook to one queue
 
 ```bash
@@ -62,7 +147,7 @@ Each entry starts with the webhook ID; that ID is what `remove` takes. Disabled 
 
 ### Temporarily disable a webhook
 
-Toggling is not a CLI command. Use the TCP command `SetWebhookEnabled`, the HTTP API, or the MCP tool:
+Toggling is not a CLI command. Use the SDK helpers shown above (`setWebhookEnabled` / `set_webhook_enabled` / `SetWebhookEnabled`), the TCP command `SetWebhookEnabled`, the HTTP API, or the MCP tool:
 
 ```text
 bunqueue_set_webhook_enabled({ id: "01920b5e-...", enabled: false })
@@ -105,7 +190,10 @@ All payloads carry `event`, `timestamp`, `jobId`, and `queue`. The rest depends 
 
 ## Verifying Signatures
 
-When a webhook is registered with `--secret`, bunqueue signs each payload with HMAC-SHA256 (a keyed hash: only someone who knows the secret can produce a valid signature). Verify it before trusting the request:
+When a webhook is registered with `--secret`, bunqueue signs each payload with HMAC-SHA256 (a keyed hash: only someone who knows the secret can produce a valid signature). The signature is the hex-encoded HMAC of the raw JSON body. Verify it before trusting the request; the receiver can be written in any language:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -134,7 +222,73 @@ Bun.serve({
 });
 ```
 
-Two things matter in any language: compute the HMAC over the **raw request body** (not a re-serialized object), and compare with a constant-time function (`timingSafeEqual` in Node/Bun, `hmac.compare_digest` in Python, `hmac.Equal` in Go).
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verifySignature(rawBody: string, signature: string, secret: string): boolean {
+  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// In your HTTP handler: read the RAW body first, verify, then JSON.parse it.
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+import hashlib
+import hmac
+
+def verify_signature(raw_body: bytes, signature: str, secret: str) -> bool:
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+# In your HTTP handler: read the RAW body first, verify, then json.loads it.
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+function verifySignature(string $rawBody, string $signature, string $secret): bool
+{
+    $expected = hash_hmac('sha256', $rawBody, $secret);
+    return hash_equals($expected, $signature);
+}
+
+// Read the raw body with file_get_contents('php://input'), verify, then json_decode it.
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "encoding/hex"
+)
+
+func verifySignature(rawBody []byte, signature, secret string) bool {
+    mac := hmac.New(sha256.New, []byte(secret))
+    mac.Write(rawBody)
+    expected := hex.EncodeToString(mac.Sum(nil))
+    return hmac.Equal([]byte(expected), []byte(signature))
+}
+
+// In your HTTP handler: read the RAW body first, verify, then json.Unmarshal it.
+```
+
+</TabItem>
+</Tabs>
+
+Two things matter in any language: compute the HMAC over the **raw request body** (not a re-serialized object), and compare with a constant-time function (`timingSafeEqual` in Node/Bun, `hmac.compare_digest` in Python, `hash_equals` in PHP, `hmac.Equal` in Go).
 
 :::caution[Unsigned webhooks]
 Without `--secret`, payloads are sent unsigned and anyone can forge requests to your endpoint. Always set a secret in production.

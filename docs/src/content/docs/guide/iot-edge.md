@@ -16,6 +16,10 @@ head:
 
 bunqueue fits where a Redis + BullMQ stack does not: a single Bun process with one SQLite file, running on the gateway next to your sensors. No containers, no broker for the queue itself.
 
+:::note[Runtime]
+Everything on this page uses the Bun `bunqueue` package: embedded mode and `queue.forward()` are Bun-only. The polyglot [SDKs](/guide/sdks/) are not affected, they can still produce and consume on the central server the gateway forwards to.
+:::
+
 ## Is it the right fit?
 
 | Scenario | Fit |

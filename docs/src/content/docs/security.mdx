@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/security.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · security</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Security, hardened by <em>default.</em></h1>
@@ -65,15 +67,79 @@ export default defineConfig({
 Clients pass the token in their connection options, identically across
 languages:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
-// TypeScript SDK (Node.js, Deno, Bun, Cloudflare Workers)
+import { Queue } from 'bunqueue/client';
+
+const queue = new Queue('emails', {
+  connection: { host: 'q.internal', token: process.env.BUNQUEUE_TOKEN },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
 const queue = new Queue('emails', { host: 'q.internal', token: process.env.BUNQUEUE_TOKEN });
 ```
 
+</TabItem>
+<TabItem label="Python">
+
 ```python
-# Python SDK
 queue = Queue("emails", host="q.internal", token=os.environ["BUNQUEUE_TOKEN"])
 ```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue = new Queue('emails', [
+    'host' => 'q.internal',
+    'token' => getenv('BUNQUEUE_TOKEN'),
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{
+    Host:  "q.internal",
+    Token: os.Getenv("BUNQUEUE_TOKEN"),
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, Queue};
+
+let queue = Queue::new("emails", ConnectionOptions {
+    host: "q.internal".into(),
+    token: std::env::var("BUNQUEUE_TOKEN").ok(),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue =
+  Bunqueue.queue("emails",
+    host: "q.internal",
+    token: System.fetch_env!("BUNQUEUE_TOKEN")
+  )
+```
+
+</TabItem>
+</Tabs>
 
 Multiple tokens are supported (`AUTH_TOKENS=token1,token2`), which enables
 zero downtime rotation: add the new token, roll clients over, remove the old

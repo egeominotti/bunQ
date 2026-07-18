@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/installation.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · installation</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Install bunqueue, zero <em>infrastructure.</em></h1>
@@ -20,13 +22,72 @@ head:
 
 ## Install
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```bash
 bun add bunqueue
 ```
 
 That is it. The package is 5.5 MB with 7 packages total, and includes the client library, the standalone server, and the CLI.
 
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```bash
+npm install bunqueue-client    # Node.js 20+
+deno add npm:bunqueue-client   # Deno 2+
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```bash
+# PyPI release upcoming; install from the repository today:
+pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```bash
+# Packagist release upcoming; today, add the repository to composer.json
+# and require bunqueue/client, or vendor sdk/php directly:
+composer require bunqueue/client
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```bash
+go get github.com/egeominotti/bunqueue/sdk/go
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```bash
+# crates.io release upcoming; use sdk/rust as a path dependency today
+cargo add bunqueue-client --path ../bunqueue/sdk/rust
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Hex release upcoming; use sdk/elixir as a path dependency today
+{:bunqueue_client, path: "../bunqueue/sdk/elixir"}
+```
+
+</TabItem>
+</Tabs>
+
+*The Bun `bunqueue` package bundles the client, the server, and the CLI. Every other SDK is a client only: it connects to a bunqueue server, started once with `bunx bunqueue start` (see [SDKs](/guide/sdks/) and [Server Mode](/guide/server/)).*
+
 ## Verify it works
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 Save this as `test.ts` and run `bun run test.ts`:
 
@@ -42,6 +103,118 @@ const worker = new Worker('test', async (job) => {
 
 await queue.add('hello', { message: 'bunqueue is working!' });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+Start a server (`bunx bunqueue start`), save this as `test.ts`, then run
+`node --experimental-strip-types test.ts` (Node 22+) or `deno run -A test.ts`:
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('test'); // connects to localhost:6789
+const worker = new Worker('test', async (job) => {
+  console.log('Processing:', job.data);
+  return { success: true };
+});
+
+await queue.add('hello', { message: 'bunqueue is working!' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+Start a server (`bunx bunqueue start`), then run `python test.py`:
+
+```python
+from bunqueue import Queue, Worker
+
+queue = Queue("test")  # connects to localhost:6789
+queue.add("hello", {"message": "bunqueue is working!"})
+
+def process(job):
+    print("Processing:", job.data)
+    return {"success": True}
+
+Worker("test", process).run()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+Start a server (`bunx bunqueue start`), then run `php test.php`:
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$queue = new Queue('test'); // connects to localhost:6789
+$queue->add('hello', ['message' => 'bunqueue is working!']);
+
+$worker = new Worker('test', function (Bunqueue\Job $job) {
+    var_dump($job->data());
+    return ['success' => true];
+});
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+Start a server (`bunx bunqueue start`), then `go run .`:
+
+```go
+queue := bunqueue.NewQueue("test", bunqueue.Options{}) // localhost:6789
+defer queue.Close()
+queue.Add("hello", map[string]any{"message": "bunqueue is working!"}, nil)
+
+worker := bunqueue.NewWorker("test", func(job *bunqueue.Job) (any, error) {
+    fmt.Println("Processing:", job.Data())
+    return map[string]any{"success": true}, nil
+}, bunqueue.WorkerOptions{})
+worker.Run()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+Start a server (`bunx bunqueue start`), then `cargo run`:
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value, Worker, WorkerOptions};
+
+let queue = Queue::new("test", ConnectionOptions::default()); // localhost:6789
+let data = Value::Map(vec![(Value::from("message"), Value::from("bunqueue is working!"))]);
+queue.add("hello", data, JobOptions::default())?;
+
+let worker = Worker::new("test", |job| {
+    println!("Processing: {:?}", job.data());
+    Ok(Value::from(true))
+}, WorkerOptions::default());
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+Start a server (`bunx bunqueue start`), then `mix run test.exs`:
+
+```elixir
+queue = Bunqueue.queue("test")  # connects to localhost:6789
+{:ok, _job} = Bunqueue.Queue.add(queue, "hello", %{message: "bunqueue is working!"})
+
+worker =
+  Bunqueue.Worker.new("test", fn job ->
+    IO.inspect(job.data, label: "Processing")
+    {:ok, %{success: true}}
+  end)
+
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
 
 You should see `Processing: { message: "bunqueue is working!" }`. Next: the [Quick Start](/guide/quickstart/) builds on this.
 

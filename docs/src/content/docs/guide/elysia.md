@@ -16,6 +16,10 @@ head:
 
 This guide wires bunqueue into Elysia. Everything runs in one process using **embedded mode**, which stores jobs in a local SQLite file, no separate queue server. The general patterns (status endpoints, separate worker processes, shutdown) are the same in every framework and live in the [Hono guide](/guide/hono/) and the [Integrations overview](/guide/integrations/); this page keeps to what Elysia does differently.
 
+:::note[Runtime]
+Elysia is a Bun framework, so this guide uses the Bun `bunqueue` package end to end; embedded mode is not available in the polyglot [SDKs](/guide/sdks/).
+:::
+
 ## Minimal working app
 
 Copy, run with `bun run app.ts`:

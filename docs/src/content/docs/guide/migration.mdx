@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/migration.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · migration</span>
   <h1 class="bq-hero-h1 bq-bench-h1">BullMQ code, minus <em>Redis.</em></h1>
@@ -17,6 +19,9 @@ head:
 This page is for BullMQ users. It shows the full before/after up front, then walks the steps and the few API differences that actually matter.
 
 ## The whole migration, one diff
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 // Before: BullMQ + Redis
@@ -38,6 +43,37 @@ const worker = new Worker('emails', async (job) => {
   return { sent: true };
 }, { embedded: true, concurrency: 5 });
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Before: BullMQ + Redis
+import { Queue, Worker } from 'bullmq';
+
+const connection = { host: 'localhost', port: 6379 };
+const queue = new Queue('emails', { connection });
+const worker = new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { connection, concurrency: 5 });
+
+// After: bunqueue server + bunqueue-client, no Redis
+import { Queue, Worker } from 'bunqueue-client';
+
+const queue = new Queue('emails'); // connects to localhost:6789
+const worker = new Worker('emails', async (job) => {
+  await sendEmail(job.data);
+  return { sent: true };
+}, { concurrency: 5 });
+```
+
+Staying on Node.js or Deno? Install `bunqueue-client` instead of `bunqueue`, start the server once with `bunx bunqueue start --data-path ./data/bunq.db`, and keep your runtime.
+
+</TabItem>
+</Tabs>
+
+*Embedded mode (`embedded: true`) ships in the Bun `bunqueue` package only. On Node.js and Deno, `bunqueue-client` connects to a bunqueue server; the Queue and Worker API is otherwise the same.*
 
 `embedded: true` runs the queue inside your process, backed by a local SQLite file, so there is no queue server to operate. `dataPath` says where that file lives.
 

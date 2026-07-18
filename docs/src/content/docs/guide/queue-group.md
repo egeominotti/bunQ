@@ -16,6 +16,10 @@ head:
 
 A QueueGroup is a thin organizer: it creates normal `Queue` and `Worker` instances whose names carry the group prefix, and it can pause, resume, or clear all of them at once.
 
+:::note[Availability]
+`QueueGroup` ships in the Bun package (`bunqueue/client`). From the other SDKs, create the queues individually with the prefixed name (for example `new Queue('billing:invoices')`): the prefix is just part of the queue name on the server, so grouped and non-grouped clients interoperate on the same queues.
+:::
+
 ## Quick Start
 
 ```typescript

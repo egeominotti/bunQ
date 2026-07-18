@@ -16,6 +16,10 @@ head:
 
 This guide shows how to run background jobs, work your server does after the HTTP response is sent, inside a Hono app. Everything runs in one process using bunqueue's **embedded mode**, which stores jobs in a local SQLite file instead of a separate queue server.
 
+:::note[Runtime]
+This guide runs Hono on Bun with the Bun `bunqueue` package; embedded mode is Bun-only. Running Hono on Node.js or Deno? Start a bunqueue server and use `bunqueue-client` instead, the route and worker code is otherwise the same (see [SDKs](/guide/sdks/)).
+:::
+
 ## Minimal working app
 
 Copy, run with `bun run app.ts`, done:

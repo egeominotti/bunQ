@@ -31,31 +31,22 @@ against the same queue, with no shared runtime and no translation layer.
 
 ## Supported platforms
 
-| Platform | Package | Current | Distribution |
-|---|---|---|---|
-| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | 0.1.9 | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
-| Python ≥ 3.9 | `bunqueue-client` | 0.1.4 | PyPI upcoming, [installable from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
-| PHP ≥ 8.1 | `bunqueue/client` | 0.1.0 | Packagist upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) |
-| Go 1.26.5 | `github.com/egeominotti/bunqueue/sdk/go` | 0.1.0 | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
-| Rust ≥ 1.85 | `bunqueue-client` | 0.1.0 | crates.io upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) |
-| Elixir ≥ 1.15 | `bunqueue_client` | 0.1.0 | Hex upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) |
-| Bun, embedded in process, no server | `bunqueue` | - | [Quick Start](/guide/quickstart/) |
-
-WebAssembly is a feasible target, but not one portable runtime. Browser WASM
-has no standard raw-TCP API, so a browser SDK needs a bunqueue HTTP/WebSocket
-bridge or a host-specific socket capability. WASI can reuse the Rust protocol
-core only where the host grants sockets and TLS. A WASM target will become
-official only when it can run the same conformance suite without weakening
-authentication, TLS, framing, or telemetry guarantees.
+| Platform | Package | Distribution |
+|---|---|---|
+| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
+| Python ≥ 3.9 | `bunqueue-client` | PyPI upcoming, [install from the repository](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) today |
+| PHP ≥ 8.1 | `bunqueue/client` | Packagist upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) |
+| Go ≥ 1.26.5 | `github.com/egeominotti/bunqueue/sdk/go` | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
+| Rust ≥ 1.85 | `bunqueue-client` | crates.io upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) |
+| Elixir ≥ 1.15 | `bunqueue_client` | Hex upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) |
+| Bun, embedded in process, no server | `bunqueue` | [Quick Start](/guide/quickstart/) |
 
 Every SDK is versioned independently from the server and follows semantic
-versioning. The wire protocol is versioned too (`protocolVersion: 2`,
-negotiated via `Hello`), so a client keeps working across server upgrades.
-
-The protocol itself is a formal, public contract, so your code is never
-coupled to a specific SDK version or language: a client written today keeps
-working across server upgrades, and services in different languages
-interoperate on the same queues out of the box.
+versioning; each changelog is linked in [Resources](#resources). The wire
+protocol is a formal, public, versioned contract (`protocolVersion: 2`,
+negotiated via `Hello`), so a client written today keeps working across
+server upgrades, and services in different languages interoperate on the
+same queues out of the box.
 
 ## Getting started
 
@@ -365,12 +356,12 @@ deno run -A app.ts                        # Deno 2 or later
 python app.py                             # Python
 php worker.php                            # PHP
 go run .                                  # Go
-cargo run                                # Rust
-mix run app.exs                          # Elixir
+cargo run                                 # Rust
+mix run app.exs                           # Elixir
 ```
 
 Producer and worker are usually separate services, often in different
-languages, a Next.js API adds jobs, a Python service processes them,
+languages: a Next.js API adds jobs, a Python service processes them,
 against the same queue and the same protocol. Constructors default to
 `host: 'localhost'` and `port: 6789`, so no options are needed for a local
 setup.
@@ -379,18 +370,18 @@ setup.
 
 Understanding four facts about the transport explains most SDK behavior:
 
-1. **Framing**, every message is a 4-byte big-endian length prefix
+1. **Framing**: every message is a 4-byte big-endian length prefix
    followed by a standard msgpack map. Maximum frame size is 64 MB;
    maximum job payload is 10 MB.
-2. **Pipelining**, every request carries a `reqId` the server echoes
+2. **Pipelining**: every request carries a `reqId` the server echoes
    back, so many commands are in flight on one socket concurrently. A
    single connection is usually all a service needs.
-3. **Authentication-first**, when a token is configured, `Auth` is
+3. **Authentication-first**: when a token is configured, `Auth` is
    guaranteed to be the first frame on every (re)connection, in every SDK:
    TypeScript through synchronous write ordering, Python through a
    connection lock (safe under free-threaded concurrency), and PHP, Go,
    Rust, and Elixir inside the connect sequence itself.
-4. **The job name travels inside `data`**, `add('welcome', {to})` is
+4. **The job name travels inside `data`**: `add('welcome', {to})` is
    encoded as `data: { name: 'welcome', to }`. Non-object payloads are
    wrapped as `{ name, payload }`.
 
@@ -1477,46 +1468,11 @@ and certify it with the
 point its runner at your client and it tells you exactly what to fix. The
 official SDKs are built and certified the same way.
 
-Conformance is complemented by realistic end-to-end workloads for every
-official SDK. These tests bulk-ingest distinct business records, process them
-through the language's actual worker concurrency model, read every persisted
-result by job id, and verify zero-loss checksums. Retry/DLQ, heartbeat,
-graceful-shutdown, authentication, TLS, telemetry, and flow rollback scenarios
-also run against disposable real brokers in `bun run test:sandbox:sdk`.
-
-## Production test contract
-
-Every official SDK passes the same layered contract:
-
-| Layer | What is exercised |
-|---|---|
-| Functional | Unit, real-broker integration, complete E2E flows, 17 shared contract checks, and permanent bug regressions |
-| Concurrency | Independent connections race one custom id and one available lease; worker slots, ACK/FAIL, and heartbeats stay bounded |
-| Fault tolerance | Half-open timeouts, malformed frames, broker SIGKILL, durable restart visibility, lazy reconnect, TLS and authentication failures |
-| Generated inputs | Fixed-seed portable payload invariants plus malformed/deep/cyclic/extension mutation corpora; Go adds native fuzzing |
-| Capacity | Bounded 512-1500 job spikes in the normal gate and opt-in sustained load with configurable duration and batch size |
-| Non-functional | Weekly compatibility, dependency-advisory, race, fuzz and 15-minute soak jobs |
-
-The normal `bun run test:sandbox:sdk` run is isolated, offline and
-deterministic. Hours-long soak and stress runs are opt-in:
-
-```bash
-# choose the matching tests/soak.* entrypoint for the SDK
-BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 bun sdk/typescript/tests/soak.ts
-```
-
-Increasing the batch explores backpressure and the practical breaking point;
-it is not a portable benchmark. Publish performance numbers only from fresh
-native processes, never Docker or a VM.
-
-Database disk-full, WAL/power-loss and schema migration tests run in the
-broker's persistence suite. A remote SDK cannot inject those filesystem
-failures; its responsibility is typed failure, reconnect, durable visibility
-and idempotent retry. Delivery is at-least-once, so a handler must still be
-idempotent if it can crash after its side effects but before ACK.
-
-Browsers are not supported, raw TCP sockets are unavailable there, so
-route through your own API instead.
+Two environments are out of scope today. Browsers have no raw-TCP API, so
+route through your own backend instead of connecting directly. WebAssembly
+is feasible but not one portable runtime: a WASM target becomes official
+only when it can pass the same conformance suite without weakening
+authentication, TLS, or framing.
 
 ## Resources
 

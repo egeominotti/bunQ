@@ -89,6 +89,20 @@ go get github.com/egeominotti/bunqueue/sdk/go
 ```
 
         </TabItem>
+        <TabItem label="Rust">
+
+```bash
+cargo add bunqueue-client --path ../bunqueue/sdk/rust   # crates.io upcoming
+```
+
+        </TabItem>
+        <TabItem label="Elixir">
+
+```elixir
+{:bunqueue_client, path: "../bunqueue/sdk/elixir"}  # Hex upcoming
+```
+
+        </TabItem>
       </Tabs>
 
       <p class="bq-install-label" style="margin-top: 2.2rem;">2 · Start the server <span style="font-weight: 400; opacity: 0.7;">(on Bun, skip: it runs embedded, no server at all)</span></p>
@@ -118,7 +132,7 @@ docker run -d --name bunqueue \
         <a class="bq-btn" href="#quickstart">Get started in 60s</a>
         <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
       </div>
-      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python, PHP, Go and Cloudflare Workers</p>
+      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers</p>
     </div>
 
     <div class="bq-hero-right">
@@ -265,6 +279,46 @@ worker.Run()
 ```
 
       <p><a href="/guide/sdks/">goroutine worker pool</a> · one dependency, go get and go</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #ce422b"></span> Rust</h3>
+
+```rust
+use bunqueue_client::{Queue, Worker,
+    ConnectionOptions, WorkerOptions,
+    JobOptions};
+
+let queue = Queue::new("emails",
+    ConnectionOptions::default());
+queue.add("welcome", data,
+    JobOptions::default())?;
+
+let worker = Worker::new("emails",
+    |job| process(job.data()),
+    WorkerOptions::default());
+worker.run()?;
+```
+
+      <p><a href="/guide/sdks/">typed options, no insecure TLS mode</a> · crates.io upcoming</p>
+    </div>
+    <div class="bq-lang">
+      <h3><span class="bq-dot" style="background: #6e4a7e"></span> Elixir</h3>
+
+```elixir
+queue = Bunqueue.queue("emails")
+{:ok, _job} = Bunqueue.Queue.add(queue,
+  "welcome", %{to: "a@b.co"})
+
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    send_email(job.data)
+    {:ok, %{sent: true}}
+  end, concurrency: 8)
+
+Bunqueue.Worker.run(worker)
+```
+
+      <p><a href="/guide/sdks/">tagged tuples, OTP-friendly</a> · Hex upcoming</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: var(--bq-amber)"></span> Cloudflare Workers</h3>

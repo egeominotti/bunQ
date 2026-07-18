@@ -1659,6 +1659,19 @@ main.bq-has-hero .sl-container {
   margin-top: 0;
 }
 
+/* 8 runtime tabs in a ~28rem column: labels never break mid-word; whole
+   tabs wrap to a second row instead. Below 40rem the mobile block turns
+   the strip into nowrap+scroll and resets these gaps. */
+.bq-hero-left starlight-tabs [role='tablist'] {
+  flex-wrap: wrap;
+  row-gap: 0.15rem;
+  column-gap: 1.1rem;
+}
+
+.bq-hero-left starlight-tabs [role='tab'] {
+  white-space: nowrap;
+}
+
 /* narrow screens: tab labels never squash, the tab strip scrolls instead */
 @media (max-width: 40rem) {
   starlight-tabs .tablist-wrapper {
@@ -1669,6 +1682,13 @@ main.bq-has-hero .sl-container {
   starlight-tabs [role='tablist'] {
     flex-wrap: nowrap !important;
     min-width: max-content;
+  }
+
+  /* undo the hero wrap-gaps on the mobile scroll strip (matches the
+     desktop rule's specificity, so no !important needed) */
+  .bq-hero-left starlight-tabs [role='tablist'] {
+    column-gap: 0;
+    row-gap: 0;
   }
 
   starlight-tabs [role='tab'] {

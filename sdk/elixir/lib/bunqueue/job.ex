@@ -61,6 +61,6 @@ defmodule Bunqueue.Job do
 
   @spec log(t(), String.t()) :: {:ok, map()} | {:error, Exception.t()}
   def log(job, message) do
-    Connection.call(job.connection, %{"cmd" => "Log", "id" => job.id, "message" => message})
+    Connection.call(job.connection, %{"cmd" => "AddLog", "id" => job.id, "message" => message})
   end
 end

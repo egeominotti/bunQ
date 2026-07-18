@@ -203,6 +203,8 @@ Client MUSTs:
 | `RegisterWorker` | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}` |
 | `UnregisterWorker` | `workerId` | `{}` |
 | `ExtendLock` | `id`, `token`, `duration` | `{}` |
+| `Progress` | `id`, `progress` (0..100 by client convention; not server-enforced), `message?` | `{}` — job MUST be active |
+| `AddLog` | `id`, `message`, `level?` (default `info`) | `{data: {added}}` — **wrapped**; read back via `GetLogs` |
 
 Semantics a client MUST implement:
 

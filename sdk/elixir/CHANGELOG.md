@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Fix `Bunqueue.Job.log/2`: it sent the wire command `Log`, which the server
+  rejects as unknown; it now sends `AddLog` like every other SDK, so job log
+  lines are actually persisted. Regression-tested against a real broker.
+  Known gap: unlike the other SDKs, `log/2` does not accept a `level` yet;
+  the server records the line at the default `info` level.
+
 ## 0.1.0
 
 - Add OTP-owned plain TCP and verified TLS connections with auth-first lazy

@@ -1,6 +1,6 @@
 # FlowProducer & Job Dependencies
 
-> **Category:** Orchestration · **Source:** `src/client/flow.ts`, `src/client/flowJobFactory.ts`, `src/client/flowPush.ts`, `src/client/flowTypes.ts`, `src/domain/queue/dependencyTracker.ts`, `src/client/queueGroup.ts`
+> **Category:** Orchestration · **Source:** `src/client/flow.ts`, `src/client/flowJobFactory.ts`, `src/client/flowPush.ts`, `src/client/flowTypes.ts`, `src/domain/queue/dependencyTracker.ts`, `src/application/dependencyResultTracker.ts`, `src/client/queueGroup.ts`
 
 ## Purpose
 
@@ -124,6 +124,8 @@ Sequential: each step pushes with `dependsOn = [prevId]` and `__flowParentId` in
 3. **Flush:** `runDependencyFlush` (`queueManager.ts:1768`) loops `processPendingDependencies` (`dependencyProcessor.ts:16`): for each completed id it gathers waiters per shard via the O(1) reverse index, acquires the **shard write lock before reading `waitingDeps`** (TOCTOU guard, line 42), re-checks `job.dependsOn.every(dep => completedJobs.has(dep) || depCompletions.has(dep))`, and promotes ready jobs.
 4. **Promote:** `promoteJobsToQueue` (`dependencyProcessor.ts:79`) deletes from `waitingDeps`, `unregisterDependencies`, pushes into the queue, `incrementQueued`, updates `jobIndex` to `{type:'queue'}`, appends timeline, and `shard.notify()`. A `job:dependencies-resolved` dashboard event fires. A fallback poll in `backgroundTasks.ts:69` drains `pendingDepChecks` if the microtask path was missed.
 
+`DependencyResultTracker` separately records consumer→dependency edges at accepted push/recovery. When a dependency ACKs, its result is copied into protected storage only if a live consumer exists. The ordinary `jobResults` LRU remains bounded and unchanged; query order is LRU → protected dependency result → SQLite. Promotion and reads do not release the protected value because the consumer may read it repeatedly while processing. Terminal completion/failure, cancel, clean, stale-GC, explicit edge removal, obliterate, and shutdown release consumer edges; fan-out keeps a result until the last consumer exits. Retries keep their edges.
+
 ### `getFlow` (`flow.ts:172`)
 
 Recursively builds a `JobNode` tree, default `depth = Infinity`, `maxChildren` slices each level. Embedded reads `job.childrenIds`; TCP reads `__childrenIds` from `job.data` (`flow.ts:399`).
@@ -144,7 +146,8 @@ Recursively builds a `JobNode` tree, default `depth = Infinity`, `maxChildren` s
 - **Failure propagation policies** (forwarded by `flowPush` `managerOptions`/`tcpOptions`): `failParentOnFailure` → `moveParentToFailed`; `continueParentOnFailure` → promote parent + record `failedChildrenValues`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure` → drop the child from parent deps (ignore variant records `ignoredChildrenFailures`). These maps are keyed by `parentId` and **cleared on parent completion** to avoid a permanent leak (`queueManager.ts:1388`), and on `obliterate`/shutdown.
 - **`removeChildDependency`** (`queueManager.ts:1668`): only valid while the parent is still in `waitingDeps`; if removing the last pending dep, promotes the parent. Throws if the job has no parent.
 - **`removeUnprocessedChildren`** (`queueManager.ts:1728`): cancels only children whose `jobIndex` location is `'queue'` (waiting/delayed); active/completed/failed children are untouched.
-- **Stale-deps GC gotcha:** `cleanStaleWaitingDependencies` (`cleanupTasks.ts:74`) drops `waitingDeps` jobs older than **1 hour**, but only deletes the in-memory entry + `jobIndex` — it does **not** release the `uniqueKey` nor `deleteJob` from SQLite (known follow-up gap from audit #102). A flow whose children never complete leaks the SQLite row and unique key.
+- **Stale-deps GC:** a `waitingDeps` job older than **1 hour** is re-checked under the shard write lock, deleted from SQLite/write-buffer first, then removed from reverse indexes, `jobIndex`, unique/custom ownership, and protected-result consumer tracking.
+- **Late consumer boundary:** registering a dependency immediately pins a result still present in the normal LRU; SQLite remains the durable fallback. In memory-only mode, a result already evicted before any consumer edge existed cannot be reconstructed. Normal predeclared flows register their edges before dependency completion.
 - **Embedded-only methods:** `getParentResult`/`getParentResults` throw outside embedded mode (`flow.ts:285`,`294`); `moveToWaitingChildren` over TCP throws "not supported" (`flowJobFactory.ts:294`); `removeDeduplicationKey` always rejects ("not implemented", `flowJobFactory.ts:341`).
 - **Shared pool semantics:** when `poolSize === 4` and no `token`, a shared pool is used; `close()` only releases (ref-counts) it, while a dedicated pool is fully closed (`flow.ts:115-123`).
 - **`QueueGroup` is embedded-only:** every method calls `getSharedManager()`; there is no TCP variant. `getQueue`/`getWorker` simply prepend the `:`-terminated prefix.
@@ -162,7 +165,7 @@ Recursively builds a `JobNode` tree, default `depth = Infinity`, `maxChildren` s
 | `connection.token` | — | presence forces a dedicated pool |
 | `connection.pingInterval` / `commandTimeout` / `pipelining` / `maxInFlight` | pool defaults | forwarded to `TcpConnectionPool` |
 
-Per-flow option `FlowOpts.queuesOptions: Record<queueName, Partial<JobOptions>>` supplies per-queue defaults merged under each node's `opts` (`flow.ts:454`). Memory bound: `depCompletions` capped at `maxCompletedJobs` (default 50,000; see [Configuration](./configuration.md)).
+Per-flow option `FlowOpts.queuesOptions: Record<queueName, Partial<JobOptions>>` supplies per-queue defaults merged under each node's `opts` (`flow.ts:454`). `depCompletions` is capped at `maxCompletedJobs`; protected dependency results are bounded by the live dependency graph and are released with its consumer edges.
 
 ## Related Docs
 

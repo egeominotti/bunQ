@@ -15,6 +15,7 @@ import { throughputTracker } from '../throughputTracker';
 import { handleCustomId } from './customId';
 import { insertJobToShard } from './pushInsert';
 import { withPushWriteLocks } from './pushLocks';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 /** Push operation context */
 export interface PushContext {
@@ -28,6 +29,7 @@ export interface PushContext {
   /** Timeout markers — cleared on custom-id reuse so a recycled id starts clean */
   timedOutJobs?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
   totalPushed: { value: bigint };

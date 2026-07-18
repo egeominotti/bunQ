@@ -3,7 +3,7 @@
  * Handles orphaned entries, stale data, and memory management
  */
 
-import type { Job, JobId } from '../domain/types/job';
+import type { JobId } from '../domain/types/job';
 import { processingShardIndex, SHARD_COUNT } from '../shared/hash';
 import { withWriteLock } from '../shared/lock';
 import type { BackgroundContext } from './types';
@@ -31,7 +31,7 @@ export async function cleanup(ctx: BackgroundContext): Promise<void> {
   }
 
   await cleanOrphanedProcessingEntries(ctx, now, stallTimeout);
-  cleanStaleWaitingDependencies(ctx, now);
+  await cleanStaleWaitingDependencies(ctx, now);
   cleanUniqueKeysAndGroups(ctx);
   cleanStalledCandidates(ctx);
   await cleanOrphanedJobIndex(ctx);
@@ -71,24 +71,46 @@ async function cleanOrphanedProcessingEntries(
   }
 }
 
-function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number): void {
+async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number): Promise<void> {
   const depTimeout = 60 * 60 * 1000; // 1 hour
 
   for (let i = 0; i < SHARD_COUNT; i++) {
     const shard = ctx.shards[i];
-    const stale: Job[] = [];
+    const staleIds: JobId[] = [];
     for (const [_id, job] of shard.waitingDeps) {
       if (now - job.createdAt > depTimeout) {
-        stale.push(job);
+        staleIds.push(job.id);
       }
     }
-    for (const job of stale) {
-      shard.waitingDeps.delete(job.id);
-      shard.unregisterDependencies(job.id, job.dependsOn);
-      ctx.jobIndex.delete(job.id);
-    }
-    if (stale.length > 0) {
-      ctx.dashboardEmit?.('cleanup:stale-deps-removed', { count: stale.length });
+
+    if (staleIds.length === 0) continue;
+
+    const removed = await withWriteLock(ctx.shardLocks[i], () => {
+      let count = 0;
+      for (const id of staleIds) {
+        const job = shard.waitingDeps.get(id);
+        if (!job || now - job.createdAt <= depTimeout) continue;
+
+        // Persistence first: deleteJob also removes a pending buffered insert.
+        // If SQLite throws, the in-memory lifecycle remains live and coherent.
+        ctx.storage?.deleteJob(job.id);
+        shard.waitingDeps.delete(job.id);
+        shard.unregisterDependencies(job.id, job.dependsOn);
+        if (job.uniqueKey && shard.getUniqueKeyEntry(job.queue, job.uniqueKey)?.jobId === job.id) {
+          shard.releaseUniqueKey(job.queue, job.uniqueKey);
+        }
+        if (job.customId && ctx.customIdMap.get(job.customId) === job.id) {
+          ctx.customIdMap.delete(job.customId);
+        }
+        ctx.dependencyResults?.releaseConsumer(job.id);
+        ctx.jobIndex.delete(job.id);
+        count++;
+      }
+      return count;
+    });
+
+    if (removed > 0) {
+      ctx.dashboardEmit?.('cleanup:stale-deps-removed', { count: removed });
     }
   }
 }

@@ -179,7 +179,7 @@ For each queue in `queueNamesCache`, calls `processAutoRetry` (re-queues entries
 
 ### `cleanup` (`cleanupTasks.ts:15`)
 
-Runs in order each tick: refresh delayed counters per shard; compact any priority queue with `needsCompaction(0.2)` (>20% tombstones); then `cleanOrphanedProcessingEntries` (drops processing entries older than the 30-minute `stallTimeout`), `cleanStaleWaitingDependencies`, `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobIndex`, `cleanOrphanedJobLocks`, `cleanEmptyQueues`.
+Runs in order each tick: refresh delayed counters per shard; compact any priority queue with `needsCompaction(0.2)` (>20% tombstones); then `cleanOrphanedProcessingEntries`, `cleanStaleWaitingDependencies`, `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobIndex`, `cleanOrphanedJobLocks`, `cleanEmptyQueues`. A dependency-gated job older than one hour is removed under its shard write lock after a TOCTOU age re-check. Its SQLite row or pending buffered insert is deleted first, then the reverse dependency index, `jobIndex`, owned unique/custom ID reservations, and dependency-result consumer edges are released together.
 
 ### `processPendingDependencies` (`dependencyProcessor.ts:16`)
 
@@ -193,10 +193,10 @@ Returns immediately if `dashboardEmit` is unset. Otherwise runs `checkQueueIdle`
 
 The lock hierarchy is `jobIndex → completedJobs → shards[N] → processingShards[N]` (see [Concurrency & Locking](./concurrency-and-locking.md)). Within this module:
 
-- `cleanOrphanedProcessingEntries` (`cleanupTasks.ts:42`) and `cleanOrphanedJobIndex` (`:144`) use a **two-phase** pattern: collect candidates lock-free, then mutate under `withWriteLock(processingLocks[i])` / `withWriteLock(shardLocks[i])`, re-checking membership inside the lock to avoid TOCTOU deletion of a job that completed in between.
+- `cleanOrphanedProcessingEntries`, `cleanStaleWaitingDependencies`, and `cleanOrphanedJobIndex` use a **two-phase** pattern: collect candidates lock-free, then mutate under the owning write lock and re-check membership/age inside the lock.
 - `processPendingDependencies` acquires `shardLocks[i]` **before** reading `waitingDeps`, then runs shards in parallel via `Promise.all`.
 - The stall and lock-expiry delegates (`stallDetection.ts`, `lockManager.ts`) acquire `shardLocks` **before** `processingLocks` (hierarchy order), verify the job is still in `processingShards` inside the lock, and only then broadcast — preventing false-positive `stalled` events.
-- `checkJobTimeouts`, `cleanStaleWaitingDependencies`, `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobLocks`, and `cleanEmptyQueues` run **without** locks — they rely on single-threaded JS execution between `await` points and tolerate benign staleness.
+- `checkJobTimeouts`, `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobLocks`, and `cleanEmptyQueues` run without locks and tolerate benign staleness. Stale dependency removal does take the shard write lock because it updates ownership, persistence, and reverse indexes as one lifecycle.
 - `recover` runs in the constructor before any concurrent traffic, so it is lock-free by construction.
 
 Stall detection uses two-phase confirmation (a job must be flagged in two consecutive 5s cycles via `stalledCandidates`) so a brief GC pause does not trigger a false stall. Lock expiry and stall detection both reset `startedAt`, bump `attempts`/`stallCount`, and call `releaseJobResources` to free the concurrency slot + group + unique key before re-pushing or moving to DLQ. Both reclaim paths enforce `attempts < maxAttempts` and `stallCount < maxStalls` before requeueing; `updateForRetry` persists both counters so a restart cannot replenish either budget.
@@ -211,7 +211,7 @@ Stall detection uses two-phase confirmation (a job must be flagged in two consec
 - **Memory bounds:** cleanup compacts priority queues at >20% tombstones; trims `uniqueKeys`/`activeGroups` by half when a queue exceeds 1000 entries; only walks `jobIndex` when `size > 100_000` (the full scan is expensive); evicts via `BoundedSet`/`LRUMap` caps elsewhere.
 - **`perQueueMetrics` not pruned on empty-queue removal** (`cleanupTasks.ts:252`): intentional — counters are cumulative and must survive a transient drain; growth is bounded by the LRU cap and `obliterate()` reclaims explicitly.
 - **`depCompletions` not pruned** in `processPendingDependencies` (`dependencyProcessor.ts:71`): intentional — it is a FIFO `BoundedSet` that self-bounds; eager pruning would orphan a dependent pushed after a `removeOnComplete` parent completed.
-- **Known gotcha (FP-1 backlog):** `cleanStaleWaitingDependencies` (`cleanupTasks.ts:74`) removes waiting-deps jobs older than 1 hour and `unregisterDependencies` + `jobIndex.delete`, but does **not** release the job's `uniqueKey` nor `deleteJob` from SQLite. The unique-key reservation lingers (blocking re-add of the same dedup key) and the row survives on disk to be re-loaded at the next restart. Compare the DLQ/stall paths, which all call `releaseJobResources` + `storage.deleteJob`.
+- **Stale dependency persistence ordering:** the SQLite/write-buffer delete runs before in-memory removal. If storage throws, the lifecycle remains live in memory and can be retried on the next cleanup tick instead of leaving disk as the only surviving copy.
 - **`recover` partial state:** if `ctx.storage` is null the whole pass is skipped. Active recovery drains offset zero because its dataset mutates; pending/completed scans use deterministic pages. Phase 3 is hard-capped at `maxCompletedJobs`.
 
 ## Configuration

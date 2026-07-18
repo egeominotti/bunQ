@@ -14,6 +14,43 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.39] - 2026-07-18
+
+### Fixed: overload correlation and complete stale-dependency cleanup
+
+- TCP rate limiting now charges each complete MessagePack frame instead of each
+  socket data event. Partial frames consume no quota, coalesced frames are
+  limited independently, and overload responses preserve the triggering
+  `reqId` so multiplexed clients can settle the correct request.
+- Stale dependency cleanup now removes durable SQLite state, buffered writes,
+  reverse dependency edges, queue ownership, custom and unique identifiers,
+  the global job index, and in-memory waiting state as one revalidated
+  transition. Expired dependency-gated jobs can no longer remain readable or
+  retain identifiers after garbage collection.
+
+### Fixed: flow results remain available to live dependants
+
+- A dependency-result tracker now retains a producer result while at least one
+  live consumer edge needs it. Fan-in, fan-out, single and batch ACK,
+  `removeOnComplete`, retries, terminal failures, cancellation, cleanup,
+  recovery, drain, and obliteration all update the same edge lifecycle.
+- Dependency result lookup distinguishes a cached `null` result from a cache
+  miss and falls back to durable storage consistently. Normal result-cache
+  pressure can no longer make a declared flow lose child results before its
+  parent is released.
+
+### Added: production, destroy, and cross-queue invariant coverage
+
+- Real public-TCP production tests now exercise durable enqueueing, worker
+  concurrency, retries, delayed jobs, priorities, flow dependencies, restart
+  recovery, backpressure, health responsiveness, duplicate-effect detection,
+  and complete drain under a large backlog.
+- The generated model now covers multi-queue shard isolation and global
+  conservation. Retention-boundary, protocol-correlation, stale-dependency,
+  and dependency-result regressions bring the executable production register
+  to 56 invariants, with the remaining contract-dependent candidates recorded
+  explicitly in the internal testing reference.
+
 ## [2.8.38] - 2026-07-18
 
 ### Changed: adoption-first npm README

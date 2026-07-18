@@ -372,6 +372,12 @@ export function recover(ctx: BackgroundContext): void {
       }
 
       ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: job.queue });
+      ctx.dependencyResults.registerConsumer(job.id, job.dependsOn);
+      for (const dependencyId of job.dependsOn) {
+        if (ctx.jobResults.has(dependencyId)) {
+          ctx.dependencyResults.retain(dependencyId, ctx.jobResults.get(dependencyId));
+        }
+      }
 
       // Restore customId mapping for deduplication (fixes idempotency on restart)
       if (job.customId) {

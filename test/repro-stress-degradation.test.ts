@@ -247,6 +247,10 @@ describe('STRESS — graceful degradation under overload', () => {
       let empty = 0;
       while (empty < 8) {
         const pull = await w.send({ cmd: 'PULL', queue: QUEUE, timeout: 0 });
+        if (pull.ok === false) {
+          if (acked.size === JOBS) return;
+          throw new Error(`stress pull failed: ${String(pull.error ?? 'unknown error')}`);
+        }
         const job = pull.job as { id: string } | null;
         if (!job?.id) {
           empty++;

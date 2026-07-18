@@ -13,6 +13,7 @@ import type { WebhookManager } from './webhookManager';
 import type { WorkerManager } from './workerManager';
 import type { EventsManager } from './eventsManager';
 import type { MonitoringState } from './monitoringChecks';
+import type { DependencyResultTracker } from './dependencyResultTracker';
 import type { LockContext, BackgroundContext, StatsContext } from './types';
 import type { PushContext } from './operations/push';
 import type { PullContext } from './operations/pull';
@@ -37,6 +38,7 @@ export interface ContextDependencies {
   depCompletions?: BoundedSet<JobId>;
   timedOutJobs?: BoundedSet<JobId>;
   jobResults: LRUMap<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   customIdMap: LRUMap<string, JobId>;
   jobLogs: LRUMap<JobId, JobLogEntry[]>;
   jobLocks: Map<JobId, JobLock>;
@@ -110,6 +112,7 @@ export class ContextFactory {
       depCompletions: this.deps.depCompletions,
       timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
       jobLocks: this.deps.jobLocks,
@@ -161,6 +164,7 @@ export class ContextFactory {
       depCompletions: this.deps.depCompletions,
       timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobIndex: this.deps.jobIndex,
       totalPushed: this.deps.metrics.totalPushed,
@@ -194,6 +198,7 @@ export class ContextFactory {
       completedJobsData: this.deps.completedJobsData,
       depCompletions: this.deps.depCompletions,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
       jobIndex: this.deps.jobIndex,
       customIdMap: this.deps.customIdMap,
       totalCompleted: this.deps.metrics.totalCompleted,
@@ -221,6 +226,7 @@ export class ContextFactory {
       jobIndex: this.deps.jobIndex,
       jobLocks: this.deps.jobLocks,
       clientJobs: this.deps.clientJobs,
+      dependencyResults: this.deps.dependencyResults,
       webhookManager: this.deps.webhookManager,
       eventsManager: this.deps.eventsManager,
       repeatChain: this.deps.repeatChain,
@@ -238,6 +244,7 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
     };
   }
@@ -279,6 +286,7 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
       jobLogs: this.deps.jobLogs,
       storage: this.deps.storage,
     };

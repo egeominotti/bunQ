@@ -1,5 +1,6 @@
 import { describe, test } from 'bun:test';
 import fc from 'fast-check';
+import { runCrossQueueInvariantCampaign } from './cross-queue-invariants';
 import { queueCommandArbitraries } from './queue-commands';
 import { RealQueue, type QueueModel } from './queue-model-harness';
 
@@ -45,6 +46,10 @@ describe('Queue state-machine model against the real broker', () => {
       }
     );
   }, 130000);
+
+  test('generated multi-queue histories preserve shard isolation and global conservation', async () => {
+    await runCrossQueueInvariantCampaign();
+  }, 70000);
 });
 
 function optionalInteger(value: string | undefined): number | undefined {

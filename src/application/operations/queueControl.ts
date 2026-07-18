@@ -8,6 +8,7 @@ import type { Shard } from '../../domain/queue/shard';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { MapLike, SetLike } from '../../shared/lru';
 import { shardIndex, SHARD_COUNT } from '../../shared/hash';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 /** Context for queue control operations */
 export interface QueueControlContext {
@@ -18,6 +19,7 @@ export interface QueueControlContext {
   completedJobsData?: MapLike<JobId, Job>;
   jobResults?: MapLike<JobId, unknown>;
   jobLogs?: MapLike<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
   storage: SqliteStorage | null;
@@ -51,6 +53,7 @@ export function drainQueue(queue: string, ctx: QueueControlContext): number {
   // (not-yet-flushed) add cannot land on disk after the drain.
   for (const jobId of jobIds) {
     ctx.jobIndex.delete(jobId);
+    ctx.dependencyResults.releaseConsumer(jobId);
     safeDeleteJob(ctx, jobId);
   }
   return count;
@@ -114,6 +117,7 @@ function cleanWaitingLike(
       shard.decrementQueued(jobId);
       shard.removeFromTemporalIndex(jobId);
       ctx.jobIndex.delete(jobId);
+      ctx.dependencyResults.releaseConsumer(jobId);
       safeDeleteJob(ctx, jobId);
       removed.push(jobId);
     }
@@ -144,6 +148,7 @@ function cleanCompleted(
     ctx.jobResults?.delete(jid);
     ctx.jobLogs?.delete(jid);
     ctx.jobIndex.delete(jid);
+    ctx.dependencyResults.releaseConsumer(jid);
     safeDeleteJob(ctx, jid);
   }
   return toRemove;
@@ -169,6 +174,7 @@ function cleanFailed(
   for (const jid of toRemove) {
     shard.removeFromDlq(queue, jid);
     ctx.jobIndex.delete(jid);
+    ctx.dependencyResults.releaseConsumer(jid);
     ctx.jobResults?.delete(jid);
     ctx.jobLogs?.delete(jid);
     safeDeleteDlqEntry(ctx, jid);

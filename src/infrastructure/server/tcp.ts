@@ -214,13 +214,6 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
       const { frameParser, ctx, state, semaphore, writeQueue } = socket.data;
       const rateLimiter = getRateLimiter();
 
-      // Check rate limit
-      if (!rateLimiter.isAllowed(state.clientId)) {
-        ctx.queueManager.emitDashboardEvent('ratelimit:hit', { clientId: state.clientId });
-        writeQueue.write(socket, errorResponse('Rate limit exceeded'));
-        return;
-      }
-
       let frames: Uint8Array[];
       try {
         // `data` is a Bun Buffer (a Uint8Array). addData copies it into its own
@@ -267,16 +260,31 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
       // Process frames in parallel for pipelining support
       // Each command is processed with semaphore-controlled concurrency
       const processFrame = async (frame: Uint8Array): Promise<void> => {
-        let cmd: Command;
+        let cmd: Command | undefined;
         try {
           cmd = unpack(frame) as Command;
         } catch {
+          // Invalid complete frames still consume protocol quota. They cannot
+          // carry a trustworthy reqId because msgpack decoding failed.
+        }
+
+        const reqId = typeof cmd?.reqId === 'string' ? cmd.reqId : undefined;
+        if (!rateLimiter.isAllowed(state.clientId)) {
+          ctx.queueManager.emitDashboardEvent('ratelimit:hit', { clientId: state.clientId });
+          writeQueue.write(socket, errorResponse('Rate limit exceeded', reqId));
+          dropForWriteOverflow();
+          return;
+        }
+
+        if (!cmd) {
           writeQueue.write(socket, errorResponse('Invalid command format'));
+          dropForWriteOverflow();
           return;
         }
 
         if (!cmd?.cmd) {
-          writeQueue.write(socket, errorResponse('Invalid command'));
+          writeQueue.write(socket, errorResponse('Invalid command', reqId));
+          dropForWriteOverflow();
           return;
         }
 

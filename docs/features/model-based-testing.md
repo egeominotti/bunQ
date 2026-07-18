@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The state-machine suite in `test/model-based/` verifies bunqueue by comparing a
-small in-memory specification with a real standalone broker. It uses
+The state-machine suites in `test/model-based/` verify bunqueue by comparing
+small in-memory specifications with a real standalone broker. They use
 `fast-check` commands, preconditions, shrinking, and seed replay. The broker is
 not mocked: every property run starts `src/main.ts`, uses the public MessagePack
 TCP protocol, writes a fresh SQLite database, and can terminate the process with
@@ -49,6 +49,13 @@ crash/restart. Focused contract commands also cover FIFO/LIFO priority ties,
 delays, TTL expiry, FIFO groups, unique keys, exclusive leases, and
 rate-limit/concurrency token rollback.
 
+`cross-queue-invariants.ts` adds a second generated history over four queues.
+Names are selected at runtime so two queues share an owning shard and, when the
+host has multiple shards, at least one is on a different shard. Histories
+interleave durable push/complete, pause/resume, `CompactMemory`, and real
+process restart. This covers both accidental cross-queue mutation within one
+shard and accidental cross-shard/global-index corruption.
+
 ## Oracle checks
 
 After every executed command, `RealQueue.assertConsistent` checks all observable
@@ -68,6 +75,13 @@ layers:
    concurrency, rate-limit and stall-policy persistence.
 7. Internal `/stats` collection cardinalities for `jobIndex`, shard queue
    counters, processing maps, waiting dependencies, completed jobs, and locks.
+
+The cross-queue oracle additionally reconciles every queue's paused, waiting,
+and completed counts; ID-to-queue ownership and payload through TCP; the entire
+`jobs` table through a read-only SQLite connection; and global `jobIndex`,
+queued, completed, processing, and lock cardinalities through `/stats` after
+every operation. `CompactMemory` is checked as an observable no-op, not merely
+as a command that does not throw.
 
 The generated transitions also assert the following contracts:
 
@@ -101,6 +115,15 @@ through the broker's recovery backoff.
 The bounded default is 150 property runs with up to 80 generated commands:
 
 ```bash
+bun run test:model
+```
+
+The same command runs 24 cross-queue histories of up to 30 operations. Tune
+that campaign independently with:
+
+```bash
+BUNQUEUE_CROSS_QUEUE_RUNS=100 \
+BUNQUEUE_CROSS_QUEUE_COMMANDS=100 \
 bun run test:model
 ```
 
@@ -158,9 +181,9 @@ in deterministic order and exposes exactly one generation. Management commands
 that claim active work now release lease and client ownership through one
 idempotent transition.
 
-## 46-invariant coverage register
+## 53-invariant coverage register
 
-The project tracks the complete production checklist as 46 invariants in 15
+The project tracks the executable production checklist as 56 invariants in 17
 categories. The number is a coverage register, not a claim that one property
 tests every subsystem. The main lifecycle state machine owns the invariants
 that can be checked deterministically after each generated command; focused
@@ -184,11 +207,49 @@ migration, and worker-runtime contracts.
 | 40-42 | TCP/HTTP/serialization | protocol integration, batch, and MessagePack property coverage |
 | 43-45 | Storage, migrations, WAL | SQLite migration, integrity, restart, and checkpoint suites |
 | 46 | Quiescent equivalence | clean-restart snapshot comparisons in model and recovery tests |
+| 47 | Same-shard queue isolation | generated four-queue TCP/SQLite campaign |
+| 48 | Cross-shard queue isolation | runtime shard-aware queue selection and generated campaign |
+| 49 | Global multi-queue conservation | per-queue model vs complete SQLite table and `/stats` |
+| 50 | Queue ownership immutability | every ID and payload stays owned by its admitting queue |
+| 51 | Maintenance non-interference | `CompactMemory` preserves every modeled observation |
+| 52 | Queue-local control persistence | pause/resume affects only its queue and survives restart |
+| 53 | Durable retention boundary | low-cap eviction/restart regression over state, payload, result, and SQLite membership |
+| 54 | Correlated overload response | real TCP limiter regression requires the triggering `reqId` |
+| 55 | Complete stale-dependency GC | shard, reverse index, ownership, write buffer, and SQLite regression |
+| 56 | Live dependency result retention | low-cap fan-in, fan-out, batch, and `removeOnComplete` regressions |
 
 Adding an invariant to this register requires an executable assertion and a
 named owning suite. Specialist coverage is not silently presented as part of
 `fc.commands`; future cron, migration, or network models should remain focused
 unless they can preserve deterministic shrinking.
+
+## Retention-boundary invariant
+
+`test/repro-retention-boundary-invariants.test.ts` forces
+`maxCompletedJobs=3` and `maxJobResults=2`, completes twelve durable jobs, and
+checks the boundary before and after restart. Hot collections stay within their
+configured caps, while every job state, payload, and result remains observable
+through SQLite and durable `jobs`/`job_results` membership is conserved. This
+distinguishes permitted cache eviction from durable data loss.
+
+## Candidate invariants not yet enforceable
+
+The audit does not count a desired property as covered when current behavior
+violates it or the required state is not observable.
+
+| Candidate | Desired invariant | Current blocker |
+| --- | --- | --- |
+| C4 | One workflow execution/node has at most one advancing executor | No execution/node lock or fencing token exists |
+| C5 | A `waitFor` node advances once under timeout-vs-signal races | A fired timeout and a concurrent signal can enqueue two node jobs |
+| C6 | Every persisted lifecycle transition is atomic under injected I/O failure | Existing failure tests are examples, not a transition-by-transition storage fault model |
+| C7 | Pagination has a no-duplicate/no-skip contract under concurrent mutation | Static ordering is deterministic, but no snapshot/cursor contract exists for mutating result sets |
+| C8 | Strong custom-ID/unique-key idempotency holds for every live job | Bounded LRU/registry trimming intentionally weakens the guarantee after eviction |
+| C9 | Internal resource conservation is directly observable for unique keys, groups, limiter tokens, temporal reverse indexes, and dependency reverse edges | `/stats` exposes aggregate subsets, so exact independent cardinality oracles need diagnostic counters |
+| C10 | JSON monitoring totals remain exact across the full `bigint` range | TCP/HTTP stats convert to `number` and lose precision above 2^53 |
+
+C1-C3 are now executable invariants 54-56. C4-C10 require a core contract decision, new observability, or a
+fault-injection seam before a non-flaky invariant can be mandatory. None is
+weakened into a characterization test merely to keep the gate green.
 
 ## Extension rule
 

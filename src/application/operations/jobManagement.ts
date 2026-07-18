@@ -12,6 +12,7 @@ import type { EventsManager } from '../eventsManager';
 import { processingShardIndex } from '../../shared/hash';
 import { webhookLog } from '../../shared/logger';
 import { type RWLock, withWriteLock } from '../../shared/lock';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 export { discardJob, moveJobToDelayed } from './jobMoveOperations';
 
@@ -28,6 +29,7 @@ export interface JobManagementContext {
   webhookManager: WebhookManager;
   eventsManager: EventsManager;
   repeatChain?: Map<JobId, JobId>;
+  dependencyResults: DependencyResultTracker;
 }
 
 /** Cancel a job (remove from queue) */
@@ -45,6 +47,7 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         if (job.uniqueKey) shard.releaseUniqueKey(location.queueName, job.uniqueKey);
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
+        ctx.dependencyResults.releaseConsumer(jobId);
         return { success: true, queueName: location.queueName };
       }
       // Not in the run queue — it may be parked in waitingChildren (moved via
@@ -55,6 +58,7 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         shard.waitingChildren.delete(jobId);
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
+        ctx.dependencyResults.releaseConsumer(jobId);
         return { success: true, queueName: location.queueName };
       }
       // Or parked in waitingDeps (flow-chain dependent inserted by push.ts while
@@ -69,6 +73,7 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         if (waiting.uniqueKey) shard.releaseUniqueKey(location.queueName, waiting.uniqueKey);
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
+        ctx.dependencyResults.releaseConsumer(jobId);
         return { success: true, queueName: location.queueName };
       }
       return { success: false, queueName: location.queueName };

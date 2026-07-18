@@ -30,6 +30,7 @@ import {
   releaseResources,
   finalizeBatchAck,
 } from './ackHelpers';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 /** Ack operation context */
 export interface AckContext {
@@ -43,6 +44,7 @@ export interface AckContext {
   /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
   depCompletions?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
   customIdMap?: MapLike<string, JobId>;
   totalCompleted: { value: bigint };
@@ -125,6 +127,9 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
     // without making the job appear in state/stats queries.
     ctx.depCompletions?.add(jobId);
   }
+
+  if (result !== undefined) ctx.dependencyResults.retain(jobId, result);
+  ctx.dependencyResults.releaseConsumer(jobId);
 
   ctx.totalCompleted.value++;
   if (ctx.perQueueMetrics) {
@@ -288,6 +293,8 @@ export async function failJob(
       timestamp: Date.now(),
       prev: 'failed',
     });
+  } else {
+    ctx.dependencyResults.releaseConsumer(jobId);
   }
 
   // BullMQ v5: failParentOnFailure — propagate terminal failure to parent

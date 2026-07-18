@@ -13,6 +13,7 @@ import type { EventsManager } from './eventsManager';
 import type { WebhookManager } from './webhookManager';
 import type { WorkerManager } from './workerManager';
 import type { MonitoringState } from './monitoringChecks';
+import type { DependencyResultTracker } from './dependencyResultTracker';
 
 /** Queue Manager configuration */
 export interface QueueManagerConfig {
@@ -58,6 +59,7 @@ export interface QueueManagerState {
   readonly jobIndex: Map<JobId, JobLocation>;
   readonly completedJobs: BoundedSet<JobId>;
   readonly jobResults: LRUMap<JobId, unknown>;
+  readonly dependencyResults: DependencyResultTracker;
   readonly customIdMap: LRUMap<string, JobId>;
   readonly jobLogs: LRUMap<JobId, JobLogEntry[]>;
 

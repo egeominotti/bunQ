@@ -11,6 +11,7 @@ import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { type RWLock, withReadLock } from '../../shared/lock';
 import type { SetLike, MapLike } from '../../shared/lru';
 import { shardIndex } from '../../shared/hash';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 /** Context for query operations */
 export interface QueryContext {
@@ -23,6 +24,7 @@ export interface QueryContext {
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
   jobResults: MapLike<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   customIdMap: MapLike<string, JobId>;
 }
 
@@ -98,7 +100,9 @@ export async function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | nul
 
 /** Get job result */
 export function getJobResult(jobId: JobId, ctx: QueryContext): unknown {
-  return ctx.jobResults.get(jobId) ?? ctx.storage?.getResult(jobId);
+  if (ctx.jobResults.has(jobId)) return ctx.jobResults.get(jobId);
+  if (ctx.dependencyResults.has(jobId)) return ctx.dependencyResults.get(jobId);
+  return ctx.storage?.getResult(jobId);
 }
 
 /** Get job by custom ID */

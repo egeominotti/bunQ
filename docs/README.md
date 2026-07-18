@@ -15,7 +15,8 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | [Architecture](./architecture.md) | System overview, technology stack & rationale, layered design, component diagram, deployment modes, request data flows (PUSH/PULL/ACK/FAIL), sharding, lock hierarchy, persistence model, performance characteristics, and the full module map. |
 | [Data Model](./data-model.md) | Authoritative reference for the `Job` model & state machine, `JobOptions`, queue/DLQ/cron/worker/webhook types, the TCP `Command`/`Response` wire shapes, the complete SQLite schema (tables, indexes, migrations), and the in-memory collections with their eviction bounds. |
 | [Test Isolation](./testing.md) | Parallel disposable Docker validation, per-file TCP server/SQLite isolation, resource telemetry and anomaly KPIs, CI equivalence, cleanup guarantees, and the separate native-only benchmark policy. |
-| [Model-Based Queue Verification](./features/model-based-testing.md) | `fast-check` command state machine against a real TCP broker and SQLite, with shrinking, seed replay, aggregate invariants, dependency flows, and actual `SIGKILL` recovery. |
+| [Model-Based Queue Verification](./features/model-based-testing.md) | `fast-check` lifecycle and cross-queue/shard state machines against a real TCP broker and SQLite, with shrinking, seed replay, aggregate invariants, cache-boundary checks, and actual `SIGKILL` recovery. |
+| [Production Readiness End-to-End Test](./features/production-readiness-testing.md) | Company-style durable mixed workload over real TCP and SQLite, with concurrent workers, retry/DLQ/idempotency, health/metrics, and two broker restarts. |
 | [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
 
 **Suggested reading order:** Architecture → Data Model → the feature docs for the area you are touching.
@@ -55,7 +56,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
-| [FlowProducer & Job Dependencies](./features/flow-producer.md) | Client-side API for building parent/child job trees and dependency chains spanning queues, with BullMQ v5 compatibility. |
+| [FlowProducer & Job Dependencies](./features/flow-producer.md) | Parent/child trees and chains plus the server-side [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) that retains results while live consumers need them. |
 | [Workflow Engine](./features/workflow-engine.md) | Multi-step saga orchestration on a Queue/Worker pair: a typed DSL of nodes driven one-node-per-job, with retries, parallelism, signals, loops, sub-workflows, SQLite-persisted state, and reverse-order compensation. |
 
 ### Transport & protocol

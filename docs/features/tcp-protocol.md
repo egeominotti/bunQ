@@ -21,7 +21,7 @@ Owns:
 Does NOT own (delegated elsewhere):
 - **Command dispatch / business logic** — `handleCommand()` routes to the handler groups; see [TCP Server Command Handlers](./tcp-server-handlers.md).
 - **Authentication / authorization** — gated inside `handleCommand` (`Auth`, token check); see [Security: TLS, Auth, CORS](./security-tls-auth.md). This module only carries the `Auth`/`Hello` frames and supplies the `authTokens` set + `authenticated` flag in the handler context.
-- **Rate limiting policy** — `getRateLimiter()` is consulted at `tcp.ts:218`, but the limiter itself lives in [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md).
+- **Rate limiting policy** — `getRateLimiter()` is consulted once per complete decoded frame, but the limiter itself lives in [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md).
 - **TLS certificate loading** — `loadTlsOptions()` from `src/infrastructure/server/tls.ts`; see [Security: TLS, Auth, CORS](./security-tls-auth.md).
 - **Client-side framing/reconnect/batching** — the client reuses the same `FrameParser` but owns its own connection logic; see [Client Transport](./client-transport.md).
 - **HTTP/SSE/WebSocket transport** — see [HTTP / REST / SSE / WebSocket API](./http-api.md).
@@ -136,11 +136,10 @@ Every wire body is one of two discriminated unions. The full field definitions o
 
 **Inbound data** (`tcp.ts:211`):
 1. `initConnection(socket)`: ensure per-socket state exists (TLS data-before-open, #108).
-2. Rate-limit gate (`tcp.ts:218`): if `getRateLimiter().isAllowed(clientId)` is false, emit `ratelimit:hit`, write a framed `Rate limit exceeded` error, and return without parsing.
-3. `frameParser.addData(data)` (`tcp.ts:229`) — the Bun read `Buffer` is passed directly; the previous defensive `new Uint8Array(data)` copy was removed (copy elision) because `addData` copies its input into its own owned buffer and never retains the caller's view.
-4. A thrown `FrameSizeError` (`tcp.ts:231`) → clear stall timer, write a `Frame too large: …` error, `socket.end()`.
-5. `updateStallTimer(socket)` (`tcp.ts:249`) — (re)arm the slowloris timer iff a partial frame is now buffered.
-6. For each complete frame, `processFrame` (`tcp.ts:269`): `unpack` → `Command`; on decode failure write `Invalid command format`; on missing `cmd` write `Invalid command`; otherwise run under `withSemaphore` → `handleCommand(cmd, ctx)` → write the framed response (or a framed error carrying `cmd.reqId`). After each write, `dropForWriteOverflow()` checks the write-queue bound.
+2. `frameParser.addData(data)` — the Bun read `Buffer` is passed directly; the previous defensive `new Uint8Array(data)` copy was removed because `addData` copies its input into owned storage.
+3. A thrown `FrameSizeError` clears the stall timer, writes `Frame too large: …`, and ends the socket.
+4. `updateStallTimer(socket)` (re)arms the slowloris timer iff a partial frame is buffered.
+5. For each complete frame, `processFrame` decodes MessagePack first, extracts a trustworthy string `reqId`, and then consumes exactly one protocol-rate token. An overload emits `ratelimit:hit` and writes `Rate limit exceeded` with that `reqId`; partial TCP chunks consume no quota and coalesced frames consume one token each. Allowed frames continue through command validation and `withSemaphore` → `handleCommand`.
 7. `await Promise.all(frames.map(processFrame))` (`tcp.ts:300`) — all frames in one read are processed concurrently (pipelining); the client correlates responses by `reqId`, so server-side ordering is not guaranteed.
 
 **Frame parsing — `FrameParser.addData`** (`protocol.ts:227`): concatenate the retained partial tail with new data into a single owned buffer (one copy), then walk it with an `offset` cursor. Each iteration reads the big-endian u32 length (`>>> 0` to force unsigned, `protocol.ts:245`), rejects lengths > `maxFrameSize` (clears the buffer and throws `FrameSizeError`, `protocol.ts:258`), breaks if the full body has not yet arrived (keeping the partial bytes buffered, `protocol.ts:264`), else slices out the body (`protocol.ts:273`) and advances the cursor by `4 + length`. Tail retention has three cases (`protocol.ts:277`): fully drained → fresh empty buffer (don't pin the read's ArrayBuffer); nothing consumed → keep the concat buffer as-is (no extra copy); partial leftover after ≥1 frame → slice the small tail. The cursor makes the pass **O(total bytes) / O(F)** in the number of frames; the prior implementation resliced the tail after every frame, which was **O(F²)** when many frames arrived coalesced in one read.
@@ -161,7 +160,7 @@ Every wire body is one of two discriminated unions. The full field definitions o
 - **Frame size cap (64MB):** a declared length over `MAX_FRAME_SIZE` throws `FrameSizeError`, clears the parser buffer (stops processing attacker bytes), sends an error, and ends the socket. Legal large partial frames are *not* dropped mid-assembly — only over-cap declarations are.
 - **Slowloris mitigation:** a peer that starts a frame (buffers partial bytes) but stalls is closed after `idleTimeoutMs` (default 60s, `tcp.ts:41`). The timer is armed **only while `hasPartialFrame` is true** and reset on each data event, so healthy idle-but-complete connections are never disturbed. Implemented as a manual `setTimeout` because Bun (1.3.x) has no socket `idleTimeout` and `socket.timeout()` resets on every byte (a 1-byte-per-window trickle would defeat it). `0` disables.
 - **Write-side memory DoS:** if a client stops reading while the server keeps producing responses, `SocketWriteQueue.bytesQueued` grows; once it exceeds `maxWriteQueueBytes` (default 64MB, `tcp.ts:49`), `isOverBudget` trips and the connection is `terminate()`d after clearing the queue (`tcp.ts:253`, also enforced in `broadcast` at `tcp.ts:383`). `0` disables.
-- **Malformed input:** non-msgpack or non-object bodies → `Invalid command format`; bodies lacking `cmd` → `Invalid command`. Neither closes the connection — only a returned framed error.
+- **Malformed input:** every complete frame consumes one protocol-rate token. Non-msgpack bodies return `Invalid command format`; decoded bodies lacking `cmd` return `Invalid command` and preserve a valid string `reqId`. Neither closes the connection.
 - **Error sanitization:** handler errors whose message contains `SQLITE` or `database` are rewritten to `Internal server error` before being framed back (`tcp.ts:290-292`, mirrored in `handler.ts:99-100`), so internal storage details never leak to clients.
 - **Job release on disconnect with retry:** `releaseClientJobsWithRetry` (`tcp.ts:58`) retries up to 3× with exponential backoff (100/200/400ms). If all retries fail, it falls back to `forceReleaseClientJobs`, which unconditionally clears client tracking (prevents a `connections`/ownership Map leak) and resets heartbeats so the stall detector recovers any orphaned `active` jobs on its next tick — chosen over leaking the jobs.
 - **Idempotency** is a command-level concern (`jobId`/`uniqueKey`/`dedup`), not a transport one; the transport delivers exactly the frames it parsed. `reqId` is purely for client-side response correlation and is echoed back verbatim, including on errors.
@@ -189,7 +188,7 @@ Every wire body is one of two discriminated unions. The full field definitions o
 - [TCP Server Command Handlers](./tcp-server-handlers.md) — what `handleCommand` does with each frame.
 - [Client Transport](./client-transport.md) — the client side of this protocol (pool, reconnect, auto-batching).
 - [Security: TLS, Auth, CORS](./security-tls-auth.md) — `Auth`, token comparison, TLS files.
-- [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — the rate limiter consulted on every `data` event.
+- [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — the limiter consulted once per complete protocol frame.
 - [Job Lifecycle (push / pull / ack / fail)](./job-lifecycle.md) — semantics of the core commands and lock tokens.
 - [HTTP / REST / SSE / WebSocket API](./http-api.md) — the alternative transport.
 - [Stats, Metrics & Monitoring](./stats-and-monitoring.md) — `Hello`, `Ping`, `Stats`, `Metrics`, `Prometheus`.

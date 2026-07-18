@@ -83,7 +83,9 @@ client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
   [`operations/`](../src/application/operations)). Active-job management claims
   are split into `jobMoveOperations.ts` (state/resource transitions) and
   `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
-  JobLogs, Stats managers, the batch `QueueStatsAggregator`, and background-task wiring.
+  JobLogs, Stats managers, the batch `QueueStatsAggregator`,
+  [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) for
+  live flow-result retention, and background-task wiring.
 - **`infrastructure/`** — `SqliteStorage` (+ `WriteBuffer`, `BatchInsertManager`),
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
   `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates. The `server/bootstrap.ts` is the single composition root.

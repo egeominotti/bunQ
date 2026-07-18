@@ -42,6 +42,7 @@ import * as statsMgr from './statsManager';
 import { ContextFactory, type ContextDependencies, type ContextCallbacks } from './contextFactory';
 import { processPendingDependencies } from './dependencyProcessor';
 import { handleTaskError, handleTaskSuccess } from './taskErrorTracking';
+import { DependencyResultTracker } from './dependencyResultTracker';
 
 export type { QueueManagerConfig };
 
@@ -73,6 +74,7 @@ export class QueueManager {
   // current token and bypasses the stale-token recovery path entirely.
   private readonly timedOutJobs!: BoundedSet<JobId>;
   private readonly jobResults!: LRUMap<JobId, unknown>;
+  private readonly dependencyResults = new DependencyResultTracker();
   private readonly customIdMap!: LRUMap<string, JobId>;
   private readonly jobLogs!: LRUMap<JobId, JobLogEntry[]>;
 
@@ -227,6 +229,7 @@ export class QueueManager {
       depCompletions: this.depCompletions,
       timedOutJobs: this.timedOutJobs,
       jobResults: this.jobResults,
+      dependencyResults: this.dependencyResults,
       customIdMap: this.customIdMap,
       jobLogs: this.jobLogs,
       jobLocks: this.jobLocks,
@@ -628,6 +631,9 @@ export class QueueManager {
       ctx.storage?.deleteJob(jId);
     }
 
+    if (result !== undefined) ctx.dependencyResults.retain(jId, result);
+    ctx.dependencyResults.releaseConsumer(jId);
+
     ctx.totalCompleted.value++;
     ctx.broadcast({
       eventType: 'completed' as EventType,
@@ -899,6 +905,7 @@ export class QueueManager {
       this.jobResults.delete(jid);
       this.jobLogs.delete(jid);
       this.jobLocks.delete(jid);
+      this.dependencyResults.releaseConsumer(jid);
       this.failedChildrenValues.delete(jid);
       this.ignoredChildrenFailures.delete(jid);
       this.pendingDepChecks.delete(jid);
@@ -1513,6 +1520,7 @@ export class QueueManager {
     // Parent reached a terminal (DLQ) state — release its flow-failure tracking.
     this.failedChildrenValues.delete(parentId);
     this.ignoredChildrenFailures.delete(parentId);
+    this.dependencyResults.releaseConsumer(parentId);
 
     // Broadcast failed event for parent
     this.eventsManager.broadcast({
@@ -1671,6 +1679,7 @@ export class QueueManager {
       if (depIndex !== -1) {
         parentJob.dependsOn.splice(depIndex, 1);
         shard.unregisterDependencies(parentId, [childJob.id]);
+        this.dependencyResults.releaseDependency(parentId, childJob.id);
       }
 
       // If no more pending deps, the parent is ready to be promoted
@@ -1728,6 +1737,7 @@ export class QueueManager {
       if (depIndex !== -1) {
         parentJob.dependsOn.splice(depIndex, 1);
         shard.unregisterDependencies(parentId, [childJobId]);
+        this.dependencyResults.releaseDependency(parentId, childJobId);
       }
 
       const allDone =
@@ -1929,6 +1939,7 @@ export class QueueManager {
     this.depCompletions.clear();
     this.timedOutJobs.clear();
     this.jobResults.clear();
+    this.dependencyResults.clear();
     this.jobLogs.clear();
     this.customIdMap.clear();
     this.pendingDepChecks.clear();

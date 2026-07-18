@@ -2,10 +2,14 @@ import type { Shard } from '../../domain/queue/shard';
 import type { Job, JobId } from '../../domain/types/job';
 import type { JobLocation } from '../../domain/types/queue';
 import type { SetLike } from '../../shared/lru';
+import type { MapLike } from '../../shared/lru';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
 export interface PushInsertContext {
   completedJobs: SetLike<JobId>;
   depCompletions?: SetLike<JobId>;
+  jobResults: MapLike<JobId, unknown>;
+  dependencyResults: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
 }
@@ -44,4 +48,10 @@ export function insertJobToShard(
   }
 
   ctx.jobIndex.set(job.id, { type: 'queue', shardIdx, queueName: queue });
+  ctx.dependencyResults.registerConsumer(job.id, job.dependsOn);
+  for (const dependencyId of job.dependsOn) {
+    if (ctx.jobResults.has(dependencyId)) {
+      ctx.dependencyResults.retain(dependencyId, ctx.jobResults.get(dependencyId));
+    }
+  }
 }

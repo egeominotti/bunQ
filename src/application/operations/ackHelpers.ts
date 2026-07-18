@@ -12,8 +12,8 @@ import { shardIndex, processingShardIndex } from '../../shared/hash';
 import type { SetLike, MapLike } from '../../shared/lru';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { throughputTracker } from '../throughputTracker';
+import type { DependencyResultTracker } from '../dependencyResultTracker';
 
-/** Extracted job with optional result */
 export interface ExtractedJob<T = unknown> {
   id: JobId;
   job: Job;
@@ -160,6 +160,7 @@ export interface FinalizeContext {
   /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
   depCompletions?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
+  dependencyResults?: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
   customIdMap?: MapLike<string, JobId>;
   totalCompleted: { value: bigint };
@@ -249,6 +250,12 @@ export function finalizeBatchAck<T>(
       // in state/stats queries.
       ctx.depCompletions?.add(jobId);
     }
+  }
+
+  for (let i = 0; i < jobCount; i++) {
+    const { id, result } = extractedJobs[i];
+    if (includeResults && result !== undefined) ctx.dependencyResults?.retain(id, result);
+    ctx.dependencyResults?.releaseConsumer(id);
   }
 
   // Broadcast events

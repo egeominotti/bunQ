@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix the sustained soak assertion to match the public `Queue.obliterate/1`
+  return value, `:ok`.
+
 ## 0.1.1
 
 - Fix `Bunqueue.Job.log/2`: it sent the wire command `Log`, which the server

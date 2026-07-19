@@ -14,6 +14,18 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.42] - 2026-07-19
+
+### Fixed: reliable scheduled SDK soak tests
+
+- Weekly SDK soaks now raise the disposable broker's protocol request budget,
+  so long-lived single-connection profiles measure SDK health instead of
+  stopping at the production anti-abuse limit after roughly one minute.
+- The Elixir soak now follows the SDK's public unit-operation contract:
+  `Queue.obliterate/1` returns `:ok`.
+- Weekly dependency advisories run in a dedicated workflow, preserving the
+  same schedule while keeping CI definitions within the 300-line limit.
+
 ## [2.8.41] - 2026-07-19
 
 ### Performance: batch pulls scan ineligible jobs once

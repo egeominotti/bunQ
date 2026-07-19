@@ -39,7 +39,7 @@ defmodule Bunqueue.SoakTest do
       assert {:ok, ^batch_size} = Queue.count(queue)
       assert {:ok, job} = Queue.get_job(queue, hd(ids))
       assert job != nil
-      assert {:ok, _response} = Queue.obliterate(queue)
+      assert :ok = Queue.obliterate(queue)
       run_batches(queue, batch_size, deadline, iterations + 1, jobs + length(ids))
     end
   end

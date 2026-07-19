@@ -83,3 +83,23 @@ bun test test/production-backpressure-torture.test.ts
 For raw protocol stress above the default 10,000 requests per 60-second client
 security limit, explicitly raise `RATE_LIMIT_MAX_REQUESTS`. Otherwise the test
 measures the anti-abuse boundary instead of queue-engine capacity.
+
+## Weekly SDK soak profiles
+
+The scheduled SDK workflow runs each official client's sustained profile
+against a disposable real broker for 15 minutes. These profiles deliberately
+reuse long-lived connections and can exceed the production protocol limit
+while checking connection health, queue visibility, cleanup, and memory
+telemetry.
+
+On scheduled runs the workflow therefore sets
+`RATE_LIMIT_MAX_REQUESTS=1000000`; push and pull-request runs retain the
+`10000` production default. This prevents the anti-abuse boundary from
+terminating a soak without weakening ordinary validation or changing the
+broker default. SDK control operations must still assert their public return
+contract; for example, Elixir `Queue.obliterate/1` returns `:ok`.
+
+Dependency advisory checks run on the same weekly cadence in the separate
+`SDK Security` workflow, keeping each workflow file below 300 lines. The
+general sandbox image includes both workflow definitions so their regression
+tests run with the same filesystem isolation as the rest of the unit suite.

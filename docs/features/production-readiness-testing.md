@@ -102,4 +102,12 @@ contract; for example, Elixir `Queue.obliterate/1` returns `:ok`.
 Dependency advisory checks run on the same weekly cadence in the separate
 `SDK Security` workflow, keeping each workflow file below 300 lines. The
 general sandbox image includes both workflow definitions so their regression
-tests run with the same filesystem isolation as the rest of the unit suite.
+tests run with the same filesystem isolation as the rest of the unit suite. It
+also includes the TypeScript fixture harnesses inspected by the port-allocation
+regression.
+
+TypeScript SDK fixtures reserve only the TCP port that clients need to know.
+They set `HTTP_PORT=0`, allowing the kernel to allocate an independent HTTP
+listener for every spawned broker. Never derive the HTTP fixture port as
+`TCP_PORT + 1`: parallel or nested fixtures can already own that adjacent
+port, causing a bind failure that otherwise appears as a startup timeout.

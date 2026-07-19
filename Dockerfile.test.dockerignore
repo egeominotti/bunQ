@@ -17,3 +17,10 @@
 !.github/
 !.github/workflows/
 !.github/workflows/sdk.yml
+!sdk/
+!sdk/typescript/
+!sdk/typescript/tests/
+!sdk/typescript/tests/harness.ts
+!sdk/typescript/tests/e2e-edge.ts
+!sdk/typescript/tests/workers/
+!sdk/typescript/tests/workers/run.mjs

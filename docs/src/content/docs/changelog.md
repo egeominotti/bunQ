@@ -14,6 +14,17 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.43] - 2026-07-19
+
+### Fixed: collision-free SDK broker fixtures
+
+- TypeScript SDK E2E fixtures now let the operating system allocate each
+  broker's unused HTTP port independently. Starting the dedicated auth broker
+  can no longer collide with the primary fixture's TCP port and wait 15
+  seconds before failing.
+- Regression coverage keeps the general, crash/restart and Cloudflare Workers
+  harnesses on the collision-free port strategy.
+
 ## [2.8.42] - 2026-07-19
 
 ### Fixed: reliable scheduled SDK soak tests

@@ -104,7 +104,7 @@ export async function startServer(extraEnv: Record<string, string> = {}): Promis
     env: {
       ...process.env,
       TCP_PORT: String(port),
-      HTTP_PORT: String(port + 1),
+      HTTP_PORT: '0',
       BUNQUEUE_DATA_PATH: join(dataDir, 'bunq.db'),
       ...extraEnv,
     },

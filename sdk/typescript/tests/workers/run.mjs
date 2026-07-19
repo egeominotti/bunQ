@@ -39,7 +39,7 @@ async function startServer(extraEnv = {}) {
     env: {
       ...process.env,
       TCP_PORT: String(port),
-      HTTP_PORT: String(port + 1),
+      HTTP_PORT: '0',
       BUNQUEUE_DATA_PATH: join(mkdtempSync(join(tmpdir(), 'bunqueue-wk-')), 'bunq.db'),
       ...extraEnv,
     },

@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Let the operating system allocate an independent HTTP port for every E2E
+  broker fixture, preventing nested auth and restart fixtures from colliding
+  with an adjacent TCP listener.
 - Emit dependency-free, typed, sanitized `error` telemetry for connection,
   socket, write, and serialization failures without forwarding raw error
   messages, tokens, commands, or payloads.

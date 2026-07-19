@@ -21,6 +21,8 @@ COPY --chown=bun:bun scripts ./scripts
 COPY --chown=bun:bun bench ./bench
 COPY --chown=bun:bun .github/workflows/sdk.yml ./.github/workflows/sdk.yml
 COPY --chown=bun:bun .github/workflows/sdk-security.yml ./.github/workflows/sdk-security.yml
+COPY --chown=bun:bun sdk/typescript/tests/harness.ts sdk/typescript/tests/e2e-edge.ts ./sdk/typescript/tests/
+COPY --chown=bun:bun sdk/typescript/tests/workers/run.mjs ./sdk/typescript/tests/workers/run.mjs
 
 ENV CI=1 \
     HOME=/tmp \

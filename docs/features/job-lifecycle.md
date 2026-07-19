@@ -1,6 +1,6 @@
 # Job Lifecycle (push / pull / ack / fail)
 
-> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pull.ts`, `src/application/operations/ack.ts`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/domain/types/job.ts`, `src/domain/queue/waiterManager.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/domain/types/job.ts`, `src/domain/queue/waiterManager.ts`
 
 ## Purpose
 
@@ -67,7 +67,11 @@ export async function changeWaitingDelay(jobId: JobId, delay: number, ctx: JobMa
 export async function moveToWaitingChildren(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
 ```
 
-Exported context interfaces: `PushContext` (`push.ts:25`), `PullContext` (`pull.ts:23`), `AckContext` (`ack.ts:35`), plus the batch helpers `ExtractedJob`/`BatchContext`/`FinalizeContext` and `groupByProcShard`/`extractJobs`/`groupByQueueShard`/`releaseResources`/`finalizeBatchAck` in `ackHelpers.ts`.
+Exported context interfaces: `PushContext` (`push.ts`), `PullContext`
+(`pullStateTransition.ts`, re-exported by `pull.ts`), `AckContext` (`ack.ts`),
+plus the batch helpers `ExtractedJob`/`BatchContext`/`FinalizeContext` and
+`groupByProcShard`/`extractJobs`/`groupByQueueShard`/`releaseResources`/
+`finalizeBatchAck` in `ackHelpers.ts`.
 
 Job-type helpers exported from `job.ts`: `createJob`, `generateJobId`, `jobId`, `calculateBackoff`, `canRetry`, `isReady`, `isDelayed`, `isExpired`, `isTimedOut`, `normalizeStacktrace`, `createJobLock`, `renewLock`, `isLockExpired`, and the `JobState` const enum.
 
@@ -103,17 +107,42 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 6. `shard.notify(queue)` wakes one long-poll waiter for that queue, or records one coalesced retry hint when none is waiting.
 7. After the lock: persist via `storage.insertJob(job, input.durable)`, bump counters, broadcast `pushed`. **Durable** jobs bypass the 10 ms write buffer (immediate write); `pushJobBatch` (`push.ts:323`) splits durable jobs into a separate `insertJobsBatch(durableJobs, true)` so `addBulk` does not silently downgrade the durability guarantee (`push.ts:384`).
 
-### PULL (`pullJob`, `pull.ts:210`)
+### PULL (`pullJob`, `pull.ts`)
 
 1. `deadline = timeoutMs > 0 ? now + timeoutMs : 0`. Loop:
-2. `tryPullFromShard` (`pull.ts:253`) under `shardLocks[idx]`: return `null` if `state.paused`; then `tryAcquireRateLimit` and `tryAcquireConcurrency` gate (each rejection emits a dashboard event and returns null). Then loop `tryDequeueNextJob`.
-3. `tryDequeueNextJob` (`pull.ts`): inspect jobs in priority order. Expired entries are discarded exactly once from persistence, the heap, counters, and `jobIndex`. The synchronous `deleteJob` runs before the in-memory transition and also removes a pending buffered INSERT, so an expired job cannot be flushed later or resurrected after restart. Delayed jobs and jobs whose FIFO group is already active are temporarily set aside while the scan looks for another eligible job, then restored before returning. The first eligible job is activated and moved to `processingShards`; this makes the pull work-conserving across groups (for order A1, A2, B1, an active A group no longer hides B1). The queue pop, processing insert, and `jobIndex` flip remain in the same synchronous shard critical section.
-4. `finalizeProcessing` (`pull.ts:132`): `storage.markActive(...)` (non-fatal on error — in-memory is source of truth), bump counters, broadcast `pulled`. Returns `false` when the job is no longer in `processingShards` — a management op (`discardJob`, `moveJobToDelayed`) claimed it between the dequeue and the handoff; the pull then does NOT deliver it to a worker (`pullJob` tries the next job, `pullJobBatch` drops it from the delivered set).
-5. If no job and deadline not reached, `await shard.waitForJob(queue, remaining)` and loop; otherwise return `null`.
+2. `tryPullFromShard` under `shardLocks[idx]` returns `null` if the queue is
+   paused, then delegates selection to `tryDequeueNextJob`
+   (`pullStateTransition.ts`).
+3. `tryDequeueNextJob` inspects jobs in priority order. Expired entries are
+   discarded exactly once from persistence, the heap, counters, and `jobIndex`.
+   Delayed jobs and jobs whose FIFO group is active are moved into a dequeue
+   scratch object while the scan looks for eligible work. Capacity is consumed
+   only after an eligible job is found. The queue pop, processing insert, and
+   `jobIndex` flip remain in the same synchronous shard critical section.
+4. A single pull creates one scratch and restores its parked jobs in `finally`.
+   A batch shares one scratch across all requested jobs and restores it once
+   after the entire batch. Readiness cannot change inside that synchronous
+   critical section: `now` is fixed and the active-group set only grows.
+   Consequently the batch cost is `O((k + b) log n)`, rather than repeatedly
+   paying `O(k log n)` for each of the `b` delivered jobs. `nextRunAt` retains
+   the minimum deadline across every parked delayed job so long-poll wake-up
+   semantics remain unchanged.
+5. `finalizeProcessing`: `storage.markActive(...)` (non-fatal on error —
+   in-memory is source of truth), bump counters, broadcast `pulled`. It returns
+   `false` when a management operation claimed the job before handoff.
+6. If no job and deadline not reached, `await shard.waitForJob(queue, remaining)`
+   and loop; otherwise return `null`.
 
-`pullJobBatch` (`pull.ts:290`) pulls up to `count` jobs in one shard lock, acquiring a rate-limit + concurrency slot per job and releasing the slot when a dequeue yields `stop`/`skip` (`pull.ts:371`); `finalizeProcessingBatch` (`pull.ts:158`) returns only the jobs actually delivered.
+`pullJobBatch` pulls up to `count` jobs in one shard lock, acquiring exactly one
+rate-limit and concurrency slot per selected job. A blocked or delayed entry
+consumes neither. If a limiter stops a partially filled batch, every parked job
+is still restored by the outer `finally`; `finalizeProcessingBatch` returns only
+the jobs actually delivered.
 
-**Safety net:** if `finalizeProcessing` throws, `requeueJob` (`pull.ts:175`) restores the job with the same observer-atomicity rule in reverse: under `shardLocks[idx]` it releases the group + concurrency slot, resets `startedAt = null`, pushes the job back to the queue AND flips `jobIndex` back to `'queue'` in one critical section, then (guarded, under `processingLocks[procIdx]`) removes the `processingShards` entry only if the index no longer says `'processing'` (a concurrent pull may have re-popped it). It skips entirely if a management op already claimed the job. Lock order shard -> processing matches the documented hierarchy.
+**Safety net:** if `finalizeProcessing` throws, `requeueJob`
+(`pullStateTransition.ts`) restores the job with the same observer-atomicity
+rule in reverse. It skips entirely if a management operation already claimed
+the job. Lock order shard → processing matches the documented hierarchy.
 
 ### ACK (`ackJob`, `ack.ts:75`)
 
@@ -156,7 +185,8 @@ the lease and client ownership through `releaseClaimedJobOwnership`.
 Locks are per-shard `RWLock`s acquired via `withWriteLock` and are **sequential, not nested** within each operation, which avoids deadlock despite differing acquisition orders:
 
 - `pushJob`: `shardLocks[idx]` only (persistence + broadcast happen after release).
-- `pullJob`: `shardLocks[idx]` (dequeue) released, then `processingLocks[procIdx]` (move).
+- `pullJob`: `shardLocks[idx]` owns the synchronous queue → processing
+  transition; persistence and delivery bookkeeping run after release.
 - `ackJob` / `failJob`: `processingLocks[procIdx]` (extract) released, then `shardLocks[idx]` (release resources / requeue / DLQ).
 
 Batch ack acquires each processing-shard lock and each queue-shard lock at most once, in parallel across distinct shards (`O(shards)` not `O(n)` — `ack.ts:303`).

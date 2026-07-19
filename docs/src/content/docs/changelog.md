@@ -14,6 +14,22 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.41] - 2026-07-19
+
+### Performance: batch pulls scan ineligible jobs once
+
+- `pullBatch` now parks delayed and active-group-blocked candidates in one
+  scratch area for the entire batch, then restores them once before releasing
+  the shard lock. This removes the repeated extract/reinsert cycle for every
+  delivered job while preserving priority, FIFO groups, limiter accounting,
+  long-poll deadlines and queue indexes.
+- Native benchmarks with 50,000 ineligible jobs and a batch of 100 improved
+  active-group backlogs from roughly 1.54 seconds to 18 milliseconds (about
+  85x) and delayed backlogs from roughly 1.45 seconds to 16 milliseconds
+  (about 90x).
+- Regression coverage verifies single restoration, partial batches under
+  concurrency limits, earliest delayed wake-up and exception-safe restoration.
+
 ## [2.8.40] - 2026-07-19
 
 ### Fixed: deterministic and interruption-safe CLI

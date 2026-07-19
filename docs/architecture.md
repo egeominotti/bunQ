@@ -214,11 +214,14 @@ IoT/edge that must tolerate intermittent connectivity. See
 1. Worker requests work (`PULL`/`PULLB`, optionally with a lease/owner) for a queue.
 2. Dispatch → `QueueManager.pull()` / `pullWithLock()`
    ([`queueManager.ts:309`](../src/application/queueManager.ts),
-   [`operations/pull.ts`](../src/application/operations/pull.ts)).
+   [`operations/pull.ts`](../src/application/operations/pull.ts)); atomic
+   queue-state transitions and the reusable dequeue scratch live in
+   [`operations/pullStateTransition.ts`](../src/application/operations/pullStateTransition.ts).
 3. Under the shard lock, the priority queue is scanned in priority order until
    the first ready job from an eligible FIFO group is found. Delayed or group-
-   blocked entries are restored before returning, so an ineligible head cannot
-   hide ready work from another group.
+   blocked entries are parked in one scratch for the whole batch and restored
+   once before releasing the lock, so an ineligible head cannot hide ready work
+   or be rescanned for every delivered batch item.
 4. In the same synchronous critical section as the pop, the job is inserted into
    `processingShards[procIdx]` and its `jobIndex` entry flips to processing
    (state → `active`), so observers never see a stale location. Post-await

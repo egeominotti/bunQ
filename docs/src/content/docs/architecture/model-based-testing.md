@@ -79,14 +79,17 @@ After each command, the test checks:
 4. `/stats` internal collection telemetry for counters, indexes, processing,
    dependency, completion, and lock cardinality.
 
-## The 46-invariant register
+## The 69-invariant register
 
-The production checklist contains 46 invariants across 15 categories. The main
+The production checklist contains 69 invariants across 18 categories. The main
 `fc.commands` lifecycle model owns core safety, ordering, limits, counters,
 crash recovery, dependencies, DLQ, and queue controls. Focused suites own the
 contracts that need different clocks or failure injection: cron, worker
 timeouts and fencing, protocol ambiguity, MessagePack roundtrips, migrations,
 SQLite integrity, WAL checkpoints, and clean-restart equivalence.
+The focused CLI category adds generated argv/flag properties, exact
+command-to-MessagePack fixtures, mutation-free read/error snapshots, API parity,
+disconnect cancellation, and a real-executable matrix for every command.
 
 This distinction matters: a green lifecycle model is not presented as proof of
 cron or migration behavior. Every checklist item must point to an executable
@@ -117,6 +120,12 @@ The subsequent full sandbox gate found a tenth defect: low-level jobs created
 before `stallCount` existed violated the new SQLite `NOT NULL` boundary.
 Persistence now normalizes an omitted value to zero without weakening the
 schema.
+
+An expanded progress/persistence oracle later found an eleventh defect:
+`MoveToWait` completed its in-memory transition but left the SQLite row
+`active`. Restart recovery therefore treated a manual requeue as interrupted
+work. The transition now persists `state`, `run_at`, and `started_at` through
+the same `updateRunAt` boundary used by delayed moves.
 
 For the complete engineering procedure, see the repository's
 [`docs/features/model-based-testing.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/features/model-based-testing.md)

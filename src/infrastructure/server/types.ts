@@ -11,4 +11,6 @@ export interface HandlerContext {
   authenticated: boolean;
   /** Client ID for job ownership tracking */
   clientId?: string;
+  /** Aborted when the transport disconnects, cancelling connection-scoped waits. */
+  signal?: AbortSignal;
 }

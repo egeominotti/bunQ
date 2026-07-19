@@ -14,6 +14,45 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.40] - 2026-07-19
+
+### Fixed: deterministic and interruption-safe CLI
+
+- The CLI now derives command routing and command discovery from one canonical
+  registry. Help, aliases and the command builder expose the same surface,
+  including `ping` and `backup create`.
+- `--json` emits exactly one JSON document on local, remote and error paths.
+  Safe-integer parsing rejects imprecise values, while negative JSON
+  primitives, equivalent flag spellings and independent flag ordering retain
+  their intended meaning.
+- Closing a TCP connection now cancels its pending pull. An interrupted
+  long-poll cannot claim the next job, leave a hidden waiter or consume
+  rate/concurrency resources while waiting for a shard lock.
+
+### Fixed: lossless MessagePack keys and durable state transitions
+
+- TCP, SQLite, CLI and cloud transports share a canonical MessagePack codec.
+  Hostile object keys such as `__proto__` round-trip without renaming,
+  collisions, data loss or prototype pollution while ordinary frames retain
+  the fast decoder path.
+- Active-to-waiting transitions, per-queue DLQ configuration, stall counters
+  and related queue indexes now persist and recover coherently. The generated
+  broker model covers 69 lifecycle, ordering, resource and persistence
+  invariants.
+
+### Added: exhaustive CLI and failure-path validation
+
+- Property campaigns cover arbitrary argv, safe-integer boundaries, Unicode,
+  JSON values, serialization and flag permutations. Real TCP/SQLite E2E tests
+  cover every CLI command, restart persistence, direct-API parity, malformed
+  inputs, concurrent idempotency, duplicate ACKs and killed long-polls.
+- A targeted mutation campaign killed all five parser, router, codec, JSON and
+  cancellation mutants. Workflow retry tests now observe terminal state
+  instead of sleeping for eight seconds, cutting the reported retry case from
+  about 8.1 seconds to about 2.1 seconds under the isolated parallel suite.
+- The real-TCP count regression harness now binds a kernel-assigned port, so
+  parallel CI cannot collide with an unreserved random port.
+
 ## [2.8.39] - 2026-07-18
 
 ### Fixed: overload correlation and complete stale-dependency cleanup

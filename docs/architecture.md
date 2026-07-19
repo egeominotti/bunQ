@@ -43,7 +43,7 @@ Producers ──add()──┐                          ┌──process()──
 | --- | --- | --- |
 | **Bun runtime** (`>=1.3.9`) | [`package.json:147`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
 | **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite.ts:7`](../src/infrastructure/persistence/sqlite.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
-| **MessagePack** (`msgpackr`) | [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | ~2–3× faster + more compact than JSON for both the on-disk job blobs and the TCP wire format; preserves binary and numeric types losslessly. |
+| **MessagePack** (`msgpackr`) | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties. |
 | **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:66`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
 | **Zero external deps** | [`package.json:74`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
 | **4-ary heaps / queue-local skip-lists** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts), [`src/domain/queue/temporalIndex.ts`](../src/domain/queue/temporalIndex.ts) | 4-ary branching improves cache locality vs binary heaps; one skip-list per queue orders cleanup candidates, with a reverse job-ID index for direct deletion. A compacting 4-ary min-heap tracks delayed jobs. |
@@ -68,6 +68,15 @@ infrastructure  External edges: SQLite persistence, TCP/HTTP servers,
 client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
                      Workflow), CLI verbs, MCP tool surface.
 ```
+
+The CLI surface is centralized in `src/cli/commandRegistry.ts`;
+`commandRouter.ts` translates registered network families to builders,
+`globalOptions.ts` owns global parsing, `localOutput.ts` owns local output, and
+`client.ts` owns only transport/execution. Help and complete
+E2E/property/concurrency matrices are checked against the same registry.
+TCP connections carry an abort signal into long-poll handlers so disconnecting
+a CLI or SDK socket cancels its waiter before any later job or limiter token can
+be claimed.
 
 - **`domain/`** — Pure, synchronous, side-effect-free. `Shard` composes
   `IndexedPriorityQueue` (waiting/delayed jobs), `DlqShard`, `UniqueKeyManager`

@@ -4,11 +4,14 @@
  * Uses msgpackr for 2-3x faster serialization
  */
 
-import { pack as msgpackEncode, unpack as msgpackDecode } from 'msgpackr';
 import { type Job, type JobId, type JobTimelineEntry, jobId } from '../../domain/types/job';
 import type { DlqEntry } from '../../domain/types/dlq';
 import type { DbJob } from './statements';
 import { storageLog } from '../../shared/logger';
+import {
+  decodeMessagePack as msgpackDecode,
+  encodeMessagePack as msgpackEncode,
+} from '../../shared/msgpack';
 
 /** Encode data to MessagePack buffer */
 export function pack(data: unknown): Uint8Array {

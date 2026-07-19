@@ -10,6 +10,8 @@ interface Waiter {
   resolve: () => void;
   timer: ReturnType<typeof setTimeout>;
   cancelled: boolean;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 interface QueueWaiters {
@@ -36,12 +38,25 @@ export class WaiterManager {
     this.notifyQueue(queue, count);
   }
 
-  waitForJob(timeoutMs: number): Promise<void>;
-  waitForJob(queue: string, timeoutMs: number): Promise<void>;
-  waitForJob(queueOrTimeout: string | number, maybeTimeout?: number): Promise<void> {
+  waitForJob(timeoutMs: number, signal?: AbortSignal): Promise<void>;
+  waitForJob(queue: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
+  waitForJob(
+    queueOrTimeout: string | number,
+    maybeTimeoutOrSignal?: number | AbortSignal,
+    maybeSignal?: AbortSignal
+  ): Promise<void> {
     const queue = typeof queueOrTimeout === 'string' ? queueOrTimeout : DEFAULT_QUEUE;
-    const timeoutMs = typeof queueOrTimeout === 'number' ? queueOrTimeout : (maybeTimeout ?? 0);
-    if (timeoutMs <= 0) return Promise.resolve();
+    const timeoutMs =
+      typeof queueOrTimeout === 'number'
+        ? queueOrTimeout
+        : typeof maybeTimeoutOrSignal === 'number'
+          ? maybeTimeoutOrSignal
+          : 0;
+    const signal =
+      typeof queueOrTimeout === 'number'
+        ? (maybeTimeoutOrSignal as AbortSignal | undefined)
+        : maybeSignal;
+    if (timeoutMs <= 0 || signal?.aborted) return Promise.resolve();
 
     const state = this.queues.get(queue);
     if (state?.pending) {
@@ -56,18 +71,28 @@ export class WaiterManager {
         resolve,
         cancelled: false,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
+        signal,
+        onAbort: undefined as (() => void) | undefined,
       };
-      waiter.timer = setTimeout(() => {
+      const settle = () => {
         if (waiter.cancelled) return;
         waiter.cancelled = true;
+        clearTimeout(waiter.timer);
+        if (waiter.signal && waiter.onAbort) {
+          waiter.signal.removeEventListener('abort', waiter.onAbort);
+        }
         queueState.active--;
         this.activeWaiters--;
         resolve();
         this.compact(queue, queueState);
-      }, timeoutMs);
+      };
+      waiter.timer = setTimeout(settle, timeoutMs);
+      waiter.onAbort = settle;
+      signal?.addEventListener('abort', settle, { once: true });
       queueState.entries.push(waiter);
       queueState.active++;
       this.activeWaiters++;
+      if (signal?.aborted) settle();
     });
   }
 
@@ -84,6 +109,9 @@ export class WaiterManager {
       if (!waiter || waiter.cancelled) continue;
       waiter.cancelled = true;
       clearTimeout(waiter.timer);
+      if (waiter.signal && waiter.onAbort) {
+        waiter.signal.removeEventListener('abort', waiter.onAbort);
+      }
       state.active--;
       this.activeWaiters--;
       remaining--;

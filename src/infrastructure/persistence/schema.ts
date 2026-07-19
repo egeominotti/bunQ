@@ -136,7 +136,8 @@ CREATE TABLE IF NOT EXISTS queue_state (
     stall_enabled INTEGER,
     stall_interval INTEGER,
     max_stalls INTEGER,
-    stall_grace_period INTEGER
+    stall_grace_period INTEGER,
+    dlq_config BLOB
 );
 `;
 
@@ -149,7 +150,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -240,5 +241,9 @@ ALTER TABLE queue_state ADD COLUMN max_stalls INTEGER;
 `,
   21: `
 ALTER TABLE queue_state ADD COLUMN stall_grace_period INTEGER;
+`,
+  // Migration 22: Persist the complete per-queue DLQ policy atomically.
+  22: `
+ALTER TABLE queue_state ADD COLUMN dlq_config BLOB;
 `,
 };

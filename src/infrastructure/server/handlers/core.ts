@@ -136,7 +136,8 @@ export async function handlePull(
       cmd.queue,
       cmd.owner,
       cmd.timeout,
-      cmd.lockTtl
+      cmd.lockTtl,
+      ctx.signal
     );
     // Register job with client for connection-based release
     if (job && ctx.clientId) {
@@ -146,7 +147,7 @@ export async function handlePull(
   }
 
   // Standard pull (no lock, but still track for client release unless detached)
-  const job = await ctx.queueManager.pull(cmd.queue, cmd.timeout);
+  const job = await ctx.queueManager.pull(cmd.queue, cmd.timeout, ctx.signal);
   if (job && ctx.clientId && !cmd.detach) {
     ctx.queueManager.registerClientJob(ctx.clientId, job.id);
   }
@@ -177,7 +178,8 @@ export async function handlePullBatch(
       cmd.count,
       cmd.owner,
       cmd.timeout ?? 0,
-      cmd.lockTtl
+      cmd.lockTtl,
+      ctx.signal
     );
     // Register all jobs with client for connection-based release
     if (ctx.clientId) {
@@ -190,7 +192,7 @@ export async function handlePullBatch(
 
   // Standard pull (no locks, but still track for client release) — the
   // non-owner branch honors cmd.timeout exactly like the owner branch and PULL.
-  const jobs = await ctx.queueManager.pullBatch(cmd.queue, cmd.count, cmd.timeout ?? 0);
+  const jobs = await ctx.queueManager.pullBatch(cmd.queue, cmd.count, cmd.timeout ?? 0, ctx.signal);
   if (ctx.clientId) {
     for (const job of jobs) {
       ctx.queueManager.registerClientJob(ctx.clientId, job.id);

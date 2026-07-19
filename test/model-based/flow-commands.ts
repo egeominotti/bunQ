@@ -45,6 +45,8 @@ class AddFlowCommand extends QueueCommand {
       generation: childGeneration,
       maxAttempts: 3,
       priority: 2,
+      progress: 0,
+      progressMessage: null,
       stallCount: 0,
       state: 'prioritized',
     });
@@ -54,6 +56,8 @@ class AddFlowCommand extends QueueCommand {
       generation: parentGeneration,
       maxAttempts: 3,
       priority: 1,
+      progress: 0,
+      progressMessage: null,
       stallCount: 0,
       state: 'waiting-children',
     });
@@ -88,6 +92,7 @@ class AckFlowCommand extends QueueCommand {
     const job = model.jobs.get(id)!;
     job.state = 'completed';
     job.diskState = 'completed';
+    job.progress = 100;
     model.terminalGenerations.add(terminalGeneration(id, job));
     real.tokens.delete(id);
     if (id === MODEL_FLOW_CHILD_ID) {

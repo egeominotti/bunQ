@@ -9,10 +9,10 @@
  * - Keepalive: server sends ping every 25s, bunqueue responds pong
  */
 
-import { pack, unpack } from 'msgpackr';
 import type { CloudConfig } from './types';
 import type { CloudCommand } from './commandHandler';
 import { cloudLog } from './logger';
+import { decodeMessagePack, encodeMessagePack } from '../../shared/msgpack';
 
 export class WsSender {
   private ws: WebSocket | null = null;
@@ -139,7 +139,7 @@ export class WsSender {
 
   /** Encode and send as zstd(msgpack) binary frame */
   private async sendBinary(ws: WebSocket, data: unknown): Promise<void> {
-    ws.send(await Bun.zstdCompress(pack(data)));
+    ws.send(await Bun.zstdCompress(encodeMessagePack(data)));
   }
 
   /** Decode incoming message — supports zstd+msgpack, plain msgpack, and JSON (text) */
@@ -165,9 +165,9 @@ export class WsSender {
       buf[2] === 0x2f &&
       buf[3] === 0xfd
     ) {
-      return unpack(Buffer.from(await Bun.zstdDecompress(buf))) as Record<string, unknown>;
+      return decodeMessagePack<Record<string, unknown>>(Buffer.from(await Bun.zstdDecompress(buf)));
     }
-    return unpack(buf) as Record<string, unknown>;
+    return decodeMessagePack<Record<string, unknown>>(buf);
   }
 
   /** Clean up socket handlers and close */

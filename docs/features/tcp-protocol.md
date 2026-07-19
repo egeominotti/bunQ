@@ -139,20 +139,38 @@ Every wire body is one of two discriminated unions. The full field definitions o
 2. `frameParser.addData(data)` — the Bun read `Buffer` is passed directly; the previous defensive `new Uint8Array(data)` copy was removed because `addData` copies its input into owned storage.
 3. A thrown `FrameSizeError` clears the stall timer, writes `Frame too large: …`, and ends the socket.
 4. `updateStallTimer(socket)` (re)arms the slowloris timer iff a partial frame is buffered.
-5. For each complete frame, `processFrame` decodes MessagePack first, extracts a trustworthy string `reqId`, and then consumes exactly one protocol-rate token. An overload emits `ratelimit:hit` and writes `Rate limit exceeded` with that `reqId`; partial TCP chunks consume no quota and coalesced frames consume one token each. Allowed frames continue through command validation and `withSemaphore` → `handleCommand`.
+5. For each complete frame, `processFrame` decodes MessagePack through
+   `src/shared/msgpack.ts`, extracts a trustworthy string `reqId`, and then
+   consumes exactly one protocol-rate token. Ordinary frames use msgpackr's
+   fast decoder. Frames containing the byte sequence `__proto__` take a safe
+   Map materialization path that defines own properties without invoking the
+   JavaScript prototype setter. An overload emits `ratelimit:hit` and writes
+   `Rate limit exceeded` with that `reqId`; partial TCP chunks consume no quota
+   and coalesced frames consume one token each. Allowed frames continue through
+   command validation and `withSemaphore` → `handleCommand`.
 7. `await Promise.all(frames.map(processFrame))` (`tcp.ts:300`) — all frames in one read are processed concurrently (pipelining); the client correlates responses by `reqId`, so server-side ordering is not guaranteed.
 
 **Frame parsing — `FrameParser.addData`** (`protocol.ts:227`): concatenate the retained partial tail with new data into a single owned buffer (one copy), then walk it with an `offset` cursor. Each iteration reads the big-endian u32 length (`>>> 0` to force unsigned, `protocol.ts:245`), rejects lengths > `maxFrameSize` (clears the buffer and throws `FrameSizeError`, `protocol.ts:258`), breaks if the full body has not yet arrived (keeping the partial bytes buffered, `protocol.ts:264`), else slices out the body (`protocol.ts:273`) and advances the cursor by `4 + length`. Tail retention has three cases (`protocol.ts:277`): fully drained → fresh empty buffer (don't pin the read's ArrayBuffer); nothing consumed → keep the concat buffer as-is (no extra copy); partial leftover after ≥1 frame → slice the small tail. The cursor makes the pass **O(total bytes) / O(F)** in the number of frames; the prior implementation resliced the tail after every frame, which was **O(F²)** when many frames arrived coalesced in one read.
 
 **Outbound write & backpressure — `SocketWriteQueue`** (`socketWriteQueue.ts:55`): if a tail is already pending, append the new chunk (never write ahead of older bytes — preserves frame order). Otherwise `socket.write(data)`; a return `< 0` means the socket is closed (`write` returns `false`), and a short write buffers the unwritten `data.subarray(written)` tail. `flush()` (`socketWriteQueue.ts:92`), invoked from the socket `drain` handler (`tcp.ts:341`, guarded against uninitialized `socket.data` under TLS, #108), drains the pending queue in order, advancing `offset` within the current chunk on a partial write and stopping at the first short write. This matters because Bun's `socket.write()` may write fewer bytes than supplied; silently dropping the tail would corrupt the length-prefixed stream.
 
-**Connection close** (`tcp.ts:303`): if the socket closed before its state was ever initialized (e.g. an aborted TLS handshake), return immediately, nothing to release (#108). Otherwise clear stall timer, drop buffered writes (`writeQueue.clear()`), remove from `connections`, drop the rate-limiter entry, `unregisterWorkersByClientId`, emit `client:disconnected`, then `releaseClientJobsWithRetry` to return that client's leased jobs to their queues.
+**Connection close** (`tcp.ts`): if the socket closed before its state was ever
+initialized (e.g. an aborted TLS handshake), return immediately, nothing to
+release (#108). Otherwise abort the connection-scoped signal first, cancelling
+pending `PULL`/`PULLB` waiters before they can claim future jobs; then clear the
+stall timer and buffered writes, remove connection/rate-limiter/worker state,
+emit `client:disconnected`, and call `releaseClientJobsWithRetry` for jobs
+already delivered to that client.
 
 ## Concurrency & Locking
 
 - **Per-connection pipelining is bounded by a `Semaphore(50)`** (`MAX_CONCURRENT_PER_CONNECTION`, `tcp.ts:27`). All frames from a single `data` event are launched together (`Promise.all`), but at most 50 commands per connection are in-flight at once; the rest await a permit. The semaphore (`shared/semaphore.ts`) is a simple FIFO permit queue.
 - **No lock is taken in this module.** Frame parsing is synchronous per `data` callback (single-threaded JS event loop), and the per-connection `FrameParser`/`SocketWriteQueue`/`stallTimer` are touched only from that connection's own callbacks. Job-state locking (the `jobIndex → completedJobs → shards → processingShards` hierarchy) happens downstream inside `QueueManager`; see [Concurrency & Locking](./concurrency-and-locking.md).
 - **Lease ownership** is keyed by the connection `clientId`: jobs pulled over a connection are released on disconnect. `PULL`/`PULLB` accept `owner`/`lockTtl`, and `detach: true` (CLI use) opts out of auto-release on disconnect. Lock-token mechanics belong to [Job Lifecycle](./job-lifecycle.md).
+- **Pending pull ownership** is also connection-scoped. Disconnect aborts
+  single/batch and owner/detached long-polls; a cancelled request cannot consume
+  a later push, increment pulled counters, activate a group, consume a
+  concurrency slot, or create a lock.
 - **`SocketWriteQueue` ordering invariant:** once any tail is pending, every subsequent `write` must enqueue rather than write directly, or response bytes would interleave and corrupt the frame stream.
 
 ## Edge Cases & Failure Modes
@@ -161,6 +179,11 @@ Every wire body is one of two discriminated unions. The full field definitions o
 - **Slowloris mitigation:** a peer that starts a frame (buffers partial bytes) but stalls is closed after `idleTimeoutMs` (default 60s, `tcp.ts:41`). The timer is armed **only while `hasPartialFrame` is true** and reset on each data event, so healthy idle-but-complete connections are never disturbed. Implemented as a manual `setTimeout` because Bun (1.3.x) has no socket `idleTimeout` and `socket.timeout()` resets on every byte (a 1-byte-per-window trickle would defeat it). `0` disables.
 - **Write-side memory DoS:** if a client stops reading while the server keeps producing responses, `SocketWriteQueue.bytesQueued` grows; once it exceeds `maxWriteQueueBytes` (default 64MB, `tcp.ts:49`), `isOverBudget` trips and the connection is `terminate()`d after clearing the queue (`tcp.ts:253`, also enforced in `broadcast` at `tcp.ts:383`). `0` disables.
 - **Malformed input:** every complete frame consumes one protocol-rate token. Non-msgpack bodies return `Invalid command format`; decoded bodies lacking `cmd` return `Invalid command` and preserve a valid string `reqId`. Neither closes the connection.
+- **MessagePack map-key preservation:** JSON-like maps use string keys.
+  `__proto__`, `__proto_`, `constructor`, and `prototype` are ordinary,
+  distinct own data properties. They round-trip through TCP and SQLite without
+  prototype mutation or key collision; encoding bytes remain compatible with
+  non-JavaScript SDKs.
 - **Error sanitization:** handler errors whose message contains `SQLITE` or `database` are rewritten to `Internal server error` before being framed back (`tcp.ts:290-292`, mirrored in `handler.ts:99-100`), so internal storage details never leak to clients.
 - **Job release on disconnect with retry:** `releaseClientJobsWithRetry` (`tcp.ts:58`) retries up to 3× with exponential backoff (100/200/400ms). If all retries fail, it falls back to `forceReleaseClientJobs`, which unconditionally clears client tracking (prevents a `connections`/ownership Map leak) and resets heartbeats so the stall detector recovers any orphaned `active` jobs on its next tick — chosen over leaking the jobs.
 - **Idempotency** is a command-level concern (`jobId`/`uniqueKey`/`dedup`), not a transport one; the transport delivers exactly the frames it parsed. `reqId` is purely for client-side response correlation and is echoed back verbatim, including on errors.

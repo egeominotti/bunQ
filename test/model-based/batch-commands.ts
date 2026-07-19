@@ -57,6 +57,8 @@ class PushBatchCommand extends QueueCommand {
         generation,
         maxAttempts: 3,
         priority: this.priority,
+        progress: 0,
+        progressMessage: null,
         stallCount: 0,
         state: index === 1 ? 'delayed' : readyState(this.priority),
       });
@@ -145,6 +147,7 @@ class AckBatchCommand extends QueueCommand {
     for (const [id, job] of active) {
       job.state = 'completed';
       job.diskState = 'completed';
+      job.progress = 100;
       model.terminalGenerations.add(terminalGeneration(id, job));
       real.tokens.delete(id);
     }

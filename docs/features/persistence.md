@@ -90,10 +90,19 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
 - `job_results` — `job_id TEXT PK`, `result BLOB`, `completed_at`.
 - `dlq` — `id INTEGER PK AUTOINCREMENT`, `job_id`, `queue`, `entry BLOB` (full `DlqEntry`), `entered_at`. Note `dlq` is append-only by `id`; a single `job_id` can have multiple rows.
 - `cron_jobs` — keyed by `name`, includes `dedup BLOB`, `skip_missed_on_restart`, `skip_if_no_worker`, `prevent_overlap` (default 1), `job_options BLOB`.
-- `queue_state` (#100) — `name TEXT PK`, `paused`, `rate_limit`, `concurrency_limit`, rate-window fields, and nullable `stall_enabled` / `stall_interval` / `max_stalls` / `stall_grace_period` for a custom crash-recovery policy.
+- `queue_state` (#100) — `name TEXT PK`, `paused`, `rate_limit`,
+  `concurrency_limit`, rate-window fields, nullable `stall_enabled` /
+  `stall_interval` / `max_stalls` / `stall_grace_period`, and nullable
+  `dlq_config BLOB` for the effective per-queue DLQ policy.
 - `migrations` — `version PK`, `applied_at`.
 
-All blob columns store MessagePack. `rowToJob` (`sqliteSerializer.ts:71-151`) rehydrates a full `Job`, defaulting BullMQ-compat fields that are intentionally not persisted (`backoffConfig`, `stackTraceLimit`, dedup/debounce flags, etc.).
+All blob columns store MessagePack. Encoding and decoding use the canonical
+`src/shared/msgpack.ts` codec. Its normal path remains msgpackr's fast decoder;
+the rare `__proto__` path materializes maps with safe own-property definitions,
+so arbitrary JSON keys remain distinct across restart without prototype
+pollution. `rowToJob` rehydrates a full `Job`, defaulting BullMQ-compat fields
+that are intentionally not persisted (`backoffConfig`, `stackTraceLimit`,
+dedup/debounce flags, etc.).
 
 ## Business Logic / Control Flow
 
@@ -112,13 +121,33 @@ the field existed while retaining the schema's
 `stall_count INTEGER NOT NULL DEFAULT 0` invariant; current domain-created jobs
 still always provide the field explicitly.
 
-State transitions and the flush-before-update invariant: `markActive`/`markCompleted`/`markFailed`, `updateJobData`, `updateJobPriority`, and delay updates first call `flushIfBuffered(jobId)` (`sqlite.ts`). If the row's INSERT is still buffered, the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite the state, payload, or scheduling fields with the original values. Priority persistence writes both `priority` and the effective `lifo` tie-break so recovery reconstructs the same heap order. `flushIfBuffered` checks `writeBuffer.hasPending(id)` and flushes first.
+State transitions and the flush-before-update invariant:
+`markActive`/`markCompleted`/`markFailed`, `updateJobData`,
+`updateJobPriority`, `updateJobProgress`, and delay updates first call
+`flushIfBuffered(jobId)` (`sqlite.ts`). If the row's INSERT is still buffered,
+the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite
+the mutation. Progress persists the clamped value, effective message, and
+heartbeat in one synchronous update. Priority persistence writes both
+`priority` and the effective `lifo` tie-break so recovery reconstructs the same
+heap order. `moveActiveToWait` also uses `updateRunAt`, clearing the persisted
+active marker so restart recovery cannot treat a manual requeue as a crash.
 
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
-Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads `loadCompletedJobIds()` + `loadDlqJobIds`, then repeatedly reads active jobs from offset zero. Every handled active row leaves `state='active'`, so advancing an offset over that shrinking result would skip rows; the fixed first-page loop drains all active jobs without deep-offset cost. Each interrupted active job increments `attempts` and persisted `stall_count`; reaching either `max_attempts` or `maxStalls` is terminal and writes exactly one DLQ entry instead of requeueing. Recovered retries are persisted in Phase 1 and enqueued exactly once by Phase 2. Pending pages use `priority DESC, run_at ASC, id ASC`, so equal scheduling keys have a deterministic boundary. The remaining phases restore the DLQ, queue control state, and the bounded completed cache.
+Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads
+`loadCompletedJobIds()` + `loadDlqJobIds` and restores stall/DLQ policies before
+classifying interrupted active jobs. It then repeatedly reads active jobs from
+offset zero. Every handled active row leaves `state='active'`, so advancing an
+offset over that shrinking result would skip rows. Each interrupted active job
+increments `attempts` and persisted `stall_count`; reaching either bound is
+terminal. Pending pages use deterministic priority/run-at/id ordering. Later
+phases restore the DLQ, limiter state, and bounded completed cache.
 
-Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table, reads `MAX(version)`; if below `SCHEMA_VERSION` (21) it runs `SCHEMA` (idempotent `CREATE ... IF NOT EXISTS` / indexes) then applies each incremental `MIGRATIONS[v]` for `v > current && v > 1`, swallowing errors where a column/index already exists, and records the new version. Migration 17 adds `jobs.stall_count INTEGER NOT NULL DEFAULT 0`; existing jobs start at zero, while subsequent retry writes preserve the cumulative recovery bound. Migrations 18–21 persist the four `StallConfig` fields separately so each interrupted `ALTER TABLE` remains retryable.
+Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table,
+reads `MAX(version)`; if below `SCHEMA_VERSION` (22) it runs the idempotent base
+schema and applies later migrations. Migration 17 adds `jobs.stall_count`;
+migrations 18–21 persist the four `StallConfig` fields; migration 22 adds the
+atomic MessagePack `queue_state.dlq_config` policy blob.
 
 Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 

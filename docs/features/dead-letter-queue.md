@@ -196,6 +196,13 @@ SQLite `dlq` table (`src/infrastructure/persistence/schema.ts:73`): `id INTEGER 
 
 DLQ behavior is per-queue via `DlqConfig` (set with `queue.setDlqConfig(...)` / `SetDlqConfig`), not via environment variables:
 
+The effective merged configuration is written through to
+`queue_state.dlq_config` as one MessagePack blob. It survives broker restart and
+is restored before interrupted active jobs are classified, so recovery uses the
+same retry/retention policy that was active before the crash. Resetting every
+field to its default removes the control-state row when no other persisted
+queue control needs it; `obliterate` removes it unconditionally.
+
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `autoRetry` | `false` | Enable background auto-retry from DLQ |

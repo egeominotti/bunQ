@@ -142,7 +142,14 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 ### Manual transitions (`jobStateTransitions.ts`)
 
-`moveActiveToWait` (`:16`): processing → queue (`runAt = now`, `startedAt = null`, release resources, push, broadcast `waiting` prev `active`). `changeWaitingDelay` (`:59`): updates `runAt` of an in-queue job via `q.updateRunAt`. `moveToWaitingChildren` (`:84`): processing → `shard.waitingChildren` (release resources; jobIndex stays `queue`-typed). Every management claim of an active job (`moveActiveToWait`, `moveToWaitingChildren`, `moveJobToDelayed`, and active `discardJob`) also calls the shared `releaseClaimedJobOwnership` helper while removing the processing entry. The helper deletes the live `jobLocks` lease and removes the id from `clientJobs` (pruning empty owner sets), so a job that is no longer active cannot retain an observable lease or be acted on again by disconnect cleanup.
+`moveActiveToWait` (`:16`): processing → queue (`runAt = now`,
+`startedAt = null`, release resources, push, persist via `updateRunAt`, broadcast
+`waiting` prev `active`). Persisting the transition prevents restart recovery
+from misclassifying the manually requeued job as an interrupted active attempt.
+`changeWaitingDelay` (`:59`) updates `runAt` in place.
+`moveToWaitingChildren` (`:84`) parks processing work in
+`shard.waitingChildren`. Every management claim of active work also releases
+the lease and client ownership through `releaseClaimedJobOwnership`.
 
 ## Concurrency & Locking
 
@@ -155,6 +162,17 @@ Locks are per-shard `RWLock`s acquired via `withWriteLock` and are **sequential,
 Batch ack acquires each processing-shard lock and each queue-shard lock at most once, in parallel across distinct shards (`O(shards)` not `O(n)` — `ack.ts:303`).
 
 Lock-token verification, the **#101 grace window** (`isExpiredButOwned`: an expired-but-still-ours lock on a still-processing job is accepted, not lost), and stall-retry recovery live in `QueueManager.ack`/`fail` (`queueManager.ts:350`, `:496`), wrapping these raw functions. `WaiterManager` partitions waiters by queue, tracks the active count in O(1), and consumes entries through a head cursor. Notifications clear the waiter's timer immediately; surplus notifications coalesce into one edge-triggered `pending` bit instead of accumulating notification debt. The array is compacted only after the consumed prefix reaches 1,024 entries and at least half the array. ACK/fail and every path that releases concurrency/group ownership notify the released job's queue, so an unrelated queue cannot steal the wake-up.
+
+Long-poll waiters also accept an optional `AbortSignal`. TCP creates one signal
+per connection and aborts it before disconnect-time lease release. Aborting
+removes the waiter and timer without creating a pending notification. Pull
+checks the signal before attempting a dequeue and immediately after acquiring
+the shard lock, before rate/concurrency acquisition. Thus cancellation while
+queued on the lock consumes no limiter token. If cancellation lands at the
+handoff boundary, the final guard requeues the job and releases
+group/concurrency ownership before persistence, pulled counters, events, or
+lock-token creation. The same contract applies to single, batch, owner-lock,
+detached CLI, and durable recovery paths.
 
 ## Edge Cases & Failure Modes
 

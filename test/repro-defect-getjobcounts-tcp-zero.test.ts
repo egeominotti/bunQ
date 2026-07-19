@@ -27,10 +27,6 @@ import { QueueManager } from '../src/application/queueManager';
 import { createTcpServer, type TcpServer } from '../src/infrastructure/server/tcp';
 import { Queue } from '../src/client';
 
-function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 25000);
-}
-
 interface Harness {
   qm: QueueManager;
   server: TcpServer;
@@ -42,8 +38,8 @@ let harness: Harness | null = null;
 
 function startServer(): Harness {
   const qm = new QueueManager(); // in-memory, no dataPath
-  const port = randomPort();
-  const server = createTcpServer(qm, { hostname: '127.0.0.1', port });
+  const server = createTcpServer(qm, { hostname: '127.0.0.1', port: 0 });
+  const port = server.server.port;
   const h: Harness = { qm, server, port, queues: [] };
   harness = h;
   return h;

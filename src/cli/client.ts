@@ -5,11 +5,12 @@
 
 import type { Socket } from 'bun';
 import { formatOutput, formatError } from './output';
-import { pack, unpack } from 'msgpackr';
 import { FrameParser, FrameSizeError } from '../infrastructure/server/protocol';
 import { CommandError } from './commands/types';
 import { buildClientTls } from '../client/tcp/connection';
 import type { ClientTlsOptions } from '../client/tcp/types';
+import { buildCommand } from './commandRouter';
+import { decodeMessagePack, encodeMessagePack } from '../shared/msgpack';
 
 /** Client options */
 export interface ClientOptions {
@@ -47,7 +48,7 @@ export function clientTimeoutFor(cmd: Record<string, unknown>): number {
 }
 
 /** Send a command and wait for response */
-async function sendCommand(
+function sendCommand(
   socket: { write: (data: Uint8Array) => void; data: SocketData },
   command: Record<string, unknown>,
   timeoutMs = 30000
@@ -67,12 +68,12 @@ async function sendCommand(
       clearTimeout(timeoutId);
       reject(error);
     };
-    socket.write(FrameParser.frame(pack(command)));
+    socket.write(FrameParser.frame(encodeMessagePack(command)));
   });
 }
 
 /** Create TCP connection */
-async function connect(options: ClientOptions): Promise<{
+function connect(options: ClientOptions): Promise<{
   socket: { write: (data: Uint8Array) => void; end: () => void; data: SocketData };
   close: () => void;
 }> {
@@ -114,7 +115,7 @@ async function connect(options: ClientOptions): Promise<{
         for (const frame of frames) {
           if (socketData.resolve) {
             try {
-              const response = unpack(frame) as Record<string, unknown>;
+              const response = decodeMessagePack<Record<string, unknown>>(frame);
               socketData.resolve(response);
               socketData.resolve = null;
               socketData.reject = null;
@@ -254,52 +255,5 @@ export async function executeCommand(
     process.exit(err instanceof CommandError ? 2 : 1);
   } finally {
     connection?.close();
-  }
-}
-
-/** Build a command from CLI arguments */
-async function buildCommand(
-  command: string,
-  args: string[]
-): Promise<Record<string, unknown> | null> {
-  // Import command builders
-  const { buildCoreCommand } = await import('./commands/core');
-  const { buildJobCommand } = await import('./commands/job');
-  const { buildQueueCommand } = await import('./commands/queue');
-  const { buildDlqCommand } = await import('./commands/dlq');
-  const { buildCronCommand } = await import('./commands/cron');
-  const { buildWorkerCommand } = await import('./commands/worker');
-  const { buildWebhookCommand } = await import('./commands/webhook');
-  const { buildRateLimitCommand } = await import('./commands/rateLimit');
-  const { buildMonitorCommand } = await import('./commands/monitor');
-
-  switch (command) {
-    case 'push':
-    case 'pull':
-    case 'ack':
-    case 'fail':
-      return buildCoreCommand(command, args);
-    case 'job':
-      return buildJobCommand(args);
-    case 'queue':
-      return buildQueueCommand(args);
-    case 'dlq':
-      return buildDlqCommand(args);
-    case 'cron':
-      return buildCronCommand(args);
-    case 'worker':
-      return buildWorkerCommand(args);
-    case 'webhook':
-      return buildWebhookCommand(args);
-    case 'rate-limit':
-    case 'concurrency':
-      return buildRateLimitCommand(command, args);
-    case 'stats':
-    case 'metrics':
-    case 'health':
-    case 'ping':
-      return buildMonitorCommand(command);
-    default:
-      return null;
   }
 }

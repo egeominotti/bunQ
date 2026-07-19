@@ -109,9 +109,13 @@ export async function updateJobProgress(
     const job = ctx.processingShards[procIdx].get(jobId);
     if (!job) return false;
 
-    job.progress = Math.max(0, Math.min(100, progress));
-    if (message !== undefined) job.progressMessage = message;
-    job.lastHeartbeat = Date.now();
+    const clampedProgress = Math.max(0, Math.min(100, progress));
+    const effectiveMessage = message === undefined ? job.progressMessage : message;
+    const heartbeat = Date.now();
+    ctx.storage?.updateJobProgress(jobId, clampedProgress, effectiveMessage, heartbeat);
+    job.progress = clampedProgress;
+    job.progressMessage = effectiveMessage;
+    job.lastHeartbeat = heartbeat;
 
     // Broadcast progress event to internal subscribers
     ctx.eventsManager.broadcast({

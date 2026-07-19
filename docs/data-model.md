@@ -758,7 +758,8 @@ CREATE TABLE IF NOT EXISTS queue_state (
     stall_enabled INTEGER,         -- nullable for legacy/default policy
     stall_interval INTEGER,
     max_stalls INTEGER,
-    stall_grace_period INTEGER
+    stall_grace_period INTEGER,
+    dlq_config BLOB
 );
 ```
 
@@ -806,6 +807,7 @@ then records `SCHEMA_VERSION`.
 | 19      | `queue_state.stall_interval`                                    |
 | 20      | `queue_state.max_stalls`                                        |
 | 21      | `queue_state.stall_grace_period`                                |
+| 22      | `queue_state.dlq_config` (effective per-queue DLQ policy, MessagePack) |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -855,9 +857,12 @@ Two layers:
 
 ### MessagePack (on-disk + on-wire)
 
-`src/infrastructure/persistence/sqliteSerializer.ts` wraps `msgpackr`
-(`pack`/`unpack`, lines 13-27) — ~2-3× faster than JSON for blobs. The TCP
-transport likewise frames msgpack-encoded `Command`/`Response` objects.
+`src/shared/msgpack.ts` owns the canonical codec used by TCP, the CLI/client,
+and SQLite serialization. The common path uses msgpackr directly. A frame/blob
+containing `__proto__` is decoded as maps and materialized with
+`Object.defineProperty`, preserving `__proto__` and `__proto_` as distinct own
+data properties without invoking prototype setters. The TCP transport frames
+the same msgpack-encoded `Command`/`Response` objects.
 
 - `pack(data)` → `Uint8Array`; written into BLOB columns. The insert statement
   only packs non-empty arrays (`depends_on`/`children_ids`/`tags`/`timeline`

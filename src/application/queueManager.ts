@@ -11,7 +11,7 @@ import type { CronJob, CronJobInput } from '../domain/types/cron';
 import type { JobLogEntry, CreateWorkerOptions } from '../domain/types/worker';
 import { DEFAULT_STALL_CONFIG, type StallConfig } from '../domain/types/stall';
 import type { DlqConfig, DlqEntry, DlqFilter, DlqStats } from '../domain/types/dlq';
-import { FailureReason } from '../domain/types/dlq';
+import { DEFAULT_DLQ_CONFIG, FailureReason } from '../domain/types/dlq';
 import { Shard } from '../domain/queue/shard';
 import { SqliteStorage } from '../infrastructure/persistence/sqlite';
 import { CronScheduler } from '../infrastructure/scheduler/cronScheduler';
@@ -310,34 +310,48 @@ export class QueueManager {
     return pushJobBatch(queue, inputs, this.contextFactory.getPushContext());
   }
 
-  async pull(queue: string, timeoutMs: number = 0): Promise<Job | null> {
-    return pullJob(queue, timeoutMs, this.contextFactory.getPullContext());
+  async pull(queue: string, timeoutMs: number = 0, signal?: AbortSignal): Promise<Job | null> {
+    return pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
   }
 
   async pullWithLock(
     queue: string,
     owner: string,
     timeoutMs: number = 0,
-    lockTtl: number = DEFAULT_LOCK_TTL
+    lockTtl: number = DEFAULT_LOCK_TTL,
+    signal?: AbortSignal
   ): Promise<{ job: Job | null; token: string | null }> {
-    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext());
+    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
     if (!job) return { job: null, token: null };
     const token = lockMgr.createLock(job.id, owner, this.contextFactory.getLockContext(), lockTtl);
     return { job, token };
   }
 
-  async pullBatch(queue: string, count: number, timeoutMs: number = 0): Promise<Job[]> {
-    return pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext());
+  async pullBatch(
+    queue: string,
+    count: number,
+    timeoutMs: number = 0,
+    signal?: AbortSignal
+  ): Promise<Job[]> {
+    return pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext(), signal);
   }
 
+  // biome-ignore lint/complexity/useMaxParams: preserves the public API while adding cancellation
   async pullBatchWithLock(
     queue: string,
     count: number,
     owner: string,
     timeoutMs: number = 0,
-    lockTtl: number = DEFAULT_LOCK_TTL
+    lockTtl: number = DEFAULT_LOCK_TTL,
+    signal?: AbortSignal
   ): Promise<{ jobs: Job[]; tokens: string[] }> {
-    const jobs = await pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext());
+    const jobs = await pullJobBatch(
+      queue,
+      count,
+      timeoutMs,
+      this.contextFactory.getPullContext(),
+      signal
+    );
     const tokens: string[] = [];
     for (const job of jobs) {
       const token = lockMgr.createLock(
@@ -1057,11 +1071,18 @@ export class QueueManager {
     if (!this.storage) return;
     const state = this.shards[shardIndex(queue)].getState(queue);
     const stallConfig = this.shards[shardIndex(queue)].getStallConfig(queue);
+    const dlqConfig = this.shards[shardIndex(queue)].getDlqConfig(queue);
     const hasCustomStallConfig =
       stallConfig.enabled !== DEFAULT_STALL_CONFIG.enabled ||
       stallConfig.stallInterval !== DEFAULT_STALL_CONFIG.stallInterval ||
       stallConfig.maxStalls !== DEFAULT_STALL_CONFIG.maxStalls ||
       stallConfig.gracePeriod !== DEFAULT_STALL_CONFIG.gracePeriod;
+    const hasCustomDlqConfig =
+      dlqConfig.autoRetry !== DEFAULT_DLQ_CONFIG.autoRetry ||
+      dlqConfig.autoRetryInterval !== DEFAULT_DLQ_CONFIG.autoRetryInterval ||
+      dlqConfig.maxAutoRetries !== DEFAULT_DLQ_CONFIG.maxAutoRetries ||
+      dlqConfig.maxAge !== DEFAULT_DLQ_CONFIG.maxAge ||
+      dlqConfig.maxEntries !== DEFAULT_DLQ_CONFIG.maxEntries;
     // When control-state returns fully to default (not paused, no limits), drop
     // the row instead of persisting an all-default placeholder. Keeps the table
     // free of noise rows for ephemeral queues that only ever call resume/clear*,
@@ -1070,7 +1091,8 @@ export class QueueManager {
       !state.paused &&
       state.rateLimit === null &&
       state.concurrencyLimit === null &&
-      !hasCustomStallConfig
+      !hasCustomStallConfig &&
+      !hasCustomDlqConfig
     ) {
       this.storage.deleteQueueState(queue);
       return;
@@ -1082,6 +1104,7 @@ export class QueueManager {
       rateLimitDuration: state.rateLimitDuration,
       rateLimitExpiresAt: state.rateLimitExpiresAt,
       stallConfig,
+      dlqConfig,
     });
   }
 
@@ -1126,6 +1149,7 @@ export class QueueManager {
 
   setDlqConfig(queue: string, config: Record<string, unknown>): void {
     this.shards[shardIndex(queue)].setDlqConfig(queue, config);
+    this.persistQueueState(queue);
   }
 
   getDlqConfig(queue: string): DlqConfig {
@@ -1547,11 +1571,15 @@ export class QueueManager {
     if (!childJob.parentId) return;
 
     if (childJob.continueParentOnFailure) {
-      this.continueParentOnChildFailure(childJob, error).catch(() => {});
+      this.continueParentOnChildFailure(childJob, error).catch(() => {
+        // Best-effort parent propagation; child failure is already durable.
+      });
     } else {
       // removeDependencyOnFailure or ignoreDependencyOnFailure
       this.removeChildFromParentDeps(childJob, error, childJob.ignoreDependencyOnFailure).catch(
-        () => {}
+        () => {
+          // Best-effort parent propagation; child failure is already durable.
+        }
       );
     }
   }

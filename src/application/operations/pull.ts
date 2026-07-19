@@ -176,16 +176,18 @@ function tryDequeueNextJob(
 }
 
 /** Wait until either a notification arrives, the next delay matures, or the pull deadline. */
-async function waitForNextCandidate(
-  shard: Shard,
-  queue: string,
-  deadline: number,
-  now: number,
-  nextRunAt: number | null
-): Promise<void> {
+async function waitForNextCandidate(options: {
+  shard: Shard;
+  queue: string;
+  deadline: number;
+  now: number;
+  nextRunAt: number | null;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const { shard, queue, deadline, now, nextRunAt, signal } = options;
   const remaining = deadline - now;
   const untilNextRun = nextRunAt === null ? remaining : Math.max(1, nextRunAt - now);
-  await shard.waitForJob(queue, Math.min(remaining, untilNextRun));
+  await shard.waitForJob(queue, Math.min(remaining, untilNextRun), signal);
 }
 
 /**
@@ -282,17 +284,23 @@ async function requeueJob(job: Job, queue: string, idx: number, ctx: PullContext
 export async function pullJob(
   queue: string,
   timeoutMs: number,
-  ctx: PullContext
+  ctx: PullContext,
+  signal?: AbortSignal
 ): Promise<Job | null> {
   const startNs = Bun.nanoseconds();
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
   const idx = shardIndex(queue);
 
   while (true) {
-    const attempt = await tryPullFromShard(queue, idx, ctx);
+    if (signal?.aborted) return null;
+    const attempt = await tryPullFromShard(queue, idx, ctx, signal);
     const job = attempt.job;
 
     if (job) {
+      if (signal?.aborted) {
+        await requeueJob(job, queue, idx, ctx);
+        return null;
+      }
       let delivered = false;
       try {
         delivered = finalizeProcessing(job, queue, ctx);
@@ -314,7 +322,14 @@ export async function pullJob(
       return null;
     }
 
-    await waitForNextCandidate(ctx.shards[idx], queue, deadline, now, attempt.nextRunAt);
+    await waitForNextCandidate({
+      shard: ctx.shards[idx],
+      queue,
+      deadline,
+      now,
+      nextRunAt: attempt.nextRunAt,
+      signal,
+    });
   }
 }
 
@@ -324,9 +339,11 @@ export async function pullJob(
 async function tryPullFromShard(
   queue: string,
   idx: number,
-  ctx: PullContext
+  ctx: PullContext,
+  signal?: AbortSignal
 ): Promise<PullAttempt> {
   return await withWriteLock(ctx.shardLocks[idx], () => {
+    if (signal?.aborted) return { job: null, nextRunAt: null };
     const shard = ctx.shards[idx];
     const state = shard.getState(queue);
 
@@ -349,17 +366,25 @@ export async function pullJobBatch(
   queue: string,
   count: number,
   timeoutMs: number,
-  ctx: PullContext
+  ctx: PullContext,
+  signal?: AbortSignal
 ): Promise<Job[]> {
   const startNs = Bun.nanoseconds();
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
   const idx = shardIndex(queue);
 
   while (true) {
-    const attempt = await tryPullBatchFromShard(queue, idx, count, ctx);
+    if (signal?.aborted) return [];
+    const attempt = await tryPullBatchFromShard(queue, idx, count, ctx, signal);
     const jobs = attempt.jobs;
 
     if (jobs.length > 0) {
+      if (signal?.aborted) {
+        for (const job of jobs) {
+          await requeueJob(job, queue, idx, ctx);
+        }
+        return [];
+      }
       let delivered: Job[];
       try {
         delivered = finalizeProcessingBatch(jobs, queue, ctx);
@@ -389,7 +414,14 @@ export async function pullJobBatch(
       return [];
     }
 
-    await waitForNextCandidate(ctx.shards[idx], queue, deadline, now, attempt.nextRunAt);
+    await waitForNextCandidate({
+      shard: ctx.shards[idx],
+      queue,
+      deadline,
+      now,
+      nextRunAt: attempt.nextRunAt,
+      signal,
+    });
   }
 }
 
@@ -400,9 +432,11 @@ async function tryPullBatchFromShard(
   queue: string,
   idx: number,
   count: number,
-  ctx: PullContext
+  ctx: PullContext,
+  signal?: AbortSignal
 ): Promise<BatchPullAttempt> {
   return await withWriteLock(ctx.shardLocks[idx], () => {
+    if (signal?.aborted) return { jobs: [], nextRunAt: null };
     const shard = ctx.shards[idx];
     const state = shard.getState(queue);
     const jobs: Job[] = [];

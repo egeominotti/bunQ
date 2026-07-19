@@ -94,13 +94,24 @@ export class Shard {
     }
   }
 
-  waitForJob(timeoutMs: number): Promise<void>;
-  waitForJob(queue: string, timeoutMs: number): Promise<void>;
-  waitForJob(queueOrTimeout: string | number, maybeTimeout?: number): Promise<void> {
+  waitForJob(timeoutMs: number, signal?: AbortSignal): Promise<void>;
+  waitForJob(queue: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
+  waitForJob(
+    queueOrTimeout: string | number,
+    maybeTimeoutOrSignal?: number | AbortSignal,
+    maybeSignal?: AbortSignal
+  ): Promise<void> {
     if (typeof queueOrTimeout === 'number') {
-      return this.waiterManager.waitForJob(queueOrTimeout);
+      return this.waiterManager.waitForJob(
+        queueOrTimeout,
+        maybeTimeoutOrSignal as AbortSignal | undefined
+      );
     }
-    return this.waiterManager.waitForJob(queueOrTimeout, maybeTimeout ?? 0);
+    return this.waiterManager.waitForJob(
+      queueOrTimeout,
+      typeof maybeTimeoutOrSignal === 'number' ? maybeTimeoutOrSignal : 0,
+      maybeSignal
+    );
   }
 
   // ============ Queue Operations ============

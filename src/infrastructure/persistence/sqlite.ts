@@ -8,7 +8,12 @@ import { Database } from 'bun:sqlite';
 import type { Job, JobId, JobTimelineEntry } from '../../domain/types/job';
 import type { StallConfig } from '../../domain/types/stall';
 import type { CronJob } from '../../domain/types/cron';
-import { type DlqEntry, FailureReason, createDlqEntry } from '../../domain/types/dlq';
+import {
+  type DlqConfig,
+  type DlqEntry,
+  FailureReason,
+  createDlqEntry,
+} from '../../domain/types/dlq';
 import { PRAGMA_SETTINGS, SCHEMA, MIGRATION_TABLE, SCHEMA_VERSION, MIGRATIONS } from './schema';
 import {
   prepareStatements,
@@ -528,6 +533,19 @@ export class SqliteStorage {
     });
   }
 
+  /** Persist progress and its heartbeat as one active-job mutation. */
+  updateJobProgress(
+    jobId: JobId,
+    progress: number,
+    message: string | null,
+    lastHeartbeat: number
+  ): void {
+    this.flushIfBuffered(jobId);
+    this.safeWrite(() => {
+      this.statements.get('updateJobProgress')!.run(progress, message, lastHeartbeat, jobId);
+    });
+  }
+
   /**
    * Persist a delay change (moveToDelayed / changeDelay) so the new `run_at`
    * survives a restart. Without this the delay lives only in the in-memory heap:
@@ -895,6 +913,7 @@ export class SqliteStorage {
       rateLimitDuration?: number | null;
       rateLimitExpiresAt?: number | null;
       stallConfig?: StallConfig | null;
+      dlqConfig?: DlqConfig | null;
     }
   ): void {
     this.safeWrite(() => {
@@ -914,7 +933,8 @@ export class SqliteStorage {
               : 0,
           state.stallConfig?.stallInterval ?? null,
           state.stallConfig?.maxStalls ?? null,
-          state.stallConfig?.gracePeriod ?? null
+          state.stallConfig?.gracePeriod ?? null,
+          state.dlqConfig ? pack(state.dlqConfig) : null
         );
     });
   }
@@ -928,6 +948,7 @@ export class SqliteStorage {
     rateLimitDuration: number | null;
     rateLimitExpiresAt: number | null;
     stallConfig: StallConfig | null;
+    dlqConfig: DlqConfig | null;
   }> {
     const rows = this.statements.get('loadQueueState')!.all() as DbQueueState[];
     return rows.map((row) => ({
@@ -949,6 +970,7 @@ export class SqliteStorage {
               maxStalls: row.max_stalls,
               gracePeriod: row.stall_grace_period,
             },
+      dlqConfig: unpack<DlqConfig | null>(row.dlq_config, null, `loadQueueDlqConfig:${row.name}`),
     }));
   }
 

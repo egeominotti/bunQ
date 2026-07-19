@@ -62,7 +62,7 @@ export async function executeBackupCommand(args: string[]): Promise<BackupComman
 
     default:
       throw new CommandError(
-        `Unknown backup subcommand: ${subcommand}. Use: now, list, restore, status`
+        `Unknown backup subcommand: ${subcommand}. Use: now, create, list, restore, status`
       );
   }
 }

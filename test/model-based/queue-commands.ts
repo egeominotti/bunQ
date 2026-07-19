@@ -55,6 +55,8 @@ class PushCommand extends QueueCommand {
         generation,
         maxAttempts: this.maxAttempts,
         priority: this.priority,
+        progress: 0,
+        progressMessage: null,
         stallCount: 0,
         state: this.delayed ? 'delayed' : readyState(this.priority),
       });
@@ -129,9 +131,11 @@ class AckCommand extends QueueCommand {
       token: real.tokens.get(id),
     });
     expect(response.ok).toBe(true);
-    model.jobs.get(id)!.state = 'completed';
-    model.jobs.get(id)!.diskState = 'completed';
-    model.terminalGenerations.add(terminalGeneration(id, model.jobs.get(id)!));
+    const job = model.jobs.get(id)!;
+    job.state = 'completed';
+    job.diskState = 'completed';
+    job.progress = 100;
+    model.terminalGenerations.add(terminalGeneration(id, job));
     real.tokens.delete(id);
     await this.verify(model, real);
   }

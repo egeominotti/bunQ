@@ -35,7 +35,11 @@ export function parseNumberArg(value: string | undefined, name: string): number 
   if (!/^-?\d+$/.test(value)) {
     throw new CommandError(`Invalid number for ${name}: ${value}`);
   }
-  return parseInt(value, 10);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new CommandError(`Invalid number for ${name}: ${value}`);
+  }
+  return parsed === 0 ? 0 : parsed;
 }
 
 /** Parse job ID argument (UUIDs, numeric IDs, or custom IDs) */

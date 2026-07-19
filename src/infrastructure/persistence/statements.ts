@@ -10,6 +10,7 @@ export type StatementName =
   | 'insertJob'
   | 'updateJobState'
   | 'completeJob'
+  | 'updateJobProgress'
   | 'deleteJob'
   | 'deleteJobResult'
   | 'getJob'
@@ -70,6 +71,9 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
   completeJob:
     'UPDATE jobs SET state = ?, completed_at = ?, progress = 100, timeline = ? WHERE id = ?',
 
+  updateJobProgress:
+    'UPDATE jobs SET progress = ?, progress_msg = ?, last_heartbeat = ? WHERE id = ?',
+
   deleteJob: 'DELETE FROM jobs WHERE id = ?',
 
   deleteJobResult: 'DELETE FROM job_results WHERE job_id = ?',
@@ -101,10 +105,10 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
 
   // Queue control-state persistence (#100): paused / rate-limit / concurrency.
   upsertQueueState:
-    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR REPLACE INTO queue_state (name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period, dlq_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 
   loadQueueState:
-    'SELECT name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period FROM queue_state',
+    'SELECT name, paused, rate_limit, concurrency_limit, rate_limit_duration, rate_limit_expires_at, stall_enabled, stall_interval, max_stalls, stall_grace_period, dlq_config FROM queue_state',
 
   deleteQueueState: 'DELETE FROM queue_state WHERE name = ?',
 };
@@ -189,4 +193,5 @@ export interface DbQueueState {
   stall_interval: number | null;
   max_stalls: number | null;
   stall_grace_period: number | null;
+  dlq_config: Uint8Array | null;
 }

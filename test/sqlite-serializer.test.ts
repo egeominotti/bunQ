@@ -838,6 +838,7 @@ describe('SQL_STATEMENTS', () => {
       'insertJob',
       'updateJobState',
       'completeJob',
+      'updateJobProgress',
       'deleteJob',
       'deleteJobResult',
       'getJob',

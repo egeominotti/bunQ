@@ -46,6 +46,7 @@ export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext):
     shard.notify(job.queue);
   });
 
+  ctx.storage?.updateRunAt(jobId, job.runAt);
   ctx.eventsManager.broadcast({
     eventType: 'waiting' as EventType,
     jobId,

@@ -12,9 +12,7 @@ import * as dlqOps from '../../application/dlqManager';
 
 /** Set DLQ configuration (embedded only) */
 export function setDlqConfig(queue: string, config: Partial<DlqConfig>): void {
-  const manager = getSharedManager();
-  const ctx = getDlqContext(manager);
-  dlqOps.configureDlq(queue, ctx, toDomainDlqConfig(config));
+  getSharedManager().setDlqConfig(queue, toDomainDlqConfig(config));
 }
 
 /** Get DLQ configuration (embedded only) */

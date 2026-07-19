@@ -18,10 +18,10 @@ import {
 import { uuid } from '../../shared/hash';
 import { tcpLog } from '../../shared/logger';
 import { getRateLimiter } from './rateLimiter';
-import { pack, unpack } from 'msgpackr';
 import { Semaphore, withSemaphore } from '../../shared/semaphore';
 import { SocketWriteQueue } from './socketWriteQueue';
 import { loadTlsOptions, type TlsServerOptions } from './tls';
+import { decodeMessagePack, encodeMessagePack } from '../../shared/msgpack';
 
 /** Max concurrent commands per connection for pipelining */
 const MAX_CONCURRENT_PER_CONNECTION = 50;
@@ -109,6 +109,7 @@ export interface TcpServerConfig {
 /** Per-connection data */
 interface ConnectionData {
   state: ConnectionState;
+  abortController: AbortController;
   frameParser: FrameParser;
   ctx: HandlerContext;
   /** Semaphore for limiting concurrent command processing (pipelining) */
@@ -121,12 +122,12 @@ interface ConnectionData {
 
 /** Serialize response to framed msgpack */
 function serializeResponse(response: Response): Uint8Array {
-  return FrameParser.frame(pack(response));
+  return FrameParser.frame(encodeMessagePack(response));
 }
 
 /** Error response as framed msgpack */
 function errorResponse(message: string, reqId?: string): Uint8Array {
-  return FrameParser.frame(pack({ ok: false, error: message, reqId }));
+  return FrameParser.frame(encodeMessagePack({ ok: false, error: message, reqId }));
 }
 
 /**
@@ -183,15 +184,18 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     if (socket.data) return;
     const clientId = uuid();
     const state = createConnectionState(clientId);
+    const abortController = new AbortController();
     const ctx: HandlerContext = {
       queueManager,
       authTokens,
       authenticated: authTokens.size === 0, // Auto-auth if no tokens
       clientId, // For job ownership tracking
+      signal: abortController.signal,
     };
 
     socket.data = {
       state,
+      abortController,
       frameParser: new FrameParser(),
       ctx,
       semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
@@ -262,7 +266,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
       const processFrame = async (frame: Uint8Array): Promise<void> => {
         let cmd: Command | undefined;
         try {
-          cmd = unpack(frame) as Command;
+          cmd = decodeMessagePack<Command>(frame);
         } catch {
           // Invalid complete frames still consume protocol quota. They cannot
           // carry a trustworthy reqId because msgpack decoding failed.
@@ -312,6 +316,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
       // A socket can close before `open`/`data` ever initialised its state
       // (e.g. TLS handshake aborted) — nothing to release. #108
       if (!socket.data) return;
+      socket.data.abortController.abort();
       const clientId = socket.data.state.clientId;
       // Cancel the slowloris stall timer and drop any buffered-but-unwritten
       // bytes; the socket is gone.
@@ -382,7 +387,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
 
     /** Broadcast to all connections */
     broadcast(message: unknown): void {
-      const frame = FrameParser.frame(pack(message));
+      const frame = FrameParser.frame(encodeMessagePack(message));
       for (const socket of connections.values()) {
         // Each connection writes through its own backpressure-aware queue so a
         // slow reader buffers (in order) instead of dropping frame tail bytes.

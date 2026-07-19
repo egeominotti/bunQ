@@ -22,6 +22,8 @@ export interface ModelJob {
   generation: number;
   maxAttempts: number;
   priority: number;
+  progress: number;
+  progressMessage: string | null;
   stallCount: number;
   state: ModelState;
 }
@@ -52,6 +54,8 @@ interface JobRow {
   id: string;
   max_attempts: number;
   priority: number;
+  progress: number;
+  progress_msg: string | null;
   stall_count: number;
   state: string;
 }
@@ -113,12 +117,16 @@ export class RealQueue {
         data?: { generation?: number };
         maxAttempts?: number;
         priority?: number;
+        progress?: number;
+        progressMessage?: string | null;
         stallCount?: number;
       };
       expect(apiJob.data?.generation, `API generation for ${id}`).toBe(job.generation);
       expect(apiJob.priority, `API priority for ${id}`).toBe(job.priority);
       expect(apiJob.attempts, `API attempts for ${id}`).toBe(job.attempts);
       expect(apiJob.maxAttempts, `API maxAttempts for ${id}`).toBe(job.maxAttempts);
+      expect(apiJob.progress, `API progress for ${id}`).toBe(job.progress);
+      expect(apiJob.progressMessage, `API progress message for ${id}`).toBe(job.progressMessage);
       expect(apiJob.stallCount, `API stallCount for ${id}`).toBe(job.stallCount);
       expect(job.attempts, `attempt bound for ${id}`).toBeLessThanOrEqual(job.maxAttempts);
       expect(job.stallCount, `stall bound for ${id}`).toBeLessThanOrEqual(3);
@@ -131,7 +139,7 @@ export class RealQueue {
     try {
       const rows = db
         .query<JobRow, [string]>(
-          'SELECT id, data, priority, attempts, max_attempts, stall_count, state FROM jobs WHERE queue = ? ORDER BY id'
+          'SELECT id, data, priority, progress, progress_msg, attempts, max_attempts, stall_count, state FROM jobs WHERE queue = ? ORDER BY id'
         )
         .all(this.queue);
       const dlq = db.query<{ job_id: string }, []>('SELECT job_id FROM dlq ORDER BY job_id').all();
@@ -167,6 +175,10 @@ export class RealQueue {
         expect(row.priority, `SQLite priority for ${row.id}`).toBe(expected!.priority);
         expect(row.attempts, `SQLite attempts for ${row.id}`).toBe(expected!.attempts);
         expect(row.max_attempts, `SQLite maxAttempts for ${row.id}`).toBe(expected!.maxAttempts);
+        expect(row.progress, `SQLite progress for ${row.id}`).toBe(expected!.progress);
+        expect(row.progress_msg, `SQLite progress message for ${row.id}`).toBe(
+          expected!.progressMessage
+        );
         expect(row.stall_count, `SQLite stallCount for ${row.id}`).toBe(expected!.stallCount);
         const payload = unpack(row.data) as { generation?: number };
         expect(payload.generation, `SQLite generation for ${row.id}`).toBe(expected!.generation);

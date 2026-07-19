@@ -11,6 +11,7 @@
 import { describe, test, expect, afterEach, setDefaultTimeout } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
 import type { WorkflowEvent, StepEvent } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 setDefaultTimeout(30_000);
 
@@ -38,9 +39,7 @@ describe('Workflow Engine - Step Retry', () => {
     engine.register(flow);
 
     const run = await engine.start('retry-test');
-    await new Promise((r) => setTimeout(r, 8000));
-
-    const exec = engine.getExecution(run.id);
+    const exec = await waitForWorkflowState(engine, run.id, 'completed');
     expect(exec!.state).toBe('completed');
     expect(attempts).toBe(3);
     expect(exec!.steps['flaky'].status).toBe('completed');
@@ -64,9 +63,7 @@ describe('Workflow Engine - Step Retry', () => {
     engine.register(flow);
 
     const run = await engine.start('retry-exhaust');
-    await new Promise((r) => setTimeout(r, 8000));
-
-    const exec = engine.getExecution(run.id);
+    const exec = await waitForWorkflowState(engine, run.id, 'failed');
     expect(exec!.state).toBe('failed');
     expect(attempts).toBe(2);
     expect(exec!.steps['always-fail'].status).toBe('failed');
@@ -90,9 +87,7 @@ describe('Workflow Engine - Step Retry', () => {
     engine.register(flow);
 
     const run = await engine.start('no-retry');
-    await new Promise((r) => setTimeout(r, 1500));
-
-    const exec = engine.getExecution(run.id);
+    const exec = await waitForWorkflowState(engine, run.id, 'failed');
     expect(exec!.state).toBe('failed');
     expect(attempts).toBe(1);
   });
@@ -126,9 +121,7 @@ describe('Workflow Engine - Step Retry', () => {
     engine.register(flow);
 
     const run = await engine.start('retry-compensate');
-    await new Promise((r) => setTimeout(r, 8000));
-
-    const exec = engine.getExecution(run.id);
+    const exec = await waitForWorkflowState(engine, run.id, 'failed');
     expect(exec!.state).toBe('failed');
     expect(attempts).toBe(2);
     expect(compensations).toEqual(['undo-setup']);
@@ -431,8 +424,8 @@ describe('Workflow Engine - Observability', () => {
     engine.on('step:retry', (e) => retryEvents.push(e as StepEvent));
     engine.register(flow);
 
-    await engine.start('retry-events');
-    await new Promise((r) => setTimeout(r, 8000));
+    const run = await engine.start('retry-events');
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     expect(retryEvents.length).toBe(2); // 2 retries before success on 3rd
     expect(retryEvents[0].stepName).toBe('flaky');

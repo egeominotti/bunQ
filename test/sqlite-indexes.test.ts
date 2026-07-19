@@ -34,8 +34,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 21', () => {
-    expect(SCHEMA_VERSION).toBe(21);
+  test('schema version is 22', () => {
+    expect(SCHEMA_VERSION).toBe(22);
   });
 
   test('jobs persist cumulative stall counts', () => {

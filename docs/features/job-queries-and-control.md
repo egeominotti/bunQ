@@ -204,7 +204,16 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 - **Pagination correctness:** logical-state filtering happens before SQL `LIMIT/OFFSET`; derived sources are merged and deduplicated before one final slice. `(created_at, id)` is the deterministic tie-breaker for both ascending and descending pages.
 - **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:209`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.
 - **Idempotency / not-found:** all mutations return `false` (or `[]`) when the job is absent or in the wrong location; `cancelJob`/`promoteJob`/`changeJobPriority` only act on queued jobs, `updateJobProgress`/`moveJobToDelayed` only on processing jobs. `promoteJob` no-ops if `runAt <= now` (already due).
-- **Progress clamping:** `updateJobProgress` clamps to `[0,100]` and refreshes `lastHeartbeat`, so a progress update doubles as a heartbeat for stall detection. The progress webhook failure is caught and logged, never propagated.
+- **Progress clamping and durability:** `updateJobProgress` clamps to `[0,100]`,
+  preserves the prior message when a later update omits one, refreshes
+  `lastHeartbeat`, and writes all three values through to SQLite while the
+  processing lock is held. A confirmed update therefore survives active-job
+  crash recovery. The progress webhook failure is caught and logged, never
+  propagated.
+- **Active-to-waiting durability:** `moveActiveToWait` persists `runAt`, derived
+  `state='waiting'`, and `startedAt=NULL` after the in-memory claim/requeue.
+  Restart therefore reloads the job as ready work without charging a phantom
+  crash attempt.
 - **`updateJobData` repeat-chain follow:** when the target id is completed/missing, it follows `repeatChain` to patch the successor job created by `handleRepeat` (`jobManagement.ts:170`).
 - **SQLite write failures swallowed:** `safeDeleteJob`/`safeDeleteDlqEntry` (`queueControl.ts:83`) catch errors (e.g. `SQLITE_FULL`); in-memory state is already cleared and the orphan row is GC'd by crash-recovery on restart.
 - **Memory-bound visibility:** completed-job queries depend on bounded LRU/Set collections — `completedJobs` (50k), `jobResults` (10k), `jobLogs` (10k), `customIdMap` (50k). Once evicted, results/custom-id lookups fall back to SQLite or return `null`. `getJobByCustomId` returns `null` if the LRU has evicted the mapping.

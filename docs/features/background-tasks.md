@@ -148,7 +148,12 @@ See [data-model](../data-model.md) for full definitions. The most relevant shape
 
 Runs once before the intervals start (called from `QueueManager` constructor, `queueManager.ts:202`). No-op if `ctx.storage` is null (in-memory mode). It loads `loadCompletedJobIds()` and `loadDlqJobIds()` up front, then:
 
-1. **Phase 1 — active jobs** (`:238`): before scanning, recovery restores each persisted custom `StallConfig` from `queue_state`, because its `maxStalls` value is needed to classify interrupted work. It then repeatedly loads the first `RECOVERY_BATCH_SIZE = 10000` rows. Every handled row leaves the active result set (retry changes it to waiting; terminal/cron/DLQ-orphan handling deletes it), so incrementing `OFFSET` over the shrinking set would skip rows. Each row is treated as stalled: cron-`preventOverlap` jobs are dropped, stale DLQ duplicates are deleted, corrupt dependencies are quarantined, and normal jobs increment both `attempts` and persisted `stall_count`. Reaching `maxAttempts` or `maxStalls` persists one DLQ row but does not add it to the in-memory shard; the later `loadDlq()` pass is the single restore path, preventing duplicate entries. Otherwise Phase 1 persists one retry with backoff but does not enqueue it.
+1. **Phase 1 — active jobs** (`:238`): before scanning, recovery restores each
+   persisted custom `StallConfig` and `DlqConfig` from `queue_state`, because
+   their bounds, retry scheduling, and retention fields are needed to classify
+   interrupted work. It then repeatedly loads the first
+   `RECOVERY_BATCH_SIZE = 10000` rows. Every handled row leaves the active result
+   set, so incrementing `OFFSET` over the shrinking set would skip rows.
 2. **Phase 2 — pending jobs** (`:312`): paginated by deterministic `priority DESC, run_at ASC, id ASC`. This phase is the single authoritative enqueue path for both original pending jobs and retries persisted by Phase 1, preventing duplicate heap entries/counter increments. Corrupt-deps are quarantined; unsatisfied dependencies enter `waitingDeps`; dedup mappings are restored.
 3. **DLQ restore** (`:378`): `loadDlq()` restores every persisted entry into memory exactly once (this is why `quarantineCorruptDependsOn` deliberately does NOT touch in-memory DLQ — it only persists + drops the job row).
 4. **Queue control-state restore** (`:391`, issue #100): the `loadQueueState()` snapshot used before Phase 1 for stall policy is reused to apply `paused` / `rateLimit` / `concurrencyLimit` directly to the owning shard; without it every queue silently un-pauses on restart. In-memory only, no write-back loop.

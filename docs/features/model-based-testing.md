@@ -143,7 +143,7 @@ regression before changing runtime code. The default unit suite, and therefore
 
 ## Defects found by the model
 
-The expanded campaign and its full-suite gate found ten classes of lifecycle,
+The expanded campaign and its full-suite gate found eleven classes of lifecycle,
 durability, recovery, and persistence-boundary defects:
 
 - `Update` changed data only in memory; restart restored the old payload.
@@ -166,6 +166,9 @@ durability, recovery, and persistence-boundary defects:
   uniqueness.
 - moving an active job back to delayed released scheduling resources but left
   its live lease and TCP-client ownership entries behind.
+- moving an active job back to waiting updated memory, counters, ownership, and
+  delivery state but left its durable row `active`, so restart charged a
+  phantom crash attempt instead of restoring ready work.
 - adding persisted `stall_count` made legacy and low-level jobs without an
   explicit `stallCount` fail the SQLite `NOT NULL` constraint. The persistence
   boundary now normalizes only an omitted value to zero for single, buffered,
@@ -181,9 +184,9 @@ in deterministic order and exposes exactly one generation. Management commands
 that claim active work now release lease and client ownership through one
 idempotent transition.
 
-## 53-invariant coverage register
+## 69-invariant coverage register
 
-The project tracks the executable production checklist as 56 invariants in 17
+The project tracks the executable production checklist as 69 invariants in 18
 categories. The number is a coverage register, not a claim that one property
 tests every subsystem. The main lifecycle state machine owns the invariants
 that can be checked deterministically after each generated command; focused
@@ -217,6 +220,10 @@ migration, and worker-runtime contracts.
 | 54 | Correlated overload response | real TCP limiter regression requires the triggering `reqId` |
 | 55 | Complete stale-dependency GC | shard, reverse index, ownership, write buffer, and SQLite regression |
 | 56 | Live dependency result retention | low-cap fan-in, fan-out, batch, and `removeOnComplete` regressions |
+| 57 | Durable progress mutation | model oracle plus active-job restart regression |
+| 58 | Durable per-queue DLQ policy | queue-state restart regression |
+| 59 | Durable manual active-to-waiting transition | generated lifecycle model plus restart regression |
+| 60-69 | CLI determinism and complete surface | generated argv/flag properties, exact command/MessagePack fixtures, real CLI/API/SQLite parity, interruption recovery, and full E2E command matrices |
 
 Adding an invariant to this register requires an executable assertion and a
 named owning suite. Specialist coverage is not silently presented as part of

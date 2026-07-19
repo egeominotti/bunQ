@@ -103,6 +103,7 @@ class RetryAllCommand extends QueueCommand {
       job.state = readyState(job.priority);
       job.diskState = 'waiting';
       job.attempts = 0;
+      if (this.completed) job.progress = 0;
       if (!this.completed) job.stallCount = 0;
     }
     await this.verify(model, real);

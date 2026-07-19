@@ -243,6 +243,9 @@ export function recover(ctx: BackgroundContext): void {
     if (qs.stallConfig) {
       ctx.shards[shardIndex(qs.name)].setStallConfig(qs.name, qs.stallConfig);
     }
+    if (qs.dlqConfig) {
+      ctx.shards[shardIndex(qs.name)].setDlqConfig(qs.name, qs.dlqConfig);
+    }
   }
 
   const now = Date.now();

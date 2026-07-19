@@ -10,8 +10,8 @@ import { DEFAULT_CONNECTION } from './types';
 import { HealthTracker } from './health';
 import { ReconnectManager } from './reconnect';
 import { createConnection, CommandQueue } from './connection';
-import { pack, unpack } from 'msgpackr';
 import { FrameParser } from '../../infrastructure/server/protocol';
+import { decodeMessagePack, encodeMessagePack } from '../../shared/msgpack';
 
 /**
  * Sentinel error class for the synthetic rejection issued by close()/rejectAll().
@@ -72,7 +72,7 @@ export class TcpClient extends EventEmitter {
     event: 'health',
     listener: (data: { type: string; latency?: number; reason?: string }) => void
   ): this;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback overload requires any[]
   on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -88,7 +88,7 @@ export class TcpClient extends EventEmitter {
     event: 'health',
     listener: (data: { type: string; latency?: number; reason?: string }) => void
   ): this;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback overload requires any[]
   once(event: string, listener: (...args: any[]) => void): this {
     return super.once(event, listener);
   }
@@ -217,7 +217,7 @@ export class TcpClient extends EventEmitter {
    */
   private handleData(frame: Uint8Array): void {
     try {
-      const response = unpack(frame) as Record<string, unknown>;
+      const response = decodeMessagePack<Record<string, unknown>>(frame);
       const reqId = response.reqId as string | undefined;
 
       // Try pipelining mode first (reqId-based matching)
@@ -406,7 +406,7 @@ export class TcpClient extends EventEmitter {
     this.commands.addInFlight(pendingRef);
 
     // Send immediately (this.socket null-checked at entry of sendDirect)
-    this.socket.write(FrameParser.frame(pack(commandWithReqId)));
+    this.socket.write(FrameParser.frame(encodeMessagePack(commandWithReqId)));
 
     return promise;
   }
@@ -439,7 +439,7 @@ export class TcpClient extends EventEmitter {
 
       // Add to in-flight tracking and send
       this.commands.addInFlight(next);
-      this.socket.write(FrameParser.frame(pack(next.command)));
+      this.socket.write(FrameParser.frame(encodeMessagePack(next.command)));
     }
   }
 
@@ -447,7 +447,7 @@ export class TcpClient extends EventEmitter {
    * Send command and wait for response
    * Uses pipelining for high throughput
    */
-  async send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+  send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     this.health.recordCommandSent();
 
@@ -499,7 +499,9 @@ export class TcpClient extends EventEmitter {
     // Connect if needed, then process queue
     if (!this.connected && !this.connecting) {
       // Connection errors during send are handled by command timeout/rejection
-      this.connect().catch(() => {});
+      this.connect().catch(() => {
+        // The queued command owns timeout and rejection reporting.
+      });
     } else if (this.connected) {
       this.processQueue();
     }

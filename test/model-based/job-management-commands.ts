@@ -145,6 +145,8 @@ class ProgressCommand extends QueueCommand {
     const observed = await real.send({ cmd: 'GetProgress', id });
     expect(observed.progress).toBe(this.progress);
     expect(observed.message).toBe(message);
+    model.jobs.get(id)!.progress = this.progress;
+    model.jobs.get(id)!.progressMessage = message;
     await this.verify(model, real);
   }
 
@@ -214,6 +216,7 @@ class RetryTerminalCommand extends QueueCommand {
     job.diskState = 'waiting';
     job.attempts = 0;
     job.stallCount = 0;
+    if (this.completed) job.progress = 0;
     model.terminalGenerations.delete(terminalGeneration(id, job));
     await this.verify(model, real);
   }

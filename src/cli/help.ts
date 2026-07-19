@@ -4,17 +4,21 @@
 
 /** Print version information */
 export function printVersion(version: string): void {
-  console.log(`bunqueue v${version}`);
+  console.log(renderVersion(version));
 }
 
-/** Print main help */
-export function printHelp(): void {
-  const magenta = '\x1b[35m';
-  const reset = '\x1b[0m';
-  const dim = '\x1b[2m';
-  const bold = '\x1b[1m';
+export function renderVersion(version: string): string {
+  return `bunqueue v${version}`;
+}
 
-  console.log(`
+/** Render main help, optionally without terminal escapes for JSON output. */
+export function renderHelp(color = true): string {
+  const magenta = color ? '\x1b[35m' : '';
+  const reset = color ? '\x1b[0m' : '';
+  const dim = color ? '\x1b[2m' : '';
+  const bold = color ? '\x1b[1m' : '';
+
+  return `
 ${magenta}   (\\(\\        ${reset}
 ${magenta}   ( -.-)      ${bold}bunqueue${reset} ${dim}- High-performance job queue for Bun${reset}
 ${magenta}   o_(")(")    ${reset}
@@ -88,11 +92,13 @@ MONITORING:
   stats                           Show server statistics
   metrics                         Show Prometheus metrics
   health                          Health check
+  ping                            Check TCP connectivity
   version                         Show client and server version
   doctor                          Run diagnostics (version, health, queues)
 
 BACKUP (S3):
   backup now                      Create backup immediately
+  backup create                   Alias for backup now
   backup list                     List available backups
   backup restore <key> [-f]       Restore from backup
   backup status                   Show backup configuration
@@ -118,12 +124,17 @@ EXAMPLES:
   bunqueue job get 12345
   bunqueue queue list
   bunqueue stats --json
-`);
+`;
 }
 
-/** Print server help */
-export function printServerHelp(): void {
-  console.log(`
+/** Print main help */
+export function printHelp(): void {
+  console.log(renderHelp());
+}
+
+/** Render server help. */
+export function renderServerHelp(): string {
+  return `
 Usage: bunqueue start [options]
 
 Start the bunQ server.
@@ -142,12 +153,17 @@ Examples:
   bunqueue start
   bunqueue start --tcp-port 7000 --http-port 7001
   bunqueue start --data-path ./data/queue.db
-`);
+`;
 }
 
-/** Print push command help */
-export function printPushHelp(): void {
-  console.log(`
+/** Print server help */
+export function printServerHelp(): void {
+  console.log(renderServerHelp());
+}
+
+/** Render push command help. */
+export function renderPushHelp(): string {
+  return `
 Usage: bunqueue push <queue> <data> [options]
 
 Push a job to a queue.
@@ -176,12 +192,17 @@ Examples:
   bunqueue push emails '{"to":"user@test.com"}'
   bunqueue push tasks '{"action":"sync"}' --priority 10
   bunqueue push jobs '{"id":1}' --delay 60000 --max-attempts 5
-`);
+`;
 }
 
-/** Print cron add help */
-export function printCronAddHelp(): void {
-  console.log(`
+/** Print push command help */
+export function printPushHelp(): void {
+  console.log(renderPushHelp());
+}
+
+/** Render cron add help. */
+export function renderCronAddHelp(): string {
+  return `
 Usage: bunqueue cron add <name> [options]
 
 Add a cron job.
@@ -200,5 +221,10 @@ Options:
 Examples:
   bunqueue cron add hourly-cleanup -q maintenance -d '{"task":"cleanup"}' -s "0 * * * *"
   bunqueue cron add health-check -q monitoring -d '{}' -e 60000
-`);
+`;
+}
+
+/** Print cron add help */
+export function printCronAddHelp(): void {
+  console.log(renderCronAddHelp());
 }

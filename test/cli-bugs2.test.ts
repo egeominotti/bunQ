@@ -73,7 +73,12 @@ describe('BUG 10: Webhook URL protocol validation', () => {
   test('rejects data: URL', async () => {
     const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
     expect(() =>
-      buildWebhookCommand(['add', 'data:text/html,<script>alert(1)</script>', '-e', 'job.completed'])
+      buildWebhookCommand([
+        'add',
+        'data:text/html,<script>alert(1)</script>',
+        '-e',
+        'job.completed',
+      ])
     ).toThrow();
   });
 
@@ -85,7 +90,12 @@ describe('BUG 10: Webhook URL protocol validation', () => {
 
   test('accepts https:// URL', async () => {
     const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
-    const cmd = buildWebhookCommand(['add', 'https://api.example.com/webhook', '-e', 'job.completed']);
+    const cmd = buildWebhookCommand([
+      'add',
+      'https://api.example.com/webhook',
+      '-e',
+      'job.completed',
+    ]);
     expect(cmd.url).toBe('https://api.example.com/webhook');
   });
 });
@@ -96,9 +106,7 @@ describe('BUG 10: Webhook URL protocol validation', () => {
 // =============================================================================
 describe('BUG 11: Auth error details', () => {
   test('client.ts includes server error in auth failure message', async () => {
-    const source = await Bun.file(
-      new URL('../src/cli/client.ts', import.meta.url).pathname
-    ).text();
+    const source = await Bun.file(new URL('../src/cli/client.ts', import.meta.url).pathname).text();
 
     // The auth error should include the server's error message
     // Current: formatError('Authentication failed', ...)
@@ -145,15 +153,11 @@ describe('BUG 12: Server port validation', () => {
 // =============================================================================
 describe('BUG 13: CommandError exit code distinction', () => {
   test('client.ts distinguishes CommandError from server errors', async () => {
-    const source = await Bun.file(
-      new URL('../src/cli/client.ts', import.meta.url).pathname
-    ).text();
+    const source = await Bun.file(new URL('../src/cli/client.ts', import.meta.url).pathname).text();
 
     // Should import or check for CommandError
     const hasCommandErrorHandling =
-      source.includes('CommandError') ||
-      source.includes('exit(2)') ||
-      source.includes('exitCode');
+      source.includes('CommandError') || source.includes('exit(2)') || source.includes('exitCode');
 
     expect(hasCommandErrorHandling).toBe(true);
   });
@@ -242,13 +246,8 @@ describe('Protocol gaps: Missing CLI commands', () => {
   });
 
   test('buildCommand supports ping', async () => {
-    // Verify the client router knows about ping
-    const source = await Bun.file(
-      new URL('../src/cli/client.ts', import.meta.url).pathname
-    ).text();
-
-    const hasPing = source.includes("'ping'");
-    expect(hasPing).toBe(true);
+    const { buildCommand } = await import('../src/cli/commandRouter');
+    expect(await buildCommand('ping', [])).toEqual({ cmd: 'Ping' });
   });
 });
 

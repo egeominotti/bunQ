@@ -6,6 +6,58 @@
 import { parseArgs } from 'node:util';
 import { CommandError, requireArg, parseJsonArg, parseNumberArg, parseBigIntArg } from './types';
 
+const PUSH_VALUE_FLAGS = new Set([
+  '--priority',
+  '-P',
+  '--delay',
+  '-d',
+  '--max-attempts',
+  '--backoff',
+  '--ttl',
+  '--timeout',
+  '--unique-key',
+  '-u',
+  '--job-id',
+  '--depends-on',
+  '--tags',
+  '--group-id',
+  '-g',
+]);
+
+function protectNegativeJsonData(args: string[]): {
+  args: string[];
+  restore: Map<string, string>;
+} {
+  const protectedArgs = [...args];
+  const restore = new Map<string, string>();
+  let positionals = 0;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--') break;
+    if (PUSH_VALUE_FLAGS.has(arg)) {
+      index++;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      if (positionals !== 1) continue;
+      try {
+        if (typeof JSON.parse(arg) !== 'number') continue;
+      } catch {
+        continue;
+      }
+      const sentinel = `bunqueue-negative-json-${index}`;
+      protectedArgs[index] = sentinel;
+      restore.set(sentinel, arg);
+      positionals++;
+      continue;
+    }
+    if (!arg.startsWith('--') && !/^-[a-zA-Z]/.test(arg)) positionals++;
+  }
+
+  return { args: protectedArgs, restore };
+}
+
 /** Build a core command from CLI args */
 export function buildCoreCommand(command: string, args: string[]): Record<string, unknown> {
   switch (command) {
@@ -24,8 +76,9 @@ export function buildCoreCommand(command: string, args: string[]): Record<string
 
 /** Build PUSH command */
 function buildPush(args: string[]): Record<string, unknown> {
+  const protectedInput = protectNegativeJsonData(args);
   const { values, positionals } = parseArgs({
-    args,
+    args: protectedInput.args,
     options: {
       priority: { type: 'string', short: 'P' },
       delay: { type: 'string', short: 'd' },
@@ -47,7 +100,8 @@ function buildPush(args: string[]): Record<string, unknown> {
   });
 
   const queue = requireArg(positionals, 0, 'queue');
-  const data = parseJsonArg(requireArg(positionals, 1, 'data'), 'data');
+  const protectedData = requireArg(positionals, 1, 'data');
+  const data = parseJsonArg(protectedInput.restore.get(protectedData) ?? protectedData, 'data');
 
   const cmd: Record<string, unknown> = {
     cmd: 'PUSH',

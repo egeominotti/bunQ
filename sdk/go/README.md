@@ -10,10 +10,12 @@
 
 Native TCP protocol (msgpack), goroutine-based worker concurrency, one runtime dependency.
 
+[![go reference](https://pkg.go.dev/badge/github.com/egeominotti/bunqueue/sdk/go.svg)](https://pkg.go.dev/github.com/egeominotti/bunqueue/sdk/go)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/LICENSE)
 [![go](https://img.shields.io/badge/go-1.26.5%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
-[Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [TypeScript SDK](https://www.npmjs.com/package/bunqueue-client) · [Python SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) · [PHP SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/php)
+[Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/go/CHANGELOG.md)
 
 </div>
 
@@ -127,4 +129,6 @@ race detector, native fuzzing, and an opt-in sustained profile.
 
 ## License
 
-MIT
+MIT. See the [LICENSE](https://github.com/egeominotti/bunqueue/blob/main/LICENSE) file.
+Documentation: [bunqueue.dev/guide/sdks](https://bunqueue.dev/guide/sdks/).
+Issues and feature requests: [GitHub issues](https://github.com/egeominotti/bunqueue/issues).

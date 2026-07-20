@@ -10,10 +10,13 @@
 
 Native TCP protocol (msgpack, pipelined), one runtime dependency (`msgpack`), sync plus thread based workers.
 
+[![pypi](https://img.shields.io/pypi/v/bunqueue-client?color=d3156d&label=pypi)](https://pypi.org/project/bunqueue-client/)
+[![downloads](https://img.shields.io/pypi/dm/bunqueue-client?color=ff4f9f)](https://pypi.org/project/bunqueue-client/)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/LICENSE)
 [![python](https://img.shields.io/badge/python-3.9%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
-[Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md) · [TypeScript SDK](https://www.npmjs.com/package/bunqueue-client)
+[Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md)
 
 </div>
 
@@ -32,8 +35,7 @@ language*.
 ## Install
 
 ```bash
-# PyPI release coming soon; install from the repo today:
-pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"
+pip install bunqueue-client
 # dependency: msgpack; import name: bunqueue
 ```
 
@@ -162,3 +164,9 @@ independent-connection idempotency and single-lease contention, fixed-seed
 generated payloads, malformed mutation corpora, 1000-job bursts, and
 crash/restart recovery. The opt-in soak keeps one connection alive; set
 `BUNQUEUE_SDK_SOAK_BATCH` to increase load.
+
+## License
+
+MIT. See the [LICENSE](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/LICENSE) file.
+Documentation: [bunqueue.dev/guide/sdks](https://bunqueue.dev/guide/sdks/).
+Issues and feature requests: [GitHub issues](https://github.com/egeominotti/bunqueue/issues).

@@ -15,8 +15,9 @@ Runs everywhere: Node.js, Bun, Deno and Cloudflare Workers.
 [![npm downloads](https://img.shields.io/npm/dm/bunqueue-client?color=ff4f9f)](https://www.npmjs.com/package/bunqueue-client)
 [![license](https://img.shields.io/npm/l/bunqueue-client?color=1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/LICENSE)
 [![runtimes](https://img.shields.io/badge/runtimes-node%20%7C%20bun%20%7C%20deno%20%7C%20workers-2ea44f)](#compatibility)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
-[Documentation](https://bunqueue.dev/guide/sdks/) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md) · [Python SDK](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
+[Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/typescript/CHANGELOG.md)
 
 </div>
 

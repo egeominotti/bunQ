@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-07-20
+
+- Documentation-only release: rewritten README with the standard header,
+  absolute links (the 0.1.0 README used repository-relative links that broke
+  on crates.io), crates.io install instructions, worker quick start, API
+  surface table, and security/telemetry sections. No code changes.
+
 ## 0.1.0
 
 - Initial Queue, Worker, FlowProducer, administration, TLS, auth, and protocol

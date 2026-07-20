@@ -11,6 +11,8 @@
 Native TCP protocol (msgpack, length-prefixed frames), one runtime dependency, verified certificate TLS.
 Producer-friendly for FPM, worker-friendly for CLI: `run()` for daemons, `runOnce()` for cron/request-scoped batches.
 
+[![packagist](https://img.shields.io/packagist/v/bunqueue/client?color=d3156d&label=packagist)](https://packagist.org/packages/bunqueue/client)
+[![downloads](https://img.shields.io/packagist/dt/bunqueue/client?color=ff4f9f)](https://packagist.org/packages/bunqueue/client)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/LICENSE)
 [![php](https://img.shields.io/badge/php-8.1%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/php)
 [![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
@@ -127,7 +129,7 @@ from queue correctness.
 ## Quality assurance
 
 Every change runs the e2e suite (a real server spawned per run) and the
-cross-language [conformance suite](../conformance/):
+cross-language [conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance):
 
 ```bash
 composer install
@@ -144,4 +146,6 @@ SIGKILL/reconnect durability. The soak profile reuses one connection; adjust
 
 ## License
 
-MIT
+MIT. See the [LICENSE](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/LICENSE) file.
+Documentation: [bunqueue.dev/guide/sdks](https://bunqueue.dev/guide/sdks/).
+Issues and feature requests: [GitHub issues](https://github.com/egeominotti/bunqueue/issues).

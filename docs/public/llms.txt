@@ -61,6 +61,7 @@ Key facts:
 - [Migrate from BullMQ](https://bunqueue.dev/guide/migration/): Keep the Queue/Worker API, drop Redis
 - [bunqueue vs BullMQ](https://bunqueue.dev/guide/comparison/): Performance and feature comparison
 - [Benchmarks](https://bunqueue.dev/guide/benchmarks/): Reproducible throughput tests, embedded and TCP modes
+- [SDK Performance](https://bunqueue.dev/guide/sdk-benchmarks/): Native producer throughput, latency, worker throughput, memory, and bottleneck analysis for all six official SDKs
 
 ## Architecture Internals
 

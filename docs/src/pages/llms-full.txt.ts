@@ -27,6 +27,7 @@ const ORDER = [
   'guide/stall-detection',
   'guide/dlq',
   'guide/sdks',
+  'guide/sdk-benchmarks',
   'guide/server',
   'guide/configuration',
   'guide/cli',

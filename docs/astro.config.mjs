@@ -176,7 +176,10 @@ export default defineConfig({
         },
         {
           label: 'SDKs · Any Language',
-          items: [{ label: 'TypeScript, Python, PHP, Go, Rust & Elixir', link: '/guide/sdks/' }],
+          items: [
+            { label: 'TypeScript, Python, PHP, Go, Rust & Elixir', link: '/guide/sdks/' },
+            { label: 'SDK Performance', link: '/guide/sdk-benchmarks/' },
+          ],
         },
         {
           label: 'Run in Production',
@@ -224,6 +227,7 @@ export default defineConfig({
           label: 'Performance',
           items: [
             { label: 'Benchmarks', link: '/guide/benchmarks/' },
+            { label: 'SDK Performance', link: '/guide/sdk-benchmarks/' },
             { label: 'bunqueue vs BullMQ', link: '/guide/comparison/' },
           ],
         },

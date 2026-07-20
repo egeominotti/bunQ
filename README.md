@@ -182,7 +182,7 @@ anywhere in your stack — add a job from TypeScript, process it from Python:
 | -------------------- | ------- |
 | **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) |
 | **Python ≥ 3.9** | PyPI coming soon — today: `pip install "git+https://github.com/egeominotti/bunqueue.git#subdirectory=sdk/python"` |
-| **PHP ≥ 8.1** | Packagist coming soon — today: use [`sdk/php`](./sdk/php) |
+| **PHP ≥ 8.1** | [`composer require bunqueue/client`](https://packagist.org/packages/bunqueue/client) |
 | **Go ≥ 1.26.5** | `go get github.com/egeominotti/bunqueue/sdk/go` |
 | **Rust ≥ 1.85** | crates.io coming soon — today: use [`sdk/rust`](./sdk/rust) as a path dependency |
 | **Elixir ≥ 1.15** | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency |

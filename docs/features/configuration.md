@@ -85,12 +85,19 @@ interface ResolvedConfig {
   dataPath: string | undefined;        // undefined => in-memory (no SQLite)
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
+  maxPrometheusQueues: number;
   s3BackupEnabled: boolean;
   shutdownTimeoutMs: number;           statsIntervalMs: number;
 }
 ```
 
-`BunqueueConfig` (`src/config/types.ts:7-59`) — the optional config-file schema, with all sections optional: `server`, `auth`, `storage`, `cors`, `cloud`, `backup`, `timeouts`, `webhooks`, `logging`. Note the file schema is a superset/subset mix of `ResolvedConfig`: e.g. `timeouts.worker`/`timeouts.lock`, `webhooks.*`, and `logging.*` exist in the file schema but are not surfaced through `resolveServerConfig` (they are read elsewhere or only via env). See [data-model](../data-model.md) for the full job/queue types.
+`BunqueueConfig` (`src/config/types.ts`) — the optional config-file schema, with
+all sections optional: `server`, `auth`, `storage`, `telemetry`, `cors`,
+`cloud`, `backup`, `timeouts`, `webhooks`, `logging`. Note the file schema is a
+superset/subset mix of `ResolvedConfig`: e.g. `timeouts.worker`/`timeouts.lock`,
+`webhooks.*`, and `logging.*` exist in the file schema but are not surfaced
+through `resolveServerConfig` (they are read elsewhere or only via env). See
+[data-model](../data-model.md) for the full job/queue types.
 
 `LogEntry` (`src/shared/logger.ts:8-15`): `{ timestamp, level, component, message, reqId?, data? }` — emitted only in JSON mode.
 
@@ -114,12 +121,21 @@ Every field follows **config file > env var > default**. Key cases:
 - `authTokens` / `corsOrigins`: comma-split env, `.filter(Boolean)`, default `[]` (`resolve.ts:43`, `:50`).
 - `s3BackupEnabled`: `S3_BACKUP_ENABLED` accepts `'1'` or `'true'` (`resolve.ts:52-54`).
 - `requireAuthForMetrics`: `METRICS_AUTH === 'true'` (`resolve.ts:51`).
+- `maxPrometheusQueues`: non-negative integer from
+  `telemetry.maxPrometheusQueues` or `METRICS_MAX_QUEUES`, default `100`.
+  Invalid/negative values fall back to the default and `0` disables labelled
+  per-queue series.
 
 ### Cloud config (`resolveCloudConfig`, `resolve.ts:86-120`)
 Returns `null` (disabled) unless **both** `url` and `apiKey` resolve (`resolve.ts:94`). If `instanceId` is missing it logs `[Cloud] BUNQUEUE_CLOUD_INSTANCE_ID is required` and returns `null` (`resolve.ts:96-100`). Trailing slashes are stripped from `url` (`resolve.ts:103`). Booleans default *on* via `!== 'false'` (`includeJobData`, `useWebSocket`, `useHttp`, `remoteCommands`); `instanceName` defaults to `hostname()`.
 
 ### Backup config (`resolveBackupConfig`, `resolve.ts:123-144`)
-Reads S3 creds with AWS fallbacks (`S3_ACCESS_KEY_ID ?? AWS_ACCESS_KEY_ID`, etc.). Numeric env are guarded with `parseInt(...) || DEFAULT` so an empty/NaN env falls back to `S3_DEFAULTS` (`resolve.ts:137-140`).
+Reads S3 credentials with AWS fallbacks (`S3_ACCESS_KEY_ID ??
+AWS_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY ?? AWS_SECRET_ACCESS_KEY`,
+`S3_SESSION_TOKEN ?? AWS_SESSION_TOKEN`, etc.) and propagates
+`virtualHostedStyle` to Bun's S3 client. Numeric env are guarded with
+`parseInt(...) || DEFAULT` so an empty/NaN env falls back to `S3_DEFAULTS`.
+The resolved `databasePath` is mandatory for the backup module.
 
 ### TLS resolution (`resolveTlsServerOptions`, `resolve.ts:66-83`)
 - Neither cert nor key set → `null` (TLS off).
@@ -141,7 +157,11 @@ N/A. This module is synchronous config resolution plus one-shot dispatch; it hol
 - **Empty/NaN numeric env:** ports use `parseInt(env ?? 'default')` (an invalid `TCP_PORT` yields `NaN`, not the default); backup numerics use `parseInt(...) || DEFAULT` so they recover from NaN — an intentional asymmetry to note.
 - **Cloud disabled silently:** missing `url`/`apiKey` returns `null` with no log; missing `instanceId` returns `null` *with* an error log (`resolve.ts:98`).
 - **Logger level filtering:** messages below the configured `Logger.level` are dropped (`logger.ts:64`); level state is static/global — `Logger.setLevel`/`enableJsonMode` mutate process-wide state, which is why `main.ts` gates them behind `import.meta.main`.
-- **In-memory mode:** an unset data path makes `dataPath` `undefined`; `bootServer` skips S3 backup entirely (`bootstrap.ts:131`) and the banner shows `in-memory`.
+- **In-memory mode:** an unset data path makes `dataPath` `undefined`;
+  when backup is disabled the banner shows `in-memory`. If S3 backup is
+  enabled, `backupStartupError()` makes this a fatal configuration error and
+  `bootServer` exits 1 before either listener binds; backup cannot silently
+  remain disabled.
 
 ## Configuration
 Resolved by `resolveServerConfig` (defaults in parentheses):
@@ -159,6 +179,7 @@ Resolved by `resolveServerConfig` (defaults in parentheses):
 | `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH` | `storage.dataPath` | `undefined` (in-memory) |
 | `CORS_ALLOW_ORIGIN` (comma-split) | `cors.origins` | `[]` |
 | `METRICS_AUTH` (`=== 'true'`) | `auth.requireAuthForMetrics` | `false` |
+| `METRICS_MAX_QUEUES` | `telemetry.maxPrometheusQueues` | `100` |
 | `S3_BACKUP_ENABLED` (`1`/`true`) | `backup.enabled` | `false` |
 | `SHUTDOWN_TIMEOUT_MS` | `timeouts.shutdown` | `30000` |
 | `STATS_INTERVAL_MS` | `timeouts.stats` | `300000` |

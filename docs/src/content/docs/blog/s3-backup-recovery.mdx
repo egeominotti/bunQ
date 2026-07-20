@@ -45,6 +45,7 @@ Configure via environment variables or a [configuration file](/guide/configurati
 
 ```bash
 # Required
+BUNQUEUE_DATA_PATH=/var/lib/bunqueue/queue.db
 S3_BACKUP_ENABLED=1
 S3_BUCKET=my-bunqueue-backups
 S3_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
@@ -53,6 +54,8 @@ S3_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 # Optional
 S3_REGION=us-east-1               # Default: us-east-1
 S3_ENDPOINT=                      # Custom endpoint (MinIO, R2, etc.)
+S3_SESSION_TOKEN=                 # Temporary credentials, when used
+S3_VIRTUAL_HOSTED_STYLE=false     # Set true only when provider requires it
 S3_BACKUP_INTERVAL=21600000       # Every 6 hours (default)
 S3_BACKUP_RETENTION=7             # Keep the last 7 backups (default)
 S3_BACKUP_PREFIX=backups/         # Key prefix (default)
@@ -94,10 +97,10 @@ S3_REGION=auto
 The backup runs on a timer (default: every 6 hours):
 
 <Steps>
-1. **Checkpoint WAL** - `PRAGMA wal_checkpoint(TRUNCATE)` forces all pending writes into the main database file
-2. **Compress** - the backup is gzip-compressed before upload
-3. **Upload to S3** - stored with a timestamp-based key, alongside a `.meta.json` sidecar with a SHA-256 checksum
-4. **Cleanup old backups** - keeps only the most recent `S3_BACKUP_RETENTION` backups
+1. **Flush and snapshot** - drains pending buffered writes, then SQLite `VACUUM INTO` creates a standalone snapshot that includes committed WAL frames
+2. **Validate and compress** - runs `PRAGMA integrity_check`, computes SHA-256 over the original bytes, then gzip-compresses
+3. **Publish to S3** - uploads metadata first and the uniquely named payload second as the commit point
+4. **Cleanup old backups** - keeps only the most recent `S3_BACKUP_RETENTION` payload/metadata pairs
 </Steps>
 
 <Aside type="note">
@@ -110,10 +113,8 @@ Backups are stored under the `S3_BACKUP_PREFIX` (default `backups/`) with this k
 
 ```
 backups/
-  bunqueue-2026-01-15T00-00-00-000Z.db            (gzip-compressed)
-  bunqueue-2026-01-15T00-00-00-000Z.db.meta.json  (checksum + sizes)
-  bunqueue-2026-01-15T06-00-00-000Z.db
-  bunqueue-2026-01-15T06-00-00-000Z.db.meta.json
+  bunqueue-2026-01-15T00-00-00-000Z-<uuid>.db            (gzip-compressed)
+  bunqueue-2026-01-15T00-00-00-000Z-<uuid>.db.meta.json  (checksum + sizes)
 ```
 
 Note that the `.db` object is gzip-compressed even though the key has no `.gz` suffix; the `.meta.json` sidecar records the compression flag and a SHA-256 checksum of the original database.
@@ -140,10 +141,10 @@ The built-in restore command handles download, decompression, and validation for
 3. **Restore it**
 
    ```bash
-   bunqueue backup restore backups/bunqueue-2026-01-15T18-00-00-000Z.db --force
+   bunqueue backup restore 'backups/bunqueue-2026-01-15T18-00-00-000Z-<uuid>.db' --force
    ```
 
-   The restore is validate-before-replace: it verifies the SHA-256 checksum from the `.meta.json` sidecar, checks the SQLite header, runs an integrity check on a temp file, and only then atomically swaps it into place. On any failure the live database is left untouched.
+   The restore is validate-before-replace: it verifies metadata, compressed/original sizes and SHA-256, checks the SQLite header, runs an integrity check on a temp file, quarantines stale WAL/SHM/journal sidecars, and only then atomically swaps it into place. On a pre-swap failure the live database is left untouched.
 
 4. **Restart bunqueue**
 
@@ -153,12 +154,19 @@ The built-in restore command handles download, decompression, and validation for
    ```
 </Steps>
 
-If you prefer to do it manually, remember the object is gzip-compressed despite the `.db` key:
+Prefer the CLI because it authenticates and validates the candidate. If an
+emergency requires a manual restore, remember that the object is gzip-compressed
+despite the `.db` key, verify the metadata checksum yourself, and remove stale
+sidecars while the server is stopped:
 
 ```bash
-aws s3 cp s3://my-bunqueue-backups/backups/bunqueue-2026-01-15T18-00-00-000Z.db ./
+aws s3 cp 's3://my-bunqueue-backups/backups/<exact-key>.db' ./backup.db.gz
+aws s3 cp 's3://my-bunqueue-backups/backups/<exact-key>.db.meta.json' ./backup.meta.json
+gzip -dc backup.db.gz > /var/lib/bunqueue/queue.db.candidate
+sqlite3 /var/lib/bunqueue/queue.db.candidate 'PRAGMA integrity_check'
 mv /var/lib/bunqueue/queue.db /var/lib/bunqueue/queue.db.corrupted
-gzip -dc bunqueue-2026-01-15T18-00-00-000Z.db > /var/lib/bunqueue/queue.db
+rm -f /var/lib/bunqueue/queue.db-wal /var/lib/bunqueue/queue.db-shm /var/lib/bunqueue/queue.db-journal
+mv /var/lib/bunqueue/queue.db.candidate /var/lib/bunqueue/queue.db
 ```
 
 bunqueue will recover the queue state from the restored database, reloading pending jobs, cron schedules, and DLQ entries.

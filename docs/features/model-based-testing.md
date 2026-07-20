@@ -2,8 +2,9 @@
 
 ## Purpose
 
-The state-machine suites in `test/model-based/` verify bunqueue by comparing
-small in-memory specifications with a real standalone broker. They use
+The state-machine suites in `test/model-based/` verify bunqueue, S3
+backup/restore, and monitoring aggregates by comparing implementations with
+small executable specifications. They use
 `fast-check` commands, preconditions, shrinking, and seed replay. The broker is
 not mocked: every property run starts `src/main.ts`, uses the public MessagePack
 TCP protocol, writes a fresh SQLite database, and can terminate the process with
@@ -12,6 +13,27 @@ TCP protocol, writes a fresh SQLite database, and can terminate the process with
 The model complements example-based unit and integration tests. Examples prove
 known scenarios; generated command histories explore valid interleavings and
 shrink a failure to the shortest reproducible history.
+
+### Focused backup and monitoring models
+
+`backup-model.test.ts` drives a real SQLite database and an in-memory S3
+contract through inserts, WAL-pinning readers, backup, restore, retention and
+corrupt payloads. After every generated command it verifies source rows,
+published payload/metadata pairing, exact point-in-time restore, stale-sidecar
+isolation, retention order, and failure atomicity. The default campaign is 50
+histories of up to 30 commands.
+
+`monitoring-model.test.ts` drives `WorkerManager` through register,
+re-register, heartbeat, active-job increment, complete/fail and unregister
+transitions. For 500 histories of up to 80 actions it asserts that registered
+workers, active jobs, concurrency slots and outcome counters equal a simple map
+model, then checks the Prometheus gauges against the same aggregates.
+
+`enterprise-telemetry-model.test.ts` generates 500 histories of backup
+start/success/failure/overlap/scheduler actions and 1,000 queue-cardinality
+cases. It asserts attempt conservation, exact scheduler/activity state,
+compressed-size/timestamp/duration fidelity, exact overlap accounting, bounded
+queue selection, subset order, and `exported + omitted == registered`.
 
 ### Isolated broker startup
 
@@ -112,13 +134,15 @@ through the broker's recovery backoff.
 
 ## Running and replaying
 
-The bounded default is 150 property runs with up to 80 generated commands:
+The bounded broker default is 150 property runs with up to 80 generated
+commands. The same command also runs the focused backup, worker-monitoring and
+enterprise-telemetry models:
 
 ```bash
 bun run test:model
 ```
 
-The same command runs 24 cross-queue histories of up to 30 operations. Tune
+It also runs 24 cross-queue histories of up to 30 operations. Tune
 that campaign independently with:
 
 ```bash
@@ -184,9 +208,9 @@ in deterministic order and exposes exactly one generation. Management commands
 that claim active work now release lease and client ownership through one
 idempotent transition.
 
-## 69-invariant coverage register
+## 71-invariant coverage register
 
-The project tracks the executable production checklist as 69 invariants in 18
+The project tracks the executable production checklist as 71 invariants in 19
 categories. The number is a coverage register, not a claim that one property
 tests every subsystem. The main lifecycle state machine owns the invariants
 that can be checked deterministically after each generated command; focused
@@ -224,6 +248,8 @@ migration, and worker-runtime contracts.
 | 58 | Durable per-queue DLQ policy | queue-state restart regression |
 | 59 | Durable manual active-to-waiting transition | generated lifecycle model plus restart regression |
 | 60-69 | CLI determinism and complete surface | generated argv/flag properties, exact command/MessagePack fixtures, real CLI/API/SQLite parity, interruption recovery, and full E2E command matrices |
+| 70 | Backup telemetry conservation | generated attempt/success/failure/overlap model, including scheduler and last-outcome fidelity |
+| 71 | Prometheus queue-cardinality bound | generated selection/subset/exported-plus-omitted model |
 
 Adding an invariant to this register requires an executable assertion and a
 named owning suite. Specialist coverage is not silently presented as part of

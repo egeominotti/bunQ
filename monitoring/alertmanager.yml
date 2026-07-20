@@ -1,0 +1,14 @@
+global:
+  resolve_timeout: 5m
+
+# Safe local default: alerts are visible in Alertmanager, but no external
+# notification target is contacted until an operator configures a receiver.
+route:
+  receiver: local-only
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: local-only

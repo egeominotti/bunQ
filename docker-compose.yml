@@ -25,7 +25,7 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:6790/health",
+          "http://localhost:6790/healthz",
         ]
       interval: 30s
       timeout: 10s
@@ -55,35 +55,57 @@ services:
 
   # Monitoring Stack
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.1
     container_name: bunqueue-prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=15d"
     restart: unless-stopped
+    depends_on:
+      - alertmanager
+    profiles:
+      - monitoring
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    container_name: bunqueue-alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    restart: unless-stopped
     profiles:
       - monitoring
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.1.0
     container_name: bunqueue-grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=bunqueue
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-bunqueue}
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_PLUGINS_PREINSTALL_DISABLED=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
     restart: unless-stopped
     depends_on:
       - prometheus
@@ -94,4 +116,5 @@ volumes:
   bunqueue-data:
   bunqueue-dev-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:

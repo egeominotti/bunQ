@@ -14,6 +14,9 @@
 !scripts/**
 !bench/
 !bench/**
+!monitoring/
+!monitoring/**
+!docker-compose.yml
 !.github/
 !.github/workflows/
 !.github/workflows/sdk.yml

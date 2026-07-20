@@ -155,7 +155,9 @@ function formatStats(stats: Record<string, unknown>): string {
   }
 
   if (stats.uptime !== undefined) {
-    lines.push('', `  ${color('Uptime:', colors.cyan)}      ${str(stats.uptime)}s`);
+    const uptimeSeconds =
+      typeof stats.uptime === 'number' ? Math.floor(stats.uptime / 1000) : stats.uptime;
+    lines.push('', `  ${color('Uptime:', colors.cyan)}      ${str(uptimeSeconds)}s`);
   }
   if (stats.pushPerSec !== undefined) {
     lines.push(`  Push/sec:    ${str(stats.pushPerSec)}`);

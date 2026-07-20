@@ -261,7 +261,14 @@ export class SqliteStorage {
 
   /** Flush write buffer to disk. Returns number of jobs flushed. */
   flushWriteBuffer(): number {
-    return this.writeBuffer.flush();
+    const flushed = this.writeBuffer.flush();
+    const pending = this.writeBuffer.pendingCount;
+    if (pending > 0) {
+      throw new Error(
+        `Cannot create a consistent backup while ${pending} write${pending === 1 ? '' : 's'} remains buffered`
+      );
+    }
+    return flushed;
   }
 
   private migrate(): void {

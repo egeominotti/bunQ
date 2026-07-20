@@ -23,6 +23,10 @@ export interface BunqueueConfig {
   storage?: {
     dataPath?: string;
   };
+  telemetry?: {
+    /** Maximum queue label values exposed to Prometheus; zero disables per-queue series. */
+    maxPrometheusQueues?: number;
+  };
   cors?: {
     origins?: string[];
   };
@@ -36,8 +40,10 @@ export interface BunqueueConfig {
     bucket?: string;
     accessKeyId?: string;
     secretAccessKey?: string;
+    sessionToken?: string;
     region?: string;
     endpoint?: string;
+    virtualHostedStyle?: boolean;
     interval?: number;
     retention?: number;
     prefix?: string;

@@ -31,7 +31,8 @@ import * as jobTransitions from './operations/jobStateTransitions';
 import * as queryOps from './operations/queryOperations';
 import * as dlqOps from './dlqManager';
 import * as logsOps from './jobLogsManager';
-import { generatePrometheusMetrics } from './metricsExporter';
+import { generatePrometheusMetrics, type OperationalMetrics } from './metricsExporter';
+import { selectPrometheusQueues } from './prometheusOperationalMetrics';
 import { LRUMap, BoundedSet, BoundedMap, type SetLike } from '../shared/lru';
 
 import type { QueueManagerConfig } from './types';
@@ -123,6 +124,7 @@ export class QueueManager {
     totalCompleted: { value: 0n },
     totalFailed: { value: 0n },
   };
+  private operationalMetricsProvider: (() => OperationalMetrics) | null = null;
   // LRU-bounded so high-cardinality / dynamically-named queues cannot grow it
   // without bound. Live queues stay resident (recently accessed on every
   // ack/fail); only long-idle ephemeral names are evicted. obliterate() also
@@ -1310,12 +1312,34 @@ export class QueueManager {
   }
 
   getPrometheusMetrics(): string {
+    const storageStatus = this.getStorageStatus();
+    const memory = process.memoryUsage();
+    const queueSelection = selectPrometheusQueues(
+      this.queueNamesCache,
+      this.config.maxPrometheusQueues
+    );
     return generatePrometheusMetrics(
       this.getStats(),
       this.workerManager,
       this.webhookManager,
-      this.getPerQueueStats()
+      statsMgr.getPerQueueStats(this.contextFactory.getStatsContext(), queueSelection.selected),
+      {
+        storageDegraded: storageStatus.diskFull,
+        storageDiskFull: storageStatus.diskFull,
+        ...(this.storage && { sqliteDatabaseSizeBytes: this.storage.getSize() }),
+        processHeapUsedBytes: memory.heapUsed,
+        processHeapTotalBytes: memory.heapTotal,
+        processResidentMemoryBytes: memory.rss,
+        perQueueMetricsExported: queueSelection.selected.size,
+        perQueueMetricsOmitted: queueSelection.omitted,
+        operational: this.operationalMetricsProvider?.(),
+      }
     );
+  }
+
+  /** Attach metrics owned by server components outside the queue state machine. */
+  setOperationalMetricsProvider(provider: () => OperationalMetrics): void {
+    this.operationalMetricsProvider = provider;
   }
 
   // ============ Cron Operations ============
@@ -1942,6 +1966,11 @@ export class QueueManager {
   getStorageStatus(): { diskFull: boolean; error: string | null; since: number | null } {
     if (!this.storage) return { diskFull: false, error: null, since: null };
     return this.storage.getDiskFullStatus();
+  }
+
+  /** Persist pending buffered writes before an external SQLite snapshot. */
+  flushPersistence(): number {
+    return this.storage?.flushWriteBuffer() ?? 0;
   }
 
   compactMemory(): void {

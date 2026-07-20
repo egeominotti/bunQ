@@ -131,7 +131,14 @@ reachability, version mismatch, status, uptime, connections, DLQ, and RSS; the
 dispatcher chooses text or JSON and applies its exit code.
 
 ### 7. Backup (`executeBackupCommand`, `src/cli/commands/backup.ts:21`)
-Requires a data path from `BUNQUEUE_DATA_PATH`→`BQ_DATA_PATH`→`DATA_PATH`→`SQLITE_PATH`; otherwise fails. Validates S3 config via `S3BackupManager.validate()`. `restore` refuses without `--force` (`-f`) and warns to stop the server first (`:128`).
+Requires a data path from
+`BUNQUEUE_DATA_PATH`→`BQ_DATA_PATH`→`DATA_PATH`→`SQLITE_PATH`; otherwise
+fails. It accepts temporary S3 credentials (`S3_SESSION_TOKEN` /
+`AWS_SESSION_TOKEN`) and virtual-host addressing
+(`S3_VIRTUAL_HOSTED_STYLE`). It validates S3 config via
+`S3BackupManager.validate()`. `restore` refuses without `--force` (`-f`) and
+warns to stop the server first; stopping is required so no open SQLite handle
+can continue using the replaced file.
 
 ## Executable CLI invariant register
 

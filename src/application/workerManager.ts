@@ -239,11 +239,13 @@ export class WorkerManager {
   getStats() {
     const now = Date.now();
     let activeWorkers = 0;
+    let concurrencySlots = 0;
 
-    // Only iterate once for active count (time-based, can't use counter)
+    // Only iterate once for time-based active count and configured capacity.
     for (const worker of this.workers.values()) {
       if (now - worker.lastSeen < WORKER_TIMEOUT_MS) {
         activeWorkers++;
+        concurrencySlots += worker.concurrency;
       }
     }
 
@@ -253,6 +255,7 @@ export class WorkerManager {
       totalProcessed: this.totalProcessedCounter,
       totalFailed: this.totalFailedCounter,
       activeJobs: this.totalActiveJobsCounter,
+      concurrencySlots,
     };
   }
 }

@@ -90,6 +90,23 @@ describe('Per-Queue Metrics', () => {
     workerManager.stop();
   });
 
+  test('should escape special characters in queue labels', () => {
+    const workerManager = new WorkerManager();
+    const webhookManager = new WebhookManager();
+    const queue = 'say"hi\\there\nnext';
+    const output = generatePrometheusMetrics(
+      qm.getStats(),
+      workerManager,
+      webhookManager,
+      new Map([[queue, { waiting: 1, prioritized: 0, delayed: 0, active: 0, dlq: 0 }]])
+    );
+
+    expect(output).toContain('queue="say\\"hi\\\\there\\nnext"');
+    expect(output).not.toContain(`queue="${queue}"`);
+
+    workerManager.stop();
+  });
+
   test('should include delayed per-queue metrics', async () => {
     await qm.push('emails', { data: { to: 'a@b.com' }, delay: 60000 });
     await qm.push('emails', { data: { to: 'c@d.com' } });

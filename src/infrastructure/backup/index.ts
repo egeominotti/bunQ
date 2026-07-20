@@ -2,4 +2,9 @@
  * Backup Module Exports
  */
 
-export { S3BackupManager, type S3BackupConfig, type BackupResult } from './s3Backup';
+export {
+  S3BackupManager,
+  type S3BackupConfig,
+  type BackupResult,
+  type BackupMetrics,
+} from './s3Backup';

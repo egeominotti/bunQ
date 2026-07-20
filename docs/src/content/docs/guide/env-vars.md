@@ -49,7 +49,8 @@ The variable is accepted and shown in the startup banner, but the TCP listener a
 |----------|------|---------|-------------|
 | `AUTH_TOKENS` | string | (none) | Comma-separated auth tokens. When set, every TCP and HTTP request needs a valid token |
 | `BQ_TOKEN` / `BUNQUEUE_TOKEN` | string | (none) | Default token for CLI client commands (avoids `--token` on every command) |
-| `METRICS_AUTH` | boolean | `false` | Require auth for `/prometheus`. Only the literal value `true` enables it |
+| `METRICS_AUTH` | boolean | `false` | Require auth for `/prometheus`. Only `true` enables it; without `AUTH_TOKENS`, the endpoint returns 503 |
+| `METRICS_MAX_QUEUES` | integer | `100` | Maximum queue names exposed as Prometheus label values; `0` disables per-queue series |
 | `CORS_ALLOW_ORIGIN` | string | (none) | Comma-separated allowed CORS origins for the HTTP API |
 
 ```bash
@@ -65,7 +66,9 @@ export BQ_TOKEN=secret-token-1
 bunqueue stats
 ```
 
-The JSON `/metrics` endpoint is already covered by the general `AUTH_TOKENS` check; `METRICS_AUTH` adds the same requirement to `/prometheus`.
+The JSON `/metrics` endpoint is already covered by the general `AUTH_TOKENS`
+check; `METRICS_AUTH` adds the same requirement to `/prometheus`. Enabling it
+without configuring any token fails closed with 503.
 
 ## Logging
 
@@ -94,11 +97,18 @@ Automatic snapshots of the SQLite database to any S3-compatible storage. Full gu
 | `S3_BUCKET` | string | (none) | Bucket name (alias: `AWS_BUCKET`) |
 | `S3_ACCESS_KEY_ID` | string | (none) | Access key (alias: `AWS_ACCESS_KEY_ID`) |
 | `S3_SECRET_ACCESS_KEY` | string | (none) | Secret key (alias: `AWS_SECRET_ACCESS_KEY`) |
+| `S3_SESSION_TOKEN` | string | (none) | Temporary credential token (alias: `AWS_SESSION_TOKEN`) |
 | `S3_REGION` | string | `us-east-1` | Region (alias: `AWS_REGION`) |
 | `S3_ENDPOINT` | string | (none) | Custom endpoint for non-AWS providers (alias: `AWS_ENDPOINT`) |
+| `S3_VIRTUAL_HOSTED_STYLE` | boolean | provider default | Force bucket-in-host addressing (`1` / `true`) |
 | `S3_BACKUP_INTERVAL` | number | `21600000` (6h) | Interval between backups in ms |
 | `S3_BACKUP_RETENTION` | number | `7` | Number of backups to keep |
 | `S3_BACKUP_PREFIX` | string | `backups/` | Key prefix for backup files |
+
+Backups require a persistent SQLite data path (`BUNQUEUE_DATA_PATH`,
+`BQ_DATA_PATH`, `DATA_PATH`, or `SQLITE_PATH`). There is no file to snapshot in
+in-memory mode, so enabling backup without one fails server startup before
+binding TCP/HTTP.
 
 ```bash
 # Cloudflare R2

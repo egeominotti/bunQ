@@ -90,6 +90,11 @@ S3_BACKUP_INTERVAL=21600000    # snapshot cadence, default 6 hours
 S3_BACKUP_RETENTION=7          # snapshots kept, oldest pruned
 ```
 
+This requires a persistent data path. Scheduled server backups flush the
+pending write buffer (and fail the cycle if storage backoff leaves anything
+pending), then use SQLite `VACUUM INTO`, so committed WAL data is captured even
+when a long-lived reader prevents checkpoint truncation.
+
 ```bash
 bunqueue backup now       # snapshot immediately
 bunqueue backup list      # list snapshots with size and age
@@ -97,7 +102,7 @@ bunqueue backup restore <key> --force   # stop the server first
 bunqueue backup status
 ```
 
-  Restore validates before it replaces: it verifies the snapshot's checksum and runs an integrity check on a temp copy, and only then swaps it in. A corrupt backup never touches your live database. Size the interval to how much queue state you can afford to lose, and rehearse one restore before you need it. Provider setup lives in the [S3 Backup guide](/guide/backup/).
+  Restore validates before it replaces: it verifies sizes and checksum, runs an integrity check on a temp copy, quarantines stale WAL/SHM sidecars, and only then swaps it in. A corrupt backup never touches your live database. Stop the server before restoring, size the interval to how much queue state you can afford to lose, and rehearse one restore before you need it. Provider setup lives in the [S3 Backup guide](/guide/backup/).
 </div>
 
 <div class="bq-wrap bq-section">
@@ -108,15 +113,18 @@ bunqueue backup status
   | Endpoint | What it gives you |
   |----------|-------------------|
   | `GET /health` | `healthy` or `degraded`, uptime, version, job counts per state, memory, and a `storage.diskFull` flag when the disk is full |
-  | `GET /healthz`, `/live`, `/ready` | Bare liveness and readiness probes for orchestrators |
-  | `GET /prometheus` | Metrics in Prometheus text format: job counts, totals, operation latencies, per-queue gauges |
+  | `GET /healthz`, `/live` | Bare liveness probes; remain 200 while the process responds |
+  | `GET /ready` | Readiness; returns 503 when persistent storage is degraded |
+  | `GET /prometheus` | Metrics in Prometheus text format: job counts, totals, latency, bounded per-queue gauges, process/connections, storage and backup freshness |
   | `GET /metrics` | The same counters as JSON |
 
-  Set `METRICS_AUTH=true` to require an auth token on the metrics endpoints. Alert on four things:
+  Set `METRICS_AUTH=true` to require an `AUTH_TOKENS` bearer token on `/prometheus`; a missing token configuration fails closed with 503. Alert on these production symptoms:
 
   - **DLQ growth**: `bunqueue_jobs_dlq` climbing means handlers are failing terminally.
-  - **Queue depth**: `bunqueue_jobs_waiting` growing steadily means workers cannot keep up.
+  - **Queue depth**: `bunqueue_jobs_waiting + bunqueue_jobs_prioritized` growing steadily means workers cannot keep up.
   - **`/health` reporting `degraded`**: the disk is full.
+  - **Backup freshness**: an enabled scheduler that is stopped, failing, or has no success within two intervals puts recovery objectives at risk.
+  - **Telemetry truncation**: `bunqueue_queue_metrics_omitted > 0` means per-queue drill-down is incomplete; review cardinality before raising the cap.
   - **Memory drift**: RSS should plateau once the workload does; internal caches are hard-capped.
 
   Dashboards and webhook alerting are covered in [Monitoring](/guide/monitoring/).

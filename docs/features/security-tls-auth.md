@@ -82,7 +82,8 @@ HTTP endpoints (auth behavior, not new routes):
 - `OPTIONS *` → 204 CORS preflight (`corsResponse`).
 - `GET /health`, `GET /healthz`, `GET /live`, `GET /ready` — **never** auth-gated.
 - `POST /gc`, `GET /heapstats` — **always** auth-gated (debug).
-- `GET /prometheus` — auth-gated **only** when `requireAuthForMetrics` is true.
+- `GET /prometheus` — auth-gated **only** when `requireAuthForMetrics` is true;
+  if true with an empty token set, returns 503 (fail closed).
 - All other REST routes, `GET /ws*`, `GET /events*` — auth-gated when tokens are configured.
 
 Events emitted (via `queueManager.emitDashboardEvent`):
@@ -160,7 +161,7 @@ No queue locks are taken in this module. The only per-connection mutable securit
 | `TLS_CERT_FILE` | unset | PEM cert/chain path. Both or neither with key, else startup error. |
 | `TLS_KEY_FILE` | unset | PEM private-key path. |
 | `AUTH_TOKENS` | unset → `[]` | Comma-separated bearer tokens; empty = open server. |
-| `METRICS_AUTH` | `false` | When `true`, `/prometheus` requires a valid token. |
+| `METRICS_AUTH` | `false` | When `true`, `/prometheus` requires a valid token; an empty `AUTH_TOKENS` set returns 503 instead of exposing metrics. |
 | `CORS_ALLOW_ORIGIN` | unset → `[]` | Comma-separated allowed origins; via bootstrap an unset value yields empty `Access-Control-Allow-Origin`. |
 | `BQ_TOKEN` | unset | Client/CLI token fallback (after explicit `connection.token`). |
 | `BUNQUEUE_TOKEN` | unset | Client/CLI token fallback (after `BQ_TOKEN`). |

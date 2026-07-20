@@ -22,6 +22,19 @@ import {
   type ResolvedConfig,
 } from '../../config';
 
+/** Return a startup error when an enabled file backup has no file to snapshot. */
+export function backupStartupError(
+  config: Pick<ResolvedConfig, 's3BackupEnabled' | 'dataPath'>
+): string | null {
+  if (config.s3BackupEnabled && !config.dataPath) {
+    return (
+      'S3 backup requires persistent SQLite storage. Set BUNQUEUE_DATA_PATH ' +
+      'or storage.dataPath before enabling S3_BACKUP_ENABLED.'
+    );
+  }
+  return null;
+}
+
 /** Print startup banner */
 function printBanner(config: ResolvedConfig, cloudUrl?: string): void {
   const dim = '\x1b[2m';
@@ -80,6 +93,13 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
     if (validLevels.includes(logLevel as LogLevel)) Logger.setLevel(logLevel as LogLevel);
   }
 
+  const backupError = backupStartupError(config);
+  if (backupError) {
+    serverLog.error(backupError);
+    process.exitCode = 1;
+    return;
+  }
+
   // Resolve cloud config
   const cloudConfig = resolveCloudConfig(fileConfig, config.dataPath);
 
@@ -97,6 +117,7 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
   // Create queue manager
   const queueManager = new QueueManager({
     dataPath: config.dataPath,
+    maxPrometheusQueues: config.maxPrometheusQueues,
   });
 
   // Start TCP + HTTP servers; a bind failure must not leave a half-started process
@@ -117,6 +138,7 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
       authTokens: config.authTokens,
       corsOrigins: config.corsOrigins,
       requireAuthForMetrics: config.requireAuthForMetrics,
+      getTcpConnectionCount: () => tcpServer.getConnectionCount(),
       ...(tlsConfig && { tls: tlsConfig }),
     });
   } catch (err) {
@@ -130,10 +152,24 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
   let backupManager: S3BackupManager | null = null;
   if (config.dataPath) {
     const backupConfig = resolveBackupConfig(fileConfig, config.dataPath);
-    backupManager = new S3BackupManager(backupConfig);
+    backupManager = new S3BackupManager({
+      ...backupConfig,
+      flushBeforeBackup: () => {
+        queueManager.flushPersistence();
+      },
+    });
     backupManager.setDashboardEmit(queueManager.emitDashboardEvent.bind(queueManager));
     backupManager.start();
   }
+
+  queueManager.setOperationalMetricsProvider(() => ({
+    ...(backupManager && { backup: backupManager.getMetrics() }),
+    connections: {
+      tcp: tcpServer.getConnectionCount(),
+      websocket: httpServer.getWsClientCount(),
+      sse: httpServer.getSseClientCount(),
+    },
+  }));
 
   // Initialize bunqueue Cloud agent (remote dashboard telemetry)
   const cloudAgent = cloudConfig ? CloudAgent.createFromConfig(queueManager, cloudConfig) : null;

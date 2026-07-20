@@ -14,11 +14,23 @@ export class LatencyTracker {
   /** Generate Prometheus output for all histograms */
   toPrometheus(): string {
     return [
-      this.push.toPrometheus('bunqueue_push_duration_ms', 'Push operation latency in milliseconds'),
+      this.push.toPrometheus(
+        'bunqueue_push_duration_seconds',
+        'Push operation latency in seconds',
+        0.001
+      ),
       '',
-      this.pull.toPrometheus('bunqueue_pull_duration_ms', 'Pull operation latency in milliseconds'),
+      this.pull.toPrometheus(
+        'bunqueue_pull_duration_seconds',
+        'Pull operation latency in seconds',
+        0.001
+      ),
       '',
-      this.ack.toPrometheus('bunqueue_ack_duration_ms', 'Ack operation latency in milliseconds'),
+      this.ack.toPrometheus(
+        'bunqueue_ack_duration_seconds',
+        'Ack operation latency in seconds',
+        0.001
+      ),
     ].join('\n');
   }
 

@@ -126,14 +126,14 @@ head:
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">backup</span>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell">1. Check database file exists</div>
-      <div class="bq-diag-cell">2. Generate key <i>backups/bunqueue-{timestamp}.db</i></div>
-      <div class="bq-diag-cell">3. Read file as ArrayBuffer</div>
-      <div class="bq-diag-cell">4. Calculate SHA256 checksum</div>
+      <div class="bq-diag-cell">1. Flush pending WriteBuffer <i>abort if any write remains</i></div>
+      <div class="bq-diag-cell">2. SQLite VACUUM INTO <i>WAL-safe standalone snapshot</i></div>
+      <div class="bq-diag-cell">3. PRAGMA integrity_check</div>
+      <div class="bq-diag-cell">4. Gzip + SHA256 <i>uncompressed bytes</i></div>
     </div>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell bq-diag-accent">5. Upload to S3 <i>application/x-sqlite3</i></div>
-      <div class="bq-diag-cell">6. Upload metadata sidecar <i>{key}.meta.json</i></div>
+      <div class="bq-diag-cell">5. Upload metadata sidecar <i>{unique-key}.meta.json</i></div>
+      <div class="bq-diag-cell bq-diag-accent">6. Publish gzip payload <i>commit point</i></div>
       <div class="bq-diag-cell">7. Cleanup old backups <i>keep N most recent</i></div>
     </div>
   </div>
@@ -142,12 +142,12 @@ head:
     <div class="bq-diag-row">
       <div class="bq-diag-cell">1. Download backup file from S3</div>
       <div class="bq-diag-cell">2. Load metadata sidecar</div>
-      <div class="bq-diag-cell">3. Verify SHA256 checksum</div>
-      <div class="bq-diag-cell">4. Write to database path</div>
-      <div class="bq-diag-cell">5. Restart server to load</div>
+      <div class="bq-diag-cell">3. Decompress, verify size + SHA256</div>
+      <div class="bq-diag-cell">4. Validate temp SQLite candidate</div>
+      <div class="bq-diag-cell">5. Quarantine WAL/SHM, atomically rename</div>
     </div>
   </div>
-  <p class="bq-diag-note">Supports AWS S3, Cloudflare R2, MinIO, DigitalOcean.</p>
+  <p class="bq-diag-note">Stop the server before restore. Current compressed backups require metadata; legacy no-metadata restores are uncompressed only.</p>
 </div>
 
 ## Flush on Failure

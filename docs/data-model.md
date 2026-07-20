@@ -620,6 +620,32 @@ sharing `ok`. Key variants:
 `pulledJob`, `error`, `hello`, `data`, `counts`, `stats`, `metrics`) live at
 `response.ts:225-345`. See [TCP Protocol](./features/tcp-protocol.md).
 
+### Prometheus operational schema
+
+Registration values use gauges with `_registered` names
+(`bunqueue_workers_registered`, `bunqueue_cron_jobs_registered`,
+`bunqueue_webhooks_registered`), while lifetime event counts retain the
+Prometheus `_total` counter suffix. Worker capacity is represented by
+`bunqueue_worker_active_jobs` and `bunqueue_worker_concurrency_slots`.
+Push/pull/ack histogram names end in `_duration_seconds`; bucket bounds and
+sums are exported in seconds even though the internal latency tracker keeps
+milliseconds for the TCP API. Storage/process gauges use `_bytes` or boolean
+0/1 semantics. Per-queue state metrics carry a single escaped `queue` label.
+
+### S3 backup object schema
+
+Every current-format committed payload key is
+`<prefix>bunqueue-<ISO timestamp>-<UUID>.db` and has a pre-published
+`<key>.meta.json` sibling. Metadata contains the bunqueue version, timestamp,
+uncompressed size, compressed size, SHA-256 of uncompressed bytes, and
+`compressed: true`. A compressed object without metadata is invalid; only
+legacy uncompressed SQLite objects may omit metadata.
+
+`BackupResult.size` is the verified, uncompressed SQLite byte length.
+`BackupResult.compressedSize` is present for current-format backup/restore
+operations and is the S3 gzip-object byte length used by
+`bunqueue_backup_last_size_bytes`.
+
 ---
 
 ## SQLite Schema

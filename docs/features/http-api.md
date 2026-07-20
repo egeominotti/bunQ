@@ -38,9 +38,16 @@ External/runtime:
 
 Exported symbols:
 - `createHttpServer(queueManager: QueueManager, config: HttpServerConfig)` — `http.ts:74`. Returns `{ server, wsClients, sseClients, getWsClientCount(), getSseClientCount(), stop() }`. `stop()` unsubscribes from the event bus, stops WS broadcasts, closes all SSE streams, and stops the Bun server.
-- `interface HttpServerConfig` — `http.ts:60`: `port?`, `hostname?`, `socketPath?`, `authTokens?: string[]`, `corsOrigins?: string[]`, `requireAuthForMetrics?: boolean`, `tls?: TlsServerOptions`.
+- `interface HttpServerConfig` — `http.ts`: `port?`, `hostname?`,
+  `socketPath?`, `authTokens?: string[]`, `corsOrigins?: string[]`,
+  `requireAuthForMetrics?: boolean`,
+  `getTcpConnectionCount?: () => number`, `tls?: TlsServerOptions`.
 - `type HttpServer = ReturnType<typeof createHttpServer>`.
-- `httpEndpoints.ts` helpers: `jsonResponse`, `parseJsonBody`, `corsResponse`, `healthEndpoint`, `gcEndpoint`, `heapStatsEndpoint`, `statsEndpoint`, `metricsEndpoint`, `dashboardOverviewEndpoint`, `dashboardQueuesEndpoint`, `dashboardQueueDetailEndpoint`.
+- `httpEndpoints.ts` owns health, readiness, stats and debug endpoints;
+  `httpDashboardEndpoints.ts` owns dashboard aggregation; `httpRouter.ts`
+  dispatches ordinary REST routes; `httpResponse.ts` owns shared JSON response
+  construction. `http.ts` retains server lifecycle, authentication, special
+  routes and WebSocket/SSE upgrades.
 - `class SseHandler` (`sseHandler.ts:62`), `class WsHandler` + `interface WsData` (`wsHandler.ts:186`/`166`).
 
 ### HTTP endpoints
@@ -50,9 +57,9 @@ Diagnostics / observability (handled in `fetch`/`routeRequest`, `http.ts`):
 | Method · Path | Auth | Notes |
 |---|---|---|
 | `OPTIONS *` | no | CORS preflight (`http.ts:116`) |
-| `GET /health` | no | health JSON + memory + connection counts (`http.ts:121`) |
+| `GET /health` | no | health JSON + real TCP/WS/SSE counts; 503 when storage is degraded |
 | `GET /healthz`, `GET /live` | no | `200 "OK"` liveness (`http.ts:124`) |
-| `GET /ready` | no | `{ ok, ready }` (`http.ts:127`) |
+| `GET /ready` | no | `{ ok, ready }`; 503 with storage detail when disk is full |
 | `POST /gc` | yes | force `Bun.gc(true)` + `compactMemory` (`http.ts:132`) |
 | `GET /heapstats` | yes | `bun:jsc` heap breakdown (`http.ts:137`) |
 | `GET /prometheus` | conditional | text exposition; auth only if `requireAuthForMetrics` (`http.ts:179`) |
@@ -185,7 +192,12 @@ The HTTP layer holds no shard locks itself; all locking happens inside `handleCo
 - **Dashboard truncation**: workers and crons lists are capped at 100 items with a `truncated` flag (`httpEndpoints.ts:261`/`284`).
 - **CORS injection on out-of-pipeline responses**: `withCors` (`http.ts:102`) adds `Access-Control-Allow-Origin` to health/ready/prometheus/debug responses only if not already set, never overwriting (audit #16–20).
 - **CORS default gotcha**: `HttpServerConfig.corsOrigins` defaults to `['*']` inside `createHttpServer` (`http.ts:76`), but the server entrypoint always passes the env-resolved array, which defaults to `[]` when `CORS_ALLOW_ORIGIN` is unset (`config/resolve.ts:50`). With `[]`, `getCorsOrigin()` yields an empty `Access-Control-Allow-Origin` string rather than `*`. See [Security: TLS, Auth, CORS](./security-tls-auth.md).
-- **Metrics auth asymmetry**: `/metrics` and `/stats` always require auth (when tokens are set) because they run after the general `checkAuth`; `/prometheus` requires auth only if `requireAuthForMetrics` (`METRICS_AUTH=true`); `/health*`, `/ready` never require auth.
+- **Metrics auth asymmetry**: `/metrics` and `/stats` always require auth (when
+  tokens are set) because they run after the general `checkAuth`;
+  `/prometheus` requires auth only if `requireAuthForMetrics`
+  (`METRICS_AUTH=true`). When required but no token is configured it returns
+  503, preventing a configuration mistake from making metrics public.
+  `/health*` and `/ready` never require auth.
 - **TLS fail-fast**: `loadTlsOptions(config.tls)` runs before binding so bad cert/key paths abort startup rather than serving plaintext (`http.ts:250`).
 
 ## Configuration

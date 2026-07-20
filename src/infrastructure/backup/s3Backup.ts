@@ -16,9 +16,11 @@ import {
   validateConfig,
 } from './s3BackupConfig';
 import { performBackup, listBackups, restoreBackup, cleanupOldBackups } from './s3BackupOperations';
+import { BackupTelemetry, type BackupMetrics } from './backupTelemetry';
 
 // Re-export types
 export type { S3BackupConfig, BackupResult } from './s3BackupConfig';
+export type { BackupMetrics } from './backupTelemetry';
 
 /**
  * S3 Backup Manager
@@ -27,10 +29,10 @@ export type { S3BackupConfig, BackupResult } from './s3BackupConfig';
 export class S3BackupManager {
   private readonly config: S3BackupConfig;
   private readonly client: S3Client;
-  private readonly flushBeforeBackup?: () => Promise<void>;
+  private readonly flushBeforeBackup?: () => void | Promise<void>;
+  private readonly telemetry: BackupTelemetry;
   private backupInterval: ReturnType<typeof setInterval> | null = null;
   private initialBackupTimeout: ReturnType<typeof setTimeout> | null = null;
-  private isBackupInProgress = false;
   private dashboardEmit: ((event: string, data: Record<string, unknown>) => void) | null = null;
 
   /** Set the dashboard event emitter callback */
@@ -41,30 +43,40 @@ export class S3BackupManager {
   constructor(
     config: Partial<S3BackupConfig> & {
       databasePath: string;
-      flushBeforeBackup?: () => Promise<void>;
+      flushBeforeBackup?: () => void | Promise<void>;
     }
   ) {
     this.config = {
       enabled: config.enabled ?? false,
       accessKeyId: config.accessKeyId ?? '',
       secretAccessKey: config.secretAccessKey ?? '',
+      sessionToken: config.sessionToken,
       bucket: config.bucket ?? '',
       endpoint: config.endpoint,
+      virtualHostedStyle: config.virtualHostedStyle,
       region: config.region ?? DEFAULTS.region,
       intervalMs: config.intervalMs ?? DEFAULTS.intervalMs,
       retention: config.retention ?? DEFAULTS.retention,
       prefix: config.prefix ?? DEFAULTS.prefix,
       databasePath: config.databasePath,
+      timeoutMs: config.timeoutMs,
     };
 
     this.flushBeforeBackup = config.flushBeforeBackup;
+    this.telemetry = new BackupTelemetry(
+      this.config.enabled,
+      this.config.intervalMs,
+      this.config.retention
+    );
 
     // Initialize S3 client
     this.client = new S3Client({
       accessKeyId: this.config.accessKeyId,
       secretAccessKey: this.config.secretAccessKey,
+      sessionToken: this.config.sessionToken,
       bucket: this.config.bucket,
       endpoint: this.config.endpoint,
+      virtualHostedStyle: this.config.virtualHostedStyle,
       region: this.config.region,
     });
   }
@@ -111,6 +123,7 @@ export class S3BackupManager {
         backupLog.error('Scheduled backup failed', { error: String(err) });
       });
     }, this.config.intervalMs);
+    this.telemetry.setSchedulerRunning(true);
   }
 
   /**
@@ -125,20 +138,21 @@ export class S3BackupManager {
       clearInterval(this.backupInterval);
       this.backupInterval = null;
     }
+    this.telemetry.setSchedulerRunning(false);
   }
 
   /**
    * Perform a backup
    */
   async backup(): Promise<BackupResult> {
-    if (this.isBackupInProgress) {
+    if (!this.telemetry.tryStart()) {
       return { success: false, error: 'Backup already in progress' };
     }
 
-    this.isBackupInProgress = true;
-    this.dashboardEmit?.('storage:backup-started', { bucket: this.config.bucket });
+    const startedAt = Date.now();
 
     try {
+      this.dashboardEmit?.('storage:backup-started', { bucket: this.config.bucket });
       if (this.flushBeforeBackup) {
         await this.flushBeforeBackup();
       }
@@ -151,36 +165,37 @@ export class S3BackupManager {
           bucket: this.config.bucket,
           key: result.key,
         });
+        this.telemetry.succeed(result, Date.now() - startedAt);
       } else {
         this.dashboardEmit?.('storage:backup-failed', {
           bucket: this.config.bucket,
           error: result.error,
         });
+        this.telemetry.fail(Date.now() - startedAt);
       }
 
       return result;
     } catch (err) {
+      this.telemetry.fail(Date.now() - startedAt);
       this.dashboardEmit?.('storage:backup-failed', {
         bucket: this.config.bucket,
         error: String(err),
       });
       throw err;
-    } finally {
-      this.isBackupInProgress = false;
     }
   }
 
   /**
    * List available backups
    */
-  async listBackups(): Promise<BackupItem[]> {
+  listBackups(): Promise<BackupItem[]> {
     return listBackups(this.config, this.client);
   }
 
   /**
    * Restore from a backup
    */
-  async restore(key: string): Promise<BackupResult> {
+  restore(key: string): Promise<BackupResult> {
     return restoreBackup(key, this.config, this.client);
   }
 
@@ -203,5 +218,10 @@ export class S3BackupManager {
       retention: this.config.retention,
       isRunning: this.backupInterval !== null,
     };
+  }
+
+  /** Snapshot label-free backup telemetry for the Prometheus collector. */
+  getMetrics(): BackupMetrics {
+    return this.telemetry.snapshot();
   }
 }

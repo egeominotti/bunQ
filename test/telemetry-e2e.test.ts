@@ -104,17 +104,17 @@ describe('Telemetry E2E', () => {
     expect(output).toContain('bunqueue_queue_jobs_dlq{queue="emails"}');
 
     // Section 4: Latency histograms
-    expect(output).toContain('bunqueue_push_duration_ms');
-    expect(output).toContain('bunqueue_pull_duration_ms');
-    expect(output).toContain('bunqueue_ack_duration_ms');
+    expect(output).toContain('bunqueue_push_duration_seconds');
+    expect(output).toContain('bunqueue_pull_duration_seconds');
+    expect(output).toContain('bunqueue_ack_duration_seconds');
     expect(output).toContain('_bucket{le=');
     expect(output).toContain('_sum');
     expect(output).toContain('_count');
 
     // Histogram counts should be > 0
-    expect(output).toContain('bunqueue_push_duration_ms_count 3');
-    expect(output).toContain('bunqueue_pull_duration_ms_count 1');
-    expect(output).toContain('bunqueue_ack_duration_ms_count 1');
+    expect(output).toContain('bunqueue_push_duration_seconds_count 3');
+    expect(output).toContain('bunqueue_pull_duration_seconds_count 1');
+    expect(output).toContain('bunqueue_ack_duration_seconds_count 1');
 
     wm.stop();
   });
@@ -181,7 +181,9 @@ describe('Telemetry E2E', () => {
   });
 
   test('LOG_LEVEL filtering works at runtime', () => {
-    const spy = spyOn(console, 'debug').mockImplementation(() => {});
+    const spy = spyOn(console, 'debug').mockImplementation(() => {
+      // Suppress expected debug output while asserting the configured filter.
+    });
 
     // Default level is info, debug should be filtered
     Logger.setLevel('info');
@@ -208,9 +210,9 @@ describe('Telemetry E2E', () => {
     // Must have all sections
     expect(output).toContain('bunqueue_jobs_waiting');
     expect(output).toContain('bunqueue_queue_jobs_waiting{queue="test-q"}');
-    expect(output).toContain('bunqueue_push_duration_ms_count');
-    expect(output).toContain('bunqueue_pull_duration_ms_count');
-    expect(output).toContain('bunqueue_ack_duration_ms_count');
+    expect(output).toContain('bunqueue_push_duration_seconds_count');
+    expect(output).toContain('bunqueue_pull_duration_seconds_count');
+    expect(output).toContain('bunqueue_ack_duration_seconds_count');
   });
 
   test('batch operations correctly record latency', async () => {
@@ -218,11 +220,7 @@ describe('Telemetry E2E', () => {
     latencyTracker.pull.reset();
 
     // Batch push
-    await qm.pushBatch('batch-q', [
-      { data: { id: 1 } },
-      { data: { id: 2 } },
-      { data: { id: 3 } },
-    ]);
+    await qm.pushBatch('batch-q', [{ data: { id: 1 } }, { data: { id: 2 } }, { data: { id: 3 } }]);
 
     // pushBatch should record 1 latency observation (entire batch)
     expect(latencyTracker.push.getCount()).toBe(1);
@@ -255,18 +253,22 @@ describe('Telemetry E2E', () => {
     const lines = output.split('\n');
 
     // Must have HELP and TYPE for each histogram
-    expect(lines.some(l => l.startsWith('# HELP bunqueue_push_duration_ms'))).toBe(true);
-    expect(lines.some(l => l.startsWith('# TYPE bunqueue_push_duration_ms histogram'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('# HELP bunqueue_push_duration_seconds'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('# TYPE bunqueue_push_duration_seconds histogram'))).toBe(
+      true
+    );
 
     // Must have _bucket, _sum, _count
-    expect(lines.some(l => l.includes('bunqueue_push_duration_ms_bucket{le="'))).toBe(true);
-    expect(lines.some(l => l.includes('bunqueue_push_duration_ms_bucket{le="+Inf"}'))).toBe(true);
-    expect(lines.some(l => l.startsWith('bunqueue_push_duration_ms_sum'))).toBe(true);
-    expect(lines.some(l => l.startsWith('bunqueue_push_duration_ms_count'))).toBe(true);
+    expect(lines.some((l) => l.includes('bunqueue_push_duration_seconds_bucket{le="'))).toBe(true);
+    expect(lines.some((l) => l.includes('bunqueue_push_duration_seconds_bucket{le="+Inf"}'))).toBe(
+      true
+    );
+    expect(lines.some((l) => l.startsWith('bunqueue_push_duration_seconds_sum'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('bunqueue_push_duration_seconds_count'))).toBe(true);
 
     // +Inf bucket count must equal _count
-    const infLine = lines.find(l => l.includes('push_duration_ms_bucket{le="+Inf"}'));
-    const countLine = lines.find(l => l.startsWith('bunqueue_push_duration_ms_count'));
+    const infLine = lines.find((l) => l.includes('push_duration_seconds_bucket{le="+Inf"}'));
+    const countLine = lines.find((l) => l.startsWith('bunqueue_push_duration_seconds_count'));
     if (infLine && countLine) {
       const infCount = infLine.split(' ')[1];
       const count = countLine.split(' ')[1];

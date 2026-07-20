@@ -114,6 +114,21 @@ defineConfig({
 });
 ```
 
+### `telemetry`
+
+Bound labelled Prometheus output independently from the exact global totals:
+
+```typescript
+defineConfig({
+  telemetry: {
+    maxPrometheusQueues: 100, // 0 disables per-queue label series
+  },
+});
+```
+
+The environment equivalent is `METRICS_MAX_QUEUES`. The default is `100`;
+invalid or negative values fall back to the default.
+
 ### `cors`
 
 Allowed origins for browser access to the HTTP API.
@@ -137,14 +152,19 @@ defineConfig({
     bucket: 'my-bunqueue-backups',
     accessKeyId: process.env.S3_ACCESS_KEY_ID,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+    sessionToken: process.env.S3_SESSION_TOKEN, // Temporary credentials
     region: 'eu-west-1',              // Default: us-east-1
     endpoint: undefined,              // Custom S3 endpoint (MinIO, R2, etc.)
+    virtualHostedStyle: undefined,     // Force bucket-in-host addressing
     interval: 6 * 60 * 60 * 1000,    // Backup interval in ms (default: 6h)
     retention: 7,                     // Backups to keep (default: 7)
     prefix: 'backups/',               // S3 key prefix (default: 'backups/')
   },
 });
 ```
+
+The server also needs `storage.dataPath` (or a data-path environment variable);
+automatic backup is unavailable in in-memory mode.
 
 ### `timeouts`
 
@@ -208,6 +228,7 @@ export default defineConfig({
     requireAuthForMetrics: true,
   },
   storage: { dataPath: '/data/bunqueue/queue.db' },
+  telemetry: { maxPrometheusQueues: 100 },
   cors: { origins: [process.env.FRONTEND_URL!] },
   backup: {
     enabled: true,

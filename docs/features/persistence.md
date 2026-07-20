@@ -65,7 +65,10 @@ Key methods (real signatures):
 - Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(): Set<JobId>`, `countPendingJobs()`, `countActiveJobs()`.
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
 - Queue control-state (#100): `saveQueueState(name, paused, rateLimit, concurrencyLimit)`, `loadQueueState()`, `deleteQueueState(name)`.
-- Health/ops: `flushWriteBuffer(): number`, `get diskFull`, `getDiskFullStatus()`, `getCriticalLosses()`, `clearCriticalLosses()`, `getSize()`, `close()`.
+- Health/ops: `flushWriteBuffer(): number`, `get diskFull`,
+  `getDiskFullStatus()`, `getCriticalLosses()`, `clearCriticalLosses()`,
+  `getSize()`, `close()`. `flushWriteBuffer` throws if a flush attempt leaves
+  any row pending; S3 backup uses that fail-closed boundary before snapshotting.
 
 `sqliteBatch.ts` exports:
 - `class BatchInsertManager` — `insertJobsBatch(jobs: Job[]): BatchInsertResult` (never throws).
@@ -132,6 +135,12 @@ heartbeat in one synchronous update. Priority persistence writes both
 heap order. `moveActiveToWait` also uses `updateRunAt`, clearing the persisted
 active marker so restart recovery cannot treat a manual requeue as a crash.
 
+External snapshot flush invariant: `flushWriteBuffer()` invokes the synchronous
+buffer flush and then checks `pendingCount`. A storage error can re-buffer rows
+for retry/backoff; returning only the number inserted would let a caller publish
+a database snapshot while accepted jobs still existed only in memory. A
+non-zero remainder therefore throws and aborts S3 backup before `VACUUM INTO`.
+
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
 Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads
@@ -171,6 +180,10 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **Completed-without-result.** A job acked with no result has `state='completed'` but no `job_results` row; `loadCompletedJobIds` unions both sources so dependency recovery still unblocks dependents (`sqlite.ts:568-579`).
 - **Dependency-result read-through.** Application queries check the normal result LRU, then results protected for live dependency consumers, then `job_results`. SQLite therefore remains the durable fallback after either in-memory cache evicts; in memory-only mode the dependency tracker protects values only while a live edge requires them.
 - **Shutdown loss reporting.** `WriteBuffer.stop()` / `stopGracefully(timeoutMs=5000)` flush remaining jobs and report anything still buffered via `reportLostJobs` → `onCriticalError`, so nothing is silently dropped on shutdown (`sqliteBatch.ts:390-486`).
+- **Snapshot flush fails closed.** `flushWriteBuffer()` throws whenever
+  `pendingCount` remains non-zero after its flush attempt. This is expected
+  during storage retry/backoff and prevents an incomplete S3 recovery point
+  from being published.
 - **Memory bounds.** Recovery loads are paginated (default batch 10,000) to avoid memory spikes; active recovery drains offset zero because it mutates the scanned state, while non-mutating pending/completed loads advance stable pages. Completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
 - **Eviction is not durable deletion.**
   `test/repro-retention-boundary-invariants.test.ts` runs with

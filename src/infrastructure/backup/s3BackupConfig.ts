@@ -11,10 +11,14 @@ export interface S3BackupConfig {
   accessKeyId: string;
   /** S3 secret access key */
   secretAccessKey: string;
+  /** Temporary credential session token */
+  sessionToken?: string;
   /** S3 bucket name */
   bucket: string;
   /** S3 endpoint (optional, for non-AWS S3-compatible services) */
   endpoint?: string;
+  /** Use bucket-name-in-host S3 requests */
+  virtualHostedStyle?: boolean;
   /** S3 region (optional, default: us-east-1) */
   region?: string;
   /** Backup interval in milliseconds (default: 6 hours) */
@@ -33,7 +37,10 @@ export interface S3BackupConfig {
 export interface BackupResult {
   success: boolean;
   key?: string;
+  /** Uncompressed SQLite database size in bytes */
   size?: number;
+  /** Uploaded gzip object size in bytes */
+  compressedSize?: number;
   duration?: number;
   error?: string;
 }
@@ -70,12 +77,18 @@ export const DEFAULTS = {
  * Create configuration from environment variables
  */
 export function configFromEnv(databasePath: string): S3BackupConfig {
+  const virtualHostedStyle = Bun.env.S3_VIRTUAL_HOSTED_STYLE;
   return {
     enabled: Bun.env.S3_BACKUP_ENABLED === '1' || Bun.env.S3_BACKUP_ENABLED === 'true',
     accessKeyId: Bun.env.S3_ACCESS_KEY_ID ?? Bun.env.AWS_ACCESS_KEY_ID ?? '',
     secretAccessKey: Bun.env.S3_SECRET_ACCESS_KEY ?? Bun.env.AWS_SECRET_ACCESS_KEY ?? '',
+    sessionToken: Bun.env.S3_SESSION_TOKEN ?? Bun.env.AWS_SESSION_TOKEN,
     bucket: Bun.env.S3_BUCKET ?? Bun.env.AWS_BUCKET ?? '',
     endpoint: Bun.env.S3_ENDPOINT ?? Bun.env.AWS_ENDPOINT,
+    virtualHostedStyle:
+      virtualHostedStyle === undefined
+        ? undefined
+        : virtualHostedStyle === '1' || virtualHostedStyle === 'true',
     region: Bun.env.S3_REGION ?? Bun.env.AWS_REGION ?? DEFAULTS.region,
     intervalMs: parseInt(Bun.env.S3_BACKUP_INTERVAL ?? '', 10) || DEFAULTS.intervalMs,
     retention: parseInt(Bun.env.S3_BACKUP_RETENTION ?? '', 10) || DEFAULTS.retention,

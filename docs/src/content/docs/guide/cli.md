@@ -214,7 +214,10 @@ bunqueue webhook remove <id>
 
 ## Backups
 
-Backup commands run **locally**, not through the TCP server: they read the database path from `BUNQUEUE_DATA_PATH` and credentials from the `S3_*` environment variables (see [S3 Backup](/guide/backup/)).
+Backup commands run **locally**, not through the TCP server: they require a
+persistent database path from `BUNQUEUE_DATA_PATH` (or its aliases) and read
+credentials from the `S3_*` environment variables, including temporary
+`S3_SESSION_TOKEN` credentials when used (see [S3 Backup](/guide/backup/)).
 
 ```bash
 bunqueue backup now              # create a backup, prints key/size/duration
@@ -222,6 +225,10 @@ bunqueue backup list             # list backups in the bucket
 bunqueue backup status           # show configuration
 bunqueue backup restore <key> -f # restore; requires --force, stop the server first
 ```
+
+Stopping is mandatory for restore. The command validates a temporary candidate
+and quarantines stale SQLite WAL/SHM sidecars, but it cannot invalidate a
+database handle held by a running server.
 
 ## Global Options
 

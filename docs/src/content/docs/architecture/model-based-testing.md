@@ -5,18 +5,47 @@ description: "How bunqueue uses fast-check command models, a real TCP broker, SQ
 
 # Model-Based Testing
 
-bunqueue's example tests are supplemented by a `fast-check` asynchronous command
-model. Every property run starts the real standalone broker on dynamic ports,
-uses the public MessagePack TCP protocol, writes a fresh SQLite database, and
-may terminate the broker with `SIGKILL` before reconnecting.
+bunqueue's example tests are supplemented by four `fast-check` models. The
+main asynchronous command model starts the real standalone broker on dynamic
+ports, uses the public MessagePack TCP protocol, writes a fresh SQLite
+database, and may terminate the broker with `SIGKILL` before reconnecting.
+Focused models exercise S3 backup/restore, worker-monitoring aggregates and
+enterprise telemetry conservation/cardinality.
 
 ```bash
 bun run test:model
 ```
 
-The default campaign runs 150 generated histories of up to 80 commands.
+The default broker campaign runs 150 generated histories of up to 80 commands.
+The backup campaign adds 50 histories of up to 30 commands, the worker
+monitoring campaign adds 500 histories of up to 80 actions, and the enterprise
+telemetry campaign adds 500 backup-state histories plus 1,000 queue-selection
+cases.
 `bun test` includes it, so `bun run test:sandbox` executes the same model inside
 the isolated unit container.
+
+## Focused invariants
+
+The backup model combines a real WAL-mode SQLite database with an in-memory S3
+contract. Generated histories insert rows, pin the WAL with an old reader,
+create and restore snapshots, prune retention, introduce stale sidecars, and
+corrupt payloads. Its invariants require every published backup to have
+metadata, every restore to equal its captured point in time, old WAL frames
+never to resurrect data, retention to preserve the newest set, and a failed
+restore never to alter live state.
+
+The monitoring model generates worker register, heartbeat, active, complete,
+fail and unregister transitions. After each action it reconciles registered
+workers, active jobs and concurrency slots with a simple map oracle, then
+checks the exported Prometheus gauges. This specifically protects utilization
+alerts from aggregate-counter drift.
+
+The enterprise telemetry model enforces two additional conservation laws:
+backup attempts equal successes plus failures plus at most one active attempt,
+the reported scheduler and last-outcome duration/timestamp/compressed-size
+match the modeled transition, and exported plus omitted queue labels equals the
+registered queue count while the emitted subset never exceeds its configured
+cap.
 
 ## Why a state model?
 
@@ -79,9 +108,9 @@ After each command, the test checks:
 4. `/stats` internal collection telemetry for counters, indexes, processing,
    dependency, completion, and lock cardinality.
 
-## The 69-invariant register
+## The 71-invariant register
 
-The production checklist contains 69 invariants across 18 categories. The main
+The production checklist contains 71 invariants across 19 categories. The main
 `fc.commands` lifecycle model owns core safety, ordering, limits, counters,
 crash recovery, dependencies, DLQ, and queue controls. Focused suites own the
 contracts that need different clocks or failure injection: cron, worker

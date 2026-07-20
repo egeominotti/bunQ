@@ -11,6 +11,7 @@ import { WebhookManager } from '../src/application/webhookManager';
 describe('Metrics Exporter', () => {
   const createStats = (overrides: Partial<QueueStats> = {}): QueueStats => ({
     waiting: 0,
+    prioritized: 0,
     delayed: 0,
     active: 0,
     dlq: 0,
@@ -102,7 +103,7 @@ describe('Metrics Exporter', () => {
 
       const output = generatePrometheusMetrics(stats, workerManager, webhookManager);
 
-      expect(output).toContain('bunqueue_cron_jobs_total 5');
+      expect(output).toContain('bunqueue_cron_jobs_registered 5');
 
       workerManager.stop();
     });
@@ -121,10 +122,27 @@ describe('Metrics Exporter', () => {
 
       const output = generatePrometheusMetrics(stats, workerManager, webhookManager);
 
-      expect(output).toContain('bunqueue_workers_total 2');
+      expect(output).toContain('bunqueue_workers_registered 2');
       expect(output).toContain('bunqueue_workers_active 2');
+      expect(output).toContain('bunqueue_worker_active_jobs 0');
+      expect(output).toContain('bunqueue_worker_concurrency_slots 2');
       expect(output).toContain('bunqueue_workers_processed_total 1');
       expect(output).toContain('bunqueue_workers_failed_total 1');
+
+      workerManager.stop();
+    });
+
+    test('worker capacity excludes stale registrations', () => {
+      const workerManager = new WorkerManager();
+      const webhookManager = new WebhookManager();
+      const worker = workerManager.register('stale', ['q'], 8);
+      worker.lastSeen = 0;
+
+      const output = generatePrometheusMetrics(createStats(), workerManager, webhookManager);
+
+      expect(output).toContain('bunqueue_workers_registered 1');
+      expect(output).toContain('bunqueue_workers_active 0');
+      expect(output).toContain('bunqueue_worker_concurrency_slots 0');
 
       workerManager.stop();
     });
@@ -142,7 +160,7 @@ describe('Metrics Exporter', () => {
 
       const output = generatePrometheusMetrics(stats, workerManager, webhookManager);
 
-      expect(output).toContain('bunqueue_webhooks_total 3');
+      expect(output).toContain('bunqueue_webhooks_registered 3');
       expect(output).toContain('bunqueue_webhooks_enabled 2');
 
       workerManager.stop();
@@ -163,6 +181,34 @@ describe('Metrics Exporter', () => {
       // Counters
       expect(output).toContain('# TYPE bunqueue_jobs_pushed_total counter');
       expect(output).toContain('# TYPE bunqueue_jobs_pulled_total counter');
+
+      workerManager.stop();
+    });
+
+    test('should include storage and process gauges', () => {
+      const workerManager = new WorkerManager();
+      const webhookManager = new WebhookManager();
+      const output = generatePrometheusMetrics(
+        createStats(),
+        workerManager,
+        webhookManager,
+        undefined,
+        {
+          storageDegraded: true,
+          storageDiskFull: true,
+          sqliteDatabaseSizeBytes: 4096,
+          processHeapUsedBytes: 100,
+          processHeapTotalBytes: 200,
+          processResidentMemoryBytes: 300,
+        }
+      );
+
+      expect(output).toContain('bunqueue_storage_degraded 1');
+      expect(output).toContain('bunqueue_storage_disk_full 1');
+      expect(output).toContain('bunqueue_sqlite_database_size_bytes 4096');
+      expect(output).toContain('bunqueue_process_heap_used_bytes 100');
+      expect(output).toContain('bunqueue_process_heap_total_bytes 200');
+      expect(output).toContain('bunqueue_process_resident_memory_bytes 300');
 
       workerManager.stop();
     });

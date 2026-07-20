@@ -235,6 +235,11 @@ curl http://localhost:6790/ready     # readiness
 curl http://localhost:6790/prometheus # metrics in Prometheus text format
 ```
 
+`/health` and `/ready` return 503 when persistent storage reports a full disk;
+`/healthz` remains a pure process-liveness check. If `METRICS_AUTH=true`, also
+configure `AUTH_TOKENS` and the scraper bearer token; otherwise `/prometheus`
+fails closed with 503.
+
 ```yaml
 # Kubernetes
 livenessProbe:
@@ -263,6 +268,10 @@ S3_BACKUP_INTERVAL=3600000    # every hour (default 6h)
 S3_BACKUP_RETENTION=24        # snapshots kept
 ```
 
+The persistent data path configured earlier is mandatory. The server flushes
+its pending write buffer, then asks SQLite for a `VACUUM INTO` snapshot that
+includes committed WAL frames; do not replace this with a raw live-file copy.
+
 To restore after a disk loss:
 
 ```bash
@@ -272,7 +281,9 @@ bunqueue backup restore backups/bunq-2026-01-30T12:00:00.db --force
 systemctl start bunqueue
 ```
 
-Provider-specific setup (R2, MinIO, Spaces) and how restore validates snapshots before replacing anything: [S3 Backup guide](/guide/backup/).
+Provider-specific setup (R2, MinIO, Spaces) and how restore verifies SHA-256,
+checks SQLite integrity, and quarantines stale sidecars before replacing
+anything: [S3 Backup guide](/guide/backup/).
 
 ## Reference: key environment variables
 

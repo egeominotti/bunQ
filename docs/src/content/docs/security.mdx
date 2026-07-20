@@ -143,7 +143,7 @@ queue =
 
 Multiple tokens are supported (`AUTH_TOKENS=token1,token2`), which enables
 zero downtime rotation: add the new token, roll clients over, remove the old
-one. `/metrics` can additionally be gated with `METRICS_AUTH=true`.
+one. `/prometheus` can additionally be gated with `METRICS_AUTH=true`.
 
 ## Transport security
 
@@ -186,7 +186,7 @@ instance beyond a trusted network:
 | `HOST` | `0.0.0.0`, all interfaces | Bind to `127.0.0.1` or a private interface unless remote clients need direct access |
 | TLS | disabled | Enable native TLS or terminate at a proxy |
 | `CORS_ALLOW_ORIGIN` | unset, no cross origin access is granted | Set explicitly, and only to your dashboard origins, when a browser client needs the HTTP API |
-| `METRICS_AUTH` | `false`, `/metrics` is public | Set `true` if metrics may leak operational detail |
+| `METRICS_AUTH` | `false`, `/prometheus` is public | Set `true` if metrics may leak operational detail; with no `AUTH_TOKENS`, `/prometheus` fails closed with 503 |
 | Protocol rate limit | 10,000 requests per 60 s per client | Tune with `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WINDOW_MS` |
 
 ## Abuse protection
@@ -252,7 +252,7 @@ bunqueue start
 3. Bind `HOST` to the narrowest interface that still reaches your clients.
 4. Leave `CORS_ALLOW_ORIGIN` unset unless a browser client needs the HTTP
    API; when it does, list the exact origins.
-5. Gate `/metrics` with `METRICS_AUTH=true` where metrics are sensitive.
+5. Gate `/prometheus` with `METRICS_AUTH=true` where metrics are sensitive.
 6. Run as an unprivileged user, `chmod 600` the data file, encrypt the
    volume.
 7. Keep the data directory on a persistent volume and enable S3 backups

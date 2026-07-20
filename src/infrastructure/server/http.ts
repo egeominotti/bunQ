@@ -7,7 +7,6 @@ import type { Server, ServerWebSocket } from 'bun';
 import type { QueueManager } from '../../application/queueManager';
 import type { HandlerContext } from './types';
 import { constantTimeEqual, uuid } from '../../shared/hash';
-import { validateQueueName } from './protocol';
 import type { JobEvent } from '../../domain/types/queue';
 import { httpLog } from '../../shared/logger';
 import { getRateLimiter } from './rateLimiter';
@@ -17,22 +16,12 @@ import {
   jsonResponse,
   corsResponse,
   healthEndpoint,
+  readinessEndpoint,
   gcEndpoint,
   heapStatsEndpoint,
-  statsEndpoint,
-  metricsEndpoint,
-  dashboardOverviewEndpoint,
-  dashboardQueuesEndpoint,
-  dashboardQueueDetailEndpoint,
 } from './httpEndpoints';
-import { routeJobRoutes } from './httpRouteJobs';
 import { loadTlsOptions, type TlsServerOptions } from './tls';
-import { routeQueueRoutes } from './httpRouteQueues';
-import { routeQueueConfigRoutes } from './httpRouteQueueConfig';
-import { routeResourceRoutes } from './httpRouteResources';
-
-// Pre-compiled regex patterns for URL matching
-const RE_DASHBOARD_QUEUE_DETAIL = /^\/dashboard\/queues\/([^/]+)$/;
+import { routeHttpRequest } from './httpRouter';
 
 /**
  * Validate auth token against valid tokens set
@@ -64,6 +53,8 @@ export interface HttpServerConfig {
   authTokens?: string[];
   corsOrigins?: string[];
   requireAuthForMetrics?: boolean;
+  /** Current TCP client count, supplied by the TCP server when available. */
+  getTcpConnectionCount?: () => number;
   /** Native TLS termination (https/wss). Protocol and routes are unchanged. */
   tls?: TlsServerOptions;
 }
@@ -119,13 +110,20 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
 
     // Health endpoints (no auth, no rate limit)
     if (path === '/health') {
-      return withCors(healthEndpoint(queueManager, wsHandler.size, sseHandler.size));
+      return withCors(
+        healthEndpoint(
+          queueManager,
+          wsHandler.size,
+          sseHandler.size,
+          config.getTcpConnectionCount?.() ?? 0
+        )
+      );
     }
     if (path === '/healthz' || path === '/live') {
       return withCors(new Response('OK', { status: 200 }));
     }
     if (path === '/ready') {
-      return jsonResponse({ ok: true, ready: true }, 200, corsOrigins);
+      return readinessEndpoint(queueManager, corsOrigins);
     }
 
     // Debug endpoints (require auth)
@@ -178,6 +176,13 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
     // Prometheus metrics
     if (path === '/prometheus' && req.method === 'GET') {
       if (config.requireAuthForMetrics) {
+        if (authTokens.size === 0) {
+          return jsonResponse(
+            { ok: false, error: 'Metrics authentication is enabled but no tokens are configured' },
+            503,
+            corsOrigins
+          );
+        }
         const denied = checkAuth(req, authTokens);
         if (denied) return denied;
       }
@@ -203,7 +208,7 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
     const ctx: HandlerContext = { queueManager, authTokens, authenticated: true };
 
     try {
-      return await routeRequest(req, path, ctx, corsOrigins);
+      return await routeHttpRequest(req, path, ctx, corsOrigins);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Internal error';
       return jsonResponse({ ok: false, error: message }, 500);
@@ -236,7 +241,7 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
       queueManager.unregisterWorkersByClientId(clientId);
       queueManager
         .releaseClientJobs(clientId)
-        .then(() => {})
+        .then(() => undefined)
         .catch((err: unknown) => {
           httpLog.error('Failed to release WebSocket client jobs', {
             clientId,
@@ -279,64 +284,6 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
       void server.stop();
     },
   };
-}
-
-/** Route HTTP request to handler */
-async function routeRequest(
-  req: Request,
-  path: string,
-  ctx: HandlerContext,
-  corsOrigins: Set<string>
-): Promise<Response> {
-  const method = req.method;
-
-  // Stats endpoint
-  if (path === '/stats' && method === 'GET') {
-    return statsEndpoint(ctx.queueManager, corsOrigins);
-  }
-  if (path === '/metrics' && method === 'GET') {
-    return metricsEndpoint(ctx.queueManager, corsOrigins);
-  }
-
-  // Dashboard endpoints
-  if (path === '/dashboard' && method === 'GET') {
-    return dashboardOverviewEndpoint(ctx.queueManager, corsOrigins);
-  }
-  if (path === '/dashboard/queues' && method === 'GET') {
-    const url = new URL(req.url);
-    const limit = Math.min(
-      Math.max(parseInt(url.searchParams.get('limit') ?? '100', 10) || 100, 1),
-      500
-    );
-    const offset = Math.max(parseInt(url.searchParams.get('offset') ?? '0', 10) || 0, 0);
-    return dashboardQueuesEndpoint(ctx.queueManager, limit, offset, corsOrigins);
-  }
-  const dashQueueMatch = path.match(RE_DASHBOARD_QUEUE_DETAIL);
-  if (dashQueueMatch && method === 'GET') {
-    const queue = decodeURIComponent(dashQueueMatch[1]);
-    const queueError = validateQueueName(queue);
-    if (queueError) return jsonResponse({ ok: false, error: queueError }, 400, corsOrigins);
-    const url = new URL(req.url);
-    const includeJobs = url.searchParams.get('includeJobs') === 'true';
-    return dashboardQueueDetailEndpoint(ctx.queueManager, queue, includeJobs, corsOrigins);
-  }
-
-  // Route through sub-routers
-  let result: Response | null;
-
-  result = await routeJobRoutes(req, path, method, ctx, corsOrigins);
-  if (result) return result;
-
-  result = await routeQueueRoutes(req, path, method, ctx, corsOrigins);
-  if (result) return result;
-
-  result = await routeQueueConfigRoutes(req, path, method, ctx, corsOrigins);
-  if (result) return result;
-
-  result = await routeResourceRoutes(req, path, method, ctx, corsOrigins);
-  if (result) return result;
-
-  return jsonResponse({ ok: false, error: 'Not found' }, 404, corsOrigins);
 }
 
 export type HttpServer = ReturnType<typeof createHttpServer>;

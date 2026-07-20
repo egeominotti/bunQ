@@ -26,7 +26,7 @@ groups:
 
       # Queue Backlog Alert
       - alert: BunqueueQueueBacklog
-        expr: bunqueue_jobs_waiting > 10000
+        expr: (bunqueue_jobs_waiting + bunqueue_jobs_prioritized) > 10000
         for: 10m
         labels:
           severity: warning
@@ -36,7 +36,9 @@ groups:
 
       # No Workers Available
       - alert: BunqueueNoWorkers
-        expr: bunqueue_workers_active == 0 and bunqueue_jobs_waiting > 0
+        expr: |
+          (bunqueue_jobs_waiting + bunqueue_jobs_prioritized) > 0
+          and on() bunqueue_workers_active == 0
         for: 2m
         labels:
           severity: critical
@@ -54,11 +56,79 @@ groups:
           summary: "Bunqueue server is down"
           description: "Cannot reach Bunqueue server for metrics scraping."
 
+      # Persistent storage cannot currently accept durable work
+      - alert: BunqueueStorageDegraded
+        expr: bunqueue_storage_degraded == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bunqueue storage is degraded"
+          description: "Persistent storage has reported a write failure."
+
+      # Enabled backups must have a live scheduler
+      - alert: BunqueueBackupSchedulerDown
+        expr: |
+          bunqueue_backup_enabled == 1
+          and on() bunqueue_backup_scheduler_running == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bunqueue backup scheduler is not running"
+          description: "S3 backup is enabled but its scheduler is inactive. Check backup configuration and server logs."
+
+      # No successful backup within two configured intervals
+      - alert: BunqueueBackupStale
+        expr: |
+          bunqueue_backup_enabled == 1
+          and on() bunqueue_backup_scheduler_running == 1
+          and on() (
+            (
+              bunqueue_backup_last_success_timestamp_seconds == 0
+              and on() bunqueue_uptime_seconds > 2 * bunqueue_backup_interval_seconds
+            )
+            or on() (
+              bunqueue_backup_last_success_timestamp_seconds > 0
+              and on() (
+                time() - bunqueue_backup_last_success_timestamp_seconds
+                > 2 * bunqueue_backup_interval_seconds
+              )
+            )
+          )
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bunqueue backups are stale"
+          description: "No successful S3 backup has completed within two configured backup intervals."
+
+      # Any recent failed attempt should be investigated before backups become stale
+      - alert: BunqueueBackupFailures
+        expr: increase(bunqueue_backup_failures_total[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bunqueue backup attempt failed"
+          description: "{{ $value | printf \"%.0f\" }} S3 backup attempts failed in the last 15 minutes."
+
+      # The endpoint is healthy, but per-queue dashboards are intentionally incomplete
+      - alert: BunqueueQueueMetricsOmitted
+        expr: bunqueue_queue_metrics_omitted > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bunqueue per-queue metrics are capped"
+          description: "{{ $value }} queue names are omitted. Raise METRICS_MAX_QUEUES only after reviewing Prometheus cardinality."
+
       # Low Throughput (after having traffic)
       - alert: BunqueueLowThroughput
         expr: |
           rate(bunqueue_jobs_completed_total[5m]) < 1
-          and bunqueue_jobs_pushed_total > 1000
+          and on() rate(bunqueue_jobs_pushed_total[5m]) > 1
+          and on() (bunqueue_jobs_waiting + bunqueue_jobs_prioritized) > 0
         for: 10m
         labels:
           severity: warning
@@ -69,7 +139,9 @@ groups:
       # Worker Utilization High
       - alert: BunqueueWorkerOverload
         expr: |
-          100 * bunqueue_workers_active / (bunqueue_workers_total + 0.001) > 95
+          100 * bunqueue_worker_active_jobs
+          / clamp_min(bunqueue_worker_concurrency_slots, 1) > 95
+          and on() bunqueue_worker_concurrency_slots > 0
         for: 15m
         labels:
           severity: warning

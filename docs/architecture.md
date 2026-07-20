@@ -97,7 +97,12 @@ be claimed.
   live flow-result retention, and background-task wiring.
 - **`infrastructure/`** — `SqliteStorage` (+ `WriteBuffer`, `BatchInsertManager`),
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
-  `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates. The `server/bootstrap.ts` is the single composition root.
+  `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates.
+  HTTP responsibilities are split across `http.ts` (server/auth/upgrades),
+  `httpRouter.ts` (REST dispatch), `httpEndpoints.ts` (health/stats/debug),
+  `httpDashboardEndpoints.ts` (dashboard aggregation), and `httpResponse.ts`
+  (response helpers). `server/bootstrap.ts` is the single composition root and
+  supplies live TCP connection counts plus the pre-backup persistence flush.
 - **`client/`** — In-process SDK: `Queue`, `Worker`, `SandboxedWorker`,
   `FlowProducer`, `QueueGroup`, `Bunqueue` (simple mode), the `Workflow`/`Engine`
   pair, and the TCP `TcpPool`/forwarder. Each transparently targets embedded or TCP.
@@ -153,7 +158,7 @@ be claimed.
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
-│   │  dependency · cleanup/memory-bounds · monitoring · S3 backup · Cloud     │   │
+│   │  dependency · cleanup/memory-bounds · monitoring · S3 snapshot · Cloud   │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -351,7 +356,7 @@ from `DEFAULT_CONFIG` ([`src/application/types.ts:33`](../src/application/types.
 | Dependency resolution | `dependencyCheckMs` = **30 s** (safety fallback) | Resolve flow/child deps; fast path is event-driven |
 | DLQ maintenance | `dlqMaintenanceMs` = **60 s** | Age-based auto-purge + opt-in auto-retry |
 | Cron scheduler | event-driven | Fire delayed/recurring jobs onto queues |
-| S3 backup | `S3_BACKUP_INTERVAL` (6 h) | Gzip + checksummed snapshots, retention pruning |
+| S3 backup | `S3_BACKUP_INTERVAL` (6 h) | Flush buffer → `VACUUM INTO` WAL-safe snapshot → integrity check → gzip/SHA-256 → metadata-first S3 publication → retention |
 | Stats log | `STATS_INTERVAL_MS` = **5 min** | Periodic queue/memory/worker stats line |
 
 Memory bounds enforced by the bounded collections (cleanup evicts ~10% when full):
@@ -477,7 +482,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 ### Observability & operations
 - [Webhooks, Events & Job Logs](./features/webhooks-and-events.md) — Server-side observability: outbound HTTP webhooks, in-process event pub/sub, bounded per-job logs, and client-job ownership/disconnect release.
 - [Worker Registry & Management](./features/workers-management.md) — Server-side in-memory registry of connected workers tracking liveness, queues, concurrency, and per-worker job counters; backs skipIfNoWorker crons and dashboard/HTTP/CLI worker visibility.
-- [Stats, Metrics & Monitoring](./features/stats-and-monitoring.md) — Read-only aggregation of queue depth counts, cumulative counters, memory sizes, EMA throughput rates, and latency histograms, exposed via TCP Stats/Metrics/Prometheus/Ping, HTTP /stats /metrics /prometheus /health /dashboard, and the periodic stats log.
+- [Stats, Metrics & Monitoring](./features/stats-and-monitoring.md) — Read-only aggregation of queue depth counts, cumulative counters, bounded per-queue labels, standard process/build/connection collectors, S3 backup outcomes and latency histograms, exposed via TCP Stats/Metrics/Prometheus/Ping, HTTP /stats /metrics /prometheus /health /dashboard, and the periodic stats log.
 - [S3 Backup](./features/backup-s3.md) — Periodic gzip-compressed, SHA-256-checksummed SQLite snapshots to S3-compatible storage with retention pruning and validate-before-replace restore.
 - [bunqueue Cloud Dashboard Integration](./features/cloud-integration.md) — Opt-in agent that pushes full server telemetry snapshots to the bunqueue.io dashboard over HTTP and receives whitelisted remote commands over WebSocket.
 

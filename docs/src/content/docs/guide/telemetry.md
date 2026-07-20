@@ -22,11 +22,11 @@ Every push, pull, and ack operation is timed and recorded in a Prometheus histog
 
 | Metric | Description |
 |--------|-------------|
-| `bunqueue_push_duration_ms` | Time to push a job |
-| `bunqueue_pull_duration_ms` | Time to pull a job from a queue |
-| `bunqueue_ack_duration_ms` | Time to acknowledge a completed job |
+| `bunqueue_push_duration_seconds` | Time to push a job |
+| `bunqueue_pull_duration_seconds` | Time to pull a job from a queue |
+| `bunqueue_ack_duration_seconds` | Time to acknowledge a completed job |
 
-Each exposes `_bucket`, `_sum`, and `_count` series on `/prometheus`, with bucket boundaries at `0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000` ms.
+Each exposes `_bucket`, `_sum`, and `_count` series on `/prometheus`, with bucket boundaries in seconds at `0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10`.
 
 ```bash
 curl http://localhost:6790/prometheus
@@ -36,13 +36,13 @@ Compute percentiles in Prometheus with `histogram_quantile()`:
 
 ```text
 # p99 push latency
-histogram_quantile(0.99, rate(bunqueue_push_duration_ms_bucket[5m]))
+histogram_quantile(0.99, sum by (le) (rate(bunqueue_push_duration_seconds_bucket[5m])))
 
 # p50 pull latency
-histogram_quantile(0.50, rate(bunqueue_pull_duration_ms_bucket[5m]))
+histogram_quantile(0.50, sum by (le) (rate(bunqueue_pull_duration_seconds_bucket[5m])))
 ```
 
-Averages can be derived from `_sum / _count`. Latency averages are also returned by the `Metrics` TCP command as `avgLatencyMs` and `avgProcessingMs` (over the TCP protocol / SDK; the `bunqueue metrics` CLI prints Prometheus text instead, and the HTTP `/metrics` endpoint only exposes the `total*` counters).
+Averages can be derived from `_sum / _count` and are in seconds in Prometheus. Latency averages returned by the `Metrics` TCP command remain in milliseconds (`avgLatencyMs` and `avgProcessingMs`); the unit change only corrects Prometheus exposition. The `bunqueue metrics` CLI prints Prometheus text, while the HTTP `/metrics` endpoint only exposes the `total*` counters.
 
 ## Throughput Rates
 
@@ -99,6 +99,26 @@ Programmatically, in embedded mode:
 const perQueue = queueManager.getPerQueueStats();
 // Map<string, { waiting, prioritized, delayed, active, dlq }>
 ```
+
+Prometheus exposition is capped independently from this embedded API:
+`METRICS_MAX_QUEUES=100` is the default, `0` disables queue labels, and
+`bunqueue_queue_metrics_exported + bunqueue_queue_metrics_omitted` always equals
+the registered queue count at scrape time. This prevents an accidental
+queue-per-tenant naming scheme from creating an unbounded live scrape.
+
+## Runtime and Recovery Signals
+
+Generic process dashboards can use the standard `process_cpu_seconds_total`,
+`process_start_time_seconds`, `process_resident_memory_bytes`, and
+`process_heap_bytes` collectors. `bunqueue_build_info` identifies both the
+bunqueue and Bun runtime versions, and `bunqueue_connections` uses the bounded
+`tcp`, `websocket`, and `sse` transport values.
+
+When scheduled S3 backup exists, its attempts, successes, failures, overlap
+rejections, current state, last duration/size, and last success/failure
+timestamps are exported without dynamic labels. See
+[Monitoring](/guide/monitoring/#backup-metrics) for the exact families and
+[S3 Backup](/guide/backup/) for recovery semantics.
 
 ## Log Levels
 

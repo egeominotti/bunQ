@@ -63,15 +63,15 @@ export class Histogram {
     return this.buckets[this.buckets.length - 1];
   }
 
-  /** Generate Prometheus histogram lines */
-  toPrometheus(name: string, help: string): string {
+  /** Generate Prometheus histogram lines, optionally scaling observed values. */
+  toPrometheus(name: string, help: string, outputScale = 1): string {
     const lines: string[] = [`# HELP ${name} ${help}`, `# TYPE ${name} histogram`];
 
     for (let i = 0; i < this.buckets.length; i++) {
-      lines.push(`${name}_bucket{le="${this.buckets[i]}"} ${this.counts[i]}`);
+      lines.push(`${name}_bucket{le="${this.buckets[i] * outputScale}"} ${this.counts[i]}`);
     }
     lines.push(`${name}_bucket{le="+Inf"} ${this.counts[this.buckets.length]}`);
-    lines.push(`${name}_sum ${this.sum}`);
+    lines.push(`${name}_sum ${this.sum * outputScale}`);
     lines.push(`${name}_count ${this.count}`);
 
     return lines.join('\n');

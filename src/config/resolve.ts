@@ -22,6 +22,7 @@ export interface ResolvedConfig {
   dataPath: string | undefined;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
+  maxPrometheusQueues: number;
   s3BackupEnabled: boolean;
   shutdownTimeoutMs: number;
   statsIntervalMs: number;
@@ -49,6 +50,10 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
       Bun.env.SQLITE_PATH,
     corsOrigins: fc?.cors?.origins ?? Bun.env.CORS_ALLOW_ORIGIN?.split(',').filter(Boolean) ?? [],
     requireAuthForMetrics: fc?.auth?.requireAuthForMetrics ?? Bun.env.METRICS_AUTH === 'true',
+    maxPrometheusQueues: nonNegativeInteger(
+      fc?.telemetry?.maxPrometheusQueues ?? parseInt(Bun.env.METRICS_MAX_QUEUES ?? '100', 10),
+      100
+    ),
     s3BackupEnabled:
       fc?.backup?.enabled ??
       (Bun.env.S3_BACKUP_ENABLED === '1' || Bun.env.S3_BACKUP_ENABLED === 'true'),
@@ -56,6 +61,10 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
       fc?.timeouts?.shutdown ?? parseInt(Bun.env.SHUTDOWN_TIMEOUT_MS ?? '30000', 10),
     statsIntervalMs: fc?.timeouts?.stats ?? parseInt(Bun.env.STATS_INTERVAL_MS ?? '300000', 10),
   };
+}
+
+function nonNegativeInteger(value: number, fallback: number): number {
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
 /**
@@ -125,14 +134,21 @@ export function resolveBackupConfig(
   databasePath: string
 ): S3BackupConfig {
   const fc = fileConfig?.backup;
+  const virtualHostedStyle = Bun.env.S3_VIRTUAL_HOSTED_STYLE;
   return {
     enabled:
       fc?.enabled ?? (Bun.env.S3_BACKUP_ENABLED === '1' || Bun.env.S3_BACKUP_ENABLED === 'true'),
     accessKeyId: fc?.accessKeyId ?? Bun.env.S3_ACCESS_KEY_ID ?? Bun.env.AWS_ACCESS_KEY_ID ?? '',
     secretAccessKey:
       fc?.secretAccessKey ?? Bun.env.S3_SECRET_ACCESS_KEY ?? Bun.env.AWS_SECRET_ACCESS_KEY ?? '',
+    sessionToken: fc?.sessionToken ?? Bun.env.S3_SESSION_TOKEN ?? Bun.env.AWS_SESSION_TOKEN,
     bucket: fc?.bucket ?? Bun.env.S3_BUCKET ?? Bun.env.AWS_BUCKET ?? '',
     endpoint: fc?.endpoint ?? Bun.env.S3_ENDPOINT ?? Bun.env.AWS_ENDPOINT,
+    virtualHostedStyle:
+      fc?.virtualHostedStyle ??
+      (virtualHostedStyle === undefined
+        ? undefined
+        : virtualHostedStyle === '1' || virtualHostedStyle === 'true'),
     region: fc?.region ?? Bun.env.S3_REGION ?? Bun.env.AWS_REGION ?? S3_DEFAULTS.region,
     intervalMs:
       fc?.interval ?? (parseInt(Bun.env.S3_BACKUP_INTERVAL ?? '', 10) || S3_DEFAULTS.intervalMs),

@@ -14,6 +14,45 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.44] - 2026-07-20
+
+### Fixed: transaction-safe S3 recovery and production monitoring
+
+- Scheduled and manual S3 backups now snapshot SQLite through `VACUUM INTO`,
+  so committed WAL frames are preserved even when a reader blocks checkpoint
+  truncation. Server snapshots first flush pending buffered writes and reject
+  the cycle if storage retry/backoff leaves any accepted write only in memory.
+- Backup keys include a UUID; metadata is published before its gzip payload.
+  Restore strictly validates metadata, compressed/original sizes, SHA-256,
+  SQLite header and `PRAGMA integrity_check`, then quarantines stale
+  WAL/SHM/journal sidecars before the atomic swap. Legacy no-metadata restore
+  is restricted to uncompressed SQLite files.
+- Temporary S3 session credentials and virtual-host addressing are supported.
+  Paginated listing now surfaces errors instead of treating an outage as an
+  empty bucket, and every S3 retry attempt has a released timeout. Enabling
+  backup without a persistent data path now fails startup before binding
+  instead of silently running without recovery points.
+- Prometheus metrics now use canonical registration gauges and
+  `_duration_seconds` histograms, and expose worker capacity, process memory,
+  storage health and SQLite size. Health/readiness return 503 for degraded
+  storage, TCP connections are reported accurately, and protected metrics fail
+  closed when no auth token is configured.
+- Enterprise telemetry adds standard `process_*` collectors, bounded build and
+  transport labels, an explicit per-queue cardinality cap with exported/omitted
+  conservation, and zero-initialized S3 backup scheduler/freshness/outcome
+  metrics. The default cap is 100 queue names and is configurable with
+  `METRICS_MAX_QUEUES` or `telemetry.maxPrometheusQueues`.
+- The pinned Compose monitoring profile now includes Alertmanager, a matching
+  Grafana datasource UID, corrected alert expressions, and a dashboard with
+  queue filtering, per-queue state, latency percentiles/heatmap, worker
+  utilization, storage/server indicators, connections, backup freshness and
+  telemetry-cap visibility. Bundled alerts cover stopped/stale/failing backups
+  and omitted per-queue metrics.
+- New model-based campaigns verify backup publication/restore/retention
+  invariants, worker aggregate/capacity conservation, backup outcome
+  conservation and queue-label bounds alongside the existing broker lifecycle
+  model.
+
 ## [2.8.43] - 2026-07-19
 
 ### Fixed: collision-free SDK broker fixtures

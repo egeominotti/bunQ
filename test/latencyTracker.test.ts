@@ -61,9 +61,9 @@ describe('LatencyTracker', () => {
 
     const output = tracker.toPrometheus();
 
-    expect(output).toContain('bunqueue_push_duration_ms');
-    expect(output).toContain('bunqueue_pull_duration_ms');
-    expect(output).toContain('bunqueue_ack_duration_ms');
+    expect(output).toContain('bunqueue_push_duration_seconds');
+    expect(output).toContain('bunqueue_pull_duration_seconds');
+    expect(output).toContain('bunqueue_ack_duration_seconds');
     expect(output).toContain('_bucket{le=');
     expect(output).toContain('_sum');
     expect(output).toContain('_count');
@@ -73,10 +73,10 @@ describe('LatencyTracker', () => {
     tracker.push.observe(1);
 
     const output = tracker.toPrometheus();
-    expect(output).toContain('# HELP bunqueue_push_duration_ms');
-    expect(output).toContain('# TYPE bunqueue_push_duration_ms histogram');
-    expect(output).toContain('bunqueue_push_duration_ms_bucket{le="+Inf"} 1');
-    expect(output).toContain('bunqueue_push_duration_ms_sum 1');
-    expect(output).toContain('bunqueue_push_duration_ms_count 1');
+    expect(output).toContain('# HELP bunqueue_push_duration_seconds');
+    expect(output).toContain('# TYPE bunqueue_push_duration_seconds histogram');
+    expect(output).toContain('bunqueue_push_duration_seconds_bucket{le="+Inf"} 1');
+    expect(output).toContain('bunqueue_push_duration_seconds_sum 0.001');
+    expect(output).toContain('bunqueue_push_duration_seconds_count 1');
   });
 });

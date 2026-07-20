@@ -1,0 +1,58 @@
+rule_files:
+  - alert_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: backup without a first success gets two full intervals
+    interval: 1m
+    input_series:
+      - series: bunqueue_backup_enabled
+        values: '1x730'
+      - series: bunqueue_backup_scheduler_running
+        values: '1x730'
+      - series: bunqueue_uptime_seconds
+        values: '0+60x730'
+      - series: bunqueue_backup_interval_seconds
+        values: '21600x730'
+      - series: bunqueue_backup_last_success_timestamp_seconds
+        values: '0x730'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: BunqueueBackupStale
+        exp_alerts: []
+      - eval_time: 12h7m
+        alertname: BunqueueBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Bunqueue backups are stale
+              description: No successful S3 backup has completed within two configured backup intervals.
+
+  - name: backup freshness uses the last successful timestamp
+    start_timestamp: 2000000000
+    interval: 1m
+    input_series:
+      - series: bunqueue_backup_enabled
+        values: '1x140'
+      - series: bunqueue_backup_scheduler_running
+        values: '1x140'
+      - series: bunqueue_uptime_seconds
+        values: '0+60x140'
+      - series: bunqueue_backup_interval_seconds
+        values: '3600x140'
+      - series: bunqueue_backup_last_success_timestamp_seconds
+        values: '2000000000x140'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BunqueueBackupStale
+        exp_alerts: []
+      - eval_time: 2h7m
+        alertname: BunqueueBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Bunqueue backups are stale
+              description: No successful S3 backup has completed within two configured backup intervals.

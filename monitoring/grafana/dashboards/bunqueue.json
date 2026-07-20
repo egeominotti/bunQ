@@ -1,7 +1,18 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
   "editable": true,
-  "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
   "links": [],
@@ -11,136 +22,80 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 100,
       "panels": [],
-      "title": "Overview",
+      "title": "Service & queue overview",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 5000 }] }
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
         }
       },
-      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "id": 1,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_waiting", "refId": "A" }],
-      "title": "Waiting",
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "up{job=\"bunqueue\"}", "refId": "A" }],
+      "title": "Server",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "HEALTHY" }, "1": { "color": "red", "text": "DEGRADED" } }, "type": "value" }
+          ]
         }
       },
-      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "id": 2,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_delayed", "refId": "A" }],
-      "title": "Delayed",
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_storage_degraded", "refId": "A" }],
+      "title": "Storage",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 10000 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "id": 3,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_active", "refId": "A" }],
-      "title": "Active",
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_jobs_waiting + bunqueue_jobs_prioritized", "refId": "A" }],
+      "title": "Ready backlog",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 100 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
       "id": 4,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_completed", "refId": "A" }],
-      "title": "Completed",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 100 }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
-      "id": 5,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
       "targets": [{ "expr": "bunqueue_jobs_dlq", "refId": "A" }],
       "title": "DLQ",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 } },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_worker_active_jobs / clamp_min(bunqueue_worker_concurrency_slots, 1)", "refId": "A" }],
+      "title": "Worker utilization",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
       "id": 6,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_workers_active", "refId": "A" }],
-      "title": "Workers",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "super-light-blue", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
-      "id": 7,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_cron_jobs_total", "refId": "A" }],
-      "title": "Cron Jobs",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "light-green", "value": null }] },
-          "unit": "s"
-        }
-      },
-      "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
-      "id": 8,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_uptime_seconds", "refId": "A" }],
-      "title": "Uptime",
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "count(ALERTS{alertname=~\"Bunqueue.*\",alertstate=\"firing\"}) or on() vector(0)", "refId": "A" }],
+      "title": "Firing alerts",
       "type": "stat"
     },
     {
@@ -148,409 +103,300 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
       "id": 101,
       "panels": [],
-      "title": "Throughput & Performance",
+      "title": "Throughput & queue state",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "jobs/sec", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "ops"
-        }
-      },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "id": 10,
-      "options": { "legend": { "calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "expr": "rate(bunqueue_jobs_pushed_total[1m])", "legendFormat": "Pushed/s", "refId": "A" },
-        { "expr": "rate(bunqueue_jobs_pulled_total[1m])", "legendFormat": "Pulled/s", "refId": "B" },
-        { "expr": "rate(bunqueue_jobs_completed_total[1m])", "legendFormat": "Completed/s", "refId": "C" },
-        { "expr": "rate(bunqueue_jobs_failed_total[1m])", "legendFormat": "Failed/s", "refId": "D" }
+        { "expr": "rate(bunqueue_jobs_pushed_total[$__rate_interval])", "legendFormat": "Pushed/s", "refId": "A" },
+        { "expr": "rate(bunqueue_jobs_pulled_total[$__rate_interval])", "legendFormat": "Pulled/s", "refId": "B" },
+        { "expr": "rate(bunqueue_jobs_completed_total[$__rate_interval])", "legendFormat": "Completed/s", "refId": "C" },
+        { "expr": "rate(bunqueue_jobs_failed_total[$__rate_interval])", "legendFormat": "Failed/s", "refId": "D" }
       ],
-      "title": "Job Throughput (per second)",
+      "title": "Job throughput",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 30, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "normal" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "DLQ" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
-        ]
-      },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "id": 11,
-      "options": { "legend": { "calcs": ["mean", "max", "last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
       "targets": [
         { "expr": "bunqueue_jobs_waiting", "legendFormat": "Waiting", "refId": "A" },
-        { "expr": "bunqueue_jobs_delayed", "legendFormat": "Delayed", "refId": "B" },
-        { "expr": "bunqueue_jobs_active", "legendFormat": "Active", "refId": "C" },
-        { "expr": "bunqueue_jobs_dlq", "legendFormat": "DLQ", "refId": "D" }
+        { "expr": "bunqueue_jobs_prioritized", "legendFormat": "Prioritized", "refId": "B" },
+        { "expr": "bunqueue_jobs_delayed", "legendFormat": "Delayed", "refId": "C" },
+        { "expr": "bunqueue_jobs_active", "legendFormat": "Active", "refId": "D" },
+        { "expr": "bunqueue_jobs_dlq", "legendFormat": "DLQ", "refId": "E" }
       ],
-      "title": "Queue Depth Over Time",
+      "title": "Global queue state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "bunqueue_queue_jobs_waiting{queue=~\"$queue\"}", "legendFormat": "{{queue}} waiting", "refId": "A" },
+        { "expr": "bunqueue_queue_jobs_prioritized{queue=~\"$queue\"}", "legendFormat": "{{queue}} prioritized", "refId": "B" },
+        { "expr": "bunqueue_queue_jobs_delayed{queue=~\"$queue\"}", "legendFormat": "{{queue}} delayed", "refId": "C" },
+        { "expr": "bunqueue_queue_jobs_active{queue=~\"$queue\"}", "legendFormat": "{{queue}} active", "refId": "D" },
+        { "expr": "bunqueue_queue_jobs_dlq{queue=~\"$queue\"}", "legendFormat": "{{queue}} DLQ", "refId": "E" }
+      ],
+      "title": "Per-queue state",
       "type": "timeseries"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
       "id": 102,
       "panels": [],
-      "title": "Success & Failure Analysis",
+      "title": "Latency (seconds)",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 98 }] },
-          "unit": "percent"
-        }
-      },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 15 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
       "id": 20,
-      "options": { "minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
-      "targets": [{ "expr": "100 * bunqueue_jobs_completed_total / (bunqueue_jobs_completed_total + bunqueue_jobs_failed_total + 0.001)", "refId": "A" }],
-      "title": "Success Rate",
-      "type": "gauge"
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(bunqueue_push_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Push p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(bunqueue_push_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Push p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(bunqueue_push_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Push p99", "refId": "C" },
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(bunqueue_pull_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Pull p50", "refId": "D" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(bunqueue_pull_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Pull p95", "refId": "E" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(bunqueue_pull_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Pull p99", "refId": "F" },
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(bunqueue_ack_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Ack p50", "refId": "G" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(bunqueue_ack_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Ack p95", "refId": "H" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(bunqueue_ack_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "Ack p99", "refId": "I" }
+      ],
+      "title": "Latency percentiles",
+      "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "max": 10,
-          "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] },
-          "unit": "percent"
-        }
-      },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 15 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "id": 21,
-      "options": { "minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true, "text": {} },
-      "targets": [{ "expr": "100 * rate(bunqueue_jobs_failed_total[5m]) / (rate(bunqueue_jobs_completed_total[5m]) + rate(bunqueue_jobs_failed_total[5m]) + 0.001)", "refId": "A" }],
-      "title": "Failure Rate (5m)",
-      "type": "gauge"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "bars", "fillOpacity": 80, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "Failed" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "Completed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
-        ]
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
-      "id": 22,
-      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "options": { "calculate": false, "cellGap": 1, "color": { "exponent": 0.5, "mode": "scheme", "scheme": "Spectral" }, "filterValues": { "le": 0.000001 }, "legend": { "show": true } },
       "targets": [
-        { "expr": "increase(bunqueue_jobs_completed_total[5m])", "legendFormat": "Completed", "refId": "A" },
-        { "expr": "increase(bunqueue_jobs_failed_total[5m])", "legendFormat": "Failed", "refId": "B" }
-      ],
-      "title": "Completed vs Failed (5m buckets)",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
-      "id": 103,
-      "panels": [],
-      "title": "Workers & Processing",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        {
+          "expr": "sum by (le) (rate(bunqueue_push_duration_seconds_bucket[$__rate_interval]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
         }
-      },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 24 },
-      "id": 30,
-      "options": { "legend": { "calcs": ["last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
-      "targets": [
-        { "expr": "bunqueue_workers_total", "legendFormat": "Total", "refId": "A" },
-        { "expr": "bunqueue_workers_active", "legendFormat": "Active", "refId": "B" }
       ],
-      "title": "Workers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "ops"
-        }
-      },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 24 },
-      "id": 31,
-      "options": { "legend": { "calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
-      "targets": [
-        { "expr": "rate(bunqueue_workers_processed_total[1m])", "legendFormat": "Processed/s", "refId": "A" },
-        { "expr": "rate(bunqueue_workers_failed_total[1m])", "legendFormat": "Failed/s", "refId": "B" }
-      ],
-      "title": "Worker Throughput",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 24 },
-      "id": 32,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "vertical", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "expr": "bunqueue_workers_processed_total", "legendFormat": "Processed", "refId": "A" },
-        { "expr": "bunqueue_workers_failed_total", "legendFormat": "Failed", "refId": "B" }
-      ],
-      "title": "Worker Totals",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 95 }] },
-          "unit": "percent"
-        }
-      },
-      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 24 },
-      "id": 33,
-      "options": { "minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true },
-      "targets": [{ "expr": "100 * bunqueue_workers_active / (bunqueue_workers_total + 0.001)", "refId": "A" }],
-      "title": "Worker Utilization",
-      "type": "gauge"
+      "title": "Push latency distribution",
+      "type": "heatmap"
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
-      "id": 104,
+      "id": 103,
       "panels": [],
-      "title": "Webhooks & Cron",
+      "title": "Workers, storage & process",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 32 },
-      "id": 40,
-      "options": { "legend": { "calcs": ["last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "id": 30,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
       "targets": [
-        { "expr": "bunqueue_webhooks_total", "legendFormat": "Total", "refId": "A" },
-        { "expr": "bunqueue_webhooks_enabled", "legendFormat": "Enabled", "refId": "B" }
+        { "expr": "bunqueue_workers_registered", "legendFormat": "Registered workers", "refId": "A" },
+        { "expr": "bunqueue_worker_active_jobs", "legendFormat": "Active jobs", "refId": "B" },
+        { "expr": "bunqueue_worker_concurrency_slots", "legendFormat": "Concurrency slots", "refId": "C" }
       ],
-      "title": "Webhooks",
+      "title": "Worker capacity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "id": 31,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        { "expr": "bunqueue_process_heap_used_bytes", "legendFormat": "Heap used", "refId": "A" },
+        { "expr": "bunqueue_process_heap_total_bytes", "legendFormat": "Heap total", "refId": "B" },
+        { "expr": "bunqueue_process_resident_memory_bytes", "legendFormat": "RSS", "refId": "C" }
+      ],
+      "title": "Process memory",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "opacity", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" } },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
+        "defaults": { "unit": "bytes" },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          }
+        ]
       },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 32 },
-      "id": 41,
-      "options": { "legend": { "calcs": ["last"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "id": 32,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
       "targets": [
-        { "expr": "bunqueue_cron_jobs_total", "legendFormat": "Cron Jobs", "refId": "A" }
+        { "expr": "bunqueue_sqlite_database_size_bytes", "legendFormat": "Database", "refId": "A" },
+        { "expr": "bunqueue_storage_disk_full", "legendFormat": "Disk full (1=yes)", "refId": "B" }
       ],
-      "title": "Cron Jobs",
+      "title": "Persistent storage",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 32 },
-      "id": 42,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 33,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
       "targets": [
-        { "expr": "bunqueue_jobs_pushed_total", "legendFormat": "Total Pushed", "refId": "A" },
-        { "expr": "bunqueue_jobs_pulled_total", "legendFormat": "Total Pulled", "refId": "B" },
-        { "expr": "bunqueue_jobs_completed_total", "legendFormat": "Total Completed", "refId": "C" },
-        { "expr": "bunqueue_jobs_failed_total", "legendFormat": "Total Failed", "refId": "D" }
+        { "expr": "bunqueue_webhooks_registered", "legendFormat": "Webhooks", "refId": "A" },
+        { "expr": "bunqueue_webhooks_enabled", "legendFormat": "Enabled", "refId": "B" },
+        { "expr": "bunqueue_cron_jobs_registered", "legendFormat": "Cron jobs", "refId": "C" }
       ],
-      "title": "Lifetime Totals",
-      "type": "stat"
+      "title": "Automation registrations",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 34,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        { "expr": "rate(bunqueue_workers_processed_total[$__rate_interval])", "legendFormat": "Processed/s", "refId": "A" },
+        { "expr": "rate(bunqueue_workers_failed_total[$__rate_interval])", "legendFormat": "Failed/s", "refId": "B" }
+      ],
+      "title": "Worker outcomes",
+      "type": "timeseries"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
-      "id": 105,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
+      "id": 104,
       "panels": [],
-      "title": "Alerts & Health",
+      "title": "Backup & telemetry safety",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "OK" } }, "type": "value" },
-            { "options": { "from": 1, "result": { "color": "red", "index": 1, "text": "ALERT" }, "to": 999999 }, "type": "range" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 39 },
-      "id": 50,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_dlq > 100", "refId": "A" }],
-      "title": "DLQ Alert",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 49 },
+      "id": 40,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_backup_enabled", "refId": "A" }],
+      "title": "Backup enabled",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "OK" } }, "type": "value" },
-            { "options": { "from": 1, "result": { "color": "red", "index": 1, "text": "ALERT" }, "to": 999999 }, "type": "range" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 39 },
-      "id": 51,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "(rate(bunqueue_jobs_failed_total[5m]) / (rate(bunqueue_jobs_completed_total[5m]) + 0.001)) > 0.05", "refId": "A" }],
-      "title": "Failure Rate >5%",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 49 },
+      "id": 41,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_backup_scheduler_running", "refId": "A" }],
+      "title": "Backup scheduler",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "OK" } }, "type": "value" },
-            { "options": { "from": 1, "result": { "color": "yellow", "index": 1, "text": "WARN" }, "to": 999999 }, "type": "range" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 39 },
-      "id": 52,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_waiting > 10000", "refId": "A" }],
-      "title": "Queue Backlog",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 49 },
+      "id": 42,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_backup_consecutive_failures", "refId": "A" }],
+      "title": "Backup failures",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "OK" } }, "type": "value" },
-            { "options": { "from": 1, "result": { "color": "red", "index": 1, "text": "NO WORKERS" }, "to": 999999 }, "type": "range" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 39 },
-      "id": 53,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_workers_active == 0 and bunqueue_jobs_waiting > 0", "refId": "A" }],
-      "title": "No Workers",
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 49 },
+      "id": 43,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "(time() - bunqueue_backup_last_success_timestamp_seconds) and bunqueue_backup_last_success_timestamp_seconds > 0", "refId": "A" }],
+      "title": "Last backup age",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "HEALTHY" } }, "type": "value" },
-            { "options": { "from": 1, "result": { "color": "green", "index": 1, "text": "HEALTHY" }, "to": 999999 }, "type": "range" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 39 },
-      "id": 54,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_uptime_seconds > 0", "refId": "A" }],
-      "title": "Server Health",
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 49 },
+      "id": 44,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_backup_last_size_bytes", "refId": "A" }],
+      "title": "Last backup size",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 39 },
-      "id": 55,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "bunqueue_jobs_waiting + bunqueue_jobs_delayed + bunqueue_jobs_active", "refId": "A" }],
-      "title": "Total In-Flight",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 49 },
+      "id": 45,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [{ "expr": "bunqueue_queue_metrics_omitted", "refId": "A" }],
+      "title": "Queues omitted",
       "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 53 },
+      "id": 46,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        { "expr": "increase(bunqueue_backup_successes_total[$__rate_interval])", "legendFormat": "Successes", "refId": "A" },
+        { "expr": "increase(bunqueue_backup_failures_total[$__rate_interval])", "legendFormat": "Failures", "refId": "B" },
+        { "expr": "increase(bunqueue_backup_overlap_rejections_total[$__rate_interval])", "legendFormat": "Overlaps rejected", "refId": "C" }
+      ],
+      "title": "Backup outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "id": 47,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        { "expr": "bunqueue_connections{transport=\"tcp\"}", "legendFormat": "TCP", "refId": "A" },
+        { "expr": "bunqueue_connections{transport=\"websocket\"}", "legendFormat": "WebSocket", "refId": "B" },
+        { "expr": "bunqueue_connections{transport=\"sse\"}", "legendFormat": "SSE", "refId": "C" }
+      ],
+      "title": "Connections",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 38,
-  "tags": ["bunqueue", "queue", "jobs", "monitoring"],
-  "templating": { "list": [] },
+  "schemaVersion": 41,
+  "tags": ["bunqueue", "jobs", "monitoring"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(bunqueue_queue_jobs_waiting, queue)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Queue",
+        "multi": true,
+        "name": "queue",
+        "options": [],
+        "query": { "query": "label_values(bunqueue_queue_jobs_waiting, queue)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-1h", "to": "now" },
-  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"] },
+  "timepicker": {},
   "timezone": "browser",
-  "title": "Bunqueue - Complete Dashboard",
-  "uid": "bunqueue-complete",
-  "version": 1
+  "title": "bunqueue",
+  "uid": "bunqueue-main",
+  "version": 3,
+  "weekStart": ""
 }

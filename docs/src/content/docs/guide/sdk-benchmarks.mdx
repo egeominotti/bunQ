@@ -1,0 +1,229 @@
+---
+title: "SDK Performance: TypeScript, Python, PHP, Go, Rust & Elixir"
+description: "Production-style native benchmarks of every official bunqueue SDK: producer throughput and latency, worker throughput, memory, variance, methodology, and bottleneck analysis."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This report compares all six official network SDKs against the same bunqueue
+broker. It is designed to answer two different questions:
+
+1. How much producer throughput can each client sustain before the broker and
+   SQLite become the limiting system?
+2. How efficiently does each Worker refill its concurrency slots when handlers
+   are short and I/O-bound?
+
+The results were measured on 20 July 2026 at repository revision
+`8f276e03ae480bc1abc615869769e48e087f7804` (`bunqueue` 2.8.43). They are a
+dated engineering result, not a universal capacity promise.
+
+<Aside type="tip">
+The producer result is deliberately boring: every SDK lands between 60K and
+64K jobs/s. That convergence is useful evidence that the broker and persistence
+path dominate once producers use bulk commands and enough connections.
+</Aside>
+
+## Test environment
+
+| Component | Version |
+| --- | --- |
+| Host | Apple M1 Max, 10 cores, 32 GiB, arm64 |
+| Operating system | macOS 26.5.2 (25F84) |
+| Broker runtime | Bun 1.3.14 |
+| Python | CPython 3.14.3 |
+| PHP | PHP CLI 8.5.8, NTS |
+| Go | Go 1.26.5 |
+| Rust | rustc/cargo 1.97.0, release build |
+| Elixir | Elixir 1.20.2, Erlang/OTP 29 |
+
+Every measured sample used a fresh native Bun broker, SQLite database, dynamic
+TCP and HTTP ports, and unique queue. No benchmark number came from Docker or a
+VM. SDK order rotated between samples to reduce thermal and ordering bias.
+
+Each SDK/scenario combination received one unmeasured warm-up followed by five
+independent measured samples. External sampling recorded the client and broker
+process-tree RSS every 50 ms. Setup, preload, shutdown, and final verification
+were excluded from timed regions.
+
+Across measured samples the campaign submitted 600,000 producer jobs and
+processed 150,000 worker jobs. Every sample ended with the exact expected
+server-side job count. This is a conservation check, not a claim of
+exactly-once handler execution; bunqueue's delivery contract remains
+at-least-once.
+
+## Producer workload
+
+Each sample submits 20,000 jobs with an approximately 256-byte payload through:
+
+- eight concurrent connections/producers;
+- `addBulk` batches of 50 jobs;
+- 400 measured bulk calls per sample;
+- local TCP and MessagePack, using each SDK's real production client.
+
+Throughput is total accepted jobs divided by elapsed wall-clock time. Call
+latency percentiles are calculated inside each sample; the table reports the
+median p50, p95, and p99 across its five samples. CV is the coefficient of
+variation of sample throughput: standard deviation divided by mean.
+
+### Producer results
+
+| SDK | Median jobs/s | Mean jobs/s | Min–max jobs/s | CV | p50 | p95 | p99 | Peak client RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Rust release | **63,735** | 62,985 | 61,347–63,859 | 1.63% | **3.936 ms** | 15.734 ms | **18.800 ms** | **8.0 MiB** |
+| PHP | 62,053 | 61,737 | 60,464–62,675 | 1.22% | 4.365 ms | **15.274 ms** | 19.443 ms | 73.2 MiB |
+| Go | 61,665 | 61,472 | 60,664–61,966 | **0.73%** | 4.243 ms | 15.698 ms | 19.292 ms | 17.3 MiB |
+| TypeScript/Bun | 61,511 | 61,426 | 60,254–62,570 | 1.39% | 4.404 ms | 17.048 ms | 20.271 ms | 79.4 MiB |
+| Python | 60,701 | 60,993 | 60,325–61,960 | 1.07% | 4.252 ms | 16.508 ms | 19.604 ms | 29.2 MiB |
+| Elixir/OTP | 60,429 | 60,176 | 58,046–61,178 | 1.86% | 4.423 ms | 16.829 ms | 23.829 ms | 109.7 MiB |
+
+PHP RSS is the aggregate of eight producer processes, while the other rows are
+single-runtime process trees. RSS also includes each runtime's allocator,
+garbage collector, loaded standard library, and JIT where applicable; it is an
+operational footprint measurement, not bytes retained per job.
+
+### Producer interpretation
+
+The fastest and slowest medians differ by only 5.5%. All six SDKs therefore
+reach the same broad broker-bound plateau. Rust leads by roughly 3.6% over
+TypeScript and has the lowest client RSS and p99, but changing producer language
+alone will not multiply queue capacity in this workload.
+
+The tail is also compact: five SDKs remain below 20.3 ms p99, while Elixir
+reaches 23.8 ms. Go has the lowest throughput variation. Every producer CV is
+below 2%, so the ranking is stable on this host, although the small gaps should
+not be treated as architectural differences.
+
+For production producers, batching is the important decision. A sequential
+`add()` pays one command round trip per job; this workload amortizes framing,
+MessagePack decoding, dispatch, and persistence over 50 jobs while eight
+connections keep the broker supplied.
+
+## Worker workload
+
+Each sample starts with 5,000 preloaded jobs and drains them with:
+
+- a 1 ms simulated I/O handler;
+- total concurrency of 16;
+- batch pulls over real TCP connections;
+- an individual ACK for every completed job;
+- final polling until the server reports exactly 5,000 completed jobs.
+
+TypeScript, Python, Go, Rust, and Elixir use one SDK Worker configured for 16-way
+concurrency. PHP's Worker is sequential by design, so its idiomatic equivalent
+is 16 independent CLI worker processes. The timer measures the complete drain,
+including pull, handler, ACK, and worker refill time.
+
+ACK batching was disabled for comparability. TypeScript and Python support
+opt-in `ACKB`; enabling it could reduce acknowledgement round trips, but would
+give those two clients a protocol optimization unavailable in the other rows.
+
+### Worker results
+
+| SDK | Median jobs/s | Mean jobs/s | Min–max jobs/s | CV | Peak client RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rust release | **2,178.2** | 2,166.6 | 2,111.1–2,212.4 | 1.88% | **8.8 MiB** |
+| Elixir/OTP | 2,136.9 | 2,135.8 | 2,108.9–2,157.5 | 0.74% | 109.8 MiB |
+| PHP, 16 processes | 1,297.9 | 1,301.5 | 1,283.2–1,321.2 | 0.98% | 132.5 MiB |
+| Go | 662.2 | 664.4 | 661.0–669.2 | 0.50% | 17.9 MiB |
+| TypeScript/Bun | 657.9 | 657.8 | 656.8–658.2 | **0.07%** | 79.9 MiB |
+| Python | 268.0 | 267.7 | 266.4–268.1 | 0.24% | 29.3 MiB |
+
+PHP memory is the aggregate RSS of all 16 worker processes. Its throughput and
+memory must therefore be read as a deployment topology, not as one PHP Worker.
+
+### Why Worker results diverge
+
+This workload intentionally makes handlers shorter than the SDK polling
+interval. It exposes the control loop rather than application compute.
+
+The TypeScript Worker calculates `free = concurrency - active.size`. When no
+slot is free it sleeps for 20 ms before checking again. Go uses the same 20 ms
+fixed wait. Python waits 50 ms. Completed handlers cannot wake these sleeps, so
+new jobs are not pulled immediately when slots become free.
+
+With 16 slots and a 1 ms handler, the approximate refill ceilings are:
+
+| SDK loop | Fixed full-capacity wait | Approximate ceiling | Observed |
+| --- | ---: | ---: | ---: |
+| TypeScript | 20 ms | 800 jobs/s | 658 jobs/s |
+| Go | 20 ms | 800 jobs/s | 662 jobs/s |
+| Python | 50 ms | 320 jobs/s | 268 jobs/s |
+
+The remaining gap includes pull/ACK round trips, scheduling, handler execution,
+and imperfect alignment between slot completion and the polling timer.
+
+Rust pulls a bounded batch, joins its processing threads, and immediately begins
+the next iteration. Elixir similarly waits for its `Task.async_stream` batch
+and recurses directly into the next pull. Neither inserts a fixed success-path
+sleep between full batches. This explains their approximately 2.1K jobs/s
+without implying that their MessagePack codecs are three to eight times faster.
+
+PHP reaches roughly 1.3K jobs/s by scaling across 16 independent connections.
+That topology refills work independently but spends more aggregate memory and
+operating-system process resources.
+
+## Highest-value SDK optimization
+
+The first SDK performance change should be event-driven slot refill in
+TypeScript, Go, and Python:
+
+1. signal a condition, channel, semaphore, or promise when an active handler
+   releases its slot;
+2. let a full Worker wait on that signal instead of a fixed timer;
+3. pull again immediately when capacity becomes available;
+4. keep bounded backoff only for empty queues and transport errors;
+5. evaluate ACK batching after removing the refill ceiling.
+
+This changes the worker loop from timer-quantized scheduling to
+capacity-triggered scheduling. It should matter most for short database, cache,
+HTTP, and event-routing handlers. Long-running or CPU-bound handlers will see
+less benefit because processing time already dominates the 20–50 ms wait.
+
+<Aside type="caution">
+The expected gain above is an engineering hypothesis supported by the measured
+ceiling, not a published after-result. It must be confirmed by the same native
+campaign plus lease, shutdown, retry, heartbeat, and model-based correctness
+tests before changing SDK behavior.
+</Aside>
+
+## How to use these numbers
+
+Use the producer table to size ingestion-heavy services that send moderate
+payloads in bulk over a low-latency network. Use the worker table to compare
+SDK control-loop overhead for very short I/O handlers. Neither table predicts:
+
+- WAN performance, where network RTT can dominate;
+- large payloads, where serialization and copies become material;
+- durable-per-job writes, which change the persistence cost;
+- CPU-bound handlers, which need process/thread isolation;
+- queues dominated by delays, priorities, groups, dependencies, or retries;
+- horizontal broker scaling, because every sample uses one local broker.
+
+Do not extrapolate linearly from five-second-scale drains to 24/7 capacity.
+Production sizing also needs a sustained soak with the application's real
+payload distribution, handler latency, retry rate, durability mode, disk, and
+network.
+
+## Correctness gate
+
+Before benchmarking, the complete isolated SDK gate passed sequentially:
+
+| SDK | Native tests | Protocol conformance |
+| --- | ---: | ---: |
+| TypeScript | 159 | 17/17 |
+| Python | 137 | 17/17 |
+| PHP | 65 | 17/17 |
+| Go | 72, 1 skipped | 17/17 |
+| Rust | 45, 1 skipped | 17/17 |
+| Elixir | 49, 1 skipped | 17/17 |
+
+The gate verifies package builds, native behavior, real broker integration, TLS,
+reconnect, leases, retries, flows, telemetry, and the shared protocol contract.
+It is separate from the native performance campaign: containers provide clean
+functional isolation, while only host-native runs are accepted as benchmark
+evidence.
+
+See [all bunqueue benchmarks](/guide/benchmarks/), the
+[SDK API guide](/guide/sdks/), and the
+[client SDK architecture](/architecture/client-sdk/) for the surrounding
+transport and worker design.

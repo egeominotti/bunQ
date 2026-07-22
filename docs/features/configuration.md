@@ -158,10 +158,13 @@ N/A. This module is synchronous config resolution plus one-shot dispatch; it hol
 - **Cloud disabled silently:** missing `url`/`apiKey` returns `null` with no log; missing `instanceId` returns `null` *with* an error log (`resolve.ts:98`).
 - **Logger level filtering:** messages below the configured `Logger.level` are dropped (`logger.ts:64`); level state is static/global — `Logger.setLevel`/`enableJsonMode` mutate process-wide state, which is why `main.ts` gates them behind `import.meta.main`.
 - **In-memory mode:** an unset data path makes `dataPath` `undefined`;
-  when backup is disabled the banner shows `in-memory`. If S3 backup is
-  enabled, `backupStartupError()` makes this a fatal configuration error and
-  `bootServer` exits 1 before either listener binds; backup cannot silently
-  remain disabled.
+  when backup is disabled the banner reports `Storage  in-memory · ephemeral`.
+  If S3 backup is enabled, `backupStartupError()` makes this a fatal
+  configuration error and `bootServer` exits 1 before either listener binds;
+  backup cannot silently remain disabled. The banner uses `●` for configured
+  endpoints/enabled features, `○` for disabled options, and `•` for neutral
+  runtime information; its product line is `One queue. Any language.` because
+  only the server and embedded runtime, not the network clients, require Bun.
 
 ## Configuration
 Resolved by `resolveServerConfig` (defaults in parentheses):

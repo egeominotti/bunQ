@@ -14,7 +14,8 @@ Owns:
 - **TCP client transport for the one-shot CLI** — connect, optional `Auth`, send one command, await one framed msgpack response, close (`src/cli/client.ts:180`).
 - **Output formatting** — colorized tables/objects and error rendering, plus a JSON pass-through (`src/cli/output.ts`). `localOutput.ts` is the single writer for local commands.
 - **Local (non-TCP) commands** — `version`, `doctor`, and `backup` run client-side against HTTP/health or S3 directly. Doctor separates HTTP collection, pure evaluation, and rendering.
-- **Help text** (`src/cli/help.ts`).
+- **Help text** (`src/cli/help.ts`), including the polyglot product line
+  `One queue. Any language.` shared with the startup banner.
 
 Does NOT own:
 - Actual queue logic — delegated to the server. The CLI never touches a Shard or SQLite directly (except `backup`, which uses `S3BackupManager`).

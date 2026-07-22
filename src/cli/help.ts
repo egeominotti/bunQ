@@ -20,8 +20,8 @@ export function renderHelp(color = true): string {
 
   return `
 ${magenta}   (\\(\\        ${reset}
-${magenta}   ( -.-)      ${bold}bunqueue${reset} ${dim}- High-performance job queue for Bun${reset}
-${magenta}   o_(")(")    ${reset}
+${magenta}   ( -.-)      ${bold}bunqueue${reset}
+${magenta}   o_(")(")    ${reset}${dim}One queue. Any language.${reset}
 
 USAGE:
   bunqueue [command] [options]

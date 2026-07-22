@@ -14,6 +14,21 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.45] - 2026-07-22
+
+### Changed: clearer polyglot startup identity
+
+- The startup banner and CLI help now use `One queue. Any language.` instead
+  of describing bunqueue as a job queue limited to Bun. The server and embedded
+  runtime remain Bun-native, while network clients can use other runtimes and
+  languages.
+- Startup state is easier to scan with aligned labels and distinct markers for
+  enabled, disabled and informational rows. Storage now identifies ephemeral
+  in-memory operation or the configured SQLite path, and Unix sockets and
+  logical CPU counts use explicit terminology.
+- The documentation terminal mirrors the production banner, and regression
+  coverage starts a real broker to protect the product line and status layout.
+
 ## [2.8.44] - 2026-07-20
 
 ### Fixed: transaction-safe S3 recovery and production monitoring

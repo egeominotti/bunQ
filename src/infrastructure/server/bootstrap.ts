@@ -42,7 +42,11 @@ function printBanner(config: ResolvedConfig, cloudUrl?: string): void {
   const bold = '\x1b[1m';
   const magenta = '\x1b[35m';
   const green = '\x1b[32m';
-  const yellow = '\x1b[33m';
+  const active = `${green}●${reset}`;
+  const inactive = `${dim}○${reset}`;
+  const info = `${dim}•${reset}`;
+  const row = (marker: string, label: string, value: string) =>
+    `  ${marker} ${label.padEnd(12)}${value}`;
 
   // Format TCP endpoint display
   const tcpDisplay = config.tcpSocketPath
@@ -60,24 +64,28 @@ function printBanner(config: ResolvedConfig, cloudUrl?: string): void {
     ? `${green}enabled${reset} ${dim}(${config.tcpSocketPath ? 'TCP' : ''}${config.tcpSocketPath && config.httpSocketPath ? '+' : ''}${config.httpSocketPath ? 'HTTP' : ''})${reset}`
     : `${dim}disabled${reset}`;
 
+  const storageDisplay = config.dataPath
+    ? `${bold}SQLite${reset} ${dim}·${reset} ${config.dataPath}`
+    : `in-memory ${dim}· ephemeral${reset}`;
+
   console.log(`
 ${magenta}        (\\(\\        ${reset}
 ${magenta}        ( -.-)      ${bold}bunqueue${reset} ${dim}v${VERSION}${reset}
-${magenta}        o_(")(")    ${reset}${dim}High-performance job queue for Bun${reset}
+${magenta}        o_(")(")    ${reset}${dim}One queue. Any language.${reset}
 
-${dim}─────────────────────────────────────────────────${reset}
+${dim}──────────────────────────────────────────────────────${reset}
 
-  ${green}●${reset} TCP    ${tcpDisplay}
-  ${green}●${reset} HTTP   ${httpDisplay}
-  ${yellow}●${reset} Socket ${socketDisplay}
-  ${yellow}●${reset} Data   ${config.dataPath ?? 'in-memory'}
-  ${yellow}●${reset} TLS    ${config.tlsCertFile ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
-  ${yellow}●${reset} Auth   ${config.authTokens.length > 0 ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
-  ${yellow}●${reset} S3 Backup ${config.s3BackupEnabled ? `${green}enabled${reset}` : `${dim}disabled${reset}`}
-  ${yellow}●${reset} Cloud  ${cloudUrl ? `${green}enabled${reset} ${dim}→ ${cloudUrl}${reset}` : `${dim}disabled${reset}`}
-  ${dim}●${reset} Shards ${bold}${SHARD_COUNT}${reset} ${dim}(${navigator.hardwareConcurrency} CPU cores)${reset}
+${row(active, 'TCP', tcpDisplay)}
+${row(active, 'HTTP', httpDisplay)}
+${row(hasUnixSockets ? active : inactive, 'Unix socket', socketDisplay)}
+${row(info, 'Storage', storageDisplay)}
+${row(config.s3BackupEnabled ? active : inactive, 'S3 Backup', config.s3BackupEnabled ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
+${row(config.tlsCertFile ? active : inactive, 'TLS', config.tlsCertFile ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
+${row(config.authTokens.length > 0 ? active : inactive, 'Auth', config.authTokens.length > 0 ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
+${row(cloudUrl ? active : inactive, 'Cloud', cloudUrl ? `${green}enabled${reset} ${dim}→ ${cloudUrl}${reset}` : `${dim}disabled${reset}`)}
+${row(info, 'Shards', `${bold}${SHARD_COUNT}${reset} ${dim}· ${navigator.hardwareConcurrency} logical CPUs${reset}`)}
 
-${dim}─────────────────────────────────────────────────${reset}
+${dim}──────────────────────────────────────────────────────${reset}
 
 `);
 }

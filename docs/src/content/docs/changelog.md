@@ -14,6 +14,15 @@ head:
   <p class="bq-hero-sub">All notable changes to bunqueue: features, fixes, performance work and breaking changes, newest first.</p>
 </div>
 
+## [2.8.46] - 2026-07-22
+
+### Fixed: hardware-independent banner regression coverage
+
+- Startup banner regression coverage now validates the runtime shard count
+  against bunqueue's hardware-derived value instead of assuming the 16 shards
+  used by the development machine. CI runners with fewer logical CPUs no
+  longer reject an otherwise correct banner.
+
 ## [2.8.45] - 2026-07-22
 
 ### Changed: clearer polyglot startup identity

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { renderHelp } from '../src/cli/help';
+import { SHARD_COUNT } from '../src/shared/hash';
 
 const REPO = `${import.meta.dir}/..`;
 
@@ -102,5 +103,8 @@ test('start banner is aligned and describes runtime state accurately', async () 
   expect(plain).toMatch(/○ Unix socket\s+disabled/);
   expect(plain).toMatch(/• Storage\s+in-memory · ephemeral/);
   expect(plain).toMatch(/○ S3 Backup\s+disabled/);
-  expect(plain).toMatch(/• Shards\s+16 · \d+ logical CPUs/);
+  const shardLine = plain.match(/• Shards\s+(\d+) · (\d+) logical CPUs/);
+  expect(shardLine).not.toBeNull();
+  expect(Number(shardLine?.[1])).toBe(SHARD_COUNT);
+  expect(Number(shardLine?.[2])).toBe(navigator.hardwareConcurrency);
 }, 15_000);

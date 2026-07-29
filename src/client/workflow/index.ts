@@ -35,6 +35,14 @@ export type {
   ExecutionState,
   StepState,
   StepRecord,
+  // Reachable from `Execution` and `StepRecord`, so a consumer that reads
+  // `exec.rollbackStatus` or `record.compensation` could see the shapes but had no
+  // name to declare a variable or a function parameter with.
+  RollbackStatus,
+  CompensationStatus,
+  CompensationOutcome,
+  BranchCondition,
+  WorkflowNode,
   EngineOptions,
   RunHandle,
   ParallelDefinition,

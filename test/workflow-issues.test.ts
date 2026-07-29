@@ -8,6 +8,7 @@
 
 import { describe, test, expect, afterEach, setDefaultTimeout } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 import type { WorkflowEvent, StepEvent } from '../src/client/workflow';
 import { WorkflowEmitter } from '../src/client/workflow/emitter';
 import { WorkflowStore } from '../src/client/workflow/store';
@@ -129,7 +130,7 @@ describe('ISSUE: Branch with non-existent path silently skipped', () => {
     engine.register(flow);
 
     const run = await engine.start('branch-miss');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
 
@@ -291,7 +292,7 @@ describe('ISSUE: Map node exception has no error handling', () => {
     engine.register(flow);
 
     const run = await engine.start('map-error');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
 
@@ -329,7 +330,7 @@ describe('ISSUE: resolvedSteps field is never populated', () => {
     engine.register(flow);
 
     const run = await engine.start('resolved-steps-test');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -344,13 +345,13 @@ describe('ISSUE: resolvedSteps field is never populated', () => {
 // ============================================================================
 // ISSUE 8: Loop (doUntil/doWhile) overwrites step results each iteration
 // ============================================================================
-describe('ISSUE: Loop step results overwritten each iteration', () => {
+describe('Loop step results are kept per iteration', () => {
   let engine: Engine;
   afterEach(async () => {
     if (engine) await engine.close(true);
   });
 
-  test('doUntil loop overwrites step results - only last iteration preserved', async () => {
+  test('doUntil keeps every iteration, and the base name still holds the last', async () => {
     let iteration = 0;
 
     const flow = new Workflow('loop-overwrite')
@@ -368,21 +369,29 @@ describe('ISSUE: Loop step results overwritten each iteration', () => {
     engine.register(flow);
 
     const run = await engine.start('loop-overwrite');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
 
-    // BUG: Only the last iteration's result is preserved.
-    // Results from iterations 1 and 2 are lost (overwritten by the same step name).
+    // The base name still resolves to the LAST iteration. That is the documented
+    // contract for downstream steps and stays unchanged.
     const counterResult = exec!.steps['counter']?.result as { iteration: number };
-    expect(counterResult.iteration).toBe(3); // only last iteration
+    expect(counterResult.iteration).toBe(3);
 
-    // There's no way to access results from previous iterations.
-    // No "counter:0", "counter:1", "counter:2" like forEach does.
-    expect(exec!.steps['counter:0']).toBeUndefined();
-    expect(exec!.steps['counter:1']).toBeUndefined();
-    expect(exec!.steps['counter:2']).toBeUndefined();
+    // ...and every iteration is now also kept under an indexed name, the way forEach
+    // already did. Without these a loop is a sliding window of one turn, which makes
+    // the obvious use of a loop — an agent turn — unable to see its own transcript
+    // (test/workflow-ai-sdk-agent.test.ts).
+    const iterations = [0, 1, 2].map(
+      (i) => (exec!.steps[`counter:${i}`]?.result as { iteration: number } | undefined)?.iteration
+    );
+    expect(iterations).toEqual([1, 2, 3]);
+
+    // The indexed copies are additive only: they carry the same identity as the
+    // iteration they mirror, and are not separate units of work.
+    expect(exec!.steps['counter:0']?.occurrence).toBe(0);
+    expect(exec!.steps['counter:2']?.occurrence).toBe(2);
   });
 });
 
@@ -395,34 +404,17 @@ describe('ISSUE: forEach indexed step names can collide with user steps', () => 
     if (engine) await engine.close(true);
   });
 
-  test('forEach step "process:0" collides with user step named "process:0"', async () => {
-    const flow = new Workflow<{ items: number[] }>('foreach-collision')
-      // User creates a step with a name that matches forEach indexing pattern
-      .step('process:0', async () => {
-        return { source: 'manual-step' };
-      })
-      .forEach(
-        (ctx) => (ctx.input as { items: number[] }).items,
-        'process',
-        async (ctx) => {
-          const item = ctx.steps['__item'];
-          return { source: 'forEach', item };
-        }
-      );
+  test('a step colliding with a loop\'s per-iteration namespace is rejected', () => {
+    // `process:0` is the name the forEach reserves for its first iteration. Letting
+    // both exist is silent corruption either way round: before memoisation the loop
+    // overwrote the user's step, after it the loop mistakes the user's record for its
+    // own completed work and skips the iteration. Refuse it at registration instead.
+    const flow = new Workflow('collision')
+      .step('process:0', async () => ({ source: 'manual-step' }))
+      .forEach(() => [1, 2], 'process', async () => ({ source: 'forEach' }));
 
     engine = new Engine({ embedded: true });
-    engine.register(flow);
-
-    const run = await engine.start('foreach-collision', { items: [10, 20] });
-    await new Promise((r) => setTimeout(r, 2000));
-
-    const exec = engine.getExecution(run.id);
-    expect(exec!.state).toBe('completed');
-
-    // BUG: The forEach creates "process:0" which overwrites the manual step's result.
-    const step0 = exec!.steps['process:0']?.result as { source: string };
-    expect(step0.source).toBe('forEach'); // manual step result is lost
-    // Expected: should prevent collision or use different naming scheme
+    expect(() => engine.register(flow)).toThrow(/collides with the per-iteration names/);
   });
 });
 
@@ -456,7 +448,7 @@ describe('ISSUE: Map failure does not trigger compensation', () => {
     engine.register(flow);
 
     const run = await engine.start('map-no-compensate');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -537,7 +529,7 @@ describe('ISSUE: Input validation redundantly runs on every retry', () => {
     );
 
     const ctx = buildContext(exec);
-    await executeStepWithRetry(def, ctx, exec, emitter, () => {});
+    await executeStepWithRetry(def, ctx, exec, { emitter, updateFn: () => {} });
 
     // BUG: Input was validated 3 times (once per attempt) even though it never changes.
     // Input validation should only run once since ctx.input is immutable.
@@ -584,13 +576,17 @@ describe('ISSUE: Parallel steps share stale context snapshot', () => {
 describe('ISSUE: Sub-workflow timeout is hardcoded', () => {
   test('executeSubWorkflow has no maxWait parameter - hardcoded to 300_000ms', async () => {
     // The function signature is:
-    //   executeSubWorkflow(name, input, startFn, getFn, pollIntervalMs?)
-    // There's no parameter for maxWait - it's hardcoded as `const maxWait = 300_000`
-    // in the function body.
+    //   executeSubWorkflow(name, input, startFn, getFn, pollIntervalMs?, existingChildId?)
+    // There is no parameter for maxWait; it is hardcoded as `const maxWait = 300_000` in
+    // the function body.
 
-    // Verify the function only accepts 4 required params + 1 optional (pollIntervalMs).
-    // No maxWait parameter exists at all.
-    expect(executeSubWorkflow.length).toBe(4); // name, input, startFn, getFn (pollIntervalMs has default)
+    // `Function.length` counts only the params before the first default or optional one,
+    // so this stays 4 as trailing optional params are added. `existingChildId` was added
+    // after this test was written and is why the comment above needed updating: it is what
+    // makes re-entering the node resume the child a restart already started, rather than
+    // abandoning it and provisioning a second one
+    // (`test/repro-workflow-orphan-child.test.ts`).
+    expect(executeSubWorkflow.length).toBe(4); // name, input, startFn, getFn
 
     // Read the source to confirm the hardcoded value
     const src = executeSubWorkflow.toString();
@@ -641,7 +637,7 @@ describe('ISSUE: forEach compensation is per-step, not per-iteration', () => {
     engine.register(flow);
 
     const run = await engine.start('foreach-compensate', { items: [1, 2, 3] });
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -860,7 +856,7 @@ describe('ISSUE: Parallel step compensation is collective, not individual', () =
     engine.register(flow);
 
     const run = await engine.start('parallel-comp');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');

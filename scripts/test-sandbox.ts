@@ -3,7 +3,7 @@
 
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { finished } from 'node:stream/promises';
-import { writeRunReport, writeSuiteArtifacts } from './test-sandbox-report';
+import { suitePassed, writeRunReport, writeSuiteArtifacts } from './test-sandbox-report';
 import {
   createSuiteTelemetry,
   monitorContainer,
@@ -180,9 +180,32 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
     samples,
   });
   await writeSuiteArtifacts(LOG_DIR, telemetry, samples);
-  if (code !== 0) {
+  // A suite that exits 0 having produced NO parseable result is not a pass, it is a
+  // gate that ran nothing and said nothing. Seen for real: a unit run stopped 11 files
+  // early, printed no summary, exited 0, and was reported `PASS | 0 / 0 / 0` while five
+  // model-based suites and six workflow suites had never executed. Status was decided
+  // on the exit code alone, so the counts beside it were decoration. Treat an empty
+  // result as a failure, loudly.
+  const counted =
+    telemetry.tests.passed + telemetry.tests.failed + telemetry.tests.skipped;
+  // One predicate, shared with the markdown verdict, `summary.json`'s `passed` field, the
+  // baseline gate and the SDK gate. They were four separate expressions, and the one on
+  // `summary.json` disagreed: it reported `passed: true` for a 0/0/0 run, which is the
+  // artifact the handoff process is told to read.
+  const emptyResult = code === 0 && !suitePassed(telemetry);
+  if (emptyResult) {
+    telemetry.anomalies.push(
+      `no test results parsed: the suite exited 0 with ${counted} tests counted`
+    );
+  }
+
+  if (code !== 0 || emptyResult) {
     activeContainers.delete(container);
-    console.error(`\nSandbox suite failed: ${suite.name} exited with ${code}.`);
+    console.error(
+      emptyResult
+        ? `\nSandbox suite reported NO tests: ${suite.name} exited 0 with an empty result.`
+        : `\nSandbox suite failed: ${suite.name} exited with ${code}.`
+    );
     console.error(`Complete log: ${LOG_DIR}/${suite.name}.log`);
     console.error(`Failed container retained: ${container}`);
     console.error(`Inspect it with: docker logs ${container}`);
@@ -214,7 +237,7 @@ const report = await writeRunReport({
 console.log(`Telemetry JSON: ${LOG_DIR}/summary.json`);
 console.log(`Telemetry report: ${LOG_DIR}/summary.md`);
 
-const failures = results.filter((result) => result.exitCode !== 0);
+const failures = results.filter((result) => !suitePassed(result));
 if (failures.length > 0) {
   console.error(
     `\nSandbox validation failed: ${failures.map((result) => result.suite).join(', ')}.`

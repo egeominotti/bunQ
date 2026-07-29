@@ -1,6 +1,7 @@
 /** WorkflowExecutor - Core execution logic */
 import type { Queue } from '../queue/queue';
 import type { Workflow } from './workflow';
+import { assertNoIndexCollision, assertNoDuplicateWaitFor, unusableEventName } from './workflow';
 import type { WorkflowStore } from './store';
 import type { WorkflowEmitter } from './emitter';
 import type {
@@ -19,11 +20,31 @@ import {
 } from './runner';
 import { executeDoUntil, executeDoWhile, executeForEach, executeMap } from './loops';
 import { WaitForSignalError, runCompensation } from './compensator';
+import {
+  abandonParkedCompensation,
+  resumeCompensation,
+  type RollbackDeps,
+} from './rollbackControl';
 import { recoverExecutions } from './recovery';
+import { clearTimers, runWaitFor, scheduleTimeoutCheck } from './waitFor';
+import type { WaitForDeps } from './waitFor';
+import { clock, type TimerHandle } from './clock';
+import { describeError } from './identity';
+import { claimKey, decideAdmission } from './admission';
 
 export class WorkflowExecutor {
   private readonly workflows = new Map<string, Workflow>();
-  private readonly timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly timeoutTimers = new Map<string, TimerHandle>();
+
+  /**
+   * Release every armed waitFor timer. The engine owns the executor's lifetime, so
+   * `Engine.close()` must call this: an armed timer would otherwise fire into a
+   * closing queue, and a caller that keeps the process alive after closing one engine
+   * has no other handle on them.
+   */
+  close(): void {
+    clearTimers(this.timeoutTimers);
+  }
 
   private readonly updateFn: (e: Execution) => void;
 
@@ -43,15 +64,21 @@ export class WorkflowExecutor {
     if (dupes.length > 0) {
       throw new Error(`Duplicate step names in "${workflow.name}": ${dupes.join(', ')}`);
     }
+    assertNoIndexCollision(workflow);
+    assertNoDuplicateWaitFor(workflow);
     this.workflows.set(workflow.name, workflow);
   }
 
-  async start(workflowName: string, input: unknown): Promise<RunHandle> {
+  async start(
+    workflowName: string,
+    input: unknown,
+    parentExecutionId?: string
+  ): Promise<RunHandle> {
     const wf = this.workflows.get(workflowName);
     if (!wf) throw new Error(`Workflow "${workflowName}" not registered`);
     if (wf.nodes.length === 0) throw new Error(`Workflow "${workflowName}" has no steps`);
-    const now = Date.now();
-    const id = `wf_${now}_${Math.random().toString(36).slice(2, 10)}`;
+    const now = clock().now();
+    const id = `wf_${now}_${clock().random().toString(36).slice(2, 10)}`;
     const exec: Execution = {
       id,
       workflowName,
@@ -60,6 +87,7 @@ export class WorkflowExecutor {
       steps: {},
       currentNodeIndex: 0,
       signals: {},
+      ...(parentExecutionId ? { parentExecutionId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -69,9 +97,43 @@ export class WorkflowExecutor {
     return { id, workflowName };
   }
 
+  /**
+   * Nodes this process is currently executing, keyed `<execution>:<nodeIndex>`.
+   *
+   * The cursor guard below rejects a job for a node the run has already left, but not
+   * a SECOND job for the node it is on right now: both carry the same index. That is
+   * the reachable duplicate, because `recover()` re-enqueues the current node of every
+   * `running` execution and is documented as callable on a live engine. Without this
+   * claim the node runs twice and each copy advances the run independently, doubling
+   * every side effect after it while the run still ends `completed`.
+   *
+   * A claim, not a queue-level dedup: a deterministic `jobId` was tried and could
+   * swallow a LEGITIMATE later re-enqueue of the same node, wedging the run forever.
+   * This drops only a duplicate that overlaps in time.
+   */
+  private readonly nodesInFlight = new Set<string>();
+
   async processStep(data: StepJobData): Promise<unknown> {
+    // The admission DECISION lives in `admission.ts` as a pure function; this method
+    // only carries it out. Delivery is at-least-once, so the same node job arrives
+    // twice routinely, and when one of the three guards was missing a duplicate re-ran
+    // the node and every node after it: two advance chains on one execution, doubled
+    // side effects, and a final `completed` that hid it. That took a long model
+    // campaign to find because the reasoning was buried in a method that also read
+    // SQLite and dispatched work.
     const exec = this.store.get(data.executionId);
-    if (!exec || (exec.state !== 'running' && exec.state !== 'waiting')) return null;
+    const admission = decideAdmission(exec, data.nodeIndex, this.nodesInFlight);
+    if (admission.kind === 'reject' || !exec) return null;
+    const claim = claimKey(data.executionId, data.nodeIndex);
+    this.nodesInFlight.add(claim);
+    try {
+      return await this.runNode(data, exec);
+    } finally {
+      this.nodesInFlight.delete(claim);
+    }
+  }
+
+  private async runNode(data: StepJobData, exec: Execution): Promise<unknown> {
     // If waiting, set back to running for timeout re-check
     if (exec.state === 'waiting') exec.state = 'running';
 
@@ -91,6 +153,15 @@ export class WorkflowExecutor {
     } catch (err) {
       if (err instanceof WaitForSignalError) return null;
       exec.state = 'failed';
+      // Why the run failed — kept distinct from what the rollback then did.
+      exec.failureReason = describeError(err);
+      // Deliberately UNGUARDED, unlike the writes on the throwing paths in `runner.ts` and
+      // `runSubWorkflow`. A throw here skips `compensate()` below, which sounds worse and
+      // is not: disk still says `running`, `listRecoverable()` covers `running`, so the
+      // next `recover()` re-drives this node and the unwind happens then. Swallowing it
+      // would instead leave a run that looks failed and was never rolled back, with
+      // nothing scheduled to notice. Guard this only alongside a durable signal that the
+      // rollback is still owed.
       this.store.update(exec);
       this.emitter?.emitWorkflow('workflow:failed', exec.id, exec.workflowName, 'failed');
       await this.compensate(exec, wf);
@@ -100,31 +171,68 @@ export class WorkflowExecutor {
   }
 
   async signal(executionId: string, event: string, payload: unknown): Promise<void> {
-    const exec = this.store.get(executionId);
-    if (!exec) throw new Error(`Execution "${executionId}" not found`);
+    // Same predicate as registration. A name that cannot be stored has to fail here
+    // too: a caller who signals it would otherwise get a clean return for a delivery
+    // that went nowhere.
+    const bad = unusableEventName(event);
+    if (bad) throw new Error(`Cannot signal an event ${bad}`);
+
+    // A finished run cannot receive anything. Accepting it wrote the payload into the
+    // persisted row and emitted `signal:received`, so a dashboard reported an approval
+    // against a run that had already ended and a closed audit record was mutated after
+    // the fact, while the caller got a clean return for a delivery that did nothing.
+    // A signal racing a run to its end is real, and rejecting is how the caller finds
+    // out (`test/repro-workflow-operator-signal.test.ts`).
+    const current = this.store.get(executionId);
+    if (current && current.state !== 'running' && current.state !== 'waiting') {
+      throw new Error(
+        `Execution "${executionId}" is "${current.state}" and cannot receive the signal "${event}"`
+      );
+    }
     const timer = this.timeoutTimers.get(executionId);
     if (timer) {
-      clearTimeout(timer);
+      clock().clearTimeout(timer);
       this.timeoutTimers.delete(executionId);
     }
-    // Always record the payload (idempotent) and notify listeners. A signal that
-    // lands before the run parks at its waitFor is still consumed there, via the
-    // `signals[event] !== undefined` gate in runWaitFor.
-    exec.signals[event] = payload;
-    this.emitter?.emitSignal('signal:received', exec.id, exec.workflowName, event, payload);
-    // Resume only a genuinely-parked run (state 'waiting'), and only once. The state
-    // check and the flip to 'running' are synchronous — no `await` between them — so a
-    // second concurrent/duplicate signal() (which can only run after the first yields
-    // at `await this.enqueue`, by which point `store.update` has persisted 'running')
-    // observes 'running' and returns early. This collapses duplicate/concurrent
-    // signals to a single resume, so every step after the waitFor runs exactly once.
-    if (exec.state !== 'waiting') {
-      this.store.update(exec);
-      return;
-    }
-    exec.state = 'running';
-    this.store.update(exec);
-    await this.enqueue(exec);
+    // Record the payload and claim the resume in a single transaction that touches
+    // only the `signals` and `state` columns. Writing through the store — rather than
+    // mutating a snapshot and calling update() — is what keeps a concurrently
+    // executing step from overwriting the payload with its own stale `signals`
+    // (test/repro-workflow-signal-lost-update.test.ts).
+    //
+    // The claim is a conditional `state = 'waiting'` UPDATE, so duplicate or
+    // concurrent signals collapse to exactly one resume and every step after the
+    // waitFor runs exactly once. A signal that lands before the run parks records
+    // its payload and returns; runWaitFor then consumes it via parkForSignal().
+    const outcome = this.store.recordSignal(executionId, event, payload);
+    if (!outcome.found) throw new Error(`Execution "${executionId}" not found`);
+
+    this.emitter?.emitSignal('signal:received', executionId, outcome.workflowName, event, payload);
+    if (!outcome.resumed) return;
+
+    await this.queue.add('wf:step', {
+      executionId,
+      workflowName: outcome.workflowName,
+      nodeIndex: outcome.currentNodeIndex,
+    } satisfies StepJobData);
+  }
+
+  /** Retry the compensation that parked the run, then finish the unwind. */
+  async resumeCompensation(executionId: string): Promise<void> {
+    await resumeCompensation(this.rollbackDeps, executionId);
+  }
+
+  /** Give up on a parked unwind, recording the outstanding steps as skipped. */
+  abandonCompensation(executionId: string): void {
+    abandonParkedCompensation(this.rollbackDeps, executionId);
+  }
+
+  private get rollbackDeps(): RollbackDeps {
+    return {
+      store: this.store,
+      emitter: this.emitter,
+      workflows: this.workflows,
+    };
   }
 
   getExecution(id: string): Execution | null {
@@ -144,16 +252,17 @@ export class WorkflowExecutor {
     else if (node.type === 'branch') await this.runBranch(exec, node, idx, wf);
     else if (node.type === 'parallel') await this.runParallel(exec, node, idx, wf);
     else if (node.type === 'subWorkflow') await this.runSubWorkflow(exec, node, idx, wf);
-    else if (node.type === 'doUntil') await this.runLoop(exec, node, idx, wf, executeDoUntil);
-    else if (node.type === 'doWhile') await this.runLoop(exec, node, idx, wf, executeDoWhile);
-    else if (node.type === 'forEach') await this.runForEach(exec, node, idx, wf);
-    else if (node.type === 'map') await this.runMap(exec, node, idx, wf);
-    else await this.runWaitFor(exec, node, idx, wf);
+    else if (node.type === 'doUntil') await this.runBody(exec, idx, wf, executeDoUntil, node.def);
+    else if (node.type === 'doWhile') await this.runBody(exec, idx, wf, executeDoWhile, node.def);
+    else if (node.type === 'forEach') await this.runBody(exec, idx, wf, executeForEach, node.def);
+    else if (node.type === 'map') await this.runBody(exec, idx, wf, executeMap, node.def);
+    else if (node.type === 'pivot') await this.runPivot(exec, idx, wf);
+    else await runWaitFor(this.waitForDeps, exec, node, idx, wf);
   }
 
   private async runStep(exec: Execution, def: StepDefinition, idx: number, wf: Workflow) {
     const ctx = buildContext(exec);
-    await executeStepWithRetry(def, ctx, exec, this.emitter, this.updateFn);
+    await executeStepWithRetry(def, ctx, exec, { emitter: this.emitter, updateFn: this.updateFn });
     await this.advance(exec, idx + 1, wf);
   }
 
@@ -167,7 +276,10 @@ export class WorkflowExecutor {
     const pathSteps = node.def.paths.get(pathName);
     if (pathSteps && pathSteps.length > 0) {
       for (const step of pathSteps) {
-        await executeStepWithRetry(step, buildContext(exec), exec, this.emitter, this.updateFn);
+        await executeStepWithRetry(step, buildContext(exec), exec, {
+          emitter: this.emitter,
+          updateFn: this.updateFn,
+        });
       }
     }
     await this.advance(exec, idx + 1, wf);
@@ -196,86 +308,107 @@ export class WorkflowExecutor {
     wf: Workflow
   ) {
     const subInput = node.inputMapper(buildContext(exec));
-    const result = await executeSubWorkflow(
-      node.name,
-      subInput,
-      (name, input) => this.start(name, input),
-      (id) => this.store.get(id)
-    );
-    exec.steps[`sub:${node.name}`] = { status: 'completed', result, completedAt: Date.now() };
+    const recordKey = `sub:${node.name}`;
+    try {
+      const { results, executionId } = await executeSubWorkflow(
+        node.name,
+        subInput,
+        // The child must record who owns it: without this, recovery treats it as a
+        // top-level run and drives it behind this parent's back.
+        async (name, input) => {
+          const handle = await this.start(name, input, exec.id);
+          // Claim it in the parent's record BEFORE waiting on it. The record used to be
+          // written only on completion, so a re-entry after a restart found nothing to
+          // resume and started a second child.
+          //
+          // Awaited rather than done on a side branch: a detached `.then()` on a start
+          // that REJECTS, which is what an unregistered child does, leaves an unhandled
+          // rejection even though the caller handles the same rejection properly.
+          exec.steps[recordKey] = { status: 'running', childExecutionId: handle.id };
+          this.store.update(exec);
+          return handle;
+        },
+        (id) => this.store.get(id),
+        undefined,
+        exec.steps[recordKey]?.childExecutionId
+      );
+      exec.steps[recordKey] = {
+        status: 'completed',
+        result: results,
+        completedAt: clock().now(),
+        childExecutionId: executionId,
+      };
+    } catch (error) {
+      // Settle the record before letting the failure through.
+      //
+      // Only the success write existed, so every interesting outcome — the child failed,
+      // parked in `compensation-stuck`, or timed out — left the record `running`.
+      // `unwindSet` drops anything that is neither `completed` nor `failed` one line
+      // before the `sub:` branch can admit it, so `unwindChild` was never called: a
+      // parent whose child was parked with stock still reserved reversed its own steps,
+      // reached the end of the pass and reported `rollbackStatus: 'completed'`
+      // (`test/repro-workflow-child-park-inherit.test.ts`).
+      //
+      // It is also the truthful record on its own terms. A `sub:` step left `running`
+      // after the parent has failed reads on a dashboard as a child still in flight.
+      const claimed = exec.steps[recordKey];
+      if (claimed) {
+        exec.steps[recordKey] = {
+          ...claimed,
+          status: 'failed',
+          error: describeError(error),
+          completedAt: clock().now(),
+        };
+        // Guarded for the same reason as the failure write in `runner.ts`: `error` below
+        // carries the real cause, and letting a write failure propagate instead replaced
+        // it. The child's own diagnostic is what the rollback guide's field table points
+        // an operator at, `... timed out` or `... is parked mid-rollback; resolve it with
+        // resumeCompensation or abandonCompensation`, so destroying it takes away the
+        // pointer to the child.
+        //
+        // This one does not self-heal, which is what made it worth guarding rather than
+        // commenting: the next write succeeds, persists the wrong diagnostic, and the run
+        // goes terminal carrying it
+        // (`test/repro-workflow-step-error-masking.test.ts`).
+        try {
+          this.store.update(exec);
+        } catch {
+          // Deliberately swallowed; the in-memory record still settles the `sub:` step, and
+          // `runNode` re-persists the whole execution one frame up.
+        }
+      }
+      throw error;
+    }
     await this.advance(exec, idx + 1, wf);
   }
 
-  private async runWaitFor(
-    exec: Execution,
-    node: Extract<WorkflowNode, { type: 'waitFor' }>,
-    idx: number,
-    wf: Workflow
-  ) {
-    if (exec.signals[node.event] !== undefined) {
-      await this.advance(exec, idx + 1, wf);
-      return;
-    }
-    const waitKey = `__waitFor:${node.event}`;
-    if (node.timeout !== undefined) {
-      const existing = exec.steps[waitKey] as { startedAt?: number } | undefined;
-      const waitingSince = existing?.startedAt ?? Date.now();
-      if (!existing) exec.steps[waitKey] = { status: 'running', startedAt: waitingSince };
-      if (Date.now() - waitingSince >= node.timeout) {
-        this.emitter?.emitSignal('signal:timeout', exec.id, exec.workflowName, node.event);
-        exec.steps[waitKey] = {
-          status: 'failed',
-          startedAt: waitingSince,
-          completedAt: Date.now(),
-          error: `Signal "${node.event}" timed out after ${node.timeout}ms`,
-        };
-        exec.state = 'failed';
-        this.store.update(exec);
-        // Compensate here, then signal completion via the WaitForSignalError
-        // sentinel so processStep short-circuits (return null) instead of
-        // re-running compensation through its generic catch path.
-        await this.compensate(exec, wf);
-        this.emitter?.emitWorkflow('workflow:failed', exec.id, exec.workflowName, 'failed');
-        throw new WaitForSignalError(node.event);
-      }
-      this.store.update(exec);
-      const remaining = node.timeout - (Date.now() - waitingSince);
-      this.scheduleTimeoutCheck(exec.id, exec.workflowName, exec.currentNodeIndex, remaining);
-    }
-    exec.state = 'waiting';
+  /**
+   * Commit the saga. From here the run can still fail, but it can no longer be
+   * rolled back: recovery past this point is forward-only.
+   */
+  private async runPivot(exec: Execution, idx: number, wf: Workflow) {
+    exec.committedAt = idx;
     this.store.update(exec);
-    this.emitter?.emitWorkflow('workflow:waiting', exec.id, exec.workflowName, 'waiting');
-    throw new WaitForSignalError(node.event);
+    await this.advance(exec, idx + 1, wf);
   }
 
-  private async runLoop(
+  /**
+   * Run a node body that manages its own step records (loops, forEach, map), then
+   * move on. These differ only in which executor they delegate to.
+   */
+  private async runBody<TDef>(
     exec: Execution,
-    node: Extract<WorkflowNode, { type: 'doUntil' }> | Extract<WorkflowNode, { type: 'doWhile' }>,
     idx: number,
     wf: Workflow,
-    loopFn: typeof executeDoUntil
+    run: (
+      def: TDef,
+      exec: Execution,
+      emitter: WorkflowEmitter | null,
+      updateFn: (e: Execution) => void
+    ) => Promise<void>,
+    def: TDef
   ) {
-    await loopFn(node.def, exec, this.emitter, this.updateFn);
-    await this.advance(exec, idx + 1, wf);
-  }
-
-  private async runForEach(
-    exec: Execution,
-    node: Extract<WorkflowNode, { type: 'forEach' }>,
-    idx: number,
-    wf: Workflow
-  ) {
-    await executeForEach(node.def, exec, this.emitter, this.updateFn);
-    await this.advance(exec, idx + 1, wf);
-  }
-
-  private async runMap(
-    exec: Execution,
-    node: Extract<WorkflowNode, { type: 'map' }>,
-    idx: number,
-    wf: Workflow
-  ) {
-    await executeMap(node.def, exec, this.emitter, this.updateFn);
+    await run(def, exec, this.emitter, this.updateFn);
     await this.advance(exec, idx + 1, wf);
   }
 
@@ -297,22 +430,43 @@ export class WorkflowExecutor {
       workflowName: exec.workflowName,
       nodeIndex: exec.currentNodeIndex,
     };
+    // Deliberately NO deterministic jobId here.
+    //
+    // `<execution>:<nodeIndex>` was tried, to let the queue's custom-id dedup collapse
+    // a duplicate enqueue. It buys nothing the cursor guard in processStep does not
+    // already provide (a duplicate job is ignored there), and it introduces a liveness
+    // risk in exchange: if the custom-id entry outlives the job it names, a legitimate
+    // re-enqueue of the same node is swallowed and the run wedges permanently. A
+    // generated model campaign produced exactly one unexplained `execution wedged in
+    // "running"` with it enabled and none without. A duplicate job that is ignored is
+    // strictly safer than a missing job that never arrives.
     await this.queue.add('wf:step', jobData);
   }
 
+  private get waitForDeps(): WaitForDeps {
+    return {
+      store: this.store,
+      emitter: this.emitter,
+      advance: (e, next, w) => this.advance(e, next, w),
+      compensate: (e, w) => this.compensate(e, w),
+      scheduleTimeoutCheck: (id, name, i, ms) => {
+        this.scheduleTimeoutCheck(id, name, i, ms);
+      },
+    };
+  }
+
   private scheduleTimeoutCheck(execId: string, workflowName: string, nodeIdx: number, ms: number) {
-    const timer = setTimeout(() => {
-      this.timeoutTimers.delete(execId);
-      const jobData: StepJobData = { executionId: execId, workflowName, nodeIndex: nodeIdx };
-      this.queue.add('wf:step', jobData as unknown as Record<string, unknown>).catch(() => {
-        /* Queue may be closed */
-      });
-    }, ms);
-    this.timeoutTimers.set(execId, timer);
+    scheduleTimeoutCheck(
+      { queue: this.queue, timers: this.timeoutTimers },
+      execId,
+      workflowName,
+      nodeIdx,
+      ms
+    );
   }
 
   private async compensate(exec: Execution, wf: Workflow) {
-    await runCompensation(exec, wf, this.store, this.emitter);
+    await runCompensation(exec, wf, this.store, this.emitter, this.workflows);
   }
 
   /** Recover orphaned executions after a crash/restart */
@@ -323,6 +477,7 @@ export class WorkflowExecutor {
       workflows: this.workflows,
       emitter: this.emitter,
       timeoutTimers: this.timeoutTimers,
+      nodesInFlight: this.nodesInFlight,
       scheduleTimeoutCheck: (id, name, idx, ms) => {
         this.scheduleTimeoutCheck(id, name, idx, ms);
       },

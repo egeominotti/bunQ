@@ -83,6 +83,29 @@ export class Engine {
     return this.executor.listExecutions(workflowName, state);
   }
 
+  /**
+   * Retry the compensation that parked a `compensation-stuck` run and continue the
+   * unwind. Use once the cause of the failed reversal has been fixed.
+   */
+  async resumeCompensation(executionId: string): Promise<void> {
+    return this.executor.resumeCompensation(executionId);
+  }
+
+  /**
+   * Abandon a parked unwind: the steps still un-compensated are recorded as skipped
+   * and the run becomes terminal. Partial, but explicitly so.
+   */
+  /**
+   * `async` on purpose, even though the work is synchronous: `resumeCompensation` is
+   * async, and an operator writing recovery code under pressure reaches for
+   * `Promise.allSettled([resume(id), abandon(id)])`. With a sync throw that expression
+   * throws before `allSettled` is ever called, so the defensive form is the one that
+   * blows up. Matching the sibling costs nothing while the API is experimental.
+   */
+  async abandonCompensation(executionId: string): Promise<void> {
+    this.executor.abandonCompensation(executionId);
+  }
+
   /** Send a signal to a waiting execution */
   async signal(executionId: string, event: string, payload?: unknown): Promise<void> {
     return this.executor.signal(executionId, event, payload);
@@ -152,6 +175,10 @@ export class Engine {
 
   /** Shut down the engine */
   async close(force = false): Promise<void> {
+    // Before the worker: a waitFor timer that fires during shutdown enqueues a step
+    // job, and a queue closing underneath it turns an orderly shutdown into a rejected
+    // add. Releasing the timers first makes the order irrelevant.
+    this.executor.close();
     await this.worker.close(force);
     this.queue.close();
     this.store.close();

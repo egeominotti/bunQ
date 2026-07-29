@@ -4,6 +4,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 describe('Workflow Engine', () => {
   let engine: Engine;
@@ -39,7 +40,7 @@ describe('Workflow Engine', () => {
     expect(run.workflowName).toBe('test-linear');
 
     // Wait for all steps to complete
-    await new Promise((r) => setTimeout(r, 1000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec).not.toBeNull();
@@ -80,7 +81,7 @@ describe('Workflow Engine', () => {
     engine.register(flow);
 
     const run = await engine.start('test-branch');
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -113,7 +114,7 @@ describe('Workflow Engine', () => {
     engine.register(flow);
 
     const run = await engine.start('test-compensate');
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');

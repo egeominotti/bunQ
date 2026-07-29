@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 describe('engine.recover()', () => {
   let engine: Engine;
@@ -15,7 +16,7 @@ describe('engine.recover()', () => {
     engine = new Engine({ embedded: true });
     engine.register(wf);
     const run = await engine.start('done-wf', {});
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('completed');
@@ -33,7 +34,7 @@ describe('engine.recover()', () => {
     engine = new Engine({ embedded: true });
     engine.register(wf);
     const run = await engine.start('wait-wf', {});
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'waiting');
 
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('waiting');
@@ -45,7 +46,7 @@ describe('engine.recover()', () => {
 
     // Signal to resume — should work after recovery
     await engine.signal(run.id, 'approval', { yes: true });
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const finalExec = engine.getExecution(run.id);
     expect(finalExec?.state).toBe('completed');
@@ -60,12 +61,12 @@ describe('engine.recover()', () => {
     engine = new Engine({ embedded: true });
     engine.register(wf);
     const run = await engine.start('signal-ready', {});
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'waiting');
     expect(engine.getExecution(run.id)?.state).toBe('waiting');
 
     // Signal arrives normally
     await engine.signal(run.id, 'data', 42);
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
     expect(engine.getExecution(run.id)?.state).toBe('completed');
   });
 
@@ -116,7 +117,7 @@ describe('engine.recover()', () => {
     const run = await engine.start('expire-wf', {});
 
     // Wait for timeout to fire naturally
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'failed');
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('failed');
   });

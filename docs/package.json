@@ -24,5 +24,9 @@
     "react-dom": "^19.0.0",
     "satori": "^0.26.0",
     "sharp": "^0.33.0"
+  },
+  "devDependencies": {
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.12.0"
   }
 }

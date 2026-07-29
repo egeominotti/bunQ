@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine;
 
@@ -23,7 +24,7 @@ describe('Workflow Engine - doUntil', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('count-until');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -41,7 +42,7 @@ describe('Workflow Engine - doUntil', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('infinite');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -68,7 +69,7 @@ describe('Workflow Engine - doWhile', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('count-while');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -91,7 +92,7 @@ describe('Workflow Engine - doWhile', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('skip-while');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -118,7 +119,7 @@ describe('Workflow Engine - forEach', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('process-items', { items: ['a', 'b', 'c'] });
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -145,7 +146,7 @@ describe('Workflow Engine - forEach', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('index-test', { items: ['x', 'y'] });
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -169,7 +170,7 @@ describe('Workflow Engine - map', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('transform');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -193,7 +194,7 @@ describe('Workflow Engine - subscribe', () => {
       events.push(event.type);
     });
 
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
     unsub();
 
     expect(events.length).toBeGreaterThan(0);
@@ -219,7 +220,8 @@ describe('Workflow Engine - subscribe', () => {
     });
 
     const run2 = await engine.start('sub-b');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run1.id, 'completed');
+    await waitForWorkflowState(engine, run2.id, 'completed');
     unsub();
 
     // All events should be for run1 only
@@ -247,12 +249,12 @@ describe('Workflow Engine - Schema Validation', () => {
 
     // Valid input
     const run1 = await engine.start('schema-input', { email: 'test@example.com' });
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run1.id, 'completed');
     expect(engine.getExecution(run1.id)!.state).toBe('completed');
 
     // Invalid input
     const run2 = await engine.start('schema-input', { email: 123 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run2.id, 'failed');
     expect(engine.getExecution(run2.id)!.state).toBe('failed');
   });
 
@@ -271,7 +273,7 @@ describe('Workflow Engine - Schema Validation', () => {
     engine = new Engine({ embedded: true });
     engine.register(flow);
     const run = await engine.start('schema-output');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'failed');
     expect(engine.getExecution(run.id)!.state).toBe('failed');
   });
 });

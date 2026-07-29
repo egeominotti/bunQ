@@ -241,8 +241,11 @@ for (let i = 0; i < scale / 100; i++) {
 git clone https://github.com/egeominotti/bunqueue.git
 cd bunqueue && bun install
 
-bun run start &                  # server, for the TCP half
-bun run bench/comprehensive.ts   # the numbers on this page
+# The server throttles a client to 10,000 commands per minute by default, which a
+# benchmark blows through in the first second. Left at the default you measure the
+# throttle, not the queue: acks get dropped and TCP throughput collapses.
+RATE_LIMIT_MAX_REQUESTS=100000000 bun run start &   # server, for the TCP half
+bun run bench/comprehensive.ts                      # the numbers on this page
 
 redis-server --daemonize yes     # optional: BullMQ comparison
 bun run bench/comparison/run.ts

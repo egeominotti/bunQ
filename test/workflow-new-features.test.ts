@@ -174,7 +174,7 @@ describe('Workflow Engine - Parallel Steps', () => {
     engine.register(flow);
 
     const run = await engine.start('parallel-test');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -228,7 +228,7 @@ describe('Workflow Engine - Parallel Steps', () => {
     engine.register(flow);
 
     const run = await engine.start('parallel-fail');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -268,7 +268,7 @@ describe('Workflow Engine - Signal Timeout', () => {
 
     const run = await engine.start('timeout-signal');
     // Wait for step to complete + delayed job to fire after timeout
-    await new Promise((r) => setTimeout(r, 5000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -290,12 +290,12 @@ describe('Workflow Engine - Signal Timeout', () => {
     engine.register(flow);
 
     const run = await engine.start('signal-ok');
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForWorkflowState(engine, run.id, 'waiting');
 
     expect(engine.getExecution(run.id)!.state).toBe('waiting');
 
     await engine.signal(run.id, 'approval', { approved: true });
-    await new Promise((r) => setTimeout(r, 1000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');

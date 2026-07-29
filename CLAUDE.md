@@ -397,9 +397,14 @@ engine.archive(7 * 24 * 60 * 60 * 1000); // archive old executions
 const unsub = engine.subscribe(run.id, (e) => console.log(e.type)); // per-execution subscribe
 ```
 
-Key: `Workflow` = pure DSL builder (step/branch/path/parallel/waitFor/subWorkflow/doUntil/doWhile/forEach/map). `Engine` = facade over Queue + Worker + SQLite Store + Executor + Emitter. Each step runs as a bunqueue job on `__wf:steps` queue. Features: retry with exponential backoff, parallel via Promise.allSettled, nested workflows via polling, signal timeout, loops (doUntil/doWhile/forEach), map transforms, schema validation (duck-typed .parse()), per-execution subscribe, typed events (11 types), cleanup/archival. Compensation runs in reverse order on failure.
+Key: `Workflow` = pure DSL builder (step/branch/path/parallel/waitFor/subWorkflow/doUntil/doWhile/forEach/map). `Engine` = facade over Queue + Worker + SQLite Store + Executor + Emitter. Each step runs as a bunqueue job on `__wf:steps` queue. Features: retry with exponential backoff, parallel via Promise.allSettled, nested workflows via polling, signal timeout, loops (doUntil/doWhile/forEach), map transforms, schema validation AND coercion (duck-typed `.parse()`, its return value is used), per-execution subscribe, typed events (15 types), cleanup/archival. Compensation runs in reverse start order on failure, and an unresolved failed reversal keeps the chain parked instead of reporting a clean rollback.
 
-Source: `src/client/workflow/` (workflow.ts, engine.ts, executor.ts, store.ts, runner.ts, emitter.ts, loops.ts, types.ts)
+Source: `src/client/workflow/` (workflow.ts, engine.ts, executor.ts, store.ts, runner.ts, emitter.ts, loops.ts, types.ts, compensator.ts, recovery.ts, waitFor.ts, rollbackControl.ts, storeSignals.ts, storeCodec.ts, identity.ts, clock.ts, unwindPlan.ts, admission.ts)
+
+The decision logic is pure and separately testable: `unwindPlan.ts` decides what an
+unwind does with each record, `admission.ts` decides whether a node job may run, and
+`clock.ts` is the single source of time and randomness, so a seed can drive the engine's
+own non-determinism.
 
 ## Client SDK
 

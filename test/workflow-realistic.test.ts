@@ -5,6 +5,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 describe('Workflow Engine - Realistic Scenarios', () => {
   let engine: Engine;
@@ -56,7 +57,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(orderFlow);
 
     const run = await engine.start('order-flow', { orderId: 'ORD-1', amount: 99.99 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -98,7 +99,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(orderFlow);
 
     const run = await engine.start('order-fail');
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -143,12 +144,12 @@ describe('Workflow Engine - Realistic Scenarios', () => {
 
     // Premium path
     const run1 = await engine.start('tier-flow', { total: 200 });
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run1.id, 'completed');
     expect(engine.getExecution(run1.id)!.state).toBe('completed');
 
     // Basic path
     const run2 = await engine.start('tier-flow', { total: 50 });
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run2.id, 'completed');
     expect(engine.getExecution(run2.id)!.state).toBe('completed');
 
     expect(results).toContain('premium');
@@ -217,10 +218,10 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(flow);
 
     const run = await engine.start('expense-reject');
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForWorkflowState(engine, run.id, 'waiting');
 
     await engine.signal(run.id, 'decision', { approved: false });
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -249,7 +250,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
       Array.from({ length: 10 }, (_, i) => engine.start('counter', { n: i }))
     );
 
-    await new Promise((r) => setTimeout(r, 2000));
+    await Promise.all(runs.map((r) => waitForWorkflowState(engine, r.id, 'completed')));
 
     // All should complete
     for (const run of runs) {
@@ -283,7 +284,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(flow);
 
     const run = await engine.start('accumulate', { source: 'test' });
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -303,7 +304,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(flow);
 
     const run = await engine.start('single');
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -320,7 +321,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(flow);
 
     const run = await engine.start('timeout-test');
-    await new Promise((r) => setTimeout(r, 1500));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -350,7 +351,7 @@ describe('Workflow Engine - Realistic Scenarios', () => {
     engine.register(flow);
 
     const run = await engine.start('persist-test');
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     // Query multiple times — should be consistent
     const exec1 = engine.getExecution(run.id);

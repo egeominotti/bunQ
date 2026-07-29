@@ -175,6 +175,20 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Workflow Engine',
+          items: [
+            { label: 'Overview', link: '/guide/workflow/' },
+            { label: 'Quick Start', link: '/guide/workflow/quickstart/' },
+            { label: 'Steps & Control Flow', link: '/guide/workflow/steps/' },
+            { label: 'Rollback (Saga)', link: '/guide/workflow/rollback/' },
+            { label: 'Durability & Idempotency', link: '/guide/workflow/durability/' },
+            { label: 'Human Approval', link: '/guide/workflow/approval/' },
+            { label: 'AI Agents (Vercel AI SDK)', link: '/guide/workflow/ai-agents/' },
+            { label: 'Agent SDK Integrations', link: '/guide/workflow/agent-sdks/' },
+            { label: 'API Reference', link: '/guide/workflow/api/' },
+          ],
+        },
+        {
           label: 'SDKs · Any Language',
           items: [
             { label: 'TypeScript, Python, PHP, Go, Rust & Elixir', link: '/guide/sdks/' },
@@ -199,7 +213,6 @@ export default defineConfig({
         {
           label: 'Advanced',
           items: [
-            { label: 'Workflow Engine', link: '/guide/workflow/' },
             { label: 'Queue Group', link: '/guide/queue-group/' },
             { label: 'CPU-Intensive Workers', link: '/guide/cpu-intensive-workers/' },
             { label: 'Stall Detection', link: '/guide/stall-detection/' },
@@ -235,6 +248,7 @@ export default defineConfig({
           label: 'Reference',
           collapsed: true,
           items: [
+            { label: 'API Reference (by version)', link: '/reference/' },
             { label: 'CLI Commands', link: '/guide/cli/' },
             { label: 'HTTP API', link: '/api/http/' },
             { label: 'TCP Protocol', link: '/api/tcp/' },
@@ -394,14 +408,14 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             name: 'twitter:creator',
-            content: '@EgeoMinotti',
+            content: '@bunqueue',
           },
         },
         {
           tag: 'meta',
           attrs: {
             name: 'twitter:site',
-            content: '@EgeoMinotti',
+            content: '@bunqueue',
           },
         },
         // JSON-LD Structured Data - SoftwareApplication

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
+import { type HealthData, evaluateDoctor } from '../src/cli/commands/doctor';
 import { createHttpServer } from '../src/infrastructure/server/http';
 import { parseSingleJson, runCli, runCliRaw } from './cli-invariants/runtimeHarness';
 
@@ -61,9 +62,29 @@ describe('complete local CLI functionality over the real executable', () => {
       const doctor = parseSingleJson(await runCli(['doctor', '--json'], tcpPort)) as Record<
         string,
         unknown
-      >;
+      > & { endpoint: string; health: HealthData; issues: number };
       expect(version).toMatchObject({ ok: true, mismatch: false });
-      expect(doctor).toMatchObject({ ok: true, reachable: true, issues: 0 });
+      expect(doctor).toMatchObject({ reachable: true, fatal: false });
+
+      // What this case is for: the CLI reached the REAL server over HTTP, on the port it
+      // derived itself, and parsed the real payload.
+      expect(doctor.endpoint).toContain(String(httpPort));
+      expect(doctor.health.status).toBe('healthy');
+
+      // And its verdict is the pure evaluator's verdict over the payload it reported.
+      //
+      // This used to assert a flat `issues: 0`, which asserted something else entirely.
+      // The evaluator counts an issue at RSS above 512MB, so that number depended on the
+      // memory footprint of whatever process ran the test. Run alone it was small and the
+      // case passed; inside a full `bun test` run of 6000+ tests sharing one process it
+      // was not, and the case failed on the suite's memory rather than on the CLI. An
+      // oracle against the same payload has no such coupling, and unlike a re-implemented
+      // count here it cannot drift from the evaluator it is checking. The thresholds
+      // themselves are covered where they belong, over the pure function, in
+      // `cli-doctor-logic.test.ts`.
+      expect(doctor.issues).toBe(
+        evaluateDoctor({ kind: 'ok', endpoint: doctor.endpoint, health: doctor.health }).issues
+      );
     } finally {
       http.stop();
       manager.shutdown();

@@ -42,8 +42,25 @@
   --sl-font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 
   /* Sizing */
-  --sl-content-width: 45rem;
+  /* Guide content fills the column left over by the sidebar and the on-this-page
+     rail, instead of being capped at a reading measure. Wide tables, comparison
+     matrices and side-by-side code blocks are the norm in this documentation, and
+     a 45rem cap forced them to scroll horizontally on a screen with room to spare. */
+  --sl-content-width: 100%;
   --sl-sidebar-width: 18rem;
+}
+
+/* The content column is now elastic, so give it breathing room at the edges and a
+   ceiling on very wide monitors — full width should not mean edge-to-edge text. */
+.sl-markdown-content,
+main .content-panel .sl-container {
+  max-width: 100%;
+}
+
+@media (min-width: 72rem) {
+  main .content-panel > .sl-container {
+    max-width: 82rem;
+  }
 }
 
 /* Light theme — inverted gray scale + pink accent */
@@ -3497,4 +3514,245 @@ html {
   .bq-vs { grid-template-columns: minmax(0, 1fr); }
   .bq-vs::after { display: none; }
   .bq-bar span { font-size: 0.62rem; }
+}
+
+/* ==========================================================================
+   Workflow simulations
+   Looping CSS-only animations that show a behaviour instead of describing it.
+   No JavaScript, so they survive being read in an RSS reader or a print stylesheet,
+   and they freeze on their final frame when the reader asks for reduced motion.
+   Built entirely on the existing tokens: --bq-line, --bq-surface, --bq-brand.
+   ========================================================================== */
+
+.bq-sim {
+  border: 1px solid var(--bq-line);
+  border-radius: 0.8rem;
+  background: var(--bq-surface);
+  padding: 1.2rem 1.4rem 1.3rem;
+  margin: 1.8rem 0;
+}
+
+.bq-sim-head {
+  font-family: var(--bq-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.bq-sim-foot {
+  font-size: 0.82rem;
+  color: var(--sl-color-gray-2);
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--bq-line);
+}
+
+/* --- Track: a row of turns that fill left to right ---------------------- */
+
+.bq-sim-track {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.bq-sim-track-label {
+  font-family: var(--bq-mono);
+  font-size: 0.74rem;
+  color: var(--sl-color-gray-2);
+  text-align: right;
+}
+
+.bq-sim-turns {
+  display: flex;
+  gap: 0.28rem;
+  align-items: center;
+}
+
+.bq-sim-turn {
+  flex: 1;
+  height: 1.35rem;
+  border-radius: 0.28rem;
+  border: 1px solid var(--bq-line);
+  background: transparent;
+  position: relative;
+  overflow: hidden;
+}
+
+.bq-sim-turn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bq-brand);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+/* Wasteful track: fills to the crash, resets, fills again from zero. */
+.bq-sim-waste .bq-sim-turn::after {
+  animation: bq-sim-waste 9s infinite;
+  animation-delay: calc(var(--i) * 0.28s);
+}
+
+/* Durable track: fills to the crash, pauses, resumes where it stopped. */
+.bq-sim-keep .bq-sim-turn::after {
+  animation: bq-sim-keep 9s infinite;
+  animation-delay: calc(var(--i) * 0.28s);
+}
+
+@keyframes bq-sim-waste {
+  0% { transform: scaleX(0); }
+  22% { transform: scaleX(1); }
+  38% { transform: scaleX(1); }
+  40% { transform: scaleX(0); }      /* crash: everything is lost */
+  62% { transform: scaleX(1); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes bq-sim-keep {
+  0% { transform: scaleX(0); }
+  22% { transform: scaleX(1); }
+  100% { transform: scaleX(1); }     /* the journal holds; nothing repeats */
+}
+
+.bq-sim-crash {
+  font-family: var(--bq-mono);
+  font-size: 0.7rem;
+  color: #ef4444;
+  opacity: 0;
+  animation: bq-sim-crash-flash 9s infinite;
+}
+
+@keyframes bq-sim-crash-flash {
+  0%, 36% { opacity: 0; }
+  40%, 52% { opacity: 1; }
+  58%, 100% { opacity: 0; }
+}
+
+/* --- Unwind: resources appear, then are struck through in reverse ------- */
+
+.bq-sim-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.bq-sim-res {
+  font-family: var(--bq-mono);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--bq-line);
+  background: color-mix(in srgb, var(--bq-brand) 12%, transparent);
+  color: var(--sl-color-text);
+  position: relative;
+  opacity: 0;
+  animation: bq-sim-provision 10s infinite;
+}
+
+.bq-sim-res::after {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  top: 50%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: bq-sim-destroy 10s infinite;
+}
+
+/* --up counts the provision order, --down the reverse order it unwinds in. */
+.bq-sim-res { animation-delay: calc(var(--up) * 0.6s); }
+.bq-sim-res::after { animation-delay: calc(5s + var(--down) * 0.6s); }
+
+@keyframes bq-sim-provision {
+  0% { opacity: 0; transform: translateY(4px); }
+  8%, 92% { opacity: 1; transform: none; }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes bq-sim-destroy {
+  0%, 2% { transform: scaleX(0); }
+  10%, 88% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
+}
+
+.bq-sim-pivot {
+  font-family: var(--bq-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bq-brand);
+  border-left: 2px solid var(--bq-brand);
+  padding: 0.35rem 0 0.35rem 0.6rem;
+  margin: 0 0.35rem;
+}
+
+/* Committed resources: shown, never struck through. */
+.bq-sim-res-locked::after { animation: none; }
+
+/* --- Gate: a run parks, a signal lands, it resumes ---------------------- */
+
+.bq-sim-gate {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.bq-sim-park {
+  border-style: dashed;
+  animation: bq-sim-park-pulse 6s infinite;
+}
+
+@keyframes bq-sim-park-pulse {
+  0%, 45% { opacity: 1; border-color: var(--bq-brand); }
+  55%, 70% { opacity: 0.45; border-color: var(--bq-line); }
+  80%, 100% { opacity: 1; border-color: var(--bq-line); }
+}
+
+.bq-sim-signal {
+  font-family: var(--bq-mono);
+  font-size: 0.72rem;
+  color: var(--bq-brand);
+  opacity: 0;
+  animation: bq-sim-signal-in 6s infinite;
+}
+
+@keyframes bq-sim-signal-in {
+  0%, 55% { opacity: 0; transform: translateX(-6px); }
+  65%, 90% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: none; }
+}
+
+@media (max-width: 40rem) {
+  .bq-sim-track { grid-template-columns: 1fr; }
+  .bq-sim-track-label { text-align: left; }
+}
+
+/* Freeze every simulation on its resolved state when motion is unwelcome. */
+@media (prefers-reduced-motion: reduce) {
+  .bq-sim-turn::after,
+  .bq-sim-res,
+  .bq-sim-res::after,
+  .bq-sim-crash,
+  .bq-sim-park,
+  .bq-sim-signal {
+    animation: none !important;
+  }
+  .bq-sim-turn::after { transform: scaleX(1); }
+  .bq-sim-res { opacity: 1; }
+  .bq-sim-res::after { transform: scaleX(1); }
+  .bq-sim-res-locked::after { transform: scaleX(0); }
+  .bq-sim-crash, .bq-sim-signal { opacity: 1; }
 }

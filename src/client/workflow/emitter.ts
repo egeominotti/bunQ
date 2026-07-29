@@ -11,6 +11,7 @@ import type {
   WorkflowEventListener,
   ExecutionState,
 } from './types';
+import { clock } from './clock';
 
 export class WorkflowEmitter {
   private readonly listeners = new Map<WorkflowEventType, Set<WorkflowEventListener>>();
@@ -42,7 +43,15 @@ export class WorkflowEmitter {
   }
 
   emitStep(
-    type: 'step:started' | 'step:completed' | 'step:failed' | 'step:retry',
+    type:
+      | 'step:started'
+      | 'step:completed'
+      | 'step:failed'
+      | 'step:retry'
+      | 'compensation:started'
+      | 'compensation:completed'
+      | 'compensation:failed'
+      | 'compensation:skipped',
     executionId: string,
     workflowName: string,
     stepName: string,
@@ -54,7 +63,7 @@ export class WorkflowEmitter {
       type,
       executionId,
       workflowName,
-      timestamp: Date.now(),
+      timestamp: clock().now(),
       stepName,
       ...extra,
     };
@@ -79,7 +88,7 @@ export class WorkflowEmitter {
       type,
       executionId,
       workflowName,
-      timestamp: Date.now(),
+      timestamp: clock().now(),
       state,
       ...extra,
     };
@@ -97,7 +106,7 @@ export class WorkflowEmitter {
       type,
       executionId,
       workflowName,
-      timestamp: Date.now(),
+      timestamp: clock().now(),
       event,
       payload,
     };

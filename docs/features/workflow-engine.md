@@ -1,6 +1,6 @@
 # Workflow Engine (saga orchestration)
 
-> **Category:** Orchestration · **Source:** `src/client/workflow/workflow.ts`, `src/client/workflow/engine.ts`, `src/client/workflow/executor.ts`, `src/client/workflow/runner.ts`, `src/client/workflow/loops.ts`, `src/client/workflow/compensator.ts`, `src/client/workflow/recovery.ts`, `src/client/workflow/store.ts`, `src/client/workflow/emitter.ts`, `src/client/workflow/types.ts`, `src/client/workflow/index.ts`
+> **Category:** Orchestration · **Source:** `src/client/workflow/workflow.ts`, `src/client/workflow/engine.ts`, `src/client/workflow/executor.ts`, `src/client/workflow/runner.ts`, `src/client/workflow/loops.ts`, `src/client/workflow/compensator.ts`, `src/client/workflow/recovery.ts`, `src/client/workflow/store.ts`, `src/client/workflow/emitter.ts`, `src/client/workflow/types.ts`, `src/client/workflow/waitFor.ts`, `src/client/workflow/identity.ts`, `src/client/workflow/rollbackControl.ts`, `src/client/workflow/storeSignals.ts`, `src/client/workflow/storeCodec.ts`, `src/client/workflow/clock.ts`, `src/client/workflow/unwindPlan.ts`, `src/client/workflow/admission.ts`, `src/client/workflow/index.ts`
 
 ## Purpose
 
@@ -17,7 +17,9 @@ Owns:
 - **Loops & transforms**: `doUntil`/`doWhile`/`forEach`/`map` (`loops.ts`).
 - **Crash recovery** of orphaned executions (`recovery.ts`).
 - **Persistence** of execution rows + archival/cleanup (`store.ts`, its own SQLite DB).
-- **Typed observability events** (`emitter.ts`, 11 event types).
+- **Typed observability events** (`emitter.ts`, 15 event types, including four `compensation:*`).
+- **Idempotency identity** per step and direction (`identity.ts`).
+- **Operator control of a parked unwind** (`rollbackControl.ts`).
 
 Does NOT own:
 
@@ -55,7 +57,10 @@ Each method mutates `this.nodes` and returns a re-typed `this` so step results a
 - `waitFor(event, { timeout? })` (`workflow.ts:114-117`).
 - `doUntil(condition, builder, { maxIterations? })` — default `maxIterations` `100` (`workflow.ts:120-140`).
 - `doWhile(condition, builder, { maxIterations? })` — default `100` (`workflow.ts:143-163`).
-- `forEach(items, name, handler, options?)` — default `maxIterations` `1000` (`workflow.ts:166-190`).
+- `forEach(items, name, handler, options?)` — default `maxIterations` `1000`.
+- `pivot()` — marks the point of no return. Once passed, `committedAt` is set and NOTHING is eligible for rollback, including steps before it.
+
+`path()`, `parallel()`, `doUntil()` and `doWhile()` reject any non-step node their builder produced (`onlySteps`), and `register()` rejects a step name colliding with a loop's `name:index` namespace (`assertNoIndexCollision`), and rejects two `waitFor` nodes on the same event (`assertNoDuplicateWaitFor`): a delivered signal is never consumed, so one `signal()` would open every gate naming that event.
 - `map(name, transform)` — synchronous/async transform stored under `name` (`workflow.ts:193-202`).
 - `getStepNames()` — flat list used for duplicate detection (`workflow.ts:205-222`).
 
@@ -88,13 +93,28 @@ close(force = false): Promise<void>
 
 `step:started`, `step:completed`, `step:failed`, `step:retry`, `workflow:started`, `workflow:completed`, `workflow:failed`, `workflow:compensating`, `workflow:waiting`, `signal:received`, `signal:timeout`. See [Webhooks, Events & Job Logs](./webhooks-and-events.md) for the queue-level event system (these are independent, in-process listeners).
 
+### Operator control of a parked unwind (`rollbackControl.ts`)
+
+- `Engine.resumeCompensation(id)` — retry the handler that parked a `compensation-stuck` run, then finish the unwind.
+- `Engine.abandonCompensation(id)` — record every outstanding eligible step as `compensation-skipped` and make the run terminal.
+
+### Step context additions
+
+`StepContext` carries `idempotencyKey` on every step, and compensate handlers additionally receive `forwardIdempotencyKey` — the key the forward execution used, so a rollback can reconcile with the provider when the forward outcome is in doubt.
+
 ## Data Models
 
 See [data-model](../data-model.md) for full definitions. Key shapes (`types.ts`):
 
-- `Execution` (`types.ts:173-185`): `{ id, workflowName, state, input, steps: Record<string, StepRecord>, currentNodeIndex, resolvedSteps?, signals, createdAt, updatedAt }`.
-- `ExecutionState` (`types.ts:153`): `'running' | 'waiting' | 'completed' | 'failed' | 'compensating'`.
-- `StepRecord` (`types.ts:158-170`): `{ status, result?, error?, startedAt?, completedAt?, attempts?, loopItem?, loopIndex? }` — `loopItem`/`loopIndex` persist a `forEach` iteration's `__item`/`__index` so compensation can reconstruct per-iteration context.
+- `Execution`: `{ id, workflowName, state, input, steps, currentNodeIndex, resolvedSteps?, rollbackStatus?, failureReason?, committedAt?, signals, createdAt, updatedAt }`. `rollbackStatus` (absent (`undefined`) | `completed` | `not-applicable` | `stuck`) is a separate axis from `failureReason`: the rollback is what the engine did *after* the failure, not why it failed, and collapsing them makes it impossible to alert on the right thing. `committedAt` is the node index at which `.pivot()` committed.
+- `ExecutionState`: `running` | `waiting` | `completed` | `failed` | `compensating` | `compensation-stuck`. The last is deliberately **non-terminal**: a definitive compensation failure parks the run for an operator.
+- `StepRecord`: `{ status, result?, error?, startedAt?, completedAt?, attempts?, loopItem?, loopIndex?, compensation?, idempotencyKey?, occurrence?, childExecutionId? }`.
+  - `loopItem`/`loopIndex` persist a loop iteration's `__item`/`__index` so compensation reconstructs per-iteration context. Written in a `finally`, so the iteration that *throws* also carries them — otherwise its compensate handler gets an undefined `__item` and silently releases nothing.
+  - `doUntil`/`doWhile` write the per-iteration mirror `name:N` in a `finally` for the same reason. `unwindSet` drops the bare `name` mirror whenever a `name:0` sibling exists, because that mirror is a copy of the LAST iteration and compensating it too would undo that iteration twice. Written only on success, the iteration that *threw* existed under the bare name alone and the two rules combined to lose it entirely: a loop that charged every turn and failed on turn 2 refunded turns 0 and 1, left turn 2 standing, and still reported `rollbackStatus: 'completed'`. That record was unreachable even by `abandonCompensation`, which walks the same set.
+  - `compensation` is `{ status: 'compensated' | 'compensation-failed' | 'compensation-skipped', at, error? }`. Exactly one per eligible step, discharged when the run terminates.
+  - `idempotencyKey` is `run:step#occurrence:direction` (`identity.ts`), persisted with the START record so a rollback can reconcile even when the body never got to write an output.
+  - `childExecutionId` on a `sub:<name>` record is the handle used to run the child's own unwind. The record is written `running` as soon as the child is claimed and settled `completed` or `failed` when the child ends. Settling on failure is load-bearing: `unwindSet` drops anything that is neither `completed` nor `failed` before the `sub:` branch can admit it, so a record left `running` took the child out of the parent's unwind and the parent reported `rollbackStatus: 'completed'` over a child parked with resources still held.
+  - `compensatable` records whether the step ran with a `compensate` handler. Nothing else can tell "never owed a reversal" from "owed one and the handler has since been renamed away", and both `unwindSet` and `owesOutcome` read it for the vanished-definition case. They must agree: while `owesOutcome` answered from the definition alone it walked past exactly the record `unwindSet` had kept, and `abandonCompensation` ended a terminal run with a step carrying no outcome.
 - `StepContext` (`types.ts:8-20`): `{ input, steps, signals, executionId }` passed to every handler; `steps` contains only **completed** step results (built in `buildContext`, `runner.ts:205-216`).
 - `WorkflowNode` discriminated union (`types.ts:140-150`): `step | branch | waitFor | parallel | subWorkflow | doUntil | doWhile | forEach | map`.
 - `StepJobData` (`types.ts:255-259`): `{ executionId, workflowName, nodeIndex }` — the on-the-wire job payload.
@@ -109,7 +129,7 @@ SQLite table `workflow_executions` (id PK, workflow_name, state, input/steps/res
 
 **advance** (`executor.ts:282-292`): bumps `currentNodeIndex`, persists, and if past the last node sets `completed` + emits `workflow:completed`; otherwise `enqueue()`s the next job. This is what serializes a single execution into a chain of one-node-at-a-time jobs.
 
-**Step** (`runStep` → `executeStepWithRetry`, `runner.ts:38-126`): loops `attempt` `1..def.retry`. Per attempt it writes a `running` `StepRecord`, validates `inputSchema.parse(ctx.input)` if present, runs `runWithTimeout(handler, def.timeout)` (`runner.ts:17-35`), validates `outputSchema.parse(result)`, then writes a `completed` record and emits `step:completed`. On error it emits `step:retry` and sleeps `backoffDelay(attempt)` = `min(500 * 2^(attempt-1), 30_000)` + up to 50% jitter (`runner.ts:9-14`). After the last attempt it writes a `failed` record, emits `step:failed`, and throws.
+**Step** (`runStep` → `executeStepWithRetry`, `runner.ts:38-126`): loops `attempt` `1..def.retry`. Per attempt it writes a `running` `StepRecord`, validates AND COERCES with `inputSchema.parse(ctx.input)` if present, using the returned value when it is not `undefined`, runs `runWithTimeout(handler, def.timeout)` (`runner.ts:17-35`), validates and coerces with `outputSchema.parse(result)`, using the returned value when it is not `undefined`, then writes a `completed` record and emits `step:completed`. On error it emits `step:retry` and sleeps `backoffDelay(attempt)` = `min(500 * 2^(attempt-1), 30_000)` + up to 50% jitter (`runner.ts:9-14`). After the last attempt it writes a `failed` record, emits `step:failed`, and throws.
 
 **Branch** (`runBranch`, `executor.ts:160-174`): evaluates `condition(ctx)` → path name; runs that path's steps sequentially (missing path = skip), then advances.
 
@@ -117,15 +137,32 @@ SQLite table `workflow_executions` (id PK, workflow_name, state, input/steps/res
 
 **Sub-workflow** (`executeSubWorkflow`, `runner.ts:149-175`): `start()`s the named workflow and **polls** `getFn(id)` every `100ms` up to `300_000ms`; on `completed` it collects completed step results into a map stored under `sub:<name>`; on `failed` or timeout it throws.
 
-**Loops/map** (`loops.ts`): `doUntil` runs the body then checks `condition(ctx, iteration)`; `doWhile` checks first; both throw if `maxIterations` exceeded. `forEach` extracts `items`, throws if `items.length > maxIterations`, and for each item runs an indexed step named `<step>:<i>` whose context is enriched with `steps.__item`/`steps.__index`, persisting `loopItem`/`loopIndex` afterward (`loops.ts:77-100`). `map` runs `transform(ctx)` and stores the result as a completed step (`loops.ts:104-121`).
+**Loops/map** (`loops.ts`): `doUntil` runs the body then checks `condition(ctx, iteration)`; `doWhile` checks first; both throw if `maxIterations` exceeded. `forEach` extracts `items`, **throws unless `Array.isArray(items)`**, then throws if `items.length > maxIterations`, and for each item runs an indexed step named `<step>:<i>` whose context is enriched with `steps.__item`/`steps.__index`, persisting `loopItem`/`loopIndex` in a `finally` (so the iteration that throws still carries its item into compensation). `map` runs `transform(ctx)` and stores the result as a completed step.
 
 **waitFor** (`runWaitFor`, `executor.ts:209-249`): if the signal is already present, advance. Otherwise, if a `timeout` is set, it tracks `__waitFor:<event>` start time; if elapsed ≥ timeout it emits `signal:timeout`, marks the wait record failed, sets state `failed`, runs compensation, emits `workflow:failed`, and throws `WaitForSignalError`; else it arms a `setTimeout` via `scheduleTimeoutCheck` for the remaining time. Either way it sets state `waiting`, emits `workflow:waiting`, and throws `WaitForSignalError`. The sentinel is caught in `processStep` (`executor.ts:92`) and turned into `return null`, so the step job acks cleanly without triggering compensation.
 
-**signal** (`executor.ts:102-128`): loads the execution (throws if not found), clears any pending timeout timer, records `signals[event] = payload` (idempotent), and emits `signal:received` — **always**, so a signal that lands *before* the run parks is still consumed at the `waitFor` via its `signals[event] !== undefined` gate. The resume is then **gated on state**: only a genuinely-parked run (`state === 'waiting'`) is flipped to `running`, persisted, and re-enqueued at `currentNodeIndex` so `processStep` re-runs the `waitFor` node and advances. For any other state (still running an earlier step, already resumed, completed, or failed) it just persists the recorded signal and returns **without** enqueuing. The `state === 'waiting'` check and the flip to `running` are synchronous (no `await` between them), and `store.update` persists `running` before the first `await this.enqueue`; a second concurrent/duplicate `signal()` therefore reads `running` back from the store and returns early. Duplicate/concurrent signals collapse to a **single resume**, so every post-`waitFor` step runs exactly once.
+**signal** (`executor.signal` → `SignalCoordinator.record`): clears any pending timeout timer, then records `signals[event] = payload` and claims the resume **inside one transaction**, and emits `signal:received` — **always**, so a signal that lands *before* the run parks is still consumed at the `waitFor`. Presence is tested by **key** (`hasSignal`, i.e. `event in signals`), never by value: `payload` is optional, the codec runs with `structuredClone: true` and round-trips `undefined` faithfully, so a value test reports "no signal" for `signal(id, event)` with no payload — the run then resumed, re-entered the `waitFor`, was told nothing had arrived, and re-parked (`test/repro-workflow-signal-no-payload.test.ts`). The same key test guards the in-memory pre-check and the timeout re-read in `waitFor.ts` and the crash-recovery resume in `recovery.ts`. The resume itself is a conditional `UPDATE ... SET state = 'running' WHERE id = ? AND state = 'waiting'`: only a genuinely-parked run is claimed and re-enqueued at `currentNodeIndex`. For any other state (still running an earlier step, already resumed, completed, or failed) the payload is recorded and nothing is enqueued. Because the claim is a single conditional UPDATE rather than an in-memory check, duplicate/concurrent signals collapse to a **single resume** at the database, so every post-`waitFor` step runs exactly once.
 
-**Compensation** (`runCompensation`, `compensator.ts:19-56`): collects completed steps whose names do **not** start with `__`, reverses them, sets state `compensating` (+ emits `workflow:compensating`), and calls each step's `compensate(ctx)`. For `forEach` records it restores `__item`/`__index` from `loopItem`/`loopIndex`. Compensation handler errors are swallowed so the chain continues. Final state is set to `failed`. Triggered from the generic `processStep` catch (`executor.ts:96`), the `waitFor` timeout path, and recovery.
+**Compensation** (`runCompensation`, `compensator.ts`): builds the unwind set, reverses it (insertion order = start order, so this is reverse *start* order — deterministic where completion order is not), sets state `compensating`, and settles each step with exactly one outcome.
+
+Eligibility: user steps only (no `__` bookkeeping), status `completed` **or `failed`** — the failing step is the one most likely to need undoing, because a charge that reached the provider and then lost its response is recorded failed while the money has moved. Nothing is eligible once `committedAt` is set: past the pivot the saga is committed and recovery is forward-only.
+
+- **Never twice.** A step already carrying a `compensation` outcome is skipped, so an unwind interrupted by a crash resumes where it stopped.
+- **Park, do not plough on.** A handler that throws settles as `compensation-failed` and the loop **breaks**. The remaining steps are left *without* an outcome on purpose — the run is parked (`compensation-stuck`, `rollbackStatus: 'stuck'`), not finished, and pre-marking them skipped would make a later resume believe they were handled.
+- **Bounded like the forward path, and bounded even when the forward path is not.** The bound comes from `decideUnwindAction` (`unwindPlan.ts`) as `def.timeout > 0 ? def.timeout : DEFAULT_COMPENSATE_TIMEOUT_MS`, so the 30 s default from `workflow.ts:121` applies to a reversal too, and a timeout settles as `compensation-failed` (`error: 'Step timed out after Nms'`) exactly like a throw. `timeout: 0` disables the bound on the forward path only: an unbounded reversal would hold the process-global `inFlight` claim forever, locking the run out of `recover()`, `resumeCompensation` and `abandonCompensation` and leaving it `compensating` rather than parked. An unbounded handler that wedges — a hung HTTP call to a provider that is down, which is precisely when rollbacks run — would leave the run in `compensating`, not `compensation-stuck`: no parked run for an operator to resume or abandon, and every later `recover()` finding the claim still held and returning without having done anything.
+- **Nested sagas.** A `sub:<name>` record is compensated by running the CHILD's `runCompensation` (`unwindChild`). A child that parks makes the parent's sub-step throw, so the parent parks too rather than reporting a clean rollback over a half-undone child.
+- **Operator exits** (`rollbackControl.ts`): `resumeCompensation` asks for the retry with a FLAG (`retryFailed`) rather than clearing the failed outcome, so the operator's record survives until a real outcome replaces it. Clearing was worse than it looked: it persisted the wipe before running anything, so a resume that met a failing store left a durable row with the diagnostic gone and the run marked `compensating`, re-driven at every startup, and guarding that needed a deep snapshot, a restore path and a second write that could mask the original error. `abandonCompensation` `abandonCompensation` records every outstanding eligible step as `compensation-skipped` and makes the run terminal — this is where "exactly one outcome" is discharged.
+
+Triggered from the generic `processStep` catch, the `waitFor` timeout path, and recovery.
 
 **Recovery** (`recoverExecutions`, `recovery.ts:26-49`): scans `listRecoverable()` (states `running`/`waiting`/`compensating`, `store.ts:96-98`). `running` → re-enqueue at `currentNodeIndex`. `waiting` → if not actually a `waitFor` node re-enqueue; else if signal already arrived resume, else re-arm the timeout for the remaining time (or re-enqueue immediately if already elapsed). `compensating` → re-run `runCompensation` from scratch (handlers must be idempotent). Returns `RecoverResult { running, waiting, compensating, total }`.
+
+A `subWorkflow` CHILD is excluded from `listRecoverable()` (`store.ts`): it carries `parentExecutionId` in its meta blob and its lifecycle belongs to the parent, which unwinds it through `unwindChild`. Driving it independently re-ran its steps, and the fresh records carried no `compensation`, so the never-twice guard did not fire on the parent's later unwind and the child's reversal was dispatched a second time (`test/repro-model-child-recovered-alone.test.ts`). A child whose parent row no longer exists IS returned, so an orphan is not stranded non-terminal forever.
+
+That exception is scoped to a missing parent row, and it does NOT make every child reachable. Two consequences follow, both expected:
+
+- **Abandoned children stay non-terminal.** `executeSubWorkflow` starts a fresh child on every entry to the node: it never resumes the `childExecutionId` recorded in a previous `sub:` record. So each retry of the sub-workflow node's job, and each `recover()` that re-drives a parent parked on that node, leaves the previous child row behind in `running`. Its parent row still exists, so the filter excludes it, and `cleanup()`/`archive()` default to `['completed','failed']`, so nothing removes it either. Those rows accumulate and are inert: the parent's `sub:` record is only written once a child reaches `completed`, so an abandoned child is never referenced by `unwindChild` and never has its compensation dispatched. Operators debugging child executions that sit in `running` forever are seeing this, not a wedged engine. `cleanup(maxAgeMs, ['running'])` does reap them, but it selects on age and state only — it cannot tell an abandoned child from a live parent or a genuinely long-running execution, and will delete those too. Use an age well beyond the longest legitimate run.
+- **The exception cannot resurrect the double-unwind.** A child is only unwound through the `sub:` record that names it, and that record exists only for a child that reached `completed` — a state `listRecoverable()` never returns. During the unwind itself the child does turn `compensating` and so does become selectable if the parent row is deleted concurrently (`cleanup(0)` racing a parent that is already persisted `failed` while its compensation runs); in-process that second unwind loses the `inFlight` claim in `compensator.ts` and does nothing. Across processes it reduces to the pre-existing limitation that the claim is process-global.
 
 ## Concurrency & Locking
 
@@ -137,17 +174,26 @@ Signal-timeout timers live in an in-memory `Map<execId, timer>` on the executor 
 
 ## Edge Cases & Failure Modes
 
-- **Step re-execution is NOT idempotent.** `executeStepWithRetry` always re-runs the handler for the node at `currentNodeIndex`; there is no "already completed" short-circuit at the step level. Re-delivery, `recover()` re-enqueue of a `running` execution, or two jobs landing on the same node can run a side-effecting step more than once. The execution-level guard (`processStep` returns `null` for non-`running`/`waiting` executions, `executor.ts:74`) only prevents re-runs of *terminal* executions.
+- **Step re-execution is at-least-once.** `executeStepWithRetry` re-runs the handler for the node at `currentNodeIndex`; there is no completed-short-circuit at the *node* level. Re-delivery, `recover()` re-enqueue of a `running` execution, or two jobs on the same node can run a side-effecting step more than once. `ctx.idempotencyKey` is stable across every one of those paths so a provider can absorb the repeat. Loop *iterations* ARE memoised (see below); branch paths and parallel groups are not, and re-run whole.
+- **Loop iterations are memoised.** `runIteration` (`loops.ts`) skips an iteration whose `name:iteration` record is already `completed`, restoring the base-name record so the condition and downstream steps see it. Only `completed` is skipped — an iteration left `running` by a crash is genuinely unfinished. Without this a loop replayed from zero on every re-entry, and the restarted in-memory counter overwrote earlier per-iteration records with later content, corrupting the transcript it was meant to preserve.
 - **Duplicate/concurrent `signal()` no longer double-executes.** `signal()` gates its resume on `state === 'waiting'` and does the state check + flip to `running` synchronously, persisting `running` before its first `await` (`executor.ts:121-127`). A second signal for the same parked run — sequential *or* concurrent — reads `running` back from the store and returns after only recording its payload, so the post-`waitFor` steps run exactly once (covered by `test/repro-workflow-signal-double.test.ts`). A signal that arrives *before* the run parks is likewise just recorded and consumed later at the `waitFor`.
-- **Residual timeout-timer vs. `signal()` race (narrow, pre-existing).** `signal()` clears the pending timeout timer, so a signal that wins the race cancels the timeout. But if the timeout timer has *already fired* and enqueued a job at the `waitFor` node and a `signal()` then also enqueues, two jobs for the same node can both pass the `running`/`waiting` guard under `concurrency > 1` and advance — there is still no per-node dedup in `processStep`/`runWaitFor`. Treat post-`waitFor` steps as needing idempotent side effects. (Tracked in the project audit backlog.)
+- **Timeout-timer vs. `signal()` race — now closed by a per-node claim.** `signal()` clears the pending timeout timer, so a signal that wins the race cancels the timeout. If the timer had *already fired* and enqueued a job at the `waitFor` node while `signal()` also enqueued, both jobs used to pass the `running`/`waiting` guard under `concurrency > 1` and advance the run twice. `processStep` now holds `nodesInFlight`, a claim keyed `<executionId>:<nodeIndex>` for the duration of the node, so the second job returns immediately. Two guards, different jobs: the cursor check (`data.nodeIndex !== exec.currentNodeIndex`) drops a job for a node the run has already left; the claim drops a concurrent second job for the node it is on. A deterministic `jobId` was tried instead and removed — dedup at the queue can swallow a *legitimate* re-enqueue and wedge the run, whereas a dropped duplicate cannot.
+- **One `Engine` per process, per data path — a real constraint, not a documented guarantee.** `src/client/manager.ts` memoises a process-global `QueueManager` with `instance ??= new QueueManager({ dataPath })`, so the FIRST caller's data path wins and every later `Engine` silently shares it. Two engines with different `dataPath` values in one process therefore collide on one internal `__wf:steps` queue: engine B's step jobs are pulled by engine A's worker, whose `store.get()` against a different SQLite file returns `null`, and `processStep` returns `null` — the job is ACKed as success and the run sits in `running` forever. This predates the saga work and is not enforced in code. Until `getSharedManager` keys by `dataPath`, treat one engine per process as a hard requirement.
+
 - **In-memory store when `dataPath` is omitted.** `WorkflowStore` opens `dataPath ?? ':memory:'` (`store.ts:67`). In TCP/`connection` mode (no `dataPath`) execution state is in-memory only — it is lost on restart and `recover()` finds nothing. Persistence requires passing `dataPath` (typically with `embedded: true`).
 - **Retry vs. compensation.** A step failing all `retry` attempts throws out of `processStep`, which sets `failed`, persists, emits `workflow:failed`, runs compensation, then re-throws — failing the underlying `wf:step` job. If the queue retries that job, `processStep` short-circuits because the execution is now `failed`, so compensation does not double-run via that path.
-- **Crash mid-compensation** leaves state `compensating`; `recover()` re-runs the whole compensation set, so compensate handlers must be idempotent.
+- **Crash mid-compensation** leaves state `compensating`; `recover()` re-enters the unwind, but per-step outcomes are checkpointed, so only the steps that had not settled are attempted again.
 - **Parallel partial failure** rejects the whole node with `AggregateError`; already-completed sibling steps remain `completed` and become candidates for compensation.
-- **Loop guards.** `doUntil`/`doWhile` throw on `maxIterations` (default `100`); `forEach` throws if `items.length` exceeds `maxIterations` (default `1000`) *before* running any iteration.
-- **Sub-workflow** is polled, not event-driven: a sub-workflow that runs longer than `300_000ms` makes the parent step throw a timeout (`runner.ts:157,174`).
-- **Compensation never rolls back internal bookkeeping steps** (names prefixed `__`, e.g. `__waitFor:*`), and swallows handler errors (`compensator.ts:26,49`).
+- **Loop guards.** `doUntil`/`doWhile` throw on `maxIterations` (default `100`), which fails the run and triggers the unwind; `forEach` throws if `items` is not an array, and then if `items.length` exceeds `maxIterations` (default `1000`) — both *before* running any iteration. `Array.isArray` is the predicate deliberately: the old `.length` duck-test accepted a number (zero iterations, run still `completed`) and a string (one iteration per character). Proxied and cross-realm arrays still pass, since `Array.isArray` tests the internal slot; typed arrays and other array-likes no longer do.
+- **Loop iterations are the unwind set, not the mirror.** Every iteration is recorded under `name:iteration` *and* mirrored under the bare `name` so the loop condition and downstream steps can read the last result. On rollback the **indexed records are compensated** — `findStepDef` resolves `turn:0` in a second, iteration-only pass — and `unwindSet` excludes the bare mirror so the final iteration is not compensated twice.
+- **Sub-workflow** is polled, not event-driven: a sub-workflow that runs longer than `300_000ms` makes the parent step throw a timeout (`runner.ts:157,174`). The parent then settles its `sub:` record `failed` while the child is *still running*, so `unwindChild` refuses any child whose state is `running` or `waiting` and throws instead. Rolling a live child back would put two writers on one row: the child's own `advance()` overwrites the compensation from its stale snapshot, compensate handlers interleave with forward steps, and the child can still reach `completed` with its reversals already executed. The parent parks for an operator rather than claiming a rollback whose subject is still changing the world.
+- **Compensation never rolls back internal bookkeeping steps** (names prefixed `__`, e.g. `__waitFor:*`).
+- **Sub-builders accept steps only.** `path()`, `parallel()`, `doUntil()` and `doWhile()` throw at build time if the builder produced any non-step node (`onlySteps`, `workflow.ts`). These bodies execute inline inside one job, so a `waitFor` there has no node index to park at and a nested `branch` has no dispatcher. They used to be filtered out silently, which turned an approval gate written inside a path into a no-op the run sailed straight through.
+- **Loop index namespace is reserved.** `register()` rejects a step whose name matches `<loopStep>:<digits>` (`assertNoIndexCollision`). Both silent outcomes are corruption: the loop overwrites the user's step, or — with memoisation — mistakes it for its own completed work and skips the iteration.
+- **The `signals` column is owned by `storeSignals.ts` alone.** `store.update()` never writes it. A worker holds one in-memory `Execution` for a whole node, so rewriting `signals` from that stale snapshot destroyed payloads delivered mid-step and parked runs forever. `recordSignal`/`parkForSignal` read-modify-write it inside a transaction, and the resume is claimed with a conditional state UPDATE so duplicate signals collapse to exactly one resume.
+- **`waitFor` timeouts are clamped** to `2**31-1` ms and re-armed in chunks; larger values wrapped to 1ms and fired immediately.
 - **List queries are capped** at 100 rows (`listExecutions`, `store.ts:86-95`; `getExecution` is an uncapped by-id lookup); `archive` moves at most 1000 rows per call (`store.ts:173`). Use repeated `archive()`/`cleanup()` calls for large backlogs.
+- **The retention cutoff is inclusive** (`updated_at <= Date.now() - maxAgeMs`). A strict `<` made `cleanup(0)`/`archive(0)` skip every row stamped in the current millisecond, which is where a run that has just reached a terminal state sits, so the documented "flush everything terminal now" call returned 0 (`test/repro-workflow-archive-boundary.test.ts`).
 - **Listener safety:** emitter dispatch wraps each listener in try/catch so a throwing observer cannot break event delivery (`emitter.ts:112-130`).
 - **Duplicate step names** across the whole node graph are rejected at `register()` (`executor.ts:41-46`).
 
@@ -167,6 +213,104 @@ The engine is configured via `EngineOptions` (no dedicated env vars):
 The internal `Queue`/`Worker` inherit standard bunqueue connection/persistence behavior; see [Configuration & Entrypoint](./configuration.md) for the global env vars that affect the underlying server (e.g. `BUNQUEUE_DATA_PATH`, `TCP_PORT`).
 
 Step-level knobs are set per `.step()`: `retry` (default `3`), `timeout` (default `30_000`ms), `inputSchema`/`outputSchema`, `compensate`. Loop bounds: `doUntil`/`doWhile` `maxIterations` `100`, `forEach` `maxIterations` `1000`.
+
+## Why this is Bun-only, and what porting it would take
+
+The engine is not exposed over the wire protocol and is not implemented in any of the six clients (verified: zero files matching `workflow` or `compensate` under `sdk/*`). That is a consequence of the DSL, not an oversight:
+
+```ts
+BranchCondition = (ctx) => string              // arbitrary closure
+LoopCondition   = (ctx, iteration) => boolean  // arbitrary closure
+```
+
+`branch()` and `doUntil()` take **functions, not data**, so a server can never evaluate them. A Temporal-style split (server orchestrates, clients supply handlers) would require a serialisable DSL, which is a breaking change to the public builder API.
+
+What *is* portable: the step job payload is only `{ executionId, workflowName, nodeIndex }` — no code crosses a boundary — and handlers resolve from an in-process registry. The single blocker is that `WorkflowStore` opens a local `bun:sqlite` file, so execution state is unreachable from another process or language.
+
+So the shape a port must take is: **the server owns execution state**, and each SDK reimplements the DSL and node walk natively, where handlers and conditions are ordinary functions in that language.
+
+The server surface needed mirrors `WorkflowStore`'s ten methods (`save`, `get`, `update`, `recordSignal`, `parkForSignal`, `list`, `listRecoverable`, `cleanup`, `archive`, `getArchivedCount`). Two of those **must stay atomic server-side**: `recordSignal` and `parkForSignal` are a read-modify-write on one row from concurrent connections. An SDK that rebuilds either as a get plus an update reintroduces the lost-update bug where a signal delivered while the run is parking is silently dropped and the execution waits forever (`storeSignals.ts` exists precisely to make that one transaction).
+
+Note that adding those commands to `src/domain/types/command.ts` is not a free first step: `docs/protocol.md` designates that file as the normative source for client authors, and `tsconfig.build.json` emits all of `src/**` into the published package. Command types without handlers would ship to npm as a public promise the server answers with `Unknown command`. Land the types, the handlers, `protocol.md` and the conformance driver together.
+
+## Agent framework integrations
+
+The engine has **no dependency on any agent framework**. Integration is always the same seam: one agent turn becomes one `.step()`, whose `compensate` handler reads the effects the step *returned* (never a closure variable, which is empty after a restart while the effect still stands).
+
+Four frameworks are covered by executable examples. All are devDependencies only.
+
+| Framework | Package | Verified by |
+|---|---|---|
+| Vercel AI SDK | `ai` | `test/workflow-ai-sdk-agent.test.ts` (mock model), `scripts/ai-sdk/saga-live-e2e.ts` (live) |
+| Claude Agent SDK | `@anthropic-ai/claude-agent-sdk` | `scripts/agent-sdks/claude-agent-live.ts` (live; needs network + Claude Code harness), plus the journaling seam in `test/workflow-agent-sdks.test.ts` |
+| OpenAI Agents SDK | `@openai/agents` | `test/workflow-agent-sdks.test.ts`, real `Agent`/`tool`/`run` with a scripted `Model` |
+| Mastra | `@mastra/core` | `test/workflow-agent-sdks.test.ts`, real agent with `MockLanguageModelV3` |
+| LangGraph | `@langchain/langgraph` | `test/workflow-agent-sdks.test.ts`, real compiled graph, no model needed |
+
+Two constraints worth recording, both found by running the code:
+
+- **Mastra hands the validated input straight to `execute`**, not wrapped in `{ context }`. Destructuring `{ context }` yields `undefined` and the tool silently does nothing.
+- **OpenAI Agents' `setDefaultModelProvider` is process-global**, and it is asked for a model on *every* turn. Returning a fresh scripted model from it resets the script cursor and the agent loops until `MaxTurnsExceeded`; the registration also leaks across tests. Pass the model to `new Agent({ model })` instead.
+
+User-facing page: `docs/src/content/docs/guide/workflow/agent-sdks.md`.
+
+## The two decisions that are pure functions
+
+Every rollback and duplicate-execution defect this engine shipped lived in decision
+logic, not in I/O, and while the two were tangled the only way to test a decision was to
+stand up an Engine, a database and a real race, then infer it from side effects. Both
+are now values.
+
+**`unwindPlan.decideUnwindAction(wf, name, record, halted, retryFailed?)`** returns what
+to do with one eligible record: `skip`, `stop`, `halt-vanished`, `halt-failed`,
+`unwind-child`, or `compensate` with its bound. The ORDER of its checks is load-bearing
+and each one earned its place by breaking:
+
+1. a record whose step no longer resolves but which already carries an outcome halts,
+   checked BEFORE the settled test, which would otherwise skip it and let the pass
+   report a clean rollback over a renamed step;
+2. a settled record is never re-run, except a `compensation-failed` one when an operator
+   explicitly asked for the retry;
+3. an unresolved `compensation-failed` HALTS rather than being skipped, or a second pass
+   after a crash walks past a refund that never went through;
+4. once halted, the rest are left without an outcome so a resume can still reach them.
+
+**`admission.decideAdmission(exec, nodeIndex, inFlight)`** returns whether a node job may
+run, with the rejection reason distinguished: `missing`, `not-live`, `stale-cursor`,
+`already-in-flight`. Delivery is at-least-once, so the same job arrives twice routinely,
+and a missing guard let a duplicate re-run the node and every node after it. `recovery.ts`
+consults the same function before re-enqueuing, so `RecoverResult` counts work that
+actually happened.
+
+Both are covered by generated inputs in `test/workflow-properties.test.ts`.
+
+## Determinism: the injected clock
+
+Every `Date.now()`, `Math.random()`, `setTimeout` and `clearTimeout` in this module
+goes through `clock()` (`clock.ts`). The default is the real clock and is installed by
+default, so nothing changes for a caller who does not ask otherwise.
+
+The reason is evidence, not taste. Each crash-window defect this engine shipped took a
+property-based campaign roughly one run in eleven to surface, and the seed that
+produced it did NOT replay it: the seed drove the command sequence while the
+interleaving came from real timers. A failing seed you cannot replay is a bug report
+you cannot act on. With `simulatedClock(seed)` installed, retry backoff, signal
+timeouts, execution ids and every persisted timestamp become functions of that seed.
+
+Scope, stated so a green run is not over-read: SQLite, the embedded queue's worker loop
+and the OS scheduler are still real, so a whole `Engine` is not deterministic. What is
+deterministic is the engine's own contribution, which is where its bugs have lived.
+
+Measured on a live engine, a run with two retries at the default backoff:
+
+| clock | attempts | wall time | simulated time |
+|---|---:|---:|---:|
+| real | 3 | 1794 ms | n/a |
+| simulated | 3 | 66 ms | 18000 ms |
+
+`test/workflow-dst.test.ts` covers the clock itself and that live case.
+`test/workflow-properties.test.ts` covers the pure core with generated inputs; it found
+the inherited-member gate defect on its 202nd case.
 
 ## Related Docs
 

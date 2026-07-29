@@ -1,0 +1,67 @@
+---
+title: "API Reference, by version"
+description: "Browse every class, interface and type bunqueue exports, generated from the source of each release. Pick the version you have installed."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/reference.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "bunqueue api reference, typedoc, bunqueue classes, bunqueue types, versioned api docs, queue api reference typescript"
+---
+
+import apiVersions from '../../data/apiVersions.json';
+
+export const { versions, current } = apiVersions;
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">api reference</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every export, <em>per version.</em></h1>
+  <p class="bq-hero-sub">Generated from the source of each release, so the page you open documents the surface that release actually shipped, not the one on main today.</p>
+</div>
+
+## Pick your version
+
+<ul class="bq-checks">
+  {versions.map((v) => (
+    <li key={v}>
+      <a href={`/reference/${v}/`}>{v === 'dev' ? 'dev (unreleased)' : v}</a>
+      {v === current ? ' — current' : null}
+    </li>
+  ))}
+</ul>
+
+Version pages are keyed by `major.minor`. Patch releases share a page because, under semver, a patch cannot change the public surface.
+
+## What is in there
+
+The reference covers exactly the entry points the package declares in its `exports` map, so everything documented is something you can actually import:
+
+| Import | What it holds |
+|---|---|
+| `bunqueue` | Server entrypoint |
+| `bunqueue/client` | `Queue`, `Worker`, `Bunqueue`, `FlowProducer`, `QueueEvents`, `Forwarder` |
+| `bunqueue/workflow` | `Workflow`, `Engine`, `WorkflowEmitter` |
+| `bunqueue/queue` | `QueueManager`, for embedding the broker |
+| `bunqueue/mcp` | The MCP server |
+
+Types that appear in those signatures are included too, so a parameter type is a link rather than a dead end.
+
+## Reference or guide?
+
+They answer different questions, and the reference is the wrong place to start.
+
+| | Use |
+|---|---|
+| *What does this method take and return?* | The reference |
+| *How do I build X?* | [The guide](/guide/introduction/) |
+| *What crosses the wire?* | [Protocol spec](/api/tcp/) |
+| *What does the HTTP surface expose?* | [HTTP API](/api/http/) |
+
+## Stability
+
+bunqueue follows semver: a breaking change to anything reachable from the entry points above means a major release. Anything reached by deep-importing a path not in the `exports` map is internal, may change in any release, and is not covered by the reference.
+
+The workflow engine is a Bun, in-process API. It is not part of the wire protocol and is not implemented in the Python, PHP, Go, Rust or Elixir clients, so it does not appear in their references. See [the workflow guide](/guide/workflow/) for what that means in practice.

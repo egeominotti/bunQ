@@ -1,6 +1,11 @@
 ---
 title: "Model-Based Testing: Queue Invariants Under Crash"
 description: "How bunqueue uses fast-check command models, a real TCP broker, SQLite, shrinking, and SIGKILL recovery to verify queue safety."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/architecture/model-based-testing.png
 ---
 
 # Model-Based Testing

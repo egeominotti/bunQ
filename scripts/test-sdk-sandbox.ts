@@ -3,7 +3,7 @@
 
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { finished } from 'node:stream/promises';
-import { writeRunReport, writeSuiteArtifacts } from './test-sandbox-report';
+import { suitePassed, writeRunReport, writeSuiteArtifacts } from './test-sandbox-report';
 import {
   createSuiteTelemetry,
   monitorContainer,
@@ -241,12 +241,21 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
     samples,
   });
   await writeSuiteArtifacts(LOG_DIR, telemetry, samples);
-  if (exitCode === 0) {
+  // Exit code alone would delete the container of a suite that exited 0 having reported
+  // nothing, which is exactly the container someone needs to open to find out why. The
+  // aggregate verdict already refuses an empty result; the retention decision has to
+  // agree with it or the evidence is gone by the time anyone reads the summary.
+  if (suitePassed(telemetry)) {
     remove(container);
     console.log(`SDK suite passed: ${suite.name}`);
   } else {
     active.delete(container);
-    console.error(`SDK suite ${suite.name} failed; retained container: ${container}`);
+    const counted =
+      telemetry.tests.passed + telemetry.tests.failed + telemetry.tests.skipped;
+    const why = exitCode === 0 ? 'reported no results' : `exited ${exitCode}`;
+    console.error(
+      `SDK suite ${suite.name} failed (${why}, ${counted} tests counted); retained container: ${container}`
+    );
   }
   return telemetry;
 }

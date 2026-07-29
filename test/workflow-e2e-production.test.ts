@@ -12,6 +12,7 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Workflow, Engine } from '../src/client/workflow';
+import { waitForWorkflowState } from './workflowTestUtils';
 
 // ============ Simulated Services ============
 
@@ -225,7 +226,7 @@ describe('Workflow E2E - Production Scenarios', () => {
       email: 'customer@example.com',
     });
 
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');
@@ -288,7 +289,7 @@ describe('Workflow E2E - Production Scenarios', () => {
     engine.register(orderFlow);
 
     const run = await engine.start('order-compensate');
-    await new Promise((r) => setTimeout(r, 3000));
+    await waitForWorkflowState(engine, run.id, 'failed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('failed');
@@ -450,7 +451,9 @@ describe('Workflow E2E - Production Scenarios', () => {
       engine.start('tiered-order', { amount: 50, region: 'US' }),
     ]);
 
-    await new Promise((r) => setTimeout(r, 3000));
+    await Promise.all(
+      [run1.id, run2.id, run3.id].map((id) => waitForWorkflowState(engine, id, 'completed'))
+    );
 
     // All should complete
     expect(engine.getExecution(run1.id)!.state).toBe('completed');
@@ -650,7 +653,7 @@ describe('Workflow E2E - Production Scenarios', () => {
       sources: ['postgres', 'mongodb', 'redis', 's3'],
     });
 
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForWorkflowState(engine, run.id, 'completed');
 
     const exec = engine.getExecution(run.id);
     expect(exec!.state).toBe('completed');

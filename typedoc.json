@@ -1,0 +1,41 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/main.ts",
+    "src/client/index.ts",
+    "src/client/workflow/index.ts",
+    "src/application/queueManager.ts",
+    "src/mcp/index.ts",
+    "src/client/events.ts",
+    "src/client/flowTypes.ts",
+    "src/client/forwarder.ts",
+    "src/domain/types/queue.ts",
+    "src/client/types.ts",
+    "src/client/worker/types.ts",
+    "src/client/tcp/types.ts",
+    "src/client/workflow/types.ts",
+    "src/domain/types/job.ts",
+    "src/domain/types/dlq.ts",
+    "src/domain/types/worker.ts",
+    "src/domain/types/cron.ts",
+    "src/domain/types/stall.ts"
+  ],
+  "out": "docs/public/reference/dev",
+  "tsconfig": "tsconfig.json",
+  "skipErrorChecking": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "githubPages": false,
+  "readme": "none",
+  "customCss": "docs/typedoc-theme.css",
+  "navigationLinks": {
+    "Guide": "https://bunqueue.dev/guide/introduction/",
+    "GitHub": "https://github.com/egeominotti/bunqueue"
+  },
+  "categorizeByGroup": true,
+  "searchInComments": true,
+  "sort": [
+    "alphabetical"
+  ]
+}

@@ -32,14 +32,27 @@ function delta(current: number, baseline: number): number {
 async function readBaseline(path: string | null): Promise<RunReport | null> {
   if (!path) return null;
   try {
-    return (await Bun.file(path).json()) as RunReport;
+    const parsed = (await Bun.file(path).json()) as RunReport;
+    // Syntactically valid JSON is not enough. A baseline written by an older schema has
+    // no `tests` on its suites, and `suitePassed` would dereference it and throw from
+    // inside `writeRunReport` AFTER the whole run: the 15 minutes of work would end with
+    // no `summary.json` and no `summary.md` at all. An unusable baseline is worth less
+    // than the report it would destroy.
+    if (!Array.isArray(parsed?.suites)) return null;
+    if (!parsed.suites.every((suite) => suite?.tests && typeof suite.exitCode === 'number')) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
 }
 
 function addBaselineSignals(current: SuiteTelemetry, baseline?: SuiteTelemetry): void {
-  if (baseline?.exitCode !== 0) return;
+  // A 0/0/0 run must not become the duration and peak-memory baseline the next run is
+  // compared against: it observed nothing, so every later run would look like a
+  // regression against nothing.
+  if (!baseline || !suitePassed(baseline)) return;
   const durationDelta = delta(current.durationMs, baseline.durationMs);
   if (durationDelta >= 25 && current.durationMs - baseline.durationMs >= 30_000) {
     current.anomalies.push(`duration regression vs baseline: +${durationDelta.toFixed(1)}%`);
@@ -69,7 +82,7 @@ function suiteTable(suites: SuiteTelemetry[]): string[] {
   for (const suite of suites) {
     const resources = suite.resources;
     rows.push(
-      `| ${suite.suite} | ${suite.exitCode === 0 ? 'PASS' : 'FAIL'} | ${formatDuration(suite.durationMs)} | ${suite.tests.passed} / ${suite.tests.failed} / ${suite.tests.skipped} | ${formatBytes(resources.memoryPeakBytes)} (${resources.memoryPeakPercent.toFixed(1)}%) | ${formatBytes(resources.memoryDeltaBytes)} | ${resources.cpuAveragePercent.toFixed(1)}% / ${resources.cpuP95Percent.toFixed(1)}% / ${resources.cpuPeakPercent.toFixed(1)}% | ${resources.pidsPeak} | ${suite.anomalies.join('; ') || 'none'} |`
+      `| ${suite.suite} | ${suiteVerdict(suite)} | ${formatDuration(suite.durationMs)} | ${suite.tests.passed} / ${suite.tests.failed} / ${suite.tests.skipped} | ${formatBytes(resources.memoryPeakBytes)} (${resources.memoryPeakPercent.toFixed(1)}%) | ${formatBytes(resources.memoryDeltaBytes)} | ${resources.cpuAveragePercent.toFixed(1)}% / ${resources.cpuP95Percent.toFixed(1)}% / ${resources.cpuPeakPercent.toFixed(1)}% | ${resources.pidsPeak} | ${suite.anomalies.join('; ') || 'none'} |`
     );
   }
   return rows;
@@ -181,7 +194,7 @@ export async function writeRunReport(input: {
     generatedAt: new Date().toISOString(),
     mode: input.mode,
     durationMs: input.durationMs,
-    passed: input.suites.every((suite) => suite.exitCode === 0),
+    passed: input.suites.every(suitePassed),
     ...(input.baselinePath && { baseline: input.baselinePath }),
     suites: input.suites,
   };
@@ -197,3 +210,31 @@ export async function writeRunReport(input: {
   ]);
   return report;
 }
+/**
+ * Did this suite actually pass?
+ *
+ * Exit code alone is not enough. A runner that dies before reporting anything, or whose
+ * output never reaches the parser, exits 0 with nothing counted, and that is precisely
+ * how a run reported `unit | PASS | 0 / 0 / 0` over 434 of 445 files with every
+ * model-based suite missing. An empty result is a failure to observe, not an observation
+ * of success.
+ *
+ * Single source of truth on purpose: the markdown verdict, the JSON `passed` field, the
+ * baseline gate and the SDK gate all read this. They were separate predicates, and the
+ * one on `summary.json` still said `passed: true` for a 0/0/0 run, which is the artifact
+ * CLAUDE.md tells a reviewer to read before handoff. A guard that disagrees with the
+ * machine-readable artifact is not a guard.
+ */
+export function suitePassed(suite: {
+  exitCode: number;
+  tests: { passed: number; failed: number; skipped: number };
+}): boolean {
+  if (suite.exitCode !== 0) return false;
+  return suite.tests.passed + suite.tests.failed + suite.tests.skipped > 0;
+}
+
+function suiteVerdict(suite: { exitCode: number; tests: { passed: number; failed: number; skipped: number } }): string {
+  if (suite.exitCode !== 0) return 'FAIL';
+  return suitePassed(suite) ? 'PASS' : 'FAIL (no results)';
+}
+

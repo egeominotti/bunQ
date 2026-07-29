@@ -43,7 +43,7 @@ import BqIcon from '@components/BqIcon.astro';
     <div class="bq-hero-left">
       <VersionPill />
       <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
-      <p class="bq-hero-sub">bunqueue is a <strong>zero-infrastructure job queue</strong>: priorities, retries, cron, rate limits and a dead letter queue in one process, persisted to a single SQLite file. No Redis, no broker, nothing to operate.</p>
+      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work</strong>: a job queue with priorities, retries, cron and a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a> with saga rollback and human approval gates, and a native <a href="/guide/mcp/">MCP server</a> for AI agents. One process, one SQLite file. No Redis, no broker, nothing to operate. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
 
       <div class="bq-hero-steps">
         <div class="bq-hero-step">
@@ -165,6 +165,89 @@ cargo add bunqueue-client
     <span><b>5.5 MB</b> install, 2 runtime deps</span>
     <span><b>500+</b> e2e scenarios across 7 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
+  </div>
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">capabilities</span>
+  <h2 class="bq-h2">Not just a queue.</h2>
+  <p class="bq-lede">A queue is where bunqueue starts, not where it stops. The same process and the same SQLite file also give you a durable workflow engine with saga rollback, cron, a native MCP server for AI agents, and operations. Adopt one piece or all six, each stands on its own. Queue, cron, flows and operations are reachable from every client language; the workflow engine and its agent integrations are in-process Bun APIs.</p>
+
+  <div class="bq-tools">
+    <div class="bq-tool">
+      <BqIcon name="rows" />
+      <h3>Queue &amp; Worker</h3>
+      <p>BullMQ-familiar API for adding and processing jobs, end to end TypeScript.</p>
+      <pre class="bq-tool-cmd">{"await queue.add('welcome', data, { priority: 5 })"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/queue/">Priorities &amp; delays</a></li>
+        <li><a href="/guide/worker/">Retries with backoff</a></li>
+        <li><a href="/guide/queue/">Idempotent custom IDs</a></li>
+        <li><a href="/guide/rate-limiting/">Rate limits &amp; concurrency</a></li>
+        <li><a href="/guide/flow/">Flows: parent-child jobs</a></li>
+        <li><a href="/guide/stall-detection/">Stall detection</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="clock" />
+      <h3>Cron &amp; schedulers</h3>
+      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted, never lost on restart.</p>
+      <pre class="bq-tool-cmd">{"await app.cron('daily', '0 9 * * *', data)"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/cron/">Cron patterns</a></li>
+        <li><a href="/guide/cron/">Every-N intervals</a></li>
+        <li><a href="/guide/cron/">Timezones</a></li>
+        <li><a href="/guide/cron/">Run limits</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="branch" />
+      <h3>Workflow engine</h3>
+      <p>Multi-step orchestration with automatic rollback when a step fails. In-process, Bun only.</p>
+      <pre class="bq-tool-cmd">{"new Workflow('order').step(...).parallel(...)"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/workflow/rollback/">Saga compensation</a></li>
+        <li><a href="/guide/workflow/steps/">Branching &amp; parallel steps</a></li>
+        <li><a href="/guide/workflow/approval/">Human approval gates</a></li>
+        <li><a href="/guide/workflow/durability/">Crash recovery &amp; idempotency</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="pulse" />
+      <h3>Operations</h3>
+      <p>Failed jobs are kept and retryable, metrics are scrapable, backups are scheduled.</p>
+      <pre class="bq-tool-cmd">{"bunx bunqueue-dashboard"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/dlq/">Dead letter queue</a></li>
+        <li><a href="/guide/monitoring/">Prometheus &amp; probes</a></li>
+        <li><a href="/guide/webhooks/">Webhooks, SSE, WebSocket</a></li>
+        <li><a href="/guide/backup/">S3 backups</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="branch" />
+      <h3>AI agents</h3>
+      <p>A native MCP server, usable from any language, plus durable agent runs on Bun that survive a restart and roll back the tools a model called.</p>
+      <pre class="bq-tool-cmd">{"bunx bunqueue-mcp"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/mcp/">MCP server</a></li>
+        <li><a href="/guide/workflow/ai-agents/">Durable agent loops</a></li>
+        <li><a href="/guide/workflow/agent-sdks/">Claude, OpenAI, Mastra, LangGraph</a></li>
+        <li><a href="/guide/workflow/rollback/">Roll back a tool call</a></li>
+      </ul>
+    </div>
+    <div class="bq-tool">
+      <BqIcon name="rows" />
+      <h3>Polyglot &amp; edge</h3>
+      <p>One server, six official client languages, and a store-and-forward mode that drains edge jobs to a central instance.</p>
+      <pre class="bq-tool-cmd">{"queue.forward({ to: { host: 'central' } })"}</pre>
+      <ul class="bq-checks">
+        <li><a href="/guide/sdks/">TypeScript, Python, PHP, Go, Rust, Elixir</a></li>
+        <li><a href="/guide/iot-edge/">Store-and-forward at the edge</a></li>
+        <li><a href="/security/">TLS &amp; auth tokens</a></li>
+        <li><a href="/guide/cli/">CLI</a></li>
+      </ul>
+    </div>
   </div>
 </div>
 
@@ -796,65 +879,6 @@ Bunqueue.Worker.run(worker)
 
     </TabItem>
   </Tabs>
-</div>
-
-<div class="bq-wrap bq-section">
-  <span class="bq-eyebrow">capabilities</span>
-  <h2 class="bq-h2">Four tools, one file.</h2>
-  <p class="bq-lede">Everything a production queue needs, in the same process and the same SQLite file. Adopt one piece or all of them, each stands on its own.</p>
-
-  <div class="bq-tools">
-    <div class="bq-tool">
-      <BqIcon name="rows" />
-      <h3>Queue &amp; Worker</h3>
-      <p>BullMQ-familiar API for adding and processing jobs, end to end TypeScript.</p>
-      <pre class="bq-tool-cmd">{"await queue.add('welcome', data, { priority: 5 })"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/queue/">Priorities &amp; delays</a></li>
-        <li><a href="/guide/worker/">Retries with backoff</a></li>
-        <li><a href="/guide/queue/">Idempotent custom IDs</a></li>
-        <li><a href="/guide/rate-limiting/">Rate limits &amp; concurrency</a></li>
-        <li><a href="/guide/flow/">Flows: parent-child jobs</a></li>
-        <li><a href="/guide/stall-detection/">Stall detection</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="clock" />
-      <h3>Cron &amp; schedulers</h3>
-      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted, never lost on restart.</p>
-      <pre class="bq-tool-cmd">{"await app.cron('daily', '0 9 * * *', data)"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/cron/">Cron patterns</a></li>
-        <li><a href="/guide/cron/">Every-N intervals</a></li>
-        <li><a href="/guide/cron/">Timezones</a></li>
-        <li><a href="/guide/cron/">Run limits</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="branch" />
-      <h3>Workflow engine</h3>
-      <p>Multi-step orchestration with automatic rollback when a step fails.</p>
-      <pre class="bq-tool-cmd">{"new Workflow('order').step(...).parallel(...)"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/workflow/">Saga compensation</a></li>
-        <li><a href="/guide/workflow/">Branching &amp; parallel steps</a></li>
-        <li><a href="/guide/workflow/">Human-in-the-loop signals</a></li>
-        <li><a href="/guide/workflow/">Loops &amp; nested workflows</a></li>
-      </ul>
-    </div>
-    <div class="bq-tool">
-      <BqIcon name="pulse" />
-      <h3>Operations</h3>
-      <p>Failed jobs are kept and retryable, metrics are scrapable, backups are scheduled.</p>
-      <pre class="bq-tool-cmd">{"bunx bunqueue-dashboard"}</pre>
-      <ul class="bq-checks">
-        <li><a href="/guide/dlq/">Dead letter queue</a></li>
-        <li><a href="/guide/monitoring/">Prometheus &amp; probes</a></li>
-        <li><a href="/guide/webhooks/">Webhooks, SSE, WebSocket</a></li>
-        <li><a href="/guide/backup/">S3 backups</a></li>
-      </ul>
-    </div>
-  </div>
 </div>
 
 <div class="bq-wrap bq-section">

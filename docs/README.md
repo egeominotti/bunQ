@@ -18,6 +18,7 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | [Model-Based Queue Verification](./features/model-based-testing.md) | `fast-check` lifecycle and cross-queue/shard state machines against a real TCP broker and SQLite, with shrinking, seed replay, aggregate invariants, cache-boundary checks, and actual `SIGKILL` recovery. |
 | [Production Readiness End-to-End Test](./features/production-readiness-testing.md) | Company-style durable mixed workload over real TCP and SQLite, with concurrent workers, retry/DLQ/idempotency, health/metrics, and two broker restarts. |
 | [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
+| [Generated API Reference](./generated-api-reference.md) | How `bun run docs:api` turns the source into the per-version TypeDoc reference at `/reference/<version>/`, which entry points it covers, and the two collisions its layout avoids. |
 
 **Suggested reading order:** Architecture → Data Model → the feature docs for the area you are touching.
 

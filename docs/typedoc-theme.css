@@ -1,0 +1,113 @@
+/*
+ * bunqueue theme for the generated API reference.
+ *
+ * TypeDoc ships its own HTML and its own CSS variables, so this file maps the
+ * site's palette onto TypeDoc's variables rather than restyling its markup.
+ * That keeps the reference visually part of bunqueue.dev while leaving
+ * TypeDoc's search, member filtering and navigation untouched, and it means a
+ * TypeDoc upgrade cannot break the theme by renaming a class.
+ *
+ * The two palettes are duplicated because TypeDoc resolves light/dark through
+ * `--light-*` / `--dark-*` pairs, not through a single set plus a media query.
+ */
+
+:root {
+  --bq-brand: #db2777;
+  --bq-brand-soft: #ec4899;
+  --bq-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  /* Light */
+  --light-color-background: #ffffff;
+  --light-color-background-secondary: #f8f8fa;
+  --light-color-accent: #e4e4e7;
+  --light-color-text: #18181b;
+  --light-color-text-aside: #52525b;
+  --light-color-link: #db2777;
+  --light-color-ts-class: #0369a1;
+  --light-color-ts-interface: #0f766e;
+  --light-color-ts-function: #7c3aed;
+  --light-color-ts-type-alias: #b45309;
+  --light-color-ts-enum: #be123c;
+
+  /* Dark */
+  --dark-color-background: #09090b;
+  --dark-color-background-secondary: #18181b;
+  --dark-color-accent: #27272a;
+  --dark-color-text: #fafafa;
+  --dark-color-text-aside: #a1a1aa;
+  --dark-color-link: #f472b6;
+  --dark-color-ts-class: #7dd3fc;
+  --dark-color-ts-interface: #5eead4;
+  --dark-color-ts-function: #c4b5fd;
+  --dark-color-ts-type-alias: #fcd34d;
+  --dark-color-ts-enum: #fda4af;
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+code,
+pre,
+.tsd-signature,
+.tsd-kind-icon + span {
+  font-family: var(--bq-mono);
+}
+
+/* The page title carries the wordmark's weight, matching the guide's h1 scale. */
+.tsd-page-title h1 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Members read as cards, the same device the guide uses for grouped content. */
+.tsd-panel {
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 12px;
+}
+
+.tsd-signature {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/*
+ * Version banner. TypeDoc has no slot for site chrome, so the one piece of
+ * bunqueue navigation the reference needs, "which version am I reading, and
+ * where do I get back to", is injected by scripts/build-api-reference.ts and
+ * styled here.
+ */
+.bq-ref-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.1rem;
+  font-family: var(--bq-mono);
+  font-size: 0.82rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.bq-ref-banner a {
+  color: var(--bq-brand);
+  text-decoration: none;
+}
+
+.bq-ref-banner a:hover {
+  text-decoration: underline;
+}
+
+.bq-ref-version {
+  font-weight: 600;
+}
+
+/* An older version is still useful, but the reader must not mistake it for current. */
+.bq-ref-stale {
+  color: #b45309;
+}

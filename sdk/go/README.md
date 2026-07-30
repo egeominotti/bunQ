@@ -113,7 +113,8 @@ correctness; handlers should still return quickly.
 go vet ./...
 go test -v ./... -count=1
 go test -race -run 'Hardening|Regression|Worker' ./...
-BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -v
+# -timeout must exceed the soak: `go test` panics at its own 10m default.
+BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -timeout 3900s -v
 go test -run '^$' -fuzz '^FuzzHardeningPortableWirePayload$' -fuzztime 60s
 cd ../.. && bun run test:sandbox:sdk
 ```

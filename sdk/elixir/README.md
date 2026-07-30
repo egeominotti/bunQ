@@ -158,7 +158,8 @@ brokers spawned per run) and the cross-language
 cd sdk/elixir
 mix format --check-formatted
 mix test
-BUNQUEUE_SDK_SOAK_SECONDS=3600 mix test --include soak test/soak_test.exs
+# --timeout must exceed the soak: ExUnit kills a test at 60s by default.
+BUNQUEUE_SDK_SOAK_SECONDS=3600 mix test --include soak --timeout 3900000 test/soak_test.exs
 
 cd ../conformance
 bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"

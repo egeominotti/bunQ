@@ -57,11 +57,55 @@ The obvious alternative, having the page read `docs/public/reference/` itself, *
 
 `apiVersions.json` is generated output and should not be edited by hand.
 
+It is nevertheless **committed**, because the CI docs job builds the site without
+running the generator: an untracked file makes `astro build` fail with
+`Could not resolve "../../data/apiVersions.json"`. The repository ignores `data/`
+for runtime SQLite directories, so `.gitignore` carries an explicit
+`!docs/src/data/` negation — deleting that line reintroduces the failure, and it
+only shows up in a clean checkout, never locally.
+
+## The guard: `bun run check:docs-data`
+
+Committing generated output trades one silent failure for another, so
+`scripts/check-docs-data.ts` closes both. It runs in the CI docs job **before** the
+build, and in `bun run check`:
+
+- every relative module specifier and asset reference in `docs/src/content/docs/**`
+  must resolve to a **git-tracked** file (fenced and inline code is stripped first,
+  so a documented `import './x'` in a sample is not mistaken for a real one);
+- `apiVersions.json` must equal what this script would derive from `package.json`
+  and `docs/public/reference/`, and the tree for the current version must itself be
+  tracked — otherwise the published listing links to a 404;
+- a `dev` entry is rejected, so a local `--dev` preview cannot reach the site.
+
+**Consequence for minor bumps.** `current` is `v<major>.<minor>`, so `2.8.x → 2.9.0`
+fails the check until `bun run docs:api` has been run and its output committed
+(a multi-megabyte TypeDoc tree). That is deliberate: the alternative is a
+`/reference/` page advertising a version that does not exist. Patch bumps are
+unaffected. Unit coverage for the scanners lives in `test/check-docs-data.test.ts`.
+
 ## Theming
 
 `docs/typedoc-theme.css` maps the site palette onto TypeDoc's own `--light-*` / `--dark-*` variables instead of restyling its markup. TypeDoc's search, member filtering and navigation keep working, and a TypeDoc upgrade that renames a class cannot break the theme.
 
 The version banner is the one piece of markup injected by the script, because TypeDoc has no slot for site chrome. It answers the two questions its own header cannot: which version am I reading, and how do I get back. Injection is idempotent, guarded by a check for `bq-ref-banner`, so re-running the build does not stack banners.
+
+Its "all versions" link is depth-relative: `allVersionsHref(depth)` returns `../` for a
+page at the version root and one more `../` per directory below it, so every page lands
+on `/reference/`. This was **wrong on 234 published pages** until 2.8.48: `injectBanner`
+passed three arguments to a two-parameter `banner()`, so `depth` silently received a
+boolean, collapsed to `0`, and every nested page linked back to its own version tree
+instead of the listing. Nothing caught it — the page still built, the site still
+deployed, `scripts/` is outside `tsconfig.json`'s `include`, and only a reader clicking
+the link would find out. The already-generated pages were repaired in place (the
+injection guard means a re-run would not have touched them), and
+`test/build-api-reference.test.ts` now pins the depth arithmetic, the two-parameter
+signature, and the version ordering.
+
+`scripts/` is still not type-checked: it carries a few hundred pre-existing errors, so
+wiring a blanket gate is its own change. Unit-testing the pure helpers is the guard that
+exists today — prefer exporting logic from a script over leaving it only reachable
+through side effects.
 
 ## Verification
 

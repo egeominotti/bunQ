@@ -30,6 +30,13 @@ The Docker build includes uncommitted files from the current worktree, so the
 validated source is the source being reviewed. It never bind-mounts the host
 repository into a test container.
 
+One class of failure escapes every container: the docs site can build from files
+that exist on the author's disk but were never committed, so it goes red in CI
+only. `bun run check:docs-data` (part of `bun run check`, and a step in the CI docs
+job) asserts that everything `docs/src/content/docs/**` references is git-tracked
+and that the committed `apiVersions.json` still matches its generator. See
+[the generated API reference](./generated-api-reference.md#the-guard-bun-run-checkdocs-data).
+
 The SDK gate writes complete `*.build.log` and suite logs plus the same NDJSON,
 per-suite JSON, and aggregate report schema under
 `artifacts/test-sandbox-sdk/<timestamp>/`. A failed image build also produces a
@@ -146,12 +153,20 @@ for 900 seconds per SDK and can be reproduced natively:
 BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 bun sdk/typescript/tests/soak.ts
 BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 python sdk/python/tests/soak.py
 BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 php sdk/php/tests/soak.php
-BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 go test ./sdk/go -run '^TestSDKSoak$' -v
+BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 \
+  go test ./sdk/go -run '^TestSDKSoak$' -timeout 3900s -v
 BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 \
   cargo test --manifest-path sdk/rust/Cargo.toml --test soak -- --ignored
 BUNQUEUE_SDK_SOAK_SECONDS=3600 BUNQUEUE_SDK_SOAK_BATCH=100 \
-  sh -c 'cd sdk/elixir && mix test --include soak test/soak_test.exs'
+  sh -c 'cd sdk/elixir && mix test --include soak --timeout 3900000 test/soak_test.exs'
 ```
+
+Go and Elixir are the two runners with a framework timeout shorter than a soak:
+`go test` panics at 10 minutes and ExUnit kills a test at 60 seconds, both
+regardless of how long the profile is asked to run. Always pass a bound larger
+than `BUNQUEUE_SDK_SOAK_SECONDS` (the examples add 300 seconds of slack for
+broker startup and teardown); the weekly CI steps derive theirs from the same
+variable. The other runners have no implicit test timeout.
 
 Raise `BUNQUEUE_SDK_SOAK_BATCH` to explore client backpressure and the practical
 breaking point. That is a diagnostic stress profile, not a stable performance

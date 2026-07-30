@@ -5,6 +5,14 @@ name: SDK
 on:
   schedule:
     - cron: '0 2 * * 0'
+  # The soak steps only ever ran on the weekly schedule, so a fix to them could
+  # not be exercised before the next Sunday. Manual dispatch makes them runnable.
+  workflow_dispatch:
+    inputs:
+      run_soak:
+        description: 'Also run the sustained soak profiles (adds ~15 min per SDK)'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
     paths:
@@ -31,14 +39,21 @@ concurrency:
   group: sdk-${{ github.ref }}
   cancel-in-progress: true
 
-# Scheduled soaks exceed the anti-abuse default on disposable brokers.
+# Soaks exceed the anti-abuse default on disposable brokers, so the limit and the
+# soak gate must be derived from the SAME condition: a manual soak run with the
+# push-level limit would measure the throttle instead of the client.
 env:
-  RATE_LIMIT_MAX_REQUESTS: ${{ github.event_name == 'schedule' && '1000000' || '10000' }}
+  RUN_SOAK: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak) }}
+  RATE_LIMIT_MAX_REQUESTS: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)) && '1000000' || '10000' }}
 
 jobs:
   typescript:
     name: TypeScript (${{ matrix.runtime }})
     runs-on: ubuntu-latest
+    # Bounds a wedge OUTSIDE any test framework — dependency resolution, a
+    # broker that never binds, a hung conformance driver — which would
+    # otherwise burn the 360-minute runner default. Fits the 15m soak.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +114,7 @@ jobs:
           WRANGLER_SEND_METRICS: 'false'
         run: bun run test:workers
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule' && matrix.runtime == 'bun'
+        if: env.RUN_SOAK == 'true' && matrix.runtime == 'bun'
         working-directory: sdk/typescript
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
@@ -109,6 +124,7 @@ jobs:
   python:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +156,7 @@ jobs:
         working-directory: sdk/conformance
         run: bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule' && matrix.python == '3.13'
+        if: env.RUN_SOAK == 'true' && matrix.python == '3.13'
         working-directory: sdk/python
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
@@ -150,6 +166,7 @@ jobs:
   php:
     name: PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -178,7 +195,7 @@ jobs:
         working-directory: sdk/conformance
         run: bun runner.ts --driver "php drivers/php.php"
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule' && matrix.php == '8.4'
+        if: env.RUN_SOAK == 'true' && matrix.php == '8.4'
         working-directory: sdk/php
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
@@ -188,6 +205,8 @@ jobs:
   go:
     name: Go 1.26.5
     runs-on: ubuntu-latest
+    # Soak (15m) + 60s fuzzing on top of the suite.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -211,20 +230,34 @@ jobs:
         working-directory: sdk/conformance
         run: bun runner.ts --driver "go -C drivers/go run ."
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule'
+        if: env.RUN_SOAK == 'true'
         working-directory: sdk/go
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
           BUNQUEUE_SDK_SOAK_BATCH: '100'
-        run: go test -run '^TestSDKSoak$' -count=1 -v
+        # `go test` panics at its own 10m default, which is shorter than the soak
+        # itself. Derive the bound from the soak length so bumping the duration
+        # cannot silently reintroduce the panic; the slack covers broker startup
+        # and shutdown. The precondition is load-bearing: with the default
+        # `bash -e` (no `set -u`) an unset, renamed or non-numeric variable
+        # arithmetically expands to `-timeout 300s` — a bound TIGHTER than the
+        # default it replaces, failing exactly like the bug this fixes.
+        run: |
+          : "${BUNQUEUE_SDK_SOAK_SECONDS:?soak duration must be set}"
+          case $BUNQUEUE_SDK_SOAK_SECONDS in
+            ''|*[!0-9]*) echo "BUNQUEUE_SDK_SOAK_SECONDS must be integer seconds" >&2; exit 1 ;;
+          esac
+          go test -run '^TestSDKSoak$' -count=1 \
+            -timeout "$((BUNQUEUE_SDK_SOAK_SECONDS + 300))s" -v
       - name: Weekly native fuzzing
-        if: github.event_name == 'schedule'
+        if: env.RUN_SOAK == 'true'
         working-directory: sdk/go
         run: go test -run '^$' -fuzz '^FuzzHardeningPortableWirePayload$' -fuzztime 60s
 
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -248,7 +281,7 @@ jobs:
           bun runner.ts --driver
           "cargo run --locked --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule'
+        if: env.RUN_SOAK == 'true'
         working-directory: sdk/rust
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
@@ -258,6 +291,7 @@ jobs:
   elixir:
     name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -292,9 +326,17 @@ jobs:
         working-directory: sdk/conformance
         run: bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"
       - name: Weekly sustained SDK soak
-        if: github.event_name == 'schedule' && matrix.elixir == '1.20.1'
+        if: env.RUN_SOAK == 'true' && matrix.elixir == '1.20.1'
         working-directory: sdk/elixir
         env:
           BUNQUEUE_SDK_SOAK_SECONDS: '900'
           BUNQUEUE_SDK_SOAK_BATCH: '100'
-        run: mix test --include soak test/soak_test.exs
+        # ExUnit kills a test at 60s by default, well under the soak duration.
+        # Same derivation and preconditions as the Go soak, in milliseconds.
+        run: |
+          : "${BUNQUEUE_SDK_SOAK_SECONDS:?soak duration must be set}"
+          case $BUNQUEUE_SDK_SOAK_SECONDS in
+            ''|*[!0-9]*) echo "BUNQUEUE_SDK_SOAK_SECONDS must be integer seconds" >&2; exit 1 ;;
+          esac
+          mix test --include soak \
+            --timeout "$(((BUNQUEUE_SDK_SOAK_SECONDS + 300) * 1000))" test/soak_test.exs

@@ -9,6 +9,12 @@ docs/dist/
 
 # Data files
 data/
+# ...but docs/src/data holds committed source data (apiVersions.json), not a
+# runtime SQLite dir: reference.mdx imports it, so ignoring it breaks the build.
+# ORDER MATTERS — this negation must stay AFTER `data/` above, and it must keep
+# the trailing slash: git can re-include an excluded DIRECTORY, but never a file
+# inside one. `bun run check:docs-data` fails if this stops working.
+!docs/src/data/
 *.db
 *.db-wal
 *.db-shm

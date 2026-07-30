@@ -122,6 +122,12 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      # Runs before the build: both failures it catches are invisible locally
+      # (an ignored import resolves on the author's disk; a stale generated
+      # version list still builds) and its error names the fix directly.
+      - name: Check committed docs data
+        run: bun scripts/check-docs-data.ts
+
       - name: Install docs dependencies
         working-directory: docs
         run: bun install --frozen-lockfile --ignore-scripts

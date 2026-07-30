@@ -62,7 +62,8 @@ and `../typescript/`.
 go vet ./...
 go test -v ./... -count=1 -timeout 600s
 go test -race -run 'Hardening|Regression|Worker' ./...
-BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -v
+# -timeout must exceed the soak: `go test` panics at its own 10m default.
+BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -timeout 3900s -v
 cd ../.. && bun run test:sandbox:sdk
 ```
 

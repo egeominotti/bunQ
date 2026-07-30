@@ -6,7 +6,7 @@ Key facts:
 - Runs embedded (in-process, `bun:sqlite`) or as a standalone TCP/HTTP server (MessagePack binary protocol on port 6789, REST/WebSocket/SSE on 6790).
 - Production features: retries with backoff, priorities, delayed jobs, cron scheduling, Dead Letter Queue, stall detection, rate limiting, concurrency caps, webhooks (HMAC-signed), S3 backups, native TLS, OpenTelemetry.
 - Workflow engine: multi-step orchestration with saga compensation, branching, parallel steps, loops, signals (human-in-the-loop), nested sub-workflows.
-- Performance: up to ~630K ops/sec bulk push (embedded), ~90K ops/sec over TCP; ~1.3x faster push and ~3.2x faster bulk than BullMQ.
+- Performance (native 2026-07-30 campaign): ~729K jobs/sec internal in-memory batch push, ~186K public on-disk Embedded addBulk, ~159K TCP PUSHB, ~17K TCP worker drain, and ~2.7K/~3.2K linear workflows/sec Embedded/TCP. Operations and persistence boundaries are reported separately.
 - Install: `bun add bunqueue` — import from `bunqueue/client` (Queue, Worker, FlowProducer, Bunqueue) or `bunqueue/workflow` (Workflow, Engine).
 
 ## Getting Started

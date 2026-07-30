@@ -66,6 +66,8 @@
     "bench:tcp": "bun run bench/tcp-bench.ts",
     "bench:autobatch": "bun run bench/local-autobatch.ts",
     "bench:pushbulk": "bun run bench/pushbulk-delta.ts",
+    "bench:workflow": "bun run bench/workflow-engine.ts",
+    "bench:workflow:scale": "bun run bench/workflow-engine/scale.ts",
     "bench:joblist": "bun run bench/job-list-perf.ts",
     "bench:compare": "bun run bench/comparison/run.ts",
     "lint": "biome lint src",

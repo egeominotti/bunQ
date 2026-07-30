@@ -30,7 +30,7 @@ head:
   - tag: script
     attrs:
       type: 'application/ld+json'
-    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path is one batched transaction. Measured at 630K jobs/sec bulk push embedded and 90K over TCP."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do."}}]}'
+    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path batches persistence. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K figure is explicitly an internal in-memory batch path."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do."}}]}'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
@@ -160,8 +160,8 @@ cargo add bunqueue-client
   <script is:inline src="/bq-sim.js"></script>
 
   <div class="bq-proof">
-    <span><b>630K</b> ops/sec bulk push, embedded</span>
-    <span><b>90K</b> ops/sec push over TCP</span>
+    <span><b>186K</b> jobs/sec public on-disk addBulk, embedded</span>
+    <span><b>159K</b> jobs/sec PUSHB over TCP</span>
     <span><b>5.5 MB</b> install, 2 runtime deps</span>
     <span><b>500+</b> e2e scenarios across 7 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
@@ -928,7 +928,7 @@ Bunqueue.Worker.run(worker)
   <div class="bq-trust">
     <div class="bq-trust-card">
       <h3>Can SQLite handle a production queue?</h3>
-      <p>In WAL mode, yes: reads and writes overlap and the write path is one batched transaction. Measured at 630K jobs/sec bulk push embedded and 90K over TCP, <a href="/guide/benchmarks/">numbers and methodology here</a>.</p>
+      <p>In WAL mode, yes: reads and writes overlap and persistence is batched. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K result is an internal in-memory batch path. <a href="/guide/benchmarks/">Numbers, distributions and methodology here</a>.</p>
     </div>
     <div class="bq-trust-card">
       <h3>What happens on a crash?</h3>

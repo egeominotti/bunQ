@@ -103,7 +103,9 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 - **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
 - **Everything server-side** — retries with backoff, priorities, cron, rate limits, dead letter queue
-- **Up to 630K ops/sec** — [verified benchmarks](https://bunqueue.dev/guide/benchmarks/) with methodology
+- **Measured, operation-specific performance** — 729K jobs/sec internal
+  in-memory batch push, 186K jobs/sec public on-disk Embedded `addBulk`, and
+  159K jobs/sec TCP `PUSHB`; [methodology and distributions](https://bunqueue.dev/guide/benchmarks/)
 
 **Great for:** single-server deployments, AI agents that need a scheduler,
 prototypes and MVPs, embedded use cases (CLI tools, edge, serverless), teams
@@ -120,7 +122,7 @@ failover today. If you already run Redis and BullMQ works for you, keep it.
 | ---------------- | ------------------------------------- | -------------------------------------------- |
 | **How it works** | Queue runs inside your process        | Standalone server, clients connect via TCP   |
 | **Setup**        | `bun add bunqueue`                    | `docker run` or `bunqueue start`             |
-| **Performance**  | 630K ops/sec (bulk push)              | 90K ops/sec (push)                           |
+| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain |
 | **Best for**     | Single-process apps, CLIs, serverless | Multiple workers, separate producer/consumer |
 | **Scaling**      | Same process only                     | Multiple clients across machines             |
 
@@ -343,13 +345,21 @@ https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116
 
 ## Performance
 
-| Mode     | Peak Throughput          | Use Case            |
-| -------- | ------------------------ | ------------------- |
-| Embedded | 630K ops/sec (bulk push) | Same process        |
-| TCP      | 90K ops/sec (push)       | Distributed workers |
+Native Ryzen 9 9950X3D, Bun 1.3.14; medians from repeated fresh processes:
 
-Run `bun run bench` to verify on your hardware.
-[Benchmark methodology →](https://bunqueue.dev/guide/benchmarks/)
+| Workload | Mode | Median | Persistence |
+| --- | --- | ---: | --- |
+| Internal batched push, 1M jobs | Embedded | 729,395 jobs/sec | In-memory, no `dataPath` |
+| Public sustained `addBulk`, 50K cell | Embedded | 186,384 jobs/sec | On-disk buffered SQLite |
+| `PUSHB`, fresh 50K sample | TCP | 158,779 jobs/sec | On-disk buffered SQLite |
+| No-work worker drain, concurrency 50 | TCP | 17,256 jobs/sec | Full pull/process/ACK |
+| Linear Workflow Engine | Embedded / TCP | 2,700 / 3,187 workflows/sec | Workflow SQLite + 3 queue nodes |
+
+These operations do different work; the internal in-memory result is not an
+SQLite or public-API claim. Run `bun run bench`, `bun run bench:tcp`, or
+`bun run bench:workflow` on your hardware.
+[Benchmark methodology →](https://bunqueue.dev/guide/benchmarks/) ·
+[full engineering report](docs/benchmarks/native-engineering-2026-07-30.md)
 
 ## Documentation
 

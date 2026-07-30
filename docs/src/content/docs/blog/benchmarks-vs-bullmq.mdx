@@ -135,6 +135,14 @@ For single-process applications, embedded mode eliminates the network entirely. 
 
 Bulk push peaks around 630K ops/sec at the 10K-job scale. There is no BullMQ column here because BullMQ has no embedded mode, which is exactly the point.
 
+:::note[Historical in-memory result]
+`bench/comprehensive.ts` does not pass a `dataPath`, so this Embedded chart is
+an in-memory Queue result, not an SQLite write-through result. The current
+[engineering benchmark](/guide/benchmarks/) reports internal in-memory,
+public on-disk Embedded, TCP producer, worker drain, durability and Workflow
+Engine workloads separately.
+:::
+
 ## Run the Benchmarks Yourself
 
 All benchmarks are included in the repository:

@@ -373,24 +373,36 @@ See [Background Tasks](./features/background-tasks.md) and
 
 ## Performance Characteristics
 
-| Mode | Throughput (approx) | Data-loss window |
-| --- | --- | --- |
-| Buffered (default) | ~100k jobs/s | up to 10 ms (one flush interval) |
-| Durable (`durable: true`) | ~10k jobs/s | none — synchronous write |
-| Auto-batch over TCP (concurrent) | ~145k ops/s | none (same persistence as PUSH/PUSHB) |
-| Auto-batch over TCP (sequential `await`) | ~10k ops/s | none |
+Current representative native measurements are operation-specific:
+
+| Operation / topology | Median on the 2026-07-30 host | Persistence boundary |
+| --- | ---: | --- |
+| Internal batched push, Embedded, 1M jobs | 729,395 jobs/s | In-memory; no `dataPath` |
+| Public `addBulk`, Embedded, sustained 50K cell | 186,384 jobs/s | On-disk buffered SQLite |
+| TCP `PUSHB`, fresh 50K sample | 158,779 jobs/s | Broker on-disk buffered SQLite |
+| TCP no-work worker drain, concurrency 50 | 17,256 jobs/s | Full pull/process/ACK path |
+| Sequential `durable:true` add, Embedded / TCP | 60,835 / 27,191 ops/s | Synchronous persistence |
+| Linear Workflow Engine, Embedded / TCP | 2,700 / 3,187 workflows/s | Workflow SQLite plus 3 queue nodes |
+| 12 tuned linear Workflow Engines, Embedded / TCP | 25,873 / 17,496 workflows/s | Independent stores/queues; TCP protocol cap raised and reported |
 
 Throughput comes from: 4-ary heaps (cache locality), per-shard parallelism, the
 double-buffered write-behind path, UUIDv7 ids that sort by time (string compare,
 no `localeCompare`), MessagePack framing, and transparent client-side add-batching
 that coalesces concurrent `add()` calls into one `PUSHB` round-trip. The only
-data-loss exposure is the ≤10 ms buffered window — eliminated per-job with
-`durable: true`. Numbers are order-of-magnitude and hardware-dependent.
+data-loss exposure is the ≤10 ms buffered window — including normal TCP
+`PUSH`/`PUSHB`, which acknowledge the in-memory acceptance while SQLite flushes
+behind it. It is eliminated per job with `durable: true`. The internal
+in-memory row has no persistence boundary and must not be presented as an
+SQLite figure. Numbers are hardware-, scale-, and operation-dependent.
 
 The cross-version `bench/fix-impact.ts` harness loads runtime modules from an
 explicit source root and records raw samples plus correctness invariants. See
 the [2026-07-16 core-fix benchmark](./benchmarks/fix-impact-2026-07-16.md) for
 the current before/after methodology, results, and remaining hot paths.
+The maintained runner catalogue and native publication contract live in
+[Benchmarking and Performance Evidence](./features/benchmarks.md); the full
+queue/Workflow campaign is
+[Native Engineering Benchmark — 2026-07-30](./benchmarks/native-engineering-2026-07-30.md).
 
 ## Reliability & Battle-Testing
 
@@ -440,6 +452,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 ### Engineering tooling
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
+- [Benchmarking and Performance Evidence](./features/benchmarks.md) — Native measurement contract, evidence levels, runner catalogue, Workflow Engine single/scale harnesses, persistence labels, protocol-cap handling, integrity requirements, and publication checklist.
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.
 
 ### Core engine & data structures

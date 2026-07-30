@@ -38,7 +38,11 @@ Internal:
 
 External / runtime:
 
-- `bun:sqlite` (`Database`) — the `WorkflowStore` opens its own DB (`store.ts:67`), WAL mode, separate from the queue's persistence DB.
+- `bun:sqlite` (`Database`) — the `WorkflowStore` opens its own connection in WAL
+  mode (`store.ts`). In Embedded mode the Engine passes the same `dataPath` to
+  the store and Queue/Worker, so two connections share one file. In TCP mode
+  `dataPath` is client-local workflow state and the broker owns a different
+  persistence file.
 - `msgpackr` (`Packr`/`Unpackr`, `structuredClone: true`) — serializes `input`/`steps`/`signals` blobs (`store.ts:9-19`).
 - Bun/JS `setTimeout` for backoff, step timeouts, and signal-timeout timers.
 
@@ -312,6 +316,40 @@ Measured on a live engine, a run with two retries at the default backoff:
 `test/workflow-properties.test.ts` covers the pure core with generated inputs; it found
 the inherited-member gate defect on its 202nd case.
 
+## Performance evidence
+
+`bench/workflow-engine.ts` measures linear, inline-parallel, compensation, and
+wait/signal workflows through this public Engine facade. Every sample receives
+a fresh process and SQLite state; TCP samples additionally receive a fresh
+broker, broker database, queue, and dynamic ports. The runner validates every
+persisted terminal execution plus exact lifecycle, step, signal, and
+compensation event counts.
+
+On the 2026-07-30 native Ryzen 9 campaign, the tuned single-engine linear
+workload measured 2,700 workflows/s Embedded (`concurrency:128`) and 3,187
+workflows/s TCP (`concurrency:64`), with 21 measured 1,000-execution processes
+per mode. The TCP topology can be faster for no-op nodes because the broker and
+Workflow Store use separate processes and SQLite files; this is not evidence
+that network transport is cheaper.
+
+`bench/workflow-engine/scale.ts` starts 1/4/8/12 independent engines behind a
+common barrier. With 5,000 executions per instance and the TCP protocol safety
+limit explicitly raised to one million requests per window, median x12
+throughput was 25,873 workflows/s Embedded and 17,496 TCP. TCP was already at
+17,407 at x8, so the shared host was saturated.
+
+The default TCP safety cap is operationally visible: 3,000 linear workflows
+completed in 749 ms, while 3,500 crossed the default 10,000 requests/client/
+60-second window and completed in about 60.16 seconds with `Rate limit
+exceeded` on ACK batches. Raising only `RATE_LIMIT_MAX_REQUESTS` restored a
+3,855 workflows/s median. Default and tuned results are deliberately reported
+separately.
+
+See [Benchmarking and Performance Evidence](./benchmarks.md) for runner controls
+and [Native Engineering Benchmark — 2026-07-30](../benchmarks/native-engineering-2026-07-30.md)
+for distributions, latency, scale-out resources, causal diagnostics, and
+integrity totals.
+
 ## Related Docs
 
 - [Client SDK: Queue](./client-queue-sdk.md) and [Client SDK: Worker](./client-worker-sdk.md) — the primitives the engine wraps.
@@ -320,4 +358,5 @@ the inherited-member gate defect on its 202nd case.
 - [Persistence](./persistence.md) and [Job Lifecycle](./job-lifecycle.md) — how the underlying step jobs are stored and processed.
 - [Concurrency & Locking](./concurrency-and-locking.md), [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — worker concurrency model.
 - [Webhooks, Events & Job Logs](./webhooks-and-events.md) — queue-level events (distinct from workflow events).
+- [Benchmarking and Performance Evidence](./benchmarks.md) — benchmark contract and maintained runner catalogue.
 - [architecture](../architecture.md), [data-model](../data-model.md).

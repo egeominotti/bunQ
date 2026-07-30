@@ -278,13 +278,60 @@ Batch push multiple jobs to a queue.
 }
 ```
 
-Each job is validated with the same rules as `PUSH` (option bounds and `dependsOn` existence). A `dependsOn` entry may also reference the `customId` of an earlier job in the same batch, so intra-batch chains work. On violation the whole batch is rejected with an error naming the offending index (`jobs[i]: ...`).
+Each job is validated with the same rules as `PUSH` (option bounds and
+`dependsOn` existence). A `dependsOn` entry may also reference the `customId`
+of any job in the same batch, so order-independent intra-batch chains work. On
+violation the whole batch is rejected with an error naming the offending index
+(`jobs[i]: ...`).
 
 **Response:**
 
 ```typescript
 { ok: true, ids: string[] }  // Array of generated job IDs
 ```
+
+---
+
+#### PUSHF
+
+Atomically commit a fully resolved, potentially multi-queue FlowProducer graph.
+This is the command used by the Bun package; external SDKs may still compose
+legacy `PUSH`/`UpdateParent` calls.
+
+**Request:**
+
+```typescript
+{
+  cmd: 'PUSHF',
+  jobs: Array<{
+    id: string,             // Final ID; non-empty, no colon
+    queue: string,
+    input: {
+      data: Record<string, unknown>, // includes canonical name/link metadata
+      dependsOn?: string[],
+      parentId?: string,
+      childrenIds?: string[],
+      // supported ordinary scheduling/retry/failure options
+    }
+  }>
+}
+```
+
+The complete graph is validated before mutation: strict runtime types,
+duplicate/missing/asymmetric edges, cycles, policy conflicts, 10,000 jobs,
+10 MB per job and 64 MB aggregate data. With configured SQLite, all job rows
+commit in one immediate transaction before any leaf becomes visible. In
+memory-only mode, publication is still atomic but not crash-durable.
+
+**Response:**
+
+```typescript
+{ ok: true, data: { jobs: Job[] } }
+```
+
+The returned array has exactly one authoritative committed snapshot per input
+ID. Any validation, ownership or persistence error returns `{ ok: false,
+error }` and publishes no job.
 
 ---
 

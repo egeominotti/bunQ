@@ -15,7 +15,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · workflow engine</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The shapes a <em>process</em> can take.</h1>
-  <p class="bq-hero-sub">Sequences, forks, fan-out and loops. Every one of them is a node the engine journals, retries and can walk back through.</p>
+  <p class="bq-hero-sub">Sequences, forks, fan-out and loops. The engine journals their decisions and outcomes so completed work can be skipped and compensatable effects can be walked back.</p>
 </div>
 
 ## Step context
@@ -28,15 +28,23 @@ Every handler receives one object:
 | `ctx.steps` | `TSteps` | Results of completed steps, keyed by step name |
 | `ctx.signals` | `Record<string, unknown>` | Payloads from `engine.signal()` |
 | `ctx.executionId` | `string` | This run's id |
-| `ctx.idempotencyKey` | `string` | Stable identity for this execution of this step, see [Durability](/guide/workflow/durability/) |
+| `ctx.signal` | `AbortSignal \| undefined` | Ordinary step attempt: aborted when its timeout expires |
+| `ctx.idempotencyKey` | `string \| undefined` | Ordinary step/compensation attempt: stable effect identity, see [Durability](/guide/workflow/durability/) |
+| `ctx.forwardIdempotencyKey` | `string \| undefined` | Compensation only: identity used by the forward attempt |
 
 Use `ctx.steps['step-name']` for hyphenated names. Typing is automatic: `Workflow<TInput>` accumulates each step's return type, so later steps see earlier results without casts.
+
+Branch/loop conditions, item extractors, input mappers and map transforms receive
+the durable data fields but are not provider-effect attempts, so they do not
+receive attempt-only keys or a cancellation signal.
 
 ## Retries and timeouts
 
 ```typescript
-.step('call-api', async () => {
-  const res = await fetch('https://api.external.com/data');
+.step('call-api', async (ctx) => {
+  const res = await fetch('https://api.external.com/data', {
+    signal: ctx.signal,
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();
 }, {
@@ -49,8 +57,14 @@ Backoff is `min(500ms × 2^(attempt-1), 30s)` plus up to 50% jitter. When attemp
 
 Set `retry: 1` on steps that throw deliberately, such as validation or guard clauses, so a rejection is not retried five times before being believed.
 
-:::caution[The timeout does not cancel your handler]
-When a step times out the engine stops waiting, but the promise underneath keeps running. A retry then starts a second copy alongside the first. For anything expensive or side-effecting, carry your own `AbortSignal`.
+The persisted attempt count is cumulative. If a process stops after attempt two,
+recovery starts at attempt three rather than granting a new retry budget.
+
+:::caution[Cancellation is cooperative]
+When a step times out the engine aborts `ctx.signal` and stops waiting. Pass that
+signal to `fetch` and other cancellable I/O. A handler that ignores it can keep
+running underneath while a retry starts, so external effects still need
+idempotency.
 :::
 
 ## Schema validation
@@ -77,7 +91,13 @@ coerced value. `inputSchema` coercion is scoped to the step that declares it, so
 shapes that handler's `ctx.input` and nothing else. A later step without its own
 schema still sees the original run input.
 
-`inputSchema` validates `ctx.input` before the handler runs; `outputSchema` validates the return value. A validation failure is a step failure, so it retries and then triggers the rollback like any other. The reason lands in `exec.failureReason` as `Output validation failed for "charge": ...`.
+`inputSchema` validates `ctx.input` before the handler runs; `outputSchema`
+validates the return value. Input parsing is done once per retry episode and its
+coerced value (or validation error) is reused across those attempts; recovery
+starts a new episode and parses again. A validation failure is a step failure,
+so it consumes the declared retry attempts and then triggers rollback. The
+reason lands in `exec.failureReason` as
+`Output validation failed for "charge": ...`.
 
 ## Branching
 
@@ -102,8 +122,18 @@ const flow = new Workflow('support-ticket')
   .step('log-ticket', async () => ({ logged: true }));   // always runs
 ```
 
+The selected path is journaled before any path effect runs, so recovery does
+not re-evaluate a non-deterministic condition. Returning an undeclared path
+fails explicitly, and declaring the same path name twice throws while building
+the workflow.
+
 :::caution[Paths hold steps, nothing else]
-A path runs inline inside a single job, so it has nowhere to park a `waitFor` and no dispatcher for a nested `branch`. Those are **rejected at `register()`** rather than quietly dropped, because an approval gate that silently does not gate is the worst way to be wrong. The same applies to `parallel()` and loop bodies. Model anything richer as a [sub-workflow](/guide/workflow/rollback/#nested-workflows).
+A path runs inline inside a single job, so it has nowhere to park a `waitFor`
+and no dispatcher for a nested `branch`. The builder throws as soon as
+`.path()` closes over a non-step node rather than quietly dropping it, because
+an approval gate that silently does not gate is the worst way to be wrong. The
+same build-time rule applies to `parallel()` and loop bodies. Model anything
+richer as a [sub-workflow](/guide/workflow/rollback/#nested-workflows).
 :::
 
 ## Parallel steps
@@ -130,7 +160,7 @@ If any of them fails the whole group fails with an `AggregateError` containing e
 | `.doUntil(condition, builder, opts?)` | Runs the body, then checks. Always runs at least once. |
 | `.doWhile(condition, builder, opts?)` | Checks first. Can skip entirely. |
 | `.forEach(itemsFn, name, handler, opts?)` | One iteration per item, sequentially. |
-| `.map(name, fn)` | A pure transform of previous results. No retry, no timeout. |
+| `.map(name, fn)` | A synchronous or async transform of previous results. No retry, no timeout. |
 
 ```typescript
 // Poll until a deploy is ready, at most 60 checks
@@ -171,6 +201,15 @@ Results are stored under indexed names such as `notify:0` and `notify:1`, while 
 
 Iterations are also **memoised**: one that already completed is not run again when the node is re-entered after a crash, so a loop resumes at the iteration it was interrupted on. See [Durability](/guide/workflow/durability/).
 
+`map` has the same durable lifecycle visibility as a step: it writes `running`,
+then `completed` or `failed`, and emits the corresponding events. A completed
+map is not transformed again when its node is re-entered after a crash.
+
+Treat a map function as pure even though JavaScript cannot enforce purity. A
+map left `running` has an unknown outcome and may execute again; use `.step()`
+with an idempotency-aware handler when the operation changes an external
+system.
+
 ### Limits
 
 `forEach` requires its extractor to return a real array, and throws before running
@@ -179,3 +218,8 @@ making explicit: a number iterated zero times and the run still reported success
 string iterated its characters, which turned an id list that arrived as `'u1,u2'` into
 five "items" nobody passed. It also throws if the list exceeds `maxIterations`
 (default 1000). `doUntil`/`doWhile` throw when they exceed theirs (default 100), which fails the run and triggers the rollback. A step whose name collides with a loop's `name:index` namespace is rejected at `register()`.
+
+All declared bounds are validated when the builder method is called: retries
+and iteration counts must be positive safe integers, timeouts must be finite
+and non-negative, and sub-workflow polling durations must be finite and
+strictly positive. Invalid values fail before any execution row is created.

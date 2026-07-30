@@ -61,9 +61,6 @@ describe('AUDIT H8 - flow failure maps leak on parent completion', () => {
     // Baseline: nothing tracked yet.
     expect(mapSizes().failed).toBe(0);
 
-    let childJobId: string | undefined;
-    let parentJobId: string | undefined;
-
     const worker = new Worker(
       queueName,
       async (job) => {
@@ -90,8 +87,8 @@ describe('AUDIT H8 - flow failure maps leak on parent completion', () => {
       ],
     });
 
-    parentJobId = result.job.id;
-    childJobId = result.children?.[0]?.job?.id;
+    const parentJobId = result.job.id;
+    const childJobId = result.children?.[0]?.job?.id;
     expect(parentJobId).toBeDefined();
     expect(childJobId).toBeDefined();
 
@@ -171,21 +168,6 @@ describe('AUDIT H8 - flow failure maps leak on parent completion', () => {
     const queue = new Queue(queueName, { embedded: true });
     queue.obliterate();
 
-    let parentAId: string | undefined;
-    let parentBId: string | undefined;
-
-    const worker = new Worker(
-      queueName,
-      async (job) => {
-        const data = job.data as { role: string };
-        if (data.role === 'child') {
-          throw new Error('shutdown-child boom');
-        }
-        return { parentDone: true };
-      },
-      { embedded: true, concurrency: 5 }
-    );
-
     // Parent A → continueParentOnFailure (populates failedChildrenValues)
     const resA = await flow.add({
       name: 'parentA',
@@ -200,7 +182,6 @@ describe('AUDIT H8 - flow failure maps leak on parent completion', () => {
         },
       ],
     });
-    parentAId = resA.job.id;
 
     // Parent B → ignoreDependencyOnFailure (populates ignoredChildrenFailures)
     const resB = await flow.add({
@@ -216,22 +197,26 @@ describe('AUDIT H8 - flow failure maps leak on parent completion', () => {
         },
       ],
     });
-    parentBId = resB.job.id;
 
-    // Wait until both maps actually hold their entries.
-    await waitFor(() => {
-      const s = mapSizes();
-      return s.failed >= 1 && s.ignored >= 1;
-    });
+    // Drive only the children to terminal failure. No worker consumes the
+    // promoted parents, so both records deterministically remain live until
+    // shutdown rather than racing parent completion.
+    const manager = getSharedManager();
+    const expectedChildren = new Set([resA.children![0].job.id, resB.children![0].job.id]);
+    for (let index = 0; index < 2; index++) {
+      const child = await manager.pull(queueName);
+      expect(child).not.toBeNull();
+      expect(expectedChildren.delete(String(child!.id))).toBe(true);
+      await manager.fail(child!.id, 'shutdown-child boom', undefined, true);
+    }
+    expect(expectedChildren.size).toBe(0);
 
     const before = mapSizes();
     expect(before.failed).toBeGreaterThan(0);
     expect(before.ignored).toBeGreaterThan(0);
 
-    await worker.close();
-
     // Capture the manager BEFORE shutdown (shutdownManager nulls the singleton).
-    const qm = getSharedManager() as unknown as {
+    const qm = manager as unknown as {
       failedChildrenValues: Map<unknown, unknown>;
       ignoredChildrenFailures: Map<unknown, unknown>;
       shutdown: () => void;

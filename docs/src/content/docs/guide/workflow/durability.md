@@ -41,7 +41,9 @@ Every step is given a key that is **stable across retries and across crash-resum
 })
 ```
 
-The shape is `run:step#occurrence:direction`, for example `wf_1785…_a1b2:charge#0:forward`.
+The shape is `run:step#occurrence:direction`, for example
+`wf_7ad3…c910:charge#0:forward`. Run IDs are opaque `wf_` plus 128 bits from the
+runtime cryptographic entropy source.
 
 | Part | Why |
 |---|---|
@@ -73,8 +75,8 @@ console.log(`Recovered ${recovered.total} executions`);
 | State found | What recovery does |
 |---|---|
 | `running` | Re-enqueues the current node so the run continues |
-| `waiting` | Re-arms the signal timeout for its **remaining** time; if the signal arrived while the process was down, resumes immediately |
-| `compensating` | Re-enters the unwind. A reversal that already succeeded is never run twice, and one recorded `compensation-failed` still blocks the chain, so the run parks again rather than reporting a clean rollback |
+| `waiting` | Re-arms the signal timeout for its **remaining** time; if the signal was already recorded before recovery, resumes immediately |
+| `compensating` | Re-enters the unwind. A reversal recorded as succeeded is skipped, and one recorded `compensation-failed` still blocks the chain, so the run parks again rather than reporting a clean rollback |
 
 A timeout is re-armed on the time that is left, not from zero. A 24-hour approval window on a process restarted after 23 hours fires in one hour.
 
@@ -91,11 +93,14 @@ This is the honest picture, and it is the main difference from a replay-based en
 | A chain of `.step()` nodes | **Resumes** at the node it reached. Completed steps are not re-run. |
 | Loop iterations (`doUntil`, `doWhile`, `forEach`) | **Resume** at the interrupted iteration. Earlier ones are memoised and skipped. |
 | The interrupted step or iteration itself | **Replays**, because it never finished and cannot be assumed done |
-| A `branch` path or `parallel` group | **Replays whole.** The node is one job; its steps re-run. |
-| Compensations | **Resume.** A reversal that already settled is never run twice. |
-| `waitFor` gates | **Survive.** A signal delivered while the process was down is still there. |
+| A `branch` path or `parallel` group | **Resumes unfinished records.** The chosen branch is journaled and completed inner steps are skipped; work left running can replay. |
+| Compensations | **Resume.** A reversal with a persisted terminal outcome is skipped; one interrupted before that write can replay. |
+| `waitFor` gates | **Survive.** A signal persisted before a crash is still there, and the remaining timeout is reconstructed. |
+| Branch/loop/item decisions | **Replay from the journal.** Conditions and extractors are not re-evaluated after their choice was persisted. |
 
-So an agent killed at turn 7 of a loop resumes at turn 7, but a `parallel` group interrupted halfway re-runs all of its steps.
+So an agent killed at turn 7 of a loop resumes at turn 7. A parallel
+group interrupted halfway re-enters the group, but completed siblings
+short-circuit and only records with an unknown outcome can dispatch again.
 
 ## At-least-once, and what to do about it
 
@@ -135,11 +140,43 @@ child a second time.
 The parent claims its child as soon as it starts one, before waiting on it, and a later
 entry into that node resumes the existing child instead of starting another. That
 matters most after a restart, when `recover()` re-enqueues the parent's current node:
-without the claim the child ran twice, so a child that provisions a resource provisioned
-two.
+without the claim the child ran twice, so a child that provisions a resource could
+provision it twice.
 
-A child whose parent row no longer exists is returned by recovery again, so an orphan is
-never stranded in a non-terminal state.
+The child poll deadline is measured from the child's original creation time, so
+restarting the parent does not grant a fresh timeout window. Configure it at the
+node:
+
+```typescript
+.subWorkflow('payment', (ctx) => ctx.input, {
+  timeout: 15 * 60_000,
+  pollInterval: 250,
+})
+```
+
+Expiry fails the parent but does not forcibly cancel a child that is still
+running. The parent can therefore park in `compensation-stuck` until the child
+settles and an operator resumes or abandons the unwind.
+
+If a parent row is removed unexpectedly, its non-terminal child becomes an
+orphan. Recovery includes that child again instead of filtering it forever, so
+the execution is observable and can make progress rather than remaining
+stranded.
+
+## Definition identity
+
+Registration seals the workflow graph. Every execution persists a SHA-256
+identity covering node shape and scheduling options, plus the workflow's
+explicit semantic revision:
+
+```typescript
+const flow = new Workflow('orders', { revision: 3 });
+```
+
+Bump `revision` when handler or condition behavior changes without changing the
+graph shape. A live persisted execution cannot be driven by a different
+definition; the engine fails closed rather than silently changing its schedule
+mid-run.
 
 ## One engine per process
 

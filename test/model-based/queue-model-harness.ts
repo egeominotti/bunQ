@@ -18,7 +18,7 @@ export type ModelState =
 
 export interface ModelJob {
   attempts: number;
-  diskState: 'waiting' | 'delayed' | 'active' | 'completed';
+  diskState: 'waiting' | 'prioritized' | 'waiting-children' | 'delayed' | 'active' | 'completed';
   generation: number;
   maxAttempts: number;
   priority: number;

@@ -16,6 +16,7 @@ import {
   handleAckBatch,
   handleFail,
 } from './handlers/core';
+import { handlePushFlow } from './handlers/flow';
 
 import {
   handleGetJob,
@@ -114,6 +115,8 @@ export async function routeCoreCommand(
       return handlePush(cmd, ctx, reqId);
     case 'PUSHB':
       return handlePushBatch(cmd, ctx, reqId);
+    case 'PUSHF':
+      return handlePushFlow(cmd, ctx, reqId);
     case 'PULL':
       return handlePull(cmd, ctx, reqId);
     case 'PULLB':

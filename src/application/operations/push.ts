@@ -22,6 +22,8 @@ export interface PushContext {
   storage: SqliteStorage | null;
   shards: Shard[];
   shardLocks: RWLock[];
+  /** Serializes deterministic IDs before any shard lock is acquired. */
+  customIdLock: RWLock;
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
   /** Bare completion ids for removeOnComplete jobs so dependents start ready */
@@ -40,6 +42,7 @@ export interface PushContext {
     timestamp: number;
   }) => void;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
+  registerQueueName?: (queue: string) => void;
 }
 
 /** Result of deduplication check */
@@ -170,7 +173,7 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
     }
 
     // Insert to shard
-    insertJobToShard(job, queue, shard, idx, ctx);
+    insertJobToShard(job, { queue, shard, shardIdx: idx }, ctx);
     shard.notify(queue);
     result = { job, persisted: true };
   });
@@ -241,7 +244,7 @@ export async function pushJobBatch(
       }
 
       // Insert to shard
-      insertJobToShard(job, queue, shard, idx, ctx);
+      insertJobToShard(job, { queue, shard, shardIdx: idx }, ctx);
       jobsToInsert.push(job);
       if (input.durable) durableJobs.push(job);
       resultIds.push(job.id);

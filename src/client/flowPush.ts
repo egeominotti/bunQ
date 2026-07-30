@@ -211,7 +211,12 @@ export async function pushJobWithParent(
   // Update children with real parent ID (like embedded mode does)
   if (childIds.length > 0) {
     for (const childId of childIds) {
-      await ctx.tcp.send({ cmd: 'UpdateParent', childId, parentId: parentJobId });
+      const update = await ctx.tcp.send({ cmd: 'UpdateParent', childId, parentId: parentJobId });
+      if (update.ok !== true) {
+        throw new Error(
+          typeof update.error === 'string' ? update.error : `Failed to link child ${childId}`
+        );
+      }
     }
   }
 

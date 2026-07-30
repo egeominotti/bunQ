@@ -62,7 +62,10 @@ Three ideas carry everything else:
 
 **A workflow is a list of nodes.** Steps, branches, loops, approval gates. You describe them; the engine walks them.
 
-**Each node is a real bunqueue job.** Finishing a node writes its result to SQLite and enqueues the next one. That journal is what makes a crash survivable: on restart the run picks up at the node it had reached, and the work already done is not repeated.
+**Each top-level node gets durable queue delivery.** Finishing one writes its
+outcome to SQLite and enqueues the next. Inline branch, parallel and loop body
+steps share that node job but persist their own records. On restart, completed
+records short-circuit; only work whose outcome is still unknown may replay.
 
 **Failure walks the journal backwards.** The engine already knows which steps completed and in what order, so it can undo them in reverse without asking your code to remember anything.
 
@@ -76,10 +79,26 @@ const flow = new Workflow('checkout')
 
 const engine = new Engine({ embedded: true, dataPath: './data/wf.db' });
 engine.register(flow);
+await engine.recover();
 await engine.start('checkout', { orderId: 'ORD-1' });
 ```
 
 Everything runs in your process, on bunqueue's Queue and Worker, persisted to SQLite. No extra services, no YAML, no control plane.
+
+For a production service, four details are part of the setup rather than
+optional tuning:
+
+1. Pass a durable `dataPath`; omitting it creates an in-memory execution store.
+2. Register every definition, then call `recover()` during startup.
+3. Make externally visible steps idempotent and pass `ctx.idempotencyKey` to
+   providers that support one.
+4. Run one workflow `Engine` per process and call `engine.close()` during
+   shutdown.
+
+The engine guarantees durable orchestration state, not exactly-once effects in
+another system. If a process dies after an API accepted a charge but before the
+completed record reached SQLite, the only safe recovery is to replay the call
+with the same provider idempotency key.
 
 ## Where to go next
 
@@ -106,6 +125,12 @@ Everything runs in your process, on bunqueue's Queue and Worker, persisted to SQ
 The workflow engine ships in the Bun `bunqueue` package only; it is not part of the polyglot [SDKs](/guide/sdks/). From other languages, orchestrate multi-step jobs via [flows](/guide/flow/) or call a Bun service that runs the engine.
 :::
 
-:::tip[Every example on these pages is executed in CI]
-The code you see is mirrored by `test/workflow-docs-examples.test.ts`, which runs it against the real engine. If a sample stops working, that test goes red before you find out the hard way.
+:::tip[Examples are executable specifications]
+The complete engine scenarios are mirrored in
+`test/workflow-docs-examples.test.ts` and run against the real engine. The
+OpenAI Agents SDK, Claude session seam, Mastra and LangGraph examples are
+covered by `test/workflow-agent-sdks.test.ts`; the Vercel AI SDK page has both
+offline model tests and an opt-in live script. Short inspection fragments such
+as `exec.rollbackStatus` refer to those same tested scenarios rather than
+inventing separate pseudo-APIs.
 :::

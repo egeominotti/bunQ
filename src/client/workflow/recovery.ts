@@ -16,6 +16,7 @@ import { runCompensation } from './compensator';
 import { hasSignal } from './storeSignals';
 import { clock, type TimerHandle } from './clock';
 import { decideAdmission } from './admission';
+import { bindExecutionDefinition } from './definitionGuard';
 
 export interface RecoverDeps {
   store: WorkflowStore;
@@ -53,6 +54,7 @@ export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResul
     // help here, because the two unwinds are sequential, not concurrent.
     const exec = store.get(snapshot.id);
     if (!exec) continue;
+    bindExecutionDefinition(exec, wf, (value) => store.update(value));
 
     if (exec.state === 'running') {
       const admission = decideAdmission(exec, exec.currentNodeIndex, deps.nodesInFlight);
@@ -65,7 +67,13 @@ export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResul
     } else if (exec.state === 'waiting') {
       await recoverWaiting(exec, wf, deps);
       result.waiting++;
-    } else if (exec.state === 'compensating') {
+    } else if (
+      exec.state === 'compensating' ||
+      (exec.state === 'failed' && exec.rollbackStatus === undefined)
+    ) {
+      // `runNode` persists the failure before it starts the unwind. A hard kill in
+      // between leaves a terminal-looking row with rollback still owed. Such rows are
+      // recoverable until runCompensation writes an explicit rollbackStatus.
       // A lost claim means another driver owns this unwind, so nothing happened here
       // and counting it as a recovery would overstate what recover() did.
       const outcome = await runCompensation(exec, wf, store, deps.emitter, deps.workflows);
@@ -97,8 +105,9 @@ async function recoverWaiting(exec: Execution, wf: Workflow, deps: RecoverDeps):
     return;
   }
 
-  // Check if signal already arrived while we were down. Key presence, not value:
-  // a payload-less signal records the key with an `undefined` value (see hasSignal).
+  // The signal may have been persisted before the crash, or accepted after this
+  // engine was recreated but before recover() reached the row. Key presence, not
+  // value: a payload-less signal records the key with an `undefined` value.
   if (hasSignal(exec.signals, node.event)) {
     exec.state = 'running';
     deps.store.update(exec);

@@ -1,162 +1,244 @@
 /**
- * Invariants the workflow engine must hold after every generated command.
- *
- * These are written to be independent of the engine's implementation: they are
- * checked against the persisted `Execution` plus a ledger of what the scripted
- * handlers actually did. Each one corresponds to a way the engine has been, or
- * could plausibly be, wrong:
- *
- *   I1 signal fidelity      — a delivered signal is never lost or altered.
- *                             (the lost-update bug: an in-flight step's stale
- *                             snapshot overwrote signals and hung the run)
- *   I2 monotonic progress   — currentNodeIndex never moves backwards.
- *   I3 no resurrection      — a terminal execution stays terminal.
- *   I4 waitFor gating       — no step positioned after a waitFor ever runs before
- *                             that signal has been delivered. (the silently
- *                             dropped waitFor inside a branch path)
- *   I5 retry bound          — a step never records more attempts than its retry.
- *   I6 name domain          — exec.steps only ever contains names the spec can
- *                             produce; no phantom or mangled keys.
- *   I7 compensation sanity  — every compensation that ran belongs to a step that
- *                             really completed and really declared a handler.
+ * Cross-cutting invariants checked after every generated operator action.
  */
 
 import type { Execution } from '../../src/client/workflow';
-import { declaredNames, stepsGatedBy, type Ledger, type WorkflowSpec } from './workflow-spec';
+import { checkChildConsistency } from './workflow-child-invariants';
+import {
+  checkCompensationDispatches,
+  checkRollbackCoherence,
+} from './workflow-rollback-invariants';
+import {
+  declaredNames,
+  executionSpec,
+  retryBudget,
+  selectedBranchMissing,
+  stepsGatedBy,
+} from './workflow-spec-analysis';
+import type { Ledger, WorkflowSpec } from './workflow-spec';
 
 export interface InvariantState {
   spec: WorkflowSpec;
   ledger: Ledger;
-  /** Signals handed to engine.signal(), in delivery order. */
+  /** Signals accepted by engine.signal(), in delivery order. */
   delivered: Map<string, unknown>;
-  /** Highest node index observed so far. */
-  maxNodeIndex: number;
-  /** True once a terminal state has been observed. */
-  sawTerminal: boolean;
-  terminalState: string | null;
-  /** Steps declared with a compensate handler. */
-  compensable: Set<string>;
-  /** Retry budget per step name. */
-  retryBudget: Map<string, number>;
+  maxNodeIndex: Map<string, number>;
+  terminalStates: Map<string, string>;
 }
 
+export type InvariantFail = (id: string, detail: string) => never;
 export class InvariantViolation extends Error {}
 
 const TERMINAL = new Set(['completed', 'failed']);
 
-export function checkInvariants(state: InvariantState, exec: Execution | null): void {
-  if (!exec) return;
-  const fail = (id: string, detail: string): never => {
+export function checkInvariants(
+  state: InvariantState,
+  parent: Execution | null,
+  executions: Execution[] = parent ? [parent] : []
+): void {
+  if (!parent) return;
+  const fail: InvariantFail = (id, detail) => {
     throw new InvariantViolation(
       `${id} violated: ${detail}\nspec=${JSON.stringify(state.spec)}\n` +
-        `ledger=${JSON.stringify(state.ledger)}\nexec=${JSON.stringify({
-          state: exec.state,
-          currentNodeIndex: exec.currentNodeIndex,
-          signals: exec.signals,
-          steps: exec.steps,
-        })}`
+        `ledger=${JSON.stringify(state.ledger)}\nexecutions=${JSON.stringify(
+          executions.map(executionSummary)
+        )}`
     );
   };
 
-  // W-COMP-ONCE — a compensate handler is dispatched AT MOST ONCE per eligible record,
-  // for the whole life of the run, including across restart()/recover().
-  //
-  // This is the invariant a real defect slipped past: recover() snapshotted every
-  // recoverable row up front, then drove them one at a time, so a sub-workflow already
-  // unwound through its parent was driven a second time from a stale copy. Both rows
-  // still ended `failed` with `rollbackStatus: 'completed'`, so no state assertion
-  // could see it. Only counting dispatches can.
-  const dispatched = new Map<string, number>();
-  for (const name of state.ledger.compensations) {
-    dispatched.set(name, (dispatched.get(name) ?? 0) + 1);
-  }
-  for (const [name, count] of dispatched) {
-    if (count > 1) {
-      fail('W-COMP-ONCE', `"${name}" compensated ${count} times; a rollback must never repeat`);
-    }
-  }
+  checkSignalFidelity(state, parent, fail);
+  checkGateOrdering(state, fail);
+  checkCompensationDispatches(state.spec, state.ledger, executions, fail);
 
-  // I1 — every delivered signal is present, unchanged.
+  for (const exec of executions) {
+    const spec = executionSpec(state.spec, exec);
+    if (!spec) {
+      fail(
+        'I8 child ownership',
+        `related execution "${exec.id}" has unknown workflow "${exec.workflowName}"`
+      );
+    }
+    checkProgress(state, exec, fail);
+    checkTerminalState(state, exec, fail);
+    checkNameDomain(spec, exec, fail);
+    checkRetryBudget(spec, state.ledger, exec, fail);
+    checkMapLifecycle(spec, state.ledger, exec, fail);
+    checkBranchTotality(spec, exec, fail);
+    checkRollbackCoherence(spec, state.ledger, exec, fail);
+  }
+  checkChildConsistency(state.spec, parent, executions, fail);
+}
+
+function checkSignalFidelity(state: InvariantState, exec: Execution, fail: InvariantFail): void {
   for (const [event, payload] of state.delivered) {
-    if (!(event in exec.signals)) {
-      fail('I1 signal fidelity', `signal "${event}" was delivered but is absent from exec.signals`);
+    if (!Object.hasOwn(exec.signals, event)) {
+      fail('I1 signal fidelity', `accepted signal "${event}" is absent from exec.signals`);
     }
     if (JSON.stringify(exec.signals[event]) !== JSON.stringify(payload)) {
       fail(
         'I1 signal fidelity',
-        `signal "${event}" payload changed: expected ${JSON.stringify(payload)}, got ${JSON.stringify(exec.signals[event])}`
+        `signal "${event}" changed: expected ${JSON.stringify(payload)}, got ${JSON.stringify(exec.signals[event])}`
       );
-    }
-  }
-
-  // I2 — progress never rewinds.
-  if (exec.currentNodeIndex < state.maxNodeIndex) {
-    fail(
-      'I2 monotonic progress',
-      `currentNodeIndex went ${state.maxNodeIndex} -> ${exec.currentNodeIndex}`
-    );
-  }
-  state.maxNodeIndex = Math.max(state.maxNodeIndex, exec.currentNodeIndex);
-
-  // I3 — terminal is forever.
-  if (state.sawTerminal && exec.state !== state.terminalState) {
-    fail(
-      'I3 no resurrection',
-      `execution left terminal state ${state.terminalState} for ${exec.state}`
-    );
-  }
-  if (TERMINAL.has(exec.state)) {
-    state.sawTerminal = true;
-    state.terminalState = exec.state;
-  }
-
-  // I4 — a step behind a waitFor cannot have run before its signal arrived.
-  const gated = stepsGatedBy(state.spec);
-  for (const name of state.ledger.steps) {
-    const event = gated.get(name);
-    if (event !== undefined && !state.delivered.has(event)) {
-      fail(
-        'I4 waitFor gating',
-        `step "${name}" ran but its gating signal "${event}" was never delivered`
-      );
-    }
-  }
-
-  // I5 — retries stay inside the declared budget.
-  for (const [name, record] of Object.entries(exec.steps)) {
-    const budget = state.retryBudget.get(baseName(name));
-    if (budget !== undefined && (record.attempts ?? 0) > budget) {
-      fail(
-        'I5 retry bound',
-        `step "${name}" recorded ${record.attempts} attempts, budget ${budget}`
-      );
-    }
-  }
-
-  // I6 — no phantom keys in the step map.
-  const allowed = declaredNames(state.spec);
-  for (const name of Object.keys(exec.steps)) {
-    if (!allowed.has(name) && !name.startsWith('__') && !name.startsWith('sub:')) {
-      fail('I6 name domain', `unexpected step key "${name}"`);
-    }
-  }
-
-  // I7 — compensations only ever belong to genuinely completed, compensable steps.
-  for (const name of state.ledger.compensations) {
-    if (!state.compensable.has(name)) {
-      fail('I7 compensation sanity', `"${name}" was compensated but declares no handler`);
-    }
-    const record = exec.steps[name];
-    if (record && record.status !== 'completed' && record.status !== 'failed') {
-      fail('I7 compensation sanity', `"${name}" was compensated while in status ${record.status}`);
     }
   }
 }
 
-/** `notify:2` -> `notify` (forEach indexed records share the declared budget). */
-function baseName(name: string): string {
-  const idx = name.lastIndexOf(':');
-  if (idx <= 0) return name;
-  const tail = name.slice(idx + 1);
-  return /^\d+$/.test(tail) ? name.slice(0, idx) : name;
+function checkGateOrdering(state: InvariantState, fail: InvariantFail): void {
+  const gated = stepsGatedBy(state.spec);
+  for (const call of state.ledger.steps) {
+    const event = gated.get(call.name);
+    if (event !== undefined && !state.delivered.has(event)) {
+      fail(
+        'I4 waitFor gating',
+        `step "${call.name}" ran before gating signal "${event}" was accepted`
+      );
+    }
+  }
+}
+
+function checkProgress(state: InvariantState, exec: Execution, fail: InvariantFail): void {
+  const previous = state.maxNodeIndex.get(exec.id) ?? 0;
+  if (exec.currentNodeIndex < previous) {
+    fail('I2 monotonic progress', `${exec.id} cursor went ${previous} -> ${exec.currentNodeIndex}`);
+  }
+  state.maxNodeIndex.set(exec.id, Math.max(previous, exec.currentNodeIndex));
+}
+
+function checkTerminalState(state: InvariantState, exec: Execution, fail: InvariantFail): void {
+  const previous = state.terminalStates.get(exec.id);
+  if (previous === 'failed' && exec.state !== 'failed') {
+    fail('I3 no resurrection', `${exec.id} left failed for ${exec.state}`);
+  }
+  if (previous === 'completed' && !exec.parentExecutionId && exec.state !== 'completed') {
+    fail('I3 no resurrection', `${exec.id} left completed for ${exec.state}`);
+  }
+  if (
+    previous === 'completed' &&
+    exec.parentExecutionId &&
+    !['completed', 'compensating', 'compensation-stuck', 'failed'].includes(exec.state)
+  ) {
+    fail('I3 no resurrection', `completed child ${exec.id} moved forward to ${exec.state}`);
+  }
+  if (TERMINAL.has(exec.state)) state.terminalStates.set(exec.id, exec.state);
+}
+
+function checkNameDomain(spec: WorkflowSpec, exec: Execution, fail: InvariantFail): void {
+  const allowed = declaredNames(spec);
+  for (const name of Object.keys(exec.steps)) {
+    if (!allowed.has(name)) {
+      fail('I6 name domain', `${exec.id} contains undeclared durable key "${name}"`);
+    }
+  }
+}
+
+function checkRetryBudget(
+  spec: WorkflowSpec,
+  ledger: Ledger,
+  exec: Execution,
+  fail: InvariantFail
+): void {
+  const groups = new Map<string, typeof ledger.steps>();
+  for (const call of ledger.steps) {
+    if (call.executionId !== exec.id) continue;
+    const key = `${call.name}#${call.occurrence}`;
+    const group = groups.get(key) ?? [];
+    group.push(call);
+    groups.set(key, group);
+  }
+  for (const [identity, calls] of groups) {
+    const first = calls[0];
+    if (!first) continue;
+    const budget = retryBudget(spec, first.name);
+    if (budget === undefined) {
+      fail('I5 retry bound', `${exec.id} dispatched undeclared handler "${first.name}"`);
+    }
+    if (calls.length > budget) {
+      fail(
+        'I5 retry bound',
+        `${exec.id}/${identity} dispatched ${calls.length} times, cumulative budget ${budget}`
+      );
+    }
+    const keys = new Set(calls.map((call) => call.idempotencyKey));
+    if (keys.size > 1) {
+      fail('I5 retry identity', `${exec.id}/${identity} changed idempotency key across retries`);
+    }
+  }
+  for (const [name, record] of Object.entries(exec.steps)) {
+    const budget = retryBudget(spec, name);
+    if (budget !== undefined && (record.attempts ?? 0) > budget) {
+      fail(
+        'I5 retry bound',
+        `${exec.id}/${name} persisted ${record.attempts} attempts, budget ${budget}`
+      );
+    }
+  }
+}
+
+function checkMapLifecycle(
+  spec: WorkflowSpec,
+  ledger: Ledger,
+  exec: Execution,
+  fail: InvariantFail
+): void {
+  for (const node of spec.nodes) {
+    if (node.kind !== 'map') continue;
+    const calls = ledger.maps.filter(
+      (call) => call.executionId === exec.id && call.name === node.name
+    );
+    if (calls.length > 1) {
+      fail(
+        'I11 map exclusive delivery',
+        `${exec.id}/${node.name} transformed ${calls.length} times`
+      );
+    }
+    const call = calls[0];
+    if (!call) continue;
+    const record = exec.steps[node.name];
+    if (!record) {
+      fail('I11 map lifecycle', `${exec.id}/${node.name} dispatched with no durable record`);
+    }
+    if (record.status !== call.outcome) {
+      fail(
+        'I11 map lifecycle',
+        `${exec.id}/${node.name} outcome ${call.outcome}, record ${record.status}`
+      );
+    }
+    if (
+      record.startedAt === undefined ||
+      record.completedAt === undefined ||
+      record.completedAt < record.startedAt
+    ) {
+      fail('I11 map lifecycle', `${exec.id}/${node.name} has incoherent timestamps`);
+    }
+    if (call.outcome === 'failed' && !record.error?.includes('scripted map failure')) {
+      fail('I11 map lifecycle', `${exec.id}/${node.name} lost its transform failure`);
+    }
+  }
+}
+
+function checkBranchTotality(spec: WorkflowSpec, exec: Execution, fail: InvariantFail): void {
+  for (let index = 0; index < spec.nodes.length; index++) {
+    if (!selectedBranchMissing(spec, index)) continue;
+    if (exec.currentNodeIndex > index || exec.state === 'completed') {
+      fail(
+        'I9 branch totality',
+        `${exec.id} advanced past branch ${index}, whose selected path is not declared`
+      );
+    }
+  }
+}
+
+function executionSummary(exec: Execution): object {
+  return {
+    id: exec.id,
+    workflowName: exec.workflowName,
+    parentExecutionId: exec.parentExecutionId,
+    state: exec.state,
+    currentNodeIndex: exec.currentNodeIndex,
+    rollbackStatus: exec.rollbackStatus,
+    failureReason: exec.failureReason,
+    committedAt: exec.committedAt,
+    signals: exec.signals,
+    steps: exec.steps,
+  };
 }

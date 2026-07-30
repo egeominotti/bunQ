@@ -40,12 +40,14 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       id, queue, data, priority, created_at, run_at, attempts,
       max_attempts, backoff, ttl, timeout, unique_key, custom_id,
       depends_on, parent_id, children_ids, tags, state, lifo, group_id,
-      remove_on_complete, remove_on_fail, stall_timeout, stall_count, timeline
+      remove_on_complete, remove_on_fail, fail_parent_on_failure,
+      remove_dependency_on_failure, continue_parent_on_failure,
+      ignore_dependency_on_failure, stall_timeout, stall_count, timeline
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       queue=excluded.queue, data=excluded.data, priority=excluded.priority,
@@ -55,6 +57,10 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       depends_on=excluded.depends_on, parent_id=excluded.parent_id, children_ids=excluded.children_ids,
       tags=excluded.tags, state=excluded.state, lifo=excluded.lifo, group_id=excluded.group_id,
       remove_on_complete=excluded.remove_on_complete, remove_on_fail=excluded.remove_on_fail,
+      fail_parent_on_failure=excluded.fail_parent_on_failure,
+      remove_dependency_on_failure=excluded.remove_dependency_on_failure,
+      continue_parent_on_failure=excluded.continue_parent_on_failure,
+      ignore_dependency_on_failure=excluded.ignore_dependency_on_failure,
       stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
       timeline=excluded.timeline,
       -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
@@ -154,6 +160,10 @@ export interface DbJob {
   progress_msg: string | null;
   remove_on_complete: number;
   remove_on_fail: number;
+  fail_parent_on_failure: number;
+  remove_dependency_on_failure: number;
+  continue_parent_on_failure: number;
+  ignore_dependency_on_failure: number;
   stall_timeout: number | null;
   last_heartbeat: number | null;
   stall_count: number;

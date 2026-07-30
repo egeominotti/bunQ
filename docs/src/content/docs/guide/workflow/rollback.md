@@ -54,7 +54,12 @@ unwind:     index, bucket, database     ← reverse START order
 ```
 
 :::caution[Reverse start order is a heuristic, not a dependency graph]
-If your search index depends on the database and the database started first, the unwind destroys the database before the index. Compensations of concurrent steps must be **mutually independent**. If they are not, split them into sequential steps.
+Builder order is deterministic, but it does not describe dependencies between
+work that was declared concurrent. If one parallel step must remain alive while
+another is undone, reverse builder order may be the wrong order for that pair.
+Compensations of concurrent steps must therefore be **mutually independent**.
+If they are not, split them into sequential steps so their dependency and
+rollback order are explicit.
 :::
 
 ## Every eligible step gets exactly one outcome
@@ -80,11 +85,11 @@ The unwind **stops** and the run parks in `compensation-stuck`. It does not plou
 
 ```typescript
 const exec = engine.getExecution(run.id);
-exec.state;                         // 'compensation-stuck'
-exec.rollbackStatus;                // 'stuck'
-exec.failureReason;                 // why the RUN failed, a separate axis
-exec.steps.charge.compensation;     // { status: 'compensation-failed', error, at }
-exec.steps.reserve.compensation;    // undefined, not reached, left open on purpose
+exec?.state;                              // 'compensation-stuck'
+exec?.rollbackStatus;                     // 'stuck'
+exec?.failureReason;                      // why the RUN failed, a separate axis
+exec?.steps.charge?.compensation;         // compensation-failed
+exec?.steps.reserve?.compensation;        // undefined, not reached
 ```
 
 The steps behind the failure are deliberately left **without** an outcome, so a resume can still reach them. Two ways out:
@@ -115,9 +120,9 @@ A `compensate` handler is bounded by the step's own `timeout`, the same one that
 If `refund` never settles, the unwind does not wait for it forever. The step is recorded like any other failed reversal and the run parks:
 
 ```typescript
-exec.state;                       // 'compensation-stuck'
-exec.rollbackStatus;              // 'stuck'
-exec.steps.charge.compensation;   // { status: 'compensation-failed', error: 'Step timed out after 1000ms', at }
+exec?.state;                             // 'compensation-stuck'
+exec?.rollbackStatus;                    // 'stuck'
+exec?.steps.charge?.compensation;        // compensation-failed, timed out after 1000ms
 ```
 
 Without that bound the run would sit in `compensating` instead, which is worse than a parked one: it is not `compensation-stuck`, so there is nothing to `resumeCompensation` or `abandonCompensation`, and every later `engine.recover()` would find the claim still held and return without having done anything.
@@ -171,6 +176,11 @@ If a workflow declares no pivot, everything stays compensatable to the end.
 `.subWorkflow(name, inputMapper)` runs another registered workflow as a step. Its results land under `ctx.steps['sub:<name>']`:
 
 ```typescript
+const paymentFlow = new Workflow<{ amount: number }>('payment')
+  .step('authorize', async (ctx) => authorizePayment(ctx.input.amount), {
+    compensate: async (ctx) => voidPayment(ctx.forwardIdempotencyKey),
+  });
+
 const orderFlow = new Workflow('order')
   .step('create-order', async () => ({ orderId: 'ORD-1', total: 99 }), {
     compensate: async () => cancelOrder(),
@@ -189,6 +199,13 @@ engine.register(orderFlow);
 This applies whether the child finished or not. A child that FAILED is rolled back through its own unwind too, and the parent's `sub:` record is settled `failed` rather than left in flight, so a dashboard never shows a child still running under a parent that has already stopped.
 
 If the child parks in `compensation-stuck`, the parent inherits it and parks too, rather than reporting a clean rollback over a half-undone child. The parent's `rollbackStatus` reads `stuck` and its `failureReason` names the child and the two ways out, `resumeCompensation` and `abandonCompensation`. Resuming the parent reaches the child: the retry is forwarded, so the child's failed reversal is attempted again and the whole saga can finish from one call.
+
+That forwarding applies only while the child is still parked. If you explicitly
+call `abandonCompensation(childId)`, the child becomes terminal (`failed` with
+`rollbackStatus: 'stuck'`). Resuming an ancestor cannot override that operator
+decision or run the child's compensators again: the ancestor remains
+`compensation-stuck` until you abandon it separately or otherwise reconcile the
+partial rollback.
 
 ## Loops
 
@@ -213,7 +230,12 @@ Each iteration gets its own `idempotencyKey`, so the keys do not collide between
 A handler that dereferences a result the failed turn never produced throws, and a compensation that throws halts the unwind at that step, leaving everything behind it untouched.
 
 :::caution[Sub-workflows hold a worker slot]
-The parent polls while the child runs, with a hardcoded 300 second ceiling. Keep `concurrency` above the number of concurrently nested runs, or the children have no slot left to run in.
+The parent polls while the child runs. The default ceiling is 300 seconds and
+the default interval is 100 ms; configure both with
+`.subWorkflow(name, mapper, { timeout, pollInterval })`. Keep `concurrency`
+above the number of concurrently nested runs, or the children have no slot left
+to run in. The timeout deadline is based on the child's original creation time,
+so restarting the parent does not reset it.
 
 If a child outlives that ceiling, the parent's step fails on the timeout while the child is still running. A child that has not stopped is never rolled back: rolling it back would run its reversals underneath its own forward steps, and it could then finish `completed` with its undo already done.
 

@@ -990,9 +990,21 @@ Some work has dependencies: an order ships only after inventory and payment both
 ```typescript
 import { FlowProducer, Worker } from 'bunqueue/client';
 
+type OrderData = { orderId: string };
 const flow = new FlowProducer({ embedded: true });
 
-await flow.add({
+const checks = new Worker<OrderData>('checks', async (job) => ({
+  check: job.name,
+  approved: true,
+}), { embedded: true });
+
+const orders = new Worker<OrderData>('orders', async (job) => {
+  // Children finished first; read what each one returned
+  const results = await job.getChildrenValues();
+  return { orderId: job.data.orderId, shipped: true, checks: results };
+}, { embedded: true });
+
+const node = await flow.add<OrderData>({
   name: 'fulfill-order',
   queueName: 'orders',
   data: { orderId: 'ORD-123' },
@@ -1002,11 +1014,12 @@ await flow.add({
   ],
 });
 
-new Worker('orders', async (job) => {
-  // Children finished first; read what each one returned
-  const results = await job.getChildrenValues();
-  return shipOrder(job.data.orderId, results);
-}, { embedded: true });
+const result = await node.job.waitUntilFinished(null, 10_000);
+console.log(result);
+
+await checks.close();
+await orders.close();
+await flow.close();
 ```
 
 </TabItem>

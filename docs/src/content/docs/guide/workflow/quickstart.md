@@ -36,33 +36,51 @@ const orderFlow = new Workflow<{ orderId: string; amount: number }>('order-pipel
     // ctx.input is typed as { orderId: string; amount: number }
     if (ctx.input.amount <= 0) throw new Error('Invalid amount');
     return { orderId: ctx.input.orderId, validated: true };
-  })
+  }, { retry: 1 })
   .step('charge', async (ctx) => {
     // ctx.steps.validate is typed from the previous step's return value
-    const txId = await payments.charge(ctx.steps.validate.orderId, ctx.input.amount);
+    const txId = await payments.charge(
+      ctx.steps.validate.orderId,
+      ctx.input.amount,
+      { idempotencyKey: ctx.idempotencyKey },
+    );
     return { transactionId: txId };
   }, {
-    compensate: async () => {
-      // Runs automatically if a LATER step fails
-      await payments.refund();
+    compensate: async (ctx) => {
+      // A failed charge may have committed without returning its transaction id.
+      const charge = ctx.steps.charge
+        ?? await payments.findByIdempotencyKey(ctx.forwardIdempotencyKey);
+      if (charge) {
+        await payments.refund(charge.transactionId, {
+          idempotencyKey: ctx.idempotencyKey,
+        });
+      }
     },
   })
   .step('confirm', async (ctx) => {
-    await mailer.send('order-confirm', { txId: ctx.steps.charge.transactionId });
+    await mailer.send(
+      'order-confirm',
+      { txId: ctx.steps.charge.transactionId },
+      { idempotencyKey: ctx.idempotencyKey },
+    );
     return { emailSent: true };
   });
 ```
+
+The provider methods are application code, but their idempotency arguments are
+not decorative. They make a retry of an outcome-unknown charge or email land
+on the same external operation. The compensate handler also reconciles by the
+forward key because the charge most in need of reversal may be the one whose
+response never came back.
 
 ## Run it
 
 ```typescript
 const engine = new Engine({ embedded: true, dataPath: './data/wf.db' });
 engine.register(orderFlow);
+await engine.recover(); // after every definition is registered, before new work
 
 const run = await engine.start('order-pipeline', { orderId: 'ORD-1', amount: 99.99 });
-
-const exec = engine.getExecution(run.id);
-console.log(exec?.state);   // 'running' → 'completed'
 ```
 
 :::caution[`dataPath` is what makes it durable]
@@ -71,23 +89,34 @@ Without it the execution store is in-memory and a restart loses every run in fli
 
 ## Watch it finish
 
-`start()` returns as soon as the first step is enqueued; the run continues in the background. Poll the state, or subscribe to events:
+`start()` returns as soon as the first node is enqueued; the run continues in
+the background. Poll durable state when you need a definitive answer:
 
 ```typescript
-const unsubscribe = engine.subscribe(run.id, (event) => console.log(event.type));
-// workflow:started → step:started → step:completed → ... → workflow:completed
+const terminal = new Set(['completed', 'failed']);
+let exec = engine.getExecution(run.id);
+while (exec && !terminal.has(exec.state)) {
+  await Bun.sleep(50);
+  exec = engine.getExecution(run.id);
+}
+console.log(exec?.state);
 ```
+
+Event subscriptions are live notifications, not a replay log. Attach
+`engine.onAny()` before `start()` if you must observe the complete event
+sequence; `subscribe(run.id, ...)` is useful for updates after the handle is
+known, but a very short workflow may already have emitted early events.
 
 ## Make it fail
 
 Change `confirm` to throw and run it again. The engine records the failure, then walks backwards through the steps that completed and calls their `compensate` handlers in reverse:
 
 ```typescript
-const exec = engine.getExecution(run.id);
-exec.state;                              // 'failed'
-exec.failureReason;                      // the error from `confirm`
-exec.rollbackStatus;                     // 'completed', the unwind finished
-exec.steps.charge.compensation.status;   // 'compensated'
+const failedExecution = engine.getExecution(run.id);
+failedExecution?.state;                              // 'failed'
+failedExecution?.failureReason;                      // the error from `confirm`
+failedExecution?.rollbackStatus;                     // 'completed', unwind finished
+failedExecution?.steps.charge?.compensation?.status; // 'compensated'
 ```
 
 Two separate facts, two separate fields: **why the run failed**, and **what the rollback then did**. They are not the same question, and collapsing them makes it impossible to alert on the right one.

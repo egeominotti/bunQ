@@ -53,7 +53,7 @@ class PushBatchCommand extends QueueCommand {
       if (previous) model.removed++;
       model.jobs.set(id, {
         attempts: 0,
-        diskState: index === 1 ? 'delayed' : 'waiting',
+        diskState: index === 1 ? 'delayed' : readyState(this.priority),
         generation,
         maxAttempts: 3,
         priority: this.priority,
@@ -155,7 +155,7 @@ class AckBatchCommand extends QueueCommand {
       const parent = model.jobs.get(MODEL_FLOW_PARENT_ID);
       if (parent?.state === 'waiting-children') {
         parent.state = readyState(parent.priority);
-        parent.diskState = 'waiting';
+        parent.diskState = readyState(parent.priority);
       }
     }
     await this.verify(model, real);

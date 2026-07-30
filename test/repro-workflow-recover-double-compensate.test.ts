@@ -29,7 +29,7 @@ import { Engine, Workflow } from '../src/client/workflow';
 
 let engine: Engine | undefined;
 afterEach(async () => {
-  await engine?.close(true).catch(() => {});
+  await engine?.close(true).catch(() => undefined);
   engine = undefined;
 });
 
@@ -88,6 +88,7 @@ await e.start('p-svc');
     // ---- phase 2: fresh process state, recover ----
     const undo: string[] = [];
     const child = new Workflow('c-svc').step('provision', async () => ({ id: 'res-1' }), {
+      timeout: 600_000,
       compensate: async () => {
         undo.push('undo-child-provision');
       },

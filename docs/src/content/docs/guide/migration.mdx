@@ -104,7 +104,11 @@ Then, in your code:
 - **`jobId` deduplication**: adding the same `jobId` twice returns the existing job instead of creating a duplicate, exactly like BullMQ.
 - **Events**: `worker.on('completed' | 'failed' | 'progress', ...)` fire with the same signatures.
 - **Job states**: the full BullMQ v5 state machine, including `prioritized` and `waiting-children`.
-- **Flows**: `FlowProducer.add()`, `addBulk()`, `getFlow()`, `queuesOptions`, `failParentOnFailure`, `removeDependencyOnFailure`. Flow creation is atomic (bunqueue uses rollback where BullMQ uses Redis Lua, same guarantee).
+- **Flows**: `FlowProducer.add()`, `addBulk()`, `getFlow()`,
+  `queuesOptions`, `failParentOnFailure`, `removeDependencyOnFailure`. The Bun
+  package sends one broker-side `PUSHF` graph; configured SQLite commits all
+  rows before publication, providing the same all-or-nothing creation
+  guarantee without client-side rollback.
 - **Per-worker rate limiting**: `limiter: { max, duration }` on `WorkerOptions`, unchanged.
 
 ```typescript

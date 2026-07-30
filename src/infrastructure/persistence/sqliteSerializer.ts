@@ -38,6 +38,21 @@ export function persistedStallCount(job: Pick<Job, 'stallCount'>): number {
   return job.stallCount ?? 0;
 }
 
+/** Derive the durable initial state from the authoritative timeline. */
+export function persistedInitialState(job: Job, now: number = Date.now()): string {
+  const latest = job.timeline[job.timeline.length - 1]?.state;
+  if (
+    latest === 'waiting-children' ||
+    latest === 'waiting' ||
+    latest === 'prioritized' ||
+    latest === 'delayed'
+  ) {
+    return latest;
+  }
+  if (job.runAt > now) return 'delayed';
+  return job.priority > 0 ? 'prioritized' : 'waiting';
+}
+
 /**
  * Symbol marker stamped on a Job whose `depends_on` blob failed to decode.
  *
@@ -126,14 +141,14 @@ export function rowToJob(row: DbJob): Job {
     lastHeartbeat: row.last_heartbeat ?? row.created_at,
     stallTimeout: row.stall_timeout,
     stallCount: row.stall_count ?? 0,
-    // BullMQ v5 additional fields (not persisted in DB, use defaults)
+    // BullMQ v5 additional fields
     stackTraceLimit: 10,
     keepLogs: null,
     sizeLimit: null,
-    failParentOnFailure: false,
-    removeDependencyOnFailure: false,
-    continueParentOnFailure: false,
-    ignoreDependencyOnFailure: false,
+    failParentOnFailure: row.fail_parent_on_failure === 1,
+    removeDependencyOnFailure: row.remove_dependency_on_failure === 1,
+    continueParentOnFailure: row.continue_parent_on_failure === 1,
+    ignoreDependencyOnFailure: row.ignore_dependency_on_failure === 1,
     deduplicationTtl: null,
     deduplicationExtend: false,
     deduplicationReplace: false,

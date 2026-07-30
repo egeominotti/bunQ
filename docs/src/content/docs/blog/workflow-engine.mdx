@@ -34,11 +34,9 @@ import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
 Most teams reach a point where individual jobs are not enough. An order pipeline, a CI/CD deployment, an onboarding flow, these are sequences of jobs with dependencies, rollback logic, and sometimes human decisions in the middle.
 
-The existing options all introduce significant complexity:
-
-- **Temporal** needs PostgreSQL, Elasticsearch, and 7+ services running
-- **Inngest** is cloud-only with vendor lock-in
-- **Trigger.dev** requires Redis and PostgreSQL alongside your app
+The established alternatives introduce a separate orchestration runtime or
+control plane. That can be the right trade-off for multi-region coordination,
+but it is another durable service, deployment and operational model to own.
 
 bunqueue's approach: if you already have a job queue with SQLite persistence, the execution engine is a natural extension. No new databases, no new protocols, no new deployment targets.
 
@@ -126,11 +124,16 @@ const deploy = new Workflow('deploy')
   .waitFor('qa-approval')
   .step('deploy-prod', async (ctx) => { /* ... */ });
 
+engine.register(deploy);
+const deployRun = await engine.start('deploy', {});
+
 // Later, when QA approves:
-await engine.signal(runId, 'qa-approval', { approvedBy: 'qa-lead' });
+await engine.signal(deployRun.id, 'qa-approval', { approvedBy: 'qa-lead' });
 ```
 
-The workflow resumes exactly where it left off. Execution state is persisted in SQLite, so it survives process restarts.
+The durable cursor resumes at the same node after `recover()`. Completed records
+are skipped; an interrupted record may replay because the engine cannot assume
+that its external effect did or did not commit.
 
 ## Step Retry, Parallel Steps & Sub-Workflows
 
@@ -157,16 +160,30 @@ Run independent steps concurrently with `.parallel()`:
 Compose workflows by nesting them with `.subWorkflow()`:
 
 ```typescript
+const payment = new Workflow<{ amount: number }>('payment')
+  .step('authorize', async (ctx) => ({ authorized: ctx.input.amount }));
+
 const parent = new Workflow('order')
   .step('create', async () => ({ total: 99 }))
   .subWorkflow('payment', (ctx) => ({
     amount: (ctx.steps['create'] as { total: number }).total,
-  }))
+  }), {
+    timeout: 15 * 60_000,
+    pollInterval: 250,
+  })
   .step('confirm', async (ctx) => {
     const result = ctx.steps['sub:payment'];
     return { done: true };
   });
+
+engine.register(payment); // register the child definition before the parent runs
+engine.register(parent);
 ```
+
+The parent polls the child's durable execution record. Its timeout is measured
+from the child's original creation time, so restarting the parent does not grant
+another full window; expiry also does not forcibly cancel a child that is still
+running.
 
 ## Observability & Lifecycle Events
 
@@ -177,7 +194,9 @@ engine.on('step:failed', (e) => alerting.send(e));
 engine.onAny((e) => metrics.increment(`workflow.${e.type}`));
 ```
 
-Eleven event types cover the full lifecycle: `workflow:started`, `step:completed`, `step:retry`, `signal:timeout`, and more.
+Fifteen event types cover the full lifecycle: workflow, step, signal and
+compensation events, including `workflow:started`, `step:retry`,
+`signal:timeout` and `compensation:failed`.
 
 ## Loops, forEach & Map
 
@@ -228,6 +247,10 @@ const run = await engine.start('validated', { email: 'user@test.com' });
 const unsub = engine.subscribe(run.id, (e) => console.log(e.type));
 ```
 
+`subscribe()` observes future in-process events; it is not a replay log. Read
+`getExecution(run.id)` for durable state, and call `unsub()` when the live
+subscription is no longer needed.
+
 <Aside type="note">
   bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you bring your own, `bun add zod` (used above), ArkType, Valibot, or anything with a compatible `.parse()` method. As of 2.8.0, bunqueue's only runtime dependencies are `croner` and `msgpackr`.
 </Aside>
@@ -245,12 +268,16 @@ engine.cleanup(7 * 24 * 60 * 60 * 1000);  // Delete 7-day-old executions
 
 The workflow engine is built on top of bunqueue's existing Queue and Worker:
 
-1. **Workflow** is a pure data structure, a DAG of step definitions, branch conditions, and wait points
+1. **Workflow** is a pure ordered graph of top-level nodes and inline step groups
 2. **Engine** wraps a Queue and Worker pair, using them to schedule and process step jobs
-3. **Execution state** is stored in SQLite via `WorkflowStore`, tracking which steps completed, their results, and received signals
-4. Each step runs as a regular bunqueue job with retry, timeout, and stall detection
+3. **Execution state** is stored in SQLite via `WorkflowStore`, including the cursor, step records, signals, control-flow decisions and sealed definition identity
+4. Each top-level node is driven by a bunqueue job; branch, parallel and loop body steps execute inside that node and persist their own records
 
-This means workflows get all of bunqueue's existing reliability features for free: persistence, heartbeats, DLQ, and S3 backups.
+Queue delivery is at-least-once. A completed record is skipped on re-entry, but
+work left `running` has an unknown external outcome and may execute again.
+Production handlers must therefore pass `ctx.idempotencyKey` to external
+providers, use a durable `dataPath`, and call `recover()` after registering all
+definitions on startup.
 
 ## When to Use It
 
@@ -276,6 +303,9 @@ import { Workflow, Engine } from 'bunqueue/workflow';
 
 Read the full guide: [Workflow Engine Documentation](/guide/workflow/)
 
-<Aside type="tip" title="80+ workflow tests">
-The workflow engine ships with 80+ tests covering linear flows, branching, compensation, signals, timeouts, retry, parallel steps, nested workflows, loops, forEach, map, schema validation, subscribe, observability, and archival, in both embedded and TCP modes.
+<Aside type="tip" title="Executable workflow examples">
+The guide scenarios run against the real workflow engine in
+`test/workflow-docs-examples.test.ts`; framework integrations have their own
+package-backed suite, and the durability model drives generated histories
+against a real TCP broker and SQLite.
 </Aside>

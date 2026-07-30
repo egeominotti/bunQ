@@ -41,7 +41,7 @@ class AddFlowCommand extends QueueCommand {
     model.accepted += 2;
     model.jobs.set(MODEL_FLOW_CHILD_ID, {
       attempts: 0,
-      diskState: 'waiting',
+      diskState: 'prioritized',
       generation: childGeneration,
       maxAttempts: 3,
       priority: 2,
@@ -52,7 +52,7 @@ class AddFlowCommand extends QueueCommand {
     });
     model.jobs.set(MODEL_FLOW_PARENT_ID, {
       attempts: 0,
-      diskState: 'waiting',
+      diskState: 'waiting-children',
       generation: parentGeneration,
       maxAttempts: 3,
       priority: 1,
@@ -98,7 +98,7 @@ class AckFlowCommand extends QueueCommand {
     if (id === MODEL_FLOW_CHILD_ID) {
       const parent = model.jobs.get(MODEL_FLOW_PARENT_ID)!;
       parent.state = readyState(parent.priority);
-      parent.diskState = 'waiting';
+      parent.diskState = readyState(parent.priority);
     }
     await this.verify(model, real);
   }

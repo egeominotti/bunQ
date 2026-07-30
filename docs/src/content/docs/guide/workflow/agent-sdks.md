@@ -104,7 +104,10 @@ const flow = new Workflow<{ repo: string }>('dependency-upgrade')
   }, { retry: 1 });
 ```
 
-While the run is parked at the gate it holds no worker and no memory, only a row. The review can arrive an hour later, or after a redeploy.
+While the run is parked at the gate it holds no worker slot. Its durable state
+is in SQLite, with one lightweight timer in memory while a timed gate's process
+is alive. The review can arrive an hour later, or after the engine has been
+recreated and recovered following a redeploy.
 
 Note that `agent-edit` declares no `compensate`. It edited a working copy on a branch that is about to be deleted, so there is nothing to undo, and a step without an inverse simply carries no compensation record. Only steps that changed something outside the branch need one.
 
@@ -395,7 +398,7 @@ Nothing on this page is illustrative.
 | Example | How it was verified |
 |---|---|
 | Claude Agent SDK saga and session resume | `scripts/agent-sdks/claude-agent-live.ts`, live API, 2/2 passed, output above |
-| OpenAI Agents SDK rollback, history, approval | `test/workflow-agent-sdks.test.ts`, 7/7 passed |
+| OpenAI Agents SDK rollback, history, approval | `test/workflow-agent-sdks.test.ts` |
 | Mastra tool rollback | same file |
 | LangGraph graph rollback | same file |
 

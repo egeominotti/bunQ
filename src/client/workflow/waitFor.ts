@@ -19,6 +19,7 @@ import { clock, type TimerHandle } from './clock';
 
 /** Largest delay setTimeout accepts before wrapping (2**31-1 ms, ~24.8 days) */
 export const MAX_TIMER_MS = 2_147_483_647;
+const TIMEOUT_ENQUEUE_RETRY_MS = 5_000;
 
 export interface TimerDeps {
   queue: Queue;
@@ -48,30 +49,40 @@ export function scheduleTimeoutCheck(
   nodeIdx: number,
   ms: number
 ): void {
-  const delay = Math.min(Math.max(ms, 0), MAX_TIMER_MS);
-  // Replacing a live timer for the same execution — re-entering a waitFor node used
-  // to leak the previous one, which then fired against a node the run had left.
-  const previous = deps.timers.get(execId);
-  if (previous) clock().clearTimeout(previous);
-  const timer = clock().setTimeout(() => {
-    deps.timers.delete(execId);
-    const jobData: StepJobData = { executionId: execId, workflowName, nodeIndex: nodeIdx };
-    deps.queue.add('wf:step', jobData as unknown as Record<string, unknown>).catch(() => {
-      /* Queue may be closed */
-    });
-  }, delay);
-  // A parked approval gate is a NORMAL steady state, and the clamp above makes this
-  // timer up to ~24.8 days long. Without unref a process whose only remaining work is
-  // a parked run never exits, even after close(): the event loop stays alive holding a
-  // timer for a signal that may never come. unref keeps the timer fully functional
-  // while the process has other work, and stops it from being the reason to stay up.
-  // `clearTimers()` covers the explicit-shutdown path. This does NOT, on its own, let
-  // a parked engine's process exit: measured, a child that omits `close()` hangs with
-  // or without this line, because the embedded queue and worker pin the process
-  // independently. It is defence in depth for the timer itself, no more, and the
-  // earlier version of this comment claimed the stronger property.
-  timer.unref?.();
-  deps.timers.set(execId, timer);
+  const arm = (requestedDelay: number): void => {
+    const delay = Math.min(Math.max(requestedDelay, 0), MAX_TIMER_MS);
+    // Replacing a live timer for the same execution — re-entering a waitFor node used
+    // to leak the previous one, which then fired against a node the run had left.
+    const previous = deps.timers.get(execId);
+    if (previous) clock().clearTimeout(previous);
+
+    const timer = clock().setTimeout(() => {
+      const jobData: StepJobData = { executionId: execId, workflowName, nodeIndex: nodeIdx };
+      const published = (): void => {
+        // Keep the handle in the map while add() is pending. signal() and close() use
+        // deletion as cancellation; a late rejection must not resurrect their timer.
+        if (deps.timers.get(execId) === timer) deps.timers.delete(execId);
+      };
+      const failed = (): void => {
+        if (deps.timers.get(execId) !== timer) return;
+        arm(TIMEOUT_ENQUEUE_RETRY_MS);
+      };
+
+      try {
+        deps.queue
+          .add('wf:step', jobData as unknown as Record<string, unknown>)
+          .then(published, failed);
+      } catch {
+        failed();
+      }
+    }, delay);
+    // A parked approval gate is a normal steady state. unref keeps its timer
+    // functional without making it the reason the process remains alive.
+    timer.unref?.();
+    deps.timers.set(execId, timer);
+  };
+
+  arm(ms);
 }
 
 /**
@@ -120,13 +131,15 @@ export async function runWaitFor(
         return;
       }
       deps.emitter?.emitSignal('signal:timeout', exec.id, exec.workflowName, node.event);
+      const timeoutReason = `Signal "${node.event}" timed out after ${node.timeout}ms`;
       exec.steps[waitKey] = {
         status: 'failed',
         startedAt: waitingSince,
         completedAt: clock().now(),
-        error: `Signal "${node.event}" timed out after ${node.timeout}ms`,
+        error: timeoutReason,
       };
       exec.state = 'failed';
+      exec.failureReason = timeoutReason;
       // Unguarded on purpose, same reasoning as the failure write in `executor.ts`. Disk
       // still says `waiting`, which `listRecoverable()` covers, so `recoverWaiting`
       // recomputes the remaining time, re-enqueues, and the gate times out again rather

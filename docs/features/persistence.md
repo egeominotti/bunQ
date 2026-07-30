@@ -12,7 +12,8 @@ Owns:
 - The SQLite `Database` handle, PRAGMA tuning, schema creation, and incremental migrations (`sqlite.ts:71-121`, `sqlite.ts:255-278`).
 - Buffered and durable (immediate) job inserts, single and bulk (`insertJob`, `insertJobImmediate`, `insertJobsBatch`).
 - State-mutating writes: `markActive`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `deleteJob`.
-- Results, DLQ rows, cron rows, and queue control-state rows (CRUD + bulk load).
+- Results, DLQ rows, cron rows, queue control-state rows, and the durable
+  flow-failure outbox (CRUD + bulk load/replay).
 - Paginated recovery reads (`loadPendingJobs`, `loadActiveJobs`, `loadCompletedJobs`, `loadDlq`, plus the id-set loaders).
 - Disk-full detection, write-retry/backoff, and critical-loss accounting.
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
@@ -59,6 +60,10 @@ type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: numb
 Key methods (real signatures):
 - Inserts: `insertJob(job: Job, durable?: boolean): void`, `insertJobImmediate(job: Job): void`, `insertJobsBatch(jobs: Job[], durable?: boolean): void`.
 - State: `markActive(jobId, startedAt, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `deleteJob(jobId)`.
+- Flow transactions: `commitFailedJob(jobId, dlqEntry, flowFailure)`,
+  `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
+  `updateFlowParentResolution(parent)`, `saveFlowFailure(record)`,
+  `loadFlowFailures()`, `deleteFlowFailure(parentId, childId?)`.
 - Results: `storeResult(jobId, result)`, `getResult(jobId)`, `hasResult(jobId)`.
 - DLQ: `saveDlqEntry(entry)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
@@ -80,7 +85,7 @@ Key methods (real signatures):
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
-`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 21`, `MIGRATIONS`.
+`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 27`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -89,7 +94,10 @@ No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by
 
 DB-row types are defined in `statements.ts` and converted to/from domain types in `sqliteSerializer.ts`. See [data-model](../data-model.md) for full domain shapes. Tables (`schema.ts:17-129`):
 
-- `jobs` — `id TEXT PK`, `queue`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, `stall_timeout`, `last_heartbeat`, `stall_count` (default 0), `timeline BLOB`, `stacktrace BLOB`.
+- `jobs` — `id TEXT PK`, `queue`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, `fail_parent_on_failure`, `remove_dependency_on_failure`, `continue_parent_on_failure`, `ignore_dependency_on_failure`, `stall_timeout`, `last_heartbeat`, `stall_count` (default 0), `timeline BLOB`, `stacktrace BLOB`.
+- `flow_failures` — `(parent_id, child_id)` primary key plus child queue,
+  failure mode/error and creation time. It is both the durable propagation
+  outbox and the live store for ignored/continued child errors.
 - `job_results` — `job_id TEXT PK`, `result BLOB`, `completed_at`.
 - `dlq` — `id INTEGER PK AUTOINCREMENT`, `job_id`, `queue`, `entry BLOB` (full `DlqEntry`), `entered_at`. Note `dlq` is append-only by `id`; a single `job_id` can have multiple rows.
 - `cron_jobs` — keyed by `name`, includes `dedup BLOB`, `skip_missed_on_restart`, `skip_if_no_worker`, `prevent_overlap` (default 1), `job_options BLOB`.
@@ -113,9 +121,15 @@ Buffered write (default path):
 1. `insertJob(job)` → `writeBuffer.add(job)` pushes onto the active buffer (`sqlite.ts:287-293`, `sqliteBatch.ts:230-235`).
 2. The buffer auto-flushes every `writeBufferFlushMs` (10ms) via `setInterval`, or immediately when `activeBuffer.length >= bufferSize` (`sqliteBatch.ts:217-245`).
 3. `flush()` does an atomic double-buffer swap (active → flush buffer, new active = []) under a `flushing` guard, then calls `BatchInsertManager.insertJobsBatch` (`sqliteBatch.ts:257-337`).
-4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/25) = 39` rows (SQLite ~999 bound variables, `COLS_PER_ROW=25`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-128`). The multi-row `INSERT` is an upsert (`ON CONFLICT(id) DO UPDATE`), so a colliding `id` overwrites the existing row in place instead of throwing `UNIQUE` and failing the whole flush.
+4. `BatchInsertManager` runs one transaction of multi-row `INSERT`s chunked at `MAX_ROWS_PER_INSERT = floor(999/29) = 34` rows (SQLite ~999 bound variables, `COLS_PER_ROW=29`); prepared statements are cached per chunk size for sizes 1–100 (`sqliteBatch.ts:55-128`). The multi-row `INSERT` is an upsert (`ON CONFLICT(id) DO UPDATE`), so a colliding `id` overwrites the existing row in place instead of throwing `UNIQUE` and failing the whole flush.
 
 Durable write (`durable: true`): bypasses the buffer entirely. `insertJobImmediate` runs the single prepared `insertJob` statement under `safeWrite`; `insertJobsBatch(jobs, true)` runs the whole batch inside one explicit `db.transaction` so a mid-batch failure rolls back all rows (`sqlite.ts:296-300`, `sqlite.ts:589-603`). This is the lower-throughput, no-loss mode.
+
+`PUSHF` always selects that immediate batch path when storage exists, regardless
+of individual node `durable` flags. The jobs transaction completes before the
+locked in-memory graph is published; a manager without `dataPath` has no
+`SqliteStorage` and therefore provides atomic visibility without crash
+durability.
 
 Persistence normalizes an omitted `Job.stallCount` to `0` on single inserts,
 buffered/batch inserts, retry updates, and row decoding. This preserves
@@ -143,6 +157,14 @@ non-zero remainder therefore throws and aborts S3 backup before `VACUUM INTO`.
 
 Delete: `deleteJob` calls `writeBuffer.removePending(id)` so a still-buffered INSERT cannot resurrect a deleted row, then deletes the `jobs` row and `job_results` row in one transaction (atomic cascade, issue #84). DLQ rows are deliberately not cascaded — `moveFailedJobToDlq` writes the DLQ entry then `deleteJob`, keeping the DLQ row (`sqlite.ts:452-469`).
 
+Flow-failure transition: terminal child removal, its optional DLQ row and its
+`flow_failures` record commit in one `commitFailedJob` transaction. Parent-side
+link removal/promotion also updates both affected job rows transactionally.
+Startup replays `loadFlowFailures()` before workers begin. `fail`/`remove`
+records are deleted after idempotent application; `ignore`/`continue` records
+remain until the live parent reaches a terminal/removal boundary so its worker
+can still query the error map.
+
 Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads
 `loadCompletedJobIds()` + `loadDlqJobIds` and restores stall/DLQ policies before
 classifying interrupted active jobs. It then repeatedly reads active jobs from
@@ -153,10 +175,13 @@ terminal. Pending pages use deterministic priority/run-at/id ordering. Later
 phases restore the DLQ, limiter state, and bounded completed cache.
 
 Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table,
-reads `MAX(version)`; if below `SCHEMA_VERSION` (22) it runs the idempotent base
+reads `MAX(version)`; if below `SCHEMA_VERSION` (27) it runs the idempotent base
 schema and applies later migrations. Migration 17 adds `jobs.stall_count`;
 migrations 18–21 persist the four `StallConfig` fields; migration 22 adds the
-atomic MessagePack `queue_state.dlq_config` policy blob.
+atomic MessagePack `queue_state.dlq_config` policy blob; migrations 23–26 add
+the four flow failure-policy flags; migration 27 creates `flow_failures`, and
+rebuilds the pending indexes so `prioritized` and `waiting-children` rows
+participate in recovery, plus the outbox parent index.
 
 Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 
@@ -197,7 +222,7 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **PRAGMAs** (`schema.ts:6-14`, fixed at startup): `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000` (~64 MB), `temp_store=MEMORY`, `mmap_size=268435456` (256 MB), `page_size=4096`, `busy_timeout=5000`.
 - **WriteBuffer**: `writeBufferSize` (default 100 rows → force flush), `writeBufferFlushMs` (effective default 10 ms). Throughput/durability trade-off: buffered ≈ up to 10 ms of loss on crash; `durable: true` job option bypasses the buffer for zero-loss writes at lower throughput.
 - **`onCriticalLoss`** callback for surfacing dropped jobs to ops tooling.
-- Indexes maintained by the schema: `idx_jobs_queue_state`, `idx_jobs_queue_created`, `idx_jobs_queue_state_created`, partial `idx_jobs_run_at WHERE state IN ('waiting','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority`, `idx_jobs_completed_order`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
+- Indexes maintained by the schema: `idx_jobs_queue_state`, `idx_jobs_queue_created`, `idx_jobs_queue_state_created`, partial `idx_jobs_run_at WHERE state IN ('waiting','prioritized','waiting-children','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority` over the same four pending states, `idx_jobs_completed_order`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
 
 ## Related Docs
 
@@ -207,6 +232,8 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - [Background Tasks](./background-tasks.md) — `recover()` and cleanup that drive these read/write APIs.
 - [Dead Letter Queue](./dead-letter-queue.md) — DLQ policy over the rows persisted here.
 - [Job Lifecycle](./job-lifecycle.md) — push/pull/ack/fail that trigger the state writes.
+- [FlowProducer & Job Dependencies](./flow-producer.md) — atomic graph commits
+  and recovery of the flow-failure outbox.
 - [Scheduler & Cron](./scheduler-and-cron.md) — consumer of the `cron_jobs` table.
 - [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — owner of the control-state persisted in `queue_state` (#100).
 - [S3 Backup](./backup-s3.md) — file-level backup of the SQLite database.

@@ -31,6 +31,7 @@ import {
   finalizeBatchAck,
 } from './ackHelpers';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import type { FlowFailureRecord, FlowFailureMode } from '../../domain/types/flow';
 
 /** Ack operation context */
 export interface AckContext {
@@ -60,15 +61,16 @@ export interface AckContext {
     prev?: string;
   }) => void;
   onJobCompleted: (jobId: JobId) => void;
+  onJobFailed?: (jobId: JobId) => void;
   onJobsCompleted?: (jobIds: JobId[]) => void;
   needsBroadcast?: () => boolean;
   emitDashboardEvent?: (event: string, data: Record<string, unknown>) => void;
   hasPendingDeps?: () => boolean;
   onRepeat?: (job: Job) => void;
   /** Called when a child job with failParentOnFailure terminally fails */
-  onChildTerminalFailure?: (childJob: Job, error: string | undefined) => void;
+  onChildTerminalFailure?: (childJob: Job, error: string | undefined) => Promise<void>;
   /** Called when a child job with removeDependencyOnFailure/ignoreDependencyOnFailure/continueParentOnFailure terminally fails */
-  onChildDependencyOption?: (childJob: Job, error: string | undefined) => void;
+  onChildDependencyOption?: (childJob: Job, error: string | undefined) => Promise<void>;
 }
 
 /**
@@ -162,17 +164,18 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
 }
 
 /** Move a permanently-failed job to DLQ (terminal path in failJob). */
-function moveFailedJobToDlq(
-  job: Job,
-  jobId: JobId,
-  error: string | undefined,
-  shard: Shard,
-  ctx: AckContext
-): void {
+function moveFailedJobToDlq(input: {
+  job: Job;
+  jobId: JobId;
+  error: string | undefined;
+  shard: Shard;
+  ctx: AckContext;
+  flowFailure: FlowFailureRecord | null;
+}): void {
+  const { job, jobId, error, shard, ctx, flowFailure } = input;
   const entry = shard.addToDlq(job, FailureReason.MaxAttemptsExceeded, error ?? null);
   ctx.jobIndex.set(jobId, { type: 'dlq', queueName: job.queue });
-  ctx.storage?.saveDlqEntry(entry);
-  ctx.storage?.deleteJob(jobId);
+  ctx.storage?.commitFailedJob(jobId, entry, flowFailure);
   ctx.totalFailed.value++;
   if (ctx.perQueueMetrics) {
     const pq = ctx.perQueueMetrics.get(job.queue);
@@ -194,6 +197,24 @@ function moveFailedJobToDlq(
       error: error ?? 'Max attempts exceeded',
     });
   }
+}
+
+function flowFailureRecord(job: Job, error: string | undefined): FlowFailureRecord | null {
+  if (!job.parentId) return null;
+  let mode: FlowFailureMode | null = null;
+  if (job.failParentOnFailure) mode = 'fail';
+  else if (job.continueParentOnFailure) mode = 'continue';
+  else if (job.ignoreDependencyOnFailure) mode = 'ignore';
+  else if (job.removeDependencyOnFailure) mode = 'remove';
+  if (!mode) return null;
+  return {
+    parentId: job.parentId,
+    childId: job.id,
+    childQueue: job.queue,
+    mode,
+    error: error ?? 'unknown error',
+    createdAt: Date.now(),
+  };
 }
 
 /**
@@ -234,11 +255,13 @@ export async function failJob(
 
   const idx = shardIndex(job.queue);
   let wasRetried = false;
+  const willRetry = !unrecoverable && canRetry(job);
+  const flowFailure = willRetry ? null : flowFailureRecord(job, error);
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
 
-    if (!unrecoverable && canRetry(job)) {
+    if (willRetry) {
       const now = Date.now();
       job.runAt = now + calculateBackoff(job);
       shard.getQueue(job.queue).push(job);
@@ -251,7 +274,7 @@ export async function failJob(
       }
     } else if (job.removeOnFail) {
       ctx.jobIndex.delete(jobId);
-      ctx.storage?.deleteJob(jobId);
+      ctx.storage?.commitFailedJob(jobId, null, flowFailure);
       ctx.totalFailed.value++;
       if (ctx.perQueueMetrics) {
         const pq = ctx.perQueueMetrics.get(job.queue);
@@ -267,7 +290,7 @@ export async function failJob(
         ctx.customIdMap.delete(job.customId);
       }
     } else {
-      moveFailedJobToDlq(job, jobId, error, shard, ctx);
+      moveFailedJobToDlq({ job, jobId, error, shard, ctx, flowFailure });
     }
 
     // Terminal failure and retry both release queue concurrency (and possibly
@@ -295,11 +318,12 @@ export async function failJob(
     });
   } else {
     ctx.dependencyResults.releaseConsumer(jobId);
+    ctx.onJobFailed?.(jobId);
   }
 
   // BullMQ v5: failParentOnFailure — propagate terminal failure to parent
   if (!wasRetried && job.failParentOnFailure && job.parentId && ctx.onChildTerminalFailure) {
-    ctx.onChildTerminalFailure(job, error);
+    await ctx.onChildTerminalFailure(job, error);
   }
 
   // removeDependencyOnFailure / ignoreDependencyOnFailure / continueParentOnFailure
@@ -309,7 +333,7 @@ export async function failJob(
     ctx.onChildDependencyOption &&
     (job.removeDependencyOnFailure || job.ignoreDependencyOnFailure || job.continueParentOnFailure)
   ) {
-    ctx.onChildDependencyOption(job, error);
+    await ctx.onChildDependencyOption(job, error);
   }
 }
 

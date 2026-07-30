@@ -1,11 +1,12 @@
 /**
- * DOCS EXAMPLES — every code sample in the Workflow Engine guide, executed.
+ * DOCS EXAMPLES — complete Workflow Engine guide scenarios, executed.
  *
- * The rule this file enforces: nothing goes in the documentation that has not been
- * run. Each test mirrors one example from `docs/src/content/docs/guide/workflow/*`
- * as closely as a test can, and asserts the behaviour the surrounding prose claims.
- * If an example changes, this file changes with it; if this file goes red, the docs
- * are lying.
+ * Each test mirrors a complete scenario from
+ * `docs/src/content/docs/guide/workflow/*` as closely as a test can and asserts the
+ * behaviour the surrounding prose claims. Short continuation/inspection fragments
+ * exercise these same executions. API-bound examples also have focused coverage in
+ * `repro-workflow-api-hardening.test.ts`; external agent packages are exercised in
+ * `workflow-agent-sdks.test.ts`.
  *
  * External services (payment providers, mailers, cloud APIs) are replaced by small
  * in-memory stand-ins with the same shape, so the ENGINE usage is exercised exactly
@@ -39,37 +40,71 @@ describe('docs: Quick Start', () => {
   test('the order pipeline runs and each step sees the previous result, typed', async () => {
     const payments = {
       charged: [] as number[],
-      async charge(orderId: string, amount: number) {
+      keys: [] as (string | undefined)[],
+      chargesByKey: new Map<string | undefined, { transactionId: string }>(),
+      async charge(orderId: string, amount: number, options: { idempotencyKey?: string }) {
         payments.charged.push(amount);
-        return `tx_${orderId}`;
+        payments.keys.push(options.idempotencyKey);
+        const charge = { transactionId: `tx_${orderId}` };
+        payments.chargesByKey.set(options.idempotencyKey, charge);
+        return charge.transactionId;
       },
-      async refund() {
+      async findByIdempotencyKey(key?: string) {
+        return payments.chargesByKey.get(key);
+      },
+      async refund(_transactionId: string, _options: { idempotencyKey?: string }) {
         /* undo */
       },
     };
-    const mailer = { sent: [] as string[], async send(t: string, d: { txId: string }) {
-      mailer.sent.push(`${t}:${d.txId}`);
-    } };
+    const mailer = {
+      sent: [] as string[],
+      async send(template: string, data: { txId: string }, _options: { idempotencyKey?: string }) {
+        mailer.sent.push(`${template}:${data.txId}`);
+      },
+    };
 
     const orderFlow = new Workflow<{ orderId: string; amount: number }>('order-pipeline')
-      .step('validate', async (ctx) => {
-        if (ctx.input.amount <= 0) throw new Error('Invalid amount');
-        return { orderId: ctx.input.orderId, validated: true };
-      })
+      .step(
+        'validate',
+        async (ctx) => {
+          if (ctx.input.amount <= 0) throw new Error('Invalid amount');
+          return { orderId: ctx.input.orderId, validated: true };
+        },
+        { retry: 1 }
+      )
       .step(
         'charge',
         async (ctx) => {
-          const txId = await payments.charge(ctx.steps.validate.orderId, ctx.input.amount);
+          const txId = await payments.charge(ctx.steps.validate.orderId, ctx.input.amount, {
+            idempotencyKey: ctx.idempotencyKey,
+          });
           return { transactionId: txId };
         },
-        { compensate: async () => void (await payments.refund()) }
+        {
+          compensate: async (ctx) => {
+            const charge =
+              ctx.steps.charge ?? (await payments.findByIdempotencyKey(ctx.forwardIdempotencyKey));
+            if (charge) {
+              await payments.refund(charge.transactionId, {
+                idempotencyKey: ctx.idempotencyKey,
+              });
+            }
+          },
+        }
       )
       .step('confirm', async (ctx) => {
-        await mailer.send('order-confirm', { txId: ctx.steps.charge.transactionId });
+        await mailer.send(
+          'order-confirm',
+          { txId: ctx.steps.charge.transactionId },
+          { idempotencyKey: ctx.idempotencyKey }
+        );
         return { emailSent: true };
       });
 
-    engine = new Engine({ embedded: true, dataPath: join(mkdtempSync(join(tmpdir(), 'bq-docs-')), 'wf.db') });
+    engine = new Engine({
+      embedded: true,
+      dataPath: join(mkdtempSync(join(tmpdir(), 'bq-docs-')), 'wf.db'),
+    });
     engine.register(orderFlow);
 
     const run = await engine.start('order-pipeline', { orderId: 'ORD-1', amount: 99.99 });
@@ -78,6 +113,7 @@ describe('docs: Quick Start', () => {
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('completed');
     expect(payments.charged).toEqual([99.99]);
+    expect(payments.keys).toEqual([`${run.id}:charge#0:forward`]);
     expect(mailer.sent).toEqual(['order-confirm:tx_ORD-1']);
   }, 40_000);
 });
@@ -97,17 +133,29 @@ describe('docs: Rollback (saga compensation)', () => {
     };
 
     const flow = new Workflow('money-transfer')
-      .step('debit-source', async () => {
-        await accounts.debit('from');
-        return { debited: true };
-      }, { retry: 1, compensate: async () => void (await accounts.credit('from')) })
-      .step('credit-target', async () => {
-        await accounts.credit('to');
-        return { credited: true };
-      }, { retry: 1, compensate: async () => void (await accounts.debit('to')) })
-      .step('send-receipt', () => {
-        throw new Error('Email service down');
-      }, { retry: 1 });
+      .step(
+        'debit-source',
+        async () => {
+          await accounts.debit('from');
+          return { debited: true };
+        },
+        { retry: 1, compensate: async () => void (await accounts.credit('from')) }
+      )
+      .step(
+        'credit-target',
+        async () => {
+          await accounts.credit('to');
+          return { credited: true };
+        },
+        { retry: 1, compensate: async () => void (await accounts.debit('to')) }
+      )
+      .step(
+        'send-receipt',
+        () => {
+          throw new Error('Email service down');
+        },
+        { retry: 1 }
+      );
 
     engine = new Engine({ embedded: true });
     engine.register(flow);
@@ -134,9 +182,13 @@ describe('docs: Rollback (saga compensation)', () => {
             log.push('refund');
           },
         })
-        .step('verify', () => {
-          throw new Error('compliance rejected');
-        }, { retry: 1 });
+        .step(
+          'verify',
+          () => {
+            throw new Error('compliance rejected');
+          },
+          { retry: 1 }
+        );
 
     engine = new Engine({ embedded: true });
     engine.register(build());
@@ -165,7 +217,7 @@ describe('docs: Rollback (saga compensation)', () => {
       .step('charge', () => ({ txId: 'tx_1' }), {
         retry: 1,
         timeout: 1000, // bounds chargeCard AND refund
-        compensate: () => new Promise<void>(() => {}), // a refund that never settles
+        compensate: () => new Promise<void>(() => undefined), // a refund that never settles
       })
       .step(
         'confirm',
@@ -190,21 +242,28 @@ describe('docs: Rollback (saga compensation)', () => {
     engine = new Engine({ embedded: true });
     engine.register(
       new Workflow('abandon-flow')
-        .step('reserve', () => ({ ok: 1 }), { retry: 1, compensate: () => {} })
+        .step('reserve', () => ({ ok: 1 }), {
+          retry: 1,
+          compensate: () => undefined,
+        })
         .step('charge', () => ({ ok: 1 }), {
           retry: 1,
           compensate: () => {
             throw new Error('permanently refused');
           },
         })
-        .step('verify', () => {
-          throw new Error('rejected');
-        }, { retry: 1 })
+        .step(
+          'verify',
+          () => {
+            throw new Error('rejected');
+          },
+          { retry: 1 }
+        )
     );
     const run = await engine.start('abandon-flow', {});
     expect(await settle(engine, run.id, 'compensation-stuck')).toBe('compensation-stuck');
 
-    engine.abandonCompensation(run.id);
+    await engine.abandonCompensation(run.id);
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('failed');
     expect(exec?.rollbackStatus).toBe('stuck');
@@ -237,9 +296,13 @@ describe('docs: Idempotency Keys', () => {
             },
           }
         )
-        .step('boom', () => {
-          throw new Error('later failure');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          () => {
+            throw new Error('later failure');
+          },
+          { retry: 1 }
+        )
     );
     const run = await engine.start('keys', {});
     expect(await settle(engine, run.id, 'failed')).toBe('failed');
@@ -269,9 +332,13 @@ describe('docs: Point of No Return', () => {
         })
         .pivot()
         .step('send-welcome-email', () => ({ sent: true }))
-        .step('activate-tenant', () => {
-          throw new Error('activation failed');
-        }, { retry: 1 })
+        .step(
+          'activate-tenant',
+          () => {
+            throw new Error('activation failed');
+          },
+          { retry: 1 }
+        )
     );
     const run = await engine.start('provision', {});
     expect(await settle(engine, run.id, 'failed')).toBe('failed');
@@ -308,10 +375,11 @@ describe('docs: Retries, Timeouts and Schema Validation', () => {
     engine.register(
       new Workflow('validated').step(
         'charge',
-        () => ({ transactionId: 'tx_123', charged: 'not-a-number' }) as unknown as {
-          transactionId: string;
-          charged: number;
-        },
+        () =>
+          ({ transactionId: 'tx_123', charged: 'not-a-number' }) as unknown as {
+            transactionId: string;
+            charged: number;
+          },
         {
           retry: 1,
           outputSchema: z.object({ transactionId: z.string(), charged: z.number() }),
@@ -410,17 +478,18 @@ describe('docs: Loops and Iteration', () => {
     expect(sizes).toEqual([0, 1, 2]);
 
     const steps = engine.getExecution(run.id)?.steps ?? {};
-    expect(Object.keys(steps).filter((k) => /^turn:\d+$/.test(k)).sort()).toEqual([
-      'turn:0',
-      'turn:1',
-      'turn:2',
-    ]);
+    expect(
+      Object.keys(steps)
+        .filter((k) => /^turn:\d+$/.test(k))
+        .sort()
+    ).toEqual(['turn:0', 'turn:1', 'turn:2']);
   }, 40_000);
 
   test('forEach exposes __item and __index and stores indexed results', async () => {
     const notified: string[] = [];
     engine = new Engine({ embedded: true });
     engine.register(
+      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
       new Workflow<{ userIds: string[] }>('notify-all').forEach(
         (ctx) => ctx.input.userIds,
         'notify',
@@ -508,11 +577,10 @@ describe('docs: Nested Workflows', () => {
     const log: string[] = [];
     engine = new Engine({ embedded: true });
     engine.register(
-      new Workflow('payment')
-        .step('authorize', () => ({ authId: 'a1' }), {
-          retry: 1,
-          compensate: () => void log.push('void-auth'),
-        })
+      new Workflow('payment').step('authorize', () => ({ authId: 'a1' }), {
+        retry: 1,
+        compensate: () => void log.push('void-auth'),
+      })
     );
     engine.register(
       new Workflow('order')
@@ -523,9 +591,13 @@ describe('docs: Nested Workflows', () => {
         .subWorkflow('payment', (ctx) => ({
           amount: (ctx.steps['create-order'] as { total: number }).total,
         }))
-        .step('confirm', () => {
-          throw new Error('confirmation failed');
-        }, { retry: 1 })
+        .step(
+          'confirm',
+          () => {
+            throw new Error('confirmation failed');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('order', {});
@@ -547,10 +619,17 @@ describe('docs: Events and Crash Recovery', () => {
     engine = new Engine({ embedded: true, onEvent: (e) => seen.push(e.type) });
     engine.register(
       new Workflow('observed')
-        .step('a', () => ({ ok: 1 }), { retry: 1, compensate: () => {} })
-        .step('b', () => {
-          throw new Error('boom');
-        }, { retry: 1 })
+        .step('a', () => ({ ok: 1 }), {
+          retry: 1,
+          compensate: () => undefined,
+        })
+        .step(
+          'b',
+          () => {
+            throw new Error('boom');
+          },
+          { retry: 1 }
+        )
     );
     const run = await engine.start('observed', {});
     expect(await settle(engine, run.id, 'failed')).toBe('failed');
@@ -604,7 +683,10 @@ describe('docs: Events and Crash Recovery', () => {
   }, 40_000);
 
   test('cleanup and archive move terminal executions out of the live table', async () => {
-    engine = new Engine({ embedded: true, dataPath: join(mkdtempSync(join(tmpdir(), 'bq-docs-')), 'wf.db') });
+    engine = new Engine({
+      embedded: true,
+      dataPath: join(mkdtempSync(join(tmpdir(), 'bq-docs-')), 'wf.db'),
+    });
     engine.register(new Workflow('short').step('only', () => ({ ok: 1 })));
     const run = await engine.start('short', {});
     expect(await settle(engine, run.id, 'completed')).toBe('completed');
@@ -686,6 +768,7 @@ describe('docs: Vercel AI SDK examples', () => {
         },
         { retry: 2, timeout: 90_000 }
       )
+      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
       .forEach(
         (ctx) => (ctx.steps.plan as { planned: { name: string; args: unknown }[] }).planned,
         'apply',
@@ -701,9 +784,13 @@ describe('docs: Vercel AI SDK examples', () => {
           },
         }
       )
-      .step('verify', () => {
-        throw new Error('compliance rejected the tenant');
-      }, { retry: 1 });
+      .step(
+        'verify',
+        () => {
+          throw new Error('compliance rejected the tenant');
+        },
+        { retry: 1 }
+      );
 
     engine = new Engine({ embedded: true });
     engine.register(agentSaga);
@@ -743,9 +830,7 @@ describe('docs: Vercel AI SDK examples', () => {
             messages: [
               { role: 'user' as const, content: ctx.input.task },
               ...(prior as never[]),
-              ...(prior.length > 0
-                ? [{ role: 'user' as const, content: 'Continue.' }]
-                : []),
+              ...(prior.length > 0 ? [{ role: 'user' as const, content: 'Continue.' }] : []),
             ],
           });
           return { messages: result.response.messages };
@@ -771,17 +856,25 @@ describe('docs: Vercel AI SDK examples', () => {
     engine = new Engine({ embedded: true });
     engine.register(
       new Workflow<{ target: string }>('destructive')
-        .step('propose', (ctx) => {
-          done.push('propose');
-          return { target: ctx.input.target };
-        }, { retry: 1, compensate: () => void done.push('undo-propose') })
+        .step(
+          'propose',
+          (ctx) => {
+            done.push('propose');
+            return { target: ctx.input.target };
+          },
+          { retry: 1, compensate: () => void done.push('undo-propose') }
+        )
         .waitFor('human-approval', { timeout: 86_400_000 })
-        .step('execute', (ctx) => {
-          const decision = ctx.signals['human-approval'] as { approved: boolean };
-          if (!decision.approved) throw new Error('operator rejected the action');
-          done.push('execute');
-          return { deleted: true };
-        }, { retry: 1 })
+        .step(
+          'execute',
+          (ctx) => {
+            const decision = ctx.signals['human-approval'] as { approved: boolean };
+            if (!decision.approved) throw new Error('operator rejected the action');
+            done.push('execute');
+            return { deleted: true };
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('destructive', { target: 'bucket-1' });

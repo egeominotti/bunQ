@@ -6,6 +6,7 @@ import type { LockGuard, RWLock } from '../../shared/lock';
 
 interface PushLockContext {
   shardLocks: RWLock[];
+  customIdLock: RWLock;
   jobIndex: Map<JobId, JobLocation>;
 }
 
@@ -39,9 +40,12 @@ export async function withPushWriteLocks<T>(
   fn: (lockedShardIndexes: ReadonlySet<number>) => T
 ): Promise<T> {
   while (true) {
-    const indexes = requiredShardIndexes(queue, inputs, ctx.jobIndex);
+    const customIdGuard = inputs.some((input) => input.customId)
+      ? await ctx.customIdLock.acquireWrite()
+      : null;
     const guards: LockGuard[] = [];
     try {
+      const indexes = requiredShardIndexes(queue, inputs, ctx.jobIndex);
       for (const index of indexes) {
         guards.push(await ctx.shardLocks[index].acquireWrite());
       }
@@ -54,6 +58,7 @@ export async function withPushWriteLocks<T>(
       for (let i = guards.length - 1; i >= 0; i--) {
         guards[i].release();
       }
+      customIdGuard?.release();
     }
   }
 }

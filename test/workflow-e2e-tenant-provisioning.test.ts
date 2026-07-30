@@ -68,7 +68,9 @@ class World {
     this.db.run(
       `CREATE TABLE IF NOT EXISTS ledger (account TEXT, delta INTEGER, idem TEXT PRIMARY KEY)`
     );
-    this.db.run(`CREATE TABLE IF NOT EXISTS calls (seq INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT)`);
+    this.db.run(
+      `CREATE TABLE IF NOT EXISTS calls (seq INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT)`
+    );
   }
 
   create(id: string, kind: string): void {
@@ -96,9 +98,11 @@ class World {
   }
 
   live(): string[] {
-    return (this.db.query("SELECT id FROM resources WHERE state = 'live' ORDER BY id").all() as {
-      id: string;
-    }[]).map((r) => r.id);
+    return (
+      this.db.query("SELECT id FROM resources WHERE state = 'live' ORDER BY id").all() as {
+        id: string;
+      }[]
+    ).map((r) => r.id);
   }
   balances(): Record<string, number> {
     const rows = this.db
@@ -131,64 +135,92 @@ function tenantFlow(w: World, faults: Faults = {}): Workflow {
   };
 
   return new Workflow(`provision-tenant-${caseId}`)
-    .step('reserve-subdomain', (ctx) => {
-      w.create('sub-acme', 'subdomain');
-      dies('reserve-subdomain');
-      return { slug: 'acme', key: ctx.idempotencyKey };
-    }, { retry: 1, compensate: () => w.destroy('sub-acme') })
-    .step('create-stripe-customer', () => {
-      w.create('cus-1', 'stripe-customer');
-      dies('create-stripe-customer');
-      return { customerId: 'cus-1' };
-    }, {
-      retry: 1,
-      // Depends on the forward step's output, with the key as the fallback route.
-      compensate: (ctx) => {
-        const id = (ctx.steps['create-stripe-customer'] as { customerId?: string } | undefined)
-          ?.customerId;
-        w.destroy(id ?? 'cus-1');
+    .step(
+      'reserve-subdomain',
+      (ctx) => {
+        w.create('sub-acme', 'subdomain');
+        dies('reserve-subdomain');
+        return { slug: 'acme', key: ctx.idempotencyKey };
       },
-    })
-    .step('charge-setup-fee', (ctx) => {
-      w.post('customer', -SETUP_FEE, `charge:${ctx.idempotencyKey}`);
-      w.post('merchant', SETUP_FEE, `charge-m:${ctx.idempotencyKey}`);
-      dies('charge-setup-fee');
-      return { charged: SETUP_FEE };
-    }, {
-      retry: 1,
-      compensate: (ctx) => {
-        refundAttempts++;
-        if (refundAttempts <= (faults.refundRefusals ?? 0)) {
-          throw new Error('refund refused: charge is disputed');
-        }
-        w.post('customer', SETUP_FEE, `refund:${ctx.idempotencyKey}`);
-        w.post('merchant', -SETUP_FEE, `refund-m:${ctx.idempotencyKey}`);
+      { retry: 1, compensate: () => w.destroy('sub-acme') }
+    )
+    .step(
+      'create-stripe-customer',
+      () => {
+        w.create('cus-1', 'stripe-customer');
+        dies('create-stripe-customer');
+        return { customerId: 'cus-1' };
       },
-    })
+      {
+        retry: 1,
+        // Depends on the forward step's output, with the key as the fallback route.
+        compensate: (ctx) => {
+          const id = (ctx.steps['create-stripe-customer'] as { customerId?: string } | undefined)
+            ?.customerId;
+          w.destroy(id ?? 'cus-1');
+        },
+      }
+    )
+    .step(
+      'charge-setup-fee',
+      (ctx) => {
+        w.post('customer', -SETUP_FEE, `charge:${ctx.idempotencyKey}`);
+        w.post('merchant', SETUP_FEE, `charge-m:${ctx.idempotencyKey}`);
+        dies('charge-setup-fee');
+        return { charged: SETUP_FEE };
+      },
+      {
+        retry: 1,
+        compensate: (ctx) => {
+          refundAttempts++;
+          if (refundAttempts <= (faults.refundRefusals ?? 0)) {
+            throw new Error('refund refused: charge is disputed');
+          }
+          w.post('customer', SETUP_FEE, `refund:${ctx.idempotencyKey}`);
+          w.post('merchant', -SETUP_FEE, `refund-m:${ctx.idempotencyKey}`);
+        },
+      }
+    )
     .parallel((f) =>
       f
-        .step('provision-database', async () => {
-          await Bun.sleep(60); // starts first, finishes LAST
-          w.create('db-1', 'database');
-          return { dbId: 'db-1' };
-        }, { retry: 1, compensate: () => w.destroy('db-1') })
-        .step('provision-bucket', async () => {
-          await Bun.sleep(5);
-          w.create('bkt-1', 'bucket');
-          return { bucketId: 'bkt-1' };
-        }, { retry: 1, compensate: () => w.destroy('bkt-1') })
-        .step('provision-search-index', async () => {
-          await Bun.sleep(25);
-          w.create('idx-1', 'search-index');
-          return { indexId: 'idx-1' };
-        }, { retry: 1, compensate: () => w.destroy('idx-1') })
+        .step(
+          'provision-database',
+          async () => {
+            await Bun.sleep(60); // starts first, finishes LAST
+            w.create('db-1', 'database');
+            return { dbId: 'db-1' };
+          },
+          { retry: 1, compensate: () => w.destroy('db-1') }
+        )
+        .step(
+          'provision-bucket',
+          async () => {
+            await Bun.sleep(5);
+            w.create('bkt-1', 'bucket');
+            return { bucketId: 'bkt-1' };
+          },
+          { retry: 1, compensate: () => w.destroy('bkt-1') }
+        )
+        .step(
+          'provision-search-index',
+          async () => {
+            await Bun.sleep(25);
+            w.create('idx-1', 'search-index');
+            return { indexId: 'idx-1' };
+          },
+          { retry: 1, compensate: () => w.destroy('idx-1') }
+        )
     )
     .waitFor('compliance-approval', { timeout: 86_400_000 })
-    .step('seed-tenant-data', () => {
-      w.create('seed-1', 'seed');
-      dies('seed-tenant-data');
-      return { seeded: true };
-    }, { retry: 1, compensate: () => w.destroy('seed-1') })
+    .step(
+      'seed-tenant-data',
+      () => {
+        w.create('seed-1', 'seed');
+        dies('seed-tenant-data');
+        return { seeded: true };
+      },
+      { retry: 1, compensate: () => w.destroy('seed-1') }
+    )
     .pivot()
     .step('send-welcome-email', () => {
       w.create('email-1', 'email');
@@ -338,7 +370,7 @@ describe('E2E tenant provisioning: a refused refund parks, then an operator resu
     await approve(engine, run.id);
     expect(await settle(engine, run.id, 'compensation-stuck')).toBe('compensation-stuck');
 
-    engine.abandonCompensation(run.id);
+    await engine.abandonCompensation(run.id);
 
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('failed');
@@ -356,7 +388,7 @@ describe('E2E tenant provisioning: a refused refund parks, then an operator resu
 });
 
 describe('E2E tenant provisioning: SIGKILL while parked for compliance', () => {
-  test('an approval delivered while the process is down still lands', async () => {
+  test('a fresh process can signal the persisted compliance gate', async () => {
     const worldDb = join(dir, `world-${caseId}.db`);
     const wfDb = join(dir, 'wf.db');
     const queue = `__wf:tenant:${caseId}`;
@@ -408,8 +440,8 @@ if ('${mode}' === 'park') {
 const runId = readFileSync(${JSON.stringify(join(dir, 'tenant-run-id'))}, 'utf8');
 
 if ('${mode}' === 'approve') {
-  // A different process delivers the approval. No recover() first: the signal must
-  // land on the persisted row and wake the run on its own.
+  // This fresh process recreated and registered the engine. No recover() first:
+  // signal() must land on the persisted row and wake the run on its own.
   await engine.signal(runId, 'compliance-approval', { approved: true });
   console.log('state=' + (await settle(runId, 'completed', 15000)));
 }

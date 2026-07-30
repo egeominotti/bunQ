@@ -94,6 +94,8 @@ export function buildJobOpts(job: InternalJob): JobOptions {
     sizeLimit: job.sizeLimit ?? undefined,
     failParentOnFailure: job.failParentOnFailure,
     removeDependencyOnFailure: job.removeDependencyOnFailure,
+    continueParentOnFailure: job.continueParentOnFailure,
+    ignoreDependencyOnFailure: job.ignoreDependencyOnFailure,
     deduplication:
       job.deduplicationTtl !== null
         ? { id: job.customId ?? '', ttl: job.deduplicationTtl }

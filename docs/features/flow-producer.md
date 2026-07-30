@@ -1,182 +1,244 @@
-# FlowProducer & Job Dependencies
+# FlowProducer and Job Dependencies
 
-> **Category:** Orchestration · **Source:** `src/client/flow.ts`, `src/client/flowJobFactory.ts`, `src/client/flowPush.ts`, `src/client/flowTypes.ts`, `src/domain/queue/dependencyTracker.ts`, `src/application/dependencyResultTracker.ts`, `src/client/queueGroup.ts`
+> **Category:** Orchestration · **Primary sources:** `src/client/flow.ts`,
+> `src/client/flowPlan.ts`, `src/client/flowAtomic.ts`,
+> `src/application/operations/flowPush.ts`,
+> `src/application/operations/flowValidation.ts`,
+> `src/application/operations/flowTopologyValidation.ts`,
+> `src/client/flowReader.ts`,
+> `src/application/flowFailureRecovery.ts`
 
-## Purpose
+## Purpose and contract
 
-`FlowProducer` is the client-side API for building **parent/child job trees** and **dependency chains** that span one or more queues, with BullMQ v5 compatibility. It lets callers express "run these children, then run the parent with their results" without manually wiring `dependsOn`. The actual dependency bookkeeping lives server-side in the `DependencyTracker` (one per shard) and in `QueueManager`'s dependency-resolution path; `FlowProducer` is a thin orchestration/translation layer over `Queue.add`-equivalent pushes. `QueueGroup` is an unrelated namespace-isolation helper documented here because it shares the multi-queue concern.
+`FlowProducer` creates dependency graphs spanning one or more queues. The
+BullMQ-compatible `add` shape is children-first: every leaf can run immediately,
+while each parent remains in `waiting-children` until its children finish.
+Legacy `addChain`, `addBulkThen`, and parent-first `addTree` use the same broker
+primitive but retain their documented ordering.
 
-## Responsibilities & Scope
+The Bun client has a strong creation contract:
 
-**Owns:**
+- `add`, `addBulk`, `addChain`, `addBulkThen`, and `addTree` commit one complete
+  graph or commit nothing;
+- no worker can observe a leaf before every node and edge exists;
+- when SQLite is configured, the graph is committed there before it is
+  published in memory; a manager without `dataPath` is intentionally
+  memory-only;
+- returned `Job` objects are built from the committed broker snapshots, not
+  synthetic defaults;
+- an ID owned by live/retained state, a SQLite job/DLQ row, a completion or
+  timeout tombstone, a retained result, or an unresolved dependency rejects the
+  complete request. Existing topology is never rewritten implicitly.
 
-- The DSL for flows: `add`/`addBulk` (BullMQ tree), `addChain` (sequential), `addBulkThen` (fan-in), `addTree` (legacy tree) — `src/client/flow.ts`.
-- Translating a flow node into a single push that carries `parentId` / `__parentQueue`, `childrenIds` / `__childrenIds`, and `dependsOn` (`src/client/flowPush.ts:164`).
-- Atomic rollback of partially-created flows on error (`cleanupJobs`).
-- Constructing lightweight `Job` result objects with live methods (`getChildrenValues`, `getDependencies`, `remove`, …) that proxy to embedded manager or TCP (`src/client/flowJobFactory.ts`).
-- Reading back a flow tree via `getFlow` (recursive, depth/maxChildren bounded).
+This is implemented by the `PUSHF` command. Older external clients that still
+compose flows from `PUSH` plus `UpdateParent` remain protocol-compatible, but
+their client-side cleanup is best effort and is not equivalent to `PUSHF`
+transactional creation.
 
-**Does NOT own (delegated):**
-
-- Dependency storage & O(1) resolution — `DependencyTracker` (`src/domain/queue/dependencyTracker.ts`) per shard, driven by `QueueManager`/`dependencyProcessor`.
-- Parking a job in `waitingDeps` and promoting it when deps complete — see [Background Tasks](./background-tasks.md) and `src/application/dependencyProcessor.ts`.
-- Failure-propagation policy (`failParentOnFailure`, `continueParentOnFailure`, …) — implemented in `QueueManager` ([Job Lifecycle](./job-lifecycle.md)).
-- The push/pull/ack mechanics themselves — [Core Queue Engine](./core-queue-engine.md), [Job Lifecycle](./job-lifecycle.md).
-- Persistence of `parentId`/`childrenIds` to SQLite — [Persistence](./persistence.md).
-
-## Dependencies
-
-**Internal:**
-
-- `getSharedManager()` (`src/client/manager.ts`) — embedded path target for all operations.
-- `TcpConnectionPool` / `getSharedPool` / `releaseSharedPool` (`src/client/tcpPool.ts`) — TCP path; see [Client Transport](./client-transport.md).
-- `pushJob` / `pushJobWithParent` / `cleanupJobs` (`src/client/flowPush.ts`).
-- `createFlowJobObject` / `extractUserDataFromInternal` (`src/client/flowJobFactory.ts`).
-- `queue/operations/management` (`updateJobData`, `promoteJob`, `removeAsync`, …) wired as flow-job callbacks.
-- `DependencyTracker` (`src/domain/queue/dependencyTracker.ts`), surfaced on each `Shard` via getters (`waitingDeps`, `dependencyIndex`, `waitingChildren`).
-- `dependencyProcessor.processPendingDependencies` (`src/application/dependencyProcessor.ts`).
-
-**External / runtime:** Node `events.EventEmitter` (base class), Bun (`Bun.env.BUNQUEUE_EMBEDDED`). No third-party deps.
-
-## Public Interface
-
-### Exported classes
-
-`FlowProducer extends EventEmitter` (`src/client/flow.ts:65`):
+## Public API
 
 ```typescript
-constructor(opts: FlowProducerOptions = {})
-add<T>(flow: FlowJob<T>, opts?: FlowOpts): Promise<JobNode<T>>          // flow.ts:141
-addBulk<T>(flows: FlowJob<T>[]): Promise<JobNode<T>[]>                  // flow.ts:153
-getFlow<T>(opts: GetFlowOpts): Promise<JobNode<T> | null>              // flow.ts:172
-addChain<T>(steps: FlowStep<T>[]): Promise<FlowResult>                 // flow.ts:185
+new FlowProducer(options?)
+
+add<T>(flow: FlowJob<T>, options?: FlowOpts): Promise<JobNode<T>>
+addBulk<T>(flows: FlowJob<T>[]): Promise<JobNode<T>[]>
+getFlow<T>(options: GetFlowOpts): Promise<JobNode<T> | null>
+
+addChain<T>(steps: FlowStep<T>[]): Promise<{ jobIds: string[] }>
 addBulkThen<T>(parallel: FlowStep<T>[], final: FlowStep<T>):
-  Promise<{ parallelIds: string[]; finalId: string }>                  // flow.ts:213
-addTree<T>(root: FlowStep<T>): Promise<FlowResult>                     // flow.ts:268
-getParentResult<R>(parentId: string): R | undefined                   // flow.ts:284 (embedded only)
-getParentResults<R>(parentIds: string[]): Map<string, R>              // flow.ts:293 (embedded only)
-close(): Promise<void>                                                 // flow.ts:115
-disconnect(): Promise<void>   // alias for close()                     // flow.ts:126
-waitUntilReady(): Promise<void>                                        // flow.ts:131
+  Promise<{ parallelIds: string[]; finalId: string }>
+addTree<T>(root: FlowStep<T>): Promise<{ jobIds: string[] }>
+
+getParentResult<R>(id: string): R | undefined
+getParentResults<R>(ids: string[]): Map<string, R>
+waitUntilReady(): Promise<void>
+close(): Promise<void>
+disconnect(): Promise<void>
 ```
 
-`QueueGroup` (`src/client/queueGroup.ts:26`) — embedded-only namespace helper:
+`getParentResult` and `getParentResults` are embedded-only legacy helpers.
+`FlowProducer` extends `EventEmitter`; queue lifecycle events still originate
+from the broker rather than from this object.
 
-```typescript
-constructor(namespace: string)                  // prefix = namespace ending in ':'
-getQueue<T>(name, opts?): Queue<T>               // new Queue(prefix + name)
-getWorker<T,R>(name, processor, opts?): Worker   // new Worker(prefix + name, …)
-listQueues(): string[]                           // prefix-filtered, prefix stripped
-pauseAll() / resumeAll() / drainAll() / obliterateAll(): void
-```
+## Creation pipeline
 
-### Exported types (`src/client/flowTypes.ts`)
+### 1. Client planning
 
-`FlowProducerOptions`, `FlowStep<T>`, `FlowResult`, `FlowJob<T>`, `JobNode<T>`, `GetFlowOpts`, `FlowOpts` (all re-exported from `flow.ts:29`).
+`planFlows` walks all roots before contacting the broker. It:
 
-### TCP commands emitted (non-embedded path)
+- preallocates the real ID of every node, eliminating placeholder parent IDs;
+- merges `FlowOpts.queuesOptions[queueName]` below node-specific options;
+- injects `name`, `__parentId`, `__parentQueue`, and `__childrenIds`;
+- emits symmetric `parentId`/`childrenIds` and `dependsOn` edges;
+- rejects cycles, shared node objects, duplicate IDs, reserved data keys, a
+  depth greater than 100 edges below a root (the root is depth 0), or more than
+  10,000 jobs;
+- validates the legacy planners to the same bounds; nested `children` are
+  accepted by `addTree`, not silently ignored by flat chain/fan-in methods.
 
-`PUSH` (with `parentId`, `childrenIds`, `dependsOn`), `UpdateParent`, `GetJob`, `GetState`, `GetResult`, `GetChildrenValues`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Cancel`, `Ping`, plus the per-job mutators on the result `Job`: `Progress`, `AddLog`, `Promote`, `Update`, `ChangeDelay`, `ChangePriority`, `ClearLogs`, `ExtendLock`, `ACK`, `FAIL`, `MoveToWait`, `MoveToDelayed`, `WaitJob`, `Discard`. Server handlers live in `src/infrastructure/server/handlers/advanced.ts` and `query.ts` — see [TCP Server Command Handlers](./tcp-server-handlers.md).
+The legacy planners compile their ordering into the same
+`AtomicFlowBatchInput`. `addChain` records predecessor dependencies;
+`addBulkThen` records every parallel job as a child/dependency of the final
+job; `addTree` records parent-first dependencies.
 
-### Events
+Atomic flows intentionally reject `repeat`, deduplication, debounce, and an
+explicit `opts.parent`. Those options require independent ownership/lifetime
+semantics and cannot be made part of this graph transaction. `jobId` is allowed,
+but it must be non-empty and cannot contain `:`.
 
-`FlowProducer` extends `EventEmitter` but emits no events itself (none are `emit`ed in source). Dependency lifecycle is surfaced via the dashboard/event system (`job:waiting-children`, `job:dependencies-resolved`, `flow:completed`) from `QueueManager` — see [Webhooks, Events & Job Logs](./webhooks-and-events.md).
+### 2. Broker validation
 
-## Data Models
+`validateAtomicFlowBatch` validates the wire payload again. Client validation is
+not trusted. It checks:
 
-See [data-model](../data-model.md) for full `Job`. Fields most relevant here:
+- strict runtime types for queue names, string IDs, link arrays, booleans, tags,
+  internal metadata, JSON-serializable payloads, and numeric option bounds;
+- a 10 MB per-job and 64 MB aggregate flow-data bound;
+- unique IDs, dependencies, children, and parent/metadata back-references;
+- duplicate edges and graph cycles;
+- mutually exclusive failure policies;
+- unsupported repeat/deduplication/debounce inputs.
 
-- `Job.dependsOn: JobId[]` — IDs that must complete before this job leaves `waitingDeps`. Drives ordering for **all** flow shapes.
-- `Job.childrenIds: JobId[]` — children of a fan-in/tree parent; consumed by `getChildrenValues`.
-- `Job.parentId: JobId | null` — back-reference used by failure-propagation.
-- Internal `data` fields injected by the producer: `name`, `__parentId`, `__parentQueue`, `__childrenIds`, and (chain/tree legacy) `__flowParentId` / `__flowParentIds`. `extractUserDataFromInternal` strips any key starting with `__` plus `name` when reconstructing user data (`flowJobFactory.ts:29`).
+Validation builds an ID map, so edge validation is linear in nodes plus edges
+rather than repeatedly scanning a 10,000-job batch.
 
-`DependencyTracker` (`src/domain/queue/dependencyTracker.ts`) holds three maps per shard:
+### 3. Atomic commit
 
-- `waitingDeps: Map<JobId, Job>` — jobs blocked on unmet `dependsOn`.
-- `dependencyIndex: Map<JobId, Set<JobId>>` — **reverse index** `depId → waiters`, giving O(1) "who is waiting for this completed job" (`getJobsWaitingFor`, line 58).
-- `waitingChildren: Map<JobId, Job>` — parents explicitly parked via `moveToWaitingChildren` (distinct from `waitingDeps`).
+`pushFlowBatch` executes under:
 
-`JobNode<T> = { job: Job<T>; children?: JobNode<T>[] }`; `FlowJob<T> = { name; queueName; data?; opts?; children? }`.
+1. the global custom-ID write lock when any node has a custom ID;
+2. every affected queue-shard write lock in ascending shard order.
 
-## Business Logic / Control Flow
+After acquiring locks it rechecks in-memory ownership/tombstones and, when
+configured, SQLite ownership including DLQ rows. It then materializes every
+`Job` and derives its initial state. With storage enabled,
+`insertJobsBatch(jobs, true)` commits every row in one immediate transaction
+before `insertJobToShard` publishes any node to `waitingDeps`, the
+delayed/prioritized heap, counters, reverse dependency indexes, `jobIndex`, or
+`customIdMap`. Without a `dataPath`, the same locked publication is atomic in
+memory but is not durable across process loss.
 
-### Building a flow (`add` → `addFlowNode`, `flow.ts:430`)
+Workers require the same shard locks, so the first runnable leaf can only become
+visible after the whole graph is present. Notifications, events, throughput,
+and latency metrics run after lock release. There is no `await` inside the
+synchronous publication section.
 
-1. Children are recursed **first**, concurrently (`Promise.all`, line 442), with a placeholder `tempParentRef = { id: 'pending', queue }` so children record a parent before the parent exists.
-2. Per-queue defaults from `FlowOpts.queuesOptions[queueName]` are merged under node `opts` (`flow.ts:454`).
-3. The node's `data` gets `__parentId`/`__parentQueue` (if it has a parent) and `__childrenIds` (if it has children) injected (`flow.ts:461-465`).
-4. `pushJobWithParent` pushes the node. In embedded mode it calls `manager.push(...)` with `parentId`, `dependsOn = childIds`, `childrenIds = childIds`, then back-patches each child with the **real** parent id via `manager.updateJobParent(childId, parentId)` (`flowPush.ts:183-187`). TCP mode pushes then sends `UpdateParent` per child (`flowPush.ts:212-216`).
-5. All created ids are tracked in `createdJobIds`; any throw triggers `cleanupJobs` which `Cancel`s every created id (`flow.ts:147`).
+The server returns the committed job snapshots. The client verifies cardinality
+and exact ID equality before constructing `JobNode` objects.
 
-### Fan-in (`addBulkThen`, `flow.ts:213`)
+### 4. Legacy `UpdateParent`
 
-Parallel steps are pushed concurrently via `Promise.allSettled`; successful ids collected, and if any rejected the successes are cleaned up before rethrowing the first error (`flow.ts:237-241`). The `final` job is pushed with `pushJobWithParent` and `childIds = parallelIds` so it both waits on all parallel jobs (`dependsOn`) **and** records them as `childrenIds`, enabling `getChildrenValues()` fan-in result access (`flow.ts:248-258`).
+`UpdateParent` remains for older SDKs. It is strict rather than a permissive
+back-patch:
 
-### Chain (`addChain`, `flow.ts:185`)
+- missing child/parent, self-link, conflicting ownership, or a non-linkable
+  parent is an error;
+- all affected shard/processing locks are acquired in hierarchy order;
+- child and parent rows are updated in one SQLite transaction before memory;
+- a child that already failed has its failure policy applied to the real parent.
 
-Sequential: each step pushes with `dependsOn = [prevId]` and `__flowParentId` in data. **Note:** chains use `dependsOn` for ordering only — they do **not** set `childrenIds`, so `getChildrenValues()` on a chain step returns `{}`. Same is true of `addTree` (`addTreeNode`, `flow.ts:487`).
+It is a compatibility path, not the path used by the Bun `FlowProducer`.
 
-### Dependency resolution (server-side)
+## Dependency lifecycle
 
-1. **Park on push:** `insertJobToShard` (`src/application/operations/push.ts:183`) computes `needsWaiting` = has `dependsOn` AND not all deps already in `completedJobs`/`depCompletions` (line 191). If waiting, the job goes into `shard.waitingDeps` and `registerDependencies` indexes it; timeline gets `waiting-children` (`push.ts:199-206`). Otherwise it enters the `PriorityQueue` immediately. Its query state is reported as `waiting-children` (`queryOperations.ts:180`).
-2. **On completion:** `QueueManager.onJobCompleted` (`queueManager.ts:1380`) adds the completed id to `pendingDepChecks`, schedules a microtask flush, and runs `checkFlowCompleted`.
-3. **Flush:** `runDependencyFlush` (`queueManager.ts:1768`) loops `processPendingDependencies` (`dependencyProcessor.ts:16`): for each completed id it gathers waiters per shard via the O(1) reverse index, acquires the **shard write lock before reading `waitingDeps`** (TOCTOU guard, line 42), re-checks `job.dependsOn.every(dep => completedJobs.has(dep) || depCompletions.has(dep))`, and promotes ready jobs.
-4. **Promote:** `promoteJobsToQueue` (`dependencyProcessor.ts:79`) deletes from `waitingDeps`, `unregisterDependencies`, pushes into the queue, `incrementQueued`, updates `jobIndex` to `{type:'queue'}`, appends timeline, and `shard.notify()`. A `job:dependencies-resolved` dashboard event fires. A fallback poll in `backgroundTasks.ts:69` drains `pendingDepChecks` if the microtask path was missed.
+A parent with unresolved `dependsOn` entries is placed in the shard's
+`waitingDeps` map and reverse dependency index. It is not counted as runnable.
+On child completion, dependency processing:
 
-`DependencyResultTracker` separately records consumer→dependency edges at accepted push/recovery. When a dependency ACKs, its result is copied into protected storage only if a live consumer exists. The ordinary `jobResults` LRU remains bounded and unchanged; query order is LRU → protected dependency result → SQLite. Promotion and reads do not release the protected value because the consumer may read it repeatedly while processing. Terminal completion/failure, cancel, clean, stale-GC, explicit edge removal, obliterate, and shutdown release consumer edges; fan-out keeps a result until the last consumer exits. Retries keep their edges.
+1. finds consumers through the reverse index;
+2. checks readiness under the parent shard write lock;
+3. unregisters resolved edges;
+4. moves the parent to the correct waiting/prioritized queue exactly once;
+5. persists the resolved parent state.
 
-### `getFlow` (`flow.ts:172`)
+`DependencyResultTracker` protects completed child results while a live parent
+may still read them. The ordinary result LRU remains bounded; protected results
+are released when the consumer finishes, fails, is removed, or loses the edge.
 
-Recursively builds a `JobNode` tree, default `depth = Infinity`, `maxChildren` slices each level. Embedded reads `job.childrenIds`; TCP reads `__childrenIds` from `job.data` (`flow.ts:399`).
+## Failure policies and recovery
 
-## Concurrency & Locking
+Exactly one of these child options may be enabled:
 
-- Dependency promotion takes the **per-shard write lock before reading `waitingDeps`** to prevent a complete-vs-check TOCTOU race (`dependencyProcessor.ts:42`). This respects the global order (`shards[N]` lock; see [Concurrency & Locking](./concurrency-and-locking.md)).
-- `moveToWaitingChildren` (`jobStateTransitions.ts:81`) moves an **active** job out of its processing shard (under `processingLocks[idx]`) into `shard.waitingChildren` (under `shardLocks[idx]`), releasing concurrency/uniqueKey/group slots first (`releaseJobResources`).
-- Flush coalescing: `scheduleDependencyFlush` debounces via a single `queueMicrotask`; `runDependencyFlush` uses a `while` re-entrancy loop + `depFlushRunning` guard so completions arriving during async lock waits are not lost (`queueManager.ts:1754-1783`).
-- `addFlowNode` recurses children with `Promise.all`; `addBulkThen` pushes parallels with `Promise.allSettled` — concurrency is at the client/push level, ordering correctness comes from server-side `dependsOn`.
+| Option | Terminal child effect |
+| --- | --- |
+| `failParentOnFailure` | Move the parent to failed/DLQ |
+| `removeDependencyOnFailure` | Remove the failed edge and continue when ready |
+| `ignoreDependencyOnFailure` | Remove the edge and expose the error through `getIgnoredChildrenFailures` |
+| `continueParentOnFailure` | Release all remaining dependencies and expose the error through `getFailedChildrenValues` |
 
-## Edge Cases & Failure Modes
+All four flags are columns in `jobs` and survive active-job recovery. A terminal
+child failure and its `flow_failures` outbox record are committed together.
+Startup calls `recoverFlowFailures` before workers start, then idempotently
+fails, promotes, or detaches the parent. `ignore` and `continue` records remain
+available while the parent is live and are removed when that parent completes,
+fails, is removed, or is obliterated.
 
-- **Atomic rollback:** `add`, `addBulk`, `addChain`, `addBulkThen`, `addTree` all collect created job ids and call `cleanupJobs` (best-effort `Cancel`, errors swallowed) on any error so a partially-built flow is not left dangling (`flowPush.ts:222`).
-- **Pending-parent race:** children are pushed with `parentId='pending'` then back-patched. `updateJobParent` (`queueManager.ts:768`) handles a child that **already terminally failed** before linkage: if the child is in DLQ it re-applies `failParentOnFailure` / `removeDependencyOnFailure` / `ignoreDependencyOnFailure` / `continueParentOnFailure` against the real parent id (lines 803-819).
-- **`__parentQueue` correctness (#104 / audit #102 follow-up):** `__parentQueue` is set to the **parent's** queue, not the child's, so cross-queue `Job.parent`/`parentKey`/`opts.parent` navigation is correct (`queueManager.ts:777-783`).
-- **`removeOnComplete` parents:** their full record is evicted from `completedJobs` to bound memory, so a bare-id `depCompletions` (`BoundedSet`, same cap as `completedJobs`, FIFO) is consulted both on push (`push.ts:194`) and on resolution (`dependencyProcessor.ts:56`). `depCompletions` is deliberately **not** pruned eagerly to avoid orphaning dependents pushed after a parent completed (`dependencyProcessor.ts:71-75`).
-- **Failure propagation policies** (forwarded by `flowPush` `managerOptions`/`tcpOptions`): `failParentOnFailure` → `moveParentToFailed`; `continueParentOnFailure` → promote parent + record `failedChildrenValues`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure` → drop the child from parent deps (ignore variant records `ignoredChildrenFailures`). These maps are keyed by `parentId` and **cleared on parent completion** to avoid a permanent leak (`queueManager.ts:1388`), and on `obliterate`/shutdown.
-- **`removeChildDependency`** (`queueManager.ts:1668`): only valid while the parent is still in `waitingDeps`; if removing the last pending dep, promotes the parent. Throws if the job has no parent.
-- **`removeUnprocessedChildren`** (`queueManager.ts:1728`): cancels only children whose `jobIndex` location is `'queue'` (waiting/delayed); active/completed/failed children are untouched.
-- **Stale-deps GC:** a `waitingDeps` job older than **1 hour** is re-checked under the shard write lock, deleted from SQLite/write-buffer first, then removed from reverse indexes, `jobIndex`, unique/custom ownership, and protected-result consumer tracking.
-- **Late consumer boundary:** registering a dependency immediately pins a result still present in the normal LRU; SQLite remains the durable fallback. In memory-only mode, a result already evicted before any consumer edge existed cannot be reconstructed. Normal predeclared flows register their edges before dependency completion.
-- **Embedded-only methods:** `getParentResult`/`getParentResults` throw outside embedded mode (`flow.ts:285`,`294`); `moveToWaitingChildren` over TCP throws "not supported" (`flowJobFactory.ts:294`); `removeDeduplicationKey` always rejects ("not implemented", `flowJobFactory.ts:341`).
-- **Shared pool semantics:** when `poolSize === 4` and no `token`, a shared pool is used; `close()` only releases (ref-counts) it, while a dedicated pool is fully closed (`flow.ts:115-123`).
-- **`QueueGroup` is embedded-only:** every method calls `getSharedManager()`; there is no TCP variant. `getQueue`/`getWorker` simply prepend the `:`-terminated prefix.
+`removeChildDependency()` removes a live edge on both sides. Parent dependencies,
+children IDs, child `parentId`, internal metadata, reverse indexes, protected
+results, and SQLite rows transition together. If it was the last unresolved
+edge, the parent is promoted. A later failure of the detached child cannot
+affect its former parent.
 
-## Configuration
+`removeUnprocessedChildren()` cancels only queued/delayed children. Active and
+terminal children are left untouched.
 
-`FlowProducerOptions` (`flowTypes.ts:9`):
+## Reading flows and returned jobs
 
-| Option | Default | Notes |
-| --- | --- | --- |
-| `embedded` | `Bun.env.BUNQUEUE_EMBEDDED === '1'` | `flow.ts:39,73`. In-process manager, no server. |
-| `connection.host` | `'localhost'` | dedicated-pool path (`flow.ts:95`) |
-| `connection.port` | `6789` | dedicated-pool path |
-| `connection.poolSize` | `4` | `poolSize===4 && !token` → shared pool (`flow.ts:82`) |
-| `connection.token` | — | presence forces a dedicated pool |
-| `connection.pingInterval` / `commandTimeout` / `pipelining` / `maxInFlight` | pool defaults | forwarded to `TcpConnectionPool` |
+`getFlow({ id, queueName, depth, maxChildren })` reads the authoritative graph:
 
-Per-flow option `FlowOpts.queuesOptions: Record<queueName, Partial<JobOptions>>` supplies per-queue defaults merged under each node's `opts` (`flow.ts:454`). `depCompletions` is capped at `maxCompletedJobs`; protected dependency results are bounded by the live dependency graph and are released with its consumer edges.
+- missing root or queue mismatch returns `null`;
+- `depth` and `maxChildren` must be non-negative integers (or `Infinity`);
+- `maxChildren: 0` returns the node without children;
+- cycles, malformed `childrenIds`, and descendants whose parent metadata does
+  not point back to the traversed parent fail explicitly;
+- missing children or non-not-found TCP errors are not silently truncated.
 
-## Related Docs
+Dependency keys use each child's actual queue (`queueName:jobId`), including
+cross-queue graphs. Returned `job.data`, `toJSON().data`, and `asJSON().data`
+exclude internal flow metadata consistently. Every TCP-backed Job mutation and
+`waitUntilReady()` checks `{ ok: false }` and throws the broker error; object
+progress is carried as numeric progress plus a JSON message, matching the queue
+client. `close()`/`disconnect()` are idempotent, including shared-pool reference
+release, and connection TLS/timeout settings are forwarded.
 
-- [Job Lifecycle (push / pull / ack / fail)](./job-lifecycle.md)
-- [Core Queue Engine (QueueManager & Shards)](./core-queue-engine.md)
-- [Background Tasks](./background-tasks.md)
-- [Concurrency & Locking](./concurrency-and-locking.md)
-- [Workflow Engine (saga orchestration)](./workflow-engine.md)
-- [Deduplication & Unique Jobs](./deduplication-and-unique.md)
-- [TCP Server Command Handlers](./tcp-server-handlers.md)
-- [Client Transport (TCP pool, reconnect, batching)](./client-transport.md)
-- [Persistence (SQLite, WriteBuffer, ReadThrough)](./persistence.md)
-- [architecture](../architecture.md)
-- [data-model](../data-model.md)
+## Persistence and wire model
+
+`AtomicFlowBatchInput` is a wire-neutral list of `{ id, queue, input }`.
+`PUSHF` returns `DataResponse<AtomicFlowBatchResult>`, whose `jobs` array contains
+one authoritative snapshot per input.
+
+SQLite persists:
+
+- `jobs.parent_id`, `jobs.children_ids`, and `jobs.depends_on`;
+- the four failure-policy columns;
+- `flow_failures(parent_id, child_id, child_queue, mode, error, created_at)`.
+
+See [Data Model](../data-model.md), [Persistence](./persistence.md), and
+[TCP Protocol](./tcp-protocol.md).
+
+## Verification
+
+Coverage is deliberately layered:
+
+- focused regressions:
+  `repro-flow-producer-production-safety.test.ts`,
+  `repro-flow-producer-boundaries.test.ts`,
+  `repro-flow-producer-api-parity.test.ts`, and
+  `repro-flow-producer-recovery.test.ts`;
+- `flow-docs-examples.test.ts` executes the Bun Quick Start, chain, fan-in,
+  parent-first tree, option/traversal, and failure-policy examples;
+- generated trees in `model-based/flow-producer-model.test.ts` check graph
+  symmetry, cross-queue ownership, conservation, traversal limits, and failed
+  batch atomicity with shrinking/seed replay;
+- `flow-producer-real-e2e.test.ts` runs actual TCP clients against a dynamic-port
+  broker and SQLite, including cross-queue execution and a full restart;
+- the final sandbox runs unit, TCP integration, and embedded integration suites
+  in disposable containers.
+
+## Related docs
+
+- [Job Lifecycle](./job-lifecycle.md)
+- [Core Queue Engine](./core-queue-engine.md)
+- [Concurrency and Locking](./concurrency-and-locking.md)
+- [Model-Based Verification](./model-based-testing.md)
+- [Workflow Engine](./workflow-engine.md)

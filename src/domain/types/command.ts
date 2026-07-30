@@ -4,6 +4,7 @@
  */
 
 import type { JobInput, JobState } from './job';
+import type { AtomicFlowJobInput } from './flow';
 import type { CronJobOptions } from './cron';
 
 /** Base command interface */
@@ -79,6 +80,12 @@ export interface PushBatchCommand extends BaseCommand {
   readonly cmd: 'PUSHB';
   readonly queue: string;
   readonly jobs: JobInput[];
+}
+
+/** Atomically commit a fully-resolved multi-queue flow graph. */
+export interface PushFlowCommand extends BaseCommand {
+  readonly cmd: 'PUSHF';
+  readonly jobs: AtomicFlowJobInput[];
 }
 
 export interface PullCommand extends BaseCommand {
@@ -621,6 +628,7 @@ export interface HelloCommand extends BaseCommand {
 export type Command =
   | PushCommand
   | PushBatchCommand
+  | PushFlowCommand
   | PullCommand
   | PullBatchCommand
   | AckCommand

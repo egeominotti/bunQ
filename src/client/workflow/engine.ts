@@ -14,6 +14,7 @@ import type {
   RunHandle,
   Execution,
   ExecutionState,
+  ExecutionListOptions,
   RecoverResult,
   StepJobData,
   WorkflowEventType,
@@ -51,7 +52,7 @@ export class Engine {
       queueName,
       async (job) => {
         const data = job.data as unknown as StepJobData;
-        return this.executor.processStep(data);
+        return await this.executor.processStep(data);
       },
       {
         connection: opts.connection,
@@ -70,7 +71,7 @@ export class Engine {
 
   /** Start a new workflow execution */
   async start(workflowName: string, input?: unknown): Promise<RunHandle> {
-    return this.executor.start(workflowName, input);
+    return await this.executor.start(workflowName, input);
   }
 
   /** Get execution state by ID */
@@ -79,8 +80,12 @@ export class Engine {
   }
 
   /** List executions with optional filters */
-  listExecutions(workflowName?: string, state?: ExecutionState): Execution[] {
-    return this.executor.listExecutions(workflowName, state);
+  listExecutions(
+    workflowName?: string,
+    state?: ExecutionState,
+    options?: ExecutionListOptions
+  ): Execution[] {
+    return this.executor.listExecutions(workflowName, state, options);
   }
 
   /**
@@ -88,7 +93,7 @@ export class Engine {
    * unwind. Use once the cause of the failed reversal has been fixed.
    */
   async resumeCompensation(executionId: string): Promise<void> {
-    return this.executor.resumeCompensation(executionId);
+    return await this.executor.resumeCompensation(executionId);
   }
 
   /**
@@ -103,12 +108,12 @@ export class Engine {
    * blows up. Matching the sibling costs nothing while the API is experimental.
    */
   async abandonCompensation(executionId: string): Promise<void> {
-    this.executor.abandonCompensation(executionId);
+    await Promise.resolve(this.executor.abandonCompensation(executionId));
   }
 
   /** Send a signal to a waiting execution */
   async signal(executionId: string, event: string, payload?: unknown): Promise<void> {
-    return this.executor.signal(executionId, event, payload);
+    return await this.executor.signal(executionId, event, payload);
   }
 
   /**
@@ -118,7 +123,7 @@ export class Engine {
    * - 'compensating' executions: compensation re-run (handlers must be idempotent)
    */
   async recover(): Promise<RecoverResult> {
-    return this.executor.recover();
+    return await this.executor.recover();
   }
 
   // ============ Observability ============

@@ -33,6 +33,7 @@ export type {
   SchemaLike,
   Execution,
   ExecutionState,
+  ExecutionListOptions,
   StepState,
   StepRecord,
   // Reachable from `Execution` and `StepRecord`, so a consumer that reads
@@ -47,6 +48,7 @@ export type {
   RunHandle,
   ParallelDefinition,
   SubWorkflowInputMapper,
+  SubWorkflowOptions,
   LoopCondition,
   ForEachItemsExtractor,
   MapTransformFn,

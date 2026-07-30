@@ -6,7 +6,13 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { PRAGMA_SETTINGS, SCHEMA, SCHEMA_VERSION } from '../src/infrastructure/persistence/schema';
+import {
+  MIGRATION_TABLE,
+  PRAGMA_SETTINGS,
+  SCHEMA,
+  SCHEMA_VERSION,
+} from '../src/infrastructure/persistence/schema';
+import { SqliteStorage } from '../src/infrastructure/persistence/sqlite';
 import { unlinkSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -34,8 +40,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 22', () => {
-    expect(SCHEMA_VERSION).toBe(22);
+  test('schema version is 27', () => {
+    expect(SCHEMA_VERSION).toBe(27);
   });
 
   test('jobs persist cumulative stall counts', () => {
@@ -77,6 +83,20 @@ describe('SQLite Performance Indexes', () => {
 
     expect(indexes.length).toBe(1);
     expect(indexes[0].name).toBe('idx_jobs_pending_priority');
+  });
+
+  test('pending indexes include prioritized and waiting-children rows', () => {
+    const indexes = db
+      .query<{ name: string; sql: string }, []>(
+        "SELECT name, sql FROM sqlite_master WHERE type='index' AND name IN ('idx_jobs_run_at', 'idx_jobs_pending_priority') ORDER BY name"
+      )
+      .all();
+
+    expect(indexes).toHaveLength(2);
+    for (const index of indexes) {
+      expect(index.sql).toContain("'prioritized'");
+      expect(index.sql).toContain("'waiting-children'");
+    }
   });
 
   test('getJobs stable pagination indexes exist', () => {
@@ -157,7 +177,7 @@ describe('SQLite Performance Indexes', () => {
     // Run EXPLAIN QUERY PLAN
     const plan = db
       .query<{ detail: string }, []>(
-        "EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE queue = 'test' AND state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC"
+        "EXPLAIN QUERY PLAN SELECT * FROM jobs WHERE queue = 'test' AND state IN ('waiting', 'prioritized', 'waiting-children', 'delayed') ORDER BY priority DESC, run_at ASC"
       )
       .all();
 
@@ -181,7 +201,7 @@ describe('SQLite Performance Indexes', () => {
         `EXPLAIN QUERY PLAN
          SELECT * FROM jobs INDEXED BY idx_jobs_queue_created
          WHERE queue = ?
-           AND (state IN ('waiting', 'delayed') AND run_at <= ? AND priority > 0)
+           AND (state IN ('waiting', 'prioritized', 'delayed') AND run_at <= ? AND priority > 0)
          ORDER BY created_at ASC, id ASC
          LIMIT ? OFFSET ?`
       )
@@ -189,5 +209,50 @@ describe('SQLite Performance Indexes', () => {
 
     expect(plan.some((row) => row.detail.includes('idx_jobs_queue_created'))).toBe(true);
     expect(plan.some((row) => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
+  });
+
+  test('migration 27 rebuilds legacy pending indexes for authoritative states', () => {
+    const path = join(tmpdir(), `bunqueue-index-migration-${crypto.randomUUID()}.db`);
+    const legacy = new Database(path, { create: true });
+    legacy.run(SCHEMA);
+    legacy.run(MIGRATION_TABLE);
+    legacy.run(`
+      DROP INDEX idx_jobs_run_at;
+      CREATE INDEX idx_jobs_run_at
+        ON jobs(run_at) WHERE state IN ('waiting', 'delayed');
+      DROP INDEX idx_jobs_pending_priority;
+      CREATE INDEX idx_jobs_pending_priority
+        ON jobs(queue, state, priority DESC, run_at ASC)
+        WHERE state IN ('waiting', 'delayed');
+      INSERT INTO migrations(version, applied_at) VALUES (22, 0);
+    `);
+    legacy.close();
+
+    const storage = new SqliteStorage({ path });
+    storage.close();
+    const migrated = new Database(path, { readonly: true });
+    try {
+      const indexes = migrated
+        .query<{ sql: string }, []>(
+          "SELECT sql FROM sqlite_master WHERE type='index' AND name IN ('idx_jobs_run_at', 'idx_jobs_pending_priority')"
+        )
+        .all();
+      expect(indexes).toHaveLength(2);
+      for (const index of indexes) {
+        expect(index.sql).toContain("'prioritized'");
+        expect(index.sql).toContain("'waiting-children'");
+      }
+      expect(
+        migrated
+          .query<{ version: number }, []>('SELECT MAX(version) AS version FROM migrations')
+          .get()?.version
+      ).toBe(27);
+    } finally {
+      migrated.close();
+      for (const suffix of ['', '-wal', '-shm']) {
+        const file = `${path}${suffix}`;
+        if (existsSync(file)) unlinkSync(file);
+      }
+    }
   });
 });

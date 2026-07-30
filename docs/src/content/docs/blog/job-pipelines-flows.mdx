@@ -40,6 +40,14 @@ const flow = new FlowProducer({ embedded: true });
 
 FlowProducer supports the BullMQ v5 API for defining job trees with parent-child relationships.
 
+In the Bun package, `add` and `addBulk` send one `PUSHF` command: the complete
+graph is validated before mutation and becomes visible atomically. With a
+configured `dataPath`, every row is also committed in one immediate SQLite
+transaction before workers can pull a leaf. Embedded mode without a
+`dataPath` keeps the atomic visibility guarantee but is intentionally
+memory-only. Current external language SDK releases that compose `PUSH` and
+`UpdateParent` provide best-effort cleanup rather than this transaction.
+
 ## Basic Flow: Parent Waits for Children
 
 The most common pattern: a parent job that depends on multiple child jobs.
@@ -301,12 +309,11 @@ new Worker('cdn', async (job) => {
 
 ## Dependency Resolution Performance
 
-bunqueue uses **event-driven dependency resolution** via microtask coalescing. When a child job completes, the parent's dependency state is updated immediately rather than on a polling interval:
-
-| Pattern | Old Polling (100ms) | Event-Driven (p50) |
-|---------|-------------------|--------------|
-| Simple parent-child | ~100ms latency | ~14 microseconds |
-| Chain (4 levels) | ~300ms | ~31 microseconds |
-| Fan-out (1 to 5) | ~100ms | ~28 microseconds |
-
-This makes complex flow trees execute with minimal overhead between steps.
+bunqueue uses **event-driven dependency resolution** via microtask coalescing.
+When a child completes, a reverse dependency index identifies only the parents
+that can be affected; readiness is rechecked under the parent shard lock and
+eligible parents are notified without a polling interval. Resolution is
+O(completed edges plus affected parents), rather than a scan of every queued
+job. See the maintained [benchmarking contract](/guide/benchmarks/) for
+hardware-qualified measurements; example code does not embed unrepeatable
+latency numbers.

@@ -6,9 +6,10 @@
  *     even though the server sends the full job — list methods lost opts.*.
  *  #2 createJobProxy / createSimpleJob hardcoded deduplicationId, parentKey,
  *     parent and repeatJobKey to undefined, diverging from embedded mode.
- *  #3 FlowProducer dropped extended job options (lifo, deduplication, durable,
- *     stallTimeout, stackTraceLimit, keepLogs, sizeLimit, repeat...) in both
- *     embedded and TCP modes.
+ *  #3 FlowProducer forwards graph-safe extended job options (lifo, durable,
+ *     stallTimeout, stackTraceLimit, keepLogs, sizeLimit...) in both embedded
+ *     and TCP modes. Independent repeat/dedup/debounce lifetimes are rejected
+ *     before an atomic graph can be partially rewritten.
  *  #4 Job.toJSON()/asJSON() hardcoded opts:{} and delay:0, losing reflected opts.
  *  #5 changePriority({ priority, lifo }) silently dropped lifo everywhere.
  *  #6 removeOnComplete/removeOnFail accepted number|KeepJobs but coerced
@@ -17,7 +18,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { unlink } from 'fs/promises';
-import { Queue, FlowProducer, shutdownManager } from '../src/client';
+import { Queue, FlowProducer, shutdownManager, type JobOptions } from '../src/client';
 import { getSharedManager } from '../src/client/manager';
 import { QueueManager } from '../src/application/queueManager';
 import { createTcpServer, type TcpServer } from '../src/infrastructure/server/tcp';
@@ -109,8 +110,8 @@ describe('#2 proxy reflects dedup/parent/repeat keys (TCP, matches embedded)', (
   });
 });
 
-describe('#3 FlowProducer forwards extended job options', () => {
-  test('embedded flow node persists lifo/dedup/durable/limits/stallTimeout', async () => {
+describe('#3 FlowProducer forwards graph-safe options and rejects independent lifetimes', () => {
+  test('embedded flow node persists lifo/durable/limits/stallTimeout', async () => {
     const flow = new FlowProducer({ embedded: true });
     open.push(flow);
     const q = freshEmb('issue90-flow-emb');
@@ -124,7 +125,6 @@ describe('#3 FlowProducer forwards extended job options', () => {
         sizeLimit: 99999,
         stackTraceLimit: 7,
         keepLogs: 11,
-        deduplication: { id: 'flow-dk', ttl: 60000 },
         durable: true,
       },
     });
@@ -135,23 +135,86 @@ describe('#3 FlowProducer forwards extended job options', () => {
     expect(stored!.opts.sizeLimit).toBe(99999);
     expect(stored!.opts.stackTraceLimit).toBe(7);
     expect(stored!.opts.keepLogs).toBe(11);
-    expect(stored!.deduplicationId).toBe('flow-dk');
   });
 
   test('TCP flow node forwards extended options to the server', async () => {
-    const flow = new FlowProducer({ embedded: false, connection: { host: '127.0.0.1', port: PORT } });
+    const flow = new FlowProducer({
+      embedded: false,
+      connection: { host: '127.0.0.1', port: PORT },
+    });
     open.push(flow);
     const node = await flow.add({
       name: 'root',
       queueName: 'issue90-flow-tcp',
       data: { v: 1 },
-      opts: { lifo: true, stallTimeout: 4242, sizeLimit: 555, deduplication: { id: 'flow-dk-tcp' } },
+      opts: { lifo: true, stallTimeout: 4242, sizeLimit: 555 },
     });
     const stored = await qm.getJob(jobId(node.job.id));
     expect(stored).not.toBeNull();
     expect(stored!.lifo).toBe(true);
     expect(stored!.stallTimeout).toBe(4242);
     expect(stored!.sizeLimit).toBe(555);
+  });
+
+  test('repeat, deduplication, and debounce reject atomically in embedded and TCP modes', async () => {
+    const unsupported = [
+      {
+        label: 'repeat',
+        opts: { repeat: { every: 5000 } },
+        message: 'repeat is not supported inside an atomic flow',
+      },
+      {
+        label: 'deduplication',
+        opts: { deduplication: { id: 'flow-dedup-key', ttl: 60000 } },
+        message: 'deduplication is not supported inside an atomic flow',
+      },
+      {
+        label: 'debounce',
+        opts: { debounce: { id: 'flow-debounce-key', ttl: 1000 } },
+        message: 'debounce is not supported inside an atomic flow',
+      },
+    ] satisfies Array<{ label: string; opts: JobOptions; message: string }>;
+
+    for (const embedded of [true, false]) {
+      for (const entry of unsupported) {
+        const queueName = `issue90-flow-unsupported-${embedded ? 'embedded' : 'tcp'}-${entry.label}`;
+        const queue = embedded ? freshEmb(queueName) : freshTcp(queueName);
+        const flow = new FlowProducer(
+          embedded
+            ? { embedded: true }
+            : { embedded: false, connection: { host: '127.0.0.1', port: PORT } }
+        );
+        open.push(flow);
+
+        await expect(
+          flow.add({
+            name: 'root',
+            queueName,
+            data: { v: 1 },
+            opts: entry.opts,
+          })
+        ).rejects.toThrow(entry.message);
+        expect(await queue.countAsync()).toBe(0);
+      }
+    }
+
+    const plannedId = jobId('issue90-flow-manual-dedup');
+    await expect(
+      qm.pushFlow({
+        jobs: [
+          {
+            id: plannedId,
+            queue: 'issue90-flow-manual-dedup',
+            input: {
+              data: { name: 'root' },
+              uniqueKey: 'manual-dedup-key',
+              dedup: { ttl: 60000 },
+            },
+          },
+        ],
+      })
+    ).rejects.toThrow('deduplication is not supported inside an atomic flow');
+    expect(await qm.getJob(plannedId)).toBeNull();
   });
 });
 
@@ -211,8 +274,18 @@ describe('#5 changePriority forwards lifo', () => {
   test('FlowProducer job node forwards lifo through changePriority', async () => {
     const flow = new FlowProducer({ embedded: true });
     open.push(flow);
-    const fa = await flow.add({ name: 'a', queueName: 'issue90-flow-lifo', data: { n: 1 }, opts: { priority: 5 } });
-    const fb = await flow.add({ name: 'b', queueName: 'issue90-flow-lifo', data: { n: 2 }, opts: { priority: 5 } });
+    const fa = await flow.add({
+      name: 'a',
+      queueName: 'issue90-flow-lifo',
+      data: { n: 1 },
+      opts: { priority: 5 },
+    });
+    const fb = await flow.add({
+      name: 'b',
+      queueName: 'issue90-flow-lifo',
+      data: { n: 2 },
+      opts: { priority: 5 },
+    });
     await fa.job.changePriority({ priority: 5, lifo: true });
     await fb.job.changePriority({ priority: 5, lifo: true });
     const mgr = getSharedManager();

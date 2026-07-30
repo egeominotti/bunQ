@@ -59,7 +59,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
-| [FlowProducer & Job Dependencies](./features/flow-producer.md) | Parent/child trees and chains plus the server-side [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) that retains results while live consumers need them. |
+| [FlowProducer & Job Dependencies](./features/flow-producer.md) | Atomic multi-queue graph creation, parent/child failure recovery, traversal safety, and the server-side [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts). |
 | [Workflow Engine](./features/workflow-engine.md) | Multi-step saga orchestration on a Queue/Worker pair: a typed DSL of nodes driven one-node-per-job, with retries, parallelism, signals, loops, sub-workflows, SQLite-persisted state, and reverse-order compensation. |
 
 ### Transport & protocol

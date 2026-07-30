@@ -154,7 +154,7 @@ be claimed.
 │                                       ▼                                          │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  WriteBuffer (10ms / 100-job double-buffer) ─► SQLite (WAL, msgpack)     │   │
-│   │  Recovery reads ◄─ jobs · job_results · dlq · cron_jobs · queue_state    │   │
+│   │  Recovery ◄─ jobs · flow_failures · results · dlq · cron · queue_state   │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
@@ -214,6 +214,25 @@ IoT/edge that must tolerate intermittent connectivity. See
    tracked in the shard's temporal delayed min-heap).
 5. The job is handed to the `WriteBuffer` (batched) — or written immediately when
    `durable: true` — and a `job:added` event is emitted. The new `Job` is returned.
+
+**PUSHF** (`FlowProducer`)
+
+1. The client preallocates every ID and compiles all roots into one fully
+   resolved graph; embedded mode calls `QueueManager.pushFlow`, while TCP sends
+   one `PUSHF` frame.
+2. The broker validates the complete graph before mutation, including numeric
+   bounds, IDs, queues, option compatibility, edge symmetry, and cycles.
+3. It acquires the custom-ID lock when needed and every affected queue-shard
+   write lock in ascending order, then rechecks ownership.
+4. With a configured `dataPath`, one immediate SQLite transaction inserts every
+   node and its initial `waiting`/`prioritized`/`delayed`/`waiting-children`
+   state. A manager without storage skips this durability step.
+5. Only after that transaction commits (or immediately in memory-only mode) are
+   all heaps, dependency indexes, counters, `jobIndex`, and custom-ID ownership
+   published under the held locks. Workers need the same shard locks, so no
+   leaf is observable against partial topology.
+6. Locks are released before notifications/events; the response contains one
+   authoritative snapshot per committed job.
 
 **PULL** (`Worker` poll)
 1. Worker requests work (`PULL`/`PULLB`, optionally with a lease/owner) for a queue.
@@ -337,9 +356,62 @@ proceed during the writer's flush.
   cron, and queue control-state back into memory before serving traffic
   ([`queueManager.ts:202`](../src/application/queueManager.ts)).
 
-Persisted tables: `jobs`, `job_results`, `dlq`, `cron_jobs`, `queue_state` (plus
-the `migrations` bookkeeping table) — see
+Persisted tables: `jobs`, `flow_failures`, `job_results`, `dlq`, `cron_jobs`,
+`queue_state` (plus the `migrations` bookkeeping table) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
+
+### Workflow execution path
+
+The workflow engine is a client-layer orchestrator over a normal Queue/Worker
+pair, with its own synchronous SQLite state:
+
+```
+Workflow graph ──register/seal──► WorkflowExecutor
+                                      │
+Engine.start ──persist Execution──────┤──publish wf:step
+                                      ▼
+                               node admission
+                        (state + cursor + in-flight claim)
+                                      │
+                 ┌────────────────────┼────────────────────┐
+                 ▼                    ▼                    ▼
+          runner / loops       wait / signals       child poller
+                 └────────────────────┼────────────────────┘
+                                      ▼
+                         persist outcome + advance
+                                      │ failure
+                                      ▼
+                         reverse compensation pass
+```
+
+Responsibilities are deliberately split to keep every hot module below 300
+lines:
+
+- `workflow.ts`, `workflowValidation.ts`, `workflowDefinition.ts` and
+  `workflowIntrospection.ts` build, validate, fingerprint and seal graphs.
+- `executor.ts`, `executorLifecycle.ts` and `executorNodes.ts` own admission,
+  start/signal publication and node dispatch.
+- `runner.ts`/`runnerTiming.ts`, `loops.ts`, `mapRunner.ts`,
+  `subWorkflowRunner.ts`, `waitFor.ts` and `workflowDecisions.ts` own executable
+  node semantics and durable decisions.
+- `compensator.ts`, `compensationPass.ts`, `compensationChild.ts`,
+  `compensationSupport.ts`, `unwindPlan.ts` and `rollbackControl.ts` own unwind
+  policy and operator recovery.
+- `store.ts`, `storeListing.ts`, `storeSignals.ts`,
+  `storeExecutionCodec.ts` and `storeMaintenance.ts` own SQLite state,
+  deterministic listing, signal transactions and retention.
+- `stepTypes.ts`, `executionTypes.ts` and `eventTypes.ts` form the public type
+  model behind the stable `types.ts` barrel.
+
+An execution is bound to a sealed definition hash. Branch, loop, item and child
+input decisions are persisted before effects, while duplicate deliveries are
+fenced in-process by `<executionId>:<nodeIndex>` and rejected when their cursor
+is stale. This gives at-least-once replay only to work whose external outcome
+is unknown; completed steps/maps and settled compensation outcomes are not
+dispatched again.
+
+See [Workflow Engine](./features/workflow-engine.md) and the workflow section in
+[Data Model](./data-model.md).
 
 ## Background Tasks
 
@@ -391,7 +463,10 @@ no `localeCompare`), MessagePack framing, and transparent client-side add-batchi
 that coalesces concurrent `add()` calls into one `PUSHB` round-trip. The only
 data-loss exposure is the ≤10 ms buffered window — including normal TCP
 `PUSH`/`PUSHB`, which acknowledge the in-memory acceptance while SQLite flushes
-behind it. It is eliminated per job with `durable: true`. The internal
+  behind it. It is eliminated per job with `durable: true`; when SQLite is
+  configured, `PUSHF` always uses one immediate all-job transaction because
+  partial durable flow state is not a valid outcome. In memory-only mode,
+  `PUSHF` still provides atomic visibility but no crash durability. The internal
 in-memory row has no persistence boundary and must not be presented as an
 SQLite figure. Numbers are hardware-, scale-, and operation-dependent.
 

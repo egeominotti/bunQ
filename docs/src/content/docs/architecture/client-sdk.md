@@ -143,6 +143,13 @@ src/client/
 
 ## FlowProducer (Dependencies)
 
+The Bun client plans the complete graph and commits it through one `PUSHF`
+operation in both embedded and TCP modes. Validation occurs before mutation;
+all affected shard locks are held through publication, and configured SQLite
+commits every node before workers are notified. Legacy external SDKs that use
+`PUSH` plus `UpdateParent` remain compatible but have best-effort cleanup
+rather than this atomic creation boundary.
+
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Dependency chain</b><span>addChain([A, B, C])</span></div>
   <div class="bq-diag-flow">

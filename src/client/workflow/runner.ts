@@ -7,37 +7,10 @@ import { idempotencyKey, isIterationOf, describeError } from './identity';
 import type { Workflow } from './workflow';
 import type { WorkflowEmitter } from './emitter';
 import { clock } from './clock';
+import { retryBackoffDelay, runWithTimeout } from './runnerTiming';
 
-/** Exponential backoff with jitter */
-function backoffDelay(attempt: number, baseMs = 500, maxMs = 30_000): number {
-  const delay = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
-  const jitter = delay * 0.5 * clock().random();
-  return delay + jitter;
-}
-
-/** Run a promise with a timeout */
-export function runWithTimeout<T>(promise: Promise<T> | T, timeoutMs: number): Promise<T> {
-  if (!(promise instanceof Promise)) return Promise.resolve(promise);
-  if (timeoutMs <= 0) return promise;
-  return new Promise<T>((resolve, reject) => {
-    const timer = clock().setTimeout(() => {
-      reject(new Error(`Step timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    promise.then(
-      (v) => {
-        clock().clearTimeout(timer);
-        resolve(v);
-      },
-      (e: unknown) => {
-        clock().clearTimeout(timer);
-        // `describeError`, not `String`: this wrapper runs BEFORE the compensator's own
-        // catch, so converting here with `String` is what destroyed a structured throw
-        // into `[object Object]` no matter how carefully the catch handled it.
-        reject(e instanceof Error ? e : new Error(describeError(e)));
-      }
-    );
-  });
-}
+export { runWithTimeout } from './runnerTiming';
+export { executeSubWorkflow } from './subWorkflowRunner';
 
 /** Engine hooks a step needs; they always travel together. */
 export interface StepHooks {
@@ -55,18 +28,30 @@ export async function executeStepWithRetry(
 ): Promise<void> {
   const { emitter, updateFn } = hooks;
   const maxAttempts = def.retry;
+  const current = exec.steps[def.name];
+  const previous = current && (current.occurrence ?? 0) === occurrence ? current : undefined;
+  const attemptsUsed = previous?.attempts ?? 0;
+  if (previous?.status === 'completed') return;
+  if (previous?.status === 'failed' && attemptsUsed >= maxAttempts) {
+    throw new Error(previous.error ?? `Step "${def.name}" exhausted its retry budget`);
+  }
   let lastError: Error | undefined;
   // Derived once, outside the retry loop, and persisted with the START record: a
   // rollback for a step whose outcome is unknown needs this key to reconcile, and by
   // then the body may never have reached the point of writing anything.
-  const forwardKey = idempotencyKey(exec.id, def.name, occurrence, 'forward');
+  const forwardKey =
+    previous?.idempotencyKey ?? idempotencyKey(exec.id, def.name, occurrence, 'forward');
   const stepCtx: StepContext = { ...ctx, idempotencyKey: forwardKey };
+  let validatedInput = stepCtx.input;
+  let inputValidationError: Error | undefined;
+  let inputParsed = false;
+  let finalAttempt = attemptsUsed;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const prev = exec.steps[def.name] as { startedAt?: number } | undefined;
+  for (let attempt = attemptsUsed + 1; attempt <= maxAttempts; attempt++) {
+    finalAttempt = attempt;
     exec.steps[def.name] = {
       status: 'running',
-      startedAt: prev?.startedAt ?? clock().now(),
+      startedAt: previous?.startedAt ?? clock().now(),
       attempts: attempt,
       idempotencyKey: forwardKey,
       occurrence,
@@ -78,27 +63,28 @@ export async function executeStepWithRetry(
     });
 
     try {
-      let input = stepCtx.input;
-      if (def.inputSchema) {
+      if (!inputParsed) {
+        inputParsed = true;
         try {
-          // The RETURN VALUE matters. `parse()` is the coercing entry point of every
-          // schema library the docs point at: `.default()` fills gaps, `.transform()`
-          // rewrites, `z.coerce.date()` builds a Date from a string. Calling it purely
-          // for its throw validated the shape and silently dropped every coercion, so
-          // a step declaring `.default('EUR')` ran with no currency at all
-          // (`test/repro-workflow-gate-and-schema.test.ts`). A validator that returns
-          // nothing is still supported: `undefined` means "I only assert", so the
-          // original value is kept rather than blanked.
-          const parsed = def.inputSchema.parse(stepCtx.input);
-          if (parsed !== undefined) input = parsed;
-        } catch (e) {
-          throw new Error(`Input validation failed for "${def.name}": ${describeError(e)}`, {
-            cause: e,
-          });
+          // Input is immutable for one step occurrence. Parse once so coercion is
+          // stable and handler retries do not repeat user schema side effects.
+          const parsed = def.inputSchema?.parse(stepCtx.input);
+          if (parsed !== undefined) validatedInput = parsed;
+        } catch (error) {
+          inputValidationError = new Error(
+            `Input validation failed for "${def.name}": ${describeError(error)}`,
+            { cause: error }
+          );
         }
       }
-      const handlerCtx = input === stepCtx.input ? stepCtx : { ...stepCtx, input };
-      let result = await runWithTimeout(def.handler(handlerCtx), def.timeout);
+      if (inputValidationError) throw inputValidationError;
+      const controller = new AbortController();
+      const handlerCtx: StepContext = {
+        ...stepCtx,
+        input: validatedInput,
+        signal: controller.signal,
+      };
+      let result = await runWithTimeout(def.handler(handlerCtx), def.timeout, controller);
       if (def.outputSchema) {
         try {
           const parsed = def.outputSchema.parse(result);
@@ -134,7 +120,7 @@ export async function executeStepWithRetry(
           attempt,
           maxAttempts,
         });
-        await new Promise<void>((r) => clock().setTimeout(() => r(), backoffDelay(attempt)));
+        await new Promise<void>((r) => clock().setTimeout(() => r(), retryBackoffDelay(attempt)));
         continue;
       }
     }
@@ -147,7 +133,7 @@ export async function executeStepWithRetry(
     error: String(finalError),
     startedAt: exec.steps[def.name].startedAt,
     completedAt: clock().now(),
-    attempts: maxAttempts,
+    attempts: finalAttempt,
     idempotencyKey: forwardKey,
     occurrence,
   };
@@ -171,7 +157,7 @@ export async function executeStepWithRetry(
   }
   emitter?.emitStep('step:failed', exec.id, exec.workflowName, def.name, {
     error: String(finalError),
-    attempt: maxAttempts,
+    attempt: finalAttempt,
     maxAttempts,
   });
   throw finalError;
@@ -195,66 +181,6 @@ export async function executeParallelSteps(
     );
     throw new AggregateError(errors, errors[0].message);
   }
-}
-
-/** Execute a sub-workflow by starting it and polling for completion */
-// 6 params, one over the limit. `existingChildId` is what makes re-entering this node resume
-// the child a restart already started, instead of abandoning it and provisioning a second
-// one, so it belongs in the signature where a caller cannot forget it rather than in an
-// options bag where omitting it looks deliberate.
-// biome-ignore lint/complexity/useMaxParams: see above
-export async function executeSubWorkflow(
-  workflowName: string,
-  input: unknown,
-  startFn: (name: string, input: unknown) => Promise<{ id: string }>,
-  getFn: (id: string) => Execution | null,
-  pollIntervalMs = 100,
-  /**
-   * A child this node already started, from an earlier entry into the same node.
-   *
-   * Without it the node started a BRAND NEW child every time it was re-entered, and
-   * re-entry is routine: a restart followed by `recover()` re-enqueues the parent's
-   * current node. Measured across one restart, the child ran twice and both rows were
-   * left `running` forever, since a child is excluded from recovery while its parent
-   * exists and `cleanup`/`archive` only reap terminal states. Duplicated work, not just
-   * a leaked row: a child that provisions a resource provisioned it twice
-   * (`test/repro-workflow-orphan-child.test.ts`).
-   */
-  existingChildId?: string
-): Promise<{ results: Record<string, unknown>; executionId: string }> {
-  // Resume the existing child when it is still there. A row that has been cleaned away
-  // cannot be resumed, so that case starts fresh.
-  const existing = existingChildId ? getFn(existingChildId) : null;
-  const handle = existing ? { id: existing.id } : await startFn(workflowName, input);
-  const maxWait = 300_000;
-  const start = clock().now();
-
-  while (clock().now() - start < maxWait) {
-    const subExec = getFn(handle.id);
-    if (subExec?.state === 'completed') {
-      const results: Record<string, unknown> = {};
-      for (const [name, record] of Object.entries(subExec.steps)) {
-        if (record.status === 'completed') results[name] = record.result;
-      }
-      return { results, executionId: handle.id };
-    }
-    if (subExec?.state === 'failed') {
-      throw new Error(`Sub-workflow "${workflowName}" (${handle.id}) failed`);
-    }
-    // A child that parks mid-rollback is terminal FOR THIS POLL: nothing it does next
-    // happens without an operator. Waiting for it was measured at the full 300 s, after
-    // which the parent reported a timeout, which is the wrong diagnostic for precisely
-    // the scenario this module exists to handle, and it held a worker slot for five
-    // minutes to say it. The parent parks too, with the real reason.
-    if (subExec?.state === 'compensation-stuck') {
-      throw new Error(
-        `Sub-workflow "${workflowName}" (${handle.id}) is parked mid-rollback ` +
-          `(compensation-stuck); resolve it with resumeCompensation or abandonCompensation`
-      );
-    }
-    await new Promise<void>((r) => clock().setTimeout(() => r(), pollIntervalMs));
-  }
-  throw new Error(`Sub-workflow "${workflowName}" (${handle.id}) timed out`);
 }
 
 /** Find a step definition by name across all node types */

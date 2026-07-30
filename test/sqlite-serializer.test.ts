@@ -886,9 +886,9 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertJob).toContain('jobs');
     });
 
-    test('should have 25 placeholder parameters', () => {
+    test('should have 29 placeholder parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertJob.match(/\?/g) || []).length;
-      expect(paramCount).toBe(25);
+      expect(paramCount).toBe(29);
     });
 
     test('should include all required columns', () => {
@@ -899,6 +899,8 @@ describe('SQL_STATEMENTS', () => {
         'unique_key', 'custom_id', 'depends_on', 'parent_id',
         'children_ids', 'tags', 'state', 'lifo', 'group_id',
         'remove_on_complete', 'remove_on_fail', 'stall_timeout', 'stall_count',
+        'fail_parent_on_failure', 'remove_dependency_on_failure',
+        'continue_parent_on_failure', 'ignore_dependency_on_failure',
       ];
       for (const col of requiredColumns) {
         expect(sql).toContain(col);
@@ -1109,6 +1111,10 @@ describe('prepareStatements', () => {
         null,                    // group_id
         0,                       // remove_on_complete
         0,                       // remove_on_fail
+        0,                       // fail_parent_on_failure
+        0,                       // remove_dependency_on_failure
+        0,                       // continue_parent_on_failure
+        0,                       // ignore_dependency_on_failure
         null,                    // stall_timeout
         0,                       // stall_count
         null                     // timeline
@@ -1313,6 +1319,10 @@ describe('end-to-end pack/unpack via SQLite', () => {
       'group-1',
       1,
       1,
+      0,
+      0,
+      0,
+      0,
       15000,
       2,
       null
@@ -1373,6 +1383,10 @@ describe('end-to-end pack/unpack via SQLite', () => {
       'waiting',
       0,
       null,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       null,

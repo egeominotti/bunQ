@@ -61,6 +61,7 @@ export class SignalCoordinator {
   private readonly read: ReturnType<Database['prepare']>;
   private readonly write: ReturnType<Database['prepare']>;
   private readonly claimResume: ReturnType<Database['prepare']>;
+  private readonly restoreWait: ReturnType<Database['prepare']>;
   private readonly claimPark: ReturnType<Database['prepare']>;
 
   constructor(private readonly db: Database) {
@@ -72,6 +73,11 @@ export class SignalCoordinator {
     );
     this.claimResume = db.prepare(
       `UPDATE workflow_executions SET state = 'running', updated_at = ? WHERE id = ? AND state = 'waiting'`
+    );
+    this.restoreWait = db.prepare(
+      `UPDATE workflow_executions
+       SET state = 'waiting', updated_at = ?
+       WHERE id = ? AND state = 'running' AND current_node_index = ?`
     );
     // 'waiting' is accepted as a source state so re-parking is idempotent: a clamped
     // or partial timeout re-arm re-enters the same waitFor node while the row is
@@ -90,7 +96,15 @@ export class SignalCoordinator {
       const row = this.read.get(id) as Record<string, unknown> | null;
       if (!row) return { found: false, resumed: false, workflowName: '', currentNodeIndex: 0 };
 
+      const state = row.state as string;
+      if (state !== 'running' && state !== 'waiting') {
+        throw new Error(`Execution "${id}" is "${state}" and cannot receive the signal "${event}"`);
+      }
+
       const signals = this.decode(row);
+      if (hasSignal(signals, event)) {
+        throw new Error(`Signal "${event}" was already received for execution "${id}"`);
+      }
       signals[event] = payload;
       const now = clock().now();
       this.write.run(pack(signals), now, id);
@@ -103,7 +117,29 @@ export class SignalCoordinator {
         currentNodeIndex: row.current_node_index as number,
       };
     });
-    return tx();
+    // A signal key lives inside one msgpack blob, so there is no SQL UNIQUE
+    // constraint that can arbitrate two writers. Taking the write reservation before
+    // the read makes the read/check/write sequence first-writer-wins across database
+    // connections as well as within this process.
+    return tx.immediate();
+  }
+
+  /**
+   * Put a claimed wait back when publishing its resume job failed.
+   *
+   * The signal stays recorded: recovery sees the waiting row plus the signal key and
+   * retries the resume. The cursor predicate prevents a delayed enqueue rejection
+   * from parking an execution that another driver has already advanced.
+   */
+  restoreWaiting(id: string, event: string, nodeIndex: number): boolean {
+    const tx = this.db.transaction((): boolean => {
+      const row = this.read.get(id) as Record<string, unknown> | null;
+      if (!row || row.current_node_index !== nodeIndex || row.state !== 'running') return false;
+      if (!hasSignal(this.decode(row), event)) return false;
+      const restored = this.restoreWait.run(clock().now(), id, nodeIndex) as { changes: number };
+      return restored.changes === 1;
+    });
+    return tx.immediate();
   }
 
   /**
@@ -123,7 +159,9 @@ export class SignalCoordinator {
       const claimed = this.claimPark.run(clock().now(), id) as { changes: number };
       return { signalPresent: false, parked: claimed.changes === 1, signals };
     });
-    return tx();
+    // Serialize the signal check with record(): a deferred transaction can let both
+    // sides read first and then surface SQLITE_BUSY while upgrading their locks.
+    return tx.immediate();
   }
 
   private decode(row: Record<string, unknown> | null): Record<string, unknown> {

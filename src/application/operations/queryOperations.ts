@@ -433,9 +433,10 @@ function querySqliteByLogicalState(
     return storage.queryJobsByLogicalStates(queue, sqlFilteredStates, opts);
   }
 
-  // waitingDeps/waitingChildren rows remain persisted as waiting/delayed. Fetch
-  // enough rows to account for every possible exclusion, then paginate the
-  // logical result so parked jobs cannot create short or shifted pages.
+  // Legacy waitingDeps/waitingChildren rows may be persisted as waiting/delayed,
+  // while current inserts retain waiting-children. Fetch enough rows to account
+  // for every possible exclusion, then paginate the logical result so parked
+  // jobs cannot create short or shifted pages.
   const pageEnd = opts.offset + opts.limit;
   const jobs = storage.queryJobsByLogicalStates(queue, sqlFilteredStates, {
     limit: pageEnd + opts.excludedIds.size,
@@ -509,9 +510,9 @@ export function getJobs(
         s !== 'paused' &&
         !(isPaused && (s === 'waiting' || s === 'prioritized'))
     );
-    // In-memory parked state is authoritative over the persisted row. Initial
-    // dependency jobs are stored as waiting/delayed, while parents moved after
-    // a pull can still be stored as active.
+    // In-memory parked state is authoritative over the persisted row. Current
+    // inserts retain waiting-children; legacy rows may still be waiting/delayed,
+    // while parents moved after a pull can still be stored as active.
     const parkedJobs =
       states.includes('waiting-children') || sqlFilteredStates.length > 0
         ? collectWaitingChildrenJobs(shard, queue)

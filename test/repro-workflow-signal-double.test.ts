@@ -53,11 +53,17 @@ describe('REPRO: engine.signal() must not double-execute post-waitFor steps', ()
     }
     expect(engine.getExecution(run.id)?.state).toBe('waiting');
 
-    // Duplicate / concurrent signal delivery — must collapse to a single resume.
-    await Promise.all([
+    // Duplicate / concurrent delivery: exactly one caller owns the signal key and
+    // resume; the other gets an actionable duplicate error.
+    const deliveries = await Promise.allSettled([
       engine.signal(run.id, 'approval', { by: 'a' }),
       engine.signal(run.id, 'approval', { by: 'b' }),
     ]);
+    expect(deliveries.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = deliveries.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    );
+    expect(String(rejected?.reason)).toMatch(/already received/i);
     await Bun.sleep(400);
 
     expect(prepRan).toBe(1); // the pre-waitFor step must never re-run

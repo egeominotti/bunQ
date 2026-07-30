@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     progress_msg TEXT,
     remove_on_complete INTEGER DEFAULT 0,
     remove_on_fail INTEGER DEFAULT 0,
+    fail_parent_on_failure INTEGER NOT NULL DEFAULT 0,
+    remove_dependency_on_failure INTEGER NOT NULL DEFAULT 0,
+    continue_parent_on_failure INTEGER NOT NULL DEFAULT 0,
+    ignore_dependency_on_failure INTEGER NOT NULL DEFAULT 0,
     stall_timeout INTEGER,
     last_heartbeat INTEGER,
     stall_count INTEGER NOT NULL DEFAULT 0,
@@ -60,13 +64,25 @@ CREATE INDEX IF NOT EXISTS idx_jobs_queue_created
 CREATE INDEX IF NOT EXISTS idx_jobs_queue_state_created
     ON jobs(queue, state, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_run_at
-    ON jobs(run_at) WHERE state IN ('waiting', 'delayed');
+    ON jobs(run_at) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
 CREATE INDEX IF NOT EXISTS idx_jobs_unique
     ON jobs(queue, unique_key) WHERE unique_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_jobs_custom_id
     ON jobs(custom_id) WHERE custom_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_jobs_parent
     ON jobs(parent_id) WHERE parent_id IS NOT NULL;
+
+-- Durable outbox/state for terminal child failure propagation.
+CREATE TABLE IF NOT EXISTS flow_failures (
+    parent_id TEXT NOT NULL,
+    child_id TEXT NOT NULL,
+    child_queue TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    error TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, child_id)
+);
+CREATE INDEX IF NOT EXISTS idx_flow_failures_parent ON flow_failures(parent_id);
 
 -- Job results storage (BLOB for MessagePack)
 CREATE TABLE IF NOT EXISTS job_results (
@@ -99,7 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_group_id
 
 -- Pending jobs: compound index for priority-ordered retrieval
 CREATE INDEX IF NOT EXISTS idx_jobs_pending_priority
-    ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'delayed');
+    ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
 
 -- Completed jobs: index for recovery ordering (issue #84)
 CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
@@ -150,7 +166,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 `;
 
 /** Current schema version */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 27;
 
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
@@ -245,5 +261,38 @@ ALTER TABLE queue_state ADD COLUMN stall_grace_period INTEGER;
   // Migration 22: Persist the complete per-queue DLQ policy atomically.
   22: `
 ALTER TABLE queue_state ADD COLUMN dlq_config BLOB;
+`,
+  // Migrations 23-26: flow failure policy must survive active-job recovery.
+  23: `
+ALTER TABLE jobs ADD COLUMN fail_parent_on_failure INTEGER NOT NULL DEFAULT 0;
+`,
+  24: `
+ALTER TABLE jobs ADD COLUMN remove_dependency_on_failure INTEGER NOT NULL DEFAULT 0;
+`,
+  25: `
+ALTER TABLE jobs ADD COLUMN continue_parent_on_failure INTEGER NOT NULL DEFAULT 0;
+`,
+  26: `
+ALTER TABLE jobs ADD COLUMN ignore_dependency_on_failure INTEGER NOT NULL DEFAULT 0;
+`,
+  27: `
+CREATE TABLE IF NOT EXISTS flow_failures (
+    parent_id TEXT NOT NULL,
+    child_id TEXT NOT NULL,
+    child_queue TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    error TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, child_id)
+);
+CREATE INDEX IF NOT EXISTS idx_flow_failures_parent ON flow_failures(parent_id);
+
+DROP INDEX IF EXISTS idx_jobs_run_at;
+CREATE INDEX idx_jobs_run_at
+    ON jobs(run_at) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
+
+DROP INDEX IF EXISTS idx_jobs_pending_priority;
+CREATE INDEX idx_jobs_pending_priority
+    ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
 `,
 };

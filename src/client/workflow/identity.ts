@@ -18,7 +18,17 @@
  * must present the key iteration 2 already used, or the provider bills twice.
  */
 
+import { clock } from './clock';
+
 export type Direction = 'forward' | 'compensate';
+
+/** Opaque 128-bit execution identity, deterministic under the simulated clock. */
+export function newExecutionId(): string {
+  const hex = [...clock().randomBytes(16)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  return `wf_${hex}`;
+}
 
 export function idempotencyKey(
   runId: string,

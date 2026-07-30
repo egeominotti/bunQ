@@ -51,7 +51,7 @@ class PushCommand extends QueueCommand {
       model.generations.set(id, generation);
       model.jobs.set(id, {
         attempts: 0,
-        diskState: this.delayed ? 'delayed' : 'waiting',
+        diskState: this.delayed ? 'delayed' : readyState(this.priority),
         generation,
         maxAttempts: this.maxAttempts,
         priority: this.priority,

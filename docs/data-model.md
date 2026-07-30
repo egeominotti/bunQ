@@ -14,10 +14,10 @@ over TCP (msgpack), the server materializes a `Job` object in a shard's
 in-memory `PriorityQueue`, and a `WriteBuffer` persists it to the `jobs` table
 where mutable/structured fields (`data`, `depends_on`, `children_ids`, `tags`,
 `timeline`, `stacktrace`) are stored as MessagePack BLOBs. These three shapes
-are **not identical** — several runtime-only fields (e.g. `backoffConfig`,
-`childrenCompleted`, and the BullMQ-v5 flow flags) are reconstructed with
-defaults on reload rather than persisted. Recovery-critical `stallCount` is
-persisted so repeated process crashes cannot reset the stall budget.
+are **not identical** — fields such as `backoffConfig` and
+`childrenCompleted` are reconstructed on reload. Recovery-critical
+`stallCount` and all four BullMQ-v5 child-failure policies are persisted so a
+restart cannot reset lifecycle or flow semantics.
 
 Cross-references: [Job Lifecycle](./features/job-lifecycle.md),
 [Persistence](./features/persistence.md),
@@ -88,7 +88,7 @@ export interface Job {
   readonly stallTimeout: number | null;
   stallCount: number;            // persisted; cumulative across restarts
 
-  // BullMQ v5 additional options (runtime only unless noted)
+  // BullMQ v5 additional options
   readonly stackTraceLimit: number;            // default 10
   readonly keepLogs: number | null;
   readonly sizeLimit: number | null;
@@ -111,6 +111,12 @@ also becomes `jobs.id`, whose SQLite primary key is global. Re-adding a live
 custom ID from any queue returns the existing generation; after a terminal
 generation, reuse first retires the completed/DLQ record and then admits one new
 generation. At no point may two rows or two live jobs share the same custom ID.
+`FlowProducer` is stricter than standalone `Queue.add`: every planned flow ID
+must be unowned by live state, SQLite/DLQ rows, retained completion/timeout
+tombstones, retained results, or unresolved reverse-dependency entries. Reuse
+therefore rejects the whole `PUSHF` request instead of retiring or rewriting
+existing topology. Pure in-memory managers keep those terminal guards in
+bounded collections; configured SQLite supplies the durable ownership check.
 
 Notable supporting types:
 
@@ -541,6 +547,11 @@ export interface PushCommand extends BaseCommand {  // command.ts:17-76
   //   removeOnComplete/Fail, repeat, stallTimeout, flow flags, timestamp …
 }
 
+export interface PushFlowCommand extends BaseCommand {
+  readonly cmd: 'PUSHF';
+  readonly jobs: AtomicFlowJobInput[]; // fully-resolved IDs and graph edges
+}
+
 export interface PullCommand extends BaseCommand {  // command.ts:84-91
   readonly cmd: 'PULL';
   readonly queue: string;
@@ -568,7 +579,7 @@ export interface FailCommand extends BaseCommand {  // command.ts:116-125
 ```
 
 Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
-(`PUSH`/`PUSHB`/`PULL`/`PULLB`/`ACK`/`ACKB`/`FAIL`), **Query** (`GetJob`,
+(`PUSH`/`PUSHB`/`PUSHF`/`PULL`/`PULLB`/`ACK`/`ACKB`/`FAIL`), **Query** (`GetJob`,
 `GetState`, `GetResult`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`,
 `GetJobByCustomId`, `Count`, `GetProgress`), **Management** (`Cancel`,
 `Progress`, `Update`, `ChangePriority`, `Promote`, `WaitJob`, `MoveToDelayed`,
@@ -580,7 +591,7 @@ Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
 **Logs** (`AddLog`, `GetLogs`, `ClearLogs`), **Heartbeat/Workers** (`Heartbeat`,
 `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `Register/UnregisterWorker`,
 `ListWorkers`, `ExtendLock(s)`), **Webhooks** (`AddWebhook`, `RemoveWebhook`,
-`ListWebhooks`, `SetWebhookEnabled`), **Flow** (`GetChildrenValues`,
+`ListWebhooks`, `SetWebhookEnabled`), **Flow** (`PUSHF`, `GetChildrenValues`,
 `UpdateParent`, `GetFailed/IgnoredChildren*`, `RemoveChildDependency`,
 `RemoveUnprocessedChildren`), **Monitoring** (`Stats`, `Metrics`, `Prometheus`,
 `StorageStatus`, `CompactMemory`), **Dashboard** (`DashboardOverview/Queues/Queue`),
@@ -596,6 +607,7 @@ sharing `ok`. Key variants:
 | ---------------------- | --------------------------------------------- | ------------------- |
 | `OkResponse`           | `{ id? }`                                     | PUSH, ACK, …        |
 | `BatchResponse`        | `{ ids: string[] }`                           | PUSHB               |
+| `DataResponse<AtomicFlowBatchResult>` | `{ data: { jobs: Job[] } }` | PUSHF |
 | `JobResponse`          | `{ job: Job }`                                | GetJob              |
 | `NullableJobResponse`  | `{ job: Job \| null }`                        | —                   |
 | `PulledJobResponse`    | `{ job: Job\|null; token: string\|null }`     | PULL                |
@@ -688,6 +700,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     progress_msg TEXT,
     remove_on_complete INTEGER DEFAULT 0,
     remove_on_fail INTEGER DEFAULT 0,
+    fail_parent_on_failure INTEGER NOT NULL DEFAULT 0,
+    remove_dependency_on_failure INTEGER NOT NULL DEFAULT 0,
+    continue_parent_on_failure INTEGER NOT NULL DEFAULT 0,
+    ignore_dependency_on_failure INTEGER NOT NULL DEFAULT 0,
     stall_timeout INTEGER,
     last_heartbeat INTEGER,
     stall_count INTEGER NOT NULL DEFAULT 0,
@@ -696,12 +712,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 ```
 
-The row type `DbJob` (`statements.ts:121-152`) mirrors this (BLOB → `Uint8Array`).
-Note: `backoffConfig`, `childrenCompleted`, `repeat`, and the BullMQ-v5 flow
-flags are **not columns**; `rowToJob` (`sqliteSerializer.ts`) reconstructs them
-with defaults (`stackTraceLimit:10`, flags `false`, `childrenCompleted:0`).
-`stallCount` maps to `jobs.stall_count`; legacy rows receive the migration's
-safe zero default once, then every recovery retry persists its increment.
+The row type `DbJob` mirrors this (BLOB → `Uint8Array`). `backoffConfig`,
+`childrenCompleted`, and `repeat` remain reconstructed runtime fields. The four
+flow flags map directly to their `_on_failure` columns; legacy rows receive safe
+false defaults through migrations 23–26. `stallCount` maps to
+`jobs.stall_count`; legacy rows receive the migration's safe zero default once,
+then every recovery retry persists its increment.
 
 Indexes on `jobs`:
 
@@ -715,9 +731,31 @@ CREATE INDEX idx_jobs_custom_id          ON jobs(custom_id) WHERE custom_id IS N
 CREATE INDEX idx_jobs_parent             ON jobs(parent_id) WHERE parent_id IS NOT NULL;
 CREATE INDEX idx_jobs_state_started      ON jobs(state, started_at) WHERE state = 'active';
 CREATE INDEX idx_jobs_group_id           ON jobs(group_id) WHERE group_id IS NOT NULL;
-CREATE INDEX idx_jobs_pending_priority   ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting','delayed');
+CREATE INDEX idx_jobs_pending_priority   ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting','prioritized','waiting-children','delayed');
 CREATE INDEX idx_jobs_completed_order    ON jobs(completed_at DESC) WHERE state = 'completed';
 ```
+
+### `flow_failures`
+
+```sql
+CREATE TABLE IF NOT EXISTS flow_failures (
+    parent_id TEXT NOT NULL,
+    child_id TEXT NOT NULL,
+    child_queue TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    error TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, child_id)
+);
+CREATE INDEX idx_flow_failures_parent ON flow_failures(parent_id);
+```
+
+This table is both a durable propagation outbox and the live value store for
+child failures. A terminal child and its outbox row commit together. Startup
+replays rows before workers can observe recovered parents. `fail` and `remove`
+rows are deleted after application; `ignore` and `continue` remain readable
+while the parent is live and are deleted when it reaches a terminal state or is
+removed.
 
 ### `job_results` (schema.ts:66-70)
 
@@ -807,7 +845,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (schema.ts:140-210)
 
-`SCHEMA_VERSION = 21`. The migrate routine (`sqlite.ts:255-278`) reads
+`SCHEMA_VERSION = 27`. The migrate routine reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -834,6 +872,11 @@ then records `SCHEMA_VERSION`.
 | 20      | `queue_state.max_stalls`                                        |
 | 21      | `queue_state.stall_grace_period`                                |
 | 22      | `queue_state.dlq_config` (effective per-queue DLQ policy, MessagePack) |
+| 23      | `jobs.fail_parent_on_failure` |
+| 24      | `jobs.remove_dependency_on_failure` |
+| 25      | `jobs.continue_parent_on_failure` |
+| 26      | `jobs.ignore_dependency_on_failure` |
+| 27      | `flow_failures` durable outbox + parent index; rebuild pending indexes for `prioritized`/`waiting-children` |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -876,6 +919,113 @@ See [Data Structures](./features/data-structures.md),
 [Core Queue Engine](./features/core-queue-engine.md).
 
 ---
+
+## Workflow execution model
+
+The Bun-only workflow engine owns a separate synchronous SQLite store in
+`src/client/workflow/`. It is not part of the TCP command model and is not
+shared with the external SDKs.
+
+### Public execution types
+
+```typescript
+interface Execution {
+  id: string;                       // wf_ + 32 lowercase hex digits
+  workflowName: string;
+  state:
+    | 'running'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'compensating'
+    | 'compensation-stuck';
+  input: unknown;
+  steps: Record<string, StepRecord>;
+  currentNodeIndex: number;
+  resolvedSteps?: string[];
+  decisions?: Record<string, unknown>;
+  definitionHash?: string;
+  rollbackStatus?: 'completed' | 'not-applicable' | 'stuck';
+  failureReason?: string;
+  committedAt?: number;
+  signals: Record<string, unknown>;
+  parentExecutionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface ExecutionListOptions {
+  limit?: number;   // default 100, integer 1..1000
+  offset?: number;  // default 0, non-negative safe integer
+}
+```
+
+Execution IDs use 16 bytes from Web Crypto in the real runtime. Existing IDs
+are opaque strings, so rows using the previous timestamp/random format remain
+valid and require no migration. The simulated workflow clock has a separate
+seeded entropy stream so IDs replay without perturbing retry jitter.
+
+`decisions` is the durable control-flow journal. Keys identify branch choices,
+loop conditions, `forEach` item snapshots, and sub-workflow input mapping by
+node/iteration. The decision is written before selected effects run.
+
+`definitionHash` is the SHA-256 identity of the sealed workflow name, explicit
+revision, graph shape and scheduling options. Handler closure bodies cannot be
+hashed safely; callers bump `new Workflow(name, { revision })` when semantics
+change without a structural graph change. Legacy rows without a hash bind to
+the first registered definition used to recover them.
+
+`StepRecord` carries lifecycle timestamps, cumulative attempts, result/error,
+forward idempotency identity, loop item/index/occurrence, child ownership and
+one terminal compensation outcome. `map` nodes use the same
+`running`/`completed`/`failed` record lifecycle even though they have no retry
+or compensation handler.
+
+### Workflow SQLite tables
+
+`workflow_executions`:
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `TEXT PRIMARY KEY` | Opaque execution ID |
+| `workflow_name` | `TEXT NOT NULL` | Registered definition name |
+| `state` | `TEXT NOT NULL` | `ExecutionState` |
+| `input` | `BLOB` | MessagePack workflow input |
+| `steps` | `BLOB` | MessagePack `Record<string, StepRecord>` |
+| `current_node_index` | `INTEGER NOT NULL` | Durable graph cursor |
+| `resolved_steps` | `BLOB` | Selected branch step names |
+| `signals` | `BLOB` | First-writer-wins signal payload map |
+| `created_at` | `INTEGER NOT NULL` | Creation time in milliseconds |
+| `updated_at` | `INTEGER NOT NULL` | Last persisted transition |
+| `meta` | `BLOB NULL` | Version-tolerant lifecycle metadata |
+
+`meta` currently packs `rollbackStatus`, `failureReason`, `committedAt`,
+`parentExecutionId`, `decisions`, and `definitionHash`. It was added with a
+guarded `ALTER TABLE` so pre-meta databases remain readable.
+
+`workflow_executions_archive` has the same columns plus
+`archived_at INTEGER NOT NULL`. Archive copies and deletes up to 1000 rows in
+one transaction, ordered by `updated_at ASC, id ASC`.
+
+Indexes on the live table:
+
+- `idx_wf_name(workflow_name)`
+- `idx_wf_state(state)`
+- `idx_wf_created(created_at DESC, id DESC)`
+- `idx_wf_name_created(workflow_name, created_at DESC, id DESC)`
+- `idx_wf_state_created(state, created_at DESC, id DESC)`
+- `idx_wf_name_state_created(workflow_name, state, created_at DESC, id DESC)`
+- `idx_wf_state_updated(state, updated_at ASC, id ASC)`
+
+All execution-list filter combinations apply `WHERE`, then the total order
+`created_at DESC, id DESC`, then `LIMIT/OFFSET`. The ID tie-breaker makes a
+static dataset deterministic. Offset pagination is not a snapshot: concurrent
+insertion can shift a later offset.
+
+The `signals` column has a single writer, `SignalCoordinator`. General
+execution updates never rewrite it from a stale in-memory snapshot. Signal
+acceptance is first-writer-wins, and payload insertion plus the
+`waiting -> running` resume claim occur in one immediate transaction.
 
 ## Serialization
 

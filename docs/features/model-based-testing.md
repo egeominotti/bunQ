@@ -5,10 +5,12 @@
 The state-machine suites in `test/model-based/` verify bunqueue, S3
 backup/restore, and monitoring aggregates by comparing implementations with
 small executable specifications. They use
-`fast-check` commands, preconditions, shrinking, and seed replay. The broker is
-not mocked: every property run starts `src/main.ts`, uses the public MessagePack
-TCP protocol, writes a fresh SQLite database, and can terminate the process with
-`SIGKILL` before reconnecting.
+`fast-check` commands, preconditions, shrinking, and seed replay. The primary
+queue command model is not mocked: every property run starts `src/main.ts`, uses
+the public MessagePack TCP protocol, writes a fresh SQLite database, and can
+terminate the process with `SIGKILL` before reconnecting. Focused workflow and
+FlowProducer models use their real embedded engines so they can run many
+structural cases cheaply; dedicated E2E suites cover their TCP boundary.
 
 The model complements example-based unit and integration tests. Examples prove
 known scenarios; generated command histories explore valid interleavings and
@@ -35,6 +37,57 @@ cases. It asserts attempt conservation, exact scheduler/activity state,
 compressed-size/timestamp/duration fidelity, exact overlap accounting, bounded
 queue selection, subset order, and `exported + omitted == registered`.
 
+### Workflow command model
+
+`workflow-model.test.ts` builds generated workflow graphs into the real
+embedded `Engine` and a real SQLite store. Every case starts a run even when
+the generated command history is empty, so the campaign cannot pass vacuously.
+Graphs include retrying/failing steps, parallel groups, total and missing
+branch choices, timed/untimed gates, `forEach`, successful/failing `map`
+transforms, pivots, child workflows and fallible compensation.
+
+Commands interleave signals, time for progress, graceful restart/recovery, live
+recovery while another driver exists, recovery during unwind, and operator
+resume/abandon. After every action the oracle checks:
+
+- signal fidelity and first-writer-wins payloads;
+- monotonic cursor progress and no terminal resurrection;
+- gate and branch ordering;
+- cumulative retry bounds plus stable idempotency keys;
+- durable-name and counter/index domains;
+- exactly-once compensation outcomes, pivot cutoff and rollback coherence;
+- parent/child ownership and no independent live-child unwind;
+- `map` exclusive delivery plus coherent completed/failed records;
+- final non-vacuous liveness after opening untimed gates and resolving parked
+  compensation.
+
+The same file runs focused Fast-Check properties for every filtered execution
+page against the SQLite oracle (`createdAt DESC, id DESC`) and for invalid
+timeout/iteration/child-poll bounds. The harness reads all pages rather than
+silently checking only the default first 100 executions.
+
+### FlowProducer graph model
+
+`flow-producer-model.test.ts` generates one to three bounded-depth trees with
+random payloads, priorities, and queue ownership. Every node receives a
+shrink-friendly deterministic custom ID. The public `FlowProducer.addBulk`
+result is compared with real manager state and `getFlow` traversal.
+
+Each run checks:
+
+- global ID uniqueness and exact node conservation across queue counts;
+- symmetric `parentId`, `childrenIds`, and `dependsOn` edges;
+- actual cross-queue ownership and correct initial
+  `waiting`/`prioritized`/`waiting-children` state;
+- `depth` and `maxChildren`, including zero, against the generated tree;
+- whole-batch rejection: a late custom-ID collision cannot publish an earlier
+  valid root.
+
+Use `BUNQUEUE_FLOW_MODEL_SEED` and `BUNQUEUE_FLOW_MODEL_RUNS` for deterministic
+replay or deeper campaigns. `flow-producer-real-e2e.test.ts` complements the
+model with a dynamic-port TCP broker, SQLite, multi-queue workers, failure
+metadata, and a full broker restart.
+
 ### Isolated broker startup
 
 Every property run probes an adjacent TCP/HTTP port pair, starts its own broker,
@@ -53,7 +106,8 @@ turning genuine schema/config/bootstrap failures into silent retries.
 - logical API state (`waiting`, `prioritized`, `waiting-children`, `delayed`,
   `active`, `completed`, or `failed`);
 - the physical SQLite representation, which intentionally differs for retry
-  backoff (`GetState=delayed`, `jobs.state=waiting`);
+  backoff (`GetState=delayed`, `jobs.state=waiting`) but preserves authoritative
+  initial `prioritized` and `waiting-children` states;
 - accepted and removed lifecycle generations, payload generation, terminal
   generations, retry attempts, stall count, bounds, and priority for every
   custom job ID;
@@ -136,7 +190,7 @@ through the broker's recovery backoff.
 
 The bounded broker default is 150 property runs with up to 80 generated
 commands. The same command also runs the focused backup, worker-monitoring and
-enterprise-telemetry models:
+enterprise-telemetry models and 40 workflow graphs with up to 12 commands:
 
 ```bash
 bun run test:model
@@ -157,6 +211,15 @@ Tune a focused campaign without editing the test:
 BUNQUEUE_MODEL_RUNS=500 \
 BUNQUEUE_MODEL_COMMANDS=150 \
 BUNQUEUE_MODEL_SEED=424242 \
+bun run test:model
+```
+
+Tune only the workflow campaign with:
+
+```bash
+BUNQUEUE_WF_MODEL_RUNS=500 \
+BUNQUEUE_WF_MODEL_COMMANDS=150 \
+BUNQUEUE_WF_MODEL_SEED=-1267197984 \
 bun run test:model
 ```
 
@@ -207,6 +270,13 @@ during obliteration. Terminal-ID reuse locks the target and prior-owner shards
 in deterministic order and exposes exactly one generation. Management commands
 that claim active work now release lease and client ownership through one
 idempotent transition.
+
+The workflow model additionally found or permanently covers duplicate live
+node execution, independent child recovery causing double compensation,
+timeout failure reasons omitted from persistence, cumulative retry budgets
+reset on re-entry, non-journaled control-flow decisions, and missing durable
+records for failed maps. Confirmed engine divergences are preserved as
+`test/repro-model-workflow-*.test.ts` before their runtime fix.
 
 ## 71-invariant coverage register
 
@@ -272,8 +342,6 @@ violates it or the required state is not observable.
 
 | Candidate | Desired invariant | Current blocker |
 | --- | --- | --- |
-| C4 | One workflow execution/node has at most one advancing executor | No execution/node lock or fencing token exists |
-| C5 | A `waitFor` node advances once under timeout-vs-signal races | A fired timeout and a concurrent signal can enqueue two node jobs |
 | C6 | Every persisted lifecycle transition is atomic under injected I/O failure | Existing failure tests are examples, not a transition-by-transition storage fault model |
 | C7 | Pagination has a no-duplicate/no-skip contract under concurrent mutation | Static ordering is deterministic, but no snapshot/cursor contract exists for mutating result sets |
 | C8 | Strong custom-ID/unique-key idempotency holds for every live job | Bounded LRU/registry trimming intentionally weakens the guarantee after eviction |

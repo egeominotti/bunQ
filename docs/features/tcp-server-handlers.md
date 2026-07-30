@@ -1,6 +1,6 @@
 # TCP Server Command Handlers
 
-> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/core.ts`, `src/infrastructure/server/handlers/advanced.ts`, `src/infrastructure/server/handlers/monitoring.ts`, `src/infrastructure/server/handlers/management.ts`, `src/infrastructure/server/handlers/query.ts`, `src/infrastructure/server/handlers/cron.ts`, `src/infrastructure/server/handlers/dlq.ts`, `src/infrastructure/server/handlers/dashboard.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types.ts`
+> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/core.ts`, `src/infrastructure/server/handlers/flow.ts`, `src/infrastructure/server/handlers/advanced.ts`, `src/infrastructure/server/handlers/monitoring.ts`, `src/infrastructure/server/handlers/management.ts`, `src/infrastructure/server/handlers/query.ts`, `src/infrastructure/server/handlers/cron.ts`, `src/infrastructure/server/handlers/dlq.ts`, `src/infrastructure/server/handlers/dashboard.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types.ts`
 
 ## Purpose
 
@@ -56,7 +56,7 @@ Exported functions:
 TCP commands handled (exact `cmd.cmd` values), by router:
 
 - **Auth** — handled inline before routing (`handler.ts:53`), always allowed.
-- **Core** (`routeCoreCommand`): `PUSH`, `PUSHB`, `PULL`, `PULLB`, `ACK`, `ACKB`, `FAIL`.
+- **Core** (`routeCoreCommand`): `PUSH`, `PUSHB`, `PUSHF`, `PULL`, `PULLB`, `ACK`, `ACKB`, `FAIL`.
 - **Query** (`routeQueryCommand`): `GetJob`, `GetState`, `GetResult`, `GetJobCounts`, `GetCountsPerPriority`, `GetJobByCustomId`, `GetJobs`, `Count`, `GetProgress`, `GetChildrenValues`. (Note: `Count`'s handler lives in `advanced.ts` and `GetProgress`'s in `management.ts`, despite being routed here.)
 - **Management** (`routeManagementCommand`): `Cancel`, `Progress`, `Update`, `UpdateParent`, `ChangePriority`, `Promote`, `MoveToDelayed`, `Discard`, `WaitJob`, `ChangeDelay`, `MoveToWait`, `PromoteJobs`, `ExtendLock`, `ExtendLocks`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`.
 - **Queue control** (`routeQueueControlCommand`): `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`.
@@ -95,7 +95,14 @@ Auth (`handleAuth`, `handler.ts:30`): iterate configured tokens, comparing with 
 Core paths:
 
 - `handlePush` (`core.ts:20`): validates queue name, data size (≤10MB), and numeric option bounds, then validates each `dependsOn` id exists in `jobIndex` **or** `completedJobs` **or** `depCompletions` — the third check covers a `removeOnComplete` parent whose row was deleted, otherwise a late dependent is wrongly rejected (`core.ts:43`). On success returns the new job id via `resp.ok(job.id)`.
-- `handlePushBatch` (`core.ts:103`): validates queue name, then runs `validatePushBatchJobs` (`pushBatchValidation.ts`) per job: the same data-size, `validateJobOptions` bounds, and `dependsOn` existence gate as `PUSH`, with the gate extended to accept the custom ids of **earlier jobs in the same batch** so intra-batch chains keep working. On violation returns an error naming the offending index (`jobs[i]: ...`); on success returns `resp.batch(ids)`.
+- `handlePushBatch` (`core.ts:103`): validates queue name, then runs `validatePushBatchJobs` (`pushBatchValidation.ts`) per job: the same data-size, `validateJobOptions` bounds, and `dependsOn` existence gate as `PUSH`, with the gate extended to accept the custom ids of **any jobs in the same batch** so order-independent intra-batch chains keep working. On violation returns an error naming the offending index (`jobs[i]: ...`); on success returns `resp.batch(ids)`.
+- `handlePushFlow` (`flow.ts`): passes the fully resolved multi-queue graph to
+  `QueueManager.pushFlow`. The application validator checks the complete batch
+  before mutation, including strict string/array/boolean wire types, internal
+  parent metadata, duplicate/missing/asymmetric edges, cycles, mutually
+  exclusive failure policies, 10,000 jobs, 10 MB per job and 64 MB total flow
+  data. Success uses `resp.data({ jobs })`; any validation, ownership, or
+  persistence error rejects the whole command.
 - `handlePull` (`core.ts:121`): caps `timeout` to `[0, 60000]`. If `cmd.owner` is set, uses `pullWithLock` and returns the lock `token` (`resp.pulledJob`); otherwise plain `pull` returning `resp.nullableJob`. Either way the job is registered against `ctx.clientId` for connection-loss release — unless the plain pull set `cmd.detach` (`core.ts:150`).
 - `handlePullBatch` (`core.ts:157`): caps `count` to `[1, 1000]` and `timeout` to `[0, 60000]` (same bound as `PULL`); lock and non-lock branches both honor `cmd.timeout` (the plain branch calls `pullBatch(queue, count, cmd.timeout ?? 0)`, so a non-lock `PULLB` long-polls like `PULL`) and register every returned job with the client.
 - `handleAck` / `handleAckBatch` (`core.ts:203`, `core.ts:220`): ack with optional result/token; `ackBatchWithResults` is used only when `results.length === ids.length`, else the result-less `ackBatch`. Both unregister the acked ids from client tracking.
@@ -128,7 +135,7 @@ Concurrency relevant to this layer:
 ## Edge Cases & Failure Modes
 
 - **Error sanitization (double layer):** `handleCommand` catches and rewrites `SQLITE`/`database` errors to `'Internal server error'` (`handler.ts:99`); the transport's `processFrame` repeats the same sanitization as a secondary net (`tcp.ts:290-292`).
-- **PUSHB validation parity:** batch push runs the same option bounds and `dependsOn` existence gate as single `PUSH` (`pushBatchValidation.ts`); a job `PUSH` would reject is rejected inside a batch too, with the error naming the offending index. `dependsOn` may additionally reference earlier same-batch custom ids.
+- **PUSHB validation parity:** batch push runs the same option bounds and `dependsOn` existence gate as single `PUSH` (`pushBatchValidation.ts`); a job `PUSH` would reject is rejected inside a batch too, with the error naming the offending index. `dependsOn` may additionally reference any same-batch custom id.
 - **`Stats`/`Metrics` routing quirk:** these two are dispatched calling `handleStats(ctx, reqId)` / `handleMetrics(ctx, reqId)` without the `cmd` argument (`handlerRoutes.ts:334`); all other handlers receive `cmd` first.
 - **`MetricsData` placeholder fields:** `sqliteSizeMb` and `activeConnections` are hard-coded to `0` in `handleMetrics` (`management.ts:140`); real connection/SSE/WS counts are only surfaced via the bootstrap stats interval and the Cloud agent handles.
 - **Idempotency / custom id:** `customId` (`cmd.jobId`) and `uniqueKey` dedup are enforced inside `QueueManager.push`, not here. The handler just forwards them. See [Deduplication & Unique Jobs](./deduplication-and-unique.md).
@@ -150,7 +157,7 @@ Environment variables read directly within this module's files:
 
 Resolved-config fields consumed by `bootServer` (sourced from env/CLI/file via `../../config`): `tcpPort` (`TCP_PORT`, 6789), `httpPort` (`HTTP_PORT`, 6790), `hostname` (`HOST`), `authTokens` (`AUTH_TOKENS`), `corsOrigins` (`CORS_ALLOW_ORIGIN`), `requireAuthForMetrics` (`METRICS_AUTH`), `maxPrometheusQueues` (`METRICS_MAX_QUEUES`, 100), `dataPath` (`BUNQUEUE_DATA_PATH`), `tcpSocketPath`/`httpSocketPath`, `tlsCertFile`/`tlsKeyFile` (`TLS_CERT_FILE`/`TLS_KEY_FILE`), `shutdownTimeoutMs` (`SHUTDOWN_TIMEOUT_MS`, 30000), `statsIntervalMs` (`STATS_INTERVAL_MS`), `s3BackupEnabled`. See [Configuration & Entrypoint](./configuration.md) and [Security: TLS, Auth, CORS](./security-tls-auth.md).
 
-Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL`/`PULLB` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`. `backoff` accepts either a number (ms) or the object form `{ type: 'fixed'|'exponential', delay }` (`validateBackoffField`) — `type` must be `fixed`/`exponential` and `delay` ≤1day, matching embedded parity; both `PUSH` and `PUSHB` (per job, via `validatePushBatchJobs`) validate it.
+Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL`/`PULLB` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`. `backoff` accepts either a number (ms) or the object form `{ type: 'fixed'|'exponential', delay }` (`validateBackoffField`) — `type` must be `fixed`/`exponential` and `delay` ≤1day, matching embedded parity; `PUSH`, `PUSHB` (per job, via `validatePushBatchJobs`) and `PUSHF` validate the applicable bounds. `PUSHF` additionally caps the full graph as described above.
 
 ## Related Docs
 

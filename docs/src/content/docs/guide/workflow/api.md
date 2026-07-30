@@ -22,24 +22,30 @@ head:
 
 The builder. Pure data: it performs no work and touches nothing until an `Engine` runs it. Each method returns a re-typed builder so step results accumulate into `TSteps`.
 
+`new Workflow(name, { revision? })` defaults `revision` to `"1"`. Registration
+seals the graph; bump the revision when handler semantics change without a
+structural graph change.
+
 | Method | Notes |
 |---|---|
 | `step(name, handler, options?)` | `options`: `retry` (3), `timeout` (30000 ms), `compensate`, `inputSchema`, `outputSchema`. Schema `parse()` output is used, so coercion applies. `retry` counts ATTEMPTS, so `1` means one try with no retry, and anything below `1` or non-integer throws where it is written |
 | `branch(condition)` | Must be followed by `path()` |
 | `path(name, builder)` | Steps only, other node types are rejected |
 | `parallel(builder)` | Requires at least one step |
-| `subWorkflow(name, inputMapper)` | Result under `ctx.steps['sub:<name>']` |
+| `subWorkflow(name, inputMapper, options?)` | Result under `ctx.steps['sub:<name>']`; `options.timeout` defaults to 300000 ms and `options.pollInterval` to 100 ms |
 | `waitFor(event, { timeout? })` | Parks the run. One gate per event name, and omit `timeout` to wait indefinitely: `0` is a deadline already past |
 | `doUntil(condition, builder, { maxIterations? })` | Default 100 |
 | `doWhile(condition, builder, { maxIterations? })` | Default 100 |
 | `forEach(items, name, handler, options?)` | `items` must return an array; anything else throws. Default `maxIterations` 1000 |
-| `map(name, fn)` | Pure transform; no retry, no timeout |
+| `map(name, fn)` | Transform intended to be pure; no retry or timeout, but full running/completed/failed records and step events |
 | `pivot()` | Point of no return; nothing is compensated once passed |
 
 `register()` refuses a definition that could not behave as written:
 
 - duplicate step names
+- declaring one branch path name twice
 - a step name colliding with a loop's `name:index` namespace
+- user step names beginning with reserved `__` or `sub:` prefixes
 - two `waitFor` gates on the same event, since one signal would open both
 - a `waitFor` with an empty event name, or one named `__proto__`, which cannot be stored as a signal key
 
@@ -49,7 +55,7 @@ The builder. Pure data: it performs no work and touches nothing until an `Engine
 const engine = new Engine({
   embedded: true,              // in-process (or connection: { port: 6789 } for TCP)
   dataPath: './data/wf.db',    // SQLite path, omit and nothing persists
-  concurrency: 10,             // parallel step executions (default: 5)
+  concurrency: 10,             // concurrent workflow-node jobs (default: 5)
   queueName: '__wf:steps',     // internal queue name (default)
   onEvent: (event) => {},      // global listener
 });
@@ -60,8 +66,8 @@ const engine = new Engine({
 | `register(workflow)` | `this` | Register a definition |
 | `start(name, input?)` | `Promise<{ id, workflowName }>` | Start a run |
 | `getExecution(id)` | `Execution \| null` | Full state by id |
-| `listExecutions(name?, state?)` | `Execution[]` | Filtered list, **max 100** |
-| `signal(id, event, payload?)` | `Promise<void>` | Deliver a signal. Throws if the run is not `running` or `waiting`, or if the event name is empty or `__proto__` |
+| `listExecutions(name?, state?, options?)` | `Execution[]` | Filtered page; `options` is `{ limit?: 1..1000, offset?: number }`, default 100 |
+| `signal(id, event, payload?)` | `Promise<void>` | First delivery wins. A duplicate cannot replace its payload and throws; empty and `__proto__` event names are invalid |
 | `recover()` | `Promise<RecoverResult>` | Resume orphaned runs after a restart |
 | `resumeCompensation(id)` | `Promise<void>` | Retry the handler that parked a `compensation-stuck` run |
 | `abandonCompensation(id)` | `Promise<void>` | Accept a partial rollback; the rest are recorded as skipped |
@@ -86,10 +92,14 @@ Background maintenance timers are process-wide. Call `shutdownManager()` from `b
   input: unknown;
   steps: Record<string, StepRecord>;
   currentNodeIndex: number;
+  resolvedSteps?: string[];
+  decisions?: Record<string, unknown>; // journaled control-flow choices
+  definitionHash?: string;             // sealed graph + explicit revision
   signals: Record<string, unknown>;
   rollbackStatus?: RollbackStatus;
   failureReason?: string;
   committedAt?: number;          // node index where .pivot() committed
+  parentExecutionId?: string;    // child workflow ownership
   createdAt: number;
   updatedAt: number;
 }
@@ -146,7 +156,10 @@ Independent of `failureReason`: `completed`, `not-applicable`, `stuck`. The fiel
 
 Every event carries `type`, `executionId`, `workflowName`, `timestamp`. Step and compensation events add `stepName`, and `result` / `error` / `attempt` / `maxAttempts` where they apply.
 
-A listener that throws cannot break delivery, because dispatch wraps each one.
+These are live in-process notifications, not a persisted event log. A
+subscriber attached after an event was emitted does not receive a replay; use
+`getExecution()` for durable truth. A listener that throws cannot break engine
+delivery because dispatch isolates each callback.
 
 ## Step context
 
@@ -156,6 +169,7 @@ A listener that throws cannot break delivery, because dispatch wraps each one.
   steps: TSteps;
   signals: Record<string, unknown>;
   executionId: string;
+  signal?: AbortSignal;               // aborted when this attempt times out
   idempotencyKey?: string;           // this execution of this step
   forwardIdempotencyKey?: string;    // compensate handlers only
 }
@@ -165,9 +179,17 @@ A listener that throws cannot break delivery, because dispatch wraps each one.
 
 ## How it works
 
-`engine.start()` writes an execution row and enqueues the first node as an ordinary bunqueue job on an internal queue. A worker picks it up, runs it with retry and timeout, saves the result and enqueues the next node. Signals store their payload and re-enqueue the parked node. A failure walks the completed steps in reverse and calls their `compensate` handlers.
+`engine.start()` writes an execution row and enqueues the first top-level node
+as an ordinary bunqueue job on an internal queue. A worker picks it up, persists
+the records produced inside that node, and enqueues its successor. Inline
+branch, parallel and loop steps are not separate queue jobs, but each has its
+own durable step record. Signals store their payload and re-enqueue a parked
+node. A failure walks eligible records in reverse start order and calls their
+`compensate` handlers.
 
-Because every node is a normal job, persistence, concurrency control and dashboard monitoring come from the queue itself.
+Queue delivery supplies persistence and worker concurrency. Workflow execution
+state, decision journaling and the event stream come from the workflow store
+and emitter, so they remain distinct from queue-job state.
 
 ## Limitations
 
@@ -176,12 +198,12 @@ Because every node is a normal job, persistence, concurrency control and dashboa
 | **One engine per process** | No distributed coordination, and two engines in one process collide even with different `dataPath` values. [Why](/guide/workflow/durability/#one-engine-per-process). |
 | **At-least-once** | Recovered steps may re-run. Make external effects idempotent. |
 | **No `indeterminate` state** | A failed step is treated as possibly-committed and is compensated. There is no way yet to declare "this failed before any effect", so a clean failure is compensated too. |
-| **Branch and parallel replay** | Loops resume at the interrupted iteration; a `branch` path or `parallel` group re-runs whole. |
+| **At-least-once interrupted work** | Completed records inside branches, parallel groups, loops and maps are skipped; a record left running has an unknown outcome and can replay. |
 | **Compensations get no retry** | A handler runs once, bounded by the step's own `timeout`. A transient failure parks the run instead of being retried. |
 | **No isolation between sagas** | Sagas are ACD, not ACID: a concurrent saga can read state another will later compensate. |
 | **Recovery is manual** | `engine.recover()` must be called on startup. |
 | **`close()` does not exit** | Pair it with `shutdownManager()`. |
-| **Sub-workflow 300s timeout** | Hardcoded. The parent holds a worker slot while waiting. |
-| **`listExecutions` caps at 100** | No pagination; query SQLite directly for more. |
+| **Sub-workflows are polled** | Timeout and poll interval are configurable, but the parent holds a worker slot while waiting. Timeout does not forcibly cancel a live child. |
+| **Offset pages are not snapshots** | Ordering is total (`createdAt`, then ID), but inserts between pages can shift offsets. |
 
 When these matter, reach for [Temporal](https://temporal.io) for multi-region HA, or [Inngest](https://www.inngest.com) for serverless-first operation. For parent/child job dependencies without rollback, bunqueue's own [Flow Producer](/guide/flow/) is lighter than a workflow.

@@ -13,8 +13,8 @@
  *     crash do not run again. Charging a card twice because a pod restarted is the
  *     failure mode that makes people leave for Temporal.
  *   - NO LOSS: the run resumes and reaches a terminal state after recover().
- *   - SIGNALS SURVIVE THE PROCESS: an approval delivered while the workflow's
- *     process is down is still there when it comes back.
+ *   - SIGNALS CROSS PROCESS RESTARTS: a fresh engine can signal the persisted gate
+ *     before an explicit recover() call and drive it to completion.
  *   - COMPENSATION CONVERGES: a crash mid-rollback re-runs compensation and still
  *     ends at 'failed' with every side effect undone.
  *
@@ -164,7 +164,7 @@ process.exit(0); // see EXPLICIT_EXIT below
     expect(countOf(after, 'release')).toBe(0);
   }, 120_000);
 
-  test('an approval delivered while the process is down is not lost', async () => {
+  test('a fresh process can signal a persisted gate before recover()', async () => {
     const APPROVAL = `
 import { Workflow, Engine } from ${JSON.stringify(WORKFLOW_SRC)};
 import { appendFileSync, writeFileSync } from 'node:fs';
@@ -206,8 +206,8 @@ const { readFileSync } = await import('node:fs');
 const runId = readFileSync(dir + '/run-id', 'utf8');
 
 if (mode === 'approve-offline') {
-  // A different process delivers the approval. No recover() first: the signal must
-  // land on the persisted row and resume the run on its own.
+  // This fresh process has recreated and registered the engine. No recover() first:
+  // signal() must land on the persisted row and resume the run on its own.
   await engine.signal(runId, 'manager-approval', { approved: true, by: 'alice' });
   console.log('state=' + (await settle(engine, runId, 'completed')));
 }

@@ -297,12 +297,16 @@ Letting the SDK drive its whole loop inside one step works, and it keeps the ful
     <span class="bq-sim-res" style="--up: 2">execute</span>
   </div>
   <div class="bq-sim-foot">
-    While it is parked the run holds no worker and no memory, only a row. The approval
-    can arrive minutes later or after a redeploy, and it still lands.
+    While it is parked the run holds no worker slot; its durable state is a row, and a
+    timed gate has one lightweight timer while the process is alive. The approval can
+    arrive minutes later or after a redeploy, once the engine is available again.
   </div>
 </div>
 
-The run parks. It stops occupying a worker, its state is on disk, and it can sit there for a day. An approval delivered while the service is **down** is still there when it comes back.
+The run parks. It stops occupying a worker, its state is on disk, and it can sit
+there for a day. A signal accepted before a crash stays durable. The API is
+in-process, so after a full outage you first recreate the engine, register the
+definition and recover; only then can the service accept a new approval.
 
 A rejection is an abort, not a completion, so throwing here unwinds everything the agent did before the gate.
 
@@ -323,8 +327,8 @@ Compensate handlers additionally receive `ctx.forwardIdempotencyKey`, the key th
 A refund gets refused. A cloud API is down. The engine does not pretend the unwind succeeded, and it does not carry on undoing things whose dependencies are still standing. The run parks in `compensation-stuck`, and you get two fields that answer two different questions:
 
 ```typescript
-exec.failureReason;    // why the run failed
-exec.rollbackStatus;   // 'stuck', what the engine did afterwards
+exec?.failureReason;    // why the run failed
+exec?.rollbackStatus;   // 'stuck', what the engine did afterwards
 
 await engine.resumeCompensation(run.id);   // fixed it, finish the unwind
 await engine.abandonCompensation(run.id);  // accept a partial rollback, explicitly
@@ -370,6 +374,10 @@ Everything on this page is written with the Vercel AI SDK, because it is the sma
 
 ## Where it differs from Temporal
 
-Temporal journals every activity, including inside nested structures, and it resumes on its own. Here the journal boundary is the **node**, and `recover()` is an explicit call you make at startup. Loops and `forEach` resume at the interrupted iteration, while a `branch` path or a `parallel` group is still one job and replays whole.
+Temporal resumes on its own; here `recover()` is an explicit call you make at
+startup. Control-flow choices and completed inner records are journaled, so
+loops resume at the interrupted iteration, branches retain their selected path,
+and completed parallel siblings short-circuit. Work left `running` still has an
+unknown external outcome and can replay.
 
 What you get in exchange: no cluster, no control plane, no separate service to operate. SQLite, inside your own process, one `bun add` away.

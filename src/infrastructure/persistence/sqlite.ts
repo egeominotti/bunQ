@@ -6,6 +6,7 @@
 
 import { Database } from 'bun:sqlite';
 import type { Job, JobId, JobTimelineEntry } from '../../domain/types/job';
+import type { FlowFailureMode, FlowFailureRecord } from '../../domain/types/flow';
 import type { StallConfig } from '../../domain/types/stall';
 import type { CronJob } from '../../domain/types/cron';
 import {
@@ -24,6 +25,7 @@ import {
 } from './statements';
 import {
   pack,
+  persistedInitialState,
   persistedStallCount,
   reconstructDlqEntry,
   rowToJob,
@@ -340,11 +342,15 @@ export class SqliteStorage {
         job.parentId,
         job.childrenIds.length > 0 ? pack(job.childrenIds) : null,
         job.tags.length > 0 ? pack(job.tags) : null,
-        job.runAt > Date.now() ? 'delayed' : 'waiting',
+        persistedInitialState(job),
         job.lifo ? 1 : 0,
         job.groupId,
         job.removeOnComplete ? 1 : 0,
         job.removeOnFail ? 1 : 0,
+        job.failParentOnFailure ? 1 : 0,
+        job.removeDependencyOnFailure ? 1 : 0,
+        job.continueParentOnFailure ? 1 : 0,
+        job.ignoreDependencyOnFailure ? 1 : 0,
         job.stallTimeout,
         persistedStallCount(job),
         job.timeline.length > 0 ? pack(job.timeline) : null
@@ -407,6 +413,49 @@ export class SqliteStorage {
       this.statements
         .get('insertDlq')!
         .run(entry.job.id, entry.job.queue, pack(entry), entry.enteredAt);
+    });
+  }
+
+  /**
+   * Commit a terminal child outcome, its optional DLQ row, and its flow outbox
+   * record together. Recovery therefore never observes only half the transition.
+   */
+  commitFailedJob(
+    jobId: JobId,
+    entry: DlqEntry | null,
+    flowFailure: FlowFailureRecord | null
+  ): void {
+    this.writeBuffer.removePending(jobId);
+    this.safeWrite(() => {
+      const tx = this.db.transaction(() => {
+        if (entry) {
+          this.statements
+            .get('insertDlq')!
+            .run(entry.job.id, entry.job.queue, pack(entry), entry.enteredAt);
+        }
+        if (flowFailure) {
+          this.db
+            .prepare(
+              `INSERT INTO flow_failures
+               (parent_id, child_id, child_queue, mode, error, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(parent_id, child_id) DO UPDATE SET
+                 child_queue=excluded.child_queue, mode=excluded.mode,
+                 error=excluded.error, created_at=excluded.created_at`
+            )
+            .run(
+              flowFailure.parentId,
+              flowFailure.childId,
+              flowFailure.childQueue,
+              flowFailure.mode,
+              flowFailure.error,
+              flowFailure.createdAt
+            );
+        }
+        this.statements.get('deleteJob')!.run(jobId);
+        this.statements.get('deleteJobResult')!.run(jobId);
+      });
+      tx();
     });
   }
 
@@ -517,6 +566,7 @@ export class SqliteStorage {
       const tx = this.db.transaction((id: JobId) => {
         deleteStmt.run(id);
         deleteResultStmt.run(id);
+        this.db.prepare('DELETE FROM flow_failures WHERE parent_id = ?').run(id);
       });
       tx(jobId);
     });
@@ -577,10 +627,152 @@ export class SqliteStorage {
 
   /** Update a job's children_ids blob and parent_id */
   updateJobChildrenIds(jobId: JobId, childrenIds: JobId[]): void {
+    this.flushIfBuffered(jobId);
     this.safeWrite(() => {
       this.db
         .prepare('UPDATE jobs SET children_ids = ? WHERE id = ?')
         .run(childrenIds.length > 0 ? pack(childrenIds) : null, jobId);
+    });
+  }
+
+  /** Persist both sides of a legacy parent link in one SQLite transaction. */
+  updateFlowLink(
+    child: Pick<Job, 'id' | 'parentId' | 'data'>,
+    parent: Pick<Job, 'id' | 'childrenIds' | 'dependsOn' | 'data'>,
+    parentState: 'waiting-children' | 'waiting' | 'prioritized' | 'delayed'
+  ): void {
+    this.flushIfBuffered(child.id);
+    this.flushIfBuffered(parent.id);
+    this.safeWrite(() => {
+      const tx = this.db.transaction(() => {
+        this.db
+          .prepare('UPDATE jobs SET parent_id = ?, data = ? WHERE id = ?')
+          .run(child.parentId, pack(child.data), child.id);
+        this.db
+          .prepare(
+            'UPDATE jobs SET children_ids = ?, depends_on = ?, data = ?, state = ? WHERE id = ?'
+          )
+          .run(
+            parent.childrenIds.length > 0 ? pack(parent.childrenIds) : null,
+            parent.dependsOn.length > 0 ? pack(parent.dependsOn) : null,
+            pack(parent.data),
+            parentState,
+            parent.id
+          );
+      });
+      tx();
+    });
+  }
+
+  /** Persist both sides of a removed parent/child relationship atomically. */
+  removeFlowLink(
+    child: Pick<Job, 'id' | 'parentId' | 'data'>,
+    parent: Pick<Job, 'id' | 'childrenIds' | 'dependsOn' | 'data' | 'runAt'>,
+    parentState: 'waiting-children' | 'waiting' | 'prioritized'
+  ): void {
+    this.flushIfBuffered(child.id);
+    this.flushIfBuffered(parent.id);
+    this.safeWrite(() => {
+      const tx = this.db.transaction(() => {
+        this.db
+          .prepare('UPDATE jobs SET parent_id = ?, data = ? WHERE id = ?')
+          .run(child.parentId, pack(child.data), child.id);
+        this.db
+          .prepare(
+            `UPDATE jobs
+             SET children_ids = ?, depends_on = ?, data = ?, run_at = ?, state = ?
+             WHERE id = ?`
+          )
+          .run(
+            parent.childrenIds.length > 0 ? pack(parent.childrenIds) : null,
+            parent.dependsOn.length > 0 ? pack(parent.dependsOn) : null,
+            pack(parent.data),
+            parent.runAt,
+            parentState,
+            parent.id
+          );
+        this.db
+          .prepare('DELETE FROM flow_failures WHERE parent_id = ? AND child_id = ?')
+          .run(parent.id, child.id);
+      });
+      tx();
+    });
+  }
+
+  /** Record terminal child propagation before applying its parent-side effect. */
+  saveFlowFailure(record: FlowFailureRecord): void {
+    this.safeWrite(() => {
+      this.db
+        .prepare(
+          `INSERT INTO flow_failures
+           (parent_id, child_id, child_queue, mode, error, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(parent_id, child_id) DO UPDATE SET
+             child_queue=excluded.child_queue, mode=excluded.mode,
+             error=excluded.error, created_at=excluded.created_at`
+        )
+        .run(
+          record.parentId,
+          record.childId,
+          record.childQueue,
+          record.mode,
+          record.error,
+          record.createdAt
+        );
+    });
+  }
+
+  loadFlowFailures(): FlowFailureRecord[] {
+    const rows = this.db
+      .query<
+        {
+          parent_id: string;
+          child_id: string;
+          child_queue: string;
+          mode: string;
+          error: string;
+          created_at: number;
+        },
+        []
+      >('SELECT * FROM flow_failures ORDER BY created_at, parent_id, child_id')
+      .all();
+    return rows.map((row) => ({
+      parentId: row.parent_id as JobId,
+      childId: row.child_id as JobId,
+      childQueue: row.child_queue,
+      mode: row.mode as FlowFailureMode,
+      error: row.error,
+      createdAt: row.created_at,
+    }));
+  }
+
+  deleteFlowFailure(parentId: JobId, childId?: JobId): void {
+    this.safeWrite(() => {
+      if (childId) {
+        this.db
+          .prepare('DELETE FROM flow_failures WHERE parent_id = ? AND child_id = ?')
+          .run(parentId, childId);
+      } else {
+        this.db.prepare('DELETE FROM flow_failures WHERE parent_id = ?').run(parentId);
+      }
+    });
+  }
+
+  /** Persist dependency removal/promotion as one parent-side recovery checkpoint. */
+  updateFlowParentResolution(job: Pick<Job, 'id' | 'dependsOn' | 'runAt' | 'priority'>): void {
+    this.flushIfBuffered(job.id);
+    const state =
+      job.dependsOn.length > 0
+        ? 'waiting-children'
+        : job.runAt > Date.now()
+          ? 'delayed'
+          : job.priority > 0
+            ? 'prioritized'
+            : 'waiting';
+    this.safeWrite(() => {
+      this.db
+        .prepare('UPDATE jobs SET depends_on = ?, run_at = ?, state = ? WHERE id = ?')
+        .run(job.dependsOn.length > 0 ? pack(job.dependsOn) : null, job.runAt, state, job.id);
     });
   }
 
@@ -739,15 +931,19 @@ export class SqliteStorage {
     const requested = new Set(uniqueStates);
 
     if (requested.has('waiting')) {
-      predicates.push("(state IN ('waiting', 'delayed') AND run_at <= ? AND priority <= 0)");
+      predicates.push(
+        "(state IN ('waiting', 'prioritized', 'delayed') AND run_at <= ? AND priority <= 0)"
+      );
       predicateParams.push(options.now);
     }
     if (requested.has('prioritized')) {
-      predicates.push("(state IN ('waiting', 'delayed') AND run_at <= ? AND priority > 0)");
+      predicates.push(
+        "(state IN ('waiting', 'prioritized', 'delayed') AND run_at <= ? AND priority > 0)"
+      );
       predicateParams.push(options.now);
     }
     if (requested.has('delayed')) {
-      predicates.push("(state IN ('waiting', 'delayed') AND run_at > ?)");
+      predicates.push("(state IN ('waiting', 'prioritized', 'delayed') AND run_at > ?)");
       predicateParams.push(options.now);
     }
 
@@ -782,7 +978,7 @@ export class SqliteStorage {
   loadPendingJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
       .query<DbJob, [number, number]>(
-        "SELECT * FROM jobs WHERE state IN ('waiting', 'delayed') ORDER BY priority DESC, run_at ASC, id ASC LIMIT ? OFFSET ?"
+        "SELECT * FROM jobs WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed') ORDER BY priority DESC, run_at ASC, id ASC LIMIT ? OFFSET ?"
       )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));
@@ -823,7 +1019,7 @@ export class SqliteStorage {
   countPendingJobs(): number {
     const result = this.db
       .query<{ count: number }, []>(
-        "SELECT COUNT(*) as count FROM jobs WHERE state IN ('waiting', 'delayed')"
+        "SELECT COUNT(*) as count FROM jobs WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed')"
       )
       .get();
     return result?.count ?? 0;

@@ -1,6 +1,5 @@
 /**
- * Loop & Map execution logic for the Workflow Engine
- * Handles doUntil, doWhile, forEach, and map node types.
+ * Loop execution logic for the Workflow Engine.
  */
 
 import type {
@@ -9,11 +8,12 @@ import type {
   Execution,
   LoopDefinition,
   ForEachDefinition,
-  MapDefinition,
 } from './types';
 import type { WorkflowEmitter } from './emitter';
 import { executeStepWithRetry, buildContext } from './runner';
-import { clock } from './clock';
+import { forEachItemsDecisionKey, loopDecisionKey, resolveDecision } from './workflowDecisions';
+
+export { executeMap } from './mapRunner';
 
 /**
  * Run one iteration of a loop body step, unless it already ran.
@@ -132,7 +132,15 @@ export async function executeDoUntil(
     }
     iteration++;
     const ctx = buildContext(exec);
-    shouldStop = await def.condition(ctx, iteration);
+    shouldStop = await resolveDecision(
+      exec,
+      loopDecisionKey('doUntil', def.steps[0].name, iteration),
+      () => def.condition(ctx, iteration),
+      updateFn
+    );
+    if (typeof shouldStop !== 'boolean') {
+      throw new Error('doUntil condition must return a boolean');
+    }
   }
 }
 
@@ -145,7 +153,15 @@ export async function executeDoWhile(
 ): Promise<void> {
   for (let iteration = 0; ; iteration++) {
     const ctx = buildContext(exec);
-    const shouldContinue = await def.condition(ctx, iteration);
+    const shouldContinue = await resolveDecision(
+      exec,
+      loopDecisionKey('doWhile', def.steps[0].name, iteration),
+      () => def.condition(ctx, iteration),
+      updateFn
+    );
+    if (typeof shouldContinue !== 'boolean') {
+      throw new Error('doWhile condition must return a boolean');
+    }
     if (!shouldContinue) break;
 
     if (iteration >= def.maxIterations) {
@@ -165,7 +181,12 @@ export async function executeForEach(
   updateFn: (exec: Execution) => void
 ): Promise<void> {
   const ctx = buildContext(exec);
-  const items = def.items(ctx);
+  const items = await resolveDecision(
+    exec,
+    forEachItemsDecisionKey(def.step.name),
+    () => structuredClone(def.items(ctx)),
+    updateFn
+  );
 
   // Anything with a `length` used to be accepted, and JavaScript is generous about
   // what has one. A number iterated ZERO times and the run reported `completed`, so a
@@ -185,7 +206,7 @@ export async function executeForEach(
   }
 
   for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+    const item = structuredClone(items[i]);
     const indexedName = `${def.step.name}:${i}`;
     const indexedStep: StepDefinition = {
       ...def.step,
@@ -199,8 +220,15 @@ export async function executeForEach(
       },
     };
     // Memoised the same way as doUntil/doWhile: an item already provisioned before a
-    // crash must not be provisioned again when the node is re-entered.
-    if (exec.steps[indexedName]?.status === 'completed') continue;
+    // crash must not be provisioned again when the node is re-entered. Restore the
+    // declared bare name too: it is the public result of the final iteration, while
+    // the indexed record remains the durable execution/compensation identity.
+    const completed = exec.steps[indexedName];
+    if (completed?.status === 'completed') {
+      exec.steps[def.step.name] = { ...completed };
+      updateFn(exec);
+      continue;
+    }
 
     const stepCtx = buildContext(exec);
     let thrown: unknown;
@@ -228,6 +256,10 @@ export async function executeForEach(
       if (record) {
         record.loopItem = item;
         record.loopIndex = i;
+        // Keep the documented aggregate view in sync on success and failure. The
+        // indexed record is still the authoritative unit of work; compensator.ts
+        // excludes this mirror whenever an indexed sibling exists.
+        exec.steps[def.step.name] = { ...record };
         try {
           updateFn(exec);
         } catch (writeError) {
@@ -238,24 +270,4 @@ export async function executeForEach(
 
     if (threw) throw thrown;
   }
-}
-
-/** Execute a map node: transform step results into a new value */
-export async function executeMap(
-  def: MapDefinition,
-  exec: Execution,
-  emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
-): Promise<void> {
-  const ctx = buildContext(exec);
-  emitter?.emitStep('step:started', exec.id, exec.workflowName, def.name);
-  const result = await def.transform(ctx);
-  exec.steps[def.name] = {
-    status: 'completed',
-    result,
-    startedAt: clock().now(),
-    completedAt: clock().now(),
-  };
-  updateFn(exec);
-  emitter?.emitStep('step:completed', exec.id, exec.workflowName, def.name, { result });
 }

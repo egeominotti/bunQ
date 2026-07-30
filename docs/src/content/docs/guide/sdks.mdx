@@ -1129,11 +1129,18 @@ flow = Bunqueue.FlowProducer.new()
 Fan-in (`addBulkThen`, N parallel jobs converging into one final job) is
 available in TypeScript and Python.
 
-Creation is transactional per call: if any push fails, every job already
-created by that call is cancelled (rollback). `getFlow(id)` reconstructs a
-tree from a root id, it returns `null` for a missing root, skips children
-that were since removed (`removeOnComplete`), and is cycle-safe, so it
-always returns the surviving partial tree instead of throwing.
+These external SDKs currently compose `PUSH`/`UpdateParent` calls. If creation
+fails they attempt to cancel jobs already created, but that cleanup is
+best-effort and is not a transaction: a worker can observe an early leaf, and a
+cleanup failure can leave a partial graph. The Bun package (`bunqueue/client`)
+uses one broker-side `PUSHF` command and has the stronger all-or-nothing
+guarantee.
+
+External-SDK `getFlow(id)` returns `null` for a missing root and skips children
+removed since creation, yielding the surviving partial tree. The Bun package
+fails on a missing descendant or malformed/cross-linked topology so corruption
+cannot masquerade as a valid partial graph. See the [Flow guide](/guide/flow/)
+for the exact per-client contract.
 
 ## Observability
 

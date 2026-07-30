@@ -1,8 +1,7 @@
 /**
  * Real-engine harness for the workflow state-machine model.
  *
- * All runs in a campaign share ONE SQLite file, and isolate through a unique queue
- * name plus a unique workflow name per run. That is not a stylistic choice: the
+ * All campaign runs share one SQLite file and use unique queue/workflow names. The
  * embedded QueueManager is a process-wide singleton that binds to the FIRST
  * dataPath it is given and silently ignores every later one, so a per-run database
  * would leave the manager writing to a directory the previous run already deleted
@@ -22,23 +21,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Engine, type Execution } from '../../src/client/workflow';
 import { checkInvariants, type InvariantState } from './workflow-invariants';
-import {
-  buildWorkflow,
-  type Ledger,
-  type WorkflowSpec,
-  buildChildWorkflows,
-} from './workflow-spec';
+import { buildChildWorkflows, buildWorkflow } from './workflow-build';
+import { emptyLedger, type Ledger, type WorkflowSpec } from './workflow-spec';
+import { listAllExecutions } from './workflow-model-listing';
 
 export interface WorkflowModel {
-  started: boolean;
-  delivered: Set<string>;
+  /** The model starts every run before applying generated operator actions. */
+  implicitStart: true;
 }
 
 export class RealWorkflow {
   private engine: Engine;
   private readonly dataPath: string;
   private readonly queueName: string;
-  readonly ledger: Ledger = { steps: [], compensations: [] };
+  readonly ledger: Ledger = emptyLedger();
   readonly invariants: InvariantState;
   runId: string | null = null;
 
@@ -53,11 +49,8 @@ export class RealWorkflow {
       spec,
       ledger: this.ledger,
       delivered: new Map(),
-      maxNodeIndex: 0,
-      sawTerminal: false,
-      terminalState: null,
-      compensable: compensableSteps(spec),
-      retryBudget: retryBudgets(spec),
+      maxNodeIndex: new Map(),
+      terminalStates: new Map(),
     };
     this.engine = this.openEngine();
   }
@@ -85,23 +78,19 @@ export class RealWorkflow {
   async start(): Promise<void> {
     const run = await this.engine.start(this.spec.name, { seed: 1 });
     this.runId = run.id;
+    this.check();
   }
 
   async signal(event: string, payload: unknown): Promise<void> {
     if (!this.runId) return;
-    // Record BEFORE delivering: if the engine ACCEPTS a signal and then loses it, I1
-    // must fire. That is the point of recording first and it is preserved.
-    this.invariants.delivered.set(event, payload);
     try {
       await this.engine.signal(this.runId, event, payload);
+      // Only accepted deliveries enter the oracle. Signals are first-wins, so a
+      // rejected duplicate must preserve the original expected payload.
+      this.invariants.delivered.set(event, payload);
     } catch (err) {
-      // A run that is no longer running or waiting REFUSES the signal rather than
-      // writing it into a closed record. A refusal is not a lost delivery, it is the
-      // absence of one, so the provisional record is withdrawn. Anything else
-      // rethrows: a signal that fails for another reason is still a defect.
       const message = err instanceof Error ? err.message : String(err);
-      if (!/cannot receive the signal/.test(message)) throw err;
-      this.invariants.delivered.delete(event);
+      if (!/cannot receive the signal|was already received/.test(message)) throw err;
     }
   }
 
@@ -169,23 +158,15 @@ export class RealWorkflow {
     }
   }
 
-  /** Operator action on a parked unwind: retry the reversal that failed. */
   async resumeCompensation(): Promise<void> {
     if (!this.runId) return;
-    if (this.execution()?.state !== 'compensation-stuck') return;
-    try {
-      await this.engine.resumeCompensation(this.runId);
-    } catch {
-      // A lost claim is reported as a rejection; the invariants still have to hold.
-    }
+    await this.resumeExecution(this.runId);
     this.check();
   }
 
-  /** Operator action on a parked unwind: accept a partial rollback. */
-  abandonCompensation(): void {
+  async abandonCompensation(): Promise<void> {
     if (!this.runId) return;
-    if (this.execution()?.state !== 'compensation-stuck') return;
-    this.engine.abandonCompensation(this.runId);
+    await this.abandonExecution(this.runId);
     this.check();
   }
 
@@ -194,42 +175,110 @@ export class RealWorkflow {
   }
 
   check(): void {
-    checkInvariants(this.invariants, this.execution());
+    checkInvariants(this.invariants, this.execution(), this.relatedExecutions());
   }
 
   /**
-   * Final liveness gate: given enough time and every signal the spec asks for, a run
-   * must come to rest. Resting states are terminal (completed/failed) or awaiting an
-   * outside decision — `waiting` for a signal, `compensation-stuck` for an operator.
-   * Being left in 'running' or 'compensating' means a node failed to enqueue its
-   * successor: a wedge no amount of waiting will clear.
+   * Final liveness gate. Untimed gates are opened, timed gates are allowed to expire,
+   * and parked rollbacks receive one retry followed by an explicit abandon. Thus
+   * every generated graph must reach a real terminal state; `waiting` and
+   * `compensation-stuck` cannot make an otherwise vacuous campaign pass.
+   *
+   * This model keeps real time: `simulatedClock` is process-global while the embedded
+   * worker polls on real timers and may drain after force-close. Advancing it between
+   * worker turns lets adjacent generated runs interfere. Direct clock properties test
+   * the timer primitive; this integration uses bounded real delays until queue clocks
+   * can be injected per engine.
    */
   async assertSettles(): Promise<void> {
-    if (!this.runId) return;
-    const deadline = Date.now() + 10_000;
+    if (!this.runId) throw new Error('NON-VACUOUS violated: generated run was never started');
+    await this.openUntimedGates();
+    const resumed = new Set<string>();
+    const deadline = Date.now() + 12_000;
     while (Date.now() < deadline) {
-      if (isAtRest(this.execution()?.state)) break;
+      const related = this.relatedExecutions();
+      for (const exec of related.filter((candidate) => candidate.state === 'compensation-stuck')) {
+        if (!resumed.has(exec.id)) {
+          resumed.add(exec.id);
+          await this.resumeExecution(exec.id);
+        } else {
+          await this.abandonExecution(exec.id);
+        }
+      }
+      this.check();
+      if (related.length > 0 && related.every((exec) => TERMINAL.has(exec.state))) return;
       await Bun.sleep(25);
     }
     this.check();
-    const state = this.execution()?.state;
-    if (!isAtRest(state)) {
-      throw new Error(
-        `LIVENESS violated: execution wedged in "${state}"\n` +
-          `spec=${JSON.stringify(this.spec)}\nledger=${JSON.stringify(this.ledger)}`
-      );
-    }
+    const states = this.relatedExecutions()
+      .map((exec) => `${exec.id}:${exec.state}`)
+      .join(', ');
+    throw new Error(
+      `LIVENESS violated: executions did not terminate (${states})\n` +
+        `spec=${JSON.stringify(this.spec)}\nledger=${JSON.stringify(this.ledger)}`
+    );
   }
 
   async dispose(): Promise<void> {
     await this.engine.close(true);
   }
+
+  private relatedExecutions(): Execution[] {
+    if (!this.runId) return [];
+    const all = listAllExecutions(this.engine);
+    const ids = new Set([this.runId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const exec of all) {
+        if (exec.parentExecutionId && ids.has(exec.parentExecutionId) && !ids.has(exec.id)) {
+          ids.add(exec.id);
+          changed = true;
+        }
+      }
+    }
+    return all.filter((exec) => ids.has(exec.id));
+  }
+
+  private async openUntimedGates(): Promise<void> {
+    const events = new Set(
+      this.spec.nodes
+        .filter((node) => node.kind === 'waitFor' && node.timeout === undefined)
+        .map((node) => node.event)
+    );
+    for (const event of events) {
+      if (!this.invariants.delivered.has(event)) {
+        await this.signal(event, { modelFinalizer: true });
+      }
+    }
+  }
+
+  private async resumeExecution(executionId: string): Promise<void> {
+    if (this.engine.getExecution(executionId)?.state !== 'compensation-stuck') return;
+    this.ledger.operatorActions.push({ kind: 'resume', executionId });
+    try {
+      await this.engine.resumeCompensation(executionId);
+    } catch (error) {
+      if (!operatorRace(error)) throw error;
+    }
+  }
+
+  private async abandonExecution(executionId: string): Promise<void> {
+    if (this.engine.getExecution(executionId)?.state !== 'compensation-stuck') return;
+    this.ledger.operatorActions.push({ kind: 'abandon', executionId });
+    try {
+      await this.engine.abandonCompensation(executionId);
+    } catch (error) {
+      if (!operatorRace(error)) throw error;
+    }
+  }
 }
 
-const AT_REST = new Set(['completed', 'failed', 'waiting', 'compensation-stuck']);
+const TERMINAL = new Set(['completed', 'failed']);
 
-function isAtRest(state: string | undefined): boolean {
-  return state !== undefined && AT_REST.has(state);
+function operatorRace(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already being rolled back|not a parked unwind/.test(message);
 }
 
 let sharedDir: string | null = null;
@@ -244,53 +293,4 @@ function campaignDir(): string {
 export function disposeCampaign(): void {
   if (sharedDir) rmSync(sharedDir, { recursive: true, force: true });
   sharedDir = null;
-}
-
-/**
- * Braces are load-bearing here. Written as bare `else if` chains with unbraced
- * loop bodies, the `else` after `for (...) if (s.compensate) out.add(...)` binds to
- * that inner `if`, not to the chain — branch paths silently never registered, and
- * the model reported a real compensation as illegitimate.
- */
-function compensableSteps(spec: WorkflowSpec): Set<string> {
-  const out = new Set<string>();
-  for (const node of spec.nodes) {
-    if (node.kind === 'step') {
-      if (node.step.compensate) out.add(node.step.name);
-    } else if (node.kind === 'parallel') {
-      for (const s of node.steps) {
-        if (s.compensate) out.add(s.name);
-      }
-    } else if (node.kind === 'branch') {
-      for (const p of node.paths) {
-        for (const s of p.steps) {
-          if (s.compensate) out.add(s.name);
-        }
-      }
-    } else if (node.kind === 'forEach') {
-      if (node.step.compensate) {
-        for (let i = 0; i < node.count; i++) out.add(`${node.step.name}:${i}`);
-      }
-    } else if (node.kind === 'subWorkflow') {
-      // The child's own step compensates through the CHILD's unwind, and it writes
-      // into the same ledger, so the parent's invariants must know the name is
-      // legitimately compensable. Without this every sub-workflow rollback trips I7
-      // ("compensated but declares no handler") and the model fails for the wrong
-      // reason instead of finding real defects.
-      if (node.step.compensate) out.add(node.step.name);
-    }
-  }
-  return out;
-}
-
-function retryBudgets(spec: WorkflowSpec): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const node of spec.nodes) {
-    if (node.kind === 'step') out.set(node.step.name, node.step.retry);
-    else if (node.kind === 'parallel') for (const s of node.steps) out.set(s.name, s.retry);
-    else if (node.kind === 'branch')
-      for (const p of node.paths) for (const s of p.steps) out.set(s.name, s.retry);
-    else if (node.kind === 'forEach') out.set(node.step.name, node.step.retry);
-  }
-  return out;
 }

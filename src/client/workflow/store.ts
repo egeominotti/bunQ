@@ -3,10 +3,19 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { pack, unpack } from './storeCodec';
+import { pack } from './storeCodec';
 import { SignalCoordinator } from './storeSignals';
-import type { Execution, ExecutionState, ParkOutcome, SignalOutcome, StepRecord } from './types';
+import type {
+  Execution,
+  ExecutionListOptions,
+  ExecutionState,
+  ParkOutcome,
+  SignalOutcome,
+} from './types';
 import { clock } from './clock';
+import { decodeExecution, packExecutionMeta } from './storeExecutionCodec';
+import { archivedExecutionCount, archiveExecutions, cleanupExecutions } from './storeMaintenance';
+import { ExecutionListing } from './storeListing';
 
 const CREATE_TABLE = `
 CREATE TABLE IF NOT EXISTS workflow_executions (
@@ -39,23 +48,13 @@ CREATE TABLE IF NOT EXISTS workflow_executions_archive (
 
 const CREATE_IDX_NAME = `CREATE INDEX IF NOT EXISTS idx_wf_name ON workflow_executions(workflow_name)`;
 const CREATE_IDX_STATE = `CREATE INDEX IF NOT EXISTS idx_wf_state ON workflow_executions(state)`;
-
-/** Rollback bookkeeping, stored as one blob so the schema migration stays trivial. */
-interface ExecutionMeta {
-  rollbackStatus?: Execution['rollbackStatus'];
-  failureReason?: string;
-  committedAt?: number;
-  parentExecutionId?: string;
-}
-
-function packMeta(exec: Execution): Uint8Array | null {
-  const meta: ExecutionMeta = {};
-  if (exec.rollbackStatus !== undefined) meta.rollbackStatus = exec.rollbackStatus;
-  if (exec.failureReason !== undefined) meta.failureReason = exec.failureReason;
-  if (exec.committedAt !== undefined) meta.committedAt = exec.committedAt;
-  if (exec.parentExecutionId !== undefined) meta.parentExecutionId = exec.parentExecutionId;
-  return Object.keys(meta).length > 0 ? pack(meta) : null;
-}
+const CREATE_LIST_INDEXES = [
+  `CREATE INDEX IF NOT EXISTS idx_wf_created ON workflow_executions(created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_wf_name_created ON workflow_executions(workflow_name, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_wf_state_created ON workflow_executions(state, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_wf_name_state_created ON workflow_executions(workflow_name, state, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_wf_state_updated ON workflow_executions(state, updated_at ASC, id ASC)`,
+];
 
 export class WorkflowStore {
   private readonly db: Database;
@@ -63,14 +62,14 @@ export class WorkflowStore {
     upsert: ReturnType<Database['prepare']>;
     get: ReturnType<Database['prepare']>;
     updateState: ReturnType<Database['prepare']>;
-    list: ReturnType<Database['prepare']>;
-    listByName: ReturnType<Database['prepare']>;
-    listByState: ReturnType<Database['prepare']>;
-    listByBoth: ReturnType<Database['prepare']>;
+    childrenByName: ReturnType<Database['prepare']>;
+    listActiveByName: ReturnType<Database['prepare']>;
     listRecoverable: ReturnType<Database['prepare']>;
+    remove: ReturnType<Database['prepare']>;
   };
   /** Sole owner of the `signals` column — see storeSignals.ts */
   private readonly signals: SignalCoordinator;
+  private readonly listing: ExecutionListing;
 
   constructor(dbPath?: string) {
     this.db = new Database(dbPath ?? ':memory:', { create: true });
@@ -85,6 +84,7 @@ export class WorkflowStore {
     this.db.run(CREATE_ARCHIVE_TABLE);
     this.db.run(CREATE_IDX_NAME);
     this.db.run(CREATE_IDX_STATE);
+    for (const statement of CREATE_LIST_INDEXES) this.db.run(statement);
     // Rollback bookkeeping arrived after the original schema. One nullable blob
     // rather than three columns keeps the migration to a single guarded statement
     // per table; SQLite has no ADD COLUMN IF NOT EXISTS, so the throw IS the check.
@@ -110,39 +110,30 @@ export class WorkflowStore {
         SET state = ?, steps = ?, current_node_index = ?, resolved_steps = ?, updated_at = ?, meta = ?
         WHERE id = ?
       `),
-      list: this.db.prepare(`SELECT * FROM workflow_executions ORDER BY created_at DESC LIMIT 100`),
-      listByName: this.db.prepare(
-        `SELECT * FROM workflow_executions WHERE workflow_name = ? ORDER BY created_at DESC LIMIT 100`
+      childrenByName: this.db.prepare(
+        `SELECT * FROM workflow_executions WHERE workflow_name = ? ORDER BY created_at ASC, id ASC`
       ),
-      listByState: this.db.prepare(
-        `SELECT * FROM workflow_executions WHERE state = ? ORDER BY created_at DESC LIMIT 100`
-      ),
-      listByBoth: this.db.prepare(
-        `SELECT * FROM workflow_executions WHERE workflow_name = ? AND state = ? ORDER BY created_at DESC LIMIT 100`
+      listActiveByName: this.db.prepare(
+        `SELECT * FROM workflow_executions
+         WHERE workflow_name = ?
+           AND state IN ('running', 'waiting', 'compensating', 'compensation-stuck', 'failed')`
       ),
       listRecoverable: this.db.prepare(
-        `SELECT * FROM workflow_executions WHERE state IN ('running', 'waiting', 'compensating') ORDER BY updated_at ASC`
+        `SELECT * FROM workflow_executions
+         WHERE state IN ('running', 'waiting', 'compensating', 'failed')
+         ORDER BY updated_at ASC, id ASC`
       ),
+      remove: this.db.prepare(`DELETE FROM workflow_executions WHERE id = ?`),
     };
 
     this.signals = new SignalCoordinator(this.db);
+    this.listing = new ExecutionListing(this.db);
   }
 
   /**
-   * INSERT a brand-new execution. Not an upsert in spirit, despite the statement.
-   *
-   * A plain INSERT, not an upsert: the statement used to be `INSERT OR REPLACE`, so a
-   * duplicate execution id silently OVERWROTE a live run instead of failing. Ids carry
-   * a random component, which makes that vanishingly rare in production and reachable
-   * in a simulation, where a seeded generator draws from a far smaller space. A lost
-   * execution is the worst possible presentation of a collision; a constraint error is
-   * the best.
-   *
-   * This is the ONLY writer of `signals` outside SignalCoordinator, and it is safe
-   * only because its single caller passes a fresh execution whose signals are `{}`.
-   * Calling it on a live run would write a stale snapshot over signals delivered
-   * since it was read, which is exactly the lost-update SignalCoordinator exists to
-   * prevent. Use `update()` for anything that already exists.
+   * Insert a fresh execution. A plain INSERT exposes id collisions instead of
+   * replacing live runs. This is the only signal writer outside SignalCoordinator and
+   * is safe because callers pass a new execution with no signals.
    */
   save(exec: Execution): void {
     if (Object.keys(exec.signals).length > 0) {
@@ -161,13 +152,27 @@ export class WorkflowStore {
       pack(exec.signals),
       exec.createdAt,
       exec.updatedAt,
-      packMeta(exec)
+      packExecutionMeta(exec)
     );
   }
 
   get(id: string): Execution | null {
     const row = this.stmts.get.get(id) as Record<string, unknown> | null;
-    return row ? this.rowToExecution(row) : null;
+    return row ? decodeExecution(row) : null;
+  }
+
+  findChild(parentExecutionId: string, workflowName: string): Execution | null {
+    const rows = this.stmts.childrenByName.all(workflowName) as Record<string, unknown>[];
+    return (
+      rows.map(decodeExecution).find((child) => child.parentExecutionId === parentExecutionId) ??
+      null
+    );
+  }
+
+  /** Remove an execution whose initial queue publication failed. */
+  remove(id: string): boolean {
+    const result = this.stmts.remove.run(id) as { changes: number };
+    return result.changes === 1;
   }
 
   /**
@@ -189,7 +194,7 @@ export class WorkflowStore {
       exec.currentNodeIndex,
       exec.resolvedSteps ? pack(exec.resolvedSteps) : null,
       exec.updatedAt,
-      packMeta(exec),
+      packExecutionMeta(exec),
       exec.id
     );
   }
@@ -203,6 +208,15 @@ export class WorkflowStore {
   }
 
   /**
+   * Restore the wait claim if publishing its resume job failed.
+   *
+   * The signal remains durable, so recover() can publish the resume again.
+   */
+  restoreSignalWait(id: string, event: string, nodeIndex: number): boolean {
+    return this.signals.restoreWaiting(id, event, nodeIndex);
+  }
+
+  /**
    * Park a running execution at a `waitFor`, unless the awaited signal has already
    * been recorded (in which case the caller must advance instead).
    */
@@ -210,18 +224,16 @@ export class WorkflowStore {
     return this.signals.park(id, event);
   }
 
-  list(workflowName?: string, state?: ExecutionState): Execution[] {
-    let rows: Record<string, unknown>[];
-    if (workflowName && state) {
-      rows = this.stmts.listByBoth.all(workflowName, state) as Record<string, unknown>[];
-    } else if (workflowName) {
-      rows = this.stmts.listByName.all(workflowName) as Record<string, unknown>[];
-    } else if (state) {
-      rows = this.stmts.listByState.all(state) as Record<string, unknown>[];
-    } else {
-      rows = this.stmts.list.all() as Record<string, unknown>[];
-    }
-    return rows.map((r) => this.rowToExecution(r));
+  list(workflowName?: string, state?: ExecutionState, options?: ExecutionListOptions): Execution[] {
+    return this.listing.list(workflowName, state, options);
+  }
+
+  /** Runs whose registered definition must remain available and structurally stable. */
+  listActive(workflowName: string): Execution[] {
+    const rows = this.stmts.listActiveByName.all(workflowName) as Record<string, unknown>[];
+    return rows
+      .map(decodeExecution)
+      .filter((exec) => exec.state !== 'failed' || exec.rollbackStatus === undefined);
   }
 
   /**
@@ -241,8 +253,11 @@ export class WorkflowStore {
    */
   listRecoverable(): Execution[] {
     const rows = this.stmts.listRecoverable.all() as Record<string, unknown>[];
-    const all = rows.map((r) => this.rowToExecution(r));
-    return all.filter((e) => !e.parentExecutionId || this.get(e.parentExecutionId) === null);
+    const all = rows.map(decodeExecution);
+    return all.filter((execution) => {
+      if (execution.state === 'failed' && execution.rollbackStatus !== undefined) return false;
+      return !execution.parentExecutionId || this.get(execution.parentExecutionId) === null;
+    });
   }
 
   /**
@@ -254,85 +269,20 @@ export class WorkflowStore {
    * (`test/repro-workflow-archive-boundary.test.ts`).
    */
   cleanup(maxAgeMs: number, states: string[] = ['completed', 'failed']): number {
-    const cutoff = clock().now() - maxAgeMs;
-    const placeholders = states.map(() => '?').join(',');
-    const stmt = this.db.prepare(
-      `DELETE FROM workflow_executions WHERE updated_at <= ? AND state IN (${placeholders})`
-    );
-    const result = stmt.run(cutoff, ...states) as { changes: number };
-    return result.changes;
+    return cleanupExecutions(this.db, maxAgeMs, states);
   }
 
   /** Archive executions at least `maxAgeMs` old to the archive table. Cutoff inclusive, as in `cleanup`. */
   archive(maxAgeMs: number, states: string[] = ['completed', 'failed']): number {
-    const cutoff = clock().now() - maxAgeMs;
-    const now = clock().now();
-    const placeholders = states.map(() => '?').join(',');
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM workflow_executions WHERE updated_at <= ? AND state IN (${placeholders}) LIMIT 1000`
-      )
-      .all(cutoff, ...states) as Record<string, unknown>[];
-
-    if (rows.length === 0) return 0;
-
-    const insertArchive = this.db.prepare(`
-      INSERT OR REPLACE INTO workflow_executions_archive
-      (id, workflow_name, state, input, steps, current_node_index, resolved_steps, signals, created_at, updated_at, archived_at, meta)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const deleteOriginal = this.db.prepare(`DELETE FROM workflow_executions WHERE id = ?`);
-
-    const tx = this.db.transaction(() => {
-      for (const row of rows) {
-        insertArchive.run(
-          row.id as string,
-          row.workflow_name as string,
-          row.state as string,
-          row.input as Uint8Array,
-          row.steps as Uint8Array,
-          row.current_node_index as number,
-          row.resolved_steps as Uint8Array | null,
-          row.signals as Uint8Array,
-          row.created_at as number,
-          row.updated_at as number,
-          now,
-          (row.meta as Uint8Array | null) ?? null
-        );
-        deleteOriginal.run(row.id as string);
-      }
-    });
-    tx();
-    return rows.length;
+    return archiveExecutions(this.db, maxAgeMs, states);
   }
 
   /** Get archived execution count */
   getArchivedCount(): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) as cnt FROM workflow_executions_archive`)
-      .get() as { cnt: number };
-    return row.cnt;
+    return archivedExecutionCount(this.db);
   }
 
   close(): void {
     this.db.close();
-  }
-
-  private rowToExecution(row: Record<string, unknown>): Execution {
-    return {
-      id: row.id as string,
-      workflowName: row.workflow_name as string,
-      state: row.state as ExecutionState,
-      input: unpack(row.input as Uint8Array | null),
-      steps: (unpack(row.steps as Uint8Array | null) as Record<string, StepRecord> | null) ?? {},
-      currentNodeIndex: row.current_node_index as number,
-      resolvedSteps: row.resolved_steps
-        ? (unpack(row.resolved_steps as Uint8Array | null) as string[])
-        : undefined,
-      signals: (unpack(row.signals as Uint8Array | null) as Record<string, unknown> | null) ?? {},
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
-      ...((unpack(row.meta as Uint8Array | null) as ExecutionMeta | null) ?? {}),
-    };
   }
 }

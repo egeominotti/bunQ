@@ -15,10 +15,13 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · workflow engine</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Stop, and <em>wait for a person.</em></h1>
-  <p class="bq-hero-sub">A run that parks holds no worker and no memory, only a row. It can sit there for a day, across a redeploy, and still pick up exactly where it left off.</p>
+  <p class="bq-hero-sub">A parked run releases its worker slot and keeps its durable state in SQLite. It can sit there for a day, across a redeploy, and still pick up exactly where it left off.</p>
 </div>
 
-`waitFor` pauses a run until something outside it says to continue. The run stops occupying a worker, its state is on disk, and it can sit there for days.
+`waitFor` pauses a run until something outside it says to continue. The run
+stops occupying a worker and its state is on disk. While the process is alive,
+a timed gate also has one lightweight in-memory timer; the execution itself is
+not held in a worker closure.
 
 ```typescript
 const flow = new Workflow<{ amount: number }>('expense-approval')
@@ -41,9 +44,16 @@ The payload lands in `ctx.signals['manager-approval']` for every step after the 
 
 ## It survives a restart
 
-An approval delivered while the process is **down** is not lost. `signal()` writes to the persisted row; when the service comes back, `recover()` picks the run up and it continues.
+An approval already accepted before a crash is stored in the execution row and
+is not lost. Because `signal()` is an in-process API, nobody can call it while
+the only engine process is down. After restart, create the engine, register the
+same definition, call `recover()`, and then accept new approvals normally.
 
-The one thing that does need `recover()` is the **timeout**: those timers live in memory. Without the call, a run with a 24-hour deadline waits forever instead of expiring. The remaining time is computed from when the wait actually started, so a restart does not hand the run a fresh full window.
+`recover()` also reconstructs timed gates because their timer handles are
+process-local. The remaining time is computed from when the wait actually
+started, so a restart does not hand a 24-hour gate a fresh full window. Without
+recovery, an untouched timed run remains parked because no timer exists to
+re-enqueue it.
 
 ## Rejection should unwind
 
@@ -85,20 +95,29 @@ Use distinct event names. A signal for an event the run is not waiting on is rec
 
 If nothing arrives in time, a `signal:timeout` event fires, the run fails, and the rollback begins. Without a timeout the run waits indefinitely, which is a legitimate choice for a gate that genuinely has no deadline.
 
-Windows longer than about 24.8 days are clamped internally and re-armed in chunks, so a 90-day retention gate behaves correctly rather than firing immediately.
+Timer handles cannot represent more than about 24.8 days in one call. The
+engine therefore arms long waits in chunks while preserving the original
+deadline, so a 90-day gate does not wrap around and fire immediately.
 
 ## Checking on a parked run
 
 ```typescript
 const exec = engine.getExecution(run.id);
-exec.state;                       // 'waiting'
-exec.steps['__waitFor:manager-approval'];   // when the wait started
+exec?.state;                              // 'waiting'
+exec?.steps['__waitFor:manager-approval']; // when the wait started
 
 // Everything parked, across every workflow:
 engine.listExecutions(undefined, 'waiting');
 ```
 
-`listExecutions` returns at most 100 rows. For a real approval inbox, query the SQLite store directly.
+`listExecutions` returns 100 rows by default and supports deterministic pages:
+
+```typescript
+engine.listExecutions(undefined, 'waiting', { limit: 100, offset: 100 });
+```
+
+Pages order by creation time and then execution ID. Inserts between offset
+pages can shift later pages, so this is not a snapshot/cursor API.
 
 `waitFor` has no `timeout: 0` idiom. Omit the option to wait indefinitely: passing
 `0` is a deadline that has already passed, so the gate fails at once and the run rolls
@@ -129,6 +148,9 @@ try {
 
 The payload is optional, and `signal(id, 'manager-approval')` on its own counts as a
 delivery: the gate opens on the event having arrived, not on it carrying anything.
+
+Delivery is first-writer-wins per event. A duplicate signal is rejected and
+cannot overwrite the accepted approval payload.
 
 An event name that cannot be stored is refused too, at `register()` and again at
 `signal()`: an empty name, and `__proto__`, which assignment would write to an object's

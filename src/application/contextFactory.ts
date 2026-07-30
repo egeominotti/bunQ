@@ -30,6 +30,7 @@ export interface ContextDependencies {
   storage: SqliteStorage | null;
   shards: Shard[];
   shardLocks: RWLock[];
+  customIdLock: RWLock;
   processingShards: Map<JobId, Job>[];
   processingLocks: RWLock[];
   jobIndex: Map<JobId, JobLocation>;
@@ -68,12 +69,13 @@ export interface ContextCallbacks {
   registerQueueName: (queue: string) => void;
   unregisterQueueName: (queue: string) => void;
   onJobCompleted: (completedId: JobId) => void;
+  onJobFailed?: (failedId: JobId) => void;
   onJobsCompleted: (completedIds: JobId[]) => void;
   hasPendingDeps: () => boolean;
   onRepeat: (job: Job) => void;
   emitDashboardEvent?: (event: string, data: Record<string, unknown>) => void;
-  onChildTerminalFailure?: (childJob: Job, error: string | undefined) => void;
-  onChildDependencyOption?: (childJob: Job, error: string | undefined) => void;
+  onChildTerminalFailure?: (childJob: Job, error: string | undefined) => Promise<void>;
+  onChildDependencyOption?: (childJob: Job, error: string | undefined) => Promise<void>;
 }
 
 /**
@@ -159,6 +161,7 @@ export class ContextFactory {
       storage: this.deps.storage,
       shards: this.deps.shards,
       shardLocks: this.deps.shardLocks,
+      customIdLock: this.deps.customIdLock,
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       depCompletions: this.deps.depCompletions,
@@ -170,6 +173,7 @@ export class ContextFactory {
       totalPushed: this.deps.metrics.totalPushed,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
       dashboardEmit: this.callbacks.emitDashboardEvent,
+      registerQueueName: this.callbacks.registerQueueName,
     };
   }
 
@@ -206,6 +210,7 @@ export class ContextFactory {
       perQueueMetrics: this.deps.perQueueMetrics,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
       onJobCompleted: this.callbacks.onJobCompleted,
+      onJobFailed: this.callbacks.onJobFailed,
       onJobsCompleted: this.callbacks.onJobsCompleted,
       needsBroadcast: this.deps.eventsManager.needsBroadcast.bind(this.deps.eventsManager),
       hasPendingDeps: this.callbacks.hasPendingDeps,

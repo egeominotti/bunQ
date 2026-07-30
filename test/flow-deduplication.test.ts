@@ -7,14 +7,13 @@
 
 import { describe, test, expect, afterEach } from 'bun:test';
 import { Queue, Worker, FlowProducer, shutdownManager } from '../src/client';
-import { getSharedManager } from '../src/client/manager';
 
 describe('Flow + Deduplication - Embedded', () => {
   afterEach(() => {
     shutdownManager();
   });
 
-  test('flow with custom ID on parent - parent is deduplicated', async () => {
+  test('flow with an existing parent custom ID rejects a topology rewrite', async () => {
     const flow = new FlowProducer({ embedded: true });
     const queue = new Queue('flow-dedup-parent', { embedded: true });
     queue.obliterate();
@@ -25,38 +24,29 @@ describe('Flow + Deduplication - Embedded', () => {
       queueName: 'flow-dedup-parent',
       data: { role: 'parent' },
       opts: { jobId: 'dedup-parent-1' },
-      children: [
-        { name: 'child-a', queueName: 'flow-dedup-parent', data: { role: 'child-a' } },
-      ],
+      children: [{ name: 'child-a', queueName: 'flow-dedup-parent', data: { role: 'child-a' } }],
     });
 
-    // Second flow with same custom ID on parent - should get existing parent
-    const result2 = await flow.add({
-      name: 'parent',
-      queueName: 'flow-dedup-parent',
-      data: { role: 'parent-dup' },
-      opts: { jobId: 'dedup-parent-1' },
-      children: [
-        { name: 'child-b', queueName: 'flow-dedup-parent', data: { role: 'child-b' } },
-      ],
-    });
+    await expect(
+      flow.add({
+        name: 'parent',
+        queueName: 'flow-dedup-parent',
+        data: { role: 'parent-dup' },
+        opts: { jobId: 'dedup-parent-1' },
+        children: [{ name: 'child-b', queueName: 'flow-dedup-parent', data: { role: 'child-b' } }],
+      })
+    ).rejects.toThrow('already exists');
+    expect(((await queue.getJob(result1.job.id))?.data as { role: string }).role).toBe('parent');
+    expect((await queue.getJobCountsAsync())['waiting-children']).toBe(1);
 
-    // The parent from result2 should have the same ID as result1 (deduplicated)
-    expect(result2.job.id).toBe(result1.job.id);
-
-    // Children should have different IDs (they don't share custom IDs)
-    expect(result1.children![0].job.id).not.toBe(result2.children![0].job.id);
-
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 
-  test('flow with custom ID on children - duplicate children are deduplicated', async () => {
+  test('one custom-ID child cannot be owned by two parents', async () => {
     const flow = new FlowProducer({ embedded: true });
     const queue = new Queue('flow-dedup-children', { embedded: true });
     queue.obliterate();
-
-    const manager = getSharedManager();
 
     // Add a flow with custom ID children
     const result1 = await flow.add({
@@ -79,34 +69,32 @@ describe('Flow + Deduplication - Embedded', () => {
     });
 
     // Add another flow where a child has the same custom ID
-    const result2 = await flow.add({
-      name: 'parent-2',
-      queueName: 'flow-dedup-children',
-      data: { role: 'parent-2' },
-      children: [
-        {
-          name: 'child-dup',
-          queueName: 'flow-dedup-children',
-          data: { role: 'child', value: 99 },
-          opts: { jobId: 'child-custom-1' },
-        },
-      ],
-    });
+    await expect(
+      flow.add({
+        name: 'parent-2',
+        queueName: 'flow-dedup-children',
+        data: { role: 'parent-2' },
+        children: [
+          {
+            name: 'child-dup',
+            queueName: 'flow-dedup-children',
+            data: { role: 'child', value: 99 },
+            opts: { jobId: 'child-custom-1' },
+          },
+        ],
+      })
+    ).rejects.toThrow('already exists');
 
-    // The child with same custom ID should have the same job ID
     const child1Id = result1.children![0].job.id;
-    const child2Id = result2.children![0].job.id;
-    expect(child2Id).toBe(child1Id);
-
-    // The unique child should be different
     const uniqueChildId = result1.children![1].job.id;
     expect(uniqueChildId).not.toBe(child1Id);
+    expect((await queue.getJob(child1Id))?.parent?.id).toBe(result1.job.id);
 
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 
-  test('flow child with same custom ID as existing non-flow job', async () => {
+  test('a standalone custom-ID job cannot be silently reparented', async () => {
     const flow = new FlowProducer({ embedded: true });
     const queue = new Queue('flow-dedup-existing', { embedded: true });
     queue.obliterate();
@@ -119,28 +107,28 @@ describe('Flow + Deduplication - Embedded', () => {
     );
 
     // Add a flow where a child uses the same custom ID
-    const flowResult = await flow.add({
-      name: 'parent',
-      queueName: 'flow-dedup-existing',
-      data: { role: 'parent' },
-      children: [
-        {
-          name: 'child',
-          queueName: 'flow-dedup-existing',
-          data: { role: 'child' },
-          opts: { jobId: 'shared-custom-id' },
-        },
-      ],
-    });
+    await expect(
+      flow.add({
+        name: 'parent',
+        queueName: 'flow-dedup-existing',
+        data: { role: 'parent' },
+        children: [
+          {
+            name: 'child',
+            queueName: 'flow-dedup-existing',
+            data: { role: 'child' },
+            opts: { jobId: 'shared-custom-id' },
+          },
+        ],
+      })
+    ).rejects.toThrow('already exists');
+    expect((await queue.getJob(standaloneJob.id))?.data).toEqual({ role: 'standalone' });
 
-    // The child should get the same ID as the standalone job (deduplicated)
-    expect(flowResult.children![0].job.id).toBe(standaloneJob.id);
-
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 
-  test('re-adding flow with same parent custom ID returns existing', async () => {
+  test('re-adding a parent custom ID rejects instead of orphaning new children', async () => {
     const flow = new FlowProducer({ embedded: true });
     const queue = new Queue('flow-dedup-readd', { embedded: true });
     queue.obliterate();
@@ -155,20 +143,27 @@ describe('Flow + Deduplication - Embedded', () => {
       ],
     });
 
-    const result2 = await flow.add({
-      name: 'parent',
-      queueName: 'flow-dedup-readd',
-      data: { role: 'parent', attempt: 2 },
-      opts: { jobId: 'readd-parent' },
-      children: [
-        { name: 'child-2', queueName: 'flow-dedup-readd', data: { role: 'child', idx: 2 } },
-      ],
+    await expect(
+      flow.add({
+        name: 'parent',
+        queueName: 'flow-dedup-readd',
+        data: { role: 'parent', attempt: 2 },
+        opts: { jobId: 'readd-parent' },
+        children: [
+          { name: 'child-2', queueName: 'flow-dedup-readd', data: { role: 'child', idx: 2 } },
+        ],
+      })
+    ).rejects.toThrow('already exists');
+    const originalData = (await queue.getJob(result1.job.id))?.data as {
+      role: string;
+      attempt: number;
+    };
+    expect({ role: originalData.role, attempt: originalData.attempt }).toEqual({
+      role: 'parent',
+      attempt: 1,
     });
 
-    // Parent IDs should match (deduplicated)
-    expect(result2.job.id).toBe(result1.job.id);
-
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 
@@ -214,7 +209,7 @@ describe('Flow + Deduplication - Embedded', () => {
       expect(result.job.id).not.toBe(childId);
     }
 
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 
@@ -275,7 +270,7 @@ describe('Flow + Deduplication - Embedded', () => {
     expect(child2Idx).toBeLessThan(parentIdx);
 
     await worker.close();
-    flow.close();
+    await flow.close();
     queue.close();
   }, 15000);
 });

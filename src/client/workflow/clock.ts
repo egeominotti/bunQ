@@ -25,8 +25,10 @@ export interface Clock {
   /** Schedule `fn` after `ms`. The handle is whatever `clear` accepts. */
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
-  /** A number in [0, 1). Used for retry jitter and execution ids. */
+  /** A number in [0, 1). Used for retry jitter. */
   random(): number;
+  /** Replayable entropy; cryptographically strong on the real clock. */
+  randomBytes(length: number): Uint8Array;
 }
 
 export interface TimerHandle {
@@ -39,6 +41,7 @@ const realClock: Clock = {
   setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms) as unknown as TimerHandle,
   clearTimeout: (h) => globalThis.clearTimeout(h as unknown as ReturnType<typeof setTimeout>),
   random: () => Math.random(),
+  randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
 };
 
 let current: Clock = realClock;
@@ -85,6 +88,7 @@ export function simulatedClock(
   let time = startAt;
   let sequence = 0;
   let state = seed >>> 0 || 0x9e3779b9;
+  let entropyState = (seed ^ 0xa5a5a5a5) >>> 0 || 0x6d2b79f5;
   const timers = new Map<number, { at: number; order: number; fn: () => void }>();
 
   const random = (): number => {
@@ -98,10 +102,25 @@ export function simulatedClock(
   return {
     now: () => time,
     random,
+    randomBytes(length) {
+      const bytes = new Uint8Array(length);
+      for (let i = 0; i < length; i++) {
+        entropyState ^= entropyState << 13;
+        entropyState ^= entropyState >>> 17;
+        entropyState ^= entropyState << 5;
+        bytes[i] = entropyState >>> 24;
+      }
+      return bytes;
+    },
     setTimeout(fn, ms) {
       const id = sequence++;
       timers.set(id, { at: time + Math.max(0, ms), order: id, fn });
-      return { unref() {}, __id: id } as TimerHandle;
+      return {
+        unref() {
+          // Simulated timers own no process handle.
+        },
+        __id: id,
+      } as TimerHandle;
     },
     clearTimeout(handle) {
       const id = (handle as { __id?: number } | undefined)?.__id;

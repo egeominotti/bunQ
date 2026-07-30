@@ -101,7 +101,10 @@ All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], 
 
 **Backend dispatch:** each tool calls one `McpBackend` method.
 - `EmbeddedBackend` calls the matching `QueueManager` method (e.g. `addJob` → `manager.push`, prefixing the job `name` into `data`, `adapter.ts:275`). Flow tools lazily instantiate a single embedded `FlowProducer` (`adapter.ts:260`).
-- `TcpBackend` translates to wire commands via `pool.send` (e.g. `PUSH`, `PUSHB`, `PULL`, `ACK`, `FAIL`, `GetJob`, `Cron`, `DashboardQueues`). Flow tools route through a TCP `FlowProducer` (`adapter.ts:679`).
+- `TcpBackend` translates to wire commands via `pool.send` (e.g. `PUSH`,
+  `PUSHB`, `PUSHF`, `PULL`, `ACK`, `FAIL`, `GetJob`, `Cron`,
+  `DashboardQueues`). Flow tools route through a TCP `FlowProducer`
+  (`adapter.ts:679`), so the Bun backend receives the atomic graph contract.
 
 **HTTP handler registration** (`register_handler` → `HttpHandlerRegistry.register`, `httpHandler.ts:25`): stops any existing handler on the same queue, then spawns an embedded `Worker(queue, processor, { embedded: true, concurrency: 1 })`. The processor opens an `AbortController` with `setTimeout(timeoutMs ?? 30_000)` (`:36`), issues `fetch(url, init)` (body = `handler.body ?? job.data` for non-GET/DELETE), parses JSON or text by `content-type`, and throws on non-2xx so the job fails and retries through normal worker semantics.
 

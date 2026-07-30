@@ -102,8 +102,8 @@ export async function handleUpdateParent(
   try {
     await ctx.queueManager.updateJobParent(jobId(cmd.childId), jobId(cmd.parentId));
     return resp.ok(undefined, reqId);
-  } catch {
-    return resp.error('Failed to update parent', reqId);
+  } catch (error) {
+    return resp.error(error instanceof Error ? error.message : 'Failed to update parent', reqId);
   }
 }
 

@@ -1,6 +1,6 @@
 ---
 title: "Integrations: Web Frameworks, Databases, AI Agents"
-description: "How bunqueue fits into your stack: background jobs in Hono and Elysia, storage options, and AI agent control over MCP. Start here, then follow the detailed guides."
+description: "How bunqueue fits your stack: background jobs in Hono and Elysia, storage options, and AI agent control over MCP. Start here, then follow the detailed guides."
 head:
   - tag: meta
     attrs:

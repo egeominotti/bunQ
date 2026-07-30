@@ -40,7 +40,7 @@ export default function ControlPanel({
   return (
     <aside className="panel controls">
       <section className="ctl-section">
-        <h3 className="ctl-title">Push jobs</h3>
+        <h2 className="ctl-title">Push jobs</h2>
         <label className="ctl-field">
           <span>Queue</span>
           <input
@@ -108,7 +108,7 @@ export default function ControlPanel({
       </section>
 
       <section className="ctl-section">
-        <h3 className="ctl-title">Workers</h3>
+        <h2 className="ctl-title">Workers</h2>
         <label className="ctl-field">
           <span>Concurrency {concurrency}</span>
           <input
@@ -129,10 +129,10 @@ export default function ControlPanel({
       </section>
 
       <section className="ctl-section">
-        <h3 className="ctl-title">
+        <h2 className="ctl-title">
           Queue controls
           {queue?.paused && <span className="badge badge-paused">paused</span>}
-        </h3>
+        </h2>
         <div className="ctl-buttons">
           {queue?.paused ? (
             <button type="button" className="btn" onClick={() => engine.resume(target)}>
@@ -179,7 +179,7 @@ export default function ControlPanel({
       </section>
 
       <section className="ctl-section">
-        <h3 className="ctl-title">Chaos</h3>
+        <h2 className="ctl-title">Chaos</h2>
         <label className="ctl-field">
           <span>Failure rate {failurePct}%</span>
           <input

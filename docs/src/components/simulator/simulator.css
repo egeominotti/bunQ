@@ -104,7 +104,14 @@
   min-width: 0;
 }
 
-@media (max-width: 960px) {
+/* Collapse to one column below 72rem, the exact width where the rule at the
+   top of this file widens the content column to 88rem. Between 961px and
+   1151px the viewport looks roomy but the 18rem docs sidebar leaves the
+   content column at ~664px, so the 290px + 1fr grid (plus the nested
+   .sim-row 1fr 1fr) could not fit and pushed the whole PAGE into horizontal
+   scroll — up to 120px at 1000px, with the fixed sidebar then covering the
+   shifted text. */
+@media (max-width: 71.9375rem) {
   .sim-grid {
     grid-template-columns: 1fr;
   }

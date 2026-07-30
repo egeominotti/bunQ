@@ -8,8 +8,6 @@ head:
       content: https://bunqueue.dev/og/architecture/model-based-testing.png
 ---
 
-# Model-Based Testing
-
 bunqueue's example tests are supplemented by four `fast-check` models. The
 main asynchronous command model starts the real standalone broker on dynamic
 ports, uses the public MessagePack TCP protocol, writes a fresh SQLite

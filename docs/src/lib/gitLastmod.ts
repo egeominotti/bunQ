@@ -16,6 +16,7 @@ import { execSync } from 'node:child_process';
 const docsDir = process.cwd();
 
 const map = new Map<string, string>();
+const created = new Map<string, string>();
 
 try {
   const out = execSync('git log --format=%x00%cI --name-only -- src/content/docs', {
@@ -38,7 +39,11 @@ try {
         .replace(/\.(md|mdx)$/, '')
         .replace(/\/index$/, '');
       const key = norm === '' ? 'index' : norm;
-      if (current && !map.has(key)) map.set(key, current);
+      if (!current) continue;
+      // git log walks newest-first: the first date seen for a file is its last
+      // modification, the last one seen is when it first appeared.
+      if (!map.has(key)) map.set(key, current);
+      created.set(key, current);
     }
   }
 } catch {
@@ -49,4 +54,15 @@ try {
 export function lastmodForId(id: string): string | undefined {
   const key = id === '' ? 'index' : id;
   return map.get(key) ?? map.get(`${key}/index`);
+}
+
+/**
+ * First-commit ISO date for a Starlight route id — a real `datePublished` for
+ * Article-family structured data, which Google expects alongside
+ * dateModified. Same rule as above: unknown means the field is omitted, never
+ * faked with a build-time now().
+ */
+export function createdForId(id: string): string | undefined {
+  const key = id === '' ? 'index' : id;
+  return created.get(key) ?? created.get(`${key}/index`);
 }

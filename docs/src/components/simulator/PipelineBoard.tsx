@@ -24,7 +24,7 @@ export default function PipelineBoard({ snap }: { snap: Snapshot }) {
             <section key={id} className={`lane lane-${id}`} aria-label={`${label} jobs`}>
               <header className="lane-head">
                 <span className="lane-dot" aria-hidden="true" />
-                <h3 className="lane-title">{label}</h3>
+                <h2 className="lane-title">{label}</h2>
                 <span className="lane-count">{lane.total}</span>
               </header>
               <ul className="lane-body">

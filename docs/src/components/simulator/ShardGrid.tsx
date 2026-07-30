@@ -6,9 +6,9 @@ export default function ShardGrid({ shards }: { shards: ShardView[] }) {
   const maxLoad = Math.max(1, ...shards.map((s) => s.load));
   return (
     <div className="panel shard-panel">
-      <h3 className="panel-title">
+      <h2 className="panel-title">
         Shards <span className="panel-hint">fnv1a(queue) &amp; {shards.length - 1}</span>
-      </h3>
+      </h2>
       <div className="shard-grid">
         {shards.map((shard) => (
           <div

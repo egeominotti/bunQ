@@ -11,7 +11,7 @@ export default function WorkerRail({
 }) {
   return (
     <div className="panel worker-panel">
-      <h3 className="panel-title">Workers</h3>
+      <h2 className="panel-title">Workers</h2>
       {workers.length === 0 ? (
         <p className="panel-empty">No workers. Start one to process jobs.</p>
       ) : (

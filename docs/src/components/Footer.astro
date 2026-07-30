@@ -153,4 +153,14 @@ const year = new Date().getFullYear();
       grid-column: 1 / -1;
     }
   }
+
+  /* The phone layer in custom.css zeroes the content panel's inline padding so
+     cards and code blocks can run edge to edge. This footer relies on that
+     panel for its gutter, so below that breakpoint it needs its own or the
+     logo, the link columns and the legal line sit 3px from the screen edge. */
+  @media (max-width: 38rem) {
+    .bq-footer {
+      padding-inline: 1rem;
+    }
+  }
 </style>

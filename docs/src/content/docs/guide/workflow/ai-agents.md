@@ -1,6 +1,6 @@
 ---
 title: "Durable AI Agents with the Vercel AI SDK"
-description: "Why AI agents need durable execution: stop re-paying for tokens after a crash, roll back the tools an agent called, and gate destructive actions behind human approval. Verified against the live Claude API."
+description: "Why AI agents need durable execution: stop re-paying for tokens after a crash, roll back the tools an agent called, gate destructive actions behind approval."
 head:
   - tag: meta
     attrs:

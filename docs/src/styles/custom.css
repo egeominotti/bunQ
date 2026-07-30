@@ -1570,6 +1570,43 @@ main.bq-has-hero .sl-container {
   margin-inline: 0;
 }
 
+/* ── right sidebar ("On this page") column ──────────────────────────────
+   Starlight sizes the TOC column as
+     sidebar-width + (100% - content-width - sidebar-width) / 2
+   which assumes a capped --sl-content-width. With our 100% content width the
+   term goes negative, the column collapses to 9rem, and .right-sidebar (fixed,
+   width:100% => 100% of the VIEWPORT, offset by its static position) runs past
+   the right edge: every TOC label was clipped by 61px at 1152 up to 121px from
+   1440 on. Give the TOC a real fixed column and take the same width off the
+   main pane so the two flex items still add up to 100%. */
+@media (min-width: 72rem) {
+  .right-sidebar-container {
+    width: var(--sl-sidebar-width);
+  }
+
+  .right-sidebar {
+    width: var(--sl-sidebar-width);
+  }
+
+  :root[data-has-sidebar][data-has-toc] .main-pane {
+    width: calc(100% - var(--sl-sidebar-width));
+  }
+}
+
+/* ── header: 800-1056px band ────────────────────────────────────────────
+   Above 50rem Starlight swaps the menu button for the sidebar, so the header
+   grid must fit title + search + the whole right group (nav links, socials,
+   theme, CTA = 581px intrinsic) next to an 18rem sidebar column that cannot
+   shrink. It does not: at 834px 209px of the right group sat off-screen (no
+   theme toggle, no "Get started"), at 1024px the CTA was still cut in half.
+   Drop the secondary nav links until there is room; they stay reachable from
+   the footer, which lists all four. */
+@media (min-width: 50rem) and (max-width: 66rem) {
+  .header .nav-links {
+    display: none;
+  }
+}
+
 .bq-eyebrow {
   font-family: var(--bq-mono);
   font-size: 0.72rem;
@@ -1783,27 +1820,30 @@ main.bq-has-hero .sl-container {
 :root[data-theme='dark'] .bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(7) [role='tab'] { --bq-chip: #e0684f; }
 :root[data-theme='dark'] .bq-hero-left starlight-tabs:has(.tab:nth-child(8)) .tab:nth-child(8) [role='tab'] { --bq-chip: #a37fc9; }
 
-/* narrow screens: docs-page tab labels never squash, the strip scrolls
-   instead; the hero chips keep wrapping (higher-specificity override) */
-@media (max-width: 40rem) {
-  starlight-tabs .tablist-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
+/* Docs-page tab labels never squash: the strip scrolls instead. NOT scoped to
+   a breakpoint — the strip is starved wherever the content column is narrower
+   than its natural width, which happens on phones (no sidebar, ~374px) AND on
+   tablet portrait 800-1000px, where the 18rem sidebar cuts the column to
+   472-598px. Scoping this to <=40rem left that second band broken: labels
+   shrank below min-content and wrapped letter-by-letter ("B/u/n" on 3 lines).
+   The hero chips keep wrapping (higher-specificity override below). */
+starlight-tabs .tablist-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
-  starlight-tabs [role='tablist'] {
-    flex-wrap: nowrap !important;
-    min-width: max-content;
-  }
+starlight-tabs [role='tablist'] {
+  flex-wrap: nowrap !important;
+  min-width: max-content;
+}
 
-  .bq-hero-left starlight-tabs [role='tablist'] {
-    flex-wrap: wrap !important;
-    min-width: 0;
-  }
+.bq-hero-left starlight-tabs [role='tablist'] {
+  flex-wrap: wrap !important;
+  min-width: 0;
+}
 
-  starlight-tabs [role='tab'] {
-    white-space: nowrap;
-  }
+starlight-tabs [role='tab'] {
+  white-space: nowrap;
 }
 
 .bq-bench-card {
@@ -3192,6 +3232,20 @@ html {
   main:has(.bq-hero) .content-panel { padding-inline: 0.2rem !important; }
   .bq-wrap { padding: 0 1rem; }
   .bq-section { margin-top: 4.75rem; }
+
+  /* Zeroing the panel padding is what lets cards, code blocks and the terminal
+     run edge to edge, and .bq-wrap above gives the hero its gutter back. But
+     81 of 83 pages carry a .bq-hero and then continue in plain markdown, which
+     is NOT inside .bq-wrap — that prose was left 3px from both screen edges.
+     Restore a gutter on the text flow only; the full-bleed blocks (pre,
+     expressive-code, .bq-wrap) are deliberately left alone. */
+  main:has(.bq-hero) .sl-markdown-content > :is(p, ul, ol, dl, blockquote, table, h1, h2, h3, h4, h5, h6, .sl-heading-wrapper, .starlight-aside, details, hr),
+  main.bq-has-hero .sl-markdown-content > :is(p, ul, ol, dl, blockquote, table, h1, h2, h3, h4, h5, h6, .sl-heading-wrapper, .starlight-aside, details, hr) {
+    padding-inline: 1rem;
+  }
+
+  /* the footer sits in the same zero-padding panel and was flush too; its
+     gutter lives in Footer.astro, whose scoped selector outranks this file */
 
   /* hero: brand becomes a quiet mono kicker, the thesis line gets the stage */
   .bq-hero { padding-top: 1.4rem; }

@@ -25,9 +25,9 @@ export default function ThroughputPanel({ snap }: { snap: Snapshot }) {
 
   return (
     <div className="panel spark-panel">
-      <h3 className="panel-title">
+      <h2 className="panel-title">
         Throughput <span className="panel-hint">last 60s</span>
-      </h3>
+      </h2>
       <div className="spark-hero">
         <span className="spark-value">{snap.totals.jobsPerSec.toFixed(1)}</span>
         <span className="spark-unit">completed / sec</span>

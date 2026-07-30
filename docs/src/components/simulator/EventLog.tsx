@@ -12,7 +12,7 @@ function fmtT(ms: number): string {
 export default function EventLog({ events }: { events: SimEvent[] }) {
   return (
     <div className="panel event-panel">
-      <h3 className="panel-title">Events</h3>
+      <h2 className="panel-title">Events</h2>
       {events.length === 0 ? (
         <p className="panel-empty">Quiet so far. Push a job or run a scenario.</p>
       ) : (

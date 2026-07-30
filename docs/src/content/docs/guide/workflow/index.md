@@ -1,6 +1,6 @@
 ---
 title: "Workflow Engine for Bun: Durable Multi-Step Jobs"
-description: "Run multi-step processes that survive crashes and undo themselves on failure. Saga compensation, human approval gates and durable AI agent loops on SQLite, with no extra services."
+description: "Run multi-step processes that survive crashes and undo themselves on failure: saga compensation, human approval gates and durable AI agent loops on SQLite."
 head:
   - tag: meta
     attrs:

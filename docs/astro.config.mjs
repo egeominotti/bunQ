@@ -114,6 +114,7 @@ export default defineConfig({
       components: {
         Header: './src/components/Header.astro',
         Head: './src/components/Head.astro',
+        PageTitle: './src/components/PageTitle.astro',
         MobileMenuFooter: './src/components/MobileMenuFooter.astro',
         MarkdownContent: './src/components/MarkdownContent.astro',
         Footer: './src/components/Footer.astro',
@@ -416,6 +417,16 @@ export default defineConfig({
           attrs: {
             name: 'twitter:site',
             content: '@bunqueue',
+          },
+        },
+        {
+          // twitter:image itself is per-page (Head.astro mirrors og:image); the
+          // alt text is the same site-wide sentence as og:image:alt.
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:image:alt',
+            content:
+              'bunqueue - High-performance job queue for Bun & AI agents. Native MCP server.',
           },
         },
         // JSON-LD Structured Data - SoftwareApplication

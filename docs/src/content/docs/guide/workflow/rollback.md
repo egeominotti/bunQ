@@ -1,6 +1,6 @@
 ---
 title: "Rollback: Saga Compensation in TypeScript"
-description: "How the workflow engine undoes a failed multi-step process: unwind order, per-step outcomes, what happens when a rollback itself fails, the point of no return, and nested sagas."
+description: "How the workflow engine undoes a failed multi-step process: unwind order, per-step outcomes, a rollback that itself fails, and the point of no return."
 head:
   - tag: meta
     attrs:

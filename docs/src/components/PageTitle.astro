@@ -1,0 +1,45 @@
+---
+/**
+ * Starlight renders the frontmatter title as the page <h1>. On the 81 pages
+ * that open with a custom .bq-hero, custom.css hides the panel that contains
+ * it (`main:has(.bq-hero) .content-panel:first-of-type { display: none }`) and
+ * the hero supplies its own visible <h1> — which left every one of those pages
+ * with two <h1> elements, the keyword-bearing one inside a display:none
+ * subtree that search engines discount anyway.
+ *
+ * So: keep the real <h1> on pages that actually display it, and downgrade it
+ * to a plain <div> where the hero already owns the heading. The element and
+ * its id stay in place either way, because the table of contents links its
+ * first entry ("Overview") to #_top.
+ */
+// Starlight's PAGE_TITLE_ID, inlined: `constants.ts` is not in the package's
+// export map, and the value is a public contract (the TOC links to #_top).
+const PAGE_TITLE_ID = '_top';
+
+const { entry } = Astro.locals.starlightRoute;
+const heroOwnsTheHeading = (entry.body ?? '').includes('bq-hero');
+---
+
+{
+  heroOwnsTheHeading ? (
+    <div id={PAGE_TITLE_ID} class="sl-page-title">
+      {entry.data.title}
+    </div>
+  ) : (
+    <h1 id={PAGE_TITLE_ID} class="sl-page-title">
+      {entry.data.title}
+    </h1>
+  )
+}
+
+<style>
+  @layer starlight.core {
+    .sl-page-title {
+      margin-top: 1rem;
+      font-size: var(--sl-text-h1);
+      line-height: var(--sl-line-height-headings);
+      font-weight: 600;
+      color: var(--sl-color-white);
+    }
+  }
+</style>

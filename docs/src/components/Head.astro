@@ -1,6 +1,6 @@
 ---
 import Default from '@astrojs/starlight/components/Head.astro';
-import { lastmodForId } from '../lib/gitLastmod';
+import { createdForId, lastmodForId } from '../lib/gitLastmod';
 
 /**
  * Extends Starlight's Head with structured data Starlight cannot emit
@@ -22,6 +22,9 @@ const scripts = [];
 const isBlogPost = id.startsWith('blog/') && id !== 'blog';
 if (isBlogPost) {
   const published = headContent('article:published_time');
+  // dateModified tracks real git history when we have it: a post edited after
+  // publication should not keep claiming its publication date.
+  const modified = lastmodForId(id) ?? published;
   scripts.push({
     '@context': 'https://schema.org',
     '@type': 'BlogPosting',
@@ -30,7 +33,8 @@ if (isBlogPost) {
     url: canonical,
     mainEntityOfPage: canonical,
     image: headContent('og:image') ?? `${SITE}/og-image.png`,
-    ...(published ? { datePublished: published, dateModified: published } : {}),
+    ...(published ? { datePublished: published } : {}),
+    ...(modified ? { dateModified: modified } : {}),
     author: {
       '@type': 'Person',
       name: 'Egeo Minotti',
@@ -48,6 +52,7 @@ const isTechArticle =
   !isBlogPost && id !== 'blog' && id !== '' && id !== 'index' && id !== '404';
 if (isTechArticle) {
   const lastmod = lastmodForId(id);
+  const published = createdForId(id);
   scripts.push({
     '@context': 'https://schema.org',
     '@type': 'TechArticle',
@@ -57,6 +62,7 @@ if (isTechArticle) {
     mainEntityOfPage: canonical,
     image: headContent('og:image') ?? `${SITE}/og-image.png`,
     inLanguage: 'en',
+    ...(published ? { datePublished: published } : {}),
     ...(lastmod ? { dateModified: lastmod } : {}),
     author: {
       '@type': 'Person',
@@ -139,6 +145,10 @@ if (segments.length > 0) {
 
 <Default><slot /></Default>
 <link rel="alternate" type="application/rss+xml" title="bunqueue blog" href="/rss.xml" />
+{/* X falls back to og:image, but naming the image explicitly is what the Card
+    Validator checks. Per-page, so it cannot live in the global head array
+    (twitter:card / :site / :image:alt do, in astro.config.mjs). */}
+<meta name="twitter:image" content={headContent('og:image') ?? `${SITE}/og-image.png`} />
 {
   scripts.map((data) => (
     <script type="application/ld+json" set:html={JSON.stringify(data).replace(/</g, '\\u003c')} />

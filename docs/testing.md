@@ -190,8 +190,11 @@ diagnostic only and must never be published as benchmark results.
 
 `Dockerfile.test` is deliberately separate from the production `Dockerfile`.
 The production image contains only the compiled server; the test image contains
-`src/`, `test/`, `scripts/`, `bench/`, configuration, and development dependencies.
-`Dockerfile.test.dockerignore` limits the build context to those inputs.
+`src/`, `test/`, `scripts/`, `bench/`, configuration, and development
+dependencies. The allow-listed configuration includes `docs/vercel.json`
+because the unit regression validates Vercel's header-rule schema before a
+deployment can fail. `Dockerfile.test.dockerignore` limits the build context to
+those inputs.
 
 The environment is reproducible:
 

@@ -430,6 +430,15 @@ new server, dynamic ports, and a unique SQLite directory that is removed in
 `finally`. See [Test Isolation and Reproducibility](./testing.md) for the threat
 model, commands, cleanup behavior, and native-only benchmark policy.
 
+The Astro documentation site is deployed from the `docs/` Vercel project root.
+Its `vercel.json` keeps the versioned TypeDoc dump crawlable but out of search
+indexes with `X-Robots-Tag: noindex, follow`; per-page Markdown twins receive
+`noindex` to avoid competing with their canonical HTML pages. Configuration
+rationale belongs in this reference rather than in synthetic JSON properties:
+Vercel rejects unknown header-rule keys before starting the Astro build.
+`test/vercel-config.test.ts` pins that schema boundary so this class of
+zero-duration deployment failure is caught locally.
+
 Beyond the functional unit/integration suites, a set of adversarial "24/7
 readiness" suites under `test/repro-*.test.ts` assert the delivery and resource
 guarantees a continuously-running deployment depends on. Each drives a real

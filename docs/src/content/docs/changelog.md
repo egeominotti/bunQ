@@ -23,6 +23,12 @@ changed.
 
 ### Fixed
 
+- **Vercel rejected the documentation deployment before Astro could start.**
+  Explanatory text for the two `X-Robots-Tag` routes had been encoded as
+  synthetic `"//"` properties inside `vercel.json`; Vercel's schema rejects
+  unknown header-rule keys. The rationale now lives in the technical
+  architecture reference, the deployed JSON contains only supported fields,
+  and a regression test guards the boundary.
 - **The "On this page" table of contents was truncated at every desktop width.** Starlight
   sizes the TOC column as `sidebar-width + (100% - content-width - sidebar-width) / 2`,
   which assumes a capped `--sl-content-width`; ours is `100%`, so the term went negative,

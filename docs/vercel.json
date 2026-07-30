@@ -3,12 +3,10 @@
   "outputDirectory": "dist",
   "headers": [
     {
-      "//": "The TypeDoc dump in public/reference/<version>/ is 236 static pages with no canonical, no per-page description (all 236 read 'Documentation for bunqueue'), duplicate titles and a 93-word median: 74% of the crawlable surface, none of it worth indexing. Keep it crawlable and linkable for humans, out of the index for search. This also defuses the version-churn trap: when the path bumps to v2.9 there are no indexed URLs left behind to 404.",
       "source": "/reference/v:version/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
     },
     {
-      "//": "Per-page markdown twins exist for AI crawlers (llms.txt convention). noindex keeps them fetchable while stopping them from competing with the HTML page they mirror. llms.txt / llms-full.txt are .txt and stay indexable.",
       "source": "/(.*).md",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     }

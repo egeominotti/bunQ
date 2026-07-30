@@ -17,6 +17,8 @@
 !monitoring/
 !monitoring/**
 !docker-compose.yml
+!docs/
+!docs/vercel.json
 !.github/
 !.github/workflows/
 !.github/workflows/sdk.yml

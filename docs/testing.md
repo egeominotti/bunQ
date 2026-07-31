@@ -93,7 +93,9 @@ covered by the unit-suite regression test.
 TCP test harnesses pass `port: 0` and read the listener's assigned port so the
 kernel chooses and binds it atomically. Random high-port probing is not safe
 under the parallel unit gate because another listener can claim the port before
-the server bind.
+the server bind. `test/repro-ci-dynamic-port.test.ts` enforces this contract for
+the TCP protocol audit that exercises slowloris protection, write backpressure,
+and large-frame reassembly.
 
 ## Model-based broker verification
 

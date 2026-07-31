@@ -35,11 +35,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { pack, unpack } from 'msgpackr';
-import {
-  FrameParser,
-  FrameSizeError,
-  MAX_FRAME_SIZE,
-} from '../src/infrastructure/server/protocol';
+import { FrameParser, FrameSizeError, MAX_FRAME_SIZE } from '../src/infrastructure/server/protocol';
 import { QueueManager } from '../src/application/queueManager';
 import { createTcpServer, type TcpServer } from '../src/infrastructure/server/tcp';
 
@@ -126,14 +122,14 @@ describe('FIX H5 — FrameParser reassembly + boundary', () => {
 // ---------------------------------------------------------------------------
 describe('FIX H5 — slowloris stall timeout (e2e)', () => {
   test('a connection that starts a frame then stalls is closed within the timeout', async () => {
-    const PORT = 20000 + Math.floor(Math.random() * 20000);
     const STALL_MS = 300; // short timeout for the test
     const qm = new QueueManager();
     const server: TcpServer = createTcpServer(qm, {
-      port: PORT,
+      port: 0,
       hostname: '127.0.0.1',
       idleTimeoutMs: STALL_MS,
     });
+    const PORT = server.server.port;
 
     let closed = false;
     let resolveClosed: () => void;
@@ -172,14 +168,14 @@ describe('FIX H5 — slowloris stall timeout (e2e)', () => {
   }, 15000);
 
   test('a healthy connection that completes its frame is NOT closed by the stall timer', async () => {
-    const PORT = 20000 + Math.floor(Math.random() * 20000);
     const STALL_MS = 300;
     const qm = new QueueManager();
     const server: TcpServer = createTcpServer(qm, {
-      port: PORT,
+      port: 0,
       hostname: '127.0.0.1',
       idleTimeoutMs: STALL_MS,
     });
+    const PORT = server.server.port;
 
     const parser = new FrameParser();
     let pong = false;
@@ -234,15 +230,15 @@ describe('FIX H5 — slowloris stall timeout (e2e)', () => {
 // ---------------------------------------------------------------------------
 describe('FIX B3 — bounded outbound write queue', () => {
   test('a never-reading client does NOT grow the server write queue unbounded (connection dropped)', async () => {
-    const PORT = 20000 + Math.floor(Math.random() * 20000);
     const CAP = 512 * 1024; // small cap so a few big responses trip it
     const qm = new QueueManager();
     const server: TcpServer = createTcpServer(qm, {
-      port: PORT,
+      port: 0,
       hostname: '127.0.0.1',
       maxWriteQueueBytes: CAP,
       idleTimeoutMs: 0, // isolate B3 from the stall timer
     });
+    const PORT = server.server.port;
 
     // ----- push several jobs (sequentially, so frames are never truncated) -----
     const BLOB = 'A'.repeat(40 * 1024); // 40KB blob -> ~40KB GetJobs responses
@@ -270,8 +266,8 @@ describe('FIX B3 — bounded outbound write queue', () => {
       const ack = new Promise<string>((r) => (ackResolve = r));
       pushSock.write(
         FrameParser.frame(
-          pack({ cmd: 'PUSH', queue: 'b3', name: 'j', data: { blob: BLOB }, reqId: `p${i}` }),
-        ),
+          pack({ cmd: 'PUSH', queue: 'b3', name: 'j', data: { blob: BLOB }, reqId: `p${i}` })
+        )
       );
       await ack;
     }
@@ -298,8 +294,8 @@ describe('FIX B3 — bounded outbound write queue', () => {
     for (let i = 0; i < 200; i++) {
       client.write(
         FrameParser.frame(
-          pack({ cmd: 'GetJobs', queue: 'b3', state: 'waiting', limit: 100, reqId: `g${i}` }),
-        ),
+          pack({ cmd: 'GetJobs', queue: 'b3', state: 'waiting', limit: 100, reqId: `g${i}` })
+        )
       );
     }
 
@@ -339,9 +335,9 @@ describe('FIX B3 — bounded outbound write queue', () => {
 // ---------------------------------------------------------------------------
 describe('CLAIM H7 — socket.write() backpressure (contested)', () => {
   test('full framed responses survive a non-reading client under backpressure', async () => {
-    const PORT = 20000 + Math.floor(Math.random() * 20000);
     const qm = new QueueManager();
-    const server: TcpServer = createTcpServer(qm, { port: PORT, hostname: '127.0.0.1' });
+    const server: TcpServer = createTcpServer(qm, { port: 0, hostname: '127.0.0.1' });
+    const PORT = server.server.port;
 
     // ~150KB blob -> each GetJobs response is ~150KB framed. Firing many of
     // them at a non-reading client forces the server's socket.write() to
@@ -374,8 +370,8 @@ describe('CLAIM H7 — socket.write() backpressure (contested)', () => {
           name: 'big',
           data: { blob: BLOB },
           reqId: 'push',
-        }),
-      ),
+        })
+      )
     );
     await pushed;
     pushSock.end();
@@ -415,8 +411,8 @@ describe('CLAIM H7 — socket.write() backpressure (contested)', () => {
             start: 0,
             end: 100,
             reqId: `g${i}`,
-          }),
-        ),
+          })
+        )
       );
     }
 
@@ -469,9 +465,9 @@ describe('CLAIM H7 — socket.write() backpressure (contested)', () => {
 // ---------------------------------------------------------------------------
 describe('FIX B2 — client receives a > 4MB framed response intact', () => {
   test('a > 4MB GetJobs response reassembles into exactly one frame with all jobs', async () => {
-    const PORT = 20000 + Math.floor(Math.random() * 20000);
     const qm = new QueueManager();
-    const server: TcpServer = createTcpServer(qm, { port: PORT, hostname: '127.0.0.1' });
+    const server: TcpServer = createTcpServer(qm, { port: 0, hostname: '127.0.0.1' });
+    const PORT = server.server.port;
 
     // 100 jobs x 50KB ≈ 5MB aggregate. Each PUSH frame is small (no client-side
     // short-write), but the single GetJobs RESPONSE is > 4MB — the size the
@@ -508,8 +504,8 @@ describe('FIX B2 — client receives a > 4MB framed response intact', () => {
       const ack = new Promise<string>((r) => (ackResolve = r));
       pushSock.write(
         FrameParser.frame(
-          pack({ cmd: 'PUSH', queue: 'b2', name: 'j', data: { blob: BLOB }, reqId: `p${i}` }),
-        ),
+          pack({ cmd: 'PUSH', queue: 'b2', name: 'j', data: { blob: BLOB }, reqId: `p${i}` })
+        )
       );
       await ack;
     }
@@ -545,7 +541,9 @@ describe('FIX B2 — client receives a > 4MB framed response intact', () => {
       },
     });
     client.write(
-      FrameParser.frame(pack({ cmd: 'GetJobs', queue: 'b2', state: 'waiting', limit: 100, reqId: 'get' })),
+      FrameParser.frame(
+        pack({ cmd: 'GetJobs', queue: 'b2', state: 'waiting', limit: 100, reqId: 'get' })
+      )
     );
 
     const winner = await Promise.race([

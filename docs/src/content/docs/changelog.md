@@ -16,6 +16,16 @@ head:
 
 ## Unreleased
 
+## [2.8.53] - 2026-07-31
+
+### Fixed
+
+- The TCP protocol audit now asks the kernel to bind an available port and
+  reads the assigned listener port before connecting, eliminating the
+  `EADDRINUSE` race that failed the parallel CI unit gate.
+- A focused regression now rejects pseudo-random high-port selection in this
+  real TCP audit and requires the atomic `port: 0` listener contract.
+
 ## [2.8.52] - 2026-07-31
 
 ### Fixed

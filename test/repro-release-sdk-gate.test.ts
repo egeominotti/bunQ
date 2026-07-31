@@ -125,6 +125,10 @@ describe('release graph SDK gate', () => {
     }
   });
 
+  test('workflow command-file paths are quoted for ShellCheck', () => {
+    expect(ciText).not.toMatch(/>>\s+\$GITHUB_(?:ENV|OUTPUT|PATH|STEP_SUMMARY)\b/);
+  });
+
   test('finite edge mutations are all detected', () => {
     for (const name of sdkNames) {
       const mutant = structuredClone(sdk);

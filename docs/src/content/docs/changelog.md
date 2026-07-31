@@ -16,6 +16,18 @@ head:
 
 ## Unreleased
 
+## [2.8.52] - 2026-07-31
+
+### Fixed
+
+- The binary-build workflow now quotes the GitHub Actions command-file path
+  used for version outputs, resolving the `SC2086` failure reported by
+  Actionlint when ShellCheck is available on the CI runner.
+- The release-graph regression suite now rejects unquoted redirections to
+  GitHub command files, so this class of workflow failure is detected by the
+  regular unit and sandbox suites even on developer machines without
+  ShellCheck.
+
 ## [2.8.51] - 2026-07-31
 
 Production hardening for atomic cross-SDK flows, dependency completion

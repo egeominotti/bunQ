@@ -339,8 +339,18 @@ and creates its tag only after the registry accepts the package.
 
 The finite release-DAG relationships are parsed and mutation-checked by
 `test/repro-release-sdk-gate.test.ts`; actionlint validates the full GitHub
-Actions syntax and reusable-workflow contracts in the lint job. Property-based
-testing is deliberately not used for this small finite edge set.
+Actions syntax and reusable-workflow contracts in the lint job. Actionlint
+delegates embedded shell snippets to `shellcheck` only when that executable is
+available, so the regression suite also rejects unquoted redirections to
+GitHub command files independently of the developer machine. For direct
+ShellCheck parity without a host installation, validate an individual workflow
+through the pinned image without mounting the repository:
+
+```bash
+docker run --rm -i rhysd/actionlint:1.7.12 - < .github/workflows/ci.yml
+```
+
+Property-based testing is deliberately not used for this small finite edge set.
 
 ## Benchmarks are native
 

@@ -275,7 +275,7 @@ jobs:
         id: version
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build executable
         run: bun build --compile --minify --target=${{ matrix.target }} src/main.ts --outfile ${{ matrix.artifact }}

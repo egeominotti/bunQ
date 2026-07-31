@@ -5,10 +5,11 @@ import Default from '@astrojs/starlight/components/MarkdownContent.astro';
  * Wraps Starlight's MarkdownContent. On blog posts it adds a meta line
  * above the article (back link, publish date, reading time) and a
  * conversion footer below it, automatically for every current and
- * future post.
+ * future post. On the changelog it loads the month filter.
  */
 const { entry, id } = Astro.locals.starlightRoute;
 const isBlogPost = id.startsWith('blog/') && id !== 'blog';
+const isChangelog = id === 'changelog';
 
 let dateLabel = '';
 let minutes = 0;
@@ -38,6 +39,8 @@ if (isBlogPost) {
 }
 
 <Default><slot /></Default>
+
+{isChangelog && <script is:inline src="/bq-changelog.js" />}
 
 {
   isBlogPost && (

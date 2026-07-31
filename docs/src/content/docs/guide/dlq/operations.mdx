@@ -1,0 +1,189 @@
+---
+title: "DLQ Operations: Filter, Retry, Purge"
+description: "Everyday work against the bunqueue Dead Letter Queue: filter entries by reason or age, retry a subset, read DLQ health counters and purge what you do not need."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq/operations.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "dlq filter, retry dlq, purge dlq, dlq stats, requeue failed jobs, dlq pagination, bunqueue dlq api"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dead letter queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Read it, retry it, <em>clear it.</em></h1>
+  <p class="bq-hero-sub">The four things you actually do with a Dead Letter Queue: narrow it down to the entries you care about, put a subset back, check whether the pile is growing, and empty it when the cause is fixed.</p>
+</div>
+
+## Common Tasks
+
+### Filter entries
+
+```typescript
+queue.getDlq({ reason: 'timeout' });                       // by failure reason
+queue.getDlq({ olderThan: Date.now() - 86400000 });        // older than 24h
+queue.getDlq({ newerThan: Date.now() - 3600000 });         // last hour
+queue.getDlq({ retriable: true });                         // still eligible for auto-retry
+queue.getDlq({ limit: 10, offset: 20 });                   // pagination
+```
+
+*Filter objects are an embedded-mode (Bun) API. Over TCP the SDKs accept only a count cap — `getDlq(10)` / `get_dlq(10)` / `GetDlq(10)` — and you filter client-side.*
+
+### Retry selectively
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.retryDlq();                                          // retry everything
+queue.retryDlq('job-123');                                 // retry one job
+queue.retryDlqByFilter({ reason: 'timeout' });             // retry by filter (embedded only)
+const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.retryDlq();                       // retry everything
+await queue.retryDlq('job-123');              // retry one job
+await queue.retryJobs({ count: 100 });        // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.retry_dlq()                    # retry everything
+queue.retry_dlq("job-123")           # retry one job
+queue.retry_dlq(count=100)           # retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->retryDlq();                  // retry everything
+$queue->retryDlq('job-123');         // retry one job
+$queue->retryDlq(null, 100);         // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+n, err := queue.RetryDlq("", 0)         // retry everything
+n, err = queue.RetryDlq("job-123", 0)   // retry one job
+n, err = queue.RetryDlq("", 100)        // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.retry_dlq(None, None)?;              // retry everything
+queue.retry_dlq(Some("job-123"), None)?;   // retry one job
+queue.retry_dlq(None, Some(100))?;         // retry only the first 100 entries
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, n} = Bunqueue.Queue.retry_dlq(queue)               # retry everything
+{:ok, _} = Bunqueue.Queue.retry_dlq(queue, "job-123")    # retry one job
+{:ok, _} = Bunqueue.Queue.retry_dlq(queue, nil, 100)     # retry only the first 100
+```
+
+</TabItem>
+</Tabs>
+
+### Check DLQ health
+
+```typescript
+const stats = queue.getDlqStats();
+console.log(stats.total);         // total entries
+console.log(stats.byReason);      // { explicit_fail: 5, timeout: 2, ... }
+console.log(stats.pendingRetry);  // entries waiting for auto-retry
+```
+
+A simple alert loop:
+
+```typescript
+setInterval(() => {
+  const stats = queue.getDlqStats();
+  if (stats.total > 100) alertOps('High DLQ count', stats);
+}, 30000);
+```
+
+*`getDlqStats()` is an embedded-mode (Bun) API. Over TCP, count the entries returned by `getDlq()` or alert from the [monitoring endpoints](/guide/monitoring/).*
+
+### Purge
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const purged = queue.purgeDlq();             // permanently deletes all entries
+const n = await queue.purgeDlqAsync();       // same, but waits and returns the count (TCP too)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const purged = await queue.purgeDlq();       // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+purged = queue.purge_dlq()       # permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$purged = $queue->purgeDlq();    // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+purged, err := queue.PurgeDlq()  // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let purged = queue.purge_dlq()?; // permanently deletes all entries, returns the count
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, purged} = Bunqueue.Queue.purge_dlq(queue)  # deletes all entries, returns the count
+```
+
+</TabItem>
+</Tabs>
+
+## Where to go next
+
+| | |
+|---|---|
+| [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
+| [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
+| [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
+| [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
+

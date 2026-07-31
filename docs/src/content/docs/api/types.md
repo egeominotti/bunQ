@@ -684,7 +684,7 @@ interface QueueOptions {
    * the same broker without their jobs, workers, cron schedulers, stats,
    * pause state, DLQ, or rate limits overlapping. `Queue.name` keeps
    * returning the logical name; only the server-side key is prefixed.
-   * See the [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey)
+   * See the [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey)
    * guide.
    */
   prefixKey?: string;
@@ -846,7 +846,7 @@ interface WorkerOptions {
    * consume its jobs. The Worker is registered under `prefixKey + name`
    * on the server, so two workers with the same logical queue name but
    * different prefixes never see each other's jobs. See the
-   * [Namespace Isolation](/guide/queue/#namespace-isolation-prefixkey) guide.
+   * [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey) guide.
    */
   prefixKey?: string;
 }

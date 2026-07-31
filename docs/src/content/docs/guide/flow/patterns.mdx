@@ -1,0 +1,330 @@
+---
+title: "Flow Patterns: Chains, Fan-In and Trees"
+description: "The graph shapes bunqueue flows support: sequential chains, parallel children merged by a parent, deeper trees, reading child results and per-job options."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/flow/patterns.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "addChain, addBulkThen, fan-in jobs, job tree, getChildrenValues, flow options, sequential jobs bun, parallel jobs merge"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · flow producer</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Chain it, fan it out, <em>merge it back.</em></h1>
+  <p class="bq-hero-sub">Four shapes cover nearly every pipeline: one after another, many at once into a single parent, a deeper tree, and the plumbing that lets a parent read what its children produced.</p>
+</div>
+
+## Common Tasks
+
+### Run jobs one after another (chain)
+
+`addChain` executes jobs in order: each starts only when the previous one completes.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// fetch → process → store
+const { jobIds } = await flow.addChain([
+  { name: 'fetch', queueName: 'pipeline', data: { url: 'https://api.example.com' } },
+  { name: 'process', queueName: 'pipeline', data: {} },
+  { name: 'store', queueName: 'pipeline', data: {} },
+]);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// fetch → process → store
+const { jobIds } = await flow.addChain([
+  { name: 'fetch', queueName: 'pipeline', data: { url: 'https://api.example.com' } },
+  { name: 'process', queueName: 'pipeline', data: {} },
+  { name: 'store', queueName: 'pipeline', data: {} },
+]);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# fetch -> process -> store
+job_ids = flow.add_chain([
+    {"name": "fetch", "queueName": "pipeline", "data": {"url": "https://api.example.com"}},
+    {"name": "process", "queueName": "pipeline", "data": {}},
+    {"name": "store", "queueName": "pipeline", "data": {}},
+])
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// fetch -> process -> store
+$jobIds = $flow->addChain([
+    ['name' => 'fetch', 'queueName' => 'pipeline', 'data' => ['url' => 'https://api.example.com']],
+    ['name' => 'process', 'queueName' => 'pipeline'],
+    ['name' => 'store', 'queueName' => 'pipeline'],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// fetch -> process -> store
+ids, err := flow.AddChain([]bunqueue.ChainStep{
+    {Name: "fetch", QueueName: "pipeline", Data: map[string]any{"url": "https://api.example.com"}},
+    {Name: "process", QueueName: "pipeline"},
+    {Name: "store", QueueName: "pipeline"},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ChainStep, JobOptions, Value};
+
+// fetch -> process -> store
+let step = |name: &str| ChainStep {
+    name: name.into(),
+    queue_name: "pipeline".into(),
+    data: Value::Nil,
+    options: JobOptions::default(),
+};
+let ids = flow.add_chain(vec![step("fetch"), step("process"), step("store")])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# fetch -> process -> store
+{:ok, ids} =
+  Bunqueue.FlowProducer.add_chain(flow, [
+    %{name: "fetch", queue: "pipeline", data: %{url: "https://api.example.com"}},
+    %{name: "process", queue: "pipeline"},
+    %{name: "store", queue: "pipeline"}
+  ])
+```
+
+</TabItem>
+</Tabs>
+
+### Run jobs in parallel, then merge (fan-in)
+
+`addBulkThen` runs a batch concurrently and fires a final job after all of them complete.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+//   fetch-api-1 ──┐
+//   fetch-api-2 ──┼──→ merge-results
+//   fetch-api-3 ──┘
+const { parallelIds, finalId } = await flow.addBulkThen(
+  [
+    { name: 'fetch-api-1', queueName: 'parallel', data: { source: 'api1' } },
+    { name: 'fetch-api-2', queueName: 'parallel', data: { source: 'api2' } },
+    { name: 'fetch-api-3', queueName: 'parallel', data: { source: 'api3' } },
+  ],
+  { name: 'merge-results', queueName: 'parallel', data: {} }
+);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+//   fetch-api-1 ──┐
+//   fetch-api-2 ──┼──→ merge-results
+//   fetch-api-3 ──┘
+const { parallelIds, finalId } = await flow.addBulkThen(
+  [
+    { name: 'fetch-api-1', queueName: 'parallel', data: { source: 'api1' } },
+    { name: 'fetch-api-2', queueName: 'parallel', data: { source: 'api2' } },
+    { name: 'fetch-api-3', queueName: 'parallel', data: { source: 'api3' } },
+  ],
+  { name: 'merge-results', queueName: 'parallel', data: {} }
+);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+#   fetch-api-1 --+
+#   fetch-api-2 --+--> merge-results
+#   fetch-api-3 --+
+result = flow.add_bulk_then(
+    [
+        {"name": "fetch-api-1", "queueName": "parallel", "data": {"source": "api1"}},
+        {"name": "fetch-api-2", "queueName": "parallel", "data": {"source": "api2"}},
+        {"name": "fetch-api-3", "queueName": "parallel", "data": {"source": "api3"}},
+    ],
+    {"name": "merge-results", "queueName": "parallel", "data": {}},
+)
+parallel_ids, final_id = result["parallel_ids"], result["final_id"]
+```
+
+</TabItem>
+</Tabs>
+
+*`addBulkThen` is available in the Bun package, the TypeScript SDK and the Python SDK. In PHP, Go, Rust and Elixir build the same shape with `add`: a parent whose `children` are the parallel jobs (children complete first, then the parent runs).*
+
+### Build a tree
+
+`addTree` creates a hierarchy where children depend on their parent (the parent
+runs first, then its children), within the [creation limits](/guide/flow/#creation-guarantees-and-limits):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const { jobIds } = await flow.addTree({
+  name: 'root',
+  queueName: 'tree',
+  data: { level: 0 },
+  children: [
+    {
+      name: 'branch-1', queueName: 'tree', data: { level: 1 },
+      children: [
+        { name: 'leaf-1a', queueName: 'tree', data: { level: 2 } },
+        { name: 'leaf-1b', queueName: 'tree', data: { level: 2 } },
+      ],
+    },
+    { name: 'branch-2', queueName: 'tree', data: { level: 1 } },
+  ],
+});
+```
+
+</TabItem>
+</Tabs>
+
+*`addTree` (parent-first hierarchies) is available in the Bun package only for now. Every SDK's `add` builds the inverse tree, where children complete before their parent ([Quick Start](/guide/flow/#quick-start)).*
+
+### Read results from earlier jobs
+
+In `flow.add()` flows, the parent calls `await job.getChildrenValues()` (shown in the Quick Start).
+
+In `addChain` / `addBulkThen` / `addTree` flows, bunqueue injects parent IDs into the job data, and FlowProducer can look up their results (embedded mode only):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('pipeline', async (job) => {
+  if (job.data.__flowParentId) {           // chain: one parent
+    const parentResult = flow.getParentResult(job.data.__flowParentId);
+  }
+  if (job.data.__flowParentIds) {          // merge: many parents
+    const results = flow.getParentResults(job.data.__flowParentIds);
+  }
+  return { processed: true };
+}, { embedded: true });
+```
+
+</TabItem>
+</Tabs>
+
+*`getParentResult` / `getParentResults` are embedded-mode helpers of the Bun package. The `__flowParentId` / `__flowParentIds` fields are injected by every SDK's chain (and fan-in) methods; in TCP mode read a parent's result with `getResult(parentId)` (`get_result` in Python).*
+
+Injected fields: `__flowParentId`, `__flowParentIds`, plus the BullMQ-compatible `__parentId`, `__parentQueue`, and `__childrenIds`. They are typed via the `FlowJobData` interface, so IntelliSense works inside processors. Parent-child links are persisted to SQLite and survive restarts.
+
+### Set per-job and per-queue options
+
+Each step accepts normal job options via `opts`. With `flow.add()`, you can also set defaults for every job on a given queue:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await flow.add(
+  {
+    name: 'report',
+    queueName: 'reports',
+    children: [
+      { name: 'fetch', queueName: 'api', data: {}, opts: { priority: 10 } },
+      { name: 'render', queueName: 'cpu', data: {} },
+    ],
+  },
+  {
+    queuesOptions: {
+      api: { attempts: 5, backoff: 2000 },  // defaults for all 'api' jobs
+      cpu: { timeout: 60000 },              // defaults for all 'cpu' jobs
+    },
+  }
+);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+flow.add(
+    {
+        "name": "report",
+        "queueName": "reports",
+        "children": [
+            {"name": "fetch", "queueName": "api", "data": {}, "opts": {"priority": 10}},
+            {"name": "render", "queueName": "cpu", "data": {}},
+        ],
+    },
+    {
+        "queues_options": {
+            "api": {"attempts": 5, "backoff": 2000},  # defaults for all 'api' jobs
+            "cpu": {"timeout": 60000},                # defaults for all 'cpu' jobs
+        },
+    },
+)
+```
+
+</TabItem>
+</Tabs>
+
+*Per-queue defaults (`queuesOptions`) are supported in the Bun package and the Python SDK; in the other SDKs set per-step `opts` on each node instead (available everywhere).*
+
+Per-job `opts` override `queuesOptions` defaults. Identity is the exception:
+set `jobId` (or Python `job_id`) in the individual node's `opts`. It is rejected
+inside `queuesOptions` / `queues_options`, where one default could otherwise
+assign the same ID to multiple nodes. Note that `delay` on a chained step sets
+its earliest run time, but the step still waits for its dependency to complete
+first.
+
+### Inspect an existing graph
+
+```typescript
+const tree = await flow.getFlow({
+  id: node.job.id,
+  queueName: 'reports',
+  depth: 2,
+  maxChildren: 10,
+});
+
+if (!tree) console.log('root not found, or queue name did not match');
+```
+
+`depth` and `maxChildren` accept non-negative integers (or `Infinity`);
+`maxChildren: 0` returns only the requested node. A missing root or queue
+mismatch returns `null`. A missing descendant, malformed topology, cycle, or
+real TCP/server error throws instead of returning a misleading partial tree.
+Each returned descendant must also point back to the parent being traversed;
+corrupt or cross-linked ownership is rejected.
+Dependency keys returned by `getDependencies()` use each child's actual queue,
+so cross-queue keys are `childQueue:childId`.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Flow Producer](/guide/flow/) | Your first parent/child graph, and what is guaranteed |
+| [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
+| [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field |
+

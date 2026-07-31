@@ -794,7 +794,7 @@ app.add("hook", {"event": "user.updated", "userId": "123"})  # different data ->
 </TabItem>
 </Tabs>
 
-Override per job: `await app.add('task', data, { deduplication: { id: 'my-id', ttl: 5000 } })` (Python: `app.add("task", data, deduplication={"id": "my-id", "ttl": 5000})`). Strategies (`extend`, `replace`) are explained in [Queue → Deduplication](/guide/queue/#deduplication).
+Override per job: `await app.add('task', data, { deduplication: { id: 'my-id', ttl: 5000 } })` (Python: `app.add("task", data, deduplication={"id": "my-id", "ttl": 5000})`). Strategies (`extend`, `replace`) are explained in [Queue → Deduplication](/guide/queue/deduplication/).
 
 ### Debounce
 

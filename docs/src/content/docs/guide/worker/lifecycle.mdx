@@ -1,0 +1,177 @@
+---
+title: "Worker Lifecycle: Pause, Resume, Graceful Shutdown"
+description: "Control a running bunqueue Worker: pause and resume consumption, and close it so in-flight jobs finish and are acknowledged instead of stalling on deploy."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/lifecycle.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "worker graceful shutdown, pause worker, resume worker, close worker, sigterm queue, in-flight jobs deploy, zero downtime worker"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Stopping without <em>dropping work.</em></h1>
+  <p class="bq-hero-sub">Deploys are the most common cause of stalled jobs. Closing a worker properly lets in-flight jobs finish and be acknowledged before the process exits.</p>
+</div>
+
+## Control and shut down
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.run();     // Start processing (if created with autorun: false)
+worker.pause();   // Stop pulling new jobs
+worker.resume();  // Resume
+
+await worker.close();      // Wait for active jobs, then stop
+await worker.close(true);  // Force close immediately
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.run();     // Start processing (if created with autorun: false)
+worker.pause();   // Stop pulling new jobs
+worker.resume();  // Resume
+
+await worker.close();      // Stop pulling, flush batched ACKs, drain in-flight jobs
+await worker.close(true);  // Force: skip the in-flight drain
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.run()             # Blocking loop (or autorun starts it in the background)
+worker.pause()           # Stop pulling new jobs
+worker.resume()          # Resume
+
+worker.close()           # Stop pulling, wait for in-flight jobs to drain
+worker.close(timeout=5)  # Bound the wait; the drain continues in the background
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->run();      // Blocking loop: pull, process, repeat
+$worker->runOnce();  // Pull and process one batch (cron-friendly)
+
+$worker->stop();     // Finish the in-flight job, then return from run()
+$worker->close();    // Unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.Run()   // Blocking pull loop
+worker.Stop()  // Stop pulling; in-flight jobs finish
+worker.Close() // Unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+worker.run()?;      // Blocking pull loop; returns after stop()
+worker.run_once()?; // Pull and process one batch
+worker.stop();      // Ask the loop to exit
+worker.close();     // Stop, unregister and close the connection
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+Bunqueue.Worker.run(worker)       # Blocking pull loop; returns after stop
+Bunqueue.Worker.run_once(worker)  # Pull and process one batch
+Bunqueue.Worker.stop(worker)      # Drain, unregister and close
+```
+
+</TabItem>
+</Tabs>
+
+For a clean process exit, hook your runtime's shutdown signal; in the Bun client, also shut down the shared machinery:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { shutdownManager, closeSharedTcpClient } from 'bunqueue/client';
+
+process.on('SIGINT', async () => {
+  await worker.close();
+  shutdownManager();       // Embedded mode: flush writes, close SQLite
+  closeSharedTcpClient();  // TCP mode: close the shared connection pool
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+process.on('SIGINT', async () => {
+  await worker.close(); // drains in-flight jobs and flushes batched ACKs
+  process.exit(0);
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+try:
+    worker.run()
+except KeyboardInterrupt:
+    worker.close()  # drains in-flight jobs
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->installSignalHandlers(); // SIGTERM / SIGINT -> graceful stop
+$worker->run();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+go func() {
+    sig := make(chan os.Signal, 1)
+    signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+    <-sig
+    worker.Stop() // Run() drains in-flight jobs, then closes
+}()
+worker.Run()
+```
+
+</TabItem>
+</Tabs>
+
+*In Rust and Elixir, calling `worker.stop()` / `Bunqueue.Worker.stop(worker)` from another thread or process makes the blocking run loop drain and return; there is no shared machinery to tear down.*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

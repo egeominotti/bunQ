@@ -1,0 +1,175 @@
+---
+title: "Dead Letter Queue: What Happens to Failed Jobs"
+description: "bunqueue keeps failed jobs in a Dead Letter Queue with full error history. Inspect them, retry manually or automatically, and expire old entries."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "dead letter queue bun, dlq, failed jobs, retry failed jobs, job failure history, bullmq dlq alternative, sqlite queue dlq"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dead letter queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Failed jobs, kept in the <em>DLQ.</em></h1>
+  <p class="bq-hero-sub">When a job runs out of retries, bunqueue does not throw it away. It lands in the Dead Letter Queue with its error and full attempt history, so you can see what went wrong and retry it.</p>
+</div>
+
+The Dead Letter Queue (DLQ) is a holding area for jobs that failed permanently, for example after exhausting all their retry attempts. Nothing is lost: each entry keeps the original job, the error message, and a record of every attempt.
+
+## Quick Start
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Queue } from 'bunqueue/client';
+
+const queue = new Queue('emails', { embedded: true });
+
+// See what failed and why
+const entries = queue.getDlq();
+for (const entry of entries) {
+  console.log(entry.job.id, entry.reason, entry.error);
+}
+
+// Put everything back in the queue for another try
+queue.retryDlq();
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('emails');
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+const jobs = await queue.getDlq();
+for (const job of jobs) {
+  console.log(job.id);
+}
+
+// Put everything back in the queue for another try
+await queue.retryDlq();
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("emails")
+
+# List the dead jobs (over TCP they arrive as plain jobs,
+# without DLQ metadata like the failure reason)
+for job in queue.get_dlq():
+    print(job["id"])
+
+# Put everything back in the queue for another try
+queue.retry_dlq()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$queue = new Queue('emails');
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+foreach ($queue->getDlq() as $job) {
+    echo $job['id'], PHP_EOL;
+}
+
+// Put everything back in the queue for another try
+$queue->retryDlq();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("emails", bunqueue.Options{})
+defer queue.Close()
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+jobs, err := queue.GetDlq(0)
+for _, job := range jobs {
+    fmt.Println(job["id"])
+}
+
+// Put everything back in the queue for another try
+_, err = queue.RetryDlq("", 0)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, Queue};
+
+let queue = Queue::new("emails", ConnectionOptions::default());
+
+// List the dead jobs (over TCP they arrive as plain jobs,
+// without DLQ metadata like the failure reason)
+let jobs = queue.get_dlq(None)?;
+println!("{} dead jobs", jobs.len());
+for job in &jobs {
+    println!("{job:?}");
+}
+
+// Put everything back in the queue for another try
+queue.retry_dlq(None, None)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("emails")
+
+# List the dead jobs (over TCP they arrive as plain jobs,
+# without DLQ metadata like the failure reason)
+{:ok, jobs} = Bunqueue.Queue.dlq(queue)
+for job <- jobs, do: IO.puts(job["id"])
+
+# Put everything back in the queue for another try
+{:ok, _count} = Bunqueue.Queue.retry_dlq(queue)
+```
+
+</TabItem>
+</Tabs>
+
+From the CLI, against a running server:
+
+```bash
+bunqueue dlq list emails
+bunqueue dlq retry emails
+bunqueue dlq purge emails
+```
+
+:::note[Embedded vs TCP]
+The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server and always return 0. The `Async` variants work in both modes: `await queue.getDlqJobsAsync(count?)` lists the dead jobs of a remote server (as plain Job objects, without DLQ metadata like the failure reason), `await queue.retryDlqAsync()` / `await queue.purgeDlqAsync()` wait for the command and return the real count, and `await queue.setDlqConfigAsync()` waits for the config to apply. For full DLQ metadata on a remote server, use the CLI or the dashboard.
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
+| [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
+| [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
+| [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
+

@@ -1,0 +1,184 @@
+---
+title: "Queue API: Add and Manage Jobs in Bun"
+description: "The bunqueue Queue is the producer side: create it embedded in your process or pointed at a server, then add, inspect and control jobs backed by SQLite."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "bun queue, job queue api, embedded queue sqlite, tcp queue client, bullmq queue alternative, background jobs typescript"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The producer <em>side.</em></h1>
+  <p class="bq-hero-sub">A Queue is where work goes in. Same object whether it writes straight to a SQLite file in your process or talks to a shared server over TCP, so the code you write does not change when the deployment does.</p>
+</div>
+
+Start here: create the queue, pick a mode, and know which options belong to the constructor rather than to individual jobs.
+
+## Create a queue
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Queue } from 'bunqueue/client';
+
+const queue = new Queue('my-queue', { embedded: true });
+
+await queue.add('job-name', { key: 'value' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+const queue = new Queue('my-queue'); // connects to localhost:6789
+
+await queue.add('job-name', { key: 'value' });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+queue = Queue("my-queue")  # connects to localhost:6789
+
+queue.add("job-name", {"key": "value"})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$queue = new Queue('my-queue'); // connects to localhost:6789
+
+$queue->add('job-name', ['key' => 'value']);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue := bunqueue.NewQueue("my-queue", bunqueue.Options{}) // localhost:6789
+defer queue.Close()
+
+queue.Add("job-name", map[string]any{"key": "value"}, nil)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value};
+
+let queue = Queue::new("my-queue", ConnectionOptions::default()); // localhost:6789
+let data = Value::Map(vec![(Value::from("key"), Value::from("value"))]);
+queue.add("job-name", data, JobOptions::default())?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queue = Bunqueue.queue("my-queue")  # connects to localhost:6789
+
+{:ok, _job} = Bunqueue.Queue.add(queue, "job-name", %{key: "value"})
+```
+
+</TabItem>
+</Tabs>
+
+:::caution[Embedded vs TCP]
+`embedded: true` runs the queue inside your process. Without it, the Queue connects to a bunqueue server on `localhost:6789` (see [Server Mode](/guide/server/)). The Queue and its Worker must use the same mode.
+:::
+
+Useful variations:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Typed queue: job.data is type-checked
+interface TaskData {
+  userId: number;
+  action: string;
+}
+const typedQueue = new Queue<TaskData>('tasks', { embedded: true });
+
+// Default options applied to every job
+const emailQueue = new Queue('emails', {
+  embedded: true,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: 1000,
+    removeOnComplete: true,
+  }
+});
+
+// TCP mode with a custom connection
+const remoteQueue = new Queue('tasks', {
+  connection: {
+    host: '192.168.1.100',
+    port: 6789,
+    token: 'secret-token',  // If AUTH_TOKENS is set on the server
+    poolSize: 4,            // Connection pool size
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue } from 'bunqueue-client';
+
+// Typed queue: job.data is type-checked
+interface TaskData {
+  userId: number;
+  action: string;
+}
+const typedQueue = new Queue<TaskData>('tasks');
+
+// Remote server: connection options are top-level
+const remoteQueue = new Queue('tasks', {
+  host: '192.168.1.100',
+  port: 6789,
+  token: 'secret-token',  // If AUTH_TOKENS is set on the server
+  poolSize: 4,            // Producer-side connection pool
+});
+```
+
+</TabItem>
+</Tabs>
+
+*`embedded: true` and `defaultJobOptions` exist in the Bun `bunqueue` package only; the `poolSize` connection pool is TypeScript-only. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call.*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

@@ -1,0 +1,159 @@
+---
+title: "Job Schedulers from the Queue"
+description: "Create named, updatable repeatable schedules with upsertJobScheduler from the bunqueue Queue, list them, and remove them when they are no longer needed."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/schedulers.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "upsertJobScheduler, repeatable jobs, job scheduler api, recurring job queue, scheduler list, remove scheduler"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Recurring work, <em>named.</em></h1>
+  <p class="bq-hero-sub">The managed alternative to a repeat option buried in a job: a named schedule you can update in place and remove by id.</p>
+</div>
+
+## Job Schedulers (Repeatable Jobs)
+
+Named, updatable schedules (the managed alternative to `repeat` in job options):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.upsertJobScheduler('daily-report', {
+  pattern: '0 9 * * *',       // cron pattern
+  // or: every: 3600000,      // interval in ms
+}, {
+  name: 'generate-report',
+  data: { type: 'daily' },
+});
+
+const scheduler = await queue.getJobScheduler('daily-report');
+const schedulers = await queue.getJobSchedulers(0, 100);
+const count = await queue.getJobSchedulersCount();
+await queue.removeJobScheduler('daily-report');
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.upsertJobScheduler('daily-report', {
+  pattern: '0 9 * * *',       // cron pattern
+  // or: every: 3600000,      // interval in ms
+}, {
+  name: 'generate-report',
+  data: { type: 'daily' },
+});
+
+const scheduler = await queue.getJobScheduler('daily-report');
+const schedulers = await queue.getJobSchedulers();
+const count = await queue.getJobSchedulersCount();
+await queue.removeJobScheduler('daily-report');
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.upsert_job_scheduler(
+    "daily-report",
+    {"pattern": "0 9 * * *"},   # or {"every": 3600000}
+    {"name": "generate-report", "data": {"type": "daily"}},
+)
+
+scheduler = queue.get_job_scheduler("daily-report")
+schedulers = queue.get_job_schedulers()
+count = queue.get_job_schedulers_count()
+queue.remove_job_scheduler("daily-report")
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->upsertJobScheduler('daily-report',
+    ['pattern' => '0 9 * * *'],   // or ['every' => 3600000]
+    ['name' => 'generate-report', 'data' => ['type' => 'daily']],
+);
+
+$scheduler = $queue->getJobScheduler('daily-report');
+$schedulers = $queue->getJobSchedulers();
+$queue->removeJobScheduler('daily-report');
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.UpsertJobScheduler("daily-report",
+    bunqueue.SchedulerRepeat{Pattern: "0 9 * * *"}, // or EveryMs: 3600000
+    bunqueue.SchedulerTemplate{
+        Name: "generate-report",
+        Data: map[string]any{"type": "daily"},
+    },
+)
+
+scheduler, _ := queue.GetJobScheduler("daily-report")
+schedulers, _ := queue.GetJobSchedulers()
+queue.RemoveJobScheduler("daily-report")
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{SchedulerRepeat, SchedulerTemplate};
+
+queue.upsert_job_scheduler(
+    "daily-report",
+    SchedulerRepeat { pattern: Some("0 9 * * *".into()), ..Default::default() },
+    SchedulerTemplate { name: Some("generate-report".into()), ..Default::default() },
+)?;
+
+let scheduler = queue.get_job_scheduler("daily-report")?;
+queue.remove_job_scheduler("daily-report")?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+:ok =
+  Bunqueue.Queue.upsert_scheduler(queue, "daily-report",
+    %{pattern: "0 9 * * *"},   # or %{every: 3_600_000}
+    %{name: "generate-report", data: %{type: "daily"}}
+  )
+
+{:ok, scheduler} = Bunqueue.Queue.get_scheduler(queue, "daily-report")
+{:ok, schedulers} = Bunqueue.Queue.list_schedulers(queue)
+:ok = Bunqueue.Queue.remove_scheduler(queue, "daily-report")
+```
+
+</TabItem>
+</Tabs>
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

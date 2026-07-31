@@ -1,0 +1,530 @@
+---
+title: "Adding Jobs: Priorities, Delays and Bulk"
+description: "Everything about putting work into a bunqueue queue: single and bulk adds, priorities, delays, per-job attempts and timeouts, and durable writes that skip the buffer."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/adding-jobs.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "queue add job, addBulk, job priority, delayed job, durable write, job attempts, bulk insert jobs bun"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Getting work <em>into the queue.</em></h1>
+  <p class="bq-hero-sub">One job or a hundred thousand, ordered by priority, held back by a delay, or written straight to disk when losing it is not an option.</p>
+</div>
+
+## Add jobs
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const job = await queue.add('job-name', { key: 'value' });
+
+// With options
+const job = await queue.add('job-name', data, {
+  priority: 10,           // Higher = processed first
+  delay: 5000,            // Wait 5s before processing
+  attempts: 5,            // Max retries if the processor throws (default: 3)
+  backoff: 2000,          // Wait between retries in ms (default: 1000, jitter applied)
+  // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
+  timeout: 30000,         // Fail the job if processing takes longer
+  jobId: 'custom-id',     // Custom ID, makes the add idempotent (see Deduplication)
+  removeOnComplete: true, // Delete job data after it completes
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const job = await queue.add('job-name', { key: 'value' });
+
+// With options
+const job = await queue.add('job-name', data, {
+  priority: 10,           // Higher = processed first
+  delay: 5000,            // Wait 5s before processing
+  attempts: 5,            // Max retries if the processor throws (default: 3)
+  backoff: 2000,          // Wait between retries in ms (default: 1000)
+  // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
+  timeout: 30000,         // Fail the job if processing takes longer
+  jobId: 'custom-id',     // Custom ID, makes the add idempotent (see Deduplication)
+  removeOnComplete: true, // Delete job data after it completes
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+job = queue.add("job-name", {"key": "value"})
+
+# With options
+job = queue.add(
+    "job-name",
+    data,
+    priority=10,              # Higher = processed first
+    delay=5000,               # Wait 5s before processing
+    attempts=5,               # Max retries if the processor raises (default: 3)
+    backoff=2000,             # Wait between retries in ms (default: 1000)
+    # OR: backoff={"type": "exponential", "delay": 2000}
+    timeout=30000,            # Fail the job if processing takes longer
+    job_id="custom-id",       # Custom ID, makes the add idempotent
+    remove_on_complete=True,  # Delete job data after it completes
+)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$job = $queue->add('job-name', ['key' => 'value']);
+
+// With options
+$job = $queue->add('job-name', $data, [
+    'priority' => 10,           // Higher = processed first
+    'delay' => 5000,            // Wait 5s before processing
+    'attempts' => 5,            // Max retries (default: 3)
+    'backoff' => 2000,          // Or ['type' => 'exponential', 'delay' => 2000]
+    'timeout' => 30000,         // Fail the job if processing takes longer
+    'jobId' => 'custom-id',     // Custom ID, makes the add idempotent
+    'removeOnComplete' => true, // Delete job data after it completes
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+job, err := queue.Add("job-name", map[string]any{"key": "value"}, nil)
+
+// With options
+job, err = queue.Add("job-name", data, bunqueue.JobOptions{
+    "priority":         10,          // Higher = processed first
+    "delay":            5000,        // Wait 5s before processing
+    "attempts":         5,           // Max retries (default: 3)
+    "backoff":          2000,        // Or map[string]any{"type": "exponential", "delay": 2000}
+    "timeout":          30000,       // Fail the job if processing takes longer
+    "jobId":            "custom-id", // Custom ID, makes the add idempotent
+    "removeOnComplete": true,        // Delete job data after it completes
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Backoff, JobOptions};
+
+// With options
+let job = queue.add("job-name", data, JobOptions {
+    priority: Some(10),               // Higher = processed first
+    delay: Some(5000),                // Wait 5s before processing
+    attempts: Some(5),                // Max retries (default: 3)
+    backoff: Some(Backoff::Milliseconds(2000)),
+    // OR: Backoff::Strategy { kind: "exponential".into(), delay: 2000, max_delay: None }
+    timeout: Some(30_000),            // Fail the job if processing takes longer
+    job_id: Some("custom-id".into()), // Custom ID, makes the add idempotent
+    remove_on_complete: Some(true),   // Delete job data after it completes
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, job} = Bunqueue.Queue.add(queue, "job-name", %{key: "value"})
+
+# With options
+{:ok, job} =
+  Bunqueue.Queue.add(queue, "job-name", data,
+    priority: 10,           # Higher = processed first
+    delay: 5000,            # Wait 5s before processing
+    attempts: 5,            # Max retries (default: 3)
+    backoff: 2000,          # Or %{type: "exponential", delay: 2000}
+    timeout: 30_000,        # Fail the job if processing takes longer
+    jobId: "custom-id",     # Custom ID, makes the add idempotent
+    removeOnComplete: true  # Delete job data after it completes
+  )
+```
+
+</TabItem>
+</Tabs>
+
+The full option list is in the [reference table](/guide/queue/options/).
+
+### Add many at once
+
+`addBulk` inserts all jobs in one batch, much faster than a loop of `add`:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const jobs = await queue.addBulk([
+  { name: 'task-1', data: { id: 1 } },
+  { name: 'task-2', data: { id: 2 }, opts: { priority: 10 } },
+  { name: 'task-3', data: { id: 3 }, opts: { delay: 5000 } },
+]);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const jobs = await queue.addBulk([
+  { name: 'task-1', data: { id: 1 } },
+  { name: 'task-2', data: { id: 2 }, opts: { priority: 10 } },
+  { name: 'task-3', data: { id: 3 }, opts: { delay: 5000 } },
+]);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Each entry: {"name", "data", ...options} with the same names as add()
+ids = queue.add_bulk([
+    {"name": "task-1", "data": {"id": 1}},
+    {"name": "task-2", "data": {"id": 2}, "priority": 10},
+    {"name": "task-3", "data": {"id": 3}, "delay": 5000},
+])
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Each entry: name + data + options, flattened
+$ids = $queue->addBulk([
+    ['name' => 'task-1', 'data' => ['id' => 1]],
+    ['name' => 'task-2', 'data' => ['id' => 2], 'priority' => 10],
+    ['name' => 'task-3', 'data' => ['id' => 3], 'delay' => 5000],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+ids, err := queue.AddBulk([]bunqueue.BulkEntry{
+    {Name: "task-1", Data: map[string]any{"id": 1}},
+    {Name: "task-2", Data: map[string]any{"id": 2}, Opts: bunqueue.JobOptions{"priority": 10}},
+    {Name: "task-3", Data: map[string]any{"id": 3}, Opts: bunqueue.JobOptions{"delay": 5000}},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{BulkEntry, JobOptions, Value};
+
+let ids = queue.add_bulk(vec![
+    BulkEntry {
+        name: "task-1".into(),
+        data: Value::Nil,
+        options: JobOptions::default(),
+    },
+    BulkEntry {
+        name: "task-2".into(),
+        data: Value::Nil,
+        options: JobOptions { priority: Some(10), ..Default::default() },
+    },
+    BulkEntry {
+        name: "task-3".into(),
+        data: Value::Nil,
+        options: JobOptions { delay: Some(5000), ..Default::default() },
+    },
+])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, ids} =
+  Bunqueue.Queue.add_bulk(queue, [
+    %{name: "task-1", data: %{id: 1}},
+    %{name: "task-2", data: %{id: 2}, opts: [priority: 10]},
+    %{name: "task-3", data: %{id: 3}, opts: [delay: 5000]}
+  ])
+```
+
+</TabItem>
+</Tabs>
+
+### Repeat on a schedule
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Every 5 seconds
+await queue.add('heartbeat', {}, { repeat: { every: 5000 } });
+
+// Every 24 hours, at most 30 times
+await queue.add('daily-report', {}, { repeat: { every: 86400000, limit: 30 } });
+
+// Cron pattern
+await queue.add('weekly', {}, { repeat: { pattern: '0 9 * * MON' } });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Every 5 seconds
+await queue.add('heartbeat', {}, { repeat: { every: 5000 } });
+
+// Every 24 hours, at most 30 times
+await queue.add('daily-report', {}, { repeat: { every: 86400000, limit: 30 } });
+
+// Cron pattern
+await queue.add('weekly', {}, { repeat: { pattern: '0 9 * * MON' } });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Every 5 seconds
+queue.add("heartbeat", {}, repeat={"every": 5000})
+
+# Every 24 hours, at most 30 times
+queue.add("daily-report", {}, repeat={"every": 86400000, "limit": 30})
+
+# Cron pattern
+queue.add("weekly", {}, repeat={"pattern": "0 9 * * MON"})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Every 5 seconds
+$queue->add('heartbeat', [], ['repeat' => ['every' => 5000]]);
+
+// Every 24 hours, at most 30 times
+$queue->add('daily-report', [], ['repeat' => ['every' => 86400000, 'limit' => 30]]);
+
+// Cron pattern
+$queue->add('weekly', [], ['repeat' => ['pattern' => '0 9 * * MON']]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Every 5 seconds
+queue.Add("heartbeat", nil, bunqueue.JobOptions{"repeat": map[string]any{"every": 5000}})
+
+// Every 24 hours, at most 30 times
+queue.Add("daily-report", nil, bunqueue.JobOptions{
+    "repeat": map[string]any{"every": 86400000, "limit": 30},
+})
+
+// Cron pattern
+queue.Add("weekly", nil, bunqueue.JobOptions{
+    "repeat": map[string]any{"pattern": "0 9 * * MON"},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{JobOptions, Value};
+
+// Every 5 seconds
+let repeat = Value::Map(vec![(Value::from("every"), Value::from(5000))]);
+queue.add("heartbeat", Value::Nil, JobOptions { repeat: Some(repeat), ..Default::default() })?;
+
+// Cron pattern
+let repeat = Value::Map(vec![(Value::from("pattern"), Value::from("0 9 * * MON"))]);
+queue.add("weekly", Value::Nil, JobOptions { repeat: Some(repeat), ..Default::default() })?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Every 5 seconds
+{:ok, _} = Bunqueue.Queue.add(queue, "heartbeat", %{}, repeat: %{every: 5000})
+
+# Every 24 hours, at most 30 times
+{:ok, _} = Bunqueue.Queue.add(queue, "daily-report", %{}, repeat: %{every: 86_400_000, limit: 30})
+
+# Cron pattern
+{:ok, _} = Bunqueue.Queue.add(queue, "weekly", %{}, repeat: %{pattern: "0 9 * * MON"})
+```
+
+</TabItem>
+</Tabs>
+
+You can change the data for future runs at any point in the lifecycle with `updateData()`, even after the current run completes (the update follows the repeat chain to the next scheduled execution):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const job = await queue.add('sync', { endpoint: '/api/v1' }, { repeat: { every: 60000 } });
+await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const job = await queue.add('sync', { endpoint: '/api/v1' }, { repeat: { every: 60000 } });
+await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+job = queue.add("sync", {"endpoint": "/api/v1"}, repeat={"every": 60000})
+job.update_data({"endpoint": "/api/v2"})  # Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$job = $queue->add('sync', ['endpoint' => '/api/v1'], ['repeat' => ['every' => 60000]]);
+$queue->updateJobData($job->id(), ['endpoint' => '/api/v2']);  // Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+job, _ := queue.Add("sync", map[string]any{"endpoint": "/api/v1"},
+    bunqueue.JobOptions{"repeat": map[string]any{"every": 60000}})
+queue.UpdateJobData(job.ID(), map[string]any{"endpoint": "/api/v2"}) // Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let repeat = Value::Map(vec![(Value::from("every"), Value::from(60_000))]);
+let job = queue.add("sync", data, JobOptions { repeat: Some(repeat), ..Default::default() })?;
+let update = Value::Map(vec![(Value::from("endpoint"), Value::from("/api/v2"))]);
+queue.update_job_data(&job.id(), update)?; // Next run uses /api/v2
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, job} =
+  Bunqueue.Queue.add(queue, "sync", %{endpoint: "/api/v1"}, repeat: %{every: 60_000})
+
+:ok = Bunqueue.Queue.update(queue, job.id, %{endpoint: "/api/v2"})  # Next run uses /api/v2
+```
+
+</TabItem>
+</Tabs>
+
+For named, managed schedules, see [Job Schedulers](/guide/queue/schedulers/) and the [Cron guide](/guide/cron/).
+
+### Durable jobs (no data loss)
+
+By default bunqueue batches writes to disk every 10ms for speed (~100k jobs/sec). A crash inside that window can lose the not-yet-flushed jobs. For jobs where that is unacceptable, `durable: true` writes to disk before `add()` returns:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
+  durable: true,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
+  durable: true,
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add("process-payment", {"order_id": "123", "amount": 99.99}, durable=True)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('process-payment', ['orderId' => '123', 'amount' => 99.99], [
+    'durable' => true,
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("process-payment", map[string]any{"orderId": "123", "amount": 99.99},
+    bunqueue.JobOptions{"durable": true})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.add("process-payment", data, JobOptions {
+    durable: Some(true),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "process-payment", %{order_id: "123", amount: 99.99},
+    durable: true
+  )
+```
+
+</TabItem>
+</Tabs>
+
+| Mode | Throughput | Data loss window | Use for |
+|------|------------|------------------|---------|
+| Default | ~100k jobs/sec | Up to 10ms | Emails, notifications, analytics |
+| Durable | ~10k jobs/sec | None | Payments, orders, audit records |
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

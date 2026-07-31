@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="bunqueue">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17111f"/>
+      <stop offset="1" stop-color="#09070d"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5ca8"/>
+      <stop offset="1" stop-color="#d3156d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#ff4f9f" stop-opacity="0.28"/>
+      <stop offset="0.6" stop-color="#db2777" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#db2777" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="28" stdDeviation="32" flood-color="#000" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="262" y="262" width="500" height="500" rx="116" fill="url(#tile)"/>
+    <g transform="translate(320 304) scale(8)" fill="none" stroke="#fff" stroke-width="4.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="13" y="8" width="20" height="20" rx="6.6"/>
+      <path d="M31 26V39.5"/>
+      <circle cx="31" cy="40" r="4" fill="#fff" stroke="none"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,161 @@
+---
+title: "WorkerOptions Reference"
+description: "Every bunqueue WorkerOptions field with its default: concurrency, batchSize, pollTimeout, heartbeatInterval, lockDuration, connection pooling and prefixKey."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/options.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "workeroptions, worker configuration, concurrency default, heartbeatInterval, lockDuration, poolSize, prefixKey, bunqueue reference"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every knob, <em>with its default.</em></h1>
+  <p class="bq-hero-sub">The complete option surface for a Worker, what each one changes, and the defaults you get when you leave it alone.</p>
+</div>
+
+## Options reference
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  concurrency: 5,
+  batchSize: 100,      // Pull up to 100 jobs per request
+  pollTimeout: 5000,   // Long-poll: wait up to 5s for jobs instead of busy polling
+  limiter: { max: 10, duration: 1000 },  // Max 10 jobs per second
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  concurrency: 5,
+  batchSize: 100,       // Pull up to 100 jobs per request
+  pollTimeoutMs: 5000,  // Long-poll: wait up to 5s for jobs (default)
+  lockTtlMs: 30000,     // Job lease TTL
+  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },  // Opt-in ACK batching
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker(
+    "queue",
+    processor,
+    concurrency=5,
+    batch_size=100,        # Pull up to 100 jobs per request
+    poll_timeout_ms=5000,  # Long-poll: wait up to 5s for jobs (default)
+    lock_ttl_ms=30000,     # Job lease TTL
+    ack_batch={"max_size": 50, "max_delay_ms": 5},  # Opt-in ACK batching
+)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'batchSize' => 100,           // Pull up to 100 jobs per request
+    'pollTimeoutMs' => 5000,      // Long-poll: wait up to 5s for jobs (default)
+    'lockTtlMs' => 30000,         // Job lease TTL
+    'heartbeatIntervalS' => 10.0, // Heartbeats fire between jobs (sequential worker)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    Concurrency:        5,
+    BatchSize:          100,   // Pull up to 100 jobs per request
+    PollTimeoutMs:      5000,  // Long-poll: wait up to 5s for jobs (default)
+    LockTtlMs:          30000, // Job lease TTL
+    HeartbeatIntervalS: 10,    // Heartbeats are disabled by default in Go
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::time::Duration;
+use bunqueue_client::{Worker, WorkerOptions};
+
+let worker = Worker::new("queue", processor, WorkerOptions {
+    concurrency: 5,
+    batch_size: 100,        // Pull up to 100 jobs per request
+    poll_timeout_ms: 5_000, // Long-poll: wait up to 5s for jobs (default)
+    lock_ttl_ms: 30_000,    // Job lease TTL
+    heartbeat_interval: Some(Duration::from_secs(10)),
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", handler,
+    concurrency: 5,
+    batch_size: 100,          # Pull up to 100 jobs per request
+    poll_timeout: 5_000,      # Long-poll: wait up to 5s for jobs
+    lock_ttl: 30_000,         # Job lease TTL
+    heartbeat_interval: 10_000
+  )
+```
+
+</TabItem>
+</Tabs>
+
+The table below documents the Bun client's options; the external SDK worker options are tabulated in the [SDK guide](/guide/sdks/#worker-options).
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `embedded` | `boolean` | `false` | Use in-process mode |
+| `concurrency` | `number` | `1` | Parallel job processing |
+| `autorun` | `boolean` | `true` | Start polling automatically |
+| `heartbeatInterval` | `number` | `10000` | Heartbeat interval in ms (0 = disabled) |
+| `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
+| `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
+| `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
+| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max jobs per window. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
+| `lockDuration` | `number` | `30000` | Job lock TTL in ms |
+| `maxStalledCount` | `number` | `1` | Max stalls before the job moves to failed |
+| `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
+| `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
+| `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
+| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |
+| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Same behavior as `removeOnComplete` (boolean only) |
+| `connection` | `ConnectionOptions` | - | TCP connection (`host`, `port`, `token`, `poolSize`) |
+| `prefixKey` | `string` | - | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey) |
+
+**Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+

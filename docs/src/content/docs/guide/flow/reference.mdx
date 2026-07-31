@@ -1,0 +1,200 @@
+---
+title: "Flow Producer Reference: Methods and Shapes"
+description: "Reference for bunqueue flows: every FlowProducer method, the job helpers available inside a worker processor, and the exact shape of a flow step."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/flow/reference.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "flowproducer methods, getChildrenValues, getDependencies, flow step shape, flow api reference, bunqueue flow types"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · flow producer</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every method, <em>spelled out.</em></h1>
+  <p class="bq-hero-sub">The producer surface, what a processor can ask about its children mid-run, and the full field list of a step so you can build graphs programmatically.</p>
+</div>
+
+## Reference
+
+### FlowProducer methods
+
+| Method | Description |
+|--------|-------------|
+| `add(flow, opts?)` | BullMQ v5: tree where children complete before the parent (atomic) |
+| `addBulk(flows[])` | BullMQ v5: add multiple flow trees (atomic, all-or-nothing) |
+| `getFlow({ id, queueName, depth?, maxChildren? })` | Retrieve a flow tree by root job ID |
+| `addChain(steps[])` | Sequential execution: A → B → C |
+| `addBulkThen(parallel[], final)` | Parallel then converge: [A, B, C] → D |
+| `addTree(root)` | Hierarchical tree with nested children |
+| `getParentResult(parentId)` | Result of a single parent job (embedded only) |
+| `getParentResults(parentIds[])` | Results of multiple parent jobs (embedded only) |
+| `close()` / `disconnect()` | Close the connection pool |
+| `waitUntilReady()` | Wait until the FlowProducer is connected |
+
+The table describes the Bun package. SDK availability: `add` and `addChain` exist in all six SDKs; `getFlow` in TypeScript, Python, PHP and Go; `addBulk` and `addBulkThen` in TypeScript and Python; `addTree`, `getParentResult` and `getParentResults` in the Bun package only.
+
+FlowProducer extends Node.js `EventEmitter` (BullMQ v5 compatible); `closing` tracks shutdown state.
+
+The Bun snippets in this guide are exercised in
+`test/flow-docs-examples.test.ts`, including the complete Quick Start, chain,
+fan-in, parent-first tree, per-queue defaults, bounded traversal, and both
+failure-value APIs.
+
+### Job methods inside a worker processor
+
+| Method | Description |
+|--------|-------------|
+| `job.getChildrenValues()` | Results of all completed children |
+| `job.getFailedChildrenValues()` | Errors from children that failed with `continueParentOnFailure` |
+| `job.getIgnoredChildrenFailures()` | Errors from children that failed with `ignoreDependencyOnFailure` |
+| `job.removeChildDependency()` | Atomically detach this job from its parent; promotes the parent if it was the last pending child |
+| `job.removeUnprocessedChildren()` | Cancel all waiting/delayed children; active and finished children are unaffected |
+
+In the external SDKs, `getChildrenValues` is available on the job in TypeScript and Python and on `Queue` (taking the job id) in TypeScript, Python, PHP and Go; the other four methods live on `Queue` in TypeScript and Python.
+
+### Step shape
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// addChain / addBulkThen / addTree
+interface FlowStep<T = unknown> {
+  name: string;           // Job name
+  queueName: string;      // Target queue
+  data: T;                // Job data
+  opts?: JobOptions;      // Optional job options
+  children?: FlowStep[];  // Child steps (addTree)
+}
+
+// flow.add / flow.addBulk (children run BEFORE the parent)
+interface FlowJob<T = unknown> {
+  name: string;
+  queueName: string;
+  data?: T;
+  opts?: JobOptions;
+  children?: FlowJob[];
+}
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// addChain / addBulkThen
+interface FlowStep<T = unknown> {
+  name: string;
+  queueName: string;
+  data?: T;
+  opts?: JobOptions;
+}
+
+// flow.add / flow.addBulk (children run BEFORE the parent)
+interface FlowJob<T = unknown> {
+  name: string;
+  queueName: string;
+  data?: T;
+  opts?: JobOptions;
+  children?: FlowJob<T>[];
+}
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# add_chain / add_bulk_then steps and add / add_bulk nodes are plain dicts:
+step = {"name": "...", "queueName": "...", "data": {}, "opts": {}}
+node = {"name": "...", "queueName": "...", "data": {}, "opts": {},
+        "children": []}  # children run BEFORE the parent
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// addChain steps and add() nodes are plain arrays:
+$step = ['name' => '...', 'queueName' => '...', 'data' => [], 'opts' => []];
+$node = ['name' => '...', 'queueName' => '...', 'data' => [], 'opts' => [],
+         'children' => []];  // children run BEFORE the parent
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// AddChain
+type ChainStep struct {
+    Name      string
+    QueueName string
+    Data      map[string]any
+    Opts      JobOptions
+}
+
+// Add (children run BEFORE the parent)
+type FlowJob struct {
+    Name      string
+    QueueName string
+    Data      map[string]any
+    Opts      JobOptions
+    Children  []FlowJob
+}
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// add_chain
+pub struct ChainStep {
+    pub name: String,
+    pub queue_name: String,
+    pub data: Value,
+    pub options: JobOptions,
+}
+
+// add (children run BEFORE the parent)
+pub struct FlowJob {
+    pub name: String,
+    pub queue_name: String,
+    pub data: Value,
+    pub options: JobOptions,
+    pub children: Vec<FlowJob>,
+}
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# add_chain steps and add/2 nodes are plain maps (note the :queue key):
+step = %{name: "...", queue: "...", data: %{}, options: []}
+node = %{name: "...", queue: "...", data: %{}, options: [],
+         children: []}  # children run BEFORE the parent
+```
+
+</TabItem>
+</Tabs>
+
+`flow.add()` returns a `JobNode`: `{ job, children? }`, recursively.
+
+:::tip[Related Guides]
+- [Queue API](/guide/queue/) - Job options available on each step
+- [Worker API](/guide/worker/) - Process flow jobs with workers
+- [Workflow Engine](/guide/workflow/) - Multi-step orchestration with rollback, when flows are not enough
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [Flow Producer](/guide/flow/) | Your first parent/child graph, and what is guaranteed |
+| [Flow Patterns](/guide/flow/patterns/) | Chains, fan-in, trees, reading child results, options |
+| [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
+

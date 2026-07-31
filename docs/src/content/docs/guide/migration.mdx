@@ -161,7 +161,7 @@ const worker = new Worker('queue', async (job) => {
 }, { embedded: true, concurrency: 4 });
 ```
 
-An experimental `SandboxedWorker` (built on Bun Workers) exists if you need process isolation. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+An experimental `SandboxedWorker` (built on Bun Workers) exists if you need process isolation. See [Worker vs SandboxedWorker](/guide/worker/sandboxed/#worker-vs-sandboxedworker).
 
 ### Queue-level rate limiting
 

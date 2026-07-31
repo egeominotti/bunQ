@@ -1098,7 +1098,7 @@ Happy-path behaviour was already solid; these harden bunqueue under failure, str
   // Workers must match the prefix to consume jobs from the producing queue
   new Worker('emails', processor, { prefixKey: 'dev:' });
   ```
-  See the [Namespace Isolation guide](/guide/queue/#namespace-isolation-prefixkey).
+  See the [Namespace Isolation guide](/guide/queue/advanced/#namespace-isolation-prefixkey).
 
 ## [2.6.114] - 2026-04-07
 

@@ -274,7 +274,7 @@ const stalledJobs = queue.getDlq({ reason: 'stalled' });
 ## SandboxedWorker
 
 :::caution[Experimental]
-`SandboxedWorker` depends on experimental Bun Workers. For production, use the standard `Worker`. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+`SandboxedWorker` depends on experimental Bun Workers. For production, use the standard `Worker`. See [Worker vs SandboxedWorker](/guide/worker/sandboxed/#worker-vs-sandboxedworker).
 :::
 
 `SandboxedWorker` also sends heartbeats automatically in both modes; in embedded mode `heartbeatInterval` defaults to `5000` ms. If its jobs run longer than `stallInterval`, either raise `stallInterval`, call `progress()` periodically, or disable stall detection with `queue.setStallConfig({ enabled: false })`.

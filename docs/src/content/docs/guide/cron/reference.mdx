@@ -1,0 +1,72 @@
+---
+title: "Cron Reference: Expressions, Options, MCP"
+description: "Reference for bunqueue scheduling: the five-field cron syntax and its shortcuts, every repeat option with defaults and per-SDK naming, and cron control from AI agents."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/cron/reference.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "cron expression cheat sheet, cron syntax reference, preventOverlap, skipIfNoWorker, skipMissedOnRestart, cron mcp, scheduler options"
+---
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · cron jobs</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every field, every <em>option.</em></h1>
+  <p class="bq-hero-sub">The expression syntax with its shortcuts, the full repeat option table with defaults and the naming each SDK uses, plus managing schedules through an AI agent.</p>
+</div>
+
+## Cron Expression Cheat Sheet
+
+Five fields, left to right: minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week (0-6, Sunday = 0).
+
+| Expression | Meaning |
+|---|---|
+| `0 9 * * *` | Every day at 9:00 AM |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 0 * * MON` | Every Monday at midnight |
+| `0 0 1 * *` | First day of every month |
+
+Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted.
+
+## Scheduler Options
+
+Options on the repeat object of `upsertJobScheduler`:
+
+| Option | Default | Description |
+|---|---|---|
+| `pattern` | - | Cron expression |
+| `every` | - | Interval in ms (alternative to `pattern`) |
+| `timezone` | `UTC` (embedded) / server timezone (TCP) | IANA timezone for `pattern` evaluation |
+| `limit` | unlimited | Max executions, then the scheduler is removed |
+| `immediately` | `false` | Fire once right away on first creation |
+| `skipIfNoWorker` | `false` | Skip a run when no worker is registered for the queue |
+| `preventOverlap` | `true` | Skip a run while the previous job is still active |
+| `skipMissedOnRestart` | `true` | On server restart, recompute the next run instead of firing missed runs |
+
+*Naming per SDK: the embedded Bun client uses `timezone`; the TypeScript (`bunqueue-client`), Python and PHP SDKs use the repeat key `tz`; Go uses the `Timezone` field, Rust `timezone`, and Elixir accepts both `tz` and `timezone`. Go and Rust name the interval `EveryMs` / `every_ms`. `addCron` and `every` convenience helpers exist in TypeScript and Python only; in PHP, Go, Rust and Elixir use the scheduler API directly.*
+
+## AI Agents (MCP)
+
+AI agents can manage cron jobs in natural language ("create a cron that cleans old sessions every hour") through the [MCP Server](/guide/mcp/):
+
+```bash
+bun add bunqueue @modelcontextprotocol/sdk
+claude mcp add bunqueue -- bunx bunqueue-mcp
+```
+
+:::tip[Related Guides]
+- [Queue API](/guide/queue/) - Job options for cron-created jobs
+- [CLI Commands](/guide/cli/) - Manage cron jobs via CLI
+- [MCP Server](/guide/mcp/) - AI agent integration
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
+| [Cron Recipes](/guide/cron/recipes/) | Fixed intervals, timezones, repeat-after-completion |
+

@@ -1,0 +1,239 @@
+---
+title: "Querying Jobs: State, Counts and Results"
+description: "Read the queue back: fetch a job by id, list by state, count per state and priority, read results and progress, and understand what each state means."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/querying.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "getJob, getJobCounts, job state, waiting active completed failed, queue introspection, job result, count jobs bun"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Asking the queue <em>what it holds.</em></h1>
+  <p class="bq-hero-sub">Dashboards, health checks and debugging all come down to the same questions: what is in there, what state is it in, and what did that one job actually return.</p>
+</div>
+
+## Query jobs
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// One job
+const job = await queue.getJob('job-id');
+const state = await queue.getJobState('job-id');
+// 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
+// | 'failed' | 'waiting-children' | 'unknown'
+
+// Counts per state
+const counts = await queue.getJobCountsAsync();
+// { waiting, prioritized, active, completed, failed, delayed,
+//   'waiting-children', paused }
+
+// Lists, filtered by state
+const failed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// One job
+const job = await queue.getJob('job-id');          // null when missing
+const state = await queue.getJobState('job-id');
+// 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
+// | 'failed' | 'waiting-children'
+
+// Counts per state
+const counts = await queue.getJobCounts();
+// { waiting, prioritized, active, completed, failed, delayed,
+//   'waiting-children', paused }
+
+// Lists, filtered by state
+const failed = await queue.getJobs({ state: 'failed', start: 0, end: 50 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# One job
+job = queue.get_job("job-id")       # None when missing
+state = queue.get_state("job-id")
+# "waiting" | "prioritized" | "delayed" | "active" | "completed"
+# | "failed" | "waiting-children"
+
+# Counts per state
+counts = queue.get_job_counts()
+
+# Lists, filtered by state
+failed = queue.get_jobs("failed", 0, 50)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// One job
+$job = $queue->getJob('job-id');       // null when missing
+$state = $queue->getState('job-id');
+// 'waiting' | 'prioritized' | 'delayed' | 'active' | 'completed'
+// | 'failed' | 'waiting-children'
+
+// Counts per state
+$counts = $queue->getJobCounts();
+
+// Lists, filtered by state
+$failed = $queue->getJobs('failed', 0, 50);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// One job
+job, _ := queue.GetJob("job-id")       // nil when missing
+state, _ := queue.GetState("job-id")
+// "waiting" | "prioritized" | "delayed" | "active" | "completed"
+// | "failed" | "waiting-children"
+
+// Counts per state
+counts, _ := queue.GetJobCounts()
+
+// Lists, filtered by state
+failed, _ := queue.GetJobs("failed", 0, 50)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// One job
+let job = queue.get_job("job-id")?;      // None when missing
+let state = queue.get_state("job-id")?;
+
+// Counts per state
+let counts = queue.get_job_counts()?;
+
+// Lists, filtered by state (offset, limit)
+let failed = queue.get_jobs(Value::from("failed"), 0, 50)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# One job
+{:ok, job} = Bunqueue.Queue.get_job(queue, "job-id")     # nil when missing
+{:ok, state} = Bunqueue.Queue.get_state(queue, "job-id")
+
+# Counts per state
+{:ok, counts} = Bunqueue.Queue.get_job_counts(queue)
+
+# Lists, filtered by state (offset, limit)
+{:ok, failed} = Bunqueue.Queue.get_jobs(queue, "failed", 0, 50)
+```
+
+</TabItem>
+</Tabs>
+
+Most read methods come in two flavors: a sync version that only works in embedded mode (`getJobCounts()`, `getJobs()`, `getCountsPerPriority()`, `count()`, `isPaused()`) and an async version that works in both modes (`getJobCountsAsync()`, `getJobsAsync()`, `getCountsPerPriorityAsync()`, `countAsync()`, `isPausedAsync()`). Prefer the async ones unless you know you're embedded.
+
+Per-state shortcuts:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Sync (embedded only): getWaiting, getActive, getCompleted, getFailed, getDelayed
+const waiting = queue.getWaiting(0, 10);
+
+// Async (both modes): same names + Async
+const failed = await queue.getFailedAsync(0, 10);
+
+// Counts (async, both modes)
+const failedCount = await queue.getFailedCount();
+// also: getWaitingCount, getActiveCount, getCompletedCount, getDelayedCount
+
+// BullMQ-compatible extras
+const prioritized = await queue.getPrioritized(0, 10);        // jobs with priority > 0
+const waitingChildren = await queue.getJobsAsync({
+  state: 'waiting-children', start: 0, end: 10,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Per-state lists: getWaiting, getActive, getCompleted, getFailed, getDelayed
+const waiting = await queue.getWaiting(0, 10);
+const failed = await queue.getFailed(0, 10);
+
+// Counts
+const failedCount = await queue.getFailedCount();
+// also: getWaitingCount, getActiveCount, getCompletedCount, getDelayedCount
+
+// BullMQ-compatible extras
+const prioritized = await queue.getPrioritized(0, 10);        // jobs with priority > 0
+const waitingChildren = await queue.getWaitingChildren(0, 10);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Per-state lists: get_waiting, get_active, get_completed, get_failed, get_delayed
+waiting = queue.get_waiting(0, 10)
+failed = queue.get_failed(0, 10)
+
+# Counts
+failed_count = queue.get_failed_count()
+# also: get_waiting_count, get_active_count, get_completed_count, get_delayed_count
+
+# BullMQ-compatible extras
+prioritized = queue.get_prioritized(0, 10)          # jobs with priority > 0
+waiting_children = queue.get_waiting_children(0, 10)
+```
+
+</TabItem>
+</Tabs>
+
+*Per-state shortcuts are available in TypeScript and Python; in PHP, Go, Rust, and Elixir use `getJobs` with a state filter.*
+
+`getPrioritized()` works in embedded and TCP modes. The BullMQ compatibility
+helper `getWaitingChildren()` is currently embedded-only; use the explicit
+`getJobsAsync({ state: 'waiting-children' })` query above when the same code must
+work in both modes.
+
+:::note[Two states worth knowing]
+**Prioritized:** jobs with `priority > 0` report the state `'prioritized'`, not `'waiting'` (BullMQ v5 behavior). Both are pullable; prioritized jobs go first.
+
+**Paused:** while a queue is paused, its ready jobs are counted under `paused`, never `waiting` or `prioritized`. On `resume()` each job returns to its logical `waiting` or `prioritized` state. Pause state survives server restarts when persistence is on.
+:::
+
+Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding area for permanently failed jobs) but remain visible: they are counted by `failed`, returned by `getJob(id)`, and listed by `getFailed()`.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

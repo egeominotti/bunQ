@@ -1,0 +1,128 @@
+---
+title: "SandboxedWorker: Isolated Job Processing"
+description: "The experimental bunqueue SandboxedWorker runs handlers in Bun Workers so CPU-heavy jobs cannot block the main loop. Known limits and why to prefer Worker."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/sandboxed.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "sandboxed worker, bun workers, cpu intensive jobs, isolated processor, worker threads queue, experimental"
+---
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Handlers in <em>their own thread.</em></h1>
+  <p class="bq-hero-sub">CPU-bound work starves an event loop. SandboxedWorker moves the handler into a Bun Worker so the main thread keeps heartbeating, at the cost of running on an experimental runtime feature.</p>
+</div>
+
+## SandboxedWorker
+
+:::danger[Experimental, not recommended for production]
+`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are currently **experimental** in Bun. Known issues include unexpected memory growth and inconsistent behavior across Bun versions. For production workloads, use the standard `Worker`.
+:::
+
+`SandboxedWorker` runs each job in an isolated Bun Worker thread. If a job crashes (out of memory, infinite loop, uncaught exception), only that thread dies; the main process keeps running and the thread is restarted automatically. Use it for CPU-heavy or untrusted code. It is a Bun (`bunqueue/client`) feature.
+
+```typescript
+import { SandboxedWorker } from 'bunqueue/client';
+
+const worker = new SandboxedWorker('cpu-intensive', {
+  processor: './processor.ts',  // Path to processor file
+  concurrency: 4,               // 4 parallel worker threads
+  timeout: 60000,               // Per-job timeout (default: 30000, 0 = disabled)
+  maxMemory: 256,               // MB per worker (default: 256)
+});
+
+await worker.start();
+```
+
+**Processor file** (`processor.ts`):
+
+```typescript
+export default async (job: {
+  id: string;
+  data: any;
+  queue: string;
+  attempts: number;
+  parentId?: string;
+  progress: (value: number) => void;
+  log: (message: string) => void;
+  fail: (error: string | Error) => void;
+}) => {
+  job.progress(50);
+  const result = await heavyComputation(job.data);
+  job.progress(100);
+  return result;
+};
+```
+
+To connect to a remote server instead of running embedded, pass a `connection` option (`host`, `port`, `token`), everything else is the same.
+
+Control:
+
+```typescript
+await worker.start();
+worker.isRunning();
+const stats = worker.getStats(); // { total, busy, idle, recycled, restarts }
+await worker.stop();             // Graceful (waits for busy workers)
+await worker.stop(true);         // Force
+```
+
+If your jobs process large files (100MB+), raise `maxMemory` above the 256MB default to avoid OOM crashes.
+
+### SandboxedWorker options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `processor` | `string` | (required) | Path to processor file |
+| `concurrency` | `number` | `1` | Parallel worker threads |
+| `maxMemory` | `number` | `256` | Max memory per thread in MB (Bun smol mode if `<= 64`) |
+| `timeout` | `number` | `30000` | Per-job timeout in ms (0 = disabled) |
+| `autoRestart` | `boolean` | `true` | Auto-restart crashed threads |
+| `maxRestarts` | `number` | `10` | Max restart attempts per thread |
+| `pollInterval` | `number` | `10` | Job poll interval in ms |
+| `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat for stall detection / lock renewal |
+| `idleTimeout` | `number` | `0` | Stop the pool after this many idle ms (0 = disabled) |
+| `idleRecycleMs` | `number` | `30000` | Recycle idle threads after this many ms (0 = disabled) |
+| `autoStart` | `boolean` | `false` | Restart the pool when new jobs arrive after an idle shutdown |
+| `autoStartPollMs` | `number` | `5000` | Poll interval while idle-stopped |
+| `connection` | `ConnectionOptions` | - | TCP connection (omit for embedded) |
+
+SandboxedWorker emits 8 of the Worker events: `ready`, `active`, `completed`, `failed`, `progress`, `log`, `error`, `closed`. It does **not** emit `stalled`, `drained`, or `cancelled`.
+
+### Worker vs SandboxedWorker
+
+| | Worker | SandboxedWorker |
+|---|--------|-----------------|
+| **Production ready** | ✅ Stable, no experimental APIs | ⚠️ Depends on experimental Bun Workers |
+| **I/O-bound tasks** (HTTP, DB, APIs) | ✅ Best choice | Overkill |
+| **CPU-intensive tasks** | ⚠️ Blocks event loop | ✅ Runs in separate thread |
+| **Untrusted code** | ❌ Runs in main thread | ✅ Isolated |
+| **Crash isolation / memory limits** | ❌ | ✅ |
+| **Events** | 11 events | 8 events |
+| **Concurrency, retries, heartbeats** | ✅ | ✅ Same behavior |
+
+Most workloads are I/O-bound (API calls, database queries, file operations); for those, `Worker` is the right choice. If CPU-heavy work over TCP is dropping connections, see [CPU-Intensive Workers](/guide/cpu-intensive-workers/) for tuning patterns.
+
+:::tip[Related Guides]
+- [Queue API](/guide/queue/), add and manage jobs
+- [Stall Detection & Recovery](/guide/stall-detection/), handle unresponsive workers
+- [Monitoring & Prometheus Metrics](/guide/monitoring/), watch worker performance
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

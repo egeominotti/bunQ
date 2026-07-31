@@ -1,0 +1,315 @@
+---
+title: "Cron Recipes: Intervals, Timezones, Chained Repeats"
+description: "Practical bunqueue scheduling patterns: fixed millisecond intervals, cron patterns evaluated in a specific IANA timezone, and jobs that repeat after each completion."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/cron/recipes.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "cron every n milliseconds, cron timezone iana, dst cron, repeat after completion, interval scheduler bun, recurring job patterns"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · cron jobs</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The schedules you <em>actually need.</em></h1>
+  <p class="bq-hero-sub">Three shapes cover almost every recurring job: a fixed interval, a wall-clock time in a real timezone, and a job that re-arms itself only once the previous run finished.</p>
+</div>
+
+## Common Tasks
+
+### Run every N milliseconds
+
+Use `every` instead of a cron pattern when you just want a fixed interval:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.upsertJobScheduler('heartbeat', {
+  every: 60000,  // every minute
+  limit: 100,    // optional: stop after 100 runs
+}, {
+  data: { check: 'health' },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.upsertJobScheduler('heartbeat', {
+  every: 60000,  // every minute
+  limit: 100,    // optional: stop after 100 runs
+}, {
+  data: { check: 'health' },
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.upsert_job_scheduler("heartbeat",
+    {"every": 60000,   # every minute
+     "limit": 100},    # optional: stop after 100 runs
+    {"data": {"check": "health"}})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->upsertJobScheduler('heartbeat', [
+    'every' => 60000,  // every minute
+    'limit' => 100,    // optional: stop after 100 runs
+], [
+    'data' => ['check' => 'health'],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+err := queue.UpsertJobScheduler("heartbeat",
+    bunqueue.SchedulerRepeat{
+        EveryMs: 60000, // every minute
+        Limit:   100,   // optional: stop after 100 runs
+    },
+    bunqueue.SchedulerTemplate{
+        Data: map[string]any{"check": "health"},
+    })
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.upsert_job_scheduler(
+    "heartbeat",
+    SchedulerRepeat {
+        every_ms: Some(60_000), // every minute
+        limit: Some(100),       // optional: stop after 100 runs
+        ..Default::default()
+    },
+    SchedulerTemplate {
+        data: Value::Map(vec![(Value::from("check"), Value::from("health"))]),
+        ..Default::default()
+    },
+)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# every minute; optional limit: stop after 100 runs
+:ok =
+  Bunqueue.Queue.upsert_scheduler(queue, "heartbeat",
+    %{every: 60_000, limit: 100},
+    %{data: %{check: "health"}}
+  )
+```
+
+</TabItem>
+</Tabs>
+
+CLI equivalent: `bunqueue cron add heartbeat -q system -d '{"check":"health"}' -e 60000`.
+
+### Schedule in a specific timezone
+
+Pass an IANA timezone (like `Europe/Rome` or `America/New_York`) and the pattern is evaluated in that timezone, daylight saving included:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// 6 PM New York time, weekdays only
+await queue.upsertJobScheduler('end-of-day', {
+  pattern: '0 18 * * 1-5',
+  timezone: 'America/New_York',
+}, {
+  name: 'end-of-day',
+  data: { type: 'summary' },
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// 6 PM New York time, weekdays only
+await queue.upsertJobScheduler('end-of-day', {
+  pattern: '0 18 * * 1-5',
+  tz: 'America/New_York',
+}, {
+  name: 'end-of-day',
+  data: { type: 'summary' },
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# 6 PM New York time, weekdays only
+queue.upsert_job_scheduler("end-of-day",
+    {"pattern": "0 18 * * 1-5",
+     "tz": "America/New_York"},
+    {"name": "end-of-day", "data": {"type": "summary"}})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// 6 PM New York time, weekdays only
+$queue->upsertJobScheduler('end-of-day', [
+    'pattern' => '0 18 * * 1-5',
+    'tz' => 'America/New_York',
+], [
+    'name' => 'end-of-day',
+    'data' => ['type' => 'summary'],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// 6 PM New York time, weekdays only
+err := queue.UpsertJobScheduler("end-of-day",
+    bunqueue.SchedulerRepeat{
+        Pattern:  "0 18 * * 1-5",
+        Timezone: "America/New_York",
+    },
+    bunqueue.SchedulerTemplate{
+        Name: "end-of-day",
+        Data: map[string]any{"type": "summary"},
+    })
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// 6 PM New York time, weekdays only
+queue.upsert_job_scheduler(
+    "end-of-day",
+    SchedulerRepeat {
+        pattern: Some("0 18 * * 1-5".into()),
+        timezone: Some("America/New_York".into()),
+        ..Default::default()
+    },
+    SchedulerTemplate {
+        name: Some("end-of-day".into()),
+        data: Value::Map(vec![(Value::from("type"), Value::from("summary"))]),
+        ..Default::default()
+    },
+)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# 6 PM New York time, weekdays only
+:ok =
+  Bunqueue.Queue.upsert_scheduler(queue, "end-of-day",
+    %{pattern: "0 18 * * 1-5", timezone: "America/New_York"},
+    %{name: "end-of-day", data: %{type: "summary"}}
+  )
+```
+
+</TabItem>
+</Tabs>
+
+From the CLI, pass `--timezone` (`-z`):
+
+```bash
+bunqueue cron add daily-report -q reports -d '{"type":"daily"}' \
+  -s "0 9 * * *" -z Europe/Rome
+```
+
+### Repeat a job after each completion
+
+For simple repetition tied to job completion, adding a job with the `repeat` option also works: the job re-enqueues itself `every` milliseconds after each run completes.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.add('sync', { source: 'crm' }, { repeat: { every: 30000, limit: 10 } });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.add('sync', { source: 'crm' }, { repeat: { every: 30000, limit: 10 } });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add("sync", {"source": "crm"}, repeat={"every": 30000, "limit": 10})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('sync', ['source' => 'crm'], ['repeat' => ['every' => 30000, 'limit' => 10]]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("sync", map[string]any{"source": "crm"},
+    bunqueue.JobOptions{"repeat": map[string]any{"every": 30000, "limit": 10}})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.add("sync",
+    Value::Map(vec![(Value::from("source"), Value::from("crm"))]),
+    JobOptions {
+        repeat: Some(Value::Map(vec![
+            (Value::from("every"), Value::from(30000)),
+            (Value::from("limit"), Value::from(10)),
+        ])),
+        ..Default::default()
+    })?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "sync", %{source: "crm"},
+    repeat: %{every: 30_000, limit: 10}
+  )
+```
+
+</TabItem>
+</Tabs>
+
+Note: `repeat.pattern` on `queue.add` is not evaluated. Cron patterns require `upsertJobScheduler` or the CLI.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
+| [Cron Reference](/guide/cron/reference/) | Expression syntax, every scheduler option, MCP |
+

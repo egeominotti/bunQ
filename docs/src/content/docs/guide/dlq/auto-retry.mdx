@@ -1,0 +1,88 @@
+---
+title: "Automatic DLQ Retry with Backoff"
+description: "Enable autoRetry so bunqueue re-queues Dead Letter Queue entries on its own, spacing attempts with exponential backoff and giving up after a bounded number of tries."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq/auto-retry.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "dlq auto retry, exponential backoff retry, automatic requeue, maxAutoRetries, autoRetryInterval, transient failure recovery"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dead letter queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Retries that happen <em>without you.</em></h1>
+  <p class="bq-hero-sub">Some failures are transient: a provider was down for ten minutes. Auto-retry puts those entries back on a widening backoff, so they recover on their own while permanent failures stay put for a human.</p>
+</div>
+
+## Automatic Retry
+
+With `autoRetry` enabled, bunqueue re-queues DLQ entries on its own, spacing retries out with exponential backoff (each retry waits twice as long as the previous one):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 60000,  // base delay: 1 minute
+  maxAutoRetries: 3,
+});
+// 1st retry: 1 min after entering the DLQ
+// 2nd retry: 1 min after the 1st  (60s x 2^0)
+// 3rd retry: 2 min after the 2nd  (60s x 2^1)
+// After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 60000,  // base delay: 1 minute
+  maxAutoRetries: 3,
+});
+// 1st retry: 1 min after entering the DLQ
+// 2nd retry: 1 min after the 1st  (60s x 2^0)
+// 3rd retry: 2 min after the 2nd  (60s x 2^1)
+// After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Config keys are the wire names (camelCase)
+queue.set_dlq_config({
+    "autoRetry": True,
+    "autoRetryInterval": 60000,  # base delay: 1 minute
+    "maxAutoRetries": 3,
+})
+# 1st retry: 1 min after entering the DLQ
+# 2nd retry: 1 min after the 1st  (60s x 2^0)
+# 3rd retry: 2 min after the 2nd  (60s x 2^1)
+# After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+</Tabs>
+
+*The PHP, Go, Rust, and Elixir SDKs do not expose DLQ configuration helpers yet. The config lives server-side per queue, so setting it once from any TypeScript or Python client applies to jobs produced and consumed in every language.*
+
+A background task checks for due retries every minute and re-queues jobs with a reset attempt count.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
+| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
+| [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
+| [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
+

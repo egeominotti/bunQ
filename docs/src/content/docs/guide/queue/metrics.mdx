@@ -1,0 +1,98 @@
+---
+title: "Workers, Stats and Metrics from the Queue"
+description: "Inspect a running bunqueue system from the Queue: registered workers, per-queue statistics, windowed metrics and event stream trimming."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/metrics.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "list workers, queue stats, getMetrics, queue observability, worker registry, trimEvents, prometheus queue"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Who is connected, <em>and how it is going.</em></h1>
+  <p class="bq-hero-sub">Which workers are registered, what the queue has processed, and the time-windowed counters behind a dashboard.</p>
+</div>
+
+## Workers and metrics
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const workers = await queue.getWorkers();       // Active workers on this queue
+const count = await queue.getWorkersCount();
+
+const completedMetrics = await queue.getMetrics('completed', 0, 100);
+const failedMetrics = await queue.getMetrics('failed', 0, 100);
+
+await queue.trimEvents(1000);                   // Trim the event log
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const workers = await queue.getWorkers();       // Active workers on this queue
+const count = await queue.getWorkersCount();
+
+const stats = await queue.getStats();           // Server-wide stats
+const metrics = await queue.getMetrics();       // Server-wide metrics
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+workers = queue.get_workers()        # Active workers on this queue
+count = queue.get_workers_count()
+
+stats = queue.get_stats()            # Server-wide stats
+metrics = queue.get_metrics()        # Server-wide metrics
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$workers = $queue->getWorkers();     // Active workers on this queue
+
+$stats = $queue->getStats();         // Server-wide stats
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+workers, _ := queue.GetWorkers()     // Active workers on this queue
+
+stats, _ := queue.GetStats()         // Server-wide stats
+```
+
+</TabItem>
+</Tabs>
+
+*Worker and stats helpers are not yet exposed in Rust and Elixir; scrape the server's HTTP `/metrics` endpoint instead. `trimEvents()` and windowed `getMetrics(state, start, end)` exist in the Bun `bunqueue` package only.*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

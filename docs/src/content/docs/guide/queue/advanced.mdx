@@ -1,0 +1,146 @@
+---
+title: "Namespaces, Auto-Batching and Store-and-Forward"
+description: "Advanced bunqueue queue behaviour: prefixKey namespace isolation for multi-tenant servers, transparent TCP auto-batching, and forwarding local jobs to a central server."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/advanced.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "prefixKey, multi tenant queue, namespace isolation, auto batching tcp, pushb, store and forward, edge queue forwarding"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Sharing a server, <em>and leaving it.</em></h1>
+  <p class="bq-hero-sub">Namespacing so several environments can share one broker, batching that makes concurrent adds an order of magnitude faster, and draining an edge queue into a central one.</p>
+</div>
+
+## Namespace Isolation (`prefixKey`)
+
+`prefixKey` lets multiple environments, tenants, or services share one server without their jobs, crons, stats, pause state, DLQ, or rate limits overlapping. The prefix is added to the queue name server-side; `Queue.name` keeps reporting the logical name.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Same server, fully isolated namespaces
+const devQueue  = new Queue('emails', { prefixKey: 'dev:' });
+const prodQueue = new Queue('emails', { prefixKey: 'prod:' });
+
+await devQueue.add('send', { to: 'tester@example.com' });
+await prodQueue.getJobCountsAsync();  // never sees dev jobs
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Same server, fully isolated namespaces
+dev_queue = Queue("emails", prefix_key="dev:")
+prod_queue = Queue("emails", prefix_key="prod:")
+
+dev_queue.add("send", {"to": "tester@example.com"})
+prod_queue.get_job_counts()  # never sees dev jobs
+```
+
+</TabItem>
+</Tabs>
+
+*A `prefixKey` option exists in the Bun `bunqueue` package and the Python SDK; in the other SDKs, prefix the queue name directly (e.g. `new Queue('dev:emails')`), the isolation is identical.*
+
+A Worker must use the same `prefixKey` to consume the prefixed queue:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const devWorker = new Worker('emails', processor, { prefixKey: 'dev:' });
+```
+
+</TabItem>
+</Tabs>
+
+*In the other SDKs, give the Worker the prefixed name (e.g. `new Worker('dev:emails', processor)`).*
+
+Common patterns: `dev:` / `staging:` / `prod:` on one server, `tenant-${id}:` per customer, per-service prefixes in a monorepo, `test-${runId}:` for parallel test isolation.
+
+Notes:
+
+- Everything is isolated per prefix: jobs, worker locks, counts, pause/drain/obliterate, rate limits, and cron schedulers (two prefixes can reuse the same `schedulerId`).
+- Backward compatible: without `prefixKey`, behavior is unchanged. Works in embedded and TCP modes.
+- The only user-visible side effect: `Job.queueName` inside processors shows the prefixed key (e.g. `dev:emails`).
+
+## Auto-batching (TCP mode)
+
+In TCP mode, concurrent `queue.add()` calls are transparently combined into single bulk commands. Enabled by default, no code changes: sequential `await add()` sends immediately with no penalty (~10k ops/s), while concurrent adds (`Promise.all`) batch into one round-trip (~145k ops/s).
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const queue = new Queue('tasks', {
+  autoBatch: {
+    enabled: true,   // default
+    maxSize: 50,     // flush when the buffer reaches this size (default: 50)
+    maxDelayMs: 5,   // max wait before flushing (default: 5)
+  },
+});
+```
+
+</TabItem>
+</Tabs>
+
+*Auto-batching is available in the Bun `bunqueue` package only; in the other SDKs, use `addBulk` to batch producer traffic into one round-trip.*
+
+:::caution[Durable jobs bypass the batcher]
+Jobs with `durable: true` are always sent individually so they hit the disk immediately, they are never batched.
+:::
+
+## Store-and-forward: `queue.forward()`
+
+Drain a local embedded queue to a remote bunqueue server, the edge/IoT pattern (local queue as offline buffer, central server as destination):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const forwarder = queue.forward({
+  to: { host: 'queue.example.com', port: 6789, tls: true, token: process.env.BQ_TOKEN },
+  queue: 'central-name', // optional remote queue name (default: same)
+  concurrency: 4,        // parallel forwards (default: 4)
+  durable: true,         // push remotely with durable: true (default: false)
+});
+
+forwarder.on('forwarded', ({ id, remoteId, name }) => {});
+forwarder.on('error', (err) => {});
+await forwarder.close();
+```
+
+</TabItem>
+</Tabs>
+
+*Store-and-forward requires the embedded Bun `bunqueue` package, it drains a local embedded queue to a remote server.*
+
+If the remote is down, jobs stay local (retry, then DLQ), nothing is lost. Full guide: [IoT & Edge](/guide/iot-edge/).
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

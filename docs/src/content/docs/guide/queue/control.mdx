@@ -1,0 +1,267 @@
+---
+title: "Queue Control and Maintenance"
+description: "Operate a live bunqueue queue: pause and resume, drain, obliterate, clean old jobs by age and state, retry in bulk and promote delayed jobs on demand."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/control.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "pause queue, drain queue, obliterate queue, clean old jobs, retry jobs bulk, promote delayed job, queue maintenance"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Pause it, drain it, <em>wipe it.</em></h1>
+  <p class="bq-hero-sub">The operational verbs. Stop consumption during an incident, clear a backlog, remove finished jobs before they accumulate, and push delayed work forward when you cannot wait.</p>
+</div>
+
+## Control the queue
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.pause();            // Workers stop pulling (fire-and-forget)
+queue.resume();           // Back to normal (fire-and-forget)
+queue.drain();            // Remove all waiting jobs (fire-and-forget)
+queue.obliterate();       // Remove ALL queue data (fire-and-forget)
+
+await queue.pauseAsync();      // Pause and wait for it
+await queue.resumeAsync();     // Resume and wait for it
+const n = await queue.drainAsync();    // Drain, wait, get removed count
+await queue.obliterateAsync(); // Remove ALL queue data and wait for it
+
+queue.remove('job-id');            // Remove one job (fire-and-forget)
+await queue.removeAsync('job-id'); // Remove one job and wait for it
+
+await queue.waitUntilReady();      // Wait until queue/server is ready
+queue.close();                     // Close TCP connection (no-op in embedded mode)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.pause();           // Workers stop pulling
+await queue.resume();          // Back to normal
+const n = await queue.drain(); // Remove all waiting jobs, get removed count
+await queue.obliterate();      // Remove ALL queue data
+
+await queue.remove('job-id');  // Remove one job
+
+await queue.waitUntilReady();  // Wait until the server is reachable
+queue.close();                 // Close the TCP connection
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.pause()             # Workers stop pulling
+queue.resume()            # Back to normal
+n = queue.drain()         # Remove all waiting jobs, get removed count
+queue.obliterate()        # Remove ALL queue data
+
+queue.remove("job-id")    # Remove one job
+
+queue.wait_until_ready()  # Wait until the server is reachable
+queue.close()             # Close the TCP connection
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->pause();            // Workers stop pulling
+$queue->resume();           // Back to normal
+$n = $queue->drain();       // Remove all waiting jobs, get removed count
+$queue->obliterate();       // Remove ALL queue data
+
+$queue->remove('job-id');   // Remove one job
+
+$queue->close();            // Close the TCP connection
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Pause()            // Workers stop pulling
+queue.Resume()           // Back to normal
+n, _ := queue.Drain()    // Remove all waiting jobs, get removed count
+queue.Obliterate()       // Remove ALL queue data
+
+queue.Remove("job-id")   // Remove one job
+
+queue.Close()            // Close the TCP connection
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.pause()?;            // Workers stop pulling
+queue.resume()?;           // Back to normal
+let n = queue.drain()?;    // Remove all waiting jobs, get removed count
+queue.obliterate()?;       // Remove ALL queue data
+
+queue.remove("job-id")?;   // Remove one job
+
+queue.close();             // Close the TCP connection
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+:ok = Bunqueue.Queue.pause(queue)        # Workers stop pulling
+:ok = Bunqueue.Queue.resume(queue)       # Back to normal
+{:ok, n} = Bunqueue.Queue.drain(queue)   # Remove all waiting jobs, get removed count
+:ok = Bunqueue.Queue.obliterate(queue)   # Remove ALL queue data
+
+:ok = Bunqueue.Queue.close(queue)        # Close the TCP connection
+```
+
+</TabItem>
+</Tabs>
+
+Gotcha: in TCP mode the fire-and-forget forms return before the server has processed them. If you drain or obliterate and immediately add new jobs, the wipe can land after the add and delete the new job. Use the `Async` variants when the next step depends on the command being done.
+
+## Maintenance
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Remove completed jobs older than 1 hour, max 100 (async works in both modes)
+const removed = await queue.cleanAsync(3600000, 100, 'completed');
+
+// Promote delayed jobs to waiting now
+const promoted = await queue.promoteJobs({ count: 50 });
+
+// Re-queue failed jobs from the DLQ
+await queue.retryJobs({ state: 'failed', count: 100 });
+
+// Re-queue completed jobs (e.g. after a logic change)
+const count = await queue.retryCompletedAsync();       // all completed, use with care
+const one = queue.retryCompleted('job-id-123');        // one job (sync, embedded; TCP returns 0)
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Remove completed jobs older than 1 hour, max 100
+const removed = await queue.clean(3600000, 100, 'completed');
+
+// Promote delayed jobs to waiting now
+const promoted = await queue.promoteJobs({ count: 50 });
+
+// Re-queue failed jobs from the DLQ
+await queue.retryJobs({ state: 'failed', count: 100 });
+
+// Re-queue completed jobs (e.g. after a logic change)
+await queue.retryCompleted();             // all completed, use with care
+await queue.retryCompleted('job-id-123'); // one job
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Remove completed jobs older than 1 hour, max 100
+removed = queue.clean(3600000, 100, "completed")
+
+# Promote delayed jobs to waiting now
+promoted = queue.promote_jobs(50)
+
+# Re-queue failed jobs from the DLQ
+queue.retry_jobs("failed", 100)
+
+# Re-queue completed jobs (e.g. after a logic change)
+queue.retry_completed()              # all completed, use with care
+queue.retry_completed("job-id-123")  # one job
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Remove completed jobs older than 1 hour, max 100 (returns removed job ids)
+$removed = $queue->clean(3600000, 100, 'completed');
+
+// Promote one delayed job to waiting now
+$queue->promote('job-id');
+
+// Re-queue one failed job (failed -> waiting)
+$queue->retryJob('job-id');
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Remove completed jobs older than 1 hour, max 100 (returns removed job ids)
+removed, _ := queue.Clean(3600000, 100, "completed")
+
+// Promote one delayed job to waiting now
+queue.Promote("job-id")
+
+// Re-queue one failed job (failed -> waiting)
+queue.RetryJob("job-id")
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Remove completed jobs older than 1 hour, max 100 (returns removed job ids)
+let removed = queue.clean(3_600_000, 100, "completed")?;
+
+// Promote one delayed job to waiting now
+queue.promote("job-id")?;
+
+// Re-queue one failed job (failed -> waiting)
+queue.retry_job("job-id")?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Remove completed jobs older than 1 hour, max 100 (returns removed job ids)
+{:ok, removed} = Bunqueue.Queue.clean(queue, 3_600_000, 100, "completed")
+
+# Promote all delayed jobs to waiting now
+:ok = Bunqueue.Queue.promote_jobs(queue)
+
+# Re-queue one failed job (failed -> waiting)
+:ok = Bunqueue.Queue.retry_job(queue, "job-id")
+```
+
+</TabItem>
+</Tabs>
+
+*Bulk `retryJobs`, `retryCompleted`, and counted `promoteJobs` are available in TypeScript and Python; PHP, Go, Rust, and Elixir act per job (`promote`, `retryJob`).*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

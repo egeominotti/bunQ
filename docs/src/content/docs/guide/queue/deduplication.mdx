@@ -1,0 +1,378 @@
+---
+title: "Deduplication and Idempotent Job Adds"
+description: "Stop the same job being queued twice in bunqueue: custom job ids for idempotent adds, deduplication keys with a TTL, and how to look up or clear an existing key."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/deduplication.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "idempotent job, deduplication key, custom jobId, duplicate jobs, exactly once enqueue, dedup ttl, job id lookup"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">The same job, <em>only once.</em></h1>
+  <p class="bq-hero-sub">Retried HTTP calls, at-least-once webhooks and impatient users all produce duplicate adds. A custom id or a dedup key makes the second one a no-op instead of a second charge.</p>
+</div>
+
+## Deduplication
+
+### With `jobId` (idempotent adds)
+
+Give a job a custom `jobId` and adding it twice does nothing: while a generation
+with that ID is live (`waiting`, `delayed`, `prioritized`,
+`waiting-children`, or `active`), the existing job is returned instead of
+creating a duplicate. Custom IDs are broker-wide because they are also the
+global persisted job primary key, so this remains idempotent even if the second
+add targets another queue. Once the prior generation is terminal, the ID may be
+reused; bunqueue retires its completed/DLQ state before admitting exactly one
+fresh generation. This makes `add()` safe to call repeatedly in embedded and
+TCP modes.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const job1 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
+const job2 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
+
+console.log(job1.id === job2.id); // true, same job returned
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const job1 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
+const job2 = await queue.add('process', { orderId: 123 }, { jobId: 'order-123' });
+
+console.log(job1.id === job2.id); // true, same job returned
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+job1 = queue.add("process", {"order_id": 123}, job_id="order-123")
+job2 = queue.add("process", {"order_id": 123}, job_id="order-123")
+
+print(job1.id == job2.id)  # True, same job returned
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$job1 = $queue->add('process', ['orderId' => 123], ['jobId' => 'order-123']);
+$job2 = $queue->add('process', ['orderId' => 123], ['jobId' => 'order-123']);
+
+var_dump($job1->id() === $job2->id()); // true, same job returned
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+job1, _ := queue.Add("process", map[string]any{"orderId": 123}, bunqueue.JobOptions{"jobId": "order-123"})
+job2, _ := queue.Add("process", map[string]any{"orderId": 123}, bunqueue.JobOptions{"jobId": "order-123"})
+
+fmt.Println(job1.ID() == job2.ID()) // true, same job returned
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let opts = || JobOptions { job_id: Some("order-123".into()), ..Default::default() };
+let job1 = queue.add("process", data.clone(), opts())?;
+let job2 = queue.add("process", data, opts())?;
+
+assert_eq!(job1.id(), job2.id()); // same job returned
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, job1} = Bunqueue.Queue.add(queue, "process", %{order_id: 123}, jobId: "order-123")
+{:ok, job2} = Bunqueue.Queue.add(queue, "process", %{order_id: 123}, jobId: "order-123")
+
+job1.id == job2.id  # true, same job returned
+```
+
+</TabItem>
+</Tabs>
+
+Typical uses: webhook retries, double-submits from a UI, restoring jobs on service startup without duplicating them.
+
+:::note[Completed ids are reused, not returned]
+Deduplication only collapses onto a job that is still pending. If the previous job with that `jobId` already completed (or is currently processing), re-adding the same id starts a fresh job under it, and the stale completed record is evicted first. So a `jobId` like `report-2026-06-17` is safe to reuse: you get idempotency within a run and a clean re-run afterwards.
+:::
+
+### With a TTL window
+
+The `deduplication` option dedupes within a time window instead of permanently. The `id` field is required:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+await queue.add('notification', { userId: '123' }, {
+  deduplication: { id: 'notify-123', ttl: 3600000 }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+await queue.add('notification', { userId: '123' }, {
+  deduplication: { id: 'notify-123', ttl: 3600000 }
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+queue.add("notification", {"user_id": "123"},
+          deduplication={"id": "notify-123", "ttl": 3600000})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+$queue->add('notification', ['userId' => '123'], [
+    'deduplication' => ['id' => 'notify-123', 'ttl' => 3600000],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+queue.Add("notification", map[string]any{"userId": "123"}, bunqueue.JobOptions{
+    "deduplication": map[string]any{"id": "notify-123", "ttl": 3600000},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Deduplication, JobOptions};
+
+// Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+queue.add("notification", data, JobOptions {
+    deduplication: Some(Deduplication {
+        id: "notify-123".into(),
+        ttl: Some(3_600_000),
+        ..Default::default()
+    }),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "notification", %{user_id: "123"},
+    deduplication: %{id: "notify-123", ttl: 3_600_000}
+  )
+```
+
+</TabItem>
+</Tabs>
+
+Two strategies change what happens when a duplicate arrives:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// extend: keep the existing job, reset its TTL (debouncing, "keep quiet while active")
+await queue.add('sync-task', { action: 'sync' }, {
+  deduplication: { id: 'sync-task', ttl: 60000, extend: true }
+});
+
+// replace: remove the pending job, insert a new one with the latest data (last write wins)
+await queue.add('latest-data', { data: newData }, {
+  deduplication: { id: 'data-job', ttl: 300000, replace: true }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// extend: keep the existing job, reset its TTL (debouncing, "keep quiet while active")
+await queue.add('sync-task', { action: 'sync' }, {
+  deduplication: { id: 'sync-task', ttl: 60000, extend: true }
+});
+
+// replace: remove the pending job, insert a new one with the latest data (last write wins)
+await queue.add('latest-data', { data: newData }, {
+  deduplication: { id: 'data-job', ttl: 300000, replace: true }
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# extend: keep the existing job, reset its TTL (debouncing)
+queue.add("sync-task", {"action": "sync"},
+          deduplication={"id": "sync-task", "ttl": 60000, "extend": True})
+
+# replace: remove the pending job, insert a new one with the latest data
+queue.add("latest-data", {"data": new_data},
+          deduplication={"id": "data-job", "ttl": 300000, "replace": True})
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// extend: keep the existing job, reset its TTL (debouncing)
+$queue->add('sync-task', ['action' => 'sync'], [
+    'deduplication' => ['id' => 'sync-task', 'ttl' => 60000, 'extend' => true],
+]);
+
+// replace: remove the pending job, insert a new one with the latest data
+$queue->add('latest-data', ['data' => $newData], [
+    'deduplication' => ['id' => 'data-job', 'ttl' => 300000, 'replace' => true],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// extend: keep the existing job, reset its TTL (debouncing)
+queue.Add("sync-task", map[string]any{"action": "sync"}, bunqueue.JobOptions{
+    "deduplication": map[string]any{"id": "sync-task", "ttl": 60000, "extend": true},
+})
+
+// replace: remove the pending job, insert a new one with the latest data
+queue.Add("latest-data", map[string]any{"data": newData}, bunqueue.JobOptions{
+    "deduplication": map[string]any{"id": "data-job", "ttl": 300000, "replace": true},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// extend: keep the existing job, reset its TTL (debouncing)
+queue.add("sync-task", data, JobOptions {
+    deduplication: Some(Deduplication {
+        id: "sync-task".into(),
+        ttl: Some(60_000),
+        extend: Some(true),
+        ..Default::default()
+    }),
+    ..Default::default()
+})?;
+
+// replace: remove the pending job, insert a new one with the latest data
+queue.add("latest-data", new_data, JobOptions {
+    deduplication: Some(Deduplication {
+        id: "data-job".into(),
+        ttl: Some(300_000),
+        replace: Some(true),
+        ..Default::default()
+    }),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# extend: keep the existing job, reset its TTL (debouncing)
+{:ok, _} =
+  Bunqueue.Queue.add(queue, "sync-task", %{action: "sync"},
+    deduplication: %{id: "sync-task", ttl: 60_000, extend: true}
+  )
+
+# replace: remove the pending job, insert a new one with the latest data
+{:ok, _} =
+  Bunqueue.Queue.add(queue, "latest-data", %{data: new_data},
+    deduplication: %{id: "data-job", ttl: 300_000, replace: true}
+  )
+```
+
+</TabItem>
+</Tabs>
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | `string` | (required) | Unique deduplication key |
+| `ttl` | `number` | - | Time in ms before the key expires |
+| `extend` | `boolean` | `false` | Reset TTL on duplicate, keep existing job |
+| `replace` | `boolean` | `false` | Remove pending job, create a new one (new internal id) |
+
+:::caution[Replace details]
+`replace: true` never touches a job that is already processing (active). If both `extend` and `replace` are set, `replace` wins.
+:::
+
+Managing keys directly:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
+await queue.removeDeduplicationKey('my-unique-key');              // allow re-adding
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+job_id = queue.get_deduplication_job_id("my-unique-key")  # look up
+```
+
+</TabItem>
+</Tabs>
+
+*Key lookup is available in TypeScript and Python; `removeDeduplicationKey()` exists in the Bun `bunqueue` package only.*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

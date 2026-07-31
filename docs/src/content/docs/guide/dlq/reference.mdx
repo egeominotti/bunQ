@@ -1,0 +1,67 @@
+---
+title: "DLQ Reference: Reasons, Entry Shape, Methods"
+description: "Reference for the bunqueue Dead Letter Queue: every reason a job lands there, the full entry structure with attempt history, and the complete method surface."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq/reference.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "dlq reference, dlq entry structure, explicit_fail, max_attempts_exceeded, stalled job, dlq methods, bunqueue api"
+---
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dead letter queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Every reason, every <em>field.</em></h1>
+  <p class="bq-hero-sub">What each failure reason means, what an entry actually contains once it is written, and the full list of DLQ methods with their embedded and TCP behaviour.</p>
+</div>
+
+## Reference
+
+### Why jobs end up in the DLQ
+
+| Reason | Description |
+|--------|-------------|
+| `explicit_fail` | The processor threw an error |
+| `max_attempts_exceeded` | Job exceeded its retry attempts |
+| `timeout` | Job timed out during processing |
+| `stalled` | Job stopped sending heartbeats (worker likely crashed) |
+| `ttl_expired` | Job expired before it was processed |
+| `worker_lost` | Worker disconnected during processing |
+| `unknown` | Fallback for unclassified failures |
+
+### Entry structure
+
+```typescript
+interface DlqEntry<T> {
+  job: Job<T>;                    // The failed job
+  enteredAt: number;              // When first moved to DLQ
+  reason: FailureReason;          // Why it failed
+  error: string | null;           // Error message
+  attempts: AttemptRecord[];      // Full attempt history
+  retryCount: number;             // Times retried from DLQ
+  lastRetryAt: number | null;     // Last DLQ retry time
+  nextRetryAt: number | null;     // Next scheduled auto-retry
+  expiresAt: number | null;       // When entry expires
+}
+```
+
+Each `AttemptRecord` carries the attempt number, start and failure timestamps, failure reason, error message, and duration in ms.
+
+:::tip[Related Guides]
+- [Stall Detection & Recovery](/guide/stall-detection/) - Stalled jobs are sent to the DLQ
+- [Worker API](/guide/worker/) - Configure retry behavior
+- [Monitoring & Prometheus Metrics](/guide/monitoring/) - Alert on DLQ size
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
+| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
+| [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
+| [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
+

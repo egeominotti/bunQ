@@ -1,0 +1,128 @@
+---
+title: "Heartbeats, Stall Detection and Lock Ownership"
+description: "How a bunqueue job stays alive while it runs: heartbeats, stall recovery when a worker dies, and the lock that stops two workers processing the same job."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/stalls.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "heartbeat queue, stall detection, stalled job recovery, lock ownership, lockDuration, extendLock, exactly once processing"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Proving the worker is <em>still alive.</em></h1>
+  <p class="bq-hero-sub">A crashed worker cannot tell anyone. Heartbeats let the queue notice, and locks make sure the recovered job is picked up by exactly one replacement.</p>
+</div>
+
+## Heartbeats and stall detection
+
+While a job is processing, the worker automatically pings the queue ("I'm still working on this"). That ping is the heartbeat. If a job stops receiving heartbeats, for example because the worker crashed, the queue marks it stalled and recovers it, so no job is silently lost.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  heartbeatInterval: 5000, // Ping every 5 seconds (ms)
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  heartbeatIntervalS: 5, // Ping every 5 seconds (0 = disabled)
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker = Worker("queue", process, heartbeat_interval_s=5.0)  # 0 disables
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', $processor, [
+    'heartbeatIntervalS' => 5.0, // Fires between jobs (sequential worker)
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
+    HeartbeatIntervalS: 5, // Heartbeats are disabled by default in Go
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("queue", processor, WorkerOptions {
+    heartbeat_interval: Some(Duration::from_secs(5)), // None disables
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker = Bunqueue.Worker.new("queue", handler, heartbeat_interval: 5_000)  # ms
+```
+
+</TabItem>
+</Tabs>
+
+Keep the heartbeat interval shorter than the queue's `stallInterval` to avoid false positives. See [Stall Detection](/guide/stall-detection/).
+
+## Lock-based ownership
+
+With `useLocks: true` (the default), each pulled job gets a lock, a temporary claim that says "this worker owns this job". The lock is renewed by heartbeats (`lockDuration` sets its TTL) and must be presented when completing or failing the job. This prevents two workers from processing the same job, and prevents a slow worker's job from being grabbed by a faster one.
+
+Locks matter most in **server mode** with multiple workers. In embedded mode with a single process you can trade the safety for a bit of throughput:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', processor, {
+  embedded: true,
+  useLocks: false, // Rely on stall detection only
+});
+```
+
+</TabItem>
+</Tabs>
+
+*The external SDKs always use lock-based ownership: every pulled job carries a lock token whose TTL is set by `lockTtlMs` / `lock_ttl_ms` / `LockTtlMs` / `lock_ttl`, renewed by heartbeats. A single long-running handler can extend its own lease with `job.extendLock(ms)` (TypeScript, PHP), `job.extend_lock(ms)` (Python, Rust), or `job.ExtendLock(ms)` (Go).*
+
+In the Bun client, locks can also be extended explicitly: `worker.extendJobLocks(jobIds, tokens, duration)`.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

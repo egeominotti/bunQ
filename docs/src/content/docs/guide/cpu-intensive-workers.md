@@ -111,7 +111,7 @@ await worker.start();
 ```
 
 :::caution[Experimental]
-`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are experimental. Known issues include memory growth and thread duplication across Bun versions. Prefer the yield pattern for production. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+`SandboxedWorker` relies on [Bun Workers](https://bun.sh/docs/runtime/workers), which are experimental. Known issues include memory growth and thread duplication across Bun versions. Prefer the yield pattern for production. See [Worker vs SandboxedWorker](/guide/worker/sandboxed/#worker-vs-sandboxedworker).
 :::
 
 ## Timeout reference

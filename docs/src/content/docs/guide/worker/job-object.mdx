@@ -1,0 +1,168 @@
+---
+title: "The Job Object Inside a Worker Processor"
+description: "What a bunqueue processor receives: job data and metadata, progress updates, per-job logs, lock extension and access to child results from a flow."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/job-object.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "job object bun, updateProgress, job.log, job attempts, job metadata, extendLock, getChildrenValues, processor api"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Everything the processor <em>gets handed.</em></h1>
+  <p class="bq-hero-sub">The job is more than its payload: attempt counts, timestamps, progress reporting, its own log stream, and the results of any children that ran before it.</p>
+</div>
+
+## Use the job object
+
+Inside the processor you get the full job:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  job.id;           // Job ID
+  job.name;         // Job name
+  job.data;         // Job data (typed if you use Worker<T>)
+  job.attemptsMade; // Current attempt number
+  job.timestamp;    // When the job was created
+
+  await job.updateProgress(50, 'Halfway done');  // Report progress
+  await job.log('Processing step 1');             // Attach a log line
+
+  return result;
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  job.id;         // Job ID
+  job.name;       // Job name
+  job.data;       // Job data (typed if you use Worker<T>)
+  job.attempts;   // Attempts consumed so far
+  job.timestamp;  // When the job was created (epoch ms)
+
+  await job.updateProgress(50, 'Halfway done');  // Report progress
+  await job.log('Processing step 1');            // Attach a log line
+
+  return result;
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    job.id          # Job ID
+    job.name        # Job name
+    job.data        # Job data
+    job.attempts    # Attempts consumed so far
+    job.created_at  # When the job was created (epoch ms)
+
+    job.update_progress(50, "Halfway done")  # Report progress
+    job.log("Processing step 1")             # Attach a log line
+
+    return result
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', function (Bunqueue\Job $job) {
+    $job->id();            // Job ID
+    $job->name();          // Job name
+    $job->data();          // Job data (without the reserved name key)
+    $job->attemptsMade();  // Attempts consumed so far
+
+    $job->updateProgress(50, 'Halfway done');  // Report progress
+    $job->log('Processing step 1');            // Attach a log line
+
+    return $result;
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
+    job.ID()           // Job ID
+    job.Name()         // Job name
+    job.Data()         // Job data (without the reserved name key)
+    job.AttemptsMade() // Attempts consumed so far
+
+    job.UpdateProgress(50, "Halfway done") // Report progress
+    job.Log("Processing step 1", "")       // Attach a log line
+
+    return result, nil
+}, bunqueue.WorkerOptions{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new(
+    "queue",
+    |job| {
+        job.id();            // Job ID
+        job.name();          // Job name
+        job.data();          // Job data (without the reserved name key)
+        job.attempts_made(); // Attempts consumed so far
+
+        let _ = job.update_progress(50.0, Some("Halfway done")); // Report progress
+        let _ = job.log("Processing step 1", None);              // Attach a log line
+
+        Ok(result)
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", fn job ->
+    job.id             # Job ID
+    job.name           # Job name
+    job.data           # Job data
+    job.attempts_made  # Attempts consumed so far
+
+    Bunqueue.Job.update_progress(job, 50, "Halfway done")  # Report progress
+    Bunqueue.Job.log(job, "Processing step 1")             # Attach a log line
+
+    {:ok, result}
+  end)
+```
+
+</TabItem>
+</Tabs>
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

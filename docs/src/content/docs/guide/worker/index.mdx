@@ -1,0 +1,141 @@
+---
+title: "Worker: Process Jobs from a Bun Queue"
+description: "A bunqueue Worker pulls jobs, runs your processor and acknowledges the result. Concurrency, heartbeats and retries are handled for you, in embedded or TCP mode."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "bun worker, job processor, queue consumer, background worker typescript, bullmq worker alternative, sqlite queue worker"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Pull, process, <em>ack.</em></h1>
+  <p class="bq-hero-sub">A worker is a loop you do not have to write. It asks the queue for work, runs your function, reports the outcome, and keeps the job alive while it runs.</p>
+</div>
+
+Give the Worker a queue name and a processor. Whatever the processor returns becomes the job result; whatever it throws becomes a failed attempt.
+
+## Create a worker
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Worker } from 'bunqueue/client';
+
+const worker = new Worker('my-queue', async (job) => {
+  // Process the job; the return value is stored as the job's result
+  return { success: true };
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Worker } from 'bunqueue-client';
+
+const worker = new Worker('my-queue', async (job) => {
+  // Process the job; the return value is stored as the job's result
+  return { success: true };
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Worker
+
+def process(job):
+    # Process the job; the return value is stored as the job's result
+    return {"success": True}
+
+worker = Worker("my-queue", process)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Worker;
+
+$worker = new Worker('my-queue', function (Bunqueue\Job $job) {
+    // Process the job; the return value is stored as the job's result
+    return ['success' => true];
+});
+
+$worker->run(); // blocking loop; or $worker->runOnce() from a cron tick
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("my-queue", func(job *bunqueue.Job) (any, error) {
+    // Process the job; the return value is stored as the job's result
+    return map[string]any{"success": true}, nil
+}, bunqueue.WorkerOptions{})
+
+worker.Run() // blocking pull loop
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Value, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "my-queue",
+    |_job| {
+        // Process the job; the returned Value is stored as the job's result
+        Ok(Value::from(true))
+    },
+    WorkerOptions::default(),
+);
+worker.run()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("my-queue", fn _job ->
+    # Process the job; the result is stored as the job's result
+    {:ok, %{success: true}}
+  end)
+
+Bunqueue.Worker.run(worker)
+```
+
+</TabItem>
+</Tabs>
+
+The Bun, TypeScript, and Python workers start polling immediately (`autorun`); the PHP, Go, Rust, and Elixir workers start when you call their run function. If your processor throws, the job is retried automatically (up to the job's `attempts`, default 3) and then moved to the dead letter queue, a holding area for jobs that keep failing.
+
+:::caution[Embedded vs TCP]
+`embedded: true` runs in-process alongside an embedded Queue and is a Bun (`bunqueue/client`) feature. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode. The external SDKs are TCP-only.
+:::
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

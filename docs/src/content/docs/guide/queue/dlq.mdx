@@ -1,0 +1,170 @@
+---
+title: "DLQ Operations from the Queue Object"
+description: "Reach the dead letter queue through the bunqueue Queue: configure it, list entries, retry them and purge, plus what changes between embedded and TCP mode."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/dlq.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "queue dlq api, getDlq, retryDlq, purgeDlq, setDlqConfig, failed jobs queue, dlq embedded vs tcp"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Dead jobs, from <em>the producer side.</em></h1>
+  <p class="bq-hero-sub">The Queue object carries the DLQ surface too, so the process that produces work can also configure and drain the pile of work that failed.</p>
+</div>
+
+## DLQ operations
+
+The dead letter queue collects jobs that failed permanently (retries exhausted, stalled too often, timed out). Configure how it behaves and act on its entries:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setDlqConfig({
+  autoRetry: true,             // Periodically re-queue DLQ entries
+  autoRetryInterval: 3600000,  // Every hour
+  maxAutoRetries: 3,
+  maxAge: 604800000,           // Drop entries older than 7 days
+  maxEntries: 10000,
+});
+
+// Inspect (embedded mode only; returns [] / zeros in TCP mode)
+const entries = queue.getDlq();
+const stalledJobs = queue.getDlq({ reason: 'stalled' });
+const stats = queue.getDlqStats(); // { total, byReason, pendingRetry, ... }
+
+// Act
+queue.retryDlq();           // Retry all
+queue.retryDlq('job-123');  // Retry one
+queue.purgeDlq();           // Clear all
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setDlqConfig({
+  autoRetry: true,             // Periodically re-queue DLQ entries
+  autoRetryInterval: 3600000,  // Every hour
+  maxAutoRetries: 3,
+  maxAge: 604800000,           // Drop entries older than 7 days
+  maxEntries: 10000,
+});
+
+// Inspect
+const entries = await queue.getDlq();
+
+// Act
+await queue.retryDlq();           // Retry all
+await queue.retryDlq('job-123');  // Retry one
+await queue.purgeDlq();           // Clear all
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.set_dlq_config({
+    "autoRetry": True,             # Periodically re-queue DLQ entries
+    "autoRetryInterval": 3600000,  # Every hour
+    "maxAutoRetries": 3,
+    "maxAge": 604800000,           # Drop entries older than 7 days
+    "maxEntries": 10000,
+})
+
+# Inspect
+entries = queue.get_dlq()
+
+# Act
+queue.retry_dlq()            # Retry all
+queue.retry_dlq("job-123")   # Retry one
+queue.purge_dlq()            # Clear all
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Inspect
+$entries = $queue->getDlq();
+
+// Act
+$queue->retryDlq();           // Retry all
+$queue->retryDlq('job-123');  // Retry one
+$queue->purgeDlq();           // Clear all
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Inspect
+entries, _ := queue.GetDlq(0) // 0 = server default count
+
+// Act
+queue.RetryDlq("", 0)        // Retry all
+queue.RetryDlq("job-123", 0) // Retry one
+queue.PurgeDlq()             // Clear all
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Inspect
+let entries = queue.get_dlq(None)?;
+
+// Act
+queue.retry_dlq(None, None)?;            // Retry all
+queue.retry_dlq(Some("job-123"), None)?; // Retry one
+queue.purge_dlq()?;                      // Clear all
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Inspect
+{:ok, entries} = Bunqueue.Queue.dlq(queue)
+
+# Act
+{:ok, _count} = Bunqueue.Queue.retry_dlq(queue)             # Retry all
+{:ok, _count} = Bunqueue.Queue.retry_dlq(queue, "job-123")  # Retry one
+{:ok, _count} = Bunqueue.Queue.purge_dlq(queue)             # Clear all
+```
+
+</TabItem>
+</Tabs>
+
+*DLQ auto-retry configuration (`setDlqConfig`) is available in TypeScript and Python; `getDlqStats()` and reason filters exist in the Bun `bunqueue` package only.*
+
+:::note[TCP mode]
+Enumerating DLQ entries from this client API works in embedded mode only. Over TCP, use the [CLI](/guide/cli/) (`bunqueue dlq list|retry|purge`); `retryDlq()` and `purgeDlq()` still send the command but return 0 instead of a count. `getDlqConfigAsync()` fetches the real config from the server.
+:::
+
+See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/guide/stall-detection/) for `setStallConfig()`, which controls when unresponsive jobs are recovered.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

@@ -1,0 +1,84 @@
+---
+title: "DLQ Configuration: Size, Age and Retry Policy"
+description: "Every setDlqConfig option for the bunqueue Dead Letter Queue: automatic retry, base interval, retry ceiling, entry expiry and the per-queue entry cap, with defaults."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/dlq/configuration.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "setDlqConfig, dlq maxAge, dlq maxEntries, dlq retention, dlq configuration bunqueue, queue failure policy"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · dead letter queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">How long dead jobs <em>stick around.</em></h1>
+  <p class="bq-hero-sub">A DLQ that grows forever is just a leak with extra steps. These options bound it by age and by count, and decide whether entries get another chance before they expire.</p>
+</div>
+
+## Configuration
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 3600000,
+  maxAutoRetries: 3,
+  maxAge: 604800000,   // purge entries after 7 days (null = never)
+  maxEntries: 10000,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.setDlqConfig({
+  autoRetry: true,
+  autoRetryInterval: 3600000,
+  maxAutoRetries: 3,
+  maxAge: 604800000,   // purge entries after 7 days (null = never)
+  maxEntries: 10000,
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Config keys are the wire names (camelCase)
+queue.set_dlq_config({
+    "autoRetry": True,
+    "autoRetryInterval": 3600000,
+    "maxAutoRetries": 3,
+    "maxAge": 604800000,   # purge entries after 7 days (None = never)
+    "maxEntries": 10000,
+})
+```
+
+</TabItem>
+</Tabs>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `autoRetry` | `false` | Enable automatic retry |
+| `autoRetryInterval` | `3600000` | Base delay between auto-retries (1 hour) |
+| `maxAutoRetries` | `3` | Maximum auto-retry attempts |
+| `maxAge` | `604800000` | Auto-purge age (7 days, `null` = never) |
+| `maxEntries` | `10000` | Maximum DLQ entries per queue |
+
+## Where to go next
+
+| | |
+|---|---|
+| [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
+| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
+| [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
+| [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
+

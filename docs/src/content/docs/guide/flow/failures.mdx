@@ -1,0 +1,188 @@
+---
+title: "Flow Failure Handling: When a Child Fails"
+description: "By default a bunqueue parent keeps waiting. Four child options change that: fail the parent, ignore the failure, remove pending siblings or continue on partial results."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/flow/failures.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "failParentOnFailure, ignoreDependencyOnFailure, removeDependencyOnFailure, continueParentOnFailure, flow error handling, partial failure jobs"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · flow producer</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">One child dies. <em>Now what?</em></h1>
+  <p class="bq-hero-sub">The default is to keep waiting, which is rarely what you want. These four options let a failed child fail the parent, be ignored, cancel its siblings, or let the parent run on whatever succeeded.</p>
+</div>
+
+## When a Child Fails
+
+By default a parent just keeps waiting for its remaining children. Four child options change what happens when a child fails terminally (no retries left):
+
+| Option | Behavior |
+|--------|----------|
+| `failParentOnFailure` | Parent immediately moves to `failed`, even if other children are still running |
+| `removeDependencyOnFailure` | The failed child is silently dropped from the parent's dependencies; the parent proceeds as if it never existed |
+| `ignoreDependencyOnFailure` | Like the above, but the failure is recorded; the parent can read it via `job.getIgnoredChildrenFailures()` |
+| `continueParentOnFailure` | Parent is promoted to run **immediately**; it can inspect failures via `job.getFailedChildrenValues()` and cancel leftover children |
+
+Choose at most one policy per child. The selected policy and any unresolved
+failure record are durable: a broker restart cannot reset the child to default
+behavior or put an already-released parent back into `waiting-children`.
+
+A worked example with `continueParentOnFailure`, useful when the parent should decide how to handle partial failure:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await flow.add({
+  name: 'pipeline',
+  queueName: 'main',
+  data: {},
+  children: [
+    { name: 'step-a', queueName: 'workers', data: {}, opts: { continueParentOnFailure: true } },
+    { name: 'step-b', queueName: 'workers', data: {}, opts: { continueParentOnFailure: true } },
+    { name: 'step-c', queueName: 'workers', data: {} },
+  ],
+});
+
+const worker = new Worker('main', async (job) => {
+  const failed = await job.getFailedChildrenValues();
+  // { 'workers:job-abc': 'Error: step-a failed', ... }
+
+  if (Object.keys(failed).length > 0) {
+    await job.removeUnprocessedChildren();  // cancel children still waiting
+    return { status: 'partial', failedSteps: failed };
+  }
+  return { status: 'complete' };
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { FlowProducer, Queue, Worker } from 'bunqueue-client';
+
+const flow = new FlowProducer();
+const queue = new Queue('main');
+
+await flow.add({
+  name: 'pipeline',
+  queueName: 'main',
+  data: {},
+  children: [
+    { name: 'step-a', queueName: 'workers', data: {}, opts: { continueParentOnFailure: true } },
+    { name: 'step-b', queueName: 'workers', data: {}, opts: { continueParentOnFailure: true } },
+    { name: 'step-c', queueName: 'workers', data: {} },
+  ],
+});
+
+const worker = new Worker('main', async (job) => {
+  const failed = await queue.getFailedChildrenValues(job.id);
+  // { 'workers:job-abc': 'Error: step-a failed', ... }
+
+  if (Object.keys(failed).length > 0) {
+    await queue.removeUnprocessedChildren(job.id);  // cancel children still waiting
+    return { status: 'partial', failedSteps: failed };
+  }
+  return { status: 'complete' };
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import FlowProducer, Queue, Worker
+
+flow = FlowProducer()
+queue = Queue("main")
+
+flow.add({
+    "name": "pipeline",
+    "queueName": "main",
+    "data": {},
+    "children": [
+        {"name": "step-a", "queueName": "workers", "data": {},
+         "opts": {"continue_parent_on_failure": True}},
+        {"name": "step-b", "queueName": "workers", "data": {},
+         "opts": {"continue_parent_on_failure": True}},
+        {"name": "step-c", "queueName": "workers", "data": {}},
+    ],
+})
+
+def process(job):
+    failed = queue.get_failed_children_values(job.id)
+    # {"workers:job-abc": "Error: step-a failed", ...}
+
+    if failed:
+        queue.remove_unprocessed_children(job.id)  # cancel children still waiting
+        return {"status": "partial", "failed_steps": failed}
+    return {"status": "complete"}
+
+Worker("main", process).run()
+```
+
+</TabItem>
+</Tabs>
+
+And with `ignoreDependencyOnFailure`, when the parent should continue with partial data:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('reports', async (job) => {
+  const ignored = await job.getIgnoredChildrenFailures();
+  // { 'workers:job-abc': 'Error: enrichment API timeout' }
+  return { partial: Object.keys(ignored).length > 0 };
+}, { embedded: true });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const queue = new Queue('reports');
+
+const worker = new Worker('reports', async (job) => {
+  const ignored = await queue.getIgnoredChildrenFailures(job.id);
+  // { 'workers:job-abc': 'Error: enrichment API timeout' }
+  return { partial: Object.keys(ignored).length > 0 };
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue = Queue("reports")
+
+def process(job):
+    ignored = queue.get_ignored_children_failures(job.id)
+    # {"workers:job-abc": "Error: enrichment API timeout"}
+    return {"partial": bool(ignored)}
+
+Worker("reports", process).run()
+```
+
+</TabItem>
+</Tabs>
+
+*All four failure-propagation options are ordinary job options and reach the wire in every SDK. The reading helpers (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are currently available in the Bun package, the TypeScript SDK and the Python SDK (on `Queue`, taking the job id).*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Flow Producer](/guide/flow/) | Your first parent/child graph, and what is guaranteed |
+| [Flow Patterns](/guide/flow/patterns/) | Chains, fan-in, trees, reading child results, options |
+| [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field |
+

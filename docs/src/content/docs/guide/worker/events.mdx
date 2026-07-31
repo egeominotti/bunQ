@@ -1,0 +1,121 @@
+---
+title: "Worker Events: completed, failed, stalled"
+description: "Every event a bunqueue Worker emits, with payload signatures: completed, failed, progress, stalled, active, drained, log and closed, plus how to unsubscribe."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/events.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "worker events, on completed, on failed, stalled event, drained event, job progress event, worker observability"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">What the worker <em>tells you.</em></h1>
+  <p class="bq-hero-sub">Metrics, alerting and audit trails all hang off the same handful of events. Here is each one, when it fires and exactly what it hands your listener.</p>
+</div>
+
+## React to events
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Completed: ${job.id}`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Failed: ${job.id}`, error.message);
+});
+
+worker.on('progress', (job, progress) => {
+  console.log(`Progress: ${job.id} - ${progress}%`);
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+worker.on('completed', (job, result) => {
+  console.log(`Completed: ${job.id}`, result);
+});
+
+worker.on('failed', (job, error) => {
+  console.error(`Failed: ${job.id}`, error.message);
+});
+
+worker.on('error', (err) => console.error(err)); // always attach
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+worker.on("completed", lambda job, result: print("completed", job.id))
+worker.on("failed", lambda job, err: print("failed", job.id, err))
+worker.on("progress", lambda job, progress: print("progress", job.id, progress))
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker->on('completed', fn ($job, $result) => print("completed {$job->id()}\n"));
+$worker->on('failed', fn ($job, $err) => print("failed {$job->id()}\n"));
+$worker->on('error', fn ($err) => print($err->getMessage() . "\n"));
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker.On("completed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    log.Printf("completed %s", job.ID())
+})
+worker.On("error", func(args ...any) { log.Println(args[0]) })
+```
+
+</TabItem>
+</Tabs>
+
+*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+
+All Bun client events are fully typed. The complete list (external SDK event sets are listed in the [SDK guide](/guide/sdks/#worker-events)):
+
+| Event | Callback Parameters | Description |
+|-------|-------------------|-------------|
+| `ready` | `()` | Worker started polling |
+| `active` | `(job: Job<T>)` | Job started processing |
+| `completed` | `(job: Job<T>, result: R)` | Job completed successfully |
+| `failed` | `(job: Job<T>, error: Error)` | Job processing failed |
+| `progress` | `(job: Job<T> \| null, progress: number)` | Job progress updated |
+| `stalled` | `(jobId: string, reason: string)` | Job stalled (no heartbeat) |
+| `drained` | `()` | Queue has no more waiting jobs |
+| `error` | `(error: Error)` | Worker-level error |
+| `cancelled` | `({ jobId: string, reason: string })` | Job was cancelled |
+| `log` | `(job: Job<T>, message: string)` | Log written via `job.log()` |
+| `closed` | `()` | Worker shut down |
+
+Remove a listener with `worker.off('completed', handler)`.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

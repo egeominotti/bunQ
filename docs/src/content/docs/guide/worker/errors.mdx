@@ -1,0 +1,150 @@
+---
+title: "Worker Error Handling, Retries and Backoff"
+description: "How bunqueue treats a throwing processor: attempts, exponential backoff, per-job timeouts, permanent failure into the DLQ, and errors outside the processor."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/worker/errors.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "job retry backoff, worker error handling, job timeout, max attempts, permanent failure dlq, retry strategy bun queue"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · worker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">When the processor <em>throws.</em></h1>
+  <p class="bq-hero-sub">A failed attempt is not a lost job. bunqueue counts the attempt, waits a widening backoff, tries again, and only after the budget runs out does the job become permanently dead.</p>
+</div>
+
+## Handle errors
+
+Throwing inside the processor fails the current attempt; bunqueue retries with backoff (a growing wait between attempts) until `attempts` is exhausted:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  await riskyOperation();  // Just let errors throw, retries are automatic
+}, { embedded: true });
+
+worker.on('failed', (job, error) => {
+  if (job.attemptsMade >= 3) {
+    alertOps(job, error);  // Final failure, tell someone
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  await riskyOperation();  // Just let errors throw, retries are automatic
+});
+
+worker.on('failed', (job, error) => {
+  if (job.attempts >= 3) {
+    alertOps(job, error);  // Final failure, tell someone
+  }
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    risky_operation()  # Just let exceptions raise, retries are automatic
+
+worker = Worker("queue", process)
+
+def on_failed(job, error):
+    if job.attempts >= 3:
+        alert_ops(job, error)  # Final failure, tell someone
+
+worker.on("failed", on_failed)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', function (Bunqueue\Job $job) {
+    riskyOperation(); // Just let exceptions throw, retries are automatic
+});
+
+$worker->on('failed', function ($job, $error) {
+    if ($job->attemptsMade() >= 3) {
+        alertOps($job, $error); // Final failure, tell someone
+    }
+});
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
+    return nil, riskyOperation() // Return an error, retries are automatic
+}, bunqueue.WorkerOptions{})
+
+worker.On("failed", func(args ...any) {
+    job := args[0].(*bunqueue.Job)
+    if job.AttemptsMade() >= 3 {
+        alertOps(job, args[1]) // Final failure, tell someone
+    }
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ProcessError, Worker, WorkerOptions};
+
+let worker = Worker::new(
+    "queue",
+    |job| {
+        risky_operation(&job)
+            .map_err(|error| ProcessError::retryable(error.to_string()))
+        // ProcessError::unrecoverable(...) skips retries -> DLQ
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("queue", fn job ->
+    # Return {:error, reason} (or raise), retries are automatic.
+    # Raising Bunqueue.UnrecoverableError skips retries -> DLQ.
+    risky_operation(job)
+  end)
+```
+
+</TabItem>
+</Tabs>
+
+*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Worker](/guide/worker/) | Create a worker and process your first job |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
+| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
+| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
+| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+| [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
+

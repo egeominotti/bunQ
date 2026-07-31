@@ -1,0 +1,219 @@
+---
+title: "Progress, Job Logs and Dependencies"
+description: "Track long-running bunqueue jobs with progress updates and per-job logs, and inspect the parent/child dependency links a flow creates."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/progress.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "job progress, updateProgress, job logs, getJobLogs, job dependencies, parent child jobs, long running job tracking"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">What a job is <em>doing right now.</em></h1>
+  <p class="bq-hero-sub">A job that runs for ten minutes should not be a black box. Progress and logs make it observable, and dependency links show how it relates to the rest of a graph.</p>
+</div>
+
+## Progress, logs, dependencies
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Progress and logs (also available on the job object inside a processor)
+await queue.updateJobProgress('job-id', 75);
+await queue.addJobLog('job-id', 'Processing step 3 completed');
+const { logs, count } = await queue.getJobLogs('job-id', 0, 100);
+
+// Parent/child flows (see the Flow guide)
+const childValues = await queue.getChildrenValues('parent-job-id');
+const deps = await queue.getJobDependencies('job-id');
+const processed = await queue.getDependencies('parent-id', 'processed', 0, 10);
+
+// Wait for a job to finish (requires a QueueEvents instance)
+import { QueueEvents } from 'bunqueue/client';
+const queueEvents = new QueueEvents('my-queue');
+const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Progress and logs (also available on the job object inside a processor)
+await queue.updateJobProgress('job-id', 75);
+await queue.addJobLog('job-id', 'Processing step 3 completed');
+const logs = await queue.getJobLogs('job-id', 0, 100);
+
+// Parent/child flows (see the Flow guide)
+const childValues = await queue.getChildrenValues('parent-job-id');
+
+// Wait for a job to finish (throws on timeout or failure)
+const result = await queue.waitForJob('job-id', 30000);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Progress and logs (also available on the job object inside a processor)
+queue.update_job_progress("job-id", 75)
+queue.add_job_log("job-id", "Processing step 3 completed")
+logs = queue.get_job_logs("job-id", 0, 100)
+
+# Parent/child flows (see the Flow guide)
+child_values = queue.get_children_values("parent-job-id")
+
+# Wait for a job to finish (raises on timeout or failure)
+result = queue.wait_for_job("job-id", timeout_ms=30000)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Progress and logs (progress requires an active job)
+$queue->getJob('job-id')?->updateProgress(75);
+$queue->addJobLog('job-id', 'Processing step 3 completed');
+$logs = $queue->getJobLogs('job-id');
+
+// Parent/child flows (see the Flow guide)
+$childValues = $queue->getChildrenValues('parent-job-id');
+
+// Wait for a job to finish (throws on timeout or failure)
+$result = $queue->waitForJob('job-id', 30000);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Progress and logs (job methods; progress requires an active job)
+job, _ := queue.GetJob("job-id")
+job.UpdateProgress(75, "")
+job.Log("Processing step 3 completed", "")
+logs, _ := queue.GetJobLogs("job-id")
+
+// Parent/child flows (see the Flow guide)
+childValues, _ := queue.GetChildrenValues("parent-job-id")
+
+// Wait for a job to finish (errors on timeout or failure)
+result, _ := queue.WaitForJob("job-id", 30000)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Progress and logs (job methods; progress requires an active job)
+if let Some(job) = queue.get_job("job-id")? {
+    job.update_progress(75.0, None)?;
+    job.log("Processing step 3 completed", None)?;
+}
+let logs = queue.get_job_logs("job-id")?;
+
+// Wait for a job to finish (errors on timeout or failure)
+let result = queue.wait_for_job("job-id", 30_000)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Progress and logs (job functions; progress requires an active job)
+{:ok, job} = Bunqueue.Queue.get_job(queue, "job-id")
+{:ok, _} = Bunqueue.Job.update_progress(job, 75)
+{:ok, _} = Bunqueue.Job.log(job, "Processing step 3 completed")
+{:ok, logs} = Bunqueue.Queue.get_logs(queue, "job-id")
+
+# Wait for a job to finish (errors on timeout or failure)
+{:ok, result} = Bunqueue.Queue.wait_for_job(queue, "job-id", 30_000)
+```
+
+</TabItem>
+</Tabs>
+
+*`getJobDependencies`, `getDependencies`, and `QueueEvents` are available in the Bun `bunqueue` package only; over TCP, `waitForJob` covers the common wait-for-result case.*
+
+Manual state transitions (BullMQ-compatible, `token` is the worker's lock token):
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.moveJobToCompleted('job-id', { success: true }, token);
+await queue.moveJobToFailed('job-id', new Error('reason'), token);
+await queue.moveJobToWait('job-id', token);
+await queue.moveJobToDelayed('job-id', Date.now() + 60000, token);
+await queue.moveJobToWaitingChildren('job-id', token);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.moveJobToCompleted('job-id', { success: true }, token);
+await queue.moveJobToFailed('job-id', new Error('reason'), token);
+await queue.moveJobToWait('job-id');
+await queue.moveJobToDelayed('job-id', 60000); // delay in ms
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.move_job_to_completed("job-id", {"success": True}, token)
+queue.move_job_to_failed("job-id", RuntimeError("reason"), token)
+queue.move_job_to_wait("job-id")
+queue.move_job_to_delayed("job-id", 60000)  # delay in ms
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->moveJobToFailed('job-id', new \RuntimeException('reason'), $token);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.MoveJobToFailed("job-id", errors.New("reason"), token)
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+:ok = Bunqueue.Queue.move_to_delayed(queue, "job-id", 60_000)  # delay in ms
+:ok = Bunqueue.Queue.retry_job(queue, "job-id")                # failed -> waiting
+```
+
+</TabItem>
+</Tabs>
+
+*The full transition set is available in TypeScript and Python; PHP and Go expose `moveJobToFailed`, Elixir exposes `move_to_delayed` and `retry_job`, and Rust omits manual transitions.*
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

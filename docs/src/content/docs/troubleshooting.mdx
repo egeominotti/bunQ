@@ -623,7 +623,7 @@ bunqueue backup restore <key> --force
 :::danger[SandboxedWorker is experimental]
 `SandboxedWorker` depends on [Bun Workers](https://bun.sh/docs/runtime/workers), which are **experimental**. Known issues include memory growth, thread duplication, and segfaults across Bun versions.
 
-**For production, use the standard `Worker` instead**, it provides the same API (events, concurrency, heartbeats, retries) without any experimental dependencies. See [Worker vs SandboxedWorker](/guide/worker/#worker-vs-sandboxedworker).
+**For production, use the standard `Worker` instead**, it provides the same API (events, concurrency, heartbeats, retries) without any experimental dependencies. See [Worker vs SandboxedWorker](/guide/worker/sandboxed/#worker-vs-sandboxedworker).
 :::
 
 ### Segmentation fault when terminating workers

@@ -1,0 +1,141 @@
+---
+title: "Queue Rate Limiting and Global Concurrency"
+description: "Cap throughput at the queue level in bunqueue: requests per window rate limits, a global concurrency ceiling across every worker, and how to clear both."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/limits.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: "queue rate limit, global concurrency, throttle jobs, requests per second queue, setRateLimit, setConcurrency, api quota jobs"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">A ceiling on <em>how fast.</em></h1>
+  <p class="bq-hero-sub">Third-party APIs have quotas and databases have limits. These caps live on the queue, so they hold no matter how many workers you start.</p>
+</div>
+
+## Rate limiting and concurrency
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+// Cap parallel processing across ALL workers on this queue
+queue.setGlobalConcurrency(10);
+queue.removeGlobalConcurrency();
+await queue.setGlobalConcurrencyAsync(10);   // same, but waits for the server
+
+// Cap throughput: max jobs per window (default window: 1 second)
+queue.setGlobalRateLimit(100);          // max 100 jobs per second
+queue.setGlobalRateLimit(100, 60_000);  // max 100 jobs per minute
+queue.removeGlobalRateLimit();
+await queue.setGlobalRateLimitAsync(100, 60_000); // same, but waits for the server
+
+// Temporary throttle to ~1 job/sec; the server clears it after 5s on its own
+await queue.rateLimit(5000);
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Cap parallel processing across ALL workers on this queue
+await queue.setGlobalConcurrency(10);
+await queue.removeGlobalConcurrency();
+
+// Cap throughput: max jobs per window (1 second)
+await queue.setGlobalRateLimit(100);   // max 100 jobs per second
+await queue.removeGlobalRateLimit();
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# Cap parallel processing across ALL workers on this queue
+queue.set_global_concurrency(10)
+queue.remove_global_concurrency()
+
+# Cap throughput: max jobs per window (1 second)
+queue.set_global_rate_limit(100)   # max 100 jobs per second
+queue.remove_global_rate_limit()
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Cap throughput: max jobs per window (default window: 1 second)
+$queue->setRateLimit(100);         // max 100 jobs per second
+$queue->setRateLimit(100, 60000);  // max 100 jobs per minute
+$queue->clearRateLimit();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Cap throughput: max jobs per window (default window: 1 second)
+queue.SetRateLimit(100)                                               // max 100 jobs per second
+queue.SetRateLimit(100, bunqueue.RateLimitOptions{DurationMs: 60000}) // max 100 jobs per minute
+queue.ClearRateLimit()
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Cap throughput: max jobs per window (default window: 1 second)
+queue.set_rate_limit(100, None, None)?;          // max 100 jobs per second
+queue.set_rate_limit(100, Some(60_000), None)?;  // max 100 jobs per minute
+queue.clear_rate_limit()?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Cap parallel processing across ALL workers on this queue
+:ok = Bunqueue.Queue.set_concurrency(queue, 10)
+:ok = Bunqueue.Queue.clear_concurrency(queue)
+
+# Cap throughput: max jobs per window (default window: 1 second)
+:ok = Bunqueue.Queue.set_rate_limit(queue, 100)
+:ok = Bunqueue.Queue.set_rate_limit(queue, 100, duration: 60_000)
+:ok = Bunqueue.Queue.clear_rate_limit(queue)
+```
+
+</TabItem>
+</Tabs>
+
+*Global concurrency helpers exist in TypeScript, Python, and Elixir; the temporary `rateLimit(ms)` throttle is available in the Bun `bunqueue` package only.*
+
+:::caution[Semantics and stubs]
+- `rateLimit(ms)` throws on non-positive or non-finite `ms`. The expiry lives on the server, so it also survives your process exiting.
+- `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they return `null` / `null` / `0` / `false` regardless of actual server state.
+:::
+
+See [Rate Limiting](/guide/rate-limiting/) for worker-side limiting too.
+
+## Where to go next
+
+| | |
+|---|---|
+| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
+| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
+| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
+| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+

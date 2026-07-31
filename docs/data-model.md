@@ -598,6 +598,14 @@ Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
 **Auth/Negotiation** (`Auth`, `Hello`). `HelloCommand` (`command.ts:608-614`)
 negotiates `protocolVersion` and `capabilities: 'pipelining'[]`.
 
+`UpdateParent` is retained for legacy multi-command flow clients. When
+`parent.childrenIds` already contains the child, it is a child-only replacement
+of the temporary `pending` parent marker and is legal even after the parent
+became active or terminal. It does not reschedule or rewrite the parent.
+Persisted `jobs`/DLQ child data and a `flow_failures` row keyed by the temporary
+parent are updated in one transaction. If the edge is not predeclared, both
+sides can be extended only while the parent is still queued.
+
 ### Responses
 
 The `Response` union (`response.ts:201-221`) is also discriminated by shape, all
@@ -725,7 +733,7 @@ Indexes on `jobs`:
 CREATE INDEX idx_jobs_queue_state        ON jobs(queue, state);
 CREATE INDEX idx_jobs_queue_created      ON jobs(queue, created_at, id);
 CREATE INDEX idx_jobs_queue_state_created ON jobs(queue, state, created_at, id);
-CREATE INDEX idx_jobs_run_at             ON jobs(run_at) WHERE state IN ('waiting','delayed');
+CREATE INDEX idx_jobs_run_at             ON jobs(run_at) WHERE state IN ('waiting','prioritized','waiting-children','delayed');
 CREATE INDEX idx_jobs_unique             ON jobs(queue, unique_key) WHERE unique_key IS NOT NULL;
 CREATE INDEX idx_jobs_custom_id          ON jobs(custom_id) WHERE custom_id IS NOT NULL;
 CREATE INDEX idx_jobs_parent             ON jobs(parent_id) WHERE parent_id IS NOT NULL;
@@ -756,6 +764,38 @@ replays rows before workers can observe recovered parents. `fail` and `remove`
 rows are deleted after application; `ignore` and `continue` remain readable
 while the parent is live and are deleted when it reaches a terminal state or is
 removed.
+
+### `dependency_completions`
+
+```sql
+CREATE TABLE IF NOT EXISTS dependency_completions (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    queue TEXT NOT NULL,
+    completed_at INTEGER NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_dependency_completions_queue
+    ON dependency_completions(queue);
+```
+
+This table is the payload-free completion proof for a
+`removeOnComplete` job. Inserting the proof and deleting the `jobs`,
+`job_results`, and parent-side `flow_failures` rows is one transaction.
+`sequence` gives deterministic FIFO pruning against `maxCompletedJobs` for
+unreferenced proofs. `pinned=1` means at least one live `waitingDeps` reverse
+edge still owns the proof; such a row is exempt from FIFO pruning until every
+consumer is durably promoted, detached, cancelled, cleaned, or obliterated.
+The RAM tracker mirrors this as an exact-size recent FIFO plus a pinned set.
+Thus `recent <= maxCompletedJobs`, while pinned rows are proportional to
+distinct completed dependency IDs referenced by live waiters.
+
+Recovery deliberately loads the full table into temporary classification
+state before applying a possibly smaller configured cap. After pending jobs
+and reverse indexes are rebuilt, it reconciles `pinned` from those indexes,
+prunes only unpinned rows, and hydrates the two RAM tiers. The record never
+makes the removed job visible through Job/state/result/stats queries, and
+`queue` exists so `obliterate(queue)` can delete the hidden state it owns.
 
 ### `job_results` (schema.ts:66-70)
 
@@ -845,7 +885,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (schema.ts:140-210)
 
-`SCHEMA_VERSION = 27`. The migrate routine reads
+`SCHEMA_VERSION = 29`. The migrate routine reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -877,6 +917,8 @@ then records `SCHEMA_VERSION`.
 | 25      | `jobs.continue_parent_on_failure` |
 | 26      | `jobs.ignore_dependency_on_failure` |
 | 27      | `flow_failures` durable outbox + parent index; rebuild pending indexes for `prioritized`/`waiting-children` |
+| 28      | Bounded `dependency_completions` evidence for crash-safe `removeOnComplete` dependency recovery |
+| 29      | `dependency_completions.pinned` ownership for proofs referenced by live waiting parents |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -894,22 +936,29 @@ Defined on `QueueManagerState` (`src/application/types.ts:47-92`), sized by
 | ----------------- | -------------------------- | ------- | ------------------------------ |
 | `jobIndex`        | `Map<JobId, JobLocation>`  | unbounded* | follows job lifecycle (no cap) |
 | `completedJobs`   | `BoundedSet<JobId>`        | 50,000  | FIFO, **10% batch**            |
+| `depCompletions`  | `DependencyCompletionTracker` | 50,000 recent + live pins | exact FIFO; pins released with reverse edges |
 | `jobResults`      | `LRUMap<JobId, unknown>`   | 10,000  | LRU (1 entry on overflow)      |
 | `jobLogs`         | `LRUMap<JobId, JobLogEntry[]>` | 10,000 | LRU                          |
 | `customIdMap`     | `LRUMap<string, JobId>`    | 50,000  | LRU                            |
-| `waitingDeps`     | per-shard map              | 10,000  | (`maxWaitingDeps`)             |
+| `waitingDeps`     | per-shard map              | unbounded* | follows live dependency waiters |
 
-\* `jobIndex` is keyed by live jobs; entries are removed on complete/fail/cancel
-rather than capped by size. All caps above reflect the source defaults in
-`src/application/types.ts` (for example `maxJobResults: 10_000`), matching the
-architecture summary in `CLAUDE.md`.
+\* `jobIndex` and `waitingDeps` are keyed by live jobs; entries are removed with
+their lifecycle or dependency edges rather than capped by size. The
+`maxWaitingDeps` compatibility option has a default of `10_000` but is not
+currently an admission or eviction limit. The other caps above reflect the
+source defaults in `src/application/types.ts` (for example
+`maxJobResults: 10_000`), matching the architecture summary in `CLAUDE.md`.
 
 **Eviction policies:**
 
 - `BoundedSet` (`src/shared/boundedSet.ts`) — pure FIFO, no recency tracking.
   When `size >= maxSize`, `evictBatch()` removes `floor(maxSize * 0.1)` oldest
   entries at once (`boundedSet.ts:22, 30-49`) to amortize iterator cost. Used by
-  `completedJobs` and several recovery sets (`depCompletions`, `timedOutJobs`).
+  `completedJobs` and `timedOutJobs`.
+- `DependencyCompletionTracker` (`src/application/dependencyCompletions.ts`) —
+  exact FIFO eviction for at most `maxCompletedJobs` recent bare IDs plus a
+  separate set for proofs owned by live dependency edges. Eviction deletes
+  only an unpinned SQLite row; pin reconciliation is driven by reverse indexes.
 - `LRUMap` (`src/shared/lruMap.ts`) — doubly-linked list, O(1)
   `moveToFront`. On `set` over capacity it evicts the single tail (least
   recently used) node and fires the optional `onEvict` callback

@@ -13,6 +13,10 @@ export interface FlowJob<T = unknown> {
   children?: FlowJob<T>[];
 }
 
+export interface FlowOptions {
+  queuesOptions?: Record<string, Omit<Partial<JobOptions>, 'jobId'>>;
+}
+
 export interface JobNode<T = unknown> {
   job: Job<T>;
   children?: JobNode<T>[];

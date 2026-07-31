@@ -228,11 +228,11 @@ flow = Bunqueue.FlowProducer.new()
 </TabItem>
 </Tabs>
 
-In the Bun package, flow creation is one broker-side transaction: `addBulk`
-commits every tree or none, and workers cannot see a leaf before the full graph
-exists. The external language SDKs shown above remain compatible with the same
-server, but releases that still compose `PUSH` and `UpdateParent` use
-best-effort cleanup rather than the Bun package's `PUSHF` transaction.
+Flow creation is one broker-side transaction in the Bun package and all six
+current external SDKs: `addBulk` commits every tree or none, and workers cannot
+see a leaf before the full graph exists. Previously published SDK versions that
+compose `PUSH` and `UpdateParent` remain compatible with the server, but their
+already-sent requests cannot gain `PUSHF` all-or-nothing visibility.
 
 :::tip
 In the Bun package, FlowProducer works in TCP mode too: pass `connection: { port: 6789 }` instead of `embedded: true`.
@@ -265,6 +265,17 @@ Wire values are checked at runtime too: IDs must be strings, link fields must be
 string arrays, booleans must actually be booleans, and parent metadata must
 match both sides of every edge. These checks happen before any queue counter,
 heap, dependency index, or SQLite row changes.
+
+:::note
+When a child uses `removeOnComplete`, bunqueue retains a payload-free completion
+proof so a restart cannot strand its parent. Unreferenced proofs follow
+`maxCompletedJobs`; a proof referenced by a waiting parent stays pinned until
+that parent's durable promotion or removal releases the final dependency edge.
+It does not retain the child Job or result. Once a parent is promoted, its
+persisted ready state remains authoritative even after the proof expires. Use
+retained children—not `removeOnComplete`—when a parent must read results after
+a broker restart.
+:::
 
 ## Common Tasks
 
@@ -537,7 +548,12 @@ flow.add(
 
 *Per-queue defaults (`queuesOptions`) are supported in the Bun package and the Python SDK; in the other SDKs set per-step `opts` on each node instead (available everywhere).*
 
-Per-job `opts` override `queuesOptions` defaults. Note that `delay` on a chained step sets its earliest run time, but the step still waits for its dependency to complete first.
+Per-job `opts` override `queuesOptions` defaults. Identity is the exception:
+set `jobId` (or Python `job_id`) in the individual node's `opts`. It is rejected
+inside `queuesOptions` / `queues_options`, where one default could otherwise
+assign the same ID to multiple nodes. Note that `delay` on a chained step sets
+its earliest run time, but the step still waits for its dependency to complete
+first.
 
 ### Inspect an existing graph
 

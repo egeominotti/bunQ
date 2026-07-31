@@ -16,6 +16,7 @@ import { handleCustomId } from './customId';
 import { insertJobToShard } from './pushInsert';
 import { withPushWriteLocks } from './pushLocks';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import type { DependencyCompletionTracker } from '../dependencyCompletions';
 
 /** Push operation context */
 export interface PushContext {
@@ -27,7 +28,8 @@ export interface PushContext {
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
   /** Bare completion ids for removeOnComplete jobs so dependents start ready */
-  depCompletions?: SetLike<JobId>;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
   /** Timeout markers — cleared on custom-id reuse so a recycled id starts clean */
   timedOutJobs?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;

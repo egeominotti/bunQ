@@ -80,6 +80,6 @@ export interface GetFlowOpts {
  * Allows setting default job options per queue when adding flows.
  */
 export interface FlowOpts {
-  /** Default job options per queue name */
-  queuesOptions?: Record<string, Partial<JobOptions>>;
+  /** Default job options per queue name. Set `jobId` on the individual flow node. */
+  queuesOptions?: Record<string, Omit<Partial<JobOptions>, 'jobId'>>;
 }

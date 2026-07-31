@@ -31,6 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycles, non-finite numbers, accessors, symbols, functions, and non-portable
   object types while retaining standard objects, arrays, dates, and binary.
 
+## [0.1.10] - 2026-07-30
+
+### Added
+
+- Add deterministic fast-check campaigns for generated flow trees, shrinking,
+  ID uniqueness, graph closure, reciprocal links, shape isomorphism, option
+  forwarding, chain/fan-in topology, and broker snapshot validation.
+- Add a Stryker mutation gate scoped to the pure tree/legacy planners and
+  snapshot validator, plus explicit Cloudflare Workers coverage for generated
+  portable IDs.
+
+### Fixed
+
+- Compile trees, bulk trees, chains, and fan-in graphs with all IDs preallocated
+  and commit them through one broker-side atomic `PUSHF` command. Partial
+  `PUSH`/`UpdateParent` graphs and best-effort rollback are no longer possible.
+- Map public `jobId` to the planned ID and wire `customId`, reject unsupported
+  repeat/deduplication/debounce and caller-owned topology, protect internal data
+  markers, reject `jobId` queue defaults, and reject nested children in flat
+  flow methods.
+- Validate the exact returned snapshot ID/queue set and build every public
+  `FlowNode` from those committed snapshots.
+
 ## [0.1.9] - 2026-07-14
 
 Conformance-suite driven: the SDK is now certified by the cross-language

@@ -138,7 +138,7 @@ func TestGetFlowReconstructsTree(t *testing.T) {
 	}
 }
 
-func TestFlowRollbackOnInvalidOption(t *testing.T) {
+func TestFlowRejectsInvalidGraphAtomically(t *testing.T) {
 	name := uniqueName("rb")
 	queue := NewQueue(name, Options{Port: shared.port})
 	flow := NewFlowProducer(Options{Port: shared.port})
@@ -158,10 +158,8 @@ func TestFlowRollbackOnInvalidOption(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid option must be rejected (no silent drop)")
 	}
-	if !waitUntil(t, 5*time.Second, func() bool {
-		count, _ := queue.Count()
-		return count == 0
-	}) {
-		t.Fatal("created children must be rolled back")
+	count, countErr := queue.Count()
+	if countErr != nil || count != 0 {
+		t.Fatalf("invalid graph became visible: count=%d err=%v", count, countErr)
 	}
 }

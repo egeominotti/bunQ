@@ -1,0 +1,12 @@
+silent: false
+unleash:
+  integration: false
+  output: build/gremlins.json
+  output-statuses: "lct"
+  workers: 4
+  timeout-coefficient: 100
+  threshold:
+    efficacy: 99.9
+    mutant-coverage: 99.9
+  exclude-files:
+    - '^(connection.*|errors|flow|flow_commit|job.*|options|queue.*|telemetry.*|wire.*|worker.*)\.go$'

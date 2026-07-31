@@ -4,10 +4,16 @@ import type { JobLocation } from '../../domain/types/queue';
 import type { SetLike } from '../../shared/lru';
 import type { MapLike } from '../../shared/lru';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import {
+  type DependencyCompletionTracker,
+  pinReferencedCompletions,
+} from '../dependencyCompletions';
+import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 
 export interface PushInsertContext {
+  storage: SqliteStorage | null;
   completedJobs: SetLike<JobId>;
-  depCompletions?: SetLike<JobId>;
+  depCompletions?: DependencyCompletionTracker;
   jobResults: MapLike<JobId, unknown>;
   dependencyResults: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
@@ -41,6 +47,7 @@ export function insertJobToShard(
   const now = Date.now();
   const state = initialJobState(job, ctx, now);
   if (state === 'waiting-children') {
+    pinReferencedCompletions(job.dependsOn, ctx);
     shard.waitingDeps.set(job.id, job);
     shard.registerDependencies(job.id, job.dependsOn);
     if (recordTimeline) job.timeline.push({ state, timestamp: now });

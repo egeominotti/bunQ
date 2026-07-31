@@ -5,26 +5,28 @@ declare(strict_types=1);
 namespace Bunqueue;
 
 use Bunqueue\Exception\CommandException;
-use Bunqueue\Wire\Protocol;
+use Bunqueue\Flow\Planner;
+use Bunqueue\Flow\SnapshotValidator;
 
 /**
  * FlowProducer: parent/child job trees and sequential chains.
  *
- * Wire contract (parity with the TS/Python SDKs): children are pushed BEFORE
- * their parent; the parent carries dependsOn/childrenIds; each child is then
- * linked via UpdateParent. On any failure every already-created job is
- * cancelled (best-effort atomic rollback).
+ * Every ID and edge is resolved locally, then the complete graph is committed
+ * by one broker-side PUSHF operation. No partially linked flow is observable.
  */
 final class FlowProducer
 {
     public readonly Connection $connection;
     private readonly bool $ownsConnection;
+    /** @var \Closure(array<string, mixed>): array<string, mixed> */
+    private \Closure $call;
 
     /** @param array{host?: string, port?: int, token?: string, tls?: bool|array} $options */
     public function __construct(array $options = [], ?Connection $connection = null)
     {
         $this->connection = $connection ?? new Connection($options);
         $this->ownsConnection = $connection === null;
+        $this->call = fn (array $command): array => $this->connection->call($command);
     }
 
     /**
@@ -32,13 +34,9 @@ final class FlowProducer
      */
     public function add(array $flow): FlowNode
     {
-        $created = [];
-        try {
-            return $this->addNode($flow, null, $created);
-        } catch (\Throwable $e) {
-            $this->rollback($created);
-            throw $e;
-        }
+        $plan = (new Planner())->planTree($flow);
+        $snapshots = $this->commit($plan['jobs']);
+        return $this->buildNode($plan['root'], $snapshots);
     }
 
     /**
@@ -49,29 +47,12 @@ final class FlowProducer
      */
     public function addChain(array $steps): array
     {
-        $jobIds = [];
-        $prevId = null;
-        try {
-            foreach ($steps as $step) {
-                $data = ['__flowParentId' => $prevId, ...($step['data'] ?? [])];
-                $command = [
-                    'cmd' => 'PUSH',
-                    'queue' => (string) $step['queueName'],
-                    'data' => Protocol::jobPayload((string) $step['name'], $data),
-                    ...Options::toWire($step['opts'] ?? []),
-                ];
-                if ($prevId !== null) {
-                    $command['dependsOn'] = [$prevId];
-                }
-                $response = $this->connection->call(Protocol::compact($command));
-                $prevId = (string) $response['id'];
-                $jobIds[] = $prevId;
-            }
-            return $jobIds;
-        } catch (\Throwable $e) {
-            $this->rollback($jobIds);
-            throw $e;
+        if ($steps === []) {
+            return [];
         }
+        $plan = (new Planner())->planChain($steps);
+        $this->commit($plan['jobs']);
+        return $plan['ids'];
     }
 
     /**
@@ -94,46 +75,32 @@ final class FlowProducer
 
     // ------------------------------------------------------------ internals
 
-    /** @param list<string> $created accumulates every created id for rollback */
-    private function addNode(array $node, ?array $parentRef, array &$created): FlowNode
+    /**
+     * @param list<array{id: string, queue: string, input: array<string, mixed>}> $jobs
+     * @return array<string, array<string, mixed>>
+     */
+    private function commit(array $jobs): array
     {
-        $childNodes = [];
-        $childIds = [];
-        foreach ($node['children'] ?? [] as $child) {
-            $childNode = $this->addNode($child, ['id' => 'pending', 'queue' => (string) $node['queueName']], $created);
-            $childNodes[] = $childNode;
-            $childIds[] = $childNode->job->id();
-        }
+        $response = ($this->call)(['cmd' => 'PUSHF', 'jobs' => $jobs]);
+        $data = $response['data'] ?? null;
+        $rawJobs = \is_array($data) ? ($data['jobs'] ?? null) : null;
+        return SnapshotValidator::validate($jobs, $rawJobs);
+    }
 
-        $data = $node['data'] ?? [];
-        if ($parentRef !== null) {
-            $data['__parentId'] = $parentRef['id'];
-            $data['__parentQueue'] = $parentRef['queue'];
-        }
-        if ($childIds !== []) {
-            $data['__childrenIds'] = $childIds;
-        }
-        $payload = Protocol::jobPayload((string) $node['name'], $data);
-
-        $response = $this->connection->call(Protocol::compact([
-            'cmd' => 'PUSH',
-            'queue' => (string) $node['queueName'],
-            'data' => $payload,
-            ...Options::toWire($node['opts'] ?? []),
-            'parentId' => $parentRef['id'] ?? null,
-            'childrenIds' => $childIds === [] ? null : $childIds,
-            'dependsOn' => $childIds === [] ? null : $childIds,
-        ]));
-        $jobId = (string) $response['id'];
-        $created[] = $jobId;
-
-        // Link children to their real parent id (placeholder was 'pending').
-        foreach ($childIds as $childId) {
-            $this->connection->call(['cmd' => 'UpdateParent', 'childId' => $childId, 'parentId' => $jobId]);
-        }
-
-        $job = new Job(['id' => $jobId, 'queue' => $node['queueName'], 'data' => $payload], $this->connection);
-        return new FlowNode($job, $childNodes);
+    /**
+     * @param array{id: string, children: list<array>} $planned
+     * @param array<string, array<string, mixed>> $snapshots
+     */
+    private function buildNode(array $planned, array $snapshots): FlowNode
+    {
+        $children = array_map(
+            fn (array $child): FlowNode => $this->buildNode($child, $snapshots),
+            $planned['children'],
+        );
+        return new FlowNode(
+            new Job($snapshots[$planned['id']], $this->connection),
+            $children,
+        );
     }
 
     /** @param array<string, true> $visited */
@@ -169,15 +136,4 @@ final class FlowProducer
         return new FlowNode($job, $children);
     }
 
-    /** @param list<string> $jobIds */
-    private function rollback(array $jobIds): void
-    {
-        foreach ($jobIds as $jobId) {
-            try {
-                $this->connection->call(['cmd' => 'Cancel', 'id' => $jobId]);
-            } catch (\Throwable) {
-                // best-effort rollback
-            }
-        }
-    }
 }

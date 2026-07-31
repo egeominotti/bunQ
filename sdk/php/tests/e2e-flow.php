@@ -8,7 +8,7 @@ use Bunqueue\FlowProducer;
 use Bunqueue\Queue;
 use Bunqueue\Worker;
 
-/** E2E: flows — parent/children trees, chains, getFlow, rollback. */
+/** E2E: atomic flows — parent/children trees, chains and getFlow. */
 
 test('flow: children run before the parent, parent reads their values', function (Server $server): void {
     $name = uniqueName('tree');
@@ -92,7 +92,7 @@ test('flow: getFlow reconstructs the tree; missing job maps to null', function (
     }
 });
 
-test('flow: a failing node rolls back every already-created job', function (Server $server): void {
+test('flow: invalid input rejects the whole atomic graph', function (Server $server): void {
     $name = uniqueName('rb');
     $queue = new Queue($name, ['port' => $server->port]);
     $flow = new FlowProducer(['port' => $server->port]);
@@ -111,7 +111,7 @@ test('flow: a failing node rolls back every already-created job', function (Serv
             $threw = true;
         }
         assertTrue($threw, 'invalid option rejected (no silent drop)');
-        assertTrue(waitUntil(fn () => $queue->count() === 0, 5), 'created children rolled back');
+        assertSame(0, $queue->count(), 'invalid graph never became visible');
     } finally {
         $flow->close();
         $queue->obliterate();

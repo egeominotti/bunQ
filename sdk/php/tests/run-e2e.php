@@ -7,6 +7,18 @@ namespace Bunqueue\Tests;
 use Bunqueue\Exception\AuthException;
 use Bunqueue\Queue;
 
+$phpunit = __DIR__ . '/../vendor/bin/phpunit';
+$propertyCommand = sprintf(
+    '%s %s --configuration %s --testsuite flow-property',
+    escapeshellarg(PHP_BINARY),
+    escapeshellarg($phpunit),
+    escapeshellarg(__DIR__ . '/../phpunit.xml.dist'),
+);
+passthru($propertyCommand, $propertyExit);
+if ($propertyExit !== 0) {
+    exit($propertyExit);
+}
+
 require __DIR__ . '/harness.php';
 require __DIR__ . '/e2e-core.php';
 require __DIR__ . '/e2e-worker.php';

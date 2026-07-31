@@ -33,6 +33,10 @@ import {
 } from './sqliteSerializer';
 import { BatchInsertManager, WriteBuffer } from './sqliteBatch';
 import { storageLog } from '../../shared/logger';
+import {
+  DependencyCompletionStore,
+  type DependencyCompletionRecord,
+} from './dependencyCompletionStore';
 
 /** Critical-loss callback: invoked when WriteBuffer drops jobs after exhausting retries. */
 export type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: number) => void;
@@ -74,6 +78,7 @@ export class SqliteStorage {
   private readonly statements: Map<StatementName, ReturnType<Database['prepare']>>;
   private readonly batchManager: BatchInsertManager;
   private readonly writeBuffer: WriteBuffer;
+  private readonly dependencyCompletionStore: DependencyCompletionStore;
   private _diskFull = false;
   private _lastDiskFullError: string | null = null;
   private _lastDiskFullAt: number | null = null;
@@ -97,6 +102,7 @@ export class SqliteStorage {
       });
     }
     this.migrate();
+    this.dependencyCompletionStore = new DependencyCompletionStore(this.db);
     this.statements = prepareStatements(this.db);
     this._onCriticalLoss = config.onCriticalLoss;
 
@@ -664,6 +670,94 @@ export class SqliteStorage {
     });
   }
 
+  /**
+   * Persist a legacy SDK parent-id backpatch without changing parent state.
+   *
+   * A fast child can finish before the SDK sends UpdateParent. Completed jobs
+   * remain in `jobs`, while failed jobs live only in the serialized DLQ entry.
+   * The failure outbox is re-keyed in the same transaction so a crash between
+   * this write and in-memory propagation still targets the real parent.
+   */
+  backpatchFlowChild(
+    child: Pick<Job, 'id' | 'parentId' | 'data'>,
+    previousParentId: JobId | null
+  ): void {
+    this.flushIfBuffered(child.id);
+    this.safeWrite(() => {
+      const tx = this.db.transaction(() => {
+        let persisted =
+          this.db
+            .prepare('UPDATE jobs SET parent_id = ?, data = ? WHERE id = ?')
+            .run(child.parentId, pack(child.data), child.id).changes > 0;
+
+        const dlqRows = this.db
+          .query<{ id: number; entry: Uint8Array }, [string]>(
+            'SELECT id, entry FROM dlq WHERE job_id = ?'
+          )
+          .all(String(child.id));
+        for (const row of dlqRows) {
+          const entry = unpack<DlqEntry | null>(
+            row.entry,
+            null,
+            `backpatchFlowChild:${String(child.id)}`
+          );
+          if (!entry?.job) continue;
+          const updated = {
+            ...entry,
+            job: { ...entry.job, parentId: child.parentId, data: child.data },
+          };
+          this.db.prepare('UPDATE dlq SET entry = ? WHERE id = ?').run(pack(updated), row.id);
+          persisted = true;
+        }
+
+        if (!persisted) {
+          throw new Error(`Flow child is no longer persisted: ${String(child.id)}`);
+        }
+
+        if (previousParentId && child.parentId && previousParentId !== child.parentId) {
+          const failure = this.db
+            .query<
+              {
+                child_queue: string;
+                mode: string;
+                error: string;
+                created_at: number;
+              },
+              [string, string]
+            >(
+              `SELECT child_queue, mode, error, created_at
+               FROM flow_failures
+               WHERE parent_id = ? AND child_id = ?`
+            )
+            .get(String(previousParentId), String(child.id));
+          if (failure) {
+            this.db
+              .prepare(
+                `INSERT INTO flow_failures
+                 (parent_id, child_id, child_queue, mode, error, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(parent_id, child_id) DO UPDATE SET
+                   child_queue=excluded.child_queue, mode=excluded.mode,
+                   error=excluded.error, created_at=excluded.created_at`
+              )
+              .run(
+                child.parentId,
+                child.id,
+                failure.child_queue,
+                failure.mode,
+                failure.error,
+                failure.created_at
+              );
+            this.db
+              .prepare('DELETE FROM flow_failures WHERE parent_id = ? AND child_id = ?')
+              .run(previousParentId, child.id);
+          }
+        }
+      });
+      tx();
+    });
+  }
+
   /** Persist both sides of a removed parent/child relationship atomically. */
   removeFlowLink(
     child: Pick<Job, 'id' | 'parentId' | 'data'>,
@@ -759,20 +853,30 @@ export class SqliteStorage {
   }
 
   /** Persist dependency removal/promotion as one parent-side recovery checkpoint. */
-  updateFlowParentResolution(job: Pick<Job, 'id' | 'dependsOn' | 'runAt' | 'priority'>): void {
+  updateFlowParentResolution(
+    job: Pick<Job, 'id' | 'dependsOn' | 'runAt' | 'priority' | 'timeline'>,
+    stateOverride?: 'waiting-children' | 'waiting' | 'prioritized' | 'delayed'
+  ): void {
     this.flushIfBuffered(job.id);
     const state =
-      job.dependsOn.length > 0
+      stateOverride ??
+      (job.dependsOn.length > 0
         ? 'waiting-children'
         : job.runAt > Date.now()
           ? 'delayed'
           : job.priority > 0
             ? 'prioritized'
-            : 'waiting';
+            : 'waiting');
     this.safeWrite(() => {
       this.db
-        .prepare('UPDATE jobs SET depends_on = ?, run_at = ?, state = ? WHERE id = ?')
-        .run(job.dependsOn.length > 0 ? pack(job.dependsOn) : null, job.runAt, state, job.id);
+        .prepare('UPDATE jobs SET depends_on = ?, run_at = ?, state = ?, timeline = ? WHERE id = ?')
+        .run(
+          job.dependsOn.length > 0 ? pack(job.dependsOn) : null,
+          job.runAt,
+          state,
+          job.timeline.length > 0 ? pack(job.timeline) : null,
+          job.id
+        );
     });
   }
 
@@ -836,16 +940,80 @@ export class SqliteStorage {
 
   /** Load all completed job IDs (for dependency recovery) */
   loadCompletedJobIds(): Set<JobId> {
-    const rows = this.db.query<{ job_id: string }, []>('SELECT job_id FROM job_results').all();
-    const ids = new Set(rows.map((r) => r.job_id as JobId));
-    // A job acked with no/undefined result has state='completed' but NO job_results
-    // row. Include state='completed' ids so dependency recovery still sees it as
-    // done and unblocks dependents (instead of parking them forever).
+    // `jobs.state` is the completion authority. A result row can exist while its
+    // job is still active if a process dies between the two legacy writes, so it
+    // must never release a dependency by itself.
+    const ids = new Set<JobId>();
     const stateRows = this.db
       .query<{ id: string }, []>("SELECT id FROM jobs WHERE state = 'completed'")
       .all();
     for (const r of stateRows) ids.add(r.id as JobId);
+    for (const record of this.dependencyCompletionStore.load()) ids.add(record.jobId);
     return ids;
+  }
+
+  /** Atomically replace a removed completed job with payload-free dependency evidence. */
+  commitRemovedCompletion(
+    job: Pick<Job, 'id' | 'queue'>,
+    retentionLimit: number,
+    pinned: boolean,
+    completedAt: number = Date.now()
+  ): void {
+    this.writeBuffer.removePending(job.id);
+    this.safeWrite(() => {
+      this.dependencyCompletionStore.commit(
+        { jobId: job.id, queue: job.queue, completedAt, pinned },
+        retentionLimit
+      );
+    });
+  }
+
+  loadDependencyCompletions(): DependencyCompletionRecord[] {
+    return this.dependencyCompletionStore.load();
+  }
+
+  pinDependencyCompletions(jobIds: Iterable<JobId>): void {
+    this.safeWrite(() => {
+      this.dependencyCompletionStore.pin(jobIds);
+    });
+  }
+
+  unpinDependencyCompletions(
+    jobIds: Iterable<JobId>,
+    retentionLimit: number
+  ): DependencyCompletionRecord[] {
+    let records: DependencyCompletionRecord[] = [];
+    this.safeWrite(() => {
+      records = this.dependencyCompletionStore.unpin(jobIds, retentionLimit);
+    });
+    return records;
+  }
+
+  reconcileDependencyCompletionPins(
+    referenced: ReadonlySet<JobId>,
+    retentionLimit: number
+  ): DependencyCompletionRecord[] {
+    let records: DependencyCompletionRecord[] = [];
+    this.safeWrite(() => {
+      records = this.dependencyCompletionStore.reconcilePins(referenced, retentionLimit);
+    });
+    return records;
+  }
+
+  deleteDependencyCompletion(jobId: JobId): boolean {
+    let deleted = false;
+    this.safeWrite(() => {
+      deleted = this.dependencyCompletionStore.delete(jobId);
+    });
+    return deleted;
+  }
+
+  deleteDependencyCompletionsForQueue(queue: string): JobId[] {
+    let deleted: JobId[] = [];
+    this.safeWrite(() => {
+      deleted = this.dependencyCompletionStore.deleteForQueue(queue);
+    });
+    return deleted;
   }
 
   // ============ Bulk Operations ============

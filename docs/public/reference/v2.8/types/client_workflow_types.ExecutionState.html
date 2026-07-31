@@ -24,12 +24,10 @@
 <li><span class="tsd-signature-type">&quot;compensating&quot;</span></li>
 <li><span class="tsd-signature-type">&quot;compensation-stuck&quot;</span>
 <div class="tsd-comment tsd-typography"><p>A compensation failed definitively and the unwind stopped. Deliberately NOT
-terminal: halting and calling it done leaves the operator nothing to act on,
-and ploughing on would undo work whose dependencies are still standing. The run
-parks here until someone retries the failed handler or abandons the unwind.</p>
+terminal: the run parks until an operator retries or abandons the unwind.</p>
 </div></li></ul></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/types.ts#L190">client/workflow/types.ts:190</a></li></ul></aside></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/executionTypes.ts#L4">client/workflow/executionTypes.ts:4</a></li></ul></aside></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

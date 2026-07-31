@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+    bootstrap="vendor/autoload.php"
+    cacheDirectory=".phpunit.cache"
+    colors="true"
+>
+    <testsuites>
+        <testsuite name="flow-property">
+            <file>tests/FlowPlannerPropertyTest.php</file>
+            <file>tests/FlowPlannerBoundaryTest.php</file>
+            <file>tests/FlowProducerValidationTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

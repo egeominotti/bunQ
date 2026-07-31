@@ -14,6 +14,7 @@ import type { WorkerManager } from './workerManager';
 import type { EventsManager } from './eventsManager';
 import type { MonitoringState } from './monitoringChecks';
 import type { DependencyResultTracker } from './dependencyResultTracker';
+import type { DependencyCompletionTracker } from './dependencyCompletions';
 import type { LockContext, BackgroundContext, StatsContext } from './types';
 import type { PushContext } from './operations/push';
 import type { PullContext } from './operations/pull';
@@ -36,7 +37,7 @@ export interface ContextDependencies {
   jobIndex: Map<JobId, JobLocation>;
   completedJobs: BoundedSet<JobId>;
   completedJobsData: BoundedMap<JobId, Job>;
-  depCompletions?: BoundedSet<JobId>;
+  depCompletions?: DependencyCompletionTracker;
   timedOutJobs?: BoundedSet<JobId>;
   jobResults: LRUMap<JobId, unknown>;
   dependencyResults: DependencyResultTracker;
@@ -112,6 +113,7 @@ export class ContextFactory {
       jobIndex: this.deps.jobIndex,
       completedJobs: this.deps.completedJobs,
       depCompletions: this.deps.depCompletions,
+      maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
       dependencyResults: this.deps.dependencyResults,
@@ -165,6 +167,7 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       depCompletions: this.deps.depCompletions,
+      maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       timedOutJobs: this.deps.timedOutJobs,
       jobResults: this.deps.jobResults,
       dependencyResults: this.deps.dependencyResults,
@@ -201,6 +204,7 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       depCompletions: this.deps.depCompletions,
+      maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       jobResults: this.deps.jobResults,
       dependencyResults: this.deps.dependencyResults,
       jobIndex: this.deps.jobIndex,
@@ -232,6 +236,8 @@ export class ContextFactory {
       jobLocks: this.deps.jobLocks,
       clientJobs: this.deps.clientJobs,
       dependencyResults: this.deps.dependencyResults,
+      depCompletions: this.deps.depCompletions,
+      maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       webhookManager: this.deps.webhookManager,
       eventsManager: this.deps.eventsManager,
       repeatChain: this.deps.repeatChain,

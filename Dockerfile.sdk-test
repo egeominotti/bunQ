@@ -23,11 +23,11 @@ COPY --from=worktree /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=worktree /workspace /workspace
 WORKDIR /workspace
 RUN pip install --no-cache-dir build hatchling \
-    && pip install --no-cache-dir -e sdk/python
+    && pip install --no-cache-dir -e 'sdk/python[test]'
 
 FROM composer:2 AS composer
 FROM php:8.4-cli-bookworm AS php-sdk
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssl unzip \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer /usr/bin/composer /usr/local/bin/composer
 COPY --from=worktree /usr/local/bin/bun /usr/local/bin/bun

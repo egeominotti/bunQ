@@ -47,6 +47,19 @@ import { processPendingDependencies } from './dependencyProcessor';
 import { handleTaskError, handleTaskSuccess } from './taskErrorTracking';
 import { DependencyResultTracker } from './dependencyResultTracker';
 import { recoverFlowFailures } from './flowFailureRecovery';
+import {
+  assertFlowParentOwnership,
+  backpatchDeclaredFlowChild,
+  canAcceptRemovedFlowChild,
+  flowChildFailureError,
+  isDeclaredFlowChild,
+} from './flowParentBackpatch';
+import {
+  commitRemovedCompletion,
+  DependencyCompletionTracker,
+  reconcileDependencyCompletionPins,
+  releaseDependencyCompletionPins,
+} from './dependencyCompletions';
 
 export type { QueueManagerConfig };
 
@@ -68,10 +81,9 @@ export class QueueManager {
   private readonly jobIndex = new Map<JobId, JobLocation>();
   private readonly completedJobs!: BoundedSet<JobId>;
   private readonly completedJobsData!: BoundedMap<JobId, Job>;
-  // Bare completion ids of removeOnComplete jobs — kept ONLY so dependent jobs
-  // can unblock (no payload, not surfaced in state/stats). Bounded like
-  // completedJobs; entries are pruned by the dependency processor once consumed.
-  private readonly depCompletions!: BoundedSet<JobId>;
+  // Bare removeOnComplete evidence: bounded recent IDs plus IDs pinned by live
+  // dependency edges. It is never surfaced as completed job data or statistics.
+  private readonly depCompletions!: DependencyCompletionTracker;
   // Ids of jobs failed by the timeout sweep. A late ACK whose lock token no
   // longer matches (the job was requeued for retry) is discarded for these,
   // instead of phantom-completing the job and skipping the retry. Bounded;
@@ -162,7 +174,9 @@ export class QueueManager {
       this.jobIndex.delete(jobId);
       this.completedJobsData.delete(jobId);
     });
-    this.depCompletions = new BoundedSet<JobId>(this.config.maxCompletedJobs);
+    this.depCompletions = new DependencyCompletionTracker(this.config.maxCompletedJobs, (jobId) => {
+      this.storage?.deleteDependencyCompletion(jobId);
+    });
     this.timedOutJobs = new BoundedSet<JobId>(this.config.maxCompletedJobs);
     this.perQueueMetrics = new LRUMap<string, { totalCompleted: bigint; totalFailed: bigint }>(
       this.config.maxCustomIds
@@ -215,6 +229,8 @@ export class QueueManager {
         shards: this.shards,
         jobIndex: this.jobIndex,
         completedJobs: this.completedJobs,
+        depCompletions: this.depCompletions,
+        maxDependencyCompletions: this.config.maxCompletedJobs,
         dependencyResults: this.dependencyResults,
         failedChildrenValues: this.failedChildrenValues,
         ignoredChildrenFailures: this.ignoredChildrenFailures,
@@ -664,8 +680,8 @@ export class QueueManager {
       ctx.jobIndex.set(jId, { type: 'completed', queueName: (job as Job).queue });
       ctx.storage?.markCompleted(jId, Date.now(), (job as Job).timeline);
     } else {
+      commitRemovedCompletion(job as Job, ctx);
       ctx.jobIndex.delete(jId);
-      ctx.storage?.deleteJob(jId);
     }
 
     if (result !== undefined) ctx.dependencyResults.retain(jId, result);
@@ -811,90 +827,105 @@ export class QueueManager {
    */
   async updateJobParent(childJobId: JobId, parentJobId: JobId): Promise<void> {
     if (childJobId === parentJobId) throw new Error('A flow job cannot be its own parent');
-    const childJob = await this.getJob(childJobId);
-    if (!childJob) throw new Error(`Child job not found: ${String(childJobId)}`);
+    let childJob = await this.getJob(childJobId);
     const parentJob = await this.getJob(parentJobId);
+    if (!childJob) {
+      if (canAcceptRemovedFlowChild(parentJob, childJobId, this.depCompletions)) return;
+      throw new Error(`Child job not found: ${String(childJobId)}`);
+    }
     if (!parentJob) throw new Error(`Parent job not found: ${String(parentJobId)}`);
-    const priorParent = childJob.parentId;
-    if (priorParent && String(priorParent) !== 'pending' && priorParent !== parentJobId) {
-      throw new Error(
-        `Child job ${String(childJobId)} already belongs to parent ${String(priorParent)}`
-      );
-    }
-    const parentLocation = this.jobIndex.get(parentJobId);
-    if (parentLocation?.type !== 'queue') {
-      throw new Error(`Parent job ${String(parentJobId)} is not linkable`);
-    }
-    const childLocation = this.jobIndex.get(childJobId);
-    const shardIndexes = [
-      ...new Set([shardIndex(childJob.queue), shardIndex(parentJob.queue)]),
-    ].sort((a, b) => a - b);
-    const processingIndexes =
-      childLocation?.type === 'processing' ? [processingShardIndex(childJobId)] : [];
-    const guards: LockGuard[] = [await this.customIdLock.acquireWrite()];
-    try {
-      for (const index of shardIndexes) guards.push(await this.shardLocks[index].acquireWrite());
-      for (const index of processingIndexes) {
-        guards.push(await this.processingLocks[index].acquireWrite());
+    assertFlowParentOwnership(childJob, parentJobId);
+
+    if (isDeclaredFlowChild(parentJob, childJobId)) {
+      childJob = await backpatchDeclaredFlowChild(childJob, parentJob, {
+        storage: this.storage,
+        customIdLock: this.customIdLock,
+        shards: this.shards,
+        shardLocks: this.shardLocks,
+        processingShards: this.processingShards,
+        processingLocks: this.processingLocks,
+        jobIndex: this.jobIndex,
+        completedJobsData: this.completedJobsData,
+        depCompletions: this.depCompletions,
+      });
+    } else {
+      const parentLocation = this.jobIndex.get(parentJobId);
+      if (parentLocation?.type !== 'queue') {
+        throw new Error(`Parent job ${String(parentJobId)} is not linkable`);
       }
-      if (this.jobIndex.get(parentJobId)?.type !== 'queue') {
-        throw new Error(`Parent job ${String(parentJobId)} changed state while linking`);
-      }
-
-      const childData = {
-        ...(childJob.data as Record<string, unknown>),
-        __parentId: String(parentJobId),
-        __parentQueue: parentJob.queue,
-      };
-      const childrenIds = parentJob.childrenIds.includes(childJobId)
-        ? [...parentJob.childrenIds]
-        : [...parentJob.childrenIds, childJobId];
-      const dependsOn = parentJob.dependsOn.includes(childJobId)
-        ? [...parentJob.dependsOn]
-        : [...parentJob.dependsOn, childJobId];
-      const parentData = {
-        ...(parentJob.data as Record<string, unknown>),
-        __childrenIds: childrenIds.map(String),
-      };
-      const linkedChild = { ...childJob, data: childData, parentId: parentJobId };
-      const linkedParent = { ...parentJob, data: parentData, childrenIds, dependsOn };
-      const childFinished =
-        this.completedJobs.has(childJobId) || this.depCompletions.has(childJobId);
-      const parentState = childFinished
-        ? parentJob.runAt > Date.now()
-          ? 'delayed'
-          : parentJob.priority > 0
-            ? 'prioritized'
-            : 'waiting'
-        : 'waiting-children';
-      this.storage?.updateFlowLink(linkedChild, linkedParent, parentState);
-
-      (childJob as { parentId: JobId | null }).parentId = parentJobId;
-      (childJob as { data: unknown }).data = childData;
-      parentJob.childrenIds = childrenIds;
-      (parentJob as { dependsOn: JobId[] }).dependsOn = dependsOn;
-      (parentJob as { data: unknown }).data = parentData;
-
-      if (!childFinished) {
-        const shard = this.shards[shardIndex(parentJob.queue)];
-        if (!shard.waitingDeps.has(parentJobId)) {
-          const removed = shard.getQueue(parentJob.queue).remove(parentJobId);
-          if (removed) shard.decrementQueued(parentJobId);
-          shard.waitingDeps.set(parentJobId, parentJob);
+      const childLocation = this.jobIndex.get(childJobId);
+      const shardIndexes = [
+        ...new Set([shardIndex(childJob.queue), shardIndex(parentJob.queue)]),
+      ].sort((a, b) => a - b);
+      const processingIndexes =
+        childLocation?.type === 'processing' ? [processingShardIndex(childJobId)] : [];
+      const guards: LockGuard[] = [await this.customIdLock.acquireWrite()];
+      try {
+        for (const index of shardIndexes) guards.push(await this.shardLocks[index].acquireWrite());
+        for (const index of processingIndexes) {
+          guards.push(await this.processingLocks[index].acquireWrite());
         }
-        shard.registerDependencies(parentJobId, [childJobId]);
-        this.dependencyResults.registerConsumer(parentJobId, dependsOn);
+        if (this.jobIndex.get(parentJobId)?.type !== 'queue') {
+          throw new Error(`Parent job ${String(parentJobId)} changed state while linking`);
+        }
+
+        const childData = {
+          ...(childJob.data as Record<string, unknown>),
+          __parentId: String(parentJobId),
+          __parentQueue: parentJob.queue,
+        };
+        const childrenIds = [...parentJob.childrenIds, childJobId];
+        const dependsOn = parentJob.dependsOn.includes(childJobId)
+          ? [...parentJob.dependsOn]
+          : [...parentJob.dependsOn, childJobId];
+        const parentData = {
+          ...(parentJob.data as Record<string, unknown>),
+          __childrenIds: childrenIds.map(String),
+        };
+        const linkedChild = { ...childJob, data: childData, parentId: parentJobId };
+        const linkedParent = { ...parentJob, data: parentData, childrenIds, dependsOn };
+        const childFinished =
+          this.completedJobs.has(childJobId) || this.depCompletions.has(childJobId);
+        const parentState = childFinished
+          ? parentJob.runAt > Date.now()
+            ? 'delayed'
+            : parentJob.priority > 0
+              ? 'prioritized'
+              : 'waiting'
+          : 'waiting-children';
+        this.storage?.updateFlowLink(linkedChild, linkedParent, parentState);
+
+        (childJob as { parentId: JobId | null }).parentId = parentJobId;
+        (childJob as { data: unknown }).data = childData;
+        parentJob.childrenIds = childrenIds;
+        (parentJob as { dependsOn: JobId[] }).dependsOn = dependsOn;
+        (parentJob as { data: unknown }).data = parentData;
+
+        if (!childFinished) {
+          const shard = this.shards[shardIndex(parentJob.queue)];
+          if (!shard.waitingDeps.has(parentJobId)) {
+            const removed = shard.getQueue(parentJob.queue).remove(parentJobId);
+            if (removed) shard.decrementQueued(parentJobId);
+            shard.waitingDeps.set(parentJobId, parentJob);
+          }
+          shard.registerDependencies(parentJobId, [childJobId]);
+          this.dependencyResults.registerConsumer(parentJobId, dependsOn);
+        }
+      } finally {
+        for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
       }
-    } finally {
-      for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
     }
 
     // Handle race condition: child may have already terminally failed
     // before parent linkage was established (parentId was 'pending').
     // If so, propagate failParentOnFailure now with the real parent ID.
     const childLoc = this.jobIndex.get(childJobId);
+    const childFailureError =
+      childLoc?.type === 'dlq'
+        ? (flowChildFailureError(childJob, this.shards) ?? 'Child job failed')
+        : 'Child job failed';
     if (childLoc?.type === 'dlq' && childJob.failParentOnFailure) {
-      await this.moveParentToFailed(parentJobId, childJob, 'Child job failed');
+      await this.moveParentToFailed(parentJobId, childJob, childFailureError);
     }
     if (
       childLoc?.type === 'dlq' &&
@@ -902,7 +933,7 @@ export class QueueManager {
         childJob.ignoreDependencyOnFailure ||
         childJob.continueParentOnFailure)
     ) {
-      await this.onChildDependencyOption(childJob, 'Child job failed');
+      await this.onChildDependencyOption(childJob, childFailureError);
     }
   }
 
@@ -1008,6 +1039,12 @@ export class QueueManager {
     }
     for (const cid of customIdsToDelete) this.customIdMap.delete(cid);
 
+    // removeOnComplete jobs have no jobIndex entry, but their bounded durable
+    // dependency proofs still belong to the obliterated queue.
+    const removedCompletions = this.storage?.deleteDependencyCompletionsForQueue(queue) ?? [];
+    for (const jobId of removedCompletions) this.depCompletions.delete(jobId);
+    this.reconcileCompletionPins();
+
     // Per-queue cumulative counters are keyed by queue name and never expire on
     // their own; obliterate is the documented way to reclaim ALL state for a
     // queue, so drop its metrics entry too (prevents unbounded growth for
@@ -1042,6 +1079,24 @@ export class QueueManager {
 
   private unregisterQueueName(queue: string): void {
     this.queueNamesCache.delete(queue);
+  }
+
+  private releaseCompletionPins(dependencyIds: Iterable<JobId>): void {
+    releaseDependencyCompletionPins(dependencyIds, {
+      storage: this.storage,
+      shards: this.shards,
+      depCompletions: this.depCompletions,
+      maxDependencyCompletions: this.config.maxCompletedJobs,
+    });
+  }
+
+  private reconcileCompletionPins(): void {
+    reconcileDependencyCompletionPins({
+      storage: this.storage,
+      shards: this.shards,
+      depCompletions: this.depCompletions,
+      maxDependencyCompletions: this.config.maxCompletedJobs,
+    });
   }
 
   clean(queue: string, graceMs: number, state?: string, limit?: number): JobId[] {
@@ -1602,6 +1657,7 @@ export class QueueManager {
     if (parentLoc.type !== 'queue') return;
 
     const idx = shardIndex(parentJob.queue);
+    let releasedDependencies: JobId[] = [];
     await withWriteLock(this.shardLocks[idx], () => {
       // Re-check inside lock to prevent duplicate DLQ entries (TOCTOU guard)
       if (this.jobIndex.get(parentId)?.type !== 'queue') return;
@@ -1610,6 +1666,7 @@ export class QueueManager {
 
       // Remove from waitingDeps if present
       if (shard.waitingDeps.has(parentId)) {
+        releasedDependencies = [...parentJob.dependsOn];
         shard.waitingDeps.delete(parentId);
         shard.unregisterDependencies(parentId, parentJob.dependsOn);
       }
@@ -1634,6 +1691,7 @@ export class QueueManager {
       this.storage?.deleteJob(parentId);
       this.storage?.deleteFlowFailure(parentId, childJob.id);
     });
+    this.releaseCompletionPins(releasedDependencies);
 
     // Parent reached a terminal (DLQ) state — release its flow-failure tracking.
     this.failedChildrenValues.delete(parentId);
@@ -1695,10 +1753,12 @@ export class QueueManager {
     this.failedChildrenValues.set(parentId, existing);
 
     const idx = shardIndex(parentJob.queue);
+    let releasedDependencies: JobId[] = [];
     await withWriteLock(this.shardLocks[idx], () => {
       if (this.jobIndex.get(parentId)?.type !== 'queue') return;
       const shard = this.shards[idx];
       const dependencies = [...parentJob.dependsOn];
+      releasedDependencies = dependencies;
       shard.unregisterDependencies(parentId, dependencies);
       for (const dependency of dependencies) {
         this.dependencyResults.releaseDependency(parentId, dependency);
@@ -1706,6 +1766,7 @@ export class QueueManager {
       (parentJob as { dependsOn: JobId[] }).dependsOn = [];
       this.storage?.updateFlowParentResolution(parentJob);
     });
+    this.releaseCompletionPins(releasedDependencies);
     await this.promoteParentAfterChildFailure(parentId, parentJob, idx);
   }
 
@@ -1726,6 +1787,7 @@ export class QueueManager {
     });
 
     let promoted = false;
+    let releasedDependencies: JobId[] = [];
     await withWriteLock(this.shardLocks[idx], () => {
       // TOCTOU guard
       if (this.jobIndex.get(parentId)?.type !== 'queue') return;
@@ -1734,6 +1796,7 @@ export class QueueManager {
 
       // Remove from waitingDeps
       if (shard.waitingDeps.has(parentId)) {
+        releasedDependencies = [...parentJob.dependsOn];
         shard.waitingDeps.delete(parentId);
         shard.unregisterDependencies(parentId, parentJob.dependsOn);
       }
@@ -1754,6 +1817,7 @@ export class QueueManager {
         promoted = true;
       }
     });
+    this.releaseCompletionPins(releasedDependencies);
 
     if (promoted) {
       this.eventsManager.broadcast({
@@ -1795,6 +1859,7 @@ export class QueueManager {
     // Remove the failed child from the parent's pending deps synchronously so
     // dependency tracking stays consistent; defer only the promotion decision.
     let readyToPromote = false;
+    let releasedDependency: JobId | null = null;
     await withWriteLock(this.shardLocks[idx], () => {
       if (this.jobIndex.get(parentId)?.type !== 'queue') return;
 
@@ -1807,6 +1872,7 @@ export class QueueManager {
       if (depIndex !== -1) {
         parentJob.dependsOn.splice(depIndex, 1);
         shard.unregisterDependencies(parentId, [childJob.id]);
+        releasedDependency = childJob.id;
         this.dependencyResults.releaseDependency(parentId, childJob.id);
         this.storage?.updateFlowParentResolution(parentJob);
       }
@@ -1816,6 +1882,7 @@ export class QueueManager {
         parentJob.dependsOn.length === 0 ||
         parentJob.dependsOn.every((dep) => this.completedJobs.has(dep));
     });
+    if (releasedDependency) this.releaseCompletionPins([releasedDependency]);
 
     if (readyToPromote) {
       await this.promoteParentAfterChildFailure(parentId, parentJob, idx);
@@ -1864,6 +1931,7 @@ export class QueueManager {
     const guards: LockGuard[] = [];
     let removed = false;
     let promoted = false;
+    let releasedDependencies: JobId[] = [];
     try {
       for (const index of shardIndexes) guards.push(await this.shardLocks[index].acquireWrite());
       for (const index of processingIndexes) {
@@ -1888,6 +1956,7 @@ export class QueueManager {
           !this.depCompletions.has(dependency)
       );
       const released = parentJob.dependsOn.filter((dependency) => !unresolved.includes(dependency));
+      releasedDependencies = released;
       const childrenIds = parentJob.childrenIds.filter((childId) => childId !== childJobId);
       const childData = { ...(childJob.data as Record<string, unknown>) };
       delete childData.__parentId;
@@ -1939,6 +2008,7 @@ export class QueueManager {
     } finally {
       for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
     }
+    this.releaseCompletionPins(releasedDependencies);
 
     if (promoted) {
       this.eventsManager.broadcast({

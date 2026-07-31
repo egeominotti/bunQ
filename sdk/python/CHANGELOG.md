@@ -5,6 +5,30 @@ All notable changes to `bunqueue-client` (Python SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-07-30
+
+### Added
+
+- Add deterministic Hypothesis campaigns for generated flow trees, shrinking,
+  ID uniqueness, graph closure, reciprocal links, shape isomorphism, option
+  forwarding, chain/fan-in topology, and broker snapshot validation.
+- Add a mutmut gate scoped to the pure tree/legacy planners and snapshot
+  validator.
+
+### Fixed
+
+- Compile trees, bulk trees, chains, and fan-in graphs with all IDs preallocated
+  and commit them through one broker-side atomic `PUSHF` command. Partial
+  `PUSH`/`UpdateParent` graphs and best-effort rollback are no longer possible.
+- Map public `job_id` to the planned ID and wire `customId`, preserve explicit
+  empty tags, reject repeat/deduplication/debounce and caller-owned topology,
+  reject `job_id` queue defaults, and protect internal flow metadata from
+  user-data overwrites.
+- Reject falsy non-dictionary `opts` and `queues_options` values instead of
+  silently treating malformed option containers as omitted.
+- Validate the exact returned snapshot ID/queue set and construct every public
+  `FlowNode` from committed broker snapshots.
+
 ## [0.1.5] - 2026-07-20
 
 First version published on PyPI: `pip install bunqueue-client`.

@@ -16,7 +16,7 @@
 </div></section>
 <div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">Job</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#attempts">attempts</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#backoff">backoff</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#backoffconfig">backoffConfig</a><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.BackoffConfig.html" class="tsd-signature-type tsd-kind-interface">BackoffConfig</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#childrencompleted">childrenCompleted</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#childrenids">childrenIds</a><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#completedat">completedAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#continueparentonfailure">continueParentOnFailure</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#createdat">createdAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#customid">customId</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#data">data</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">unknown</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#debounceid">debounceId</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#debouncettl">debounceTtl</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#deduplicationextend">deduplicationExtend</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#deduplicationreplace">deduplicationReplace</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#deduplicationttl">deduplicationTtl</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#dependson">dependsOn</a><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#failparentonfailure">failParentOnFailure</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#groupid">groupId</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#id">id</a><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#ignoredependencyonfailure">ignoreDependencyOnFailure</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#keeplogs">keepLogs</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#lastheartbeat">lastHeartbeat</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#lifo">lifo</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxattempts">maxAttempts</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#parentid">parentId</a><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#priority">priority</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#progress">progress</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#progressmessage">progressMessage</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#queue">queue</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#removedependencyonfailure">removeDependencyOnFailure</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#removeoncomplete">removeOnComplete</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#removeonfail">removeOnFail</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#repeat">repeat</a><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.RepeatConfig.html" class="tsd-signature-type tsd-kind-interface">RepeatConfig</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#runat">runAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#sizelimit">sizeLimit</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#stacktrace">stacktrace</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#stacktracelimit">stackTraceLimit</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#stallcount">stallCount</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#stalltimeout">stallTimeout</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#startedat">startedAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#tags">tags</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#timeline">timeline</a><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.JobTimelineEntry.html" class="tsd-signature-type tsd-kind-interface">JobTimelineEntry</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#timeout">timeout</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#ttl">ttl</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#uniquekey">uniqueKey</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L81">domain/types/job.ts:81</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L81">domain/types/job.ts:81</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -77,259 +77,259 @@
 <h3 class="tsd-anchor-link" id="attempts"><span>attempts</span><a href="#attempts" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">attempts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L95">domain/types/job.ts:95</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L95">domain/types/job.ts:95</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="backoff"><code class="tsd-tag">Readonly</code><span>backoff</span><a href="#backoff" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">backoff</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div>
 <div class="tsd-comment tsd-typography"><p>Backoff delay in ms or backoff configuration</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L98">domain/types/job.ts:98</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L98">domain/types/job.ts:98</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="backoffconfig"><code class="tsd-tag">Readonly</code><span>backoff<wbr/>Config</span><a href="#backoffconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">backoffConfig</span><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.BackoffConfig.html" class="tsd-signature-type tsd-kind-interface">BackoffConfig</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Backoff configuration (if using object-based backoff)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L100">domain/types/job.ts:100</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L100">domain/types/job.ts:100</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="childrencompleted"><span>children<wbr/>Completed</span><a href="#childrencompleted" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">childrenCompleted</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L114">domain/types/job.ts:114</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L114">domain/types/job.ts:114</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="childrenids"><span>children<wbr/>Ids</span><a href="#childrenids" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">childrenIds</span><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L113">domain/types/job.ts:113</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L113">domain/types/job.ts:113</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="completedat"><span>completed<wbr/>At</span><a href="#completedat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">completedAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L92">domain/types/job.ts:92</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L92">domain/types/job.ts:92</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="continueparentonfailure"><code class="tsd-tag">Readonly</code><span>continue<wbr/>Parent<wbr/>On<wbr/>Failure</span><a href="#continueparentonfailure" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">continueParentOnFailure</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Continue parent processing even if this child fails</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L152">domain/types/job.ts:152</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L152">domain/types/job.ts:152</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="createdat"><code class="tsd-tag">Readonly</code><span>created<wbr/>At</span><a href="#createdat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">createdAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L86">domain/types/job.ts:86</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L86">domain/types/job.ts:86</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="customid"><code class="tsd-tag">Readonly</code><span>custom<wbr/>Id</span><a href="#customid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">customId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L108">domain/types/job.ts:108</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L108">domain/types/job.ts:108</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="data"><code class="tsd-tag">Readonly</code><span>data</span><a href="#data" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">data</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">unknown</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L84">domain/types/job.ts:84</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L84">domain/types/job.ts:84</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="debounceid"><code class="tsd-tag">Readonly</code><span>debounce<wbr/>Id</span><a href="#debounceid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">debounceId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Debounce ID</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L162">domain/types/job.ts:162</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L162">domain/types/job.ts:162</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="debouncettl"><code class="tsd-tag">Readonly</code><span>debounce<wbr/>Ttl</span><a href="#debouncettl" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">debounceTtl</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Debounce TTL in milliseconds</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L164">domain/types/job.ts:164</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L164">domain/types/job.ts:164</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="deduplicationextend"><code class="tsd-tag">Readonly</code><span>deduplication<wbr/>Extend</span><a href="#deduplicationextend" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">deduplicationExtend</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Extend deduplication TTL on duplicate</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L158">domain/types/job.ts:158</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L158">domain/types/job.ts:158</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="deduplicationreplace"><code class="tsd-tag">Readonly</code><span>deduplication<wbr/>Replace</span><a href="#deduplicationreplace" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">deduplicationReplace</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Replace job data on duplicate while in delayed state</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L160">domain/types/job.ts:160</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L160">domain/types/job.ts:160</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="deduplicationttl"><code class="tsd-tag">Readonly</code><span>deduplication<wbr/>Ttl</span><a href="#deduplicationttl" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">deduplicationTtl</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Deduplication TTL in milliseconds</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L156">domain/types/job.ts:156</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L156">domain/types/job.ts:156</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="dependson"><code class="tsd-tag">Readonly</code><span>depends<wbr/>On</span><a href="#dependson" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">dependsOn</span><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L111">domain/types/job.ts:111</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L111">domain/types/job.ts:111</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="failparentonfailure"><code class="tsd-tag">Readonly</code><span>fail<wbr/>Parent<wbr/>On<wbr/>Failure</span><a href="#failparentonfailure" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">failParentOnFailure</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Fail parent job if this child job fails</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L148">domain/types/job.ts:148</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L148">domain/types/job.ts:148</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="groupid"><code class="tsd-tag">Readonly</code><span>group<wbr/>Id</span><a href="#groupid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">groupId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L118">domain/types/job.ts:118</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L118">domain/types/job.ts:118</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="id"><code class="tsd-tag">Readonly</code><span>id</span><a href="#id" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">id</span><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L82">domain/types/job.ts:82</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L82">domain/types/job.ts:82</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="ignoredependencyonfailure"><code class="tsd-tag">Readonly</code><span>ignore<wbr/>Dependency<wbr/>On<wbr/>Failure</span><a href="#ignoredependencyonfailure" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">ignoreDependencyOnFailure</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Move job to parent's failed dependencies instead of blocking parent</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L154">domain/types/job.ts:154</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L154">domain/types/job.ts:154</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="keeplogs"><code class="tsd-tag">Readonly</code><span>keep<wbr/>Logs</span><a href="#keeplogs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">keepLogs</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Maximum number of log entries to keep</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L144">domain/types/job.ts:144</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L144">domain/types/job.ts:144</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="lastheartbeat"><span>last<wbr/>Heartbeat</span><a href="#lastheartbeat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">lastHeartbeat</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L136">domain/types/job.ts:136</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L136">domain/types/job.ts:136</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="lifo"><code class="tsd-tag">Readonly</code><span>lifo</span><a href="#lifo" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">lifo</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L87">domain/types/job.ts:87</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L87">domain/types/job.ts:87</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxattempts"><code class="tsd-tag">Readonly</code><span>max<wbr/>Attempts</span><a href="#maxattempts" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">maxAttempts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L96">domain/types/job.ts:96</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L96">domain/types/job.ts:96</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="parentid"><code class="tsd-tag">Readonly</code><span>parent<wbr/>Id</span><a href="#parentid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">parentId</span><span class="tsd-signature-symbol">:</span> <a href="../types/domain_types_job.JobId.html" class="tsd-signature-type tsd-kind-type-alias">JobId</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L112">domain/types/job.ts:112</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L112">domain/types/job.ts:112</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="priority"><code class="tsd-tag">Readonly</code><span>priority</span><a href="#priority" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">priority</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L85">domain/types/job.ts:85</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L85">domain/types/job.ts:85</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="progress"><span>progress</span><a href="#progress" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">progress</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L121">domain/types/job.ts:121</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L121">domain/types/job.ts:121</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="progressmessage"><span>progress<wbr/>Message</span><a href="#progressmessage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">progressMessage</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L122">domain/types/job.ts:122</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L122">domain/types/job.ts:122</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="queue"><code class="tsd-tag">Readonly</code><span>queue</span><a href="#queue" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">queue</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L83">domain/types/job.ts:83</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L83">domain/types/job.ts:83</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="removedependencyonfailure"><code class="tsd-tag">Readonly</code><span>remove<wbr/>Dependency<wbr/>On<wbr/>Failure</span><a href="#removedependencyonfailure" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">removeDependencyOnFailure</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Remove dependency relationship if this job fails</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L150">domain/types/job.ts:150</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L150">domain/types/job.ts:150</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="removeoncomplete"><code class="tsd-tag">Readonly</code><span>remove<wbr/>On<wbr/>Complete</span><a href="#removeoncomplete" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">removeOnComplete</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L129">domain/types/job.ts:129</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L129">domain/types/job.ts:129</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="removeonfail"><code class="tsd-tag">Readonly</code><span>remove<wbr/>On<wbr/>Fail</span><a href="#removeonfail" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">removeOnFail</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L130">domain/types/job.ts:130</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L130">domain/types/job.ts:130</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="repeat"><code class="tsd-tag">Readonly</code><span>repeat</span><a href="#repeat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">repeat</span><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.RepeatConfig.html" class="tsd-signature-type tsd-kind-interface">RepeatConfig</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L133">domain/types/job.ts:133</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L133">domain/types/job.ts:133</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="runat"><span>run<wbr/>At</span><a href="#runat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">runAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L90">domain/types/job.ts:90</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L90">domain/types/job.ts:90</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="sizelimit"><code class="tsd-tag">Readonly</code><span>size<wbr/>Limit</span><a href="#sizelimit" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">sizeLimit</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Maximum job data size in bytes</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L146">domain/types/job.ts:146</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L146">domain/types/job.ts:146</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="stacktrace"><span>stacktrace</span><a href="#stacktrace" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">stacktrace</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Last failure's stack trace lines (trimmed, capped at stackTraceLimit). Null until a FAIL carries a stack. (#74)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L126">domain/types/job.ts:126</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L126">domain/types/job.ts:126</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="stacktracelimit"><code class="tsd-tag">Readonly</code><span>stack<wbr/>Trace<wbr/>Limit</span><a href="#stacktracelimit" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">stackTraceLimit</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div>
 <div class="tsd-comment tsd-typography"><p>Maximum stack trace lines to store</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L142">domain/types/job.ts:142</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L142">domain/types/job.ts:142</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="stallcount"><span>stall<wbr/>Count</span><a href="#stallcount" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">stallCount</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L138">domain/types/job.ts:138</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L138">domain/types/job.ts:138</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="stalltimeout"><code class="tsd-tag">Readonly</code><span>stall<wbr/>Timeout</span><a href="#stalltimeout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">stallTimeout</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L137">domain/types/job.ts:137</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L137">domain/types/job.ts:137</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="startedat"><span>started<wbr/>At</span><a href="#startedat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">startedAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L91">domain/types/job.ts:91</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L91">domain/types/job.ts:91</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="tags"><code class="tsd-tag">Readonly</code><span>tags</span><a href="#tags" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">tags</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L117">domain/types/job.ts:117</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L117">domain/types/job.ts:117</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="timeline"><span>timeline</span><a href="#timeline" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">timeline</span><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.JobTimelineEntry.html" class="tsd-signature-type tsd-kind-interface">JobTimelineEntry</a><span class="tsd-signature-symbol">[]</span></div>
 <div class="tsd-comment tsd-typography"><p>State transition timeline (in-memory only, not persisted to SQLite)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L167">domain/types/job.ts:167</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L167">domain/types/job.ts:167</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="timeout"><code class="tsd-tag">Readonly</code><span>timeout</span><a href="#timeout" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">timeout</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L104">domain/types/job.ts:104</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L104">domain/types/job.ts:104</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="ttl"><code class="tsd-tag">Readonly</code><span>ttl</span><a href="#ttl" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">ttl</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L103">domain/types/job.ts:103</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L103">domain/types/job.ts:103</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="uniquekey"><code class="tsd-tag">Readonly</code><span>unique<wbr/>Key</span><a href="#uniquekey" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">uniqueKey</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/job.ts#L107">domain/types/job.ts:107</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/job.ts#L107">domain/types/job.ts:107</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

@@ -139,7 +139,8 @@ language covers the same failure classes, with idiomatic mechanics:
 | Unit / integration / E2E | Pure option and wire logic, real TCP framing, Queue/Worker/Flow business paths, and permanent regressions for fixed bugs |
 | Contract | All 17 independent producer/consumer conformance checks |
 | Race / idempotency | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded |
-| Property / fuzz | Fixed-seed generated portable payloads preserve invariants; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
+| Property / fuzz | Native generators shrink flow plans while checking graph conservation, reciprocal edges, ordering, reserved metadata, and zero I/O on invalid input; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
+| Mutation | A pinned native mutation engine challenges each SDK's pure flow planner on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant |
 | Chaos / recovery | Hard process termination, half-open timeout, reconnect and durable-job visibility after restart |
 | Load / spike | Bounded bulk and worker bursts run in the normal gate, including 512-1500 job spikes |
 | Soak / stress | One long-lived SDK connection repeatedly adds, queries, and resets batches for a configurable duration and batch size |
@@ -171,8 +172,20 @@ variable. The other runners have no implicit test timeout.
 Raise `BUNQUEUE_SDK_SOAK_BATCH` to explore client backpressure and the practical
 breaking point. That is a diagnostic stress profile, not a stable performance
 threshold. Go also exposes `FuzzHardeningPortableWirePayload`; CI fuzzes it for
-60 seconds weekly. Other SDKs execute deterministic mutation corpora in the
-normal gate so their results remain reproducible.
+60 seconds weekly. All SDKs keep deterministic malformed-input corpora in the
+normal gate; these are separate from mutation testing, which rewrites planner
+code and therefore runs in its own scheduled/manual campaign after the normal
+suite is green.
+
+`.github/workflows/sdk-mutation.yml` is that campaign. It pins every mutation
+engine, retains the machine-readable/native report, and must never weaken a
+language's checked-in ratchet at the command line. The current minimums are
+98% for StrykerJS, 97% for mutmut, 100% for Muex, 99% MSI/covered MSI for
+Infection, and 99.9% efficacy/coverage for Gremlins. `cargo-mutants` fails on
+every viable survivor. A score above a ratchet is not sufficient by itself:
+every survivor is classified as a missing assertion or a behaviorally
+equivalent mutation, and non-equivalent survivors require a stronger property
+before handoff.
 
 Database power-loss, disk-full, WAL integrity, and schema upgrade/downgrade
 tests belong to the broker's persistence suite, not to network clients that
@@ -191,10 +204,12 @@ diagnostic only and must never be published as benchmark results.
 `Dockerfile.test` is deliberately separate from the production `Dockerfile`.
 The production image contains only the compiled server; the test image contains
 `src/`, `test/`, `scripts/`, `bench/`, configuration, and development
-dependencies. The allow-listed configuration includes `docs/vercel.json`
-because the unit regression validates Vercel's header-rule schema before a
-deployment can fail. `Dockerfile.test.dockerignore` limits the build context to
-those inputs.
+dependencies. The allow-listed configuration includes `docs/vercel.json`, the
+CI workflow files, and the small per-SDK mutation configuration files consumed
+by structural regressions. It also includes `Dockerfile.test` itself so tests
+can verify that this contract stays synchronized with the workflow files. It
+does not install SDK toolchains or copy credentials into the core test image.
+`Dockerfile.test.dockerignore` limits the build context to those inputs.
 
 The environment is reproducible:
 
@@ -277,6 +292,10 @@ otherwise the runner inherits the daemon's configured CPU ceiling.
 `BUNQUEUE_TEST_IMAGE` changes the local image tag. The default memory ceiling is
 4 GB per container. Use `BUNQUEUE_TEST_SEQUENTIAL=1` to run the same isolated
 suites one after another when diagnosing a possible resource-contention failure.
+Functional tests that depend on background timers must poll the observable state
+with a generous deadline. A fixed sleep proves only that a minimum duration
+elapsed; it does not bound when a timer callback runs under parallel CPU or I/O
+contention.
 
 ## TCP suite isolation
 
@@ -307,6 +326,21 @@ GitHub Actions already gives each job a fresh virtual machine, so the unit, TCP,
 and embedded jobs remain parallel rather than starting nested Docker. They use
 the same pinned Bun version and frozen lockfile as the local sandbox. A CI job is
 the isolation equivalent of one local suite container.
+
+`.github/workflows/sdk.yml` is both reusable and directly schedulable. CI calls
+it once and waits for an explicit `sdk-gate` that checks the result of all six
+language jobs even when an earlier one failed or was cancelled. A root
+`quality-gate` similarly checks every core, docs, and SDK result. The version
+gate, binary matrix, container publication, and GitHub release are all
+transitively downstream; Docker publication also waits for the complete binary
+matrix. The TypeScript package publisher is manual, runs the same reusable
+six-SDK gate, uses frozen installs and pinned Bun, publishes with `bun publish`,
+and creates its tag only after the registry accepts the package.
+
+The finite release-DAG relationships are parsed and mutation-checked by
+`test/repro-release-sdk-gate.test.ts`; actionlint validates the full GitHub
+Actions syntax and reusable-workflow contracts in the lint job. Property-based
+testing is deliberately not used for this small finite edge set.
 
 ## Benchmarks are native
 

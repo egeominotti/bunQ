@@ -6,12 +6,18 @@ import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 import { shardIndex } from '../shared/hash';
 import type { SetLike } from '../shared/lru';
 import type { DependencyResultTracker } from './dependencyResultTracker';
+import {
+  type DependencyCompletionTracker,
+  reconcileDependencyCompletionPins,
+} from './dependencyCompletions';
 
 export interface FlowFailureRecoveryContext {
   readonly storage: SqliteStorage;
   readonly shards: Shard[];
   readonly jobIndex: Map<JobId, JobLocation>;
   readonly completedJobs: SetLike<JobId>;
+  readonly depCompletions?: DependencyCompletionTracker;
+  readonly maxDependencyCompletions: number;
   readonly dependencyResults: DependencyResultTracker;
   readonly failedChildrenValues: Map<JobId, Record<string, string>>;
   readonly ignoredChildrenFailures: Map<JobId, Record<string, string>>;
@@ -113,10 +119,14 @@ export function recoverFlowFailures(ctx: FlowFailureRecoveryContext): void {
     }
     const ready =
       parent.dependsOn.length === 0 ||
-      parent.dependsOn.every((dependency) => ctx.completedJobs.has(dependency));
+      parent.dependsOn.every(
+        (dependency) =>
+          ctx.completedJobs.has(dependency) || (ctx.depCompletions?.has(dependency) ?? false)
+      );
     if (ready) promote(parent, ctx);
     if (record.mode === 'remove') {
       ctx.storage.deleteFlowFailure(record.parentId, record.childId);
     }
   }
+  reconcileDependencyCompletionPins(ctx);
 }

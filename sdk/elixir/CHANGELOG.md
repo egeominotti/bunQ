@@ -4,6 +4,17 @@
 
 - Fix the sustained soak assertion to match the public `Queue.obliterate/1`
   return value, `:ok`.
+- Replace multi-command flow creation and best-effort rollback with a pure
+  tree/chain planner and one broker-atomic `PUSHF` commit.
+- Preallocate secure colon-free IDs, forward explicit job IDs as `customId`,
+  make parent/child links and internal markers reciprocal, and reject reserved
+  data, topology overrides (including empty values), non-empty/invalid chain
+  `children`, repeat, deduplication, and debounce before I/O.
+- Validate the exact ID/queue bijection in returned snapshots and construct
+  nodes from those authoritative snapshots.
+- Add StreamData 1.4.0 tree/chain properties with shrinking, atomic tree and
+  chain E2E tests, and separate Muex 0.8.1 mutation campaigns for the pure
+  planner and snapshot validator.
 
 ## 0.1.1
 

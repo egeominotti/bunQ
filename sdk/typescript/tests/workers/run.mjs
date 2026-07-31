@@ -81,7 +81,11 @@ const CHECKS = {
     r.dlqSize === 1 &&
     r.retried === 1 &&
     ['waiting', 'prioritized'].includes(r.stateAfter),
-  '/flows': (r) => r.chainLength === 3 && r.children === 2 && r.parentWaitsChildren === true,
+  '/flows': (r) =>
+    r.chainLength === 3 &&
+    r.children === 2 &&
+    r.parentWaitsChildren === true &&
+    r.portableIds === true,
   '/cron': (r) => r.listed === true && r.spawned >= 1 && r.removed === true,
   '/auth': (r) => r.authedAdd === true && r.unauthedRejected === true,
   '/api-moves': (r) =>

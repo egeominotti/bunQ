@@ -88,7 +88,7 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
   (`ack_batch={"max_size": 50, "max_delay_ms": 5}`: successful ACKs flush as
   one `ACKB` on size/delay/close; a job stays active until its batch settles)
 - **FlowProducer**: `add` (parent/child trees), `add_bulk`, `add_chain`
-  (sequential), `add_bulk_then` (fan-in), `get_flow`, atomic rollback
+  (sequential), `add_bulk_then` (fan-in), `get_flow`, atomic broker commit
 - **Simple Mode** (`Bunqueue`): Queue + Worker in one object — routes,
   onion middleware, in-process retry (fixed/exponential/jitter/fibonacci/
   custom + `retry_if`), circuit breaker, batch accumulation, event triggers,
@@ -101,6 +101,73 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
 Not applicable outside Bun (by design): embedded mode, sandboxed workers,
 `QueueEvents` (in-process subscription; use webhooks or SSE/WS on the HTTP
 port instead).
+
+## Flows
+
+```python
+from bunqueue import FlowProducer
+
+with FlowProducer(host="localhost", port=6789) as flows:
+    node = flows.add(
+        {
+            "name": "assemble",
+            "queueName": "orders",
+            "opts": {"job_id": "order-42-assembly"},
+            "children": [
+                {
+                    "name": "reserve-stock",
+                    "queueName": "orders",
+                    "opts": {"job_id": "order-42-stock"},
+                },
+                {"name": "charge-card", "queueName": "orders"},
+            ],
+        },
+        {"queues_options": {"orders": {"attempts": 3, "backoff": 500}}},
+    )
+    assert node.job.id == "order-42-assembly"
+    assert node.children[0].job.parent_id == node.job.id
+
+    ids = flows.add_chain(
+        [
+            {"name": "extract", "queueName": "pipeline"},
+            {"name": "transform", "queueName": "pipeline"},
+            {"name": "load", "queueName": "pipeline"},
+        ]
+    )
+
+    fan_in = flows.add_bulk_then(
+        [
+            {"name": "part-a", "queueName": "pipeline"},
+            {"name": "part-b", "queueName": "pipeline"},
+        ],
+        {"name": "merge", "queueName": "pipeline"},
+    )
+```
+
+`add`, `add_bulk`, `add_chain`, and `add_bulk_then` compile the full graph
+locally, preallocate every ID, and send one `PUSHF` command. The broker either
+persists and publishes the complete graph or creates no jobs. Public
+`FlowNode` results are reconstructed from committed broker snapshots.
+
+`opts["job_id"]` becomes both the planned ID and wire `customId`; generated
+IDs are portable UUID hex strings without `:`. Atomic flows reject `repeat`,
+`deduplication`/`unique_key`, and `debounce`. The planner owns `parent_id`,
+`depends_on`, and `children_ids`; data keys named `name` or beginning with
+`__` are reserved for immutable flow metadata and are rejected.
+`queues_options` may supply scheduling and retention defaults, but not
+`job_id`; identity belongs to the individual node. If supplied, `opts`,
+`queues_options`, and each per-queue defaults value must be dictionaries;
+malformed falsy values such as `[]`, `""`, `0`, or `False` are rejected rather
+than interpreted as omitted options.
+
+A transport timeout after `PUSHF` is ambiguous: the broker may have committed
+the complete graph before the response was lost. Assign a deterministic
+`opts["job_id"]` to every node and reuse the same graph on retry. If the first
+call did not commit, the retry can create it; if it did, strict `PUSHF`
+collision checking returns `already exists` instead of rewriting the graph or
+fabricating snapshots. Treat that error as a reconciliation signal and query
+the known stable IDs. Regenerated IDs can create a second graph after an
+uncertain outcome.
 
 ## Errors
 
@@ -151,19 +218,37 @@ transport and cannot fail a queue operation.
 ## Tests
 
 ```bash
-python -m venv .venv && .venv/bin/pip install msgpack
+python -m venv .venv && .venv/bin/pip install -e '.[test]'
+.venv/bin/python -m pytest tests/test_flow_plan_property.py tests/test_flow_commit.py \
+  tests/test_flow_plan_validation.py tests/test_flow_plan_limits.py \
+  tests/test_flow_plan_contract.py tests/test_flow_plan_wire_contract.py \
+  --hypothesis-seed=20260730
 .venv/bin/python tests/test_integration.py   # basic (8)
 .venv/bin/python tests/run_e2e.py            # full e2e vs real server (112)
 BUNQUEUE_SDK_SOAK_SECONDS=3600 .venv/bin/python tests/soak.py
 ```
 
-Both spawn a real bunqueue server (`bun src/main.ts` from the repo root). The
+Mutation testing is intentionally a final, slower quality gate and requires
+Python 3.10 or later (the runtime package remains compatible with Python 3.9):
+
+```bash
+.venv/bin/pip install -e '.[test,mutation]'
+.venv/bin/mutmut run       # planners plus the pure snapshot validator
+.venv/bin/mutmut results
+```
+
+The integration and E2E runners spawn a real bunqueue server (`bun src/main.ts`
+from the repo root). The
 E2E runner emits a monotonic duration for each case so the isolated SDK gate
 can rank slow tests without relying on timing assertions. Hardening covers
 independent-connection idempotency and single-lease contention, fixed-seed
 generated payloads, malformed mutation corpora, 1000-job bursts, and
 crash/restart recovery. The opt-in soak keeps one connection alive; set
 `BUNQUEUE_SDK_SOAK_BATCH` to increase load.
+
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

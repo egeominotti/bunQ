@@ -144,9 +144,73 @@ No token, job payload, result, or TLS secret is included in telemetry.
 
 ## Flows
 
-`Bunqueue.FlowProducer` creates children before parents, updates placeholder
-parents, and rolls back created jobs best-effort after an error. It also
-supports dependency chains.
+`Bunqueue.FlowProducer` compiles the complete graph locally, then sends exactly
+one `PUSHF` command. The broker either publishes every job with all links
+resolved or publishes none. Returned nodes contain authoritative broker
+snapshots.
+
+```elixir
+producer = Bunqueue.FlowProducer.new(host: "127.0.0.1", port: 6789)
+
+{:ok, root} =
+  Bunqueue.FlowProducer.add(producer, %{
+    name: "send-summary",
+    queue: "reports",
+    data: %{account: "acme"},
+    options: [jobId: "summary-acme"],
+    children: [
+      %{
+        name: "build-report",
+        queue: "reports",
+        data: %{}
+      }
+    ]
+  })
+
+"summary-acme" = root.job.id
+[%{job: child}] = root.children
+true = is_binary(child.id)
+Bunqueue.FlowProducer.close(producer)
+```
+
+Children run before their parent. A chain makes each step depend only on the
+immediately preceding step:
+
+```elixir
+producer = Bunqueue.FlowProducer.new(host: "127.0.0.1", port: 6789)
+
+{:ok, [extract_id, transform_id]} =
+  Bunqueue.FlowProducer.add_chain(producer, [
+    %{name: "extract", queue: "pipeline", data: %{}},
+    %{name: "transform", queue: "pipeline", data: %{}}
+  ])
+
+true = extract_id != transform_id
+Bunqueue.FlowProducer.close(producer)
+```
+
+The planner generates cryptographically secure, colon-free IDs unless `jobId`
+is supplied. A custom ID is also sent as the server's `customId`, so custom-ID
+lookup remains available. Duplicate, empty, colon-containing, and overlong IDs
+are rejected before network I/O.
+
+Planner errors never touch the connection, and broker rejection publishes
+nothing. A timeout or malformed response after `PUSHF` is necessarily
+ambiguous: the broker may already have committed, so the client returns an
+error and does not attempt a partial rollback. Give production flows stable
+explicit `jobId` values when callers may retry. The retry commits if the first
+call did not; otherwise strict `PUSHF` collision checking returns
+`already exists`. Treat that error as a reconciliation signal and query the
+known IDs; the SDK does not fabricate the original snapshots.
+
+Flow topology is owned by `FlowProducer`: `parentId`, `dependsOn`, and
+`childrenIds` are rejected even when supplied as empty values. User data cannot
+contain `name` or a key starting with `__`, because those fields carry
+canonical topology markers. Atomic flows also reject repeat,
+deduplication/unique-key, and debounce options. Chain steps may use
+`children: []`, but non-empty or non-list `children` values are rejected. Trees
+accept descendants through depth 100 from a depth-zero root, and one commit is
+limited to 10,000 jobs.
 
 ## Quality assurance
 
@@ -158,6 +222,9 @@ brokers spawned per run) and the cross-language
 cd sdk/elixir
 mix format --check-formatted
 mix test
+mix test test/flow_planner_property_test.exs test/flow_snapshots_test.exs
+# Two Muex 0.8.1 campaigns: planner properties, then snapshot bijection.
+mix mutants
 # --timeout must exceed the soak: ExUnit kills a test at 60s by default.
 BUNQUEUE_SDK_SOAK_SECONDS=3600 mix test --include soak --timeout 3900000 test/soak_test.exs
 
@@ -166,9 +233,16 @@ bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.ex
 ```
 
 Hardening adds concurrent custom-id/single-lease races, generated payloads,
-malformed-term fuzzing, a 512-job spike, and durable SIGKILL/restart recovery.
-The tagged soak profile reuses one OTP connection; `BUNQUEUE_SDK_SOAK_BATCH`
-controls stress.
+malformed-term fuzzing, shrinkable StreamData flow properties, exact snapshot
+validation, atomic tree/chain E2E cases, a 512-job spike, and durable
+SIGKILL/restart recovery. `mix mutants` invokes Muex 0.8.1 separately for
+`lib/bunqueue/flow_planner.ex` and `lib/bunqueue/flow_snapshots.ex`, with only
+their relevant pure tests. The tagged soak profile reuses one OTP connection;
+`BUNQUEUE_SDK_SOAK_BATCH` controls stress.
+
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

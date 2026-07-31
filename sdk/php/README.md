@@ -99,10 +99,56 @@ the processor: `$job->extendLock(60_000);`
 | DLQ | `getDlq`, `retryDlq`, `purgeDlq` |
 | Schedulers | `upsertJobScheduler` (cron pattern or `every`, execution `limit`), `getJobScheduler`, `getJobSchedulers`, `removeJobScheduler` |
 | Admin | webhooks, `setRateLimit(limit, durationMs, ttlMs)`, `getWorkers`, `getStats`, `listQueues`, `ping` |
-| Flows | `FlowProducer`: parent/child trees, `addChain`, `getFlow`, automatic rollback |
+| Flows | `FlowProducer`: atomic parent/child trees, `addChain`, `getFlow` |
 
 TLS: `['tls' => true]` (system CAs, verified) or
 `['tls' => ['caFile' => './ca.pem']]`. Auth: `['token' => '...']`.
+
+### Atomic flows
+
+`FlowProducer` validates and resolves the complete graph locally, then submits
+exactly one `PUSHF` command. A rejected plan performs no broker I/O; a rejected
+commit exposes no partial tree and needs no client-side rollback.
+
+```php
+use Bunqueue\FlowProducer;
+
+$flows = new FlowProducer(['host' => 'localhost', 'port' => 6789]);
+try {
+    $tree = $flows->add([
+        'name' => 'publish-release',
+        'queueName' => 'release',
+        'opts' => ['jobId' => 'release-2026-07-30'],
+        'children' => [
+            ['name' => 'build', 'queueName' => 'build'],
+            ['name' => 'test', 'queueName' => 'test'],
+        ],
+    ]);
+    printf("root=%s children=%d\n", $tree->job->id(), count($tree->children));
+
+    $ids = $flows->addChain([
+        ['name' => 'extract', 'queueName' => 'etl'],
+        ['name' => 'transform', 'queueName' => 'etl'],
+        ['name' => 'load', 'queueName' => 'etl'],
+    ]);
+} finally {
+    $flows->close();
+}
+```
+
+Flow data cannot overwrite `name` or `__*` markers. `parentId`, `dependsOn`
+and `childrenIds` are owned by the planner, while repeat, deduplication and
+debounce are rejected because they cannot be composed safely into the atomic
+graph. Custom `jobId` values are sent as `customId`; generated IDs are portable
+lowercase hex without the protocol's `:` separator. See
+[INVARIANTS.md](INVARIANTS.md#flowproducer-and-atomic-pushf).
+
+A timeout after `PUSHF` cannot prove whether the broker committed. If the
+caller may retry a production flow, assign a stable explicit `jobId` to every
+node and reuse the same graph. If the first call did not commit, the retry can
+create it; otherwise strict `PUSHF` collision checking returns `already exists`.
+Treat that error as a reconciliation signal and query the known IDs; the SDK
+does not rewrite the graph or fabricate successful snapshots.
 
 ### Telemetry
 
@@ -133,16 +179,39 @@ cross-language [conformance suite](https://github.com/egeominotti/bunqueue/tree/
 
 ```bash
 composer install
-php tests/run-e2e.php                                # 48 e2e tests
+composer test:property                              # Eris + PHPUnit, shrinking
+php tests/run-e2e.php                               # property tests, then e2e
 BUNQUEUE_SDK_SOAK_SECONDS=3600 php tests/soak.php   # sustained profile
 cd ../conformance && bun runner.ts --driver "php drivers/php.php"   # 17/17
 cd ../.. && bun run test:sandbox:sdk
 ```
 
+Mutation testing is a separate PHP 8.4 job because Infection 0.34.1 requires
+PHP `^8.3`; normal installs remain compatible with PHP 8.1–8.4:
+
+```bash
+curl -fsSL https://github.com/infection/infection/releases/download/0.34.1/infection.phar \
+  -o infection.phar
+echo '4e8f4235742784f45f2b883a64767a1533c58efcb9f5bd60c62cc6f50fd14035  infection.phar' \
+  | sha256sum -c -
+pecl install pcov-1.0.12
+composer mutation
+```
+
+The mutation surface is limited to the pure flow planner and authoritative
+snapshot validator. The 99% MSI ratchet and reports are configured in
+[`infection.json5`](infection.json5); outputs land in `build/infection.log`,
+`build/infection.html`, `build/infection.json`, and
+`build/infection-summary.json`.
+
 The native suite includes multi-process custom-id and single-lease races,
 fixed-seed generated payloads, malformed depth fuzzing, a 512-job spike, and
 SIGKILL/reconnect durability. The soak profile reuses one connection; adjust
 `BUNQUEUE_SDK_SOAK_BATCH` for stress diagnostics.
+
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

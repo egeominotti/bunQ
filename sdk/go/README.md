@@ -69,7 +69,7 @@ Return `bunqueue.NewUnrecoverableError("...")` from a processor to skip retries 
 
 ## Surface
 
-Queues (add, bulk, custom ids, deduplication), query (jobs, states, results, progress, `WaitForJob`), control (pause, drain, clean, obliterate, promote, retry), DLQ (`GetDlq`, `RetryDlq`, `PurgeDlq`), schedulers (cron pattern or fixed interval, execution `Limit`), webhooks, rate limit, monitoring (`GetWorkers`, `GetStats`), and flows (`FlowProducer`: parent/children trees, chains, rollback).
+Queues (add, bulk, custom ids, deduplication), query (jobs, states, results, progress, `WaitForJob`), control (pause, drain, clean, obliterate, promote, retry), DLQ (`GetDlq`, `RetryDlq`, `PurgeDlq`), schedulers (cron pattern or fixed interval, execution `Limit`), webhooks, rate limit, monitoring (`GetWorkers`, `GetStats`), and atomic flows (`FlowProducer`: parent/children trees, chains, reconstruction).
 
 Rate limits accept the delivery window and broker-side expiry:
 
@@ -84,6 +84,58 @@ queue.SetRateLimit(100, bunqueue.RateLimitOptions{
 both explicit `false` and omission reach the broker correctly.
 
 TLS: pass `TLS: &bunqueue.TLSOptions{...}` — certificates are verified by default; use `CAFile` for a private CA.
+
+## Atomic flows
+
+The producer resolves IDs and reciprocal edges before transport and sends one
+`PUSHF`. Local validation errors make zero calls; broker rejection cannot leave
+a partially linked graph.
+
+```go
+flow := bunqueue.NewFlowProducer(bunqueue.Options{
+	Host: "localhost",
+	Port: 6789,
+})
+defer flow.Close()
+
+tree, err := flow.Add(bunqueue.FlowJob{
+	Name:      "publish-release",
+	QueueName: "release",
+	Opts:      bunqueue.JobOptions{"jobId": "release-2026-07-30"},
+	Children: []bunqueue.FlowJob{
+		{Name: "build", QueueName: "build"},
+		{Name: "test", QueueName: "test"},
+	},
+})
+if err != nil {
+	panic(err)
+}
+fmt.Printf("root=%s children=%d\n", tree.Job.ID(), len(tree.Children))
+
+ids, err := flow.AddChain([]bunqueue.ChainStep{
+	{Name: "extract", QueueName: "etl"},
+	{Name: "transform", QueueName: "etl"},
+	{Name: "load", QueueName: "etl"},
+})
+if err != nil {
+	panic(err)
+}
+fmt.Println("chain", ids)
+```
+
+`FlowJob.Children` represents tree topology. `ChainStep` deliberately has no
+`Children` field, so nested chain topology is impossible at compile time.
+The planner owns `parentId`, `dependsOn`, and `childrenIds`; flow data cannot
+overwrite `name` or `__*`, and repeat/deduplication/debounce are rejected.
+Returned snapshots must match every requested ID and queue exactly. See
+[INVARIANTS.md](INVARIANTS.md#flowproducer-and-atomic-pushf).
+
+A timeout after `PUSHF` is ambiguous: the broker may already have committed.
+For a production graph that callers can retry, give every node the same stable
+explicit `bunqueue.JobOptions{"jobId": stableID}` on each attempt. A retry
+commits when the first call did not; otherwise strict collision checking returns
+`already exists`. Treat that error as a reconciliation signal and query the
+known IDs; the SDK does not fabricate the original snapshots.
 
 ## Worker leases and telemetry
 
@@ -112,12 +164,28 @@ correctness; handlers should still return quickly.
 ```bash
 go vet ./...
 go test -v ./... -count=1
+go test -run 'FlowPlanner|FlowProducerRejectsOwnedTopology|FlowCommit|RandomFlowID' \
+  -count=1 -v ./...                    # Rapid properties + flow unit checks
 go test -race -run 'Hardening|Regression|Worker' ./...
 # -timeout must exceed the soak: `go test` panics at its own 10m default.
 BUNQUEUE_SDK_SOAK_SECONDS=3600 go test -run '^TestSDKSoak$' -timeout 3900s -v
 go test -run '^$' -fuzz '^FuzzHardeningPortableWirePayload$' -fuzztime 60s
 cd ../.. && bun run test:sandbox:sdk
 ```
+
+The flow planner, secure ID generator and pure snapshot validator also have a
+mutation gate:
+
+```bash
+GOBIN="$(go env GOPATH)/bin" \
+  go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+mkdir -p build
+gremlins unleash --config .gremlins.yaml
+```
+
+[`go.mod`](go.mod) pins Rapid 1.3.0 for shrinking property tests.
+[`.gremlins.yaml`](.gremlins.yaml) enforces a
+99.9% threshold; `build/gremlins.json` records the full campaign.
 
 The suite spawns real bunqueue servers (requires [Bun](https://bun.sh) and the
 repo checkout) and covers the full surface: wire framing and 64 MiB
@@ -127,6 +195,10 @@ timestamp safety, worker lease isolation, crash/restart reconnection and shared
 protocol alignment. Hardening adds independent-connection idempotency and
 single-lease contention, 500 generated wire cases, a 512-job spike, the Go
 race detector, native fuzzing, and an opt-in sustained profile.
+
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

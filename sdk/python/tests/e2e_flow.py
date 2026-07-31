@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 
 from harness import Server, test, unique_name, wait_until
 
@@ -132,7 +131,36 @@ def get_flow_reconstructs_tree(server: Server) -> None:
 
 
 @test
-def flow_rollback_on_failure(server: Server) -> None:
+def flow_custom_ids_and_reciprocal_links(server: Server) -> None:
+    qname = unique_name("customflow")
+    root_id = f"root-{qname}"
+    child_id = f"child-{qname}"
+    with Queue(qname, port=server.port) as queue, FlowProducer(port=server.port) as flows:
+        queue.pause()
+        node = flows.add(
+            {
+                "name": "root",
+                "queueName": qname,
+                "opts": {"job_id": root_id},
+                "children": [
+                    {
+                        "name": "child",
+                        "queueName": qname,
+                        "opts": {"job_id": child_id},
+                    }
+                ],
+            }
+        )
+        assert node.job.id == root_id
+        assert node.job.custom_id == root_id
+        assert node.children[0].job.id == child_id
+        assert node.children[0].job.parent_id == root_id
+        assert node.job.children_ids == [child_id]
+        queue.obliterate()
+
+
+@test
+def flow_invalid_batch_commits_no_jobs(server: Server) -> None:
     qname = unique_name("rollback")
     with Queue(qname, port=server.port) as queue, FlowProducer(port=server.port) as flows:
         try:
@@ -145,5 +173,4 @@ def flow_rollback_on_failure(server: Server) -> None:
             raise AssertionError("expected chain to fail on invalid queue name")
         except Exception:
             pass
-        time.sleep(0.3)
-        assert queue.count() == 0, "rollback did not cancel created jobs"
+        assert queue.count() == 0, "failed atomic batch created jobs"

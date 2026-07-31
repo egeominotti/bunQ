@@ -40,13 +40,13 @@ const flow = new FlowProducer({ embedded: true });
 
 FlowProducer supports the BullMQ v5 API for defining job trees with parent-child relationships.
 
-In the Bun package, `add` and `addBulk` send one `PUSHF` command: the complete
-graph is validated before mutation and becomes visible atomically. With a
-configured `dataPath`, every row is also committed in one immediate SQLite
-transaction before workers can pull a leaf. Embedded mode without a
-`dataPath` keeps the atomic visibility guarantee but is intentionally
-memory-only. Current external language SDK releases that compose `PUSH` and
-`UpdateParent` provide best-effort cleanup rather than this transaction.
+In the Bun package and every current official external SDK, `add` and `addBulk`
+send one `PUSHF` command: the complete graph is validated before mutation and
+becomes visible atomically. With a configured `dataPath`, every row is also
+committed in one immediate SQLite transaction before workers can pull a leaf.
+Embedded mode without a `dataPath` keeps the atomic visibility guarantee but is
+intentionally memory-only. Previously published SDKs using `PUSH` plus
+`UpdateParent` remain compatible without retroactively gaining that transaction.
 
 ## Basic Flow: Parent Waits for Children
 

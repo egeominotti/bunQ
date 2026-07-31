@@ -1,7 +1,4 @@
-/**
- * Ack Helpers - Shared batch processing utilities
- */
-
+/** Shared batch acknowledgement utilities. */
 import type { Job, JobId } from '../../domain/types/job';
 import { MAX_TIMELINE_ENTRIES } from '../../domain/types/job';
 import type { JobLocation, EventType } from '../../domain/types/queue';
@@ -13,6 +10,10 @@ import type { SetLike, MapLike } from '../../shared/lru';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { throughputTracker } from '../throughputTracker';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import {
+  commitRemovedCompletion,
+  type DependencyCompletionTracker,
+} from '../dependencyCompletions';
 
 export interface ExtractedJob<T = unknown> {
   id: JobId;
@@ -155,10 +156,12 @@ export async function releaseResources(
 /** Context for finalize operations */
 export interface FinalizeContext {
   storage: SqliteStorage | null;
+  shards: Shard[];
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
   /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
-  depCompletions?: SetLike<JobId>;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
   jobResults: MapLike<JobId, unknown>;
   dependencyResults?: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
@@ -242,13 +245,10 @@ export function finalizeBatchAck<T>(
       // 3. Mark as completed LAST - this is the signal other threads wait for
       ctx.completedJobs.add(jobId);
     } else {
+      commitRemovedCompletion(job, ctx, now);
       ctx.jobIndex.delete(jobId);
-      if (hasStorage) storage.deleteJob(jobId);
-      // removeOnComplete drops the full job to bound memory, but dependents gate
-      // readiness on completedJobs.has(parentId). Record the bare completion id
-      // (no payload) so dependent jobs still unblock, without surfacing the job
-      // in state/stats queries.
-      ctx.depCompletions?.add(jobId);
+      // The helper publishes payload-free dependency evidence only after its
+      // durable job-removal transaction commits.
     }
   }
 

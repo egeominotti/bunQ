@@ -313,7 +313,7 @@ migration, and worker-runtime contracts.
 | 53 | Durable retention boundary | low-cap eviction/restart regression over state, payload, result, and SQLite membership |
 | 54 | Correlated overload response | real TCP limiter regression requires the triggering `reqId` |
 | 55 | Complete stale-dependency GC | shard, reverse index, ownership, write buffer, and SQLite regression |
-| 56 | Live dependency result retention | low-cap fan-in, fan-out, batch, and `removeOnComplete` regressions |
+| 56 | Live dependency result retention and durable completion evidence | low-cap fan-in/fan-out, ACK/ACKB, `removeOnComplete`, live-edge pinning, eviction, restart, and transaction-fault regressions |
 | 57 | Durable progress mutation | model oracle plus active-job restart regression |
 | 58 | Durable per-queue DLQ policy | queue-state restart regression |
 | 59 | Durable manual active-to-waiting transition | generated lifecycle model plus restart regression |
@@ -333,7 +333,20 @@ unless they can preserve deterministic shrinking.
 checks the boundary before and after restart. Hot collections stay within their
 configured caps, while every job state, payload, and result remains observable
 through SQLite and durable `jobs`/`job_results` membership is conserved. This
-distinguishes permitted cache eviction from durable data loss.
+suite covers retained jobs and distinguishes permitted cache eviction from
+durable data loss.
+
+`test/repro-dependency-completion-retention.test.ts` and
+`test/repro-dependency-completion-pinning.test.ts` separately exercise the
+payload-free `removeOnComplete` contract. They prove the SQLite table and RAM
+tracker retain the same newest unpinned FIFO window, a batch larger than the cap
+cannot evict proofs owned by unresolved parents, a late parent pins an existing
+proof, shared ownership lasts through the final waiter, a lower restart cap
+cannot prune before reverse-edge reconstruction, an evicted proof cannot
+regress a checkpointed parent, obliteration releases the correct ownership, a
+custom-ID generation cannot inherit an older completion, a late stall ACK
+survives restart, and an injected SQLite failure cannot delete the job without
+creating its proof.
 
 ## Candidate invariants not yet enforceable
 

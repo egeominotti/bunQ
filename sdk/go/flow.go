@@ -25,69 +25,47 @@ type FlowNode struct {
 
 // FlowProducer creates dependent job hierarchies across one or more queues.
 //
-// Wire contract (parity with the TS/Python/PHP SDKs): children are pushed
-// BEFORE their parent; the parent carries dependsOn/childrenIds; each child
-// is then linked via UpdateParent. On failure every already-created job is
-// cancelled (best-effort atomic rollback).
+// Every ID and edge is resolved locally, then the complete graph is committed
+// by one broker-side PUSHF operation. No partially linked flow is observable.
 type FlowProducer struct {
 	Connection *Connection
 	owns       bool
+	call       func(map[string]any) (map[string]any, error)
 }
 
 // NewFlowProducer opens a flow producer with its own lazy connection.
 func NewFlowProducer(opts Options) *FlowProducer {
-	return &FlowProducer{Connection: NewConnection(opts), owns: true}
+	connection := NewConnection(opts)
+	return &FlowProducer{Connection: connection, owns: true, call: connection.Call}
 }
 
 // Add creates a flow tree and returns its root node.
 func (f *FlowProducer) Add(flow FlowJob) (*FlowNode, error) {
-	var created []string
-	node, err := f.addNode(flow, nil, &created)
+	plan, err := newFlowPlanner(nil).planTree(flow)
 	if err != nil {
-		f.rollback(created)
 		return nil, err
 	}
-	return node, nil
+	snapshots, err := f.commitFlow(plan.jobs)
+	if err != nil {
+		return nil, err
+	}
+	return f.buildFlowNode(plan.root, snapshots), nil
 }
 
 // AddChain creates a sequential chain (each step depends on the previous)
 // and returns the created ids in chain order.
 func (f *FlowProducer) AddChain(steps []ChainStep) ([]string, error) {
-	var jobIDs []string
-	prevID := ""
-	for _, step := range steps {
-		data := map[string]any{}
-		for key, value := range step.Data {
-			data[key] = value
-		}
-		if prevID != "" {
-			data["__flowParentId"] = prevID
-		}
-		wire, err := optionsToWire(step.Opts)
-		if err != nil {
-			f.rollback(jobIDs)
-			return nil, err
-		}
-		command := map[string]any{
-			"cmd":   "PUSH",
-			"queue": step.QueueName,
-			"data":  jobPayload(step.Name, data),
-		}
-		for key, value := range wire {
-			command[key] = value
-		}
-		if prevID != "" {
-			command["dependsOn"] = []string{prevID}
-		}
-		response, err := f.Connection.Call(compact(command))
-		if err != nil {
-			f.rollback(jobIDs)
-			return nil, err
-		}
-		prevID = toIDString(response["id"])
-		jobIDs = append(jobIDs, prevID)
+	if len(steps) == 0 {
+		return []string{}, nil
 	}
-	return jobIDs, nil
+	plan, err := newFlowPlanner(nil).planChain(steps)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.commitFlow(plan.jobs); err != nil {
+		return nil, err
+	}
+	return plan.ids, nil
 }
 
 // GetFlow reconstructs a flow tree from a root job id. depth < 0 means
@@ -106,71 +84,6 @@ func (f *FlowProducer) Close() {
 }
 
 // ---------------------------------------------------------------- internals
-
-type flowParentRef struct {
-	id    string
-	queue string
-}
-
-func (f *FlowProducer) addNode(node FlowJob, parent *flowParentRef, created *[]string) (*FlowNode, error) {
-	var childNodes []*FlowNode
-	var childIDs []string
-	for _, child := range node.Children {
-		childNode, err := f.addNode(child, &flowParentRef{id: "pending", queue: node.QueueName}, created)
-		if err != nil {
-			return nil, err
-		}
-		childNodes = append(childNodes, childNode)
-		childIDs = append(childIDs, childNode.Job.ID())
-	}
-
-	data := map[string]any{}
-	for key, value := range node.Data {
-		data[key] = value
-	}
-	if parent != nil {
-		data["__parentId"] = parent.id
-		data["__parentQueue"] = parent.queue
-	}
-	if len(childIDs) > 0 {
-		data["__childrenIds"] = childIDs
-	}
-	payload := jobPayload(node.Name, data)
-
-	wire, err := optionsToWire(node.Opts)
-	if err != nil {
-		return nil, err
-	}
-	command := map[string]any{"cmd": "PUSH", "queue": node.QueueName, "data": payload}
-	for key, value := range wire {
-		command[key] = value
-	}
-	if parent != nil {
-		command["parentId"] = parent.id
-	}
-	if len(childIDs) > 0 {
-		command["childrenIds"] = childIDs
-		command["dependsOn"] = childIDs
-	}
-	response, err := f.Connection.Call(compact(command))
-	if err != nil {
-		return nil, err
-	}
-	jobID := toIDString(response["id"])
-	*created = append(*created, jobID)
-
-	// Link children to their real parent id (placeholder was 'pending').
-	for _, childID := range childIDs {
-		if _, err := f.Connection.Call(map[string]any{
-			"cmd": "UpdateParent", "childId": childID, "parentId": jobID,
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	job := newJob(map[string]any{"id": jobID, "queue": node.QueueName, "data": payload}, f.Connection, "")
-	return &FlowNode{Job: job, Children: childNodes}, nil
-}
 
 func (f *FlowProducer) fetchNode(jobID string, depth int, visited map[string]bool) (*FlowNode, error) {
 	if visited[jobID] {
@@ -206,10 +119,4 @@ func (f *FlowProducer) fetchNode(jobID string, depth int, visited map[string]boo
 		}
 	}
 	return &FlowNode{Job: job, Children: children}, nil
-}
-
-func (f *FlowProducer) rollback(jobIDs []string) {
-	for _, jobID := range jobIDs {
-		_, _ = f.Connection.Call(map[string]any{"cmd": "Cancel", "id": jobID}) // best-effort
-	}
 }

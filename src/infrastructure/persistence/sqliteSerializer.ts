@@ -67,6 +67,20 @@ export function persistedInitialState(job: Job, now: number = Date.now()): strin
  * so it only exists on the in-memory Job for the duration of recovery.
  */
 export const CORRUPT_DEPENDS_ON = Symbol('bunqueue.corruptDependsOn');
+const PERSISTED_JOB_STATE = Symbol('bunqueue.persistedJobState');
+
+export type PersistedJobState =
+  | 'active'
+  | 'completed'
+  | 'delayed'
+  | 'prioritized'
+  | 'waiting'
+  | 'waiting-children';
+
+/** Read the authoritative SQLite state carried by a recovered job. */
+export function persistedJobState(job: Job): PersistedJobState | undefined {
+  return (job as { [PERSISTED_JOB_STATE]?: PersistedJobState })[PERSISTED_JOB_STATE];
+}
 
 /** True if a Job was recovered with a corrupt `depends_on` blob. */
 export function isCorruptDependsOn(job: Job): boolean {
@@ -161,6 +175,11 @@ export function rowToJob(row: DbJob): Job {
       ? unpack<string[] | null>(row.stacktrace, null, `${jobContext}:stacktrace`)
       : null,
   };
+  Object.defineProperty(job, PERSISTED_JOB_STATE, {
+    value: row.state as PersistedJobState,
+    enumerable: false,
+    configurable: false,
+  });
 
   // Stamp a collision-proof corruption marker (non-enumerable Symbol, never
   // persisted) so the recovery path routes this job to the DLQ rather than

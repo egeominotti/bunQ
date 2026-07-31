@@ -1026,11 +1026,18 @@ Per-flow options passed as the second argument to `flow.add(flowJob, opts)`.
 interface FlowOpts {
   /**
    * Default job options per queue name.
-   * Applied as defaults, per-job opts override these.
+   * Applied as defaults; per-job opts override these.
+   * jobId is intentionally excluded because identity belongs to each flow node.
    */
-  queuesOptions?: Record<string, Partial<JobOptions>>;
+  queuesOptions?: Record<string, Omit<Partial<JobOptions>, 'jobId'>>;
 }
 ```
+
+Set `jobId` on a `FlowJob.opts` object when a node needs a custom identity.
+`jobId` is rejected inside `queuesOptions`: a shared default could assign the
+same identity to multiple nodes and make the atomic graph ambiguous. Python
+follows the same rule using `job_id` inside each node's `opts`, never inside
+`queues_options`.
 
 **Example:**
 ```typescript

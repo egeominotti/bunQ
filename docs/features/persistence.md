@@ -1,6 +1,6 @@
 # Persistence (SQLite, WriteBuffer, ReadThrough)
 
-> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqliteBatch.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
+> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqliteBatch.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/dependencyCompletionStore.ts`, `src/infrastructure/persistence/dependencyCompletionSchema.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
 
 ## Purpose
 
@@ -12,8 +12,9 @@ Owns:
 - The SQLite `Database` handle, PRAGMA tuning, schema creation, and incremental migrations (`sqlite.ts:71-121`, `sqlite.ts:255-278`).
 - Buffered and durable (immediate) job inserts, single and bulk (`insertJob`, `insertJobImmediate`, `insertJobsBatch`).
 - State-mutating writes: `markActive`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `deleteJob`.
-- Results, DLQ rows, cron rows, queue control-state rows, and the durable
-  flow-failure outbox (CRUD + bulk load/replay).
+- Results, DLQ rows, cron rows, queue control-state rows, the durable
+  flow-failure outbox, and `removeOnComplete` dependency evidence with bounded
+  recent retention plus live-edge pin ownership.
 - Paginated recovery reads (`loadPendingJobs`, `loadActiveJobs`, `loadCompletedJobs`, `loadDlq`, plus the id-set loaders).
 - Disk-full detection, write-retry/backoff, and critical-loss accounting.
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
@@ -31,7 +32,9 @@ Does NOT own (delegated elsewhere):
 Internal:
 - `domain/types/job` (`Job`, `JobId`, `JobTimelineEntry`), `domain/types/cron` (`CronJob`), `domain/types/dlq` (`DlqEntry`, `FailureReason`, `createDlqEntry`).
 - `shared/logger` (`storageLog`).
-- Sibling modules in this folder: `schema.ts`, `statements.ts`, `sqliteSerializer.ts`, `sqliteBatch.ts`.
+- Sibling modules in this folder: `schema.ts`, `statements.ts`,
+  `sqliteSerializer.ts`, `sqliteBatch.ts`, `dependencyCompletionSchema.ts`, and
+  `dependencyCompletionStore.ts`.
 
 External/runtime:
 - `bun:sqlite` `Database` (native SQLite).
@@ -64,6 +67,11 @@ Key methods (real signatures):
   `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
   `updateFlowParentResolution(parent)`, `saveFlowFailure(record)`,
   `loadFlowFailures()`, `deleteFlowFailure(parentId, childId?)`.
+- Removed-completion evidence:
+  `commitRemovedCompletion(job, retentionLimit, completedAt?)`,
+  `loadDependencyCompletions(retentionLimit)`,
+  `deleteDependencyCompletion(jobId)`, and
+  `deleteDependencyCompletionsForQueue(queue)`.
 - Results: `storeResult(jobId, result)`, `getResult(jobId)`, `hasResult(jobId)`.
 - DLQ: `saveDlqEntry(entry)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
@@ -85,7 +93,8 @@ Key methods (real signatures):
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
-`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`, `SCHEMA_VERSION = 27`, `MIGRATIONS`.
+`schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`,
+`SCHEMA_VERSION = 29`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -98,6 +107,10 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
 - `flow_failures` — `(parent_id, child_id)` primary key plus child queue,
   failure mode/error and creation time. It is both the durable propagation
   outbox and the live store for ignored/continued child errors.
+- `dependency_completions` — monotonic `sequence`, unique `job_id`, source
+  `queue`, `completed_at`, and `pinned`; a payload-free proof for removed
+  completed jobs. Unpinned rows are FIFO-bounded; pinned rows are owned by live
+  waiting dependency edges.
 - `job_results` — `job_id TEXT PK`, `result BLOB`, `completed_at`.
 - `dlq` — `id INTEGER PK AUTOINCREMENT`, `job_id`, `queue`, `entry BLOB` (full `DlqEntry`), `entered_at`. Note `dlq` is append-only by `id`; a single `job_id` can have multiple rows.
 - `cron_jobs` — keyed by `name`, includes `dedup BLOB`, `skip_missed_on_restart`, `skip_if_no_worker`, `prevent_overlap` (default 1), `job_options BLOB`.
@@ -165,23 +178,45 @@ records are deleted after idempotent application; `ignore`/`continue` records
 remain until the live parent reaches a terminal/removal boundary so its worker
 can still query the error map.
 
-Recovery (consumer side, `backgroundTasks.ts`): `recover()` reads
-`loadCompletedJobIds()` + `loadDlqJobIds` and restores stall/DLQ policies before
-classifying interrupted active jobs. It then repeatedly reads active jobs from
-offset zero. Every handled active row leaves `state='active'`, so advancing an
-offset over that shrinking result would skip rows. Each interrupted active job
-increments `attempts` and persisted `stall_count`; reaching either bound is
-terminal. Pending pages use deterministic priority/run-at/id ordering. Later
-phases restore the DLQ, limiter state, and bounded completed cache.
+Removed-completion transition: `commitRemovedCompletion` first removes a
+buffered insert for the ID, then one SQLite transaction inserts/updates the
+payload-free proof, marks it pinned if a reverse waiter already exists, prunes
+only unpinned rows through the monotonic FIFO boundary, and deletes the job,
+result, and parent-side flow-failure rows. The ACK publishes the matching RAM
+tier, counters, and events only after this transaction succeeds. Single ACK,
+optimized ACKB (with or without results), and the late stall-ACK recovery path
+all use this operation. A parent accepted after the child completed pins any
+recent proof before registering its wait edges. `obliterate(queue)` removes
+the source queue's hidden proofs; parent removal releases pin ownership.
+
+Recovery (consumer side, `backgroundTasks.ts`): `recover()` first loads all
+`dependency_completions` into temporary classification state without pruning.
+It rebuilds pending parents and their reverse indexes, checkpoints ready
+parents, then reconciles `pinned` from the authoritative indexes, prunes only
+unreferenced rows, and hydrates the exact recent/pinned RAM tiers. This order
+also survives a deployment that lowers `maxCompletedJobs`. A `job_results` row
+alone is not completion evidence because a crash may leave it beside an
+`active` job.
+Recovery restores stall/DLQ policies before classifying interrupted active
+jobs, then repeatedly reads active jobs from offset zero. Every handled active
+row leaves `state='active'`, so advancing an offset over that shrinking result
+would skip rows. Each interrupted active job increments `attempts` and
+persisted `stall_count`; reaching either bound is terminal. Pending pages use
+deterministic priority/run-at/id ordering. A persisted ready state
+(`waiting`/`prioritized`/`delayed`) is an authoritative dependency checkpoint,
+so bounded-proof eviction cannot regress a promoted parent. Later phases
+restore the DLQ, limiter state, and bounded completed cache.
 
 Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table,
-reads `MAX(version)`; if below `SCHEMA_VERSION` (27) it runs the idempotent base
+reads `MAX(version)`; if below `SCHEMA_VERSION` (29) it runs the idempotent base
 schema and applies later migrations. Migration 17 adds `jobs.stall_count`;
 migrations 18–21 persist the four `StallConfig` fields; migration 22 adds the
 atomic MessagePack `queue_state.dlq_config` policy blob; migrations 23–26 add
 the four flow failure-policy flags; migration 27 creates `flow_failures`, and
 rebuilds the pending indexes so `prioritized` and `waiting-children` rows
-participate in recovery, plus the outbox parent index.
+participate in recovery, plus the outbox parent index. Migration 28 creates the
+`dependency_completions` table and its queue-cleanup index; migration 29 adds
+the conservative `pinned` ownership bit.
 
 Close (`sqlite.ts:818-840`): stop the buffer timer, final `flush()`, `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on restart, then `db.close()`. Flush and WAL checkpoint are wrapped for logging; `writeBuffer.stop()` and `db.close()` are not wrapped and will abort on error.
 
@@ -202,7 +237,11 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **Corrupt `depends_on` blob.** A failed msgpack decode of `depends_on` is NOT collapsed to `[]` (which recovery would treat as "ready, no deps" → out-of-order execution). `decodeDependsOn` returns `corrupt: true` and `rowToJob` stamps the job with the non-enumerable `CORRUPT_DEPENDS_ON` symbol; recovery (`isCorruptDependsOn`) routes it to the DLQ instead (`sqliteSerializer.ts:42-68`, `sqliteSerializer.ts:138-148`).
 - **Lossy decode fallback.** `unpack` logs and returns the provided fallback on decode error rather than throwing, so a single corrupt blob does not abort a whole load (`sqliteSerializer.ts:19-27`).
 - **Id type round-trip.** `brandId` preserves non-string id types without conversion (msgpackr can round-trip bigint), preserving id equality on the critical-loss → DLQ → restart path (`sqliteSerializer.ts:162-164`).
-- **Completed-without-result.** A job acked with no result has `state='completed'` but no `job_results` row; `loadCompletedJobIds` unions both sources so dependency recovery still unblocks dependents (`sqlite.ts:568-579`).
+- **Completed-without-result and orphan results.** A retained job acked with no
+  result has `state='completed'` but no `job_results` row, so
+  `loadCompletedJobIds` uses the jobs state plus payload-free removed-completion
+  proofs. It deliberately ignores a standalone result row: that row can be the
+  first half of an interrupted legacy ACK while the job is still active.
 - **Dependency-result read-through.** Application queries check the normal result LRU, then results protected for live dependency consumers, then `job_results`. SQLite therefore remains the durable fallback after either in-memory cache evicts; in memory-only mode the dependency tracker protects values only while a live edge requires them.
 - **Shutdown loss reporting.** `WriteBuffer.stop()` / `stopGracefully(timeoutMs=5000)` flush remaining jobs and report anything still buffered via `reportLostJobs` → `onCriticalError`, so nothing is silently dropped on shutdown (`sqliteBatch.ts:390-486`).
 - **Snapshot flush fails closed.** `flushWriteBuffer()` throws whenever
@@ -210,6 +249,12 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
   during storage retry/backoff and prevents an incomplete S3 recovery point
   from being published.
 - **Memory bounds.** Recovery loads are paginated (default batch 10,000) to avoid memory spikes; active recovery drains offset zero because it mutates the scanned state, while non-mutating pending/completed loads advance stable pages. Completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
+- **Removed-completion bounds.** SQLite and the in-memory tracker retain at
+  most `maxCompletedJobs` unpinned recent proofs. Proofs referenced by live
+  `waitingDeps` edges remain pinned outside that FIFO cap until the final
+  consumer is durably promoted or removed; interrupted unpins are reconciled
+  on recovery. Rows contain no payload/result and remain invisible to normal
+  job queries.
 - **Eviction is not durable deletion.**
   `test/repro-retention-boundary-invariants.test.ts` runs with
   `maxCompletedJobs=3` and `maxJobResults=2`, completes twelve durable jobs,

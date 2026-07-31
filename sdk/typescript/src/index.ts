@@ -40,6 +40,7 @@ export {
 export { FlowProducer } from './flow.js';
 export type {
   FlowJob,
+  FlowOptions,
   FlowProducerOptions,
   FlowStep,
   GetFlowOptions,
@@ -92,4 +93,4 @@ export type {
   WorkerOptions,
 } from './worker-types.js';
 
-export const __version__ = '0.1.7';
+export const __version__ = '0.1.10';

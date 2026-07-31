@@ -13,6 +13,31 @@ import { describe, test, expect, afterEach } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 import { shardIndex, processingShardIndex } from '../src/shared/hash';
 
+interface QueueManagerProbe {
+  jobIndex: ReadonlyMap<string, { type: string }>;
+}
+
+function getLocationType(manager: QueueManager, id: string): string | undefined {
+  return (manager as unknown as QueueManagerProbe).jobIndex.get(id)?.type;
+}
+
+async function waitForLocationType(
+  manager: QueueManager,
+  id: string,
+  expected: string,
+  timeoutMs = 5_000
+): Promise<string | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  let current = getLocationType(manager, id);
+
+  while (current !== expected && Date.now() < deadline) {
+    await Bun.sleep(25);
+    current = getLocationType(manager, id);
+  }
+
+  return current;
+}
+
 describe('Stall re-queue ack handling', () => {
   let manager: QueueManager;
 
@@ -39,18 +64,14 @@ describe('Stall re-queue ack handling', () => {
     });
 
     // 1. Push job
-    const job = await manager.push(queueName, { data: { task: 'slow' } });
+    await manager.push(queueName, { data: { task: 'slow' } });
 
     // 2. Pull WITHOUT lock (simulates worker with useLocks=false)
     const pulled = await manager.pull(queueName);
     expect(pulled).not.toBeNull();
 
-    // 3. Wait for stall detection (two-phase: ~150ms candidate, ~300ms confirm)
-    await Bun.sleep(600);
-
-    // Verify job is back in queue
-    const loc = (manager as any).jobIndex.get(pulled!.id);
-    expect(loc?.type).toBe('queue');
+    // 3. Observe the two-phase detector instead of assuming timer callbacks are punctual.
+    expect(await waitForLocationType(manager, pulled!.id, 'queue')).toBe('queue');
 
     // 4. Ack WITHOUT token — should succeed by completing from queue
     await manager.ack(pulled!.id, { result: 'done' });
@@ -86,12 +107,10 @@ describe('Stall re-queue ack handling', () => {
     const token1 = result.token!;
     console.log(`2. Pulled with lock: job=${result.job!.id}, token=${token1.substring(0, 8)}...`);
 
-    // 3. Wait for stall detection
-    await Bun.sleep(600);
-
-    const loc = (manager as any).jobIndex.get(result.job!.id);
-    console.log(`3. After stall: type=${loc?.type}`);
-    expect(loc?.type).toBe('queue');
+    // 3. Observe the two-phase detector instead of assuming timer callbacks are punctual.
+    const locationType = await waitForLocationType(manager, result.job!.id, 'queue');
+    console.log(`3. After stall: type=${locationType}`);
+    expect(locationType).toBe('queue');
 
     // 4. Ack with ORIGINAL token T1 (no re-pull happened)
     let ackOk = false;
@@ -143,11 +162,10 @@ describe('Stall re-queue ack handling', () => {
     const jobId = result1.job!.id;
     console.log(`2. Pull #1: token=${token1.substring(0, 8)}...`);
 
-    // 3. Wait for stall detection
-    await Bun.sleep(600);
-    const locAfterStall = (manager as any).jobIndex.get(jobId);
-    console.log(`3. After stall: type=${locAfterStall?.type}`);
-    expect(locAfterStall?.type).toBe('queue');
+    // 3. Observe the two-phase detector instead of assuming timer callbacks are punctual.
+    const locationType = await waitForLocationType(manager, jobId, 'queue');
+    console.log(`3. After stall: type=${locationType}`);
+    expect(locationType).toBe('queue');
 
     // 4. Wait for backoff=0 to settle, then re-pull
     await Bun.sleep(100);
@@ -195,22 +213,10 @@ describe('Stall re-queue ack handling', () => {
       gracePeriod: 50,
     });
 
-    const job = await manager.push(queueName, { data: { task: 'test' } });
+    await manager.push(queueName, { data: { task: 'test' } });
     const pulled = await manager.pull(queueName);
     expect(pulled).not.toBeNull();
 
-    // Wait for two-phase stall detection
-    let requeued = false;
-    for (let i = 0; i < 10; i++) {
-      await Bun.sleep(150);
-      const idx = (manager as any).jobIndex.get(pulled!.id);
-      if (idx?.type === 'queue') {
-        console.log(`  Stall re-queued at ${(i + 1) * 150}ms`);
-        requeued = true;
-        break;
-      }
-    }
-
-    expect(requeued).toBe(true);
+    expect(await waitForLocationType(manager, pulled!.id, 'queue')).toBe('queue');
   }, 10000);
 });

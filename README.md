@@ -212,6 +212,49 @@ Worker("emails", lambda job: {"sent": True}, concurrency=10).run()
 Every SDK is certified against the same public
 [wire protocol](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) and conformance suite.
 
+### Atomic flows, in every SDK
+
+Every official `FlowProducer` resolves all job IDs and reciprocal dependency
+edges locally, then sends one `PUSHF` command. The broker validates the complete
+graph and commits it atomically, so a worker cannot observe a leaf from a
+partially-created flow.
+
+```typescript
+import { FlowProducer } from 'bunqueue-client';
+
+const flows = new FlowProducer({ host: 'localhost', port: 6789 });
+const root = await flows.add({
+  name: 'publish-release',
+  queueName: 'release',
+  data: { version: 'candidate-42' },
+  children: [
+    { name: 'unit-tests', queueName: 'checks', data: { suite: 'unit' } },
+    { name: 'sdk-tests', queueName: 'checks', data: { suite: 'sdk' } },
+  ],
+});
+
+console.log(root.job.id, root.children?.map(({ job }) => job.id));
+await flows.close();
+```
+
+The repository records the contracts and the test strategy beside each
+implementation:
+
+| SDK | Runtime invariants | Generated tests | Mutation engine |
+| --- | --- | --- | --- |
+| [TypeScript](./sdk/typescript/README.md) | [contract](./sdk/typescript/INVARIANTS.md) | fast-check | StrykerJS |
+| [Python](./sdk/python/README.md) | [contract](./sdk/python/INVARIANTS.md) | Hypothesis | mutmut |
+| [PHP](./sdk/php/README.md) | [contract](./sdk/php/INVARIANTS.md) | Eris | Infection |
+| [Go](./sdk/go/README.md) | [contract](./sdk/go/INVARIANTS.md) | Rapid | Gremlins |
+| [Rust](./sdk/rust/README.md) | [contract](./sdk/rust/INVARIANTS.md) | proptest | cargo-mutants |
+| [Elixir](./sdk/elixir/README.md) | [contract](./sdk/elixir/INVARIANTS.md) | StreamData | Muex |
+
+Property campaigns run in the ordinary SDK gate with deterministic replay
+seeds. Mutation campaigns run separately against the pure planners and
+snapshot validators. Contributors can reproduce the complete isolated SDK
+gate with `bun run test:sandbox:sdk`; language-specific commands live in each
+SDK README and `AGENTS.md`.
+
 [SDK guide (all six languages) →](https://bunqueue.dev/guide/sdks/)
 
 ## Simple Mode

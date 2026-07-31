@@ -16,7 +16,7 @@
 </div></section>
 <div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">DlqEntry</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#attempts">attempts</a><span class="tsd-signature-symbol">:</span> <a href="domain_types_dlq.AttemptRecord.html" class="tsd-signature-type tsd-kind-interface">AttemptRecord</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#enteredat">enteredAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#error">error</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#expiresat">expiresAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#job">job</a><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#lastretryat">lastRetryAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#nextretryat">nextRetryAt</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#reason">reason</a><span class="tsd-signature-symbol">:</span> <a href="../enums/domain_types_dlq.FailureReason.html" class="tsd-signature-type tsd-kind-enum">FailureReason</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#retrycount">retryCount</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L43">domain/types/dlq.ts:43</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L43">domain/types/dlq.ts:43</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -43,63 +43,63 @@
 <div class="tsd-comment tsd-typography"><p>Full attempt history</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L53">domain/types/dlq.ts:53</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L53">domain/types/dlq.ts:53</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="enteredat"><code class="tsd-tag">Readonly</code><span>entered<wbr/>At</span><a href="#enteredat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">enteredAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div>
 <div class="tsd-comment tsd-typography"><p>When first moved to DLQ</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L47">domain/types/dlq.ts:47</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L47">domain/types/dlq.ts:47</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="error"><code class="tsd-tag">Readonly</code><span>error</span><a href="#error" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Last error message</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L51">domain/types/dlq.ts:51</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L51">domain/types/dlq.ts:51</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="expiresat"><code class="tsd-tag">Readonly</code><span>expires<wbr/>At</span><a href="#expiresat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">expiresAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Expires at (for auto-purge)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L61">domain/types/dlq.ts:61</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L61">domain/types/dlq.ts:61</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="job"><code class="tsd-tag">Readonly</code><span>job</span><a href="#job" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">job</span><span class="tsd-signature-symbol">:</span> <a href="domain_types_job.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a></div>
 <div class="tsd-comment tsd-typography"><p>Original job</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L45">domain/types/dlq.ts:45</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L45">domain/types/dlq.ts:45</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="lastretryat"><span>last<wbr/>Retry<wbr/>At</span><a href="#lastretryat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">lastRetryAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Last retry attempt from DLQ</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L57">domain/types/dlq.ts:57</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L57">domain/types/dlq.ts:57</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="nextretryat"><span>next<wbr/>Retry<wbr/>At</span><a href="#nextretryat" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">nextRetryAt</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></div>
 <div class="tsd-comment tsd-typography"><p>Next scheduled auto-retry (null = no auto-retry)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L59">domain/types/dlq.ts:59</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L59">domain/types/dlq.ts:59</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="reason"><code class="tsd-tag">Readonly</code><span>reason</span><a href="#reason" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">reason</span><span class="tsd-signature-symbol">:</span> <a href="../enums/domain_types_dlq.FailureReason.html" class="tsd-signature-type tsd-kind-enum">FailureReason</a></div>
 <div class="tsd-comment tsd-typography"><p>Last failure reason</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L49">domain/types/dlq.ts:49</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L49">domain/types/dlq.ts:49</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="retrycount"><span>retry<wbr/>Count</span><a href="#retrycount" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">retryCount</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span></div>
 <div class="tsd-comment tsd-typography"><p>Number of times retried from DLQ</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/domain/types/dlq.ts#L55">domain/types/dlq.ts:55</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/domain/types/dlq.ts#L55">domain/types/dlq.ts:55</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

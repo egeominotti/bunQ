@@ -13,6 +13,10 @@ import { processingShardIndex } from '../../shared/hash';
 import { webhookLog } from '../../shared/logger';
 import { type RWLock, withWriteLock } from '../../shared/lock';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import {
+  type DependencyCompletionTracker,
+  releaseDependencyCompletionPins,
+} from '../dependencyCompletions';
 
 export { discardJob, moveJobToDelayed } from './jobMoveOperations';
 
@@ -30,6 +34,8 @@ export interface JobManagementContext {
   eventsManager: EventsManager;
   repeatChain?: Map<JobId, JobId>;
   dependencyResults: DependencyResultTracker;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
 }
 
 /** Cancel a job (remove from queue) */
@@ -48,7 +54,7 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
         ctx.dependencyResults.releaseConsumer(jobId);
-        return { success: true, queueName: location.queueName };
+        return { success: true, queueName: location.queueName, released: [] };
       }
       // Not in the run queue — it may be parked in waitingChildren (moved via
       // moveToWaitingChildren, which already released its resources and does not
@@ -59,7 +65,7 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
         ctx.dependencyResults.releaseConsumer(jobId);
-        return { success: true, queueName: location.queueName };
+        return { success: true, queueName: location.queueName, released: [] };
       }
       // Or parked in waitingDeps (flow-chain dependent inserted by push.ts while
       // its predecessors are unresolved). These are NOT counted in the queued
@@ -74,12 +80,17 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
         ctx.dependencyResults.releaseConsumer(jobId);
-        return { success: true, queueName: location.queueName };
+        return {
+          success: true,
+          queueName: location.queueName,
+          released: waiting.dependsOn,
+        };
       }
-      return { success: false, queueName: location.queueName };
+      return { success: false, queueName: location.queueName, released: [] };
     });
 
     if (result.success) {
+      releaseDependencyCompletionPins(result.released, ctx);
       // Emit removed event (BullMQ v5)
       ctx.eventsManager.broadcast({
         eventType: EventType.Removed,

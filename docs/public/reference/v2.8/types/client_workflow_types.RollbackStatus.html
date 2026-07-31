@@ -11,18 +11,12 @@
 <li><a href="../modules/client_workflow_types.html">client/workflow/types</a></li>
 <li><a href="" aria-current="page">RollbackStatus</a></li></ul>
 <h1>Type Alias RollbackStatus</h1></div>
-<div class="tsd-signature"><span class="tsd-kind-type-alias">RollbackStatus</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;not-started&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;completed&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;not-applicable&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;stuck&quot;</span></div>
-<div class="tsd-comment tsd-typography"><p>What the engine did AFTER a failure. Deliberately a separate axis from the
-failure reason: the rollback is not the cause of the failure, and collapsing the
-two makes it impossible to alert on the right thing — &quot;the payment failed&quot; and
-&quot;the refund never went through&quot; need different pagers.</p>
+<div class="tsd-signature"><span class="tsd-kind-type-alias">RollbackStatus</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;completed&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;not-applicable&quot;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">&quot;stuck&quot;</span></div>
+<div class="tsd-comment tsd-typography"><p>What the engine did after a failure, independently of the failure reason.</p>
 </div>
 <div class="tsd-type-declaration">
 <h4>Type Declaration</h4>
 <ul>
-<li><span class="tsd-signature-type">&quot;not-started&quot;</span>
-<div class="tsd-comment tsd-typography"><p>No unwind was attempted (the run has not failed, or nothing was eligible).</p>
-</div></li>
 <li><span class="tsd-signature-type">&quot;completed&quot;</span>
 <div class="tsd-comment tsd-typography"><p>Every eligible step was compensated successfully.</p>
 </div></li>
@@ -30,10 +24,10 @@ two makes it impossible to alert on the right thing — &quot;the payment failed
 <div class="tsd-comment tsd-typography"><p>The unwind ran past the pivot cutoff or had nothing left to do.</p>
 </div></li>
 <li><span class="tsd-signature-type">&quot;stuck&quot;</span>
-<div class="tsd-comment tsd-typography"><p>A compensation failed definitively; the remaining ones were not attempted.</p>
+<div class="tsd-comment tsd-typography"><p>A compensation failed definitively; remaining reversals were not attempted.</p>
 </div></li></ul></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/types.ts#L210">client/workflow/types.ts:210</a></li></ul></aside></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/executionTypes.ts#L17">client/workflow/executionTypes.ts:17</a></li></ul></aside></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

@@ -32,6 +32,10 @@ import {
 } from './ackHelpers';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
 import type { FlowFailureRecord, FlowFailureMode } from '../../domain/types/flow';
+import {
+  commitRemovedCompletion,
+  type DependencyCompletionTracker,
+} from '../dependencyCompletions';
 
 /** Ack operation context */
 export interface AckContext {
@@ -43,7 +47,8 @@ export interface AckContext {
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
   /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
-  depCompletions?: SetLike<JobId>;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
   jobResults: MapLike<JobId, unknown>;
   dependencyResults: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
@@ -121,13 +126,12 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
     ctx.jobIndex.set(jobId, { type: 'completed', queueName: job.queue });
     ctx.storage?.markCompleted(jobId, now, job.timeline);
   } else {
+    commitRemovedCompletion(job, ctx);
     ctx.jobIndex.delete(jobId);
-    ctx.storage?.deleteJob(jobId);
     // removeOnComplete drops the full job (index + data + persisted row) to bound
     // memory, but dependent jobs gate readiness on completedJobs.has(parentId).
     // Record the bare completion id (no payload) so dependents still unblock,
     // without making the job appear in state/stats queries.
-    ctx.depCompletions?.add(jobId);
   }
 
   if (result !== undefined) ctx.dependencyResults.retain(jobId, result);

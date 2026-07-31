@@ -149,12 +149,14 @@ be claimed.
 │   │  │  processingShards[N] (active jobs)  + processingLocks[N]        │     │   │
 │   │  └────────────────────────────────────────────────────────────────┘     │   │
 │   │  Global indexes: jobIndex(Map) · completedJobs(BoundedSet) ·             │   │
-│   │  jobResults(LRU) · customIdMap(LRU) · jobLogs(LRU) · jobLocks(Map)       │   │
+│   │  depCompletions(recent FIFO + pinned) · jobResults(LRU) · customIdMap ·  │   │
+│   │  jobLogs(LRU) · jobLocks(Map)                                             │   │
 │   └──────────────────────────────────┬───────────────────────────────────────┘   │
 │                                       ▼                                          │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  WriteBuffer (10ms / 100-job double-buffer) ─► SQLite (WAL, msgpack)     │   │
-│   │  Recovery ◄─ jobs · flow_failures · results · dlq · cron · queue_state   │   │
+│   │  Recovery ◄─ jobs · flow_failures · dep_proofs · results · dlq · cron     │   │
+│   │              · queue_state                                                │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
@@ -218,8 +220,8 @@ IoT/edge that must tolerate intermittent connectivity. See
 **PUSHF** (`FlowProducer`)
 
 1. The client preallocates every ID and compiles all roots into one fully
-   resolved graph; embedded mode calls `QueueManager.pushFlow`, while TCP sends
-   one `PUSHF` frame.
+   resolved graph; embedded mode calls `QueueManager.pushFlow`, while the Bun
+   TCP client and all six official external SDKs send one `PUSHF` frame.
 2. The broker validates the complete graph before mutation, including numeric
    bounds, IDs, queues, option compatibility, edge symmetry, and cycles.
 3. It acquires the custom-ID lock when needed and every affected queue-shard
@@ -233,6 +235,13 @@ IoT/edge that must tolerate intermittent connectivity. See
    leaf is observable against partial topology.
 6. Locks are released before notifications/events; the response contains one
    authoritative snapshot per committed job.
+
+Previously published SDKs can still issue `PUSH` plus `UpdateParent`. If the
+parent already declared the child, this compatibility command is a child-only
+parent-id back-patch: it preserves an active/completed/DLQ parent exactly as it
+is and atomically updates a persisted child/DLQ snapshot together with any
+failure-outbox key. Only a genuinely new edge requires a queued parent and
+mutates both sides of the topology.
 
 **PULL** (`Worker` poll)
 1. Worker requests work (`PULL`/`PULLB`, optionally with a lease/owner) for a queue.
@@ -352,12 +361,14 @@ proceed during the writer's flush.
   exhausted batches surface via an `onCriticalLoss` callback.
 - **Serialization.** Job payloads, results, and DLQ entries are stored as
   MessagePack blobs ([`sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts)).
-- **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, results, DLQ,
-  cron, and queue control-state back into memory before serving traffic
+- **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, bounded
+  dependency-completion proofs, results, DLQ, cron, and queue control-state
+  back into memory before serving traffic
   ([`queueManager.ts:202`](../src/application/queueManager.ts)).
 
-Persisted tables: `jobs`, `flow_failures`, `job_results`, `dlq`, `cron_jobs`,
-`queue_state` (plus the `migrations` bookkeeping table) — see
+Persisted tables: `jobs`, `flow_failures`, `dependency_completions`,
+`job_results`, `dlq`, `cron_jobs`, `queue_state` (plus the `migrations`
+bookkeeping table) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
 
 ### Workflow execution path
@@ -436,6 +447,7 @@ Memory bounds enforced by the bounded collections (cleanup evicts ~10% when full
 | Collection | Max | Eviction |
 | --- | --- | --- |
 | `completedJobs` | 50,000 | FIFO batch |
+| `depCompletions` recent tier | 50,000 | Exact FIFO; live-edge pins are released separately |
 | `jobResults` | 10,000 | LRU |
 | `jobLogs` | 10,000 | LRU |
 | `customIdMap` | 50,000 | LRU |
@@ -489,8 +501,11 @@ The companion `bun run test:sandbox:sdk` gate builds six language-specific
 images and runs TypeScript, Python, PHP, Go, Rust, and Elixir
 native/conformance suites with the same containment and telemetry format.
 Those suites include independent-connection lease/idempotency races,
-fixed-seed property corpora, malformed-input fuzz corpora, bounded spikes,
-and durable SIGKILL/restart recovery. Go additionally runs its race detector.
+native property-based flow planners with reproducible seeds and shrinking,
+malformed-input fuzz corpora, bounded spikes, and durable SIGKILL/restart
+recovery. Go additionally runs its race detector. A separate scheduled/manual
+mutation campaign runs each ecosystem's mutation engine against those planner
+properties; it is intentionally outside the bounded offline sandbox.
 Long-lived soak/stress profiles and live dependency-advisory checks are weekly
 CI jobs because the local release gate is bounded and networkless.
 The unit suite also runs a

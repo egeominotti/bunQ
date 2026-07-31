@@ -1,0 +1,6 @@
+examine_globs = ["src/flow_plan.rs", "src/flow_commit.rs"]
+exclude_re = ["^src/flow_commit.rs:.*replace commit_flow"]
+test_tool = "cargo"
+additional_cargo_test_args = ["--lib"]
+timeout_multiplier = 2.0
+minimum_test_timeout = 60.0

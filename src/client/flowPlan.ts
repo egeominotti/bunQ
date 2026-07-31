@@ -52,8 +52,17 @@ function plannedId(node: FlowJob<unknown>): JobId {
   return jobId(custom);
 }
 
+function validateQueueDefaults(options: FlowOpts | undefined): void {
+  for (const defaults of Object.values(options?.queuesOptions ?? {})) {
+    if ((defaults as { jobId?: unknown }).jobId !== undefined) {
+      throw new Error('jobId cannot be a queue default');
+    }
+  }
+}
+
 /** Compile one or more trees into a fully-resolved graph before contacting the broker. */
 export function planFlows<T>(flows: FlowJob<T>[], options?: FlowOpts): FlowPlan<T> {
+  validateQueueDefaults(options);
   const jobs: AtomicFlowJobInput[] = [];
   const ids = new Set<string>();
   const seen = new WeakSet<object>();

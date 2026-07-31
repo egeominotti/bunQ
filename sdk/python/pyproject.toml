@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bunqueue-client"
-version = "0.1.5"
+version = "0.1.6"
 description = "Python client SDK for bunqueue — high-performance job queue server (TCP mode)"
 readme = "README.md"
 license = "MIT"
@@ -26,6 +26,15 @@ classifiers = [
 ]
 dependencies = ["msgpack>=1.0.0"]
 
+[project.optional-dependencies]
+test = [
+  "hypothesis==6.141.1",
+  "pytest==8.4.2",
+]
+mutation = [
+  "mutmut==3.6.0; python_version >= '3.10'",
+]
+
 [project.urls]
 Homepage = "https://github.com/egeominotti/bunqueue"
 Documentation = "https://bunqueue.dev"
@@ -39,3 +48,22 @@ packages = ["bunqueue"]
 # include/exclude tweak cannot silently drop it.
 [tool.hatch.build.targets.wheel.force-include]
 "bunqueue/py.typed" = "bunqueue/py.typed"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mutmut]
+source_paths = ["bunqueue/"]
+only_mutate = [
+  "bunqueue/flow_plan.py",
+  "bunqueue/flow_plan_legacy.py",
+  "bunqueue/flow_commit.py",
+]
+pytest_add_cli_args_test_selection = [
+  "tests/test_flow_plan_property.py",
+  "tests/test_flow_plan_validation.py",
+  "tests/test_flow_plan_limits.py",
+  "tests/test_flow_plan_contract.py",
+  "tests/test_flow_plan_wire_contract.py",
+  "tests/test_flow_commit.py",
+]

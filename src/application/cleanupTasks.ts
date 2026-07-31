@@ -7,6 +7,7 @@ import type { JobId } from '../domain/types/job';
 import { processingShardIndex, SHARD_COUNT } from '../shared/hash';
 import { withWriteLock } from '../shared/lock';
 import type { BackgroundContext } from './types';
+import { releaseDependencyCompletionPins } from './dependencyCompletions';
 
 /**
  * Main cleanup function - called periodically to maintain system health
@@ -87,6 +88,7 @@ async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number
 
     const removed = await withWriteLock(ctx.shardLocks[i], () => {
       let count = 0;
+      const released: JobId[] = [];
       for (const id of staleIds) {
         const job = shard.waitingDeps.get(id);
         if (!job || now - job.createdAt <= depTimeout) continue;
@@ -96,6 +98,7 @@ async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number
         ctx.storage?.deleteJob(job.id);
         shard.waitingDeps.delete(job.id);
         shard.unregisterDependencies(job.id, job.dependsOn);
+        released.push(...job.dependsOn);
         if (job.uniqueKey && shard.getUniqueKeyEntry(job.queue, job.uniqueKey)?.jobId === job.id) {
           shard.releaseUniqueKey(job.queue, job.uniqueKey);
         }
@@ -106,11 +109,12 @@ async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number
         ctx.jobIndex.delete(job.id);
         count++;
       }
-      return count;
+      return { count, released };
     });
 
-    if (removed > 0) {
-      ctx.dashboardEmit?.('cleanup:stale-deps-removed', { count: removed });
+    releaseDependencyCompletionPins(removed.released, ctx);
+    if (removed.count > 0) {
+      ctx.dashboardEmit?.('cleanup:stale-deps-removed', { count: removed.count });
     }
   }
 }

@@ -81,11 +81,17 @@ export async function flows(env: Env): Promise<Record<string, unknown>> {
     });
     const tree = await flow.getFlow({ id: node.job.id, queueName });
     const parentState = await queue.getJobState(node.job.id);
+    const generatedIds = [
+      ...chain.jobIds,
+      node.job.id,
+      ...(node.children ?? []).map((child) => child.job.id),
+    ];
     await queue.obliterate();
     return {
       chainLength: chain.jobIds.length,
       children: tree?.children?.length ?? 0,
       parentWaitsChildren: parentState === 'waiting-children',
+      portableIds: generatedIds.every((id) => id.length > 0 && !id.includes(':')),
     };
   } finally {
     flow.close();

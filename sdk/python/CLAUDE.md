@@ -5,11 +5,16 @@ protocol (msgpack). Parity reference: the official TypeScript client in
 `../../src/client/` (TCP mode — embedded/sandboxed/QueueEvents are excluded
 by design: they require the in-process Bun runtime).
 
+The normative behavioral contract is
+[`INVARIANTS.md`](./INVARIANTS.md). Read it before changing transport,
+serialization, Queue, Worker, FlowProducer, query, or admin code.
+
 ## Non-negotiable rules
 
 1. **Never touch the bunqueue core** (`../../src/`): this SDK lives here only.
 2. **Max 250 lines per file** — split into modules/mixins, don't compress.
-3. **Single runtime dependency: `msgpack`** — nothing else.
+3. **Single runtime dependency: `msgpack`** — pytest, Hypothesis, and mutmut
+   are optional development extras, never runtime dependencies.
 4. **Protocol source of truth**: `../../src/domain/types/command.ts`
    (commands), `../../src/domain/types/response.ts` (responses),
    `../../src/infrastructure/server/handlers/` (actual shapes). When in
@@ -32,7 +37,9 @@ by design: they require the in-process Bun runtime).
 | `queue_admin.py` | Admin mixin: DLQ, configs, rate limit, schedulers/cron, webhooks, monitoring |
 | `worker.py` | Worker lifecycle: start/run/pause/close, events |
 | `worker_runtime.py` | Worker runtime mixin: poll loop, job execution, heartbeats, registry |
-| `flow.py` | FlowProducer: tree/chain/fan-in, UpdateParent, rollback |
+| `flow.py` | FlowProducer public creation/read API |
+| `flow_plan.py` / `flow_plan_legacy.py` | Pure ID allocation and closed tree/chain/fan-in planning |
+| `flow_commit.py` | One `PUSHF` call plus exact snapshot ID/queue validation |
 | `simple/app.py` + `simple/app_api.py` | `Bunqueue` Simple Mode: constructor + processing pipeline, API mixin |
 | `simple/{retry,circuit_breaker,batch,triggers,aging,cancellation,ttl,dedup_debounce}.py` | Simple Mode subsystems, 1:1 with `src/client/bunqueue/` |
 
@@ -68,15 +75,23 @@ by design: they require the in-process Bun runtime).
 ## Tests
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install msgpack   # once
+python3 -m venv .venv && .venv/bin/pip install -e '.[test,mutation]'
+.venv/bin/python -m pytest tests/test_flow_plan_property.py \
+  tests/test_flow_plan_validation.py tests/test_flow_plan_limits.py \
+  tests/test_flow_plan_contract.py tests/test_flow_plan_wire_contract.py \
+  tests/test_flow_commit.py \
+  --hypothesis-seed=20260730
+.venv/bin/mutmut run                       # final gate; Python 3.10+
 .venv/bin/python tests/test_integration.py   # smoke (8) — also pytest-compatible
 .venv/bin/python tests/run_e2e.py            # full e2e (112)
 BUNQUEUE_SDK_SOAK_SECONDS=3600 .venv/bin/python tests/soak.py
 ```
 
-Both spawn a real server (`bun src/main.ts` from the repo root, random port,
-temp DB). `tests/harness.py` = server fixture + `@test` registry +
-`wait_until`. The auth suite uses a dedicated server with `AUTH_TOKENS`.
+The integration and E2E runners spawn a real server (`bun src/main.ts` from
+the repo root, random port, temp DB). Pure property and mutation tests do not.
+Replay failures with the printed Hypothesis seed or `@reproduce_failure` blob.
+`tests/harness.py` = server fixture + `@test` registry + `wait_until`. The auth
+suite uses a dedicated server with `AUTH_TOKENS`.
 
 ## New-method checklist
 

@@ -8,6 +8,26 @@ import { MAX_TIMELINE_ENTRIES } from '../domain/types/job';
 import { SHARD_COUNT } from '../shared/hash';
 import { withWriteLock } from '../shared/lock';
 import type { BackgroundContext } from './types';
+import { releaseDependencyCompletionPins } from './dependencyCompletions';
+
+type DependencyReadyState = 'delayed' | 'prioritized' | 'waiting';
+
+export function dependencyReadyState(job: Job, now: number): DependencyReadyState {
+  if (job.runAt > now) return 'delayed';
+  return job.priority > 0 ? 'prioritized' : 'waiting';
+}
+
+export function checkpointDependencyPromotion(
+  job: Job,
+  state: DependencyReadyState,
+  now: number,
+  storage: BackgroundContext['storage']
+): void {
+  if (job.timeline.at(-1)?.state !== state && job.timeline.length < MAX_TIMELINE_ENTRIES) {
+    job.timeline.push({ state, timestamp: now });
+  }
+  storage?.updateFlowParentResolution(job, state);
+}
 
 /**
  * Process pending dependency checks
@@ -17,9 +37,11 @@ export async function processPendingDependencies(ctx: BackgroundContext): Promis
   if (ctx.pendingDepChecks.size === 0) return;
 
   const completedIds = Array.from(ctx.pendingDepChecks);
+  const completedNow = new Set(completedIds);
   ctx.pendingDepChecks.clear();
 
   const jobsToCheckByShard = new Map<number, Set<JobId>>();
+  const releasedDependencyIds = new Set<JobId>();
 
   // Find all jobs waiting for the completed dependencies
   for (const completedId of completedIds) {
@@ -53,7 +75,10 @@ export async function processPendingDependencies(ctx: BackgroundContext): Promis
           const job = shard.waitingDeps.get(jobId);
           if (
             job?.dependsOn.every(
-              (dep) => ctx.completedJobs.has(dep) || (ctx.depCompletions?.has(dep) ?? false)
+              (dep) =>
+                completedNow.has(dep) ||
+                ctx.completedJobs.has(dep) ||
+                (ctx.depCompletions?.has(dep) ?? false)
             )
           ) {
             jobsToPromote.push(job);
@@ -62,17 +87,13 @@ export async function processPendingDependencies(ctx: BackgroundContext): Promis
 
         // Promote jobs with all dependencies satisfied
         if (jobsToPromote.length > 0) {
-          promoteJobsToQueue(jobsToPromote, shard, ctx, i);
+          promoteJobsToQueue(jobsToPromote, shard, ctx, i, releasedDependencyIds);
         }
       });
     })
   );
 
-  // NOTE: depCompletions is intentionally NOT pruned here. It is a FIFO
-  // BoundedSet (same cap as completedJobs), so it self-bounds. Pruning eagerly
-  // once "no waiters remain" would orphan a dependent pushed AFTER a
-  // removeOnComplete parent completed — exactly the symmetry completedJobs
-  // provides for normal parents (readiness holds for the whole bounded window).
+  releaseDependencyCompletionPins(releasedDependencyIds, ctx);
 }
 
 /** Move jobs from waitingDeps to the active queue */
@@ -80,22 +101,22 @@ function promoteJobsToQueue(
   jobsToPromote: Job[],
   shard: BackgroundContext['shards'][number],
   ctx: BackgroundContext,
-  shardIdx: number
+  shardIdx: number,
+  releasedDependencyIds: Set<JobId>
 ): void {
   const now = Date.now();
 
   for (const job of jobsToPromote) {
     if (shard.waitingDeps.has(job.id)) {
+      const state = dependencyReadyState(job, now);
+      checkpointDependencyPromotion(job, state, now, ctx.storage);
       shard.waitingDeps.delete(job.id);
       shard.unregisterDependencies(job.id, job.dependsOn);
+      for (const dependencyId of job.dependsOn) releasedDependencyIds.add(dependencyId);
       shard.getQueue(job.queue).push(job);
-      const isDelayed = job.runAt > now;
+      const isDelayed = state === 'delayed';
       shard.incrementQueued(job.id, isDelayed, job.createdAt, job.queue, job.runAt);
       ctx.jobIndex.set(job.id, { type: 'queue', shardIdx, queueName: job.queue });
-      if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-        const state = isDelayed ? 'delayed' : job.priority > 0 ? 'prioritized' : 'waiting';
-        job.timeline.push({ state, timestamp: now });
-      }
     }
   }
 

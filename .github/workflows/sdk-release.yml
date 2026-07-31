@@ -1,45 +1,86 @@
 name: SDK Release (npm)
 
-# Publishes the TypeScript SDK to npm with build provenance
-# (https://docs.npmjs.com/generating-provenance-statements). Trigger by pushing
-# a tag like `sdk-ts-v1.0.0`. Requires an NPM_TOKEN secret (automation token).
-
+# A package release is requested manually. The version is validated before
+# publishing and the immutable tag is created only after npm accepts the package.
 on:
-  push:
-    tags: ['sdk-ts-v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact sdk/typescript package version to publish'
+        required: true
+        type: string
 
 permissions:
   contents: read
-  id-token: write # required for npm provenance
 
 jobs:
+  sdk:
+    name: Validate every official SDK
+    uses: ./.github/workflows/sdk.yml
+    with:
+      run_soak: false
+
   publish:
+    name: Publish TypeScript SDK
     runs-on: ubuntu-latest
+    needs: [sdk]
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require the current main commit
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: Install server deps (for bun src/main.ts)
-        run: bun install --frozen-lockfile || bun install
-      - name: Build + verify SDK
+      - name: Install and package reproducibly
         working-directory: sdk/typescript
         run: |
-          bun install --frozen-lockfile || bun install
+          set -euo pipefail
+          bun install --frozen-lockfile
           bun run build
-          bun run check
-      - name: Test gate (never publish an untested tag)
-        working-directory: sdk/typescript
+          mkdir -p /tmp/typescript-package
+          bun pm pack --destination /tmp/typescript-package
+      - name: Validate requested version and tag
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          bun tests/integration.ts
-          bun tests/e2e.ts
+          set -euo pipefail
+          VERSION=$(node -p "require('./sdk/typescript/package.json').version")
+          test "$REQUESTED_VERSION" = "$VERSION"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*) echo "Invalid SDK version: $VERSION" >&2; exit 1 ;;
+          esac
+          TAG="sdk-ts-v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists" >&2
+            exit 1
+          fi
+          if npm view "bunqueue-client@$VERSION" version >/dev/null 2>&1; then
+            echo "bunqueue-client@$VERSION is already published" >&2
+            exit 1
+          fi
+          echo "SDK_VERSION=$VERSION" >> "$GITHUB_ENV"
       - name: Publish with provenance
         working-directory: sdk/typescript
-        run: npm publish --provenance --access public
+        run: bun publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Tag the published commit
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "sdk-ts-v$SDK_VERSION" -m "TypeScript SDK v$SDK_VERSION"
+          git push origin "sdk-ts-v$SDK_VERSION"

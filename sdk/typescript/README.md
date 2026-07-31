@@ -230,13 +230,49 @@ const { finalId } = await flow.addBulkThen(
 
 // parent and child tree: children always run before the parent
 const node = await flow.add({
-  name: 'assemble', queueName: 'orders',
+  name: 'assemble',
+  queueName: 'orders',
+  opts: { jobId: 'order-42-assembly' },
   children: [
-    { name: 'reserve-stock', queueName: 'orders' },
+    {
+      name: 'reserve-stock',
+      queueName: 'orders',
+      opts: { jobId: 'order-42-stock' },
+    },
     { name: 'charge-card', queueName: 'orders' },
   ],
+}, {
+  queuesOptions: { orders: { attempts: 3, backoff: 500 } },
 });
+
+console.log(node.job.id);              // order-42-assembly
+console.log(node.children?.[0].job.id); // order-42-stock
+flow.close();
 ```
+
+`add`, `addBulk`, `addChain`, and `addBulkThen` compile the complete dependency
+graph locally, preallocate every ID, and send exactly one `PUSHF` command. The
+broker either persists and publishes the entire graph or creates no jobs. The
+returned `Job` objects are built from the broker's committed snapshots, so
+state, options, and reciprocal parent/child links are immediately available.
+
+`opts.jobId` becomes both the planned ID and the wire `customId`; generated IDs
+are portable UUIDs and never contain `:`. Atomic flows reject `repeat`,
+`deduplication`, and `debounce`, because those options can change graph
+cardinality or identity. `parentId`, `dependsOn`, and `childrenIds` are owned
+by the planner. Job data keys named `name` or beginning with `__` are reserved
+for immutable flow metadata and are rejected instead of being overwritten.
+`queuesOptions` may define scheduling and retention defaults, but not
+`jobId`; identity is always chosen on the individual node.
+
+A transport timeout after `PUSHF` is ambiguous: the broker may have committed
+the complete graph before the response was lost. Assign a deterministic
+`opts.jobId` to every node and reuse the same graph on retry. If the first call
+did not commit, the retry can create it; if it did, strict `PUSHF` collision
+checking returns `already exists` instead of rewriting the graph or fabricating
+snapshots. Treat that error as a reconciliation signal and query the known
+stable IDs. Regenerated IDs can create a second graph after an uncertain
+outcome.
 
 ## Simple Mode
 
@@ -381,6 +417,8 @@ Every release is validated against a real bunqueue server, spawned fresh for eac
 bun install
 bun run build          # tsc, emits dist/
 bun run check          # Biome lint and format verification
+BUNQUEUE_FLOW_PBT_SEED=20260730 bun run test:property
+bun run test:mutation  # Stryker, pure flow planners + snapshot validator
 
 bun tests/integration.ts                            # smoke suite
 bun tests/e2e.ts                                    # full surface, edge cases, realistic load
@@ -396,8 +434,10 @@ fixed-seed generated payloads, malformed mutation fuzzing, a 1500-job spike,
 server crash/restart, and realistic zero-loss accounting. `test:soak` reuses
 one pooled client; tune `BUNQUEUE_SDK_SOAK_BATCH` for stress diagnostics.
 Engineering standards: Biome, a maximum of 250 lines per file, and relative
-imports with explicit `.js` extensions for NodeNext resolution. See
-`CLAUDE.md` for the full development guide and wire protocol notes.
+imports with explicit `.js` extensions for NodeNext resolution. Maintainers
+should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

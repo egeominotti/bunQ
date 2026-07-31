@@ -148,7 +148,14 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
 - **Same job ID at multiple timestamps:** the reverse map stores an entry array. `remove(jobId)` removes its earliest temporal entry, preserving the previous one-at-a-time semantics when tests or recovery insert multiple timestamps for one ID.
 - **Queue-local clear:** `clearQueue` detaches reverse-map entries while deleting the queue skip list; `cleanOrphaned` removes every entry for IDs absent from the supplied valid set.
 - **`TTLMap` interval leak:** the cleanup `setInterval` keeps the instance alive; failing to call `stop()` leaks memory (documented invariant at the top of `ttlMap.ts`).
-- **Memory bounds** are enforced by capacity-constructed containers in `QueueManager` (`queueManager.ts:151`-`:163`): `completedJobsData` (`BoundedMap`), `completedJobs`/`depCompletions`/`timedOutJobs` (`BoundedSet`), `jobResults`/`customIdMap`/`jobLogs`/`perQueueMetrics` (`LRUMap`). Eviction is silent (LRU drops oldest-touched; Bounded drops oldest-inserted 10% batch).
+- **Memory bounds** are enforced by capacity-constructed containers in
+  `QueueManager`: `completedJobsData` (`BoundedMap`),
+  `completedJobs`/`timedOutJobs` (`BoundedSet`), `depCompletions`
+  (`DependencyCompletionTracker`), and
+  `jobResults`/`customIdMap`/`jobLogs`/`perQueueMetrics` (`LRUMap`). The
+  completion tracker uses exact one-at-a-time FIFO eviction for recent IDs and
+  a separate pinned set whose members correspond to live reverse dependency
+  ownership.
 - **`Histogram.percentile`** returns `0` for an empty histogram and clamps to the largest finite bucket for high percentiles; it reports bucket boundaries, not interpolated values.
 - **Unused-in-`src` containers:** `LRUSet` and `TTLMap` are exported and unit-tested but currently have no production call site in `src/` (only `test/lru.test.ts`); they remain part of the public toolkit.
 
@@ -158,7 +165,9 @@ These structures take sizes as constructor arguments; defaults that bind them co
 
 | Collection (consumer) | Container | Default cap | Source |
 | --- | --- | --- | --- |
-| `completedJobs`, `completedJobsData`, `depCompletions`, `timedOutJobs` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `types.ts:34` |
+| `completedJobs`, `completedJobsData`, `timedOutJobs` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `types.ts` |
+| `depCompletions` recent tier | `DependencyCompletionTracker` | `maxCompletedJobs = 50_000` | `dependencyCompletions.ts` |
+| `depCompletions` pinned tier | `Set` | Live completed IDs referenced by `waitingDeps` | `dependencyCompletions.ts` |
 | `jobResults` | `LRUMap` | `maxJobResults = 10_000` | `types.ts:35` |
 | `jobLogs` | `LRUMap` | `maxJobLogs = 10_000` | `types.ts:36` |
 | `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `types.ts:37` |

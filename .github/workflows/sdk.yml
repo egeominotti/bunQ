@@ -3,6 +3,12 @@ name: SDK
 # Polyglot SDK CI; integration and conformance spawn the current broker.
 
 on:
+  workflow_call:
+    inputs:
+      run_soak:
+        description: 'Also run the sustained soak profiles'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 2 * * 0'
   # The soak steps only ever ran on the weekly schedule, so a fix to them could
@@ -13,38 +19,13 @@ on:
         description: 'Also run the sustained soak profiles (adds ~15 min per SDK)'
         type: boolean
         default: false
-  push:
-    branches: [main, master]
-    paths:
-      - 'sdk/**'
-      - 'src/**'
-      - 'Dockerfile.sdk-test'
-      - 'Dockerfile.sdk-test.dockerignore'
-      - 'scripts/test-sdk-sandbox.ts'
-      - 'scripts/test-sandbox-telemetry.ts'
-      - '.github/workflows/sdk-security.yml'
-      - '.github/workflows/sdk.yml'
-  pull_request:
-    paths:
-      - 'sdk/**'
-      - 'src/**'
-      - 'Dockerfile.sdk-test'
-      - 'Dockerfile.sdk-test.dockerignore'
-      - 'scripts/test-sdk-sandbox.ts'
-      - 'scripts/test-sandbox-telemetry.ts'
-      - '.github/workflows/sdk-security.yml'
-      - '.github/workflows/sdk.yml'
-
-concurrency:
-  group: sdk-${{ github.ref }}
-  cancel-in-progress: true
 
 # Soaks exceed the anti-abuse default on disposable brokers, so the limit and the
 # soak gate must be derived from the SAME condition: a manual soak run with the
 # push-level limit would measure the throttle instead of the client.
 env:
-  RUN_SOAK: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak) }}
-  RATE_LIMIT_MAX_REQUESTS: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)) && '1000000' || '10000' }}
+  RUN_SOAK: ${{ github.event_name == 'schedule' || inputs.run_soak }}
+  RATE_LIMIT_MAX_REQUESTS: ${{ (github.event_name == 'schedule' || inputs.run_soak) && '1000000' || '10000' }}
 
 jobs:
   typescript:
@@ -80,6 +61,10 @@ jobs:
       - name: Lint (biome)
         working-directory: sdk/typescript
         run: bun run check
+      - name: Flow planner properties (fast-check)
+        if: matrix.runtime == 'bun'
+        working-directory: sdk/typescript
+        run: bun run test:property
       - name: Validate package contents
         if: matrix.runtime == 'bun'
         working-directory: sdk/typescript
@@ -144,7 +129,10 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --quiet build hatchling
-          .venv/bin/pip install --quiet -e .
+          .venv/bin/pip install --quiet -e '.[test]'
+      - name: Flow planner properties (Hypothesis)
+        working-directory: sdk/python
+        run: .venv/bin/python -m pytest tests/test_flow_plan_property.py -q
       - name: Integration + e2e
         working-directory: sdk/python
         run: |
@@ -190,6 +178,7 @@ jobs:
         run: |
           composer validate --strict --no-check-publish
           find src tests -name '*.php' -print0 | xargs -0 -n1 php -l
+          composer test:property
           php tests/run-e2e.php
       - name: Protocol conformance
         working-directory: sdk/conformance
@@ -340,3 +329,26 @@ jobs:
           esac
           mix test --include soak \
             --timeout "$(((BUNQUEUE_SDK_SOAK_SECONDS + 300) * 1000))" test/soak_test.exs
+
+  sdk-gate:
+    name: SDK gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [typescript, python, php, go, rust, elixir]
+    if: ${{ always() }}
+    steps:
+      - name: Require every official SDK
+        env:
+          TYPESCRIPT_RESULT: ${{ needs.typescript.result }}
+          PYTHON_RESULT: ${{ needs.python.result }}
+          PHP_RESULT: ${{ needs.php.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          ELIXIR_RESULT: ${{ needs.elixir.result }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "$TYPESCRIPT_RESULT" "$PYTHON_RESULT" "$PHP_RESULT" \
+            "$GO_RESULT" "$RUST_RESULT" "$ELIXIR_RESULT"; do
+            test "$result" = success
+          done

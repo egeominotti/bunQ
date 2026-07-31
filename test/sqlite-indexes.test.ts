@@ -40,8 +40,28 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 27', () => {
-    expect(SCHEMA_VERSION).toBe(27);
+  test('schema version is 29', () => {
+    expect(SCHEMA_VERSION).toBe(29);
+  });
+
+  test('bounded dependency-completion table and queue index exist', () => {
+    const table = db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='dependency_completions'"
+      )
+      .get();
+    const index = db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_dependency_completions_queue'"
+      )
+      .get();
+    expect(table?.name).toBe('dependency_completions');
+    expect(index?.name).toBe('idx_dependency_completions_queue');
+    const columns = db
+      .query<{ name: string }, []>('PRAGMA table_info(dependency_completions)')
+      .all()
+      .map((row) => row.name);
+    expect(columns).toContain('pinned');
   });
 
   test('jobs persist cumulative stall counts', () => {
@@ -211,11 +231,12 @@ describe('SQLite Performance Indexes', () => {
     expect(plan.some((row) => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 
-  test('migration 27 rebuilds legacy pending indexes for authoritative states', () => {
+  test('migrations 28-29 restore completion evidence and pin ownership', () => {
     const path = join(tmpdir(), `bunqueue-index-migration-${crypto.randomUUID()}.db`);
     const legacy = new Database(path, { create: true });
     legacy.run(SCHEMA);
     legacy.run(MIGRATION_TABLE);
+    legacy.run('DROP TABLE dependency_completions');
     legacy.run(`
       DROP INDEX idx_jobs_run_at;
       CREATE INDEX idx_jobs_run_at
@@ -246,7 +267,19 @@ describe('SQLite Performance Indexes', () => {
         migrated
           .query<{ version: number }, []>('SELECT MAX(version) AS version FROM migrations')
           .get()?.version
-      ).toBe(27);
+      ).toBe(29);
+      expect(
+        migrated
+          .query<{ name: string }, []>(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='dependency_completions'"
+          )
+          .get()?.name
+      ).toBe('dependency_completions');
+      const columns = migrated
+        .query<{ name: string }, []>('PRAGMA table_info(dependency_completions)')
+        .all()
+        .map((row) => row.name);
+      expect(columns).toContain('pinned');
     } finally {
       migrated.close();
       for (const suffix of ['', '-wal', '-shm']) {

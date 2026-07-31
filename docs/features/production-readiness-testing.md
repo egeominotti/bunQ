@@ -58,6 +58,18 @@ hard-crash test. Throughput claims require native benchmark runs, while
 `SIGKILL`, generated lifecycle histories, and broader transport coverage remain
 the responsibility of the model-based and isolated sandbox suites.
 
+Flow durability has an additional deterministic crash matrix:
+`repro-model-flow-batch-parent-persistence.test.ts` reproduces the minimized
+fast-check ACKB history and interrupts single/optimized result ACK paths before
+dependency flushing. `repro-dependency-completion-retention.test.ts` applies a
+small retention cap, restart/eviction pressure, custom-ID reuse, stall-late-ACK,
+queue obliteration, and an injected SQLite transaction failure.
+`repro-dependency-completion-pinning.test.ts` adds oversized ACKB, late-parent,
+shared-parent, reduced-cap recovery, and parent-obliteration cases. Together
+they assert that a removed child has either its live row or one durable,
+payload-free proof—never neither—that a live reverse edge owns its proof until
+checkpoint, and that recovery is idempotent.
+
 ## Durable backpressure torture test
 
 The torture scenario bulk-enqueues durable jobs while no consumers are
@@ -93,18 +105,19 @@ while checking connection health, queue visibility, cleanup, and memory
 telemetry.
 
 On scheduled runs the workflow therefore sets
-`RATE_LIMIT_MAX_REQUESTS=1000000`; push and pull-request runs retain the
-`10000` production default. This prevents the anti-abuse boundary from
-terminating a soak without weakening ordinary validation or changing the
-broker default. SDK control operations must still assert their public return
-contract; for example, Elixir `Queue.obliterate/1` returns `:ok`.
+`RATE_LIMIT_MAX_REQUESTS=1000000`; reusable calls from ordinary push and
+pull-request CI retain the `10000` production default. This prevents the
+anti-abuse boundary from terminating a soak without weakening ordinary
+validation or changing the broker default. SDK control operations must still
+assert their public return contract; for example, Elixir
+`Queue.obliterate/1` returns `:ok`.
 
 Dependency advisory checks run on the same weekly cadence in the separate
 `SDK Security` workflow, keeping each workflow file below 300 lines. The
-general sandbox image includes both workflow definitions so their regression
-tests run with the same filesystem isolation as the rest of the unit suite. It
-also includes the TypeScript fixture harnesses inspected by the port-allocation
-regression.
+general sandbox image includes the CI, SDK, SDK release, and security workflow
+definitions needed by their regression tests, so graph validation runs with
+the same filesystem isolation as the rest of the unit suite. It also includes
+the TypeScript fixture harnesses inspected by the port-allocation regression.
 
 TypeScript SDK fixtures reserve only the TCP port that clients need to know.
 They set `HTTP_PORT=0`, allowing the kernel to allocate an independent HTTP

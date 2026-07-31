@@ -11,13 +11,21 @@ import * as dlqOps from './dlqManager';
 import { checkExpiredLocks } from './lockManager';
 import { cleanup } from './cleanupTasks';
 import { checkStalledJobs } from './stallDetection';
-import { processPendingDependencies } from './dependencyProcessor';
+import {
+  checkpointDependencyPromotion,
+  dependencyReadyState,
+  processPendingDependencies,
+} from './dependencyProcessor';
 import { handleTaskError, handleTaskSuccess, getTaskErrorStats } from './taskErrorTracking';
 import { runMonitoringChecks } from './monitoringChecks';
-import { isCorruptDependsOn } from '../infrastructure/persistence/sqliteSerializer';
+import {
+  isCorruptDependsOn,
+  persistedJobState,
+} from '../infrastructure/persistence/sqliteSerializer';
 import type { BackgroundContext, LockContext } from './types';
 import type { CronScheduler } from '../infrastructure/scheduler/cronScheduler';
 import type { Job } from '../domain/types/job';
+import { reconcileDependencyCompletionPins } from './dependencyCompletions';
 
 export { getTaskErrorStats };
 
@@ -229,8 +237,14 @@ function quarantineCorruptDependsOn(ctx: BackgroundContext, job: Job): void {
 export function recover(ctx: BackgroundContext): void {
   if (!ctx.storage) return;
 
+  // Keep the full pre-reconciliation window outside the bounded RAM tracker.
+  // A restart may lower maxCompletedJobs; pruning before Phase 2 reconstructs
+  // reverse edges could discard an old proof still owned by a waiting parent.
+  const dependencyCompletions = ctx.storage.loadDependencyCompletions();
+
   // Load completed job IDs from SQLite for dependency checking
   const completedInDb = ctx.storage.loadCompletedJobIds();
+  for (const record of dependencyCompletions) completedInDb.add(record.jobId);
   // Load DLQ job IDs so Phase 1 can skip stale active rows for DLQ'd jobs
   // (legacy DBs predate the DLQ-row cleanup fix in failJob).
   const dlqJobIds = ctx.storage.loadDlqJobIds();
@@ -355,10 +369,17 @@ export function recover(ctx: BackgroundContext): void {
       }
 
       // Check if job has unmet dependencies
-      // Check both in-memory completedJobs AND SQLite job_results table
+      // A ready persisted state is an authoritative checkpoint: dependency
+      // proofs are deliberately bounded and may have expired after promotion.
       const hasDependencies = job.dependsOn && job.dependsOn.length > 0;
+      const recoveredState = persistedJobState(job);
+      const wasAlreadyPromoted =
+        recoveredState === 'waiting' ||
+        recoveredState === 'prioritized' ||
+        recoveredState === 'delayed';
       const needsWaitingDeps =
         hasDependencies &&
+        !wasAlreadyPromoted &&
         !job.dependsOn.every((depId) => ctx.completedJobs.has(depId) || completedInDb.has(depId));
 
       if (needsWaitingDeps) {
@@ -370,8 +391,10 @@ export function recover(ctx: BackgroundContext): void {
         // Job is ready to process
         shard.getQueue(job.queue).push(job);
         // Update running counters for O(1) stats and temporal index
-        const isDelayed = job.runAt > now;
+        const state = dependencyReadyState(job, now);
+        const isDelayed = state === 'delayed';
         shard.incrementQueued(job.id, isDelayed, job.createdAt, job.queue, job.runAt);
+        if (hasDependencies) checkpointDependencyPromotion(job, state, now, ctx.storage);
       }
 
       ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: job.queue });
@@ -477,6 +500,8 @@ export function recover(ctx: BackgroundContext): void {
     completedOffset += completedBatch.length;
     if (completedBatch.length < batchSize) break;
   }
+
+  reconcileDependencyCompletionPins(ctx);
 }
 
 // Re-export for backward compatibility

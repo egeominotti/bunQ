@@ -1,6 +1,7 @@
 /**
  * SQLite schema and migrations
  */
+import { DEPENDENCY_COMPLETION_SCHEMA } from './dependencyCompletionSchema';
 
 /** SQLite PRAGMA settings for optimal performance */
 export const PRAGMA_SETTINGS = `
@@ -12,7 +13,6 @@ PRAGMA mmap_size = 268435456;
 PRAGMA page_size = 4096;
 PRAGMA busy_timeout = 5000;
 `;
-
 /** Main schema creation */
 export const SCHEMA = `
 -- Jobs table (using UUIDv7 for job IDs)
@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS flow_failures (
     PRIMARY KEY (parent_id, child_id)
 );
 CREATE INDEX IF NOT EXISTS idx_flow_failures_parent ON flow_failures(parent_id);
+
+${DEPENDENCY_COMPLETION_SCHEMA}
 
 -- Job results storage (BLOB for MessagePack)
 CREATE TABLE IF NOT EXISTS job_results (
@@ -164,10 +166,8 @@ CREATE TABLE IF NOT EXISTS migrations (
     applied_at INTEGER NOT NULL
 );
 `;
-
 /** Current schema version */
-export const SCHEMA_VERSION = 27;
-
+export const SCHEMA_VERSION = 29;
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
   1: SCHEMA,
@@ -295,4 +295,6 @@ DROP INDEX IF EXISTS idx_jobs_pending_priority;
 CREATE INDEX idx_jobs_pending_priority
     ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
 `,
+  28: DEPENDENCY_COMPLETION_SCHEMA,
+  29: 'ALTER TABLE dependency_completions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;',
 };

@@ -28,18 +28,26 @@ test('Go protocol conformance selects the nested driver module', () => {
  */
 const parsedWorkflow = Bun.YAML.parse(workflow) as {
   env: Record<string, string>;
-  jobs: Record<string, { 'timeout-minutes'?: number; steps: { name?: string; if?: string; run?: string }[] }>;
+  jobs: Record<
+    string,
+    { 'timeout-minutes'?: number; steps: { name?: string; if?: string; run?: string }[] }
+  >;
 };
 const soakSteps = Object.entries(parsedWorkflow.jobs).flatMap(([job, { steps }]) =>
   steps.filter((step) => /soak|fuzz/i.test(step.name ?? '')).map((step) => ({ job, step }))
 );
 
 test('scheduled SDK soaks raise the protocol request budget', () => {
-  const condition = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)";
+  const condition = "github.event_name == 'schedule' || inputs.run_soak";
   expect(parsedWorkflow.env.RUN_SOAK).toBe(`\${{ ${condition} }}`);
   expect(parsedWorkflow.env.RATE_LIMIT_MAX_REQUESTS).toBe(
     `\${{ (${condition}) && '1000000' || '10000' }}`
   );
+});
+
+test('a reusable caller can enable the same soak profile', () => {
+  expect(parsedWorkflow.env.RUN_SOAK).toContain('inputs.run_soak');
+  expect(parsedWorkflow.env.RUN_SOAK).not.toContain("github.event_name == 'workflow_dispatch'");
 });
 
 test('every soak and fuzz step is gated on the same RUN_SOAK flag', () => {

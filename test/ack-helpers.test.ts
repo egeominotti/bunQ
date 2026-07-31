@@ -8,6 +8,8 @@ import { jobId, type JobId, type Job } from '../src/domain/types/job';
 import type { JobLocation, EventType } from '../src/domain/types/queue';
 import { RWLock } from '../src/shared/lock';
 import { SHARD_COUNT, processingShardIndex, shardIndex } from '../src/shared/hash';
+import { DependencyCompletionTracker } from '../src/application/dependencyCompletions';
+import { DEFAULT_CONFIG } from '../src/application/types';
 import {
   extractJobs,
   extractJobsWithResults,
@@ -100,8 +102,11 @@ function createMockShard() {
 function createFinalizeContext(overrides?: Partial<FinalizeContext>): FinalizeContext {
   return {
     storage: null,
+    shards: [],
     completedJobs: new Set<JobId>() as any,
     completedJobsData: new Map<JobId, Job>() as any,
+    depCompletions: new DependencyCompletionTracker(DEFAULT_CONFIG.maxCompletedJobs),
+    maxDependencyCompletions: DEFAULT_CONFIG.maxCompletedJobs,
     jobResults: new Map<JobId, unknown>() as any,
     jobIndex: new Map<JobId, JobLocation>(),
     totalCompleted: { value: 0n },
@@ -329,7 +334,12 @@ describe('releaseResources', () => {
 
     const job1 = fakeJob({ id: jobId('rr-1'), queue: 'emails', uniqueKey: 'uk-1', groupId: 'g-1' });
     const job2 = fakeJob({ id: jobId('rr-2'), queue: 'emails', uniqueKey: null, groupId: null });
-    const job3 = fakeJob({ id: jobId('rr-3'), queue: 'payments', uniqueKey: 'uk-3', groupId: null });
+    const job3 = fakeJob({
+      id: jobId('rr-3'),
+      queue: 'payments',
+      uniqueKey: 'uk-3',
+      groupId: null,
+    });
 
     const idx1 = shardIndex('emails');
     const idx3 = shardIndex('payments');
@@ -431,11 +441,7 @@ describe('finalizeBatchAck', () => {
     const id2 = jobId('tc-2');
     const id3 = jobId('tc-3');
 
-    finalizeBatchAck(
-      [{ id: id1, job: fakeJob({ id: id1, queue: 'q' }) }],
-      finalizeCtx,
-      false
-    );
+    finalizeBatchAck([{ id: id1, job: fakeJob({ id: id1, queue: 'q' }) }], finalizeCtx, false);
     finalizeBatchAck(
       [
         { id: id2, job: fakeJob({ id: id2, queue: 'q' }) },
@@ -464,9 +470,7 @@ describe('finalizeBatchAck', () => {
 
   test('sets jobIndex to completed location', () => {
     const id1 = jobId('ji-1');
-    const extracted: ExtractedJob[] = [
-      { id: id1, job: fakeJob({ id: id1, queue: 'q1' }) },
-    ];
+    const extracted: ExtractedJob[] = [{ id: id1, job: fakeJob({ id: id1, queue: 'q1' }) }];
 
     finalizeBatchAck(extracted, finalizeCtx, false);
 
@@ -549,9 +553,7 @@ describe('finalizeBatchAck', () => {
       needsBroadcast: () => false,
     });
 
-    const extracted: ExtractedJob[] = [
-      { id: id1, job: fakeJob({ id: id1, queue: 'q1' }) },
-    ];
+    const extracted: ExtractedJob[] = [{ id: id1, job: fakeJob({ id: id1, queue: 'q1' }) }];
 
     finalizeBatchAck(extracted, finalizeCtx, false);
 
@@ -562,9 +564,7 @@ describe('finalizeBatchAck', () => {
     const id1 = jobId('default-bc-1');
 
     // needsBroadcast is not set, should default to true
-    const extracted: ExtractedJob[] = [
-      { id: id1, job: fakeJob({ id: id1, queue: 'q1' }) },
-    ];
+    const extracted: ExtractedJob[] = [{ id: id1, job: fakeJob({ id: id1, queue: 'q1' }) }];
 
     finalizeBatchAck(extracted, finalizeCtx, false);
 
@@ -625,9 +625,7 @@ describe('finalizeBatchAck', () => {
       hasPendingDeps: () => false,
     });
 
-    const extracted: ExtractedJob[] = [
-      { id: id1, job: fakeJob({ id: id1, queue: 'q1' }) },
-    ];
+    const extracted: ExtractedJob[] = [{ id: id1, job: fakeJob({ id: id1, queue: 'q1' }) }];
 
     finalizeBatchAck(extracted, finalizeCtx, false);
 
@@ -639,9 +637,7 @@ describe('finalizeBatchAck', () => {
     const id1 = jobId('def-deps-1');
 
     // hasPendingDeps not set, should default to true
-    const extracted: ExtractedJob[] = [
-      { id: id1, job: fakeJob({ id: id1, queue: 'q1' }) },
-    ];
+    const extracted: ExtractedJob[] = [{ id: id1, job: fakeJob({ id: id1, queue: 'q1' }) }];
 
     finalizeBatchAck(extracted, finalizeCtx, false);
 
@@ -666,6 +662,8 @@ describe('finalizeBatchAck', () => {
     expect(finalizeCtx.jobIndex.has(id1)).toBe(false);
     // Should NOT be added to completedJobs
     expect(finalizeCtx.completedJobs.has(id1)).toBe(false);
+    // The payload-free proof still allows a dependent to observe completion.
+    expect(finalizeCtx.depCompletions?.has(id1)).toBe(true);
   });
 
   test('removeOnComplete=true does not store result even with includeResults=true', () => {
@@ -679,6 +677,7 @@ describe('finalizeBatchAck', () => {
     finalizeBatchAck(extracted, finalizeCtx, true);
 
     expect(finalizeCtx.jobResults.has(id1)).toBe(false);
+    expect(finalizeCtx.depCompletions?.has(id1)).toBe(true);
   });
 
   test('cleans up customIdMap entries', () => {
@@ -750,6 +749,7 @@ describe('finalizeBatchAck', () => {
     expect(finalizeCtx.completedJobs.has(idRemove)).toBe(false);
     expect(finalizeCtx.jobIndex.has(idRemove)).toBe(false);
     expect(finalizeCtx.jobResults.has(idRemove)).toBe(false);
+    expect(finalizeCtx.depCompletions?.has(idRemove)).toBe(true);
 
     // totalCompleted should still count both
     expect(finalizeCtx.totalCompleted.value).toBe(2n);

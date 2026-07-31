@@ -1,5 +1,8 @@
 .venv/
+.venv-mutation/
 __pycache__/
 *.pyc
 dist/
 *.egg-info/
+.hypothesis/
+mutants/

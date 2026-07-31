@@ -40,9 +40,24 @@ Every SDK must:
 6. clamp batch and long-poll values to protocol limits;
 7. keep active job leases alive, bound pulls by available concurrency, and
    surface ACK/FAIL errors;
-8. roll back partially created flows best-effort;
+8. plan every flow completely before I/O and submit it with one atomic `PUSHF`,
+   so validation or transport failure creates no partial graph;
 9. expose typed connection, timeout, command, authentication, protocol, and
    unrecoverable-processing errors.
+
+## Atomic flow contract
+
+Each SDK owns a pure planner for trees, chains, and fan-in graphs. The planner
+allocates every ID before transport, rejects empty/duplicate IDs, cycles,
+shared nodes, reserved metadata keys, unsupported option combinations, excessive
+depth/size, and produces reciprocal `parentId`/`childrenIds`/`dependsOn` edges.
+Only a valid plan is encoded as one `PUSHF` command. Returned flow nodes are
+rebuilt from the broker's authoritative snapshots, with an exact cardinality
+and ID-set check; clients never synthesize a successful graph after a partial
+or malformed response.
+
+`UpdateParent` remains a server compatibility command for already-published SDK
+versions. It is not part of current official `FlowProducer` creation.
 
 ## Telemetry contract
 
@@ -61,7 +76,8 @@ tokens, job payloads, job results, private keys, or CA contents.
 
 Native regression suites cover protocol encoding, option mapping, failure
 classification, timeout/reconnect behavior, authentication, TLS verification,
-worker concurrency/lease behavior, flow rollback, and telemetry isolation.
+worker concurrency/lease behavior, atomic flow rejection, and telemetry
+isolation.
 The shared conformance suite then validates 17 public protocol behaviors
 against a fresh broker through each SDK's real driver.
 
@@ -79,6 +95,28 @@ use hard broker termination to prove durable jobs remain visible through
 restart; the TypeScript, Python, PHP, and Go suites retain their equivalent
 restart coverage.
 
+Each SDK additionally runs native property-based tests over its pure flow
+planner. TypeScript uses fast-check; Python, PHP, Go, Rust, and Elixir use their
+ecosystem equivalents so generated values and shrinking integrate with the
+native runner. Shared invariants cover conservation, unique IDs, reciprocal
+edges, acyclicity, ordering semantics, reserved metadata, option preservation,
+determinism under a supplied ID stream, and no transport call for invalid
+input. Seeds and minimized counterexamples are printed by the native tools.
+
+Mutation testing is a distinct scheduled/manual campaign after the bounded
+suite is green. Each SDK has a pinned mutation engine scoped to the planner and
+its properties. Surviving mutations are either killed with a stronger invariant
+or documented as equivalent; mutation is not placed inside the ordinary
+test-driven edit loop or the offline release sandbox. The workflow may make a
+ratchet stricter than the tool configuration, but it may not override it with a
+lower value; in particular, PHP's Infection gate enforces the checked-in 99%
+MSI and covered-MSI floor.
+
+The manual TypeScript SDK publisher accepts only the current `origin/main`
+commit. Selecting a feature branch or a stale main commit in the Actions UI
+fails before dependencies are installed, packaged artifacts are created, or
+registry credentials are used.
+
 Each SDK also owns an opt-in sustained profile that reuses one connection while
 repeatedly adding, querying, and resetting configurable batches. Weekly CI runs
 these profiles for 15 minutes, runs the compatibility matrix, and checks live
@@ -93,6 +131,13 @@ emits complete logs, container resource samples, per-suite JSON, and aggregate
 
 Any change below `sdk/` must pass this gate in addition to the core
 `bun run test:sandbox` gate.
+
+The GitHub release graph calls `.github/workflows/sdk.yml` as a reusable
+workflow. Its six language jobs converge on `sdk-gate`; the root `quality-gate`
+requires that result together with every core/docs suite, and all binary,
+container, GitHub-release, and npm publication paths are downstream. The SDK
+workflow has no separate push trigger, avoiding a race where publishing could
+finish before an independent SDK failure arrived.
 
 SQLite disk-full, WAL/power-loss, and schema migration tests remain broker
 responsibilities. An SDK cannot inject a filesystem failure into a remote

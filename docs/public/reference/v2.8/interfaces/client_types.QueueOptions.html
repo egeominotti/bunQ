@@ -16,7 +16,7 @@
 </div></section>
 <div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">QueueOptions</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#autobatch">autoBatch</a><span class="tsd-signature-symbol">?:</span> <a href="client_types.AutoBatchOptions.html" class="tsd-signature-type tsd-kind-interface">AutoBatchOptions</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#connection">connection</a><span class="tsd-signature-symbol">?:</span> <a href="client_types.ConnectionOptions.html" class="tsd-signature-type tsd-kind-interface">ConnectionOptions</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#datapath">dataPath</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#defaultjoboptions">defaultJobOptions</a><span class="tsd-signature-symbol">?:</span> <a href="client_types.JobOptions.html" class="tsd-signature-type tsd-kind-interface">JobOptions</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#embedded">embedded</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#prefixkey">prefixKey</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L443">client/types.ts:443</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L443">client/types.ts:443</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -43,33 +43,33 @@ Gives 10-100x throughput improvement for sequential add() calls over TCP.
 Default: enabled for TCP mode, disabled for embedded mode.</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L457">client/types.ts:457</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L457">client/types.ts:457</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="connection"><code class="tsd-tag">Optional</code><span>connection</span><a href="#connection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">connection</span><span class="tsd-signature-symbol">?:</span> <a href="client_types.ConnectionOptions.html" class="tsd-signature-type tsd-kind-interface">ConnectionOptions</a></div>
 <div class="tsd-comment tsd-typography"><p>Connection options - if omitted, connects to localhost:6789</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L446">client/types.ts:446</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L446">client/types.ts:446</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="datapath"><code class="tsd-tag">Optional</code><span>data<wbr/>Path</span><a href="#datapath" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">dataPath</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div>
 <div class="tsd-comment tsd-typography"><p>SQLite database path for embedded mode (overrides DATA_PATH env var)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L450">client/types.ts:450</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L450">client/types.ts:450</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="defaultjoboptions"><code class="tsd-tag">Optional</code><span>default<wbr/>Job<wbr/>Options</span><a href="#defaultjoboptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">defaultJobOptions</span><span class="tsd-signature-symbol">?:</span> <a href="client_types.JobOptions.html" class="tsd-signature-type tsd-kind-interface">JobOptions</a></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L444">client/types.ts:444</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L444">client/types.ts:444</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="embedded"><code class="tsd-tag">Optional</code><span>embedded</span><a href="#embedded" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">embedded</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div>
 <div class="tsd-comment tsd-typography"><p>Use embedded mode (in-process SQLite) instead of TCP</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L448">client/types.ts:448</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L448">client/types.ts:448</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="prefixkey"><code class="tsd-tag">Optional</code><span>prefix<wbr/>Key</span><a href="#prefixkey" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">prefixKey</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div>
@@ -81,7 +81,7 @@ key and the cron scheduler IDs are prefixed. A Worker that wants to consume
 from the namespaced queue must use the same <code>prefixKey</code>.</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/types.ts#L467">client/types.ts:467</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/types.ts#L467">client/types.ts:467</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

@@ -303,20 +303,31 @@ There is no general rule — the wrapping above is historical and normative.
 
 ## 7. Flows (parent/child trees)
 
-The flow contract is client-orchestrated over plain `PUSH`:
+Current official clients create flows with one `PUSHF` request. They allocate
+all IDs and validate the complete tree/chain/fan-in plan before transport, then
+send:
 
-1. Push **children before their parent**. Children of a not-yet-created
-   parent carry data markers `__parentId: "pending"` and `__parentQueue`.
-2. Push the parent with `parentId` (if it has one), `childrenIds` and
-   `dependsOn` = its children's ids, and `__childrenIds` in data.
-3. After the parent is created, send `UpdateParent {childId, parentId}` for
-   each child to replace the placeholder.
-4. On any failure mid-flow, roll back by `Cancel`-ing every job created so
-   far (best-effort).
+```text
+{ cmd: "PUSHF", jobs: [{ id, queue, input }, ...] }
+```
 
-Chains are the degenerate case: each step `dependsOn` the previous id and
-carries `__flowParentId` in data. Fan-in pushes N independent jobs, then a
-final job with `childrenIds`/`dependsOn` = those ids.
+Every `input` carries the ordinary `PUSH` options plus fully resolved
+`parentId`, `childrenIds`, `dependsOn`, and canonical metadata in `data`. The
+broker revalidates unique IDs, limits, acyclicity, existing ownership, and
+reciprocal edges before mutation. It returns
+`{data: {jobs: Job[]}}` with one authoritative snapshot per input. With SQLite,
+one immediate transaction commits all rows before in-memory publication;
+without storage, visibility is still atomic but intentionally not
+crash-durable.
+
+Previously published clients may use the legacy children-first sequence:
+`PUSH` children with a `pending` marker, `PUSH` a parent that already declares
+their IDs, then `UpdateParent`. For a predeclared edge, `UpdateParent` only
+back-patches the child and never reschedules an active or terminal parent.
+SQLite updates the job/DLQ child snapshot and re-keys any failure outbox record
+atomically. Adding a new edge is restricted to a queued parent. The legacy
+multi-request sequence remains compatible but cannot provide `PUSHF`
+all-or-nothing visibility.
 
 ## 8. TLS
 

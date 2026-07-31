@@ -136,7 +136,13 @@ The stall and lock-expiry intervals additionally drive `job:stalled` / `job:lock
 
 See [data-model](../data-model.md) for full definitions. The most relevant shapes:
 
-- `BackgroundContext` (`src/application/types.ts:113`) extends `QueueManagerState` and adds the callbacks/collections the tasks need: `fail(jobId, error?)`, `registerQueueName`/`unregisterQueueName`, `dashboardEmit`, `workerManager`, `monitoringState`, `completedJobsData: BoundedMap<JobId, Job>`, `depCompletions?: BoundedSet<JobId>` (bare ids of `removeOnComplete` parents), and `timedOutJobs?: BoundedSet<JobId>` (guard against late ACKs from timed-out workers).
+- `BackgroundContext` extends `QueueManagerState` and adds the callbacks and
+  collections the tasks need: `fail(jobId, error?)`,
+  `registerQueueName`/`unregisterQueueName`, `dashboardEmit`, `workerManager`,
+  `monitoringState`, `completedJobsData: BoundedMap<JobId, Job>`,
+  `depCompletions?: DependencyCompletionTracker` (bounded recent bare IDs plus
+  IDs pinned by live dependency edges), and `timedOutJobs?: BoundedSet<JobId>`
+  (guard against late ACKs from timed-out workers).
 - `LockContext` (`src/application/types.ts:95`) — narrowed view passed to `checkExpiredLocks`, built by `getLockContext` (`backgroundTasks.ts:125`). It MUST carry `storage: ctx.storage`: this is the only production path to `checkExpiredLocks`, and without it the `saveDlqEntry`/`deleteJob` persistence inside `handleMaxStallsExceeded` silently no-ops through optional chaining (issue #110 — the #97 fix never executed on this path from 2.8.17 to 2.8.27, leaving orphan `active` rows in SQLite and memory-only DLQ entries).
 - `DEFAULT_CONFIG` (`src/application/types.ts:33`) — the interval defaults (see [Configuration](#configuration)).
 - `Job` — fields read/written by these tasks: `timeout`, `startedAt`, `lastHeartbeat`, `stallCount`, `attempts`, `runAt`, `dependsOn`, `uniqueKey`, `customId`, `deduplicationTtl`, `timeline`.
@@ -188,7 +194,15 @@ Runs in order each tick: refresh delayed counters per shard; compact any priorit
 
 ### `processPendingDependencies` (`dependencyProcessor.ts:16`)
 
-Drains `pendingDepChecks` into a local array (clearing the set), uses each shard's reverse index (`getJobsWaitingFor`) to find waiting jobs — O(m) in waiters, not O(n) in all jobs — then per shard, under the shard write lock, re-checks every dependent's `dependsOn` against `completedJobs` OR `depCompletions` and promotes satisfied jobs to the queue (`promoteJobsToQueue`, `:79`), calling `shard.notify(job.queue)` and emitting `job:dependencies-resolved`. See [FlowProducer & Job Dependencies](./flow-producer.md).
+Drains `pendingDepChecks` into a local array (clearing the set), uses each
+shard's reverse index (`getJobsWaitingFor`) to find waiting jobs — O(m) in
+waiters, not O(n) in all jobs — then per shard, under the shard write lock,
+re-checks every dependent's `dependsOn` against the current completion batch,
+`completedJobs`, or `depCompletions`. A ready parent is checkpointed in SQLite
+before its reverse edges are removed and it becomes visible in the run queue.
+After all shard locks are released, dependency proofs with no remaining waiter
+are unpinned and ordinary FIFO pruning resumes. See
+[FlowProducer & Job Dependencies](./flow-producer.md).
 
 ### `runMonitoringChecks` (`monitoringChecks.ts:56`)
 
@@ -215,7 +229,11 @@ Stall detection uses two-phase confirmation (a job must be flagged in two consec
 - **Cron `preventOverlap` jobs:** never re-queued by recovery, stall, or lock-expiry paths — they are deleted and left to the scheduler to recreate (issues #73/#75).
 - **Memory bounds:** cleanup compacts priority queues at >20% tombstones; trims `uniqueKeys`/`activeGroups` by half when a queue exceeds 1000 entries; only walks `jobIndex` when `size > 100_000` (the full scan is expensive); evicts via `BoundedSet`/`LRUMap` caps elsewhere.
 - **`perQueueMetrics` not pruned on empty-queue removal** (`cleanupTasks.ts:252`): intentional — counters are cumulative and must survive a transient drain; growth is bounded by the LRU cap and `obliterate()` reclaims explicitly.
-- **`depCompletions` not pruned** in `processPendingDependencies` (`dependencyProcessor.ts:71`): intentional — it is a FIFO `BoundedSet` that self-bounds; eager pruning would orphan a dependent pushed after a `removeOnComplete` parent completed.
+- **Completion-proof pinning:** recent `depCompletions` self-bound to
+  `maxCompletedJobs`, but proofs referenced by waiting parents are excluded
+  from pruning. Promotion, cancel, stale cleanup, failure-policy detach,
+  explicit unlink, and parent-queue obliteration release pins only after the
+  owning reverse edge and durable parent state have moved together.
 - **Stale dependency persistence ordering:** the SQLite/write-buffer delete runs before in-memory removal. If storage throws, the lifecycle remains live in memory and can be retried on the next cleanup tick instead of leaving disk as the only surviving copy.
 - **`recover` partial state:** if `ctx.storage` is null the whole pass is skipped. Active recovery drains offset zero because its dataset mutates; pending/completed scans use deterministic pages. Phase 3 is hard-capped at `maxCompletedJobs`.
 

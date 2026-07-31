@@ -1,0 +1,20 @@
+{
+    "source": {
+        "directories": ["src/Flow"]
+    },
+    "timeout": 10,
+    "threads": 4,
+    "testFramework": "phpunit",
+    "testFrameworkExtraArgs": "--testsuite=flow-property",
+    "logs": {
+        "text": "build/infection.log",
+        "html": "build/infection.html",
+        "json": "build/infection.json",
+        "summaryJson": "build/infection-summary.json"
+    },
+    "minMsi": 99,
+    "minCoveredMsi": 99,
+    "mutators": {
+        "@default": true
+    }
+}

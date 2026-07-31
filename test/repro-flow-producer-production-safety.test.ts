@@ -3,6 +3,7 @@ import { FlowProducer, Queue, Worker, shutdownManager } from '../src/client';
 import { getSharedManager } from '../src/client/manager';
 import { pushJobWithParent, type PushContext } from '../src/client/flowPush';
 import { closeAllSharedPools, type TcpConnectionPool } from '../src/client/tcpPool';
+import { planFlows } from '../src/client/flowPlan';
 import { jobId } from '../src/domain/types/job';
 
 async function until(
@@ -109,6 +110,17 @@ describe('FlowProducer production safety', () => {
       await producer.close();
       await queue.close();
     }
+  });
+
+  test('queue defaults cannot own a per-job flow identity', () => {
+    expect(() =>
+      planFlows([{ name: 'job', queueName: 'repro-flow-default-identity', data: {} }], {
+        queuesOptions: {
+          // @ts-expect-error Runtime guard protects JavaScript and untyped callers.
+          'repro-flow-default-identity': { jobId: 'shared-default-id' },
+        },
+      })
+    ).toThrow('jobId cannot be a queue default');
   });
 
   test('a pre-existing job cannot be silently reparented into a flow', async () => {

@@ -5,6 +5,10 @@ the native TCP protocol (msgpack). Parity reference: the official client in
 `../../src/client/` (TCP mode — embedded/sandboxed/QueueEvents are excluded
 by design: they require the in-process Bun runtime).
 
+The normative behavioral contract is
+[`INVARIANTS.md`](./INVARIANTS.md). Read it before changing transport,
+serialization, Queue, Worker, FlowProducer, query, or admin code.
+
 ## Non-negotiable rules
 
 1. **Never touch the bunqueue core** (`../../src/`): this SDK lives here only.
@@ -14,6 +18,7 @@ by design: they require the in-process Bun runtime).
    wire.
 3. **Single runtime dependency: `msgpackr`** (top-level pack/unpack =
    standard msgpack; do NOT use `Packr` with records: it breaks interop).
+   fast-check and Stryker are development-only dependencies.
 4. **Max 250 lines per file** — split into modules, don't compress.
 5. **Relative imports with explicit `.js` extension** (NodeNext): without it,
    Node ESM cannot resolve.
@@ -37,7 +42,9 @@ by design: they require the in-process Bun runtime).
 | `src/queue.ts` | Queue core (add/addBulk/lifecycle) + prototype-mixin merge |
 | `src/queue-query.ts` / `src/queue-control.ts` / `src/queue-admin.ts` | Queue area modules merged onto the prototype |
 | `src/worker-base.ts` / `src/worker.ts` / `src/worker-types.ts` | Worker: lifecycle+cancel base, PULLB loop, heartbeats, events, options |
-| `src/flow.ts` / `src/flow-types.ts` | FlowProducer: tree/chain/fan-in, UpdateParent, rollback |
+| `src/flow.ts` / `src/flow-types.ts` | FlowProducer public creation/read API and types |
+| `src/flow-plan.ts` / `src/flow-plan-legacy.ts` | Pure ID allocation and closed tree/chain/fan-in graph planning |
+| `src/flow-commit.ts` | One `PUSHF` call plus exact snapshot ID/queue validation |
 | `src/bunqueue/*.ts` | Simple Mode (`Bunqueue`): 1:1 port of `src/client/bunqueue*` — core+api (prototype merge), retry, circuit-breaker, batch, triggers, aging, cancellation, ttl, dedup-debounce, dlq-rate-limit, rate-gate |
 | `tests/harness.ts` | Shared registry/asserts/server fixture/runner |
 | `tests/integration.ts` | Smoke suite (10 tests, own entrypoint) |
@@ -73,12 +80,21 @@ by design: they require the in-process Bun runtime).
 
 ```bash
 bun install && bun run build      # tsc → dist/ (tests import from dist/)
+bun run test:property             # deterministic pure planner/commit tests
+bun run test:mutation             # final Stryker gate; no broker
+bun run check                     # Biome
 bun tests/integration.ts          # smoke
 bun tests/e2e.ts                  # full e2e
 node --experimental-strip-types tests/e2e.ts
 deno run -A tests/e2e.ts
+bun run test:workers              # packaged SDK inside workerd
 BUNQUEUE_SDK_SOAK_SECONDS=3600 bun tests/soak.ts
 ```
+
+Set `BUNQUEUE_FLOW_PBT_SEED=<signed-seed>` and
+`BUNQUEUE_FLOW_PBT_PATH='<path>'` to replay fast-check output. Mutation is
+scoped to the pure flow planners and snapshot validator; do not broaden it to
+socket or broker E2E code.
 
 Tests spawn a real server (`bun src/main.ts` from the repo root, random
 port, temp DB). The auth suite uses a dedicated server with `AUTH_TOKENS`.

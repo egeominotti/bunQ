@@ -1129,12 +1129,11 @@ flow = Bunqueue.FlowProducer.new()
 Fan-in (`addBulkThen`, N parallel jobs converging into one final job) is
 available in TypeScript and Python.
 
-These external SDKs currently compose `PUSH`/`UpdateParent` calls. If creation
-fails they attempt to cancel jobs already created, but that cleanup is
-best-effort and is not a transaction: a worker can observe an early leaf, and a
-cleanup failure can leave a partial graph. The Bun package (`bunqueue/client`)
-uses one broker-side `PUSHF` command and has the stronger all-or-nothing
-guarantee.
+Every current external SDK plans the complete graph before I/O and sends one
+broker-side `PUSHF` command, matching the Bun package's all-or-nothing creation
+and visibility guarantee. Previously published versions that compose
+`PUSH`/`UpdateParent` remain server-compatible, but that historical
+multi-request sequence is not atomic.
 
 External-SDK `getFlow(id)` returns `null` for a missing root and skips children
 removed since creation, yielding the surviving partial tree. The Bun package

@@ -12,7 +12,7 @@
 <li><a href="" aria-current="page">Engine</a></li></ul>
 <h1>Class Engine</h1></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L25">client/workflow/engine.ts:25</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L26">client/workflow/engine.ts:26</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -57,7 +57,7 @@
 <li><span><span class="tsd-kind-parameter">opts</span>: <a href="../interfaces/client_workflow_types.EngineOptions.html" class="tsd-signature-type tsd-kind-interface">EngineOptions</a><span class="tsd-signature-symbol"> = {}</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <a href="" class="tsd-signature-type tsd-kind-class">Engine</a></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L32">client/workflow/engine.ts:32</a></li></ul></aside></div></li></ul></section></section></details>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L33">client/workflow/engine.ts:33</a></li></ul></aside></div></li></ul></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -65,18 +65,21 @@
 <h3 class="tsd-anchor-link" id="abandoncompensation"><span>abandon<wbr/>Compensation</span><a href="#abandoncompensation" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
 <li class="">
-<div class="tsd-signature tsd-anchor-link" id="abandoncompensation-1"><span class="tsd-kind-call-signature">abandonCompensation</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">executionId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#abandoncompensation-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-signature tsd-anchor-link" id="abandoncompensation-1"><span class="tsd-kind-call-signature">abandonCompensation</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">executionId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#abandoncompensation-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
-<div class="tsd-comment tsd-typography"><p>Abandon a parked unwind: the steps still un-compensated are recorded as skipped
-and the run becomes terminal. Partial, but explicitly so.</p>
+<div class="tsd-comment tsd-typography"><p><code>async</code> on purpose, even though the work is synchronous: <code>resumeCompensation</code> is
+async, and an operator writing recovery code under pressure reaches for
+<code>Promise.allSettled([resume(id), abandon(id)])</code>. With a sync throw that expression
+throws before <code>allSettled</code> is ever called, so the defensive form is the one that
+blows up. Matching the sibling costs nothing while the API is experimental.</p>
 </div>
 <div class="tsd-parameters">
 <h4 class="tsd-parameters-title">Parameters</h4>
 <ul class="tsd-parameter-list">
 <li><span><span class="tsd-kind-parameter">executionId</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
-<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L98">client/workflow/engine.ts:98</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L110">client/workflow/engine.ts:110</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="archive"><span>archive</span><a href="#archive" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -92,7 +95,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">states</span>: <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a><span class="tsd-signature-symbol">[]</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L160">client/workflow/engine.ts:160</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L172">client/workflow/engine.ts:172</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="cleanup"><span>cleanup</span><a href="#cleanup" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -108,7 +111,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">states</span>: <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a><span class="tsd-signature-symbol">[]</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L155">client/workflow/engine.ts:155</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L167">client/workflow/engine.ts:167</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="close"><span>close</span><a href="#close" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -123,7 +126,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">force</span>: <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol"> = false</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L170">client/workflow/engine.ts:170</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L182">client/workflow/engine.ts:182</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="getarchivedcount"><span>get<wbr/>Archived<wbr/>Count</span><a href="#getarchivedcount" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -134,7 +137,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L165">client/workflow/engine.ts:165</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L177">client/workflow/engine.ts:177</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="getexecution"><span>get<wbr/>Execution</span><a href="#getexecution" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -149,12 +152,12 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">id</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <a href="../interfaces/client_workflow_types.Execution.html" class="tsd-signature-type tsd-kind-interface">Execution</a> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L77">client/workflow/engine.ts:77</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L78">client/workflow/engine.ts:78</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="listexecutions"><span>list<wbr/>Executions</span><a href="#listexecutions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
 <li class="">
-<div class="tsd-signature tsd-anchor-link" id="listexecutions-1"><span class="tsd-kind-call-signature">listExecutions</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">workflowName</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">state</span><span class="tsd-signature-symbol">?:</span> <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client_workflow_types.Execution.html" class="tsd-signature-type tsd-kind-interface">Execution</a><span class="tsd-signature-symbol">[]</span><a href="#listexecutions-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-signature tsd-anchor-link" id="listexecutions-1"><span class="tsd-kind-call-signature">listExecutions</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">workflowName</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">state</span><span class="tsd-signature-symbol">?:</span> <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">options</span><span class="tsd-signature-symbol">?:</span> <a href="../interfaces/client_workflow_types.ExecutionListOptions.html" class="tsd-signature-type tsd-kind-interface">ExecutionListOptions</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client_workflow_types.Execution.html" class="tsd-signature-type tsd-kind-interface">Execution</a><span class="tsd-signature-symbol">[]</span><a href="#listexecutions-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
 <div class="tsd-comment tsd-typography"><p>List executions with optional filters</p>
 </div>
@@ -162,10 +165,11 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <h4 class="tsd-parameters-title">Parameters</h4>
 <ul class="tsd-parameter-list">
 <li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">workflowName</span>: <span class="tsd-signature-type">string</span></span></li>
-<li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">state</span>: <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a></span></li></ul></div>
+<li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">state</span>: <a href="../types/client_workflow_types.ExecutionState.html" class="tsd-signature-type tsd-kind-type-alias">ExecutionState</a></span></li>
+<li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">options</span>: <a href="../interfaces/client_workflow_types.ExecutionListOptions.html" class="tsd-signature-type tsd-kind-interface">ExecutionListOptions</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <a href="../interfaces/client_workflow_types.Execution.html" class="tsd-signature-type tsd-kind-interface">Execution</a><span class="tsd-signature-symbol">[]</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L82">client/workflow/engine.ts:82</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L83">client/workflow/engine.ts:83</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="off"><span>off</span><a href="#off" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -181,7 +185,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">listener</span>: <a href="../types/client_workflow_types.WorkflowEventListener.html" class="tsd-signature-type tsd-kind-type-alias">WorkflowEventListener</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L132">client/workflow/engine.ts:132</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L144">client/workflow/engine.ts:144</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="offany"><span>off<wbr/>Any</span><a href="#offany" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -196,7 +200,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">listener</span>: <a href="../types/client_workflow_types.WorkflowEventListener.html" class="tsd-signature-type tsd-kind-type-alias">WorkflowEventListener</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L138">client/workflow/engine.ts:138</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L150">client/workflow/engine.ts:150</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="on"><span>on</span><a href="#on" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -212,7 +216,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">listener</span>: <a href="../types/client_workflow_types.WorkflowEventListener.html" class="tsd-signature-type tsd-kind-type-alias">WorkflowEventListener</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L120">client/workflow/engine.ts:120</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L132">client/workflow/engine.ts:132</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="onany"><span>on<wbr/>Any</span><a href="#onany" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -227,7 +231,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">listener</span>: <a href="../types/client_workflow_types.WorkflowEventListener.html" class="tsd-signature-type tsd-kind-type-alias">WorkflowEventListener</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L126">client/workflow/engine.ts:126</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L138">client/workflow/engine.ts:138</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="recover"><span>recover</span><a href="#recover" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -243,7 +247,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/client_workflow_types.RecoverResult.html" class="tsd-signature-type tsd-kind-interface">RecoverResult</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L113">client/workflow/engine.ts:113</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L125">client/workflow/engine.ts:125</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="register"><span>register</span><a href="#register" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -258,7 +262,7 @@ and the run becomes terminal. Partial, but explicitly so.</p>
 <li><span><span class="tsd-kind-parameter">workflow</span>: <a href="client_workflow.Workflow.html" class="tsd-signature-type tsd-kind-class">Workflow</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L66">client/workflow/engine.ts:66</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L67">client/workflow/engine.ts:67</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="resumecompensation"><span>resume<wbr/>Compensation</span><a href="#resumecompensation" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -274,7 +278,7 @@ unwind. Use once the cause of the failed reversal has been fixed.</p>
 <li><span><span class="tsd-kind-parameter">executionId</span>: <span class="tsd-signature-type">string</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L90">client/workflow/engine.ts:90</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L95">client/workflow/engine.ts:95</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="signal"><span>signal</span><a href="#signal" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -291,7 +295,7 @@ unwind. Use once the cause of the failed reversal has been fixed.</p>
 <li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">payload</span>: <span class="tsd-signature-type">unknown</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L103">client/workflow/engine.ts:103</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L115">client/workflow/engine.ts:115</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="start"><span>start</span><a href="#start" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -307,7 +311,7 @@ unwind. Use once the cause of the failed reversal has been fixed.</p>
 <li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">input</span>: <span class="tsd-signature-type">unknown</span></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../interfaces/client_workflow_types.RunHandle.html" class="tsd-signature-type tsd-kind-interface">RunHandle</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L72">client/workflow/engine.ts:72</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L73">client/workflow/engine.ts:73</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="subscribe"><span>subscribe</span><a href="#subscribe" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -323,7 +327,7 @@ unwind. Use once the cause of the failed reversal has been fixed.</p>
 <li><span><span class="tsd-kind-parameter">callback</span>: <a href="../types/client_workflow_types.WorkflowEventListener.html" class="tsd-signature-type tsd-kind-type-alias">WorkflowEventListener</a></span></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/fa79ca133b7ad1406d4082cd81531988596b547c/src/client/workflow/engine.ts#L144">client/workflow/engine.ts:144</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/4fcbfd2a52c6628b1c1c37d9e34da11d2665aed4/src/client/workflow/engine.ts#L156">client/workflow/engine.ts:156</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

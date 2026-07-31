@@ -1,6 +1,6 @@
 # Job Lifecycle (push / pull / ack / fail)
 
-> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/domain/types/job.ts`, `src/domain/queue/waiterManager.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/application/dependencyCompletions.ts`, `src/domain/types/job.ts`, `src/domain/queue/waiterManager.ts`
 
 ## Purpose
 
@@ -37,6 +37,8 @@ Internal:
 - `src/shared/lock.ts` — `withWriteLock`, `RWLock`. See [Concurrency & Locking](./concurrency-and-locking.md).
 - `src/shared/hash.ts` — `shardIndex`, `processingShardIndex`.
 - `src/shared/lru.ts` — `SetLike` / `MapLike` (bounded `completedJobs`, `jobResults`, `customIdMap`).
+- `src/application/dependencyCompletions.ts` — two-tier removed-completion
+  tracker plus pin, unpin, and recovery reconciliation helpers.
 - `src/infrastructure/persistence/sqlite.ts` — `insertJob`, `insertJobsBatch`, `markActive`, `markCompleted`, `updateForRetry`, `storeResult`, `saveDlqEntry`, `deleteJob`. See [Persistence](./persistence.md).
 - `src/application/latencyTracker.ts`, `src/application/throughputTracker.ts` — observability counters.
 
@@ -103,7 +105,7 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 2. **customId idempotency** (`handleCustomId`, `customId.ts`): if `input.customId` maps to a live job, skip and return the existing id. On terminal reuse, a completed generation is evicted from its completed collections and `jobs` row, while a DLQ generation is removed from its owning shard, DLQ counter, `jobIndex`, and SQLite before the new generation is admitted. The recycled id therefore starts fresh as `waiting` with exactly one observable generation; any stale timeout marker is also cleared to avoid resurrecting the #33/#75 duplicate-execution guard.
 3. `createJob(id, queue, input, now)`.
 4. **Deduplication** (`handleDeduplication`, `push.ts:133`): only if `job.uniqueKey` is set. Strategies — `replace` (remove old, register new), `extend` (reset TTL, return existing), default BullMQ-style (return existing if it is still waiting or active; broadcast `Duplicated`). If the existing job is completed/failed, a fresh insert is allowed.
-5. **Insert** (`insertJobToShard`, `push.ts:211`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), the job goes to `shard.waitingDeps` and dependencies are registered (timeline `waiting-children`). Otherwise it is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
+5. **Insert** (`insertJobToShard`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), any already-present removed-completion proofs are durably pinned first, then the job goes to `shard.waitingDeps` and every dependency is registered (timeline `waiting-children`). This protects a late parent that finds one child complete but must still wait for another. Otherwise the job is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
 6. `shard.notify(queue)` wakes one long-poll waiter for that queue, or records one coalesced retry hint when none is waiting.
 7. After the lock: persist via `storage.insertJob(job, input.durable)`, bump counters, broadcast `pushed`. **Durable** jobs bypass the 10 ms write buffer (immediate write); `pushJobBatch` (`push.ts:323`) splits durable jobs into a separate `insertJobsBatch(durableJobs, true)` so `addBulk` does not silently downgrade the durability guarantee (`push.ts:384`).
 
@@ -149,7 +151,15 @@ the job. Lock order shard → processing matches the documented hierarchy.
 1. Under `processingLocks[procIdx]`, remove the job from `processingShards`; if absent, **throw** `Job not found or not in processing state` (the `QueueManager` catches this to recover stall-retried jobs — see Edge Cases).
 2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId)` (frees concurrency slot, uniqueKey, group).
 3. Release `customId` from `customIdMap` so it can be reused.
-4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add to `completedJobs` + `completedJobsData`, store result in `jobResults` and `storage.storeResult` (only if `result !== undefined`), set `jobIndex` to `completed`, `storage.markCompleted`. If `removeOnComplete`: delete from `jobIndex`, `storage.deleteJob`, and record a bare id in `depCompletions` so dependents still unblock without the job surfacing in queries (`ack.ts:122`).
+4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add
+   to `completedJobs` + `completedJobsData`, store a defined result, set
+   `jobIndex` to completed, and persist the completed row. If
+   `removeOnComplete`: `commitRemovedCompletion` atomically deletes the
+   jobs/result rows and inserts a payload-free `dependency_completions` record.
+   It is marked `pinned` when a reverse waiter exists; otherwise it enters the
+   bounded recent FIFO. Only after commit does the matching in-memory marker
+   become visible. The job remains absent from Job/state/result/completed
+   queries.
 5. Bump counters, broadcast `completed`, call `onJobCompleted` (dependency processing), and re-schedule repeatable jobs via `onRepeat` if under `repeat.limit`.
 
 ### FAIL (`failJob`, `ack.ts:193`)
@@ -167,7 +177,14 @@ the job. Lock order shard → processing matches the documented hierarchy.
 
 ### Batch ack (`ackHelpers.ts`)
 
-`ackJobBatch`/`ackJobBatchWithResults` short-circuit to parallel per-job `ackJob` for ≤4 ids (`ack.ts:309`). Larger batches: `groupByProcShard` → `extractJobs` (one lock per processing shard, parallel) → `groupByQueueShard` → `releaseResources` (one lock per queue shard) → `finalizeBatchAck`. **Invariant** (`ackHelpers.ts:215`): for each completed job, `jobResults.set` happens BEFORE `completedJobs.add`, so any dependent observing `completedJobs.has(id)` always finds the result available.
+`ackJobBatch`/`ackJobBatchWithResults` short-circuit to parallel per-job
+`ackJob` for ≤4 ids. Larger batches: `groupByProcShard` → `extractJobs` (one
+lock per processing shard, parallel) → `groupByQueueShard` →
+`releaseResources` (one lock per queue shard) → `finalizeBatchAck`.
+`removeOnComplete` entries use the same delete-plus-proof transaction in both
+optimized variants, including result-bearing ACKB. For retained jobs,
+`jobResults.set` happens before `completedJobs.add`, so a live dependent never
+observes completion before its in-memory result.
 
 ### Manual transitions (`jobStateTransitions.ts`)
 
@@ -215,7 +232,11 @@ detached CLI, and durable recovery paths.
 - **Retry vs. terminal**: `canRetry` uses `attempts < maxAttempts` after `attempts++`; `unrecoverable=true` (from `failJob`) forces the terminal path regardless of attempts.
 - **Stack trace persistence** (#74): the last failure's stack is normalized and capped at `stackTraceLimit` before branching; an absent stack (old clients) leaves any prior stack intact; `stackTraceLimit: 0` yields `null`.
 - **Memory bounds**: `timeline` is capped at 20 entries (older transitions are not recorded once full). `completedJobs`, `jobResults`, `customIdMap` are bounded LRU/FIFO collections (eviction in [Core Queue Engine](./core-queue-engine.md) / [Background Tasks](./background-tasks.md)).
-- **removeOnComplete + dependencies**: the full job is dropped but its bare id is added to `depCompletions` so dependents still gate correctly (`ack.ts:122`, `ackHelpers.ts:250`).
+- **removeOnComplete + dependencies**: the full job is dropped but its bare ID
+  enters the two-tier `depCompletions` tracker. Proofs referenced by
+  `waitingDeps` stay pinned even when a batch is larger than
+  `maxCompletedJobs`; after the last reverse edge is durably resolved or
+  removed, the proof becomes recent and ordinary FIFO pruning applies.
 - **Repeatable jobs**: re-scheduled via `onRepeat` only while `repeat.limit` is undefined or `repeat.count < limit`.
 
 ## Configuration

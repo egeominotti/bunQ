@@ -104,7 +104,7 @@ independent connection, so jobs longer than the lock TTL survive; set
 | DLQ | get, retry, purge |
 | Schedulers | cron pattern or fixed interval, execution limit, get/list/remove |
 | Admin | webhooks, rate limit with duration window and broker-side TTL, workers, stats, list queues, ping |
-| Flows | `FlowProducer`: parent/child trees (`add`), chains (`add_chain`), best-effort rollback on failure |
+| Flows | `FlowProducer`: atomic parent/child trees (`add`) and dependency chains (`add_chain`) |
 | Worker | bounded thread pool, batch pulls capped by concurrency, ACK-gated completion, reconnect-safe registration |
 
 ## Security
@@ -160,6 +160,97 @@ outgoing map/extension validation, ext-0 tolerance on responses, and a
 64 MiB frame cap. Pass 64-bit identifiers such as snowflake IDs as strings
 to avoid precision loss.
 
+## Atomic flows
+
+`FlowProducer` compiles the complete graph locally, then sends exactly one
+`PUSHF` command. The broker either publishes every job with all links resolved
+or publishes none. The returned `FlowNode` is built from the broker's
+authoritative job snapshots.
+
+```rust
+use bunqueue_client::{
+    ConnectionOptions, FlowJob, FlowProducer, JobOptions, Value,
+};
+
+fn main() -> Result<(), bunqueue_client::Error> {
+    let producer = FlowProducer::new(ConnectionOptions::default());
+    let flow = FlowJob {
+        name: "send-summary".into(),
+        queue_name: "reports".into(),
+        data: Value::Map(vec![(Value::from("account"), Value::from("acme"))]),
+        options: JobOptions {
+            job_id: Some("summary-acme".into()),
+            ..Default::default()
+        },
+        children: vec![FlowJob {
+            name: "build-report".into(),
+            queue_name: "reports".into(),
+            data: Value::Map(Vec::new()),
+            options: JobOptions::default(),
+            children: Vec::new(),
+        }],
+    };
+
+    let root = producer.add(flow)?;
+    assert_eq!(root.job.id(), "summary-acme");
+    assert_eq!(root.children.len(), 1);
+    producer.close();
+    Ok(())
+}
+```
+
+Children run before their parent. For a linear dependency chain, every step
+after the first depends only on the immediately preceding step:
+
+```rust
+use bunqueue_client::{
+    ChainStep, ConnectionOptions, FlowProducer, JobOptions, Value,
+};
+
+fn main() -> Result<(), bunqueue_client::Error> {
+    let producer = FlowProducer::new(ConnectionOptions::default());
+    let ids = producer.add_chain(vec![
+        ChainStep {
+            name: "extract".into(),
+            queue_name: "pipeline".into(),
+            data: Value::Nil,
+            options: JobOptions::default(),
+        },
+        ChainStep {
+            name: "transform".into(),
+            queue_name: "pipeline".into(),
+            data: Value::Nil,
+            options: JobOptions::default(),
+        },
+    ])?;
+    assert_eq!(ids.len(), 2);
+    producer.close();
+    Ok(())
+}
+```
+
+The planner generates cryptographically secure, colon-free IDs unless
+`JobOptions.job_id` is supplied. A custom ID is also sent as the server's
+`customId`, so custom-ID lookup remains available. Duplicate, empty,
+colon-containing, and overlong IDs are rejected before network I/O.
+
+Planning failures perform no network call, and a broker rejection leaves the
+whole batch unpublished. A timeout or malformed response after `PUSHF` is
+different: the client cannot know whether the broker committed before the
+connection failed, so it returns an error and never attempts a partial
+rollback. Use stable explicit `job_id` values for production flows that may be
+retried. The retry commits if the first call did not; otherwise strict `PUSHF`
+collision checking returns `already exists`. Treat that error as a
+reconciliation signal and query the known IDs; the SDK does not fabricate the
+original snapshots.
+
+Flow topology is owned by `FlowProducer`: do not set `parent_id`,
+`depends_on`, or `children_ids`. User data cannot contain `name` or a key
+starting with `__`, because those fields carry canonical topology markers.
+Atomic flows reject repeat, deduplication/unique-key, and debounce options.
+The maximum descendant depth is 100 edges (the root is depth zero), and one
+commit is limited to 10,000 jobs.
+
 ## Quality assurance
 
 Every change runs the native suite (a real server spawned per run) and the
@@ -169,6 +260,10 @@ cross-language [conformance suite](https://github.com/egeominotti/bunqueue/tree/
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+cargo test --locked flow_plan_tests -- --nocapture
+# cargo-mutants 26.0.0 supports Rust 1.78+, including this crate's Rust 1.85 MSRV.
+cargo install cargo-mutants --version 26.0.0 --locked
+cargo mutants
 BUNQUEUE_SDK_SOAK_SECONDS=3600 cargo test --test soak -- --ignored
 cd ../conformance && bun runner.ts --driver \
   "cargo run --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
@@ -176,11 +271,18 @@ cd ../conformance && bun runner.ts --driver \
 
 The native tests cover wire validation, frame limits, option mapping, error
 shapes, telemetry, auth, timeout/reconnect, TLS verification, worker
-registration, concurrency-safe batch pulls and flow rollback. Hardening adds
+registration, concurrency-safe batch pulls and atomic flow rejection. Hardening adds
 idempotent retry and single-lease contention races, generated MessagePack
-payloads, malformed extension fuzzing, a 512-job spike and durable
-SIGKILL/restart recovery. Integration tests require `bun` and `openssl` on
-`PATH`.
+payloads, malformed extension fuzzing, shrinkable flow-plan properties, exact
+snapshot validation, atomic tree/chain E2E cases, a 512-job spike and durable
+SIGKILL/restart recovery. `cargo mutants` reads `.cargo/mutants.toml` and is
+scoped to the pure flow planner and snapshot validator; the transport wrapper
+is covered against a real broker. Integration tests require `bun` and
+`openssl` on `PATH`.
+
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
+[module and protocol guide](CLAUDE.md), and the
+[local agent rules](AGENTS.md) before changing behavior.
 
 ## License
 

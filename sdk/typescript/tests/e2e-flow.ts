@@ -1,4 +1,4 @@
-/** E2E: FlowProducer — trees, chains, fan-in, getFlow, rollback. */
+/** E2E: FlowProducer — atomic trees, chains, fan-in and flow reads. */
 
 import { FlowProducer, type Job } from '../dist/index.js';
 import {
@@ -8,7 +8,6 @@ import {
   makeWorker,
   namedQueue,
   qname,
-  sleep,
   test,
   waitFor,
 } from './harness.ts';
@@ -146,7 +145,33 @@ test('flow: getFlow reconstructs nested tree', async () => {
   }
 });
 
-test('flow: rollback cancels created jobs on failure', async () => {
+test('flow: custom IDs and reciprocal links survive the atomic snapshot', async () => {
+  const name = qname('customflow');
+  const rootId = `root-${name}`;
+  const childId = `child-${name}`;
+  const queue = namedQueue(name);
+  const flow = makeFlow();
+  try {
+    await queue.pause();
+    const node = await flow.add({
+      name: 'root',
+      queueName: name,
+      opts: { jobId: rootId },
+      children: [{ name: 'child', queueName: name, opts: { jobId: childId } }],
+    });
+    assertEq(node.job.id, rootId, 'root planned custom ID');
+    assertEq(node.job.customId, rootId, 'root customId snapshot');
+    assertEq(node.children?.[0].job.id, childId, 'child planned custom ID');
+    assertEq(node.children?.[0].job.parentId, rootId, 'child points to root');
+    assertEq(node.job.childrenIds[0], childId, 'root owns child');
+    await queue.obliterate();
+  } finally {
+    flow.close();
+    queue.close();
+  }
+});
+
+test('flow: invalid batch commits no jobs', async () => {
   const name = qname('rollback');
   const queue = namedQueue(name);
   const flow = makeFlow();
@@ -161,8 +186,7 @@ test('flow: rollback cancels created jobs on failure', async () => {
       threw = true;
     }
     assert(threw, 'chain with invalid queue must throw');
-    await sleep(300);
-    assertEq(await queue.count(), 0, 'rollback cancelled created jobs');
+    assertEq(await queue.count(), 0, 'failed atomic batch created no jobs');
   } finally {
     flow.close();
     queue.close();

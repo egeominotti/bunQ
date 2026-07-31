@@ -7,6 +7,8 @@ mod connection;
 mod connection_io;
 mod error;
 mod flow;
+mod flow_commit;
+mod flow_plan;
 mod job;
 mod options;
 mod queue;
@@ -22,6 +24,10 @@ mod worker_runtime;
 
 #[cfg(test)]
 mod error_tests;
+#[cfg(test)]
+mod flow_plan_boundary_tests;
+#[cfg(test)]
+mod flow_plan_tests;
 #[cfg(test)]
 mod options_tests;
 #[cfg(test)]

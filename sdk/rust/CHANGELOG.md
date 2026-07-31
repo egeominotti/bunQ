@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Replace multi-command flow creation and best-effort rollback with a pure
+  tree/chain planner and one broker-atomic `PUSHF` commit.
+- Preallocate secure colon-free IDs, forward explicit job IDs as `customId`,
+  make parent/child links and internal markers reciprocal, and reject reserved
+  data, topology overrides, repeat, deduplication, and debounce before I/O.
+- Validate the exact ID/queue bijection in returned snapshots and construct
+  `FlowNode` values from those authoritative snapshots.
+- Add `proptest` 1.7.0 tree/chain properties with shrinking, atomic tree and
+  chain E2E tests, and cargo-mutants 26.0.0 campaigns scoped to the pure
+  planner and snapshot validator.
+
 ## 0.1.1 - 2026-07-20
 
 - Documentation-only release: rewritten README with the standard header,

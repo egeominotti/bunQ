@@ -24,7 +24,7 @@ const suites = [
     command: [
       'bash',
       '-c',
-      "cd sdk/typescript && bun run build && bun run check && mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package && bun tests/integration.ts && bun tests/e2e.ts && bun run test:workers && cd ../conformance && bun runner.ts --driver 'bun drivers/typescript.ts'",
+      "cd sdk/typescript && bun run build && bun run check && bun run test:property && mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package && bun tests/integration.ts && bun tests/e2e.ts && bun run test:workers && cd ../conformance && bun runner.ts --driver 'bun drivers/typescript.ts'",
     ],
   },
   {
@@ -32,7 +32,7 @@ const suites = [
     command: [
       'bash',
       '-c',
-      "cd sdk/python && python -m compileall -q bunqueue tests && python -m build --no-isolation --outdir /tmp/python-package && python tests/test_integration.py && python tests/run_e2e.py && cd ../conformance && bun runner.ts --driver 'python drivers/python.py'",
+      "cd sdk/python && python -m compileall -q bunqueue tests && python -m pytest tests/test_flow_plan_property.py -q && python -m build --no-isolation --outdir /tmp/python-package && python tests/test_integration.py && python tests/run_e2e.py && cd ../conformance && bun runner.ts --driver 'python drivers/python.py'",
     ],
   },
   {
@@ -40,7 +40,7 @@ const suites = [
     command: [
       'bash',
       '-c',
-      "cd sdk/php && composer validate --strict --no-check-publish && find src tests -name '*.php' -print0 | xargs -0 -n1 php -l && php tests/run-e2e.php && cd ../conformance && bun runner.ts --driver 'php drivers/php.php'",
+      "cd sdk/php && composer validate --strict --no-check-publish && find src tests -name '*.php' -print0 | xargs -0 -n1 php -l && composer test:property && php tests/run-e2e.php && cd ../conformance && bun runner.ts --driver 'php drivers/php.php'",
     ],
   },
   {
@@ -250,8 +250,7 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
     console.log(`SDK suite passed: ${suite.name}`);
   } else {
     active.delete(container);
-    const counted =
-      telemetry.tests.passed + telemetry.tests.failed + telemetry.tests.skipped;
+    const counted = telemetry.tests.passed + telemetry.tests.failed + telemetry.tests.skipped;
     const why = exitCode === 0 ? 'reported no results' : `exited ${exitCode}`;
     console.error(
       `SDK suite ${suite.name} failed (${why}, ${counted} tests counted); retained container: ${container}`

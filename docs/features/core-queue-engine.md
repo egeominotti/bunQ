@@ -11,7 +11,11 @@
 Owns:
 
 - The shard arrays: `shards`, `shardLocks`, `processingShards`, `processingLocks` (`queueManager.ts:55-58`), one entry per `SHARD_COUNT`.
-- The global indexes: `jobIndex` (Map), `completedJobs` (BoundedSet), `completedJobsData` (BoundedMap), `depCompletions`/`timedOutJobs` (BoundedSet), `jobResults`/`customIdMap`/`jobLogs` (LRUMap) (`queueManager.ts:61-76`).
+- The global indexes: `jobIndex` (Map), `completedJobs` (BoundedSet),
+  `completedJobsData` (BoundedMap), `depCompletions`
+  (`DependencyCompletionTracker`: exact recent FIFO plus live pins),
+  `timedOutJobs` (BoundedSet), and
+  `jobResults`/`customIdMap`/`jobLogs` (LRUMap).
 - Lock-ownership tracking: `jobLocks` and `clientJobs` (`queueManager.ts:89-90`); flow-failure maps `failedChildrenValues`/`ignoredChildrenFailures` (`queueManager.ts:97-99`); `repeatChain` for repeat-job succession (`queueManager.ts:93`).
 - Shard selection and routing of every operation to the owning shard.
 - Lifecycle: recovery from storage at construction, background-task startup, and `shutdown()` teardown of all collections.
@@ -140,9 +144,22 @@ Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`; `QueueMana
 
 ## Edge Cases & Failure Modes
 
-- **Memory bounds / eviction.** `completedJobs`, `completedJobsData`, `depCompletions`, `timedOutJobs` use `BoundedSet`/`BoundedMap` sized at `maxCompletedJobs` (50k); `BoundedSet` evicts a **10% batch** when full (`boundedSet.ts:22`, `37-49`). `jobResults`, `customIdMap`, `jobLogs`, `perQueueMetrics` use `LRUMap`, which evicts **one** tail (least-recently-used) entry per insert at capacity (`lruMap.ts:94-99`) — not a 10% batch. `jobIndex` is a plain `Map`, kept bounded indirectly: the `completedJobs` eviction callback deletes the corresponding `jobIndex` and `completedJobsData` entries (`queueManager.ts:152-155`).
+- **Memory bounds / eviction.** `completedJobs`, `completedJobsData`, and
+  `timedOutJobs` use `BoundedSet`/`BoundedMap` sized at
+  `maxCompletedJobs` (50k); `BoundedSet` evicts a **10% batch** when full.
+  `depCompletions` instead holds exactly that many recent bare IDs plus proofs
+  pinned by live reverse dependency edges. ACK prunes only unpinned SQLite
+  rows; the last consumer release moves a pin into the recent FIFO and
+  re-applies the cap. `jobResults`, `customIdMap`, `jobLogs`, and
+  `perQueueMetrics` use `LRUMap`, which evicts **one** tail entry per insert at
+  capacity. `jobIndex` is a plain `Map`, kept bounded indirectly: the
+  `completedJobs` eviction callback deletes the corresponding `jobIndex` and
+  `completedJobsData` entries.
 - **Stale-token / duplicate execution.** Issue #33 (lock removed but job still present), #75 (lock expired + requeued), and #101 (expired-but-owned grace) are all handled in `ack`/`ackBatch`/`ackBatchWithResults`. Jobs in `timedOutJobs` are never completed by a late ACK so the retry proceeds (`queueManager.ts:372-375`, `393-396`, `428`, `476`).
-- **`removeOnComplete`.** Completed jobs with `removeOnComplete` are dropped from indexes; their bare ID is kept in `depCompletions` so late dependents can still unblock (`queueManager.ts:64-67`, `616-628`).
+- **`removeOnComplete`.** Completed jobs with `removeOnComplete` are dropped
+  from normal indexes; their bare ID is kept as recent evidence, or pinned
+  while a waiting parent owns it. Recovery reconstructs ownership before
+  pruning, so lowering the cap cannot strand an accepted parent.
 - **Repeat-chain leak guard.** `repeatChain` is capped at 10,000 entries; the oldest key is evicted past the cap (`queueManager.ts:290-293`).
 - **Flow-failure map leak guard.** `failedChildrenValues`/`ignoredChildrenFailures` are released on parent terminal completion (`onJobCompleted` `:1388-1389`), on DLQ move (`:1476-1477`), and on `obliterate`/`shutdown` (AUDIT H8).
 - **Cron orphan removal.** On `preventOverlap` upsert, a stale waiting cron job is removed by unique key so a reconnecting worker doesn't pick it up immediately (#73, `queueManager.ts:1254-1289`).
@@ -157,11 +174,11 @@ Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`; `QueueMana
 | Option | Default | Effect |
 | --- | --- | --- |
 | `dataPath` | _(unset)_ | Enables `SqliteStorage`; unset ⇒ in-memory only |
-| `maxCompletedJobs` | `50_000` | Size of `completedJobs`, `completedJobsData`, `depCompletions`, `timedOutJobs` (10% batch eviction) |
+| `maxCompletedJobs` | `50_000` | Size of `completedJobs`, `completedJobsData`, and `timedOutJobs`; exact cap for recent removed-completion proofs. Proofs owned by live waiting edges stay pinned outside the recent cap until release. |
 | `maxJobResults` | `10_000` | Size of `jobResults` LRU |
 | `maxJobLogs` | `10_000` | Size of `jobLogs` LRU |
 | `maxCustomIds` | `50_000` | Size of `customIdMap` and `perQueueMetrics` LRU |
-| `maxWaitingDeps` | `10_000` | Waiting-dependency bound |
+| `maxWaitingDeps` | `10_000` | Compatibility setting; currently not enforced as an admission or eviction bound |
 | `cleanupIntervalMs` | `10_000` | Background cleanup cadence |
 | `jobTimeoutCheckMs` | `5_000` | Timeout sweep cadence |
 | `dependencyCheckMs` | `30_000` | Safety fallback (event-driven flush is the fast path) |

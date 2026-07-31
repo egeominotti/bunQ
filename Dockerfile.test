@@ -15,6 +15,7 @@ COPY --chown=bun:bun package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY --chown=bun:bun tsconfig.json tsconfig.test.json tsconfig.build.json biome.json ./
+COPY --chown=bun:bun Dockerfile.test ./
 COPY --chown=bun:bun src ./src
 COPY --chown=bun:bun test ./test
 COPY --chown=bun:bun scripts ./scripts
@@ -22,10 +23,20 @@ COPY --chown=bun:bun bench ./bench
 COPY --chown=bun:bun monitoring ./monitoring
 COPY --chown=bun:bun docker-compose.yml ./
 COPY --chown=bun:bun docs/vercel.json ./docs/vercel.json
+COPY --chown=bun:bun .github/workflows/ci.yml ./.github/workflows/ci.yml
 COPY --chown=bun:bun .github/workflows/sdk.yml ./.github/workflows/sdk.yml
+COPY --chown=bun:bun .github/workflows/sdk-release.yml ./.github/workflows/sdk-release.yml
 COPY --chown=bun:bun .github/workflows/sdk-security.yml ./.github/workflows/sdk-security.yml
+COPY --chown=bun:bun .github/workflows/sdk-mutation.yml ./.github/workflows/sdk-mutation.yml
+COPY --chown=bun:bun sdk/typescript/package.json sdk/typescript/stryker.config.mjs ./sdk/typescript/
 COPY --chown=bun:bun sdk/typescript/tests/harness.ts sdk/typescript/tests/e2e-edge.ts ./sdk/typescript/tests/
 COPY --chown=bun:bun sdk/typescript/tests/workers/run.mjs ./sdk/typescript/tests/workers/run.mjs
+COPY --chown=bun:bun sdk/python/pyproject.toml ./sdk/python/pyproject.toml
+COPY --chown=bun:bun sdk/php/infection.json5 ./sdk/php/infection.json5
+COPY --chown=bun:bun sdk/php/src/Flow/SnapshotValidator.php ./sdk/php/src/Flow/SnapshotValidator.php
+COPY --chown=bun:bun sdk/go/.gremlins.yaml ./sdk/go/.gremlins.yaml
+COPY --chown=bun:bun sdk/rust/.cargo/mutants.toml ./sdk/rust/.cargo/mutants.toml
+COPY --chown=bun:bun sdk/elixir/mix.exs ./sdk/elixir/mix.exs
 
 ENV CI=1 \
     HOME=/tmp \

@@ -14,6 +14,7 @@ import type { WebhookManager } from './webhookManager';
 import type { WorkerManager } from './workerManager';
 import type { MonitoringState } from './monitoringChecks';
 import type { DependencyResultTracker } from './dependencyResultTracker';
+import type { DependencyCompletionTracker } from './dependencyCompletions';
 
 /** Queue Manager configuration */
 export interface QueueManagerConfig {
@@ -128,7 +129,8 @@ export interface BackgroundContext extends QueueManagerState {
   completedJobsData: BoundedMap<JobId, Job>;
   // Bare completion ids of removeOnComplete jobs (no payload) — lets dependent
   // jobs unblock even though the parent's full record was dropped.
-  depCompletions?: BoundedSet<JobId>;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
   // Ids of jobs failed by the timeout sweep — a late ACK from the timed-out
   // worker is discarded (not phantom-completed) so the retry proceeds.
   timedOutJobs?: BoundedSet<JobId>;

@@ -295,8 +295,9 @@ violation the whole batch is rejected with an error naming the offending index
 #### PUSHF
 
 Atomically commit a fully resolved, potentially multi-queue FlowProducer graph.
-This is the command used by the Bun package; external SDKs may still compose
-legacy `PUSH`/`UpdateParent` calls.
+This is the command used by the Bun package and all six current official SDKs.
+Previously published clients may still compose legacy `PUSH`/`UpdateParent`
+calls.
 
 **Request:**
 
@@ -1862,6 +1863,15 @@ Used by FlowProducer for parent/child job graphs.
 **Request:** `{ cmd: 'UpdateParent', childId: string, parentId: string }`
 
 **Response:** `{ ok: true }`
+
+This is a compatibility command for legacy multi-request flow creation. If the
+parent already declares `childId`, only the child's temporary parent marker is
+updated; the parent may be active or terminal and its state/topology is not
+rewritten. A queued, active, completed, DLQ, or `removeOnComplete`-tombstoned
+child is accepted when that declared edge is consistent. Persisted job/DLQ data
+and any failure-outbox key move atomically. A genuinely new edge still requires
+a queued parent; conflicting ownership, self-links, and undeclared missing
+nodes fail.
 
 #### GetFailedChildrenValues
 

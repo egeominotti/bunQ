@@ -4,12 +4,18 @@ import type { JobLocation } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { shardIndex } from '../../shared/hash';
 import type { MapLike, SetLike } from '../../shared/lru';
+import {
+  type DependencyCompletionTracker,
+  releaseDependencyCompletionPins,
+} from '../dependencyCompletions';
 
 export interface CustomIdContext {
   storage: SqliteStorage | null;
   shards: Shard[];
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
+  depCompletions?: DependencyCompletionTracker;
+  maxDependencyCompletions: number;
   timedOutJobs?: SetLike<JobId>;
   jobResults: MapLike<JobId, unknown>;
   customIdMap: MapLike<string, JobId>;
@@ -77,6 +83,18 @@ export function handleCustomId(
     // deleteDlqEntry removes every persisted generation for this deterministic
     // id. The fresh jobs row is inserted only after this retirement completes.
     ctx.storage?.deleteDlqEntry(id);
+  }
+
+  if (ctx.depCompletions?.has(id)) {
+    const hasUnresolvedConsumers = ctx.shards.some(
+      (shard) => (shard.getJobsWaitingFor(id)?.size ?? 0) > 0
+    );
+    if (hasUnresolvedConsumers) {
+      throw new Error(`Custom ID ${String(id)} still has unresolved dependency consumers`);
+    }
+    releaseDependencyCompletionPins([id], ctx);
+    ctx.storage?.deleteDependencyCompletion(id);
+    ctx.depCompletions.delete(id);
   }
 
   // A durable jobs row may outlive its in-memory tracking after an interrupted

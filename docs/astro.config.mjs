@@ -160,13 +160,11 @@ export default defineConfig({
             { label: 'Introduction', link: '/guide/introduction/' },
             { label: 'Installation', link: '/guide/installation/' },
             { label: 'Quick Start', link: '/guide/quickstart/' },
+            { label: 'Simple Mode', link: '/guide/simple-mode/' },
+            { label: 'Use Cases & Patterns', link: '/guide/use-cases/' },
             { label: 'Migrate from BullMQ', link: '/guide/migration/' },
             { label: 'FAQ', link: '/faq/' },
           ],
-        },
-        {
-          label: 'Core Guide',
-          items: [{ label: 'Simple Mode', link: '/guide/simple-mode/' }],
         },
         {
           label: 'Queue',
@@ -179,8 +177,8 @@ export default defineConfig({
             { label: 'Control & Maintenance', link: '/guide/queue/control/' },
             { label: 'Progress, Logs & Dependencies', link: '/guide/queue/progress/' },
             { label: 'Rate Limits & Concurrency', link: '/guide/queue/limits/' },
-            { label: 'Job Schedulers', link: '/guide/queue/schedulers/' },
-            { label: 'DLQ Operations', link: '/guide/queue/dlq/' },
+            { label: 'Rate Limiting in Depth', link: '/guide/rate-limiting/' },
+            { label: 'Queue Groups', link: '/guide/queue-group/' },
             { label: 'Workers & Metrics', link: '/guide/queue/metrics/' },
             { label: 'Namespaces & Batching', link: '/guide/queue/advanced/' },
             { label: 'Job Options Reference', link: '/guide/queue/options/' },
@@ -197,16 +195,19 @@ export default defineConfig({
             { label: 'Errors & Retries', link: '/guide/worker/errors/' },
             { label: 'Lifecycle & Shutdown', link: '/guide/worker/lifecycle/' },
             { label: 'Heartbeats & Locks', link: '/guide/worker/stalls/' },
+            { label: 'Stall Detection in Depth', link: '/guide/stall-detection/' },
+            { label: 'CPU-Intensive Workers', link: '/guide/cpu-intensive-workers/' },
             { label: 'SandboxedWorker', link: '/guide/worker/sandboxed/' },
             { label: 'Options Reference', link: '/guide/worker/options/' },
           ],
         },
         {
-          label: 'Cron Jobs',
+          label: 'Cron & Schedulers',
           collapsed: true,
           items: [
             { label: 'Overview', link: '/guide/cron/' },
             { label: 'Recipes', link: '/guide/cron/recipes/' },
+            { label: 'Job Schedulers (Queue API)', link: '/guide/queue/schedulers/' },
             { label: 'Expressions & Options', link: '/guide/cron/reference/' },
           ],
         },
@@ -216,6 +217,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/guide/dlq/' },
             { label: 'Operations', link: '/guide/dlq/operations/' },
+            { label: 'From the Queue API', link: '/guide/queue/dlq/' },
             { label: 'Automatic Retry', link: '/guide/dlq/auto-retry/' },
             { label: 'Configuration', link: '/guide/dlq/configuration/' },
             { label: 'Reference', link: '/guide/dlq/reference/' },
@@ -247,14 +249,17 @@ export default defineConfig({
           ],
         },
         {
-          label: 'SDKs · Any Language',
+          label: 'SDKs, CLI & MCP',
+          collapsed: true,
           items: [
-            { label: 'TypeScript, Python, PHP, Go, Rust & Elixir', link: '/guide/sdks/' },
-            { label: 'SDK Performance', link: '/guide/sdk-benchmarks/' },
+            { label: 'SDK Guide · Six Languages', link: '/guide/sdks/' },
+            { label: 'CLI Commands', link: '/guide/cli/' },
+            { label: 'MCP Server for AI Agents', link: '/guide/mcp/' },
           ],
         },
         {
           label: 'Run in Production',
+          collapsed: true,
           items: [
             { label: 'Running the Server', link: '/guide/server/' },
             { label: 'Deployment Guide', link: '/guide/deployment/' },
@@ -263,24 +268,16 @@ export default defineConfig({
             { label: 'Native TLS', link: '/guide/tls/' },
             { label: 'Monitoring', link: '/guide/monitoring/' },
             { label: 'Telemetry', link: '/guide/telemetry/' },
+            { label: 'Webhooks', link: '/guide/webhooks/' },
             { label: 'S3 Backup', link: '/guide/backup/' },
             { label: 'Databases (Postgres/MySQL)', link: '/guide/databases/' },
+            { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
             { label: 'Production Operations', link: '/guide/production/' },
           ],
         },
         {
-          label: 'Advanced',
-          items: [
-            { label: 'Queue Group', link: '/guide/queue-group/' },
-            { label: 'CPU-Intensive Workers', link: '/guide/cpu-intensive-workers/' },
-            { label: 'Stall Detection', link: '/guide/stall-detection/' },
-            { label: 'Rate Limiting', link: '/guide/rate-limiting/' },
-            { label: 'Webhooks', link: '/guide/webhooks/' },
-            { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
-          ],
-        },
-        {
-          label: 'Integrations',
+          label: 'Framework Integrations',
+          collapsed: true,
           items: [
             { label: 'Overview', link: '/guide/integrations/' },
             { label: 'Hono', link: '/guide/hono/' },
@@ -288,14 +285,8 @@ export default defineConfig({
           ],
         },
         {
-          label: 'AI Agents (MCP)',
-          items: [
-            { label: 'MCP Server', link: '/guide/mcp/' },
-            { label: 'Production Patterns', link: '/guide/use-cases/' },
-          ],
-        },
-        {
           label: 'Performance',
+          collapsed: true,
           items: [
             { label: 'Benchmarks', link: '/guide/benchmarks/' },
             { label: 'SDK Performance', link: '/guide/sdk-benchmarks/' },
@@ -307,7 +298,6 @@ export default defineConfig({
           collapsed: true,
           items: [
             { label: 'API Reference (by version)', link: '/reference/' },
-            { label: 'CLI Commands', link: '/guide/cli/' },
             { label: 'HTTP API', link: '/api/http/' },
             { label: 'TCP Protocol', link: '/api/tcp/' },
             { label: 'TypeScript Types', link: '/api/types/' },
@@ -360,6 +350,7 @@ export default defineConfig({
           items: [
             { label: 'Troubleshooting', link: '/troubleshooting/' },
             { label: 'Changelog', link: '/changelog/' },
+            { label: 'Queue Simulator', link: '/simulator/' },
             { label: 'Security', link: '/security/' },
             { label: 'Contributing', link: '/contributing/' },
           ],
@@ -640,8 +631,11 @@ export default defineConfig({
           item.priority = 0.9;
           item.changefreq = 'weekly';
         }
-        // MCP, workflow, benchmarks, comparison, use-cases - high priority landing pages
-        else if (url.match(/^\/(guide\/(mcp|workflow|benchmarks|comparison|use-cases))\//)) {
+        // MCP, workflow, benchmarks, comparison, use-cases, and the entry points a
+        // first-time reader lands on (simple mode, the SDK guide, the BullMQ migration)
+        else if (
+          url.match(/^\/(guide\/(mcp|workflow|benchmarks|comparison|use-cases|simple-mode|sdks|migration))\//)
+        ) {
           item.priority = 0.9;
           item.changefreq = 'weekly';
         }

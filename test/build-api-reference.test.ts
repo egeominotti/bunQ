@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import fc from 'fast-check';
-import { allVersionsHref, banner, sortVersions, versionKey } from '../scripts/build-api-reference';
+import {
+  allVersionsHref,
+  banner,
+  hasHeadRobots,
+  injectHead,
+  REFERENCE_ROBOTS,
+  shouldNoindex,
+  sortVersions,
+  versionKey,
+} from '../scripts/build-api-reference';
 
 /**
  * The banner is injected into generated TypeDoc output, so a wrong link is invisible
@@ -47,6 +56,77 @@ describe('banner', () => {
 
   test('the marker used for idempotent re-injection is present', () => {
     expect(banner('v2.8', 0)).toContain('bq-ref-banner');
+  });
+});
+
+describe('shouldNoindex', () => {
+  test('the current version is indexable, every other tree is not', () => {
+    expect(shouldNoindex('v2.8', 'v2.8')).toBe(false);
+    expect(shouldNoindex('v2.7', 'v2.8')).toBe(true);
+    expect(shouldNoindex('dev', 'v2.8')).toBe(true);
+  });
+});
+
+describe('injectHead', () => {
+  const PAGE = '<!DOCTYPE html><html><head><title>Worker | bunqueue</title></head><body><p>x</p></body></html>';
+
+  test('fresh typedoc output of an old version gets both banner and robots', () => {
+    const out = injectHead(PAGE, 'v2.7', 0, true);
+    expect(out).toContain('bq-ref-banner');
+    expect(out).toContain(REFERENCE_ROBOTS);
+  });
+
+  test('the current version gets chrome but stays indexable', () => {
+    const out = injectHead(PAGE, 'v2.8', 0, false);
+    expect(out).toContain('bq-ref-banner');
+    expect(out).not.toContain('robots');
+  });
+
+  test('an already-bannered page still receives the meta', () => {
+    // The guards must be independent: the committed tree carries banners already, so
+    // a shared guard would skip robots on every existing file.
+    const bannered = injectHead(PAGE, 'v2.7', 0, false);
+    expect(bannered).not.toContain('robots');
+    const out = injectHead(bannered, 'v2.7', 0, true);
+    expect(out).toContain(REFERENCE_ROBOTS);
+    expect(out.match(/bq-ref-banner/g)).toHaveLength(1);
+  });
+
+  test('re-running over its own output changes nothing', () => {
+    const once = injectHead(PAGE, 'v2.7', 0, true);
+    expect(injectHead(once, 'v2.7', 0, true)).toBe(once);
+  });
+
+  test('a <head> carrying attributes still matches', () => {
+    // A silently unmatched replace is how the wrong depth shipped on 234 pages: a
+    // typedoc release emitting `<head lang="en">` must not quietly drop the meta.
+    const out = injectHead(PAGE.replace('<head>', '<head lang="en">'), 'v2.7', 0, true);
+    expect(out).toContain(REFERENCE_ROBOTS);
+    expect(out).toContain('<head lang="en">');
+    expect(hasHeadRobots(out)).toBe(true);
+  });
+
+  test('<header>, which typedoc emits on every page, is not mistaken for <head>', () => {
+    // `<head([^>]*)>` matches `<header class=…>` too. On a page whose head is missing
+    // the meta would land inside the header element: still present, no longer a
+    // directive — which is why the post-condition asserts placement, not presence.
+    const headless = '<html><body><header class="tsd-page-toolbar">t</header></body></html>';
+    const out = injectHead(headless, 'v2.7', 0, true);
+    expect(out).not.toContain('robots');
+    expect(hasHeadRobots(out)).toBe(false);
+  });
+
+  test('the meta goes into the real head, leaving the toolbar header alone', () => {
+    const page = PAGE.replace('<body>', '<body><header class="tsd-page-toolbar">t</header>');
+    const out = injectHead(page, 'v2.7', 0, true);
+    expect(out).toContain(`<head>${REFERENCE_ROBOTS}`);
+    expect(out).toContain('<header class="tsd-page-toolbar">t</header>');
+    expect(hasHeadRobots(out)).toBe(true);
+  });
+
+  test('the meta lands inside the first 1024 bytes, where crawlers still read it', () => {
+    const out = injectHead(PAGE, 'v2.7', 0, true);
+    expect(out.indexOf('name="robots"')).toBeLessThan(1024);
   });
 });
 

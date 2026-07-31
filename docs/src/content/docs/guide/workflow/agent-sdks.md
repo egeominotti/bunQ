@@ -1,5 +1,5 @@
 ---
-title: "Agent SDK Integrations: Claude, OpenAI, Mastra, LangGraph"
+title: "Agent SDKs: Claude, OpenAI, Mastra & LangGraph"
 description: "Wrap the Claude Agent SDK, OpenAI Agents SDK, Mastra or LangGraph in a durable saga: journal the session, roll back the tools it called, gate risky turns."
 head:
   - tag: meta

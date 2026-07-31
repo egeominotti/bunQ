@@ -90,6 +90,14 @@ unaffected. Unit coverage for the scanners lives in `test/check-docs-data.test.t
 
 The version banner is the one piece of markup injected by the script, because TypeDoc has no slot for site chrome. It answers the two questions its own header cannot: which version am I reading, and how do I get back. Injection is idempotent, guarded by a check for `bq-ref-banner`, so re-running the build does not stack banners.
 
+`injectHead()` adds a second, separately-guarded injection: `<meta name="robots" content="noindex, follow">`, but **only on trees that are not the current version** (`shouldNoindex(version, current)`). The current tree stays indexable on purpose — TypeDoc writes real per-page titles (`Worker | bunqueue`, `StallConfig | bunqueue`; the bare `bunqueue` title is on two files, `index.html` and `hierarchy.html`), so a search for a type name landing on that type is useful. What must not accumulate is one near-identical tree per released version: all 238 pages share the description `Documentation for bunqueue` and carry no canonical, so an indexed v2.7 next to an indexed v2.8 is self-competition that grows with every release. `--dev` previews never index.
+
+Demotion happens on the release that supersedes a tree, not when the tree is written: `main()` injects into the tree TypeDoc just produced, then walks every sibling version directory and re-runs the same injection with `noindex` on each one that is no longer current. Without that second pass the policy could never fire for a released version — a tree is only ever generated while it *is* current, so it would keep the indexable head it was born with and each release would add another near-identical competitor. Both passes are idempotent, so re-running costs nothing.
+
+The two injections need independent guards. A shared one is wrong in both directions: the committed tree already carries banners, so a `bq-ref-banner` check would skip the meta on every existing file, and a tree that predates the banner would never get chrome. `injectBanner` also asserts a post-condition — a page that ends without a robots meta *inside its `<head>`* exits the build non-zero, because a silently unmatched `replace` is exactly how the wrong `depth` shipped on 234 pages. Placement, not presence: `<head(\s[^>]*)?>` is attribute-tolerant like `<body>` above, and the `\s` is load-bearing, because `<head([^>]*)>` also matches the `<header class="tsd-page-toolbar">` TypeDoc puts on every page — on a page with no `<head>` the meta would land inside that element, still present and no longer a directive.
+
+The generated pages are not in the sitemap either way: `@astrojs/sitemap` only enumerates Astro routes, and this tree is copied verbatim from `docs/public/`.
+
 Its "all versions" link is depth-relative: `allVersionsHref(depth)` returns `../` for a
 page at the version root and one more `../` per directory below it, so every page lands
 on `/reference/`. This was **wrong on 234 published pages** until 2.8.48: `injectBanner`
@@ -151,6 +159,8 @@ published.
 ## Release integration
 
 The reference is **not** wired into the release flow yet. `bun run docs:api` is a manual step; running it after a version bump and before publishing keeps `/reference/` current. Automating it belongs with the version-bump step in `CLAUDE.md`.
+
+**Commit the whole diff, not just the new tree.** A minor bump makes the demotion pass rewrite every page of the previous version, so `bun run docs:api` for v2.9 also touches all ~238 files under `v2.8/`. Staging only `v2.9/` leaves the published v2.8 indexable with a green build: `check-docs-data` validates `apiVersions.json` and tree tracking, not robots state, so nothing else would catch it.
 
 ## Related Docs
 

@@ -65,6 +65,12 @@ queue.set_dlq_config({
 </TabItem>
 </Tabs>
 
+*The DLQ policy is server-side state per queue: set it once from any client and it governs jobs failed by workers in every language. The typed helper ships in the Bun package, the TypeScript SDK and the Python SDK; from PHP, Go, Rust and Elixir use `PUT /queues/:queue/dlq-config` over HTTP, or the `SetDlqConfig` TCP command.*
+
+:::note[Confirming the write in TCP mode]
+In the Bun client `setDlqConfig()` is fire-and-forget over TCP: it updates the local cache and sends the command without waiting, so a transport failure is not reported to you. Use `await queue.setDlqConfigAsync(config)` when you need the call to resolve only once the server has applied the policy. In embedded mode the two are equivalent.
+:::
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `autoRetry` | `false` | Enable automatic retry |
@@ -77,6 +83,7 @@ queue.set_dlq_config({
 
 | | |
 |---|---|
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | The same operations from an existing Queue instance |
 | [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
 | [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
 | [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |

@@ -358,11 +358,16 @@ describe('releaseResources', () => {
 
     // Check that releaseJobResources was called with correct args
     const emailsShard = mockShards[idx1];
-    expect(emailsShard.releaseJobResources).toHaveBeenCalledWith('emails', 'uk-1', 'g-1');
-    expect(emailsShard.releaseJobResources).toHaveBeenCalledWith('emails', null, null);
+    expect(emailsShard.releaseJobResources).toHaveBeenCalledWith('emails', 'uk-1', 'g-1', 'rr-1');
+    expect(emailsShard.releaseJobResources).toHaveBeenCalledWith('emails', null, null, 'rr-2');
 
     const paymentsShard = mockShards[idx3];
-    expect(paymentsShard.releaseJobResources).toHaveBeenCalledWith('payments', 'uk-3', null);
+    expect(paymentsShard.releaseJobResources).toHaveBeenCalledWith(
+      'payments',
+      'uk-3',
+      null,
+      'rr-3'
+    );
   });
 
   test('passes correct uniqueKey and groupId to releaseJobResources', async () => {
@@ -390,7 +395,8 @@ describe('releaseResources', () => {
     expect(mockShards[idx].releaseJobResources).toHaveBeenCalledWith(
       'orders',
       'order-123',
-      'batch-A'
+      'batch-A',
+      'rr-unique'
     );
   });
 

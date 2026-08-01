@@ -5,20 +5,28 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { unlinkSync } from 'node:fs';
 import { QueueManager } from '../src/application/queueManager';
 import { shardIndex } from '../src/shared/hash';
 import { FailureReason } from '../src/domain/types/dlq';
-import type { JobId } from '../src/domain/types/job';
+import { jobId, type JobId } from '../src/domain/types/job';
 
 describe('DLQ Selective Retry', () => {
   let qm: QueueManager;
 
-  beforeEach(() => { qm = new QueueManager(); });
-  afterEach(() => { qm.shutdown(); });
+  beforeEach(() => {
+    qm = new QueueManager();
+  });
+  afterEach(() => {
+    qm.shutdown();
+  });
 
   /** Push a job, pull it, and fail it so it lands in the DLQ. */
   async function pushPullFail(
-    queue: string, data: unknown, error = 'test error', maxAttempts = 1
+    queue: string,
+    data: unknown,
+    error = 'test error',
+    maxAttempts = 1
   ): Promise<JobId> {
     const job = await qm.push(queue, { data, maxAttempts, backoff: 0 });
     const pulled = await qm.pull(queue, 0);
@@ -201,15 +209,17 @@ describe('DLQ Selective Retry', () => {
     expect(shard.getAutoRetryEntries(q, Date.now()).length).toBe(2);
   });
 
-  test('8. retryCompleted returns 0 in memory-only mode', async () => {
+  test('8. retryCompleted requeues a completed job in memory-only mode', async () => {
     const job = await qm.push('rc-mem', { data: { v: 1 }, removeOnComplete: false });
     const pulled = await qm.pull('rc-mem', 0);
     await qm.ack(pulled!.id, { done: true });
-    expect(qm.retryCompleted('rc-mem', job.id)).toBe(0);
+    expect(await qm.getJobState(job.id)).toBe('completed');
+    expect(qm.retryCompleted('rc-mem', job.id)).toBe(1);
+    expect(await qm.getJobState(job.id)).toBe('waiting');
+    expect((await qm.pull('rc-mem', 0))?.id).toBe(job.id);
   });
 
   test('retryCompleted returns 0 for non-existent job', () => {
-    const { jobId } = require('../src/domain/types/job');
     expect(qm.retryCompleted('any', jobId('non-existent'))).toBe(0);
   });
 
@@ -217,7 +227,11 @@ describe('DLQ Selective Retry', () => {
     const tmpPath = `/tmp/bunqueue-test-retry-${Date.now()}.db`;
     const qmS = new QueueManager({ dataPath: tmpPath });
     try {
-      const job = await qmS.push('rc-sql', { data: { v: 42 }, removeOnComplete: false, durable: true });
+      const job = await qmS.push('rc-sql', {
+        data: { v: 42 },
+        removeOnComplete: false,
+        durable: true,
+      });
       const pulled = await qmS.pull('rc-sql', 0);
       await qmS.ack(pulled!.id, { result: 'ok' });
       expect(await qmS.getJobState(job.id)).toBe('completed');
@@ -228,12 +242,13 @@ describe('DLQ Selective Retry', () => {
       expect(retried!.attempts).toBe(0);
     } finally {
       qmS.shutdown();
-      try {
-        const { unlinkSync } = require('fs');
-        for (const ext of ['', '-wal', '-shm']) {
-          try { unlinkSync(tmpPath + ext); } catch {}
+      for (const ext of ['', '-wal', '-shm']) {
+        try {
+          unlinkSync(tmpPath + ext);
+        } catch {
+          // The SQLite sidecar may not have been created.
         }
-      } catch {}
+      }
     }
   });
 

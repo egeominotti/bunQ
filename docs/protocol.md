@@ -165,7 +165,7 @@ Client MUSTs:
 |---|---|---|
 | `GetJob` | `id` | `{job}` |
 | `GetJobByCustomId` | `queue`, `customId` | `{job}` |
-| `GetJobs` | `queue`, `state` (string or list), `offset`, `limit` | `{jobs: []}` |
+| `GetJobs` | `queue`, `state` (string or list), `offset`, `limit`, `asc?` (default `true`) | `{jobs: []}` |
 | `GetState` | `id` | `{state}` |
 | `GetResult` | `id` | `{result}` |
 | `GetProgress` | `id` | `{progress, message}` — top-level |
@@ -186,6 +186,9 @@ Client MUSTs:
   probes `GetState`: `failed` → failure error, otherwise → timeout error.
   Timeouts beyond the server bound MUST be clamped to `[0, 600000]`, not
   forwarded.
+- `GetJobs.asc=false` reverses the total createdAt/job-id ordering before
+  applying `offset` and `limit`. A paginating client MUST send the same value
+  on every page; omitting it preserves ascending order.
 - `GetJobs` reads from SQLite behind a ~10 ms write buffer: results are
   eventually consistent with respect to a just-issued `PUSH`.
 

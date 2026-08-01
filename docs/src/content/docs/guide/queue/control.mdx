@@ -147,7 +147,14 @@ const promoted = await queue.promoteJobs({ count: 50 });
 // Re-queue failed jobs from the DLQ
 await queue.retryJobs({ state: 'failed', count: 100 });
 
-// Re-queue completed jobs (e.g. after a logic change)
+// Re-queue completed jobs through the same selector contract
+await queue.retryJobs({
+  state: 'completed',
+  count: 100,
+  timestamp: Date.now() - 3600000, // completed at least one hour ago
+});
+
+// Direct completed-job helpers (e.g. after a logic change)
 const count = await queue.retryCompletedAsync();       // all completed, use with care
 const one = queue.retryCompleted('job-id-123');        // one job (sync, embedded; TCP returns 0)
 ```
@@ -264,4 +271,3 @@ queue.retry_job("job-id")?;
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

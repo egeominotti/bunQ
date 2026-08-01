@@ -277,6 +277,7 @@ export class ContextFactory {
       jobLogs: this.deps.jobLogs,
       storage: this.deps.storage,
       completedJobs: this.deps.completedJobs,
+      completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
     };
   }

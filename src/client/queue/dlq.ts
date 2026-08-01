@@ -7,9 +7,12 @@ import { getSharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
 import type { Job, DlqConfig, DlqEntry, DlqStats, DlqFilter, FailureReason } from '../types';
 import type { Job as InternalJob } from '../../domain/types/job';
+import type { DlqEntry as InternalDlqEntry } from '../../domain/types/dlq';
 import { jobId } from '../../domain/types/job';
-import { createSimpleJob, type SimpleJobContext } from './jobProxy';
+import { createSimpleJob } from './jobProxy';
 import * as dlqOps from './dlqOps';
+import { toDlqEntry } from '../jobConversion';
+import { createDlqJobMethods, type DlqJobContext } from './dlqJobMethods';
 
 interface DlqContext {
   name: string;
@@ -65,18 +68,43 @@ export async function getDlqConfigAsync(ctx: DlqContext): Promise<DlqConfig> {
 }
 
 /** Get DLQ entries */
-export function getDlq<T>(ctx: DlqContext, filter?: DlqFilter): DlqEntry<T>[] {
+export function getDlq<T>(ctx: DlqQueryContext, filter?: DlqFilter): DlqEntry<T>[] {
   if (!ctx.embedded) return [];
-  return dlqOps.getDlqEntries<T>(ctx.name, filter);
+  const entries = getSharedManager().getDlqEntries(
+    ctx.name,
+    filter as unknown as import('../../domain/types/dlq').DlqFilter
+  );
+  const methods = createDlqJobMethods(ctx);
+  return entries.map((entry) => toDlqEntry<T>(entry, methods));
 }
 
-type DlqQueryContext = DlqContext &
-  Pick<SimpleJobContext, 'getJobState' | 'removeAsync' | 'retryJob' | 'getChildrenValues'>;
+type DlqQueryContext = DlqJobContext;
+
+/** Read full DLQ metadata from the selected broker runtime. */
+export async function getDlqAsync<T>(
+  ctx: DlqQueryContext,
+  filter?: DlqFilter
+): Promise<DlqEntry<T>[]> {
+  let entries: InternalDlqEntry[];
+  if (ctx.embedded) {
+    entries = getSharedManager().getDlqEntries(
+      ctx.name,
+      filter as unknown as import('../../domain/types/dlq').DlqFilter
+    );
+  } else if (ctx.tcp) {
+    const response = await ctx.tcp.send({ cmd: 'Dlq', queue: ctx.name, filter });
+    if (!response.ok) return [];
+    entries = (response.entries ?? []) as InternalDlqEntry[];
+  } else {
+    return [];
+  }
+  const methods = createDlqJobMethods(ctx);
+  return entries.map((entry) => toDlqEntry<T>(entry, methods));
+}
 
 /**
- * Get the dead jobs in the DLQ, working over TCP too (wire command `Dlq`).
- * Returns public Job objects; the wire does not carry DlqEntry metadata
- * (reason, enteredAt, attempts) — that stays embedded-only via getDlq().
+ * Get only the public jobs from the DLQ. Use getDlqAsync() when the full entry
+ * metadata is needed; both views work over TCP through the same command.
  */
 export async function getDlqJobsAsync<T>(ctx: DlqQueryContext, count?: number): Promise<Job<T>[]> {
   let raw: InternalJob[];
@@ -119,6 +147,15 @@ export function getDlqStats(ctx: DlqContext): DlqStats {
   return dlqOps.getDlqStatsEmbedded(ctx.name);
 }
 
+/** Read authoritative DLQ statistics from the selected broker runtime. */
+export async function getDlqStatsAsync(ctx: DlqContext): Promise<DlqStats> {
+  if (ctx.embedded) return dlqOps.getDlqStatsEmbedded(ctx.name);
+  if (!ctx.tcp) return getDlqStats(ctx);
+  const response = await ctx.tcp.send({ cmd: 'GetDlqStats', queue: ctx.name });
+  if (!response.ok) return getDlqStats(ctx);
+  return (response.data as { stats: DlqStats }).stats;
+}
+
 /** Retry DLQ entries */
 export function retryDlq(ctx: DlqContext, id?: string): number {
   if (ctx.embedded) return dlqOps.retryDlqEmbedded(ctx.name, id);
@@ -143,6 +180,15 @@ export async function retryDlqAsync(ctx: DlqContext, id?: string): Promise<numbe
 export function retryDlqByFilter(ctx: DlqContext, filter: DlqFilter): number {
   if (!ctx.embedded) return 0;
   return dlqOps.retryDlqByFilterEmbedded(ctx.name, filter);
+}
+
+/** Retry matching DLQ entries and return the applied count. */
+export async function retryDlqByFilterAsync(ctx: DlqContext, filter: DlqFilter): Promise<number> {
+  if (ctx.embedded) return dlqOps.retryDlqByFilterEmbedded(ctx.name, filter);
+  if (!ctx.tcp) return 0;
+  const response = await ctx.tcp.send({ cmd: 'RetryDlq', queue: ctx.name, filter });
+  if (!response.ok) return 0;
+  return (response.count ?? 0) as number;
 }
 
 /** Purge DLQ */

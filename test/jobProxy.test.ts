@@ -9,19 +9,32 @@ import type { JobStateType } from '../src/client/types';
 function createMockTcp() {
   const calls: Record<string, unknown>[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { calls, tcp: { send: async (cmd: Record<string, unknown>) => { calls.push(cmd); return { ok: true }; } } as any };
+  return {
+    calls,
+    tcp: {
+      send: async (cmd: Record<string, unknown>) => {
+        calls.push(cmd);
+        if (cmd.cmd === 'RemoveJobDeduplicationKey') return { ok: true, data: { removed: true } };
+        return { ok: true };
+      },
+    } as any,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createMockCtx(overrides: Record<string, any> = {}) {
   const { tcp, calls } = createMockTcp();
-  return { calls, ctx: {
-    queueName: overrides.queueName ?? 'test-queue', tcp: overrides.tcp ?? tcp,
-    getJobState: overrides.getJobState ?? (async () => 'waiting' as JobStateType),
-    removeAsync: overrides.removeAsync ?? (async () => {}),
-    retryJob: overrides.retryJob ?? (async () => {}),
-    getChildrenValues: overrides.getChildrenValues ?? (async () => ({})),
-  }};
+  return {
+    calls,
+    ctx: {
+      queueName: overrides.queueName ?? 'test-queue',
+      tcp: overrides.tcp ?? tcp,
+      getJobState: overrides.getJobState ?? (async () => 'waiting' as JobStateType),
+      removeAsync: overrides.removeAsync ?? (async () => {}),
+      retryJob: overrides.retryJob ?? (async () => {}),
+      getChildrenValues: overrides.getChildrenValues ?? (async () => ({})),
+    },
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,10 +124,8 @@ describe('createJobProxy', () => {
     expect(calls[3].delay).toBeGreaterThan(4000);
     expect(calls[3].delay).toBeLessThanOrEqual(5000);
 
-    // moveToWaitingChildren has no TCP primitive → throws explicit error
-    await expect(job.moveToWaitingChildren()).rejects.toThrow(
-      /moveToWaitingChildren is not supported in TCP mode/
-    );
+    expect(await job.moveToWaitingChildren()).toBe(true);
+    expect(calls[4]).toEqual({ cmd: 'MoveToWaitingChildren', id: 'j1' });
     // waitUntilFinished throws on timeout when mock response has no completed flag
     await expect(job.waitUntilFinished(null)).rejects.toThrow(/waitUntilFinished timed out/);
   });
@@ -138,8 +149,12 @@ describe('createJobProxy', () => {
     let removedId: string | null = null;
     let retriedId: string | null = null;
     const { ctx } = createMockCtx({
-      removeAsync: async (id: string) => { removedId = id; },
-      retryJob: async (id: string) => { retriedId = id; },
+      removeAsync: async (id: string) => {
+        removedId = id;
+      },
+      retryJob: async (id: string) => {
+        retriedId = id;
+      },
       getChildrenValues: async () => ({ 'q:c1': 42 }),
     });
     const job = createJobProxy('j1', 'task', {}, ctx);
@@ -174,7 +189,7 @@ describe('createJobProxy', () => {
     expect(typeof raw.timestamp).toBe('string');
   });
 
-  test('stub methods: dependencies, discard, children, dedup', async () => {
+  test('dependency, child, discard, and dedup methods dispatch', async () => {
     const { ctx } = createMockCtx();
     const job = createJobProxy('j1', 'task', {}, ctx);
     expect(await job.getDependencies()).toEqual({ processed: {}, unprocessed: [] });
@@ -183,10 +198,7 @@ describe('createJobProxy', () => {
     expect(await job.getFailedChildrenValues()).toEqual({});
     expect(await job.getIgnoredChildrenFailures()).toEqual({});
     expect(await job.removeChildDependency()).toBe(false);
-    // removeDeduplicationKey has no server primitive — explicit error instead of silent false
-    await expect(job.removeDeduplicationKey()).rejects.toThrow(
-      /removeDeduplicationKey is not implemented/
-    );
+    expect(await job.removeDeduplicationKey()).toBe(true);
     await expect(job.removeUnprocessedChildren()).resolves.toBeUndefined();
   });
 });
@@ -230,10 +242,7 @@ describe('createSimpleJob', () => {
     await expect(job.moveToFailed(new Error('x'))).resolves.toBeUndefined();
     expect(await job.moveToWait()).toBe(false);
     await expect(job.moveToDelayed(Date.now())).resolves.toBeUndefined();
-    // Without embedded/tcp we have no TCP primitive → throws explicit error
-    await expect(job.moveToWaitingChildren()).rejects.toThrow(
-      /moveToWaitingChildren is not supported in TCP mode/
-    );
+    expect(await job.moveToWaitingChildren()).toBe(false);
     await expect(job.waitUntilFinished(null)).rejects.toThrow(/waitUntilFinished: no connection/);
   });
 
@@ -253,8 +262,12 @@ describe('createSimpleJob', () => {
     let removedId = '';
     let retriedId = '';
     const ctx = createSimpleCtx({
-      removeAsync: async (id: string) => { removedId = id; },
-      retryJob: async (id: string) => { retriedId = id; },
+      removeAsync: async (id: string) => {
+        removedId = id;
+      },
+      retryJob: async (id: string) => {
+        retriedId = id;
+      },
       getChildrenValues: async () => ({ 'q:c1': 'done' }),
     });
     const job = createSimpleJob('s1', 'test', {}, 0, ctx);
@@ -284,7 +297,7 @@ describe('createSimpleJob', () => {
     expect(raw.stacktrace).toBeNull();
   });
 
-  test('stub methods: dependencies, discard, children, dedup', async () => {
+  test('detached dependency, child, discard, and dedup methods are safe', async () => {
     const ctx = createSimpleCtx();
     const job = createSimpleJob('s1', 'test', {}, 0, ctx);
     expect(() => job.discard()).not.toThrow();
@@ -292,9 +305,7 @@ describe('createSimpleJob', () => {
     expect(await job.getDependenciesCount()).toEqual({ processed: 0, unprocessed: 0 });
     expect(await job.getFailedChildrenValues()).toEqual({});
     expect(await job.removeChildDependency()).toBe(false);
-    await expect(job.removeDeduplicationKey()).rejects.toThrow(
-      /removeDeduplicationKey is not implemented/
-    );
+    expect(await job.removeDeduplicationKey()).toBe(false);
     await expect(job.removeUnprocessedChildren()).resolves.toBeUndefined();
   });
 });
@@ -308,7 +319,10 @@ describe('edge cases', () => {
     expect(nullJob.asJSON().data).toBe('null');
 
     const sCtx = createSimpleCtx();
-    expect(createSimpleJob('e2', 'test', { a: undefined, b: 1 }, 0, sCtx).data).toEqual({ a: undefined, b: 1 });
+    expect(createSimpleJob('e2', 'test', { a: undefined, b: 1 }, 0, sCtx).data).toEqual({
+      a: undefined,
+      b: 1,
+    });
 
     const data = { nested: { deep: { array: [1, 2, 3] } } };
     expect(JSON.parse(createJobProxy('e3', 'test', data, ctx).asJSON().data)).toEqual(data);

@@ -203,12 +203,8 @@ describe('flowJobFactory', () => {
       await expect(job.moveToFailed(new Error('fail'))).resolves.toBeUndefined();
       expect(await job.moveToWait()).toBe(false);
       await expect(job.moveToDelayed(Date.now() + 5000)).resolves.toBeUndefined();
-      await expect(job.moveToWaitingChildren()).rejects.toThrow(
-        /moveToWaitingChildren is not supported in TCP mode/
-      );
-      await expect(job.waitUntilFinished(null)).rejects.toThrow(
-        /waitUntilFinished: no connection/
-      );
+      expect(await job.moveToWaitingChildren()).toBe(false);
+      await expect(job.waitUntilFinished(null)).rejects.toThrow(/waitUntilFinished: no connection/);
     });
 
     test('additional BullMQ v5 methods wire correctly or throw explicitly', async () => {
@@ -220,10 +216,7 @@ describe('flowJobFactory', () => {
       expect(await job.getFailedChildrenValues()).toEqual({});
       expect(await job.getIgnoredChildrenFailures()).toEqual({});
       expect(await job.removeChildDependency()).toBe(false);
-      // removeDeduplicationKey has no server primitive → must throw rather than silently succeed
-      await expect(job.removeDeduplicationKey()).rejects.toThrow(
-        /removeDeduplicationKey is not implemented/
-      );
+      expect(await job.removeDeduplicationKey()).toBe(false);
       await expect(job.removeUnprocessedChildren()).resolves.toBeUndefined();
     });
   });
@@ -482,7 +475,10 @@ describe('FlowProducer - Extended', () => {
 
     test('should preserve complex nested data', async () => {
       const complexData = {
-        users: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }],
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
         config: { retries: 3, timeout: 5000 },
         tags: ['urgent', 'batch'],
       };
@@ -544,9 +540,7 @@ describe('FlowProducer - Extended', () => {
           name: 'with-children',
           queueName: 'fp-extended',
           data: { type: 'parent' },
-          children: [
-            { name: 'child', queueName: 'fp-extended', data: { type: 'child' } },
-          ],
+          children: [{ name: 'child', queueName: 'fp-extended', data: { type: 'child' } }],
         },
         { name: 'another-simple', queueName: 'fp-extended', data: { type: 'simple2' } },
       ];
@@ -837,9 +831,7 @@ describe('FlowProducer - Cross-queue flows', () => {
           name: 'mid',
           queueName: 'cross-q-b',
           data: {},
-          children: [
-            { name: 'leaf', queueName: 'cross-q-a', data: {} },
-          ],
+          children: [{ name: 'leaf', queueName: 'cross-q-a', data: {} }],
         },
       ],
     };
@@ -930,10 +922,11 @@ describe('FlowProducer - Legacy API Extended', () => {
         data: { index: i },
       }));
 
-      const result = await flowProducer.addBulkThen(
-        parallel,
-        { name: 'merge', queueName: 'bulk-ext', data: { type: 'merge' } }
-      );
+      const result = await flowProducer.addBulkThen(parallel, {
+        name: 'merge',
+        queueName: 'bulk-ext',
+        data: { type: 'merge' },
+      });
 
       expect(result.parallelIds).toHaveLength(8);
       expect(result.finalId).toBeDefined();
@@ -1009,9 +1002,7 @@ describe('FlowProducer - Legacy API Extended', () => {
                 name: 'l2',
                 queueName: 'tree-ext',
                 data: { id: 'l2' },
-                children: [
-                  { name: 'l3', queueName: 'tree-ext', data: { id: 'l3' } },
-                ],
+                children: [{ name: 'l3', queueName: 'tree-ext', data: { id: 'l3' } }],
               },
             ],
           },
@@ -1171,9 +1162,7 @@ describe('FlowProducer - Multiple children scenarios', () => {
               name: 'deeper',
               queueName: 'mixed-depth',
               data: {},
-              children: [
-                { name: 'deepest', queueName: 'mixed-depth', data: {} },
-              ],
+              children: [{ name: 'deepest', queueName: 'mixed-depth', data: {} }],
             },
           ],
         },

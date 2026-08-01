@@ -36,15 +36,20 @@ queue.setDlqConfig({
   maxEntries: 10000,
 });
 
-// Inspect (embedded mode only; returns [] / zeros in TCP mode)
+// Synchronous snapshots (embedded mode)
 const entries = queue.getDlq();
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
 const stats = queue.getDlqStats(); // { total, byReason, pendingRetry, ... }
+
+// Authoritative reads (embedded or TCP)
+const remoteEntries = await queue.getDlqAsync({ reason: 'stalled' });
+const remoteStats = await queue.getDlqStatsAsync();
 
 // Act
 queue.retryDlq();           // Retry all
 queue.retryDlq('job-123');  // Retry one
 queue.purgeDlq();           // Clear all
+const retried = await queue.retryDlqByFilterAsync({ reason: 'timeout' });
 ```
 
 </TabItem>
@@ -147,7 +152,12 @@ queue.purge_dlq()?;                      // Clear all
 *DLQ auto-retry configuration (`setDlqConfig`) is available in TypeScript and Python; `getDlqStats()` and reason filters exist in the Bun `bunqueue` package only.*
 
 :::note[TCP mode]
-Enumerating DLQ entries from this client API works in embedded mode only. Over TCP, use the [CLI](/guide/cli/) (`bunqueue dlq list|retry|purge`); `retryDlq()` and `purgeDlq()` still send the command but return 0 instead of a count. `getDlqConfigAsync()` fetches the real config from the server.
+The synchronous `getDlq()` / `getDlqStats()` methods are embedded snapshots,
+and the synchronous mutation forms are fire-and-forget over TCP. Use
+`getDlqAsync(filter?)`, `getDlqStatsAsync()`, `retryDlqAsync()`,
+`retryDlqByFilterAsync(filter)`, and `purgeDlqAsync()` when a remote result or
+count matters. Full entry metadata and every live `Job` method survive the TCP
+round trip. `getDlqConfigAsync()` reads the authoritative server config.
 :::
 
 See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/guide/stall-detection/) for `setStallConfig()`, which controls when unresponsive jobs are recovered.
@@ -170,4 +180,3 @@ See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

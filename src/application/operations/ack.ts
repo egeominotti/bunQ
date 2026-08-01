@@ -100,7 +100,7 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
   const idx = shardIndex(job.queue);
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     // Releasing either queue concurrency or an active FIFO group can make a
     // parked job eligible. Wake only waiters for this queue.
     shard.notify(job.queue);
@@ -263,7 +263,7 @@ export async function failJob(
   const flowFailure = willRetry ? null : flowFailureRecord(job, error);
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
 
     if (willRetry) {
       const now = Date.now();

@@ -392,6 +392,16 @@ export class SqliteStorage {
     });
   }
 
+  /** Persist a manually parked parent so recovery does not requeue it. */
+  markWaitingChildren(jobId: JobId, timeline?: JobTimelineEntry[]): void {
+    this.flushIfBuffered(jobId);
+    this.safeWrite(() => {
+      this.db
+        .prepare('UPDATE jobs SET state = ?, started_at = NULL, timeline = ? WHERE id = ?')
+        .run('waiting-children', timeline && timeline.length > 0 ? pack(timeline) : null, jobId);
+    });
+  }
+
   markCompleted(jobId: JobId, completedAt: number, timeline?: JobTimelineEntry[]): void {
     this.flushIfBuffered(jobId);
     this.safeWrite(() => {
@@ -583,6 +593,14 @@ export class SqliteStorage {
     this.flushIfBuffered(jobId);
     this.safeWrite(() => {
       this.db.prepare('UPDATE jobs SET data = ? WHERE id = ?').run(pack(data), jobId);
+    });
+  }
+
+  /** Clear a released deduplication key so recovery cannot resurrect it. */
+  clearJobUniqueKey(jobId: JobId): void {
+    this.flushIfBuffered(jobId);
+    this.safeWrite(() => {
+      this.db.prepare('UPDATE jobs SET unique_key = NULL WHERE id = ?').run(jobId);
     });
   }
 

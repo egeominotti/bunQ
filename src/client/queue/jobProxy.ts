@@ -10,6 +10,7 @@ import type { JobStateType, ChangePriorityOpts } from '../types';
 import { getSharedManager } from '../manager';
 import { jobId } from '../../domain/types/job';
 import { buildFailCommand, failEmbeddedArgs } from './failWire';
+import { removeJobDeduplicationKey } from '../jobDeduplication';
 
 interface JobProxyContext {
   queueName: string;
@@ -202,12 +203,9 @@ export function createJobProxy<T>(
       const delay = Math.max(0, timestamp - Date.now());
       await tcp.send({ cmd: 'MoveToDelayed', id, delay });
     },
-    moveToWaitingChildren: (): Promise<boolean> => {
-      return Promise.reject(
-        new Error(
-          'moveToWaitingChildren is not supported in TCP mode — no server command available'
-        )
-      );
+    moveToWaitingChildren: async () => {
+      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+      return response.ok === true;
     },
     waitUntilFinished: async (_queueEvents, ttl) => {
       const timeout = ttl ?? 30000;
@@ -233,10 +231,7 @@ export function createJobProxy<T>(
       const res = await tcp.send({ cmd: 'RemoveChildDependency', id });
       return (res.removed as boolean | undefined) ?? false;
     },
-    removeDeduplicationKey: (): Promise<boolean> =>
-      Promise.reject(
-        new Error('removeDeduplicationKey is not implemented — no server primitive available')
-      ),
+    removeDeduplicationKey: () => removeJobDeduplicationKey(id, false, tcp),
     removeUnprocessedChildren: async () => {
       await tcp.send({ cmd: 'RemoveUnprocessedChildren', id });
     },
@@ -481,9 +476,9 @@ export function createSimpleJob<T>(
       if (embedded) {
         return await getSharedManager().moveToWaitingChildren(jobId(id));
       }
-      throw new Error(
-        'moveToWaitingChildren is not supported in TCP mode — no server command available'
-      );
+      if (!tcp) return false;
+      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+      return response.ok === true;
     },
     waitUntilFinished: async (_qe, ttl) => {
       const timeout = ttl ?? 30000;
@@ -534,10 +529,7 @@ export function createSimpleJob<T>(
       const res = await tcp.send({ cmd: 'RemoveChildDependency', id });
       return (res.removed as boolean | undefined) ?? false;
     },
-    removeDeduplicationKey: (): Promise<boolean> =>
-      Promise.reject(
-        new Error('removeDeduplicationKey is not implemented — no server primitive available')
-      ),
+    removeDeduplicationKey: () => removeJobDeduplicationKey(id, embedded ?? false, tcp),
     removeUnprocessedChildren: async () => {
       if (embedded) {
         await getSharedManager().removeUnprocessedChildren(jobId(id));

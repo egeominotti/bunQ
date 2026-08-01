@@ -116,9 +116,11 @@ queue.clear_rate_limit()?;
 
 *Global concurrency helpers exist in TypeScript, Python, and Elixir; the temporary `rateLimit(ms)` throttle is available in the Bun `bunqueue` package only.*
 
-:::caution[Semantics and stubs]
+:::note[Read-back semantics]
 - `rateLimit(ms)` throws on non-positive or non-finite `ms`. The expiry lives on the server, so it also survives your process exiting.
-- `getGlobalConcurrency()`, `getGlobalRateLimit()`, `getRateLimitTtl()`, and `isMaxed()` exist for BullMQ API compatibility but are **stubs**: they return `null` / `null` / `0` / `false` regardless of actual server state.
+- `getGlobalConcurrency()` and `getGlobalRateLimit()` return the live configured values in embedded and TCP modes.
+- `getRateLimitTtl(maxJobs?)` returns `-2` when no rate limit exists; otherwise it reports the temporary-limit lifetime or token wait.
+- `isMaxed()` reports whether the queue's global concurrency slots are all occupied.
 :::
 
 See [Rate Limiting](/guide/rate-limiting/) for worker-side limiting too.
@@ -138,4 +140,3 @@ See [Rate Limiting](/guide/rate-limiting/) for worker-side limiting too.
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

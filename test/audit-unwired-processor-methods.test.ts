@@ -31,7 +31,7 @@ describe('Wired Job methods inside Worker processor (Issue #82 follow-up)', () =
 
     let savedId: string | undefined;
     let observedDataBeforeRemove: unknown;
-    let removeDedupThrew = false;
+    let removeDedupResult: boolean | undefined;
     let isWaitingChildrenResult: boolean | undefined;
 
     const worker = new Worker(
@@ -44,12 +44,7 @@ describe('Wired Job methods inside Worker processor (Issue #82 follow-up)', () =
         const afterUpdate = await queue.getJob(savedId);
         observedDataBeforeRemove = afterUpdate?.data;
 
-        // removeDeduplicationKey has no server primitive → must throw
-        try {
-          await j.removeDeduplicationKey();
-        } catch {
-          removeDedupThrew = true;
-        }
+        removeDedupResult = await j.removeDeduplicationKey();
 
         // getDependenciesCount returns real zero-child counts (job has no children)
         const depsCount = await j.getDependenciesCount();
@@ -68,7 +63,7 @@ describe('Wired Job methods inside Worker processor (Issue #82 follow-up)', () =
 
     // Proofs that methods really executed server-side:
     expect(observedDataBeforeRemove).toEqual({ kind: 'mutated' });
-    expect(removeDedupThrew).toBe(true);
+    expect(removeDedupResult).toBe(false);
     expect(isWaitingChildrenResult).toBe(false);
     expect(savedId).toBeDefined();
 

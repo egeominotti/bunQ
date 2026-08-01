@@ -16,6 +16,31 @@ head:
 
 ## Unreleased
 
+## [2.8.54] - 2026-08-01
+
+### Public API completeness
+
+- Completed 39 previously exposed Queue, Worker, QueueGroup, dependency, DLQ,
+  deduplication, retry, limiter and state-query methods or method families that
+  returned sentinels, ignored public options or behaved differently between
+  embedded and TCP runtimes.
+- Wired every one of the 32 non-serialization methods exposed by a DLQ `Job`
+  to live queue operations. Deduplication-key release is generation-safe, and
+  explicit waiting-children transitions now survive SQLite restart.
+- Made unbounded state reads exhaustive beyond the first page, preserved
+  ascending and descending ordering, and returned authoritative prioritized
+  and waiting-children counts without changing the wire protocol.
+
+### Verification and SDK audit
+
+- Added a dedicated 135-test regression contract with generated properties,
+  embedded coverage, real TCP broker coverage and one end-to-end test for each
+  DLQ `Job` operation. Lifecycle and persistence changes also pass the
+  asynchronous command model and the complete isolated sandbox.
+- Documented the core-parity audit for all six network SDKs. None currently
+  exposes the complete network-capable core surface; the per-language method
+  and semantic gaps are now recorded as an explicit implementation backlog.
+
 ## [2.8.53] - 2026-07-31
 
 ### Fixed

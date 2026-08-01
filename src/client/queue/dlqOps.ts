@@ -7,6 +7,7 @@ import { getSharedManager } from '../manager';
 import { jobId } from '../../domain/types/job';
 import type { DlqConfig, DlqEntry, DlqStats, DlqFilter, StallConfig } from '../types';
 import { toDlqEntry } from '../types';
+import type { PublicJobMethodContext } from '../jobConversionTypes';
 import { getShard, getDlqContext, toDomainFilter, toDomainDlqConfig } from './helpers';
 import * as dlqOps from '../../application/dlqManager';
 
@@ -23,11 +24,15 @@ export function getDlqConfigEmbedded(queue: string): DlqConfig {
 }
 
 /** Get DLQ entries (embedded only) */
-export function getDlqEntries<T>(queue: string, filter?: DlqFilter): DlqEntry<T>[] {
+export function getDlqEntries<T>(
+  queue: string,
+  methods: PublicJobMethodContext,
+  filter?: DlqFilter
+): DlqEntry<T>[] {
   const manager = getSharedManager();
   const ctx = getDlqContext(manager);
   const entries = dlqOps.getDlqEntries(queue, ctx, toDomainFilter(filter));
-  return entries.map((entry) => toDlqEntry<T>(entry));
+  return entries.map((entry) => toDlqEntry<T>(entry, methods));
 }
 
 /** Get DLQ statistics (embedded only) */

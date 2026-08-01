@@ -494,13 +494,16 @@ describe('Deduplication Operations', () => {
       expect(result).toBeNull();
     });
 
-    it('should return job ID for a job added with custom jobId', async () => {
-      const customId = `dedup-${Date.now()}`;
-      const job = await queue.add('dedup-task', { val: 1 }, { jobId: customId });
+    it('should return the owner ID for an existing deduplication key', async () => {
+      const deduplicationId = `dedup-${Date.now()}`;
+      const job = await queue.add(
+        'dedup-task',
+        { val: 1 },
+        { deduplication: { id: deduplicationId, ttl: 60_000 } }
+      );
 
-      const found = await queue.getDeduplicationJobId(customId);
-      // The found ID might be the internal ID mapped from the custom ID
-      expect(found).toBeDefined();
+      const found = await queue.getDeduplicationJobId(deduplicationId);
+      expect(found).toBe(String(job.id));
     });
   });
 
@@ -511,11 +514,16 @@ describe('Deduplication Operations', () => {
     });
 
     it('should return 1 for an existing deduplication key', async () => {
-      const customId = `dedup-remove-${Date.now()}`;
-      await queue.add('dedup-task', { val: 1 }, { jobId: customId });
+      const deduplicationId = `dedup-remove-${Date.now()}`;
+      await queue.add(
+        'dedup-task',
+        { val: 1 },
+        { deduplication: { id: deduplicationId, ttl: 60_000 } }
+      );
 
-      const result = await queue.removeDeduplicationKey(customId);
+      const result = await queue.removeDeduplicationKey(deduplicationId);
       expect(result).toBe(1);
+      expect(await queue.getDeduplicationJobId(deduplicationId)).toBeNull();
     });
   });
 

@@ -146,11 +146,13 @@ The persisted/enum states live in `JobState` (`job.ts:20-27`):
 | `completed`    | `Completed`     | ACKed successfully                                 |
 | `failed`       | `Failed`        | Terminal failure → DLQ                             |
 
-Two **virtual** states are reported in counts/queries but are *not* members of
+Two additional states are reported in counts/queries but are *not* members of
 the `JobState` enum (see `JobCounts`, `response.ts:73-82`):
 
 - `waiting-children` — parked in `shard.waitingDeps` or `shard.waitingChildren`
-  (flow dependency not yet satisfied). Derived in `queryOperations.ts:210`.
+  (flow dependency not yet satisfied or explicitly parked by a public move).
+  It is derived for in-memory queries and is also a valid SQLite `jobs.state`
+  checkpoint so a manual transition survives restart.
   The public `Queue.getJobCounts()` / `getJobCountsAsync()` result includes the
   same `'waiting-children'` bucket (including `0` for an empty queue), so job
   state, listing, and count surfaces use one classification.
@@ -581,11 +583,13 @@ export interface FailCommand extends BaseCommand {  // command.ts:116-125
 Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
 (`PUSH`/`PUSHB`/`PUSHF`/`PULL`/`PULLB`/`ACK`/`ACKB`/`FAIL`), **Query** (`GetJob`,
 `GetState`, `GetResult`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`,
-`GetJobByCustomId`, `Count`, `GetProgress`), **Management** (`Cancel`,
+`GetJobByCustomId`, `Count`, `GetProgress`, `GetQueueLimits`,
+`GetDeduplicationJobId`), **Management** (`Cancel`,
 `Progress`, `Update`, `ChangePriority`, `Promote`, `WaitJob`, `MoveToDelayed`,
-`Discard`, `MoveToWait`, `PromoteJobs`, `ChangeDelay`), **Queue Control**
+`MoveToWaitingChildren`, `Discard`, `MoveToWait`, `PromoteJobs`, `ChangeDelay`,
+`RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`), **Queue Control**
 (`Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`),
-**DLQ** (`Dlq`, `RetryDlq`, `PurgeDlq`, `RetryCompleted`), **Rate/Concurrency**
+**DLQ** (`Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RetryCompleted`), **Rate/Concurrency**
 (`RateLimit`, `SetConcurrency`, `*Clear`), **Config** (`Set/GetStallConfig`,
 `Set/GetDlqConfig`), **Cron** (`Cron`, `CronDelete`, `CronList`, `CronGet`),
 **Logs** (`AddLog`, `GetLogs`, `ClearLogs`), **Heartbeat/Workers** (`Heartbeat`,
@@ -597,6 +601,23 @@ Command families (each is a `cmd`-tagged interface in `command.ts`): **Core**
 `StorageStatus`, `CompactMemory`), **Dashboard** (`DashboardOverview/Queues/Queue`),
 **Auth/Negotiation** (`Auth`, `Hello`). `HelloCommand` (`command.ts:608-614`)
 negotiates `protocolVersion` and `capabilities: 'pipelining'[]`.
+
+`GetJobsCommand` carries optional `state`, `limit`, `offset`, and `asc`. The
+server defaults `asc` to `true`; `false` reverses the stable createdAt/job-id
+order before applying the page range.
+
+The extended introspection/DLQ shapes are:
+
+- `Dlq { queue, count?, filter? }` returns `{ jobs, entries }`; `entries`
+  preserve the full failure metadata and embedded job snapshot.
+- `GetDlqStats { queue }` returns `{ data: { stats } }`.
+- `RetryDlq { queue, jobId?, count?, filter? }` returns the applied `count`.
+- `RetryCompleted { queue, id?, count?, timestamp? }` applies the optional
+  terminal-time cutoff before the count cap.
+- `GetQueueLimits { queue, maxJobs? }` returns
+  `{ data: { limits: { rateLimit, rateLimitTtl, concurrencyLimit, maxed } } }`.
+- Deduplication lookup/removal responses use `data.jobId`, `data.count`, or
+  `data.removed` respectively.
 
 `UpdateParent` is retained for legacy multi-command flow clients. When
 `parent.childrenIds` already contains the child, it is a child-only replacement
@@ -726,6 +747,12 @@ flow flags map directly to their `_on_failure` columns; legacy rows receive safe
 false defaults through migrations 23–26. `stallCount` maps to
 `jobs.stall_count`; legacy rows receive the migration's safe zero default once,
 then every recovery retry persists its increment.
+
+`clearJobUniqueKey(jobId)` updates only `jobs.unique_key`. It is called after
+an owner-aware in-memory release, preventing startup recovery from restoring a
+key the public API already removed. `markWaitingChildren(jobId, timeline)`
+writes `state='waiting-children'`, clears `started_at`, and persists the
+transition timeline without altering the job identity or dependency blobs.
 
 Indexes on `jobs`:
 

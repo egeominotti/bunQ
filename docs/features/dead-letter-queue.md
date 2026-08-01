@@ -1,6 +1,6 @@
 # Dead Letter Queue (DLQ)
 
-> **Category:** Jobs · **Source:** `src/domain/queue/dlqShard.ts`, `src/application/dlqManager.ts`, `src/domain/types/dlq.ts`, `src/client/queue/dlq.ts`, `src/client/queue/dlqOps.ts`
+> **Category:** Jobs · **Source:** `src/domain/queue/dlqShard.ts`, `src/application/dlqManager.ts`, `src/domain/types/dlq.ts`, `src/client/queue/dlq.ts`, `src/client/queue/dlqOps.ts`, `src/client/queue/dlqJobMethods.ts`
 
 ## Purpose
 
@@ -80,20 +80,37 @@ queue.setDlqConfig(config: Partial<DlqConfig>): void
 queue.getDlqConfig(): DlqConfig
 queue.getDlqConfigAsync(): Promise<DlqConfig>
 queue.getDlq(filter?: DlqFilter): DlqEntry<T>[]      // embedded only
-queue.getDlqStats(): DlqStats                        // embedded only
+queue.getDlqAsync(filter?: DlqFilter): Promise<DlqEntry<T>[]>
+queue.getDlqJobsAsync(count?: number): Promise<Job<T>[]>
+queue.getDlqStats(): DlqStats                        // embedded snapshot
+queue.getDlqStatsAsync(): Promise<DlqStats>
 queue.retryDlq(id?: string): number
-queue.retryDlqByFilter(filter: DlqFilter): number    // embedded only
+queue.retryDlqAsync(id?: string): Promise<number>
+queue.retryDlqByFilter(filter: DlqFilter): number    // embedded snapshot
+queue.retryDlqByFilterAsync(filter: DlqFilter): Promise<number>
 queue.purgeDlq(): number
+queue.purgeDlqAsync(): Promise<number>
 queue.retryCompleted(id?: string): number
 queue.retryCompletedAsync(id?: string): Promise<number>
+queue.retryJobs(opts?: {
+  state?: 'failed' | 'completed'; count?: number; timestamp?: number
+}): Promise<void>
 ```
+
+The synchronous read/count-returning methods cannot return a remote response and
+remain embedded snapshots or TCP fire-and-forget forms. The async variants are
+authoritative in both runtimes. Every `job` nested in a `DlqEntry` is constructed
+with the live callbacks from `dlqJobMethods.ts`; all 32 non-serialization `Job`
+methods therefore reach the embedded manager or TCP broker instead of returning
+placeholder values.
 
 ### TCP commands handled
 
-- `Dlq` → `handleDlq` (`src/infrastructure/server/handlers/dlq.ts:13`) — returns DLQ jobs (`getDlq(queue, count)`).
-- `RetryDlq` → `handleRetryDlq` (`:23`) — retry one (`jobId`) or all; emits `dlq:retried` / `dlq:retry-all`.
+- `Dlq` → `handleDlq` (`src/infrastructure/server/handlers/dlq.ts`) — accepts `count?` and `filter?`, returning both raw jobs and full entries with failure metadata.
+- `GetDlqStats` → `handleGetDlqStats` — returns authoritative aggregate statistics.
+- `RetryDlq` → `handleRetryDlq` — retries one (`jobId`), a bounded batch (`count`), or entries selected by `filter`; emits `dlq:retried` / `dlq:retry-all`.
 - `PurgeDlq` → `handlePurgeDlq` (`:41`) — clears the queue's DLQ; emits `dlq:purged`.
-- `RetryCompleted` → `handleRetryCompleted` (`:52`).
+- `RetryCompleted` → `handleRetryCompleted` — accepts `id?`, `count?`, and `timestamp?` and returns the applied count.
 - `GetDlqConfig` / `SetDlqConfig` → `handleGetDlqConfig` / `handleSetDlqConfig` (`src/infrastructure/server/handlers/advanced.ts:337` for GetDlqConfig, `:317` for SetDlqConfig).
 
 Dispatched in `src/infrastructure/server/handlerRoutes.ts:249-256` and `:316-319`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
@@ -153,6 +170,12 @@ SQLite `dlq` table (`src/infrastructure/persistence/schema.ts:73`): `id INTEGER 
 
 `getFiltered` (`dlqShard.ts:125`) applies the filter predicates in-memory: `reason`, `olderThan`/`newerThan` (compared against `enteredAt`), `retriable` (via `canAutoRetry`), `expired` (via `isDlqEntryExpired`), then `offset`/`limit` slicing. `getDlqStats` (`dlqManager.ts:42`) tallies counts by reason, `pendingRetry` (`nextRetryAt <= now && retryCount < maxAutoRetries`), `expired`, and oldest/newest timestamps.
 
+The TCP `Dlq` handler applies the same filter before serializing entries, and
+`GetDlqStats` exposes the same aggregate. `getDlqAsync` converts each returned
+entry through `toDlqEntry` with a complete live-method context; failure reason,
+attempt history, timestamps, and the operational public `Job` survive the wire
+round trip.
+
 ### Manual retry
 
 `retryDlqJob` (`dlqManager.ts:89`): `removeFromDlq` → `storage.deleteDlqEntry` → reset `job.attempts = 0`, `runAt = now`, `stallCount = 0`, `lastHeartbeat = now`, push a `waiting` timeline entry → `shard.getQueue().push(job)` → `incrementQueued` → `jobIndex.set(... 'queue')` → **`storage.insertJob(job, true)`** (`:114`). The re-insert is essential: the `jobs` row was deleted when the job entered the DLQ, so without it the retried job would not survive a restart. `retryDlqJobs` with no id (`:120`) clears the whole queue's DLQ in one pass (`clearDlq` + `clearDlqQueue`), then re-queues every entry. With an optional `limit` (the `RetryDlq` command's `count`, surfaced client-side as `queue.retryJobs({ state:'failed', count })`) it instead retries only the first `limit` entries by looping the per-entry `retryDlqJob`, leaving the remainder in the DLQ — before this the client's `count` was silently dropped and the whole DLQ was drained (a #111-class silent-loss). `retryDlqByFilter` (`:186`) does the same per filtered entry.
@@ -167,7 +190,13 @@ SQLite `dlq` table (`src/infrastructure/persistence/schema.ts:73`): `id INTEGER 
 
 ### `retryCompleted`
 
-`retryCompletedJobs` (`dlqManager.ts:309`) is a sibling, **not** a DLQ operation: it re-queues *completed* jobs from `completedJobs`/SQLite (`requeueCompletedJob`, `:330`), clearing `completedJobs`/`jobResults` and calling `storage.updateForRetry`.
+`retryCompletedJobs` is a sibling, **not** a DLQ operation. It re-queues
+completed jobs from the in-memory completed-job data map, falling back to
+SQLite when needed, clears completed/result ownership, and calls
+`storage.updateForRetry`. Selection is stable and accepts an optional job id,
+non-negative `limit`, and terminal `timestamp` cutoff. This keeps
+`queue.retryJobs({ state: 'completed', count, timestamp })` consistent in
+memory-only, persisted embedded, and TCP deployments.
 
 ## Concurrency & Locking
 
@@ -186,7 +215,7 @@ SQLite `dlq` table (`src/infrastructure/persistence/schema.ts:73`): `id INTEGER 
 - **Purge is a full terminal deletion** — clearing only `DlqShard`/the `dlq` table leaves a dangling `jobIndex` location, so `GetState` still reports `failed`. `purgeDlqJobs` and `purgeExpiredDlq` share the same cleanup path and transactionally remove durable job/result rows plus pending buffered inserts before dropping the global indexes. Repeating expiry cleanup is a no-op, and purging one queue cannot delete another queue's entries.
 - **Recovery double-count avoidance** — `recover` loads `loadDlqJobIds()` and skips stale `active` rows already present in the DLQ (legacy DBs predate the failJob fix), dropping the orphan row (`backgroundTasks.ts:262-267`). `quarantineCorruptDependsOn` persists the entry and drops the row but deliberately does **not** add to in-memory DLQ — the later `loadDlq()` pass restores it exactly once (`:206-212`).
 - **`job_id` is not UNIQUE in the `dlq` table** — `insertDlq` is a plain `INSERT` (`statements.ts:82`), so re-discarding the same id could create multiple rows; `deleteDlqEntry` deletes by `job_id` (all matching rows) and `loadDlq` orders by `entered_at`. In normal flow a job is removed from its owning collection before `addToDlq`, so duplicates do not arise.
-- **TCP mode is read-degraded for rich queries** — in non-embedded mode `getDlq` returns `[]`, `getDlqStats` returns zeroed stats, and `retryDlqByFilter` returns 0 (`src/client/queue/dlq.ts:51-82`); only `Dlq`/`RetryDlq`/`PurgeDlq`/`RetryCompleted`/`Get/SetDlqConfig` cross the wire. `getDlqConfig` (sync) returns the client-side `tcpDlqConfigCache` or `{}`; `getDlqConfigAsync` round-trips `GetDlqConfig`.
+- **Choose the async remote surface** — `getDlq`, `getDlqStats`, and `retryDlqByFilter` retain synchronous embedded return types, so their TCP forms cannot return broker results. Use `getDlqAsync`, `getDlqStatsAsync`, and `retryDlqByFilterAsync`; they round-trip full entries, statistics, and filtered retry counts. `getDlqConfig` returns the client-side TCP cache or `{}`, while `getDlqConfigAsync` reads the broker.
 - **`retryDlq`/`purgeDlq` are fire-and-forget in TCP mode** — they `void tcp.send(...)` and return `0` regardless of server outcome (`dlq.ts:72-89`).
 - **Auto-retry default off** — `DEFAULT_DLQ_CONFIG.autoRetry = false`; entries created under it get `nextRetryAt = null` and are never auto-retried until config is changed. Changing config later does not retro-set `nextRetryAt` on existing entries.
 - **`maxAge: null`** disables expiry (`expiresAt = null`), so entries persist until manually purged or evicted by `maxEntries`.

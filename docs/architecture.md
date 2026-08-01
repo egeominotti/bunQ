@@ -105,7 +105,11 @@ be claimed.
   supplies live TCP connection counts plus the pre-backup persistence flush.
 - **`client/`** — In-process SDK: `Queue`, `Worker`, `SandboxedWorker`,
   `FlowProducer`, `QueueGroup`, `Bunqueue` (simple mode), the `Workflow`/`Engine`
-  pair, and the TCP `TcpPool`/forwarder. Each transparently targets embedded or TCP.
+  pair, and the TCP `TcpPool`/forwarder. Queue reads are split between the
+  generic conversion/query module, state aliases (`queryStates.ts`), and
+  exhaustive TCP traversal (`queryTcpPages.ts`); see
+  [Client SDK: Queue](./features/client-queue-sdk.md). Each facade transparently
+  targets embedded or TCP where its contract permits it.
 - **`shared/`** — Cross-cutting primitives: `fnv1a`/`uuid`/`shardIndex`
   ([`src/shared/hash.ts`](../src/shared/hash.ts)), `RWLock`/`Semaphore`,
   `LRUMap`/`BoundedSet`/`BoundedMap`/`TtlMap`, `MinHeap`, `SkipList`, `Histogram`,
@@ -585,7 +589,8 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Client Transport (TCP pool, reconnect, batching)](./features/client-transport.md) — Wire-level TCP transport (pool, pipelining, reconnect, health, TLS, add-batching) used by the Queue and Worker SDKs.
 - [Client SDK: Queue](./features/client-queue-sdk.md) — Producer-side BullMQ-style Queue<T> SDK that transparently drives embedded (in-process QueueManager) and TCP (msgpack-over-pool) backends.
 - [Client SDK: Worker (& sandboxed)](./features/client-worker-sdk.md) — BullMQ-style consumer worker that pulls jobs (embedded or TCP), runs the user processor, and reports ack/fail — plus a process-isolated SandboxedWorker variant.
-- [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) — Shared production invariants, telemetry contract, native regression coverage, and isolated six-language release gate.
+- [Public API Completeness](./features/public-api-completeness.md) — Exact audit of missing and partial public methods, embedded/TCP parity boundaries, DLQ Job factory wiring, and the per-method regression/E2E contract.
+- [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) — Shared production invariants, audited core-feature parity matrix, known semantic gaps, telemetry contract, and isolated six-language release gate.
 - [Rust Client SDK](./features/rust-sdk.md) — Standalone synchronous Queue, bounded-thread Worker, FlowProducer, rustls transport, and shared conformance driver.
 - [Elixir Client SDK](./features/elixir-sdk.md) — OTP-native Queue, concurrent Worker, FlowProducer, verified TLS transport, structured telemetry, and shared conformance driver.
 - [Simple Mode (Bunqueue all-in-one)](./features/simple-mode.md) — Thin all-in-one wrapper pairing a Queue and Worker with opt-in conveniences (routes, middleware, retry, circuit breaker, batching, aging, TTL, triggers, dedup, DLQ).

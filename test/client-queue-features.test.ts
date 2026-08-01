@@ -73,9 +73,9 @@ describe('Job Move Operations', () => {
     it('should throw when trying to complete a non-active job', async () => {
       const job = await queue.add('task', { value: 5 });
       // Job is in waiting state, not active -- should throw
-      await expect(
-        queue.moveJobToCompleted(job.id, 'ok')
-      ).rejects.toThrow(/not found or not in processing/);
+      await expect(queue.moveJobToCompleted(job.id, 'ok')).rejects.toThrow(
+        /not found or not in processing/
+      );
     });
   });
 
@@ -107,9 +107,9 @@ describe('Job Move Operations', () => {
 
     it('should throw when trying to fail a non-active job', async () => {
       const job = await queue.add('task', { value: 4 });
-      await expect(
-        queue.moveJobToFailed(job.id, new Error('nope'))
-      ).rejects.toThrow(/not found or not in processing/);
+      await expect(queue.moveJobToFailed(job.id, new Error('nope'))).rejects.toThrow(
+        /not found or not in processing/
+      );
     });
   });
 
@@ -191,9 +191,9 @@ describe('Job Move Operations', () => {
         off: () => {},
       };
 
-      await expect(
-        queue.waitJobUntilFinished(job.id, mockEvents, 100)
-      ).rejects.toThrow(/timed out/);
+      await expect(queue.waitJobUntilFinished(job.id, mockEvents, 100)).rejects.toThrow(
+        /timed out/
+      );
     });
 
     it('should resolve immediately if job is already completed', async () => {
@@ -221,9 +221,9 @@ describe('Job Move Operations', () => {
         off: () => {},
       };
 
-      await expect(
-        queue.waitJobUntilFinished(id, mockEvents, 5000)
-      ).rejects.toThrow(/already failed/);
+      await expect(queue.waitJobUntilFinished(id, mockEvents, 5000)).rejects.toThrow(
+        /already failed/
+      );
     });
 
     it('should resolve when completed event fires', async () => {
@@ -278,9 +278,9 @@ describe('Job Move Operations', () => {
         }
       }, 10);
 
-      await expect(
-        queue.waitJobUntilFinished(job.id, mockEvents, 5000)
-      ).rejects.toThrow('processing error');
+      await expect(queue.waitJobUntilFinished(job.id, mockEvents, 5000)).rejects.toThrow(
+        'processing error'
+      );
     });
 
     it('should ignore events for other job IDs', async () => {
@@ -308,9 +308,9 @@ describe('Job Move Operations', () => {
       }, 10);
 
       // Should timeout since the event is for a different job
-      await expect(
-        queue.waitJobUntilFinished(job.id, mockEvents, 200)
-      ).rejects.toThrow(/timed out/);
+      await expect(queue.waitJobUntilFinished(job.id, mockEvents, 200)).rejects.toThrow(
+        /timed out/
+      );
     });
   });
 });
@@ -352,7 +352,7 @@ describe('Rate Limit Operations', () => {
   });
 
   describe('getGlobalConcurrency()', () => {
-    it('should return null (not yet tracked in embedded mode)', async () => {
+    it('should return null when no concurrency limit is configured', async () => {
       const result = await queue.getGlobalConcurrency();
       expect(result).toBeNull();
     });
@@ -380,7 +380,7 @@ describe('Rate Limit Operations', () => {
   });
 
   describe('getGlobalRateLimit()', () => {
-    it('should return null (not yet tracked in embedded mode)', async () => {
+    it('should return null when no global rate limit is configured', async () => {
       const result = await queue.getGlobalRateLimit();
       expect(result).toBeNull();
     });
@@ -404,19 +404,19 @@ describe('Rate Limit Operations', () => {
   });
 
   describe('getRateLimitTtl()', () => {
-    it('should return 0 (stub in embedded mode)', async () => {
+    it('should return -2 when no rate limit exists', async () => {
       const ttl = await queue.getRateLimitTtl();
-      expect(ttl).toBe(0);
+      expect(ttl).toBe(-2);
     });
 
-    it('should return 0 with maxJobs parameter', async () => {
+    it('should return -2 with maxJobs when no rate limit exists', async () => {
       const ttl = await queue.getRateLimitTtl(100);
-      expect(ttl).toBe(0);
+      expect(ttl).toBe(-2);
     });
   });
 
   describe('isMaxed()', () => {
-    it('should return false (stub in embedded mode)', async () => {
+    it('should return false when no concurrency limit is exhausted', async () => {
       const maxed = await queue.isMaxed();
       expect(maxed).toBe(false);
     });
@@ -889,7 +889,7 @@ describe('BullMQ Compatibility Operations', () => {
   });
 
   describe('getDependencies()', () => {
-    it('should return empty processed and unprocessed for any parent ID', async () => {
+    it('should return empty processed and unprocessed for a missing parent', async () => {
       const deps = await queue.getDependencies('some-parent-id');
       expect(deps.processed).toEqual({});
       expect(deps.unprocessed).toEqual([]);

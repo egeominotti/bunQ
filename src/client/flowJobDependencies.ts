@@ -15,11 +15,12 @@ async function fetchChildIds(
 ): Promise<string[]> {
   if (embedded) {
     const job = await getSharedManager().getJob(jobId(id));
-    if (!job) throw new Error(`Flow job ${id} not found`);
+    if (!job) return [];
     return job.childrenIds.map(String);
   }
   if (!tcp) return [];
   const response = await tcp.send({ cmd: 'GetJob', id });
+  if (response.ok !== true && response.error === 'Job not found') return [];
   assertFlowTcpOk(response, 'GetJob');
   const parent = response.job as { childrenIds?: string[] } | undefined;
   return (parent?.childrenIds ?? []).map(String);

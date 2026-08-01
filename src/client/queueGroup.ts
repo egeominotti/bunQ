@@ -25,6 +25,7 @@ import type { QueueOptions, WorkerOptions, Processor } from './types';
  */
 export class QueueGroup {
   readonly prefix: string;
+  private readonly queues = new Map<string, Queue<unknown>>();
 
   constructor(namespace: string) {
     this.prefix = namespace.endsWith(':') ? namespace : `${namespace}:`;
@@ -32,7 +33,9 @@ export class QueueGroup {
 
   /** Get a queue within this group */
   getQueue<T = unknown>(name: string, opts?: QueueOptions): Queue<T> {
-    return new Queue<T>(this.prefix + name, opts);
+    const queue = new Queue<T>(this.prefix + name, opts);
+    this.queues.set(name, queue as Queue<unknown>);
+    return queue;
   }
 
   /** Create a worker for a queue in this group */
@@ -91,5 +94,33 @@ export class QueueGroup {
         manager.obliterate(queue);
       }
     }
+  }
+
+  /** List queues created through this group, including remote queues. */
+  async listQueuesAsync(): Promise<string[]> {
+    const names = new Set(this.queues.keys());
+    for (const name of this.listQueues()) names.add(name);
+    return [...names].sort();
+  }
+
+  /** Pause every queue created through this group. */
+  async pauseAllAsync(): Promise<void> {
+    await Promise.all([...this.queues.values()].map((queue) => queue.pauseAsync()));
+  }
+
+  /** Resume every queue created through this group. */
+  async resumeAllAsync(): Promise<void> {
+    await Promise.all([...this.queues.values()].map((queue) => queue.resumeAsync()));
+  }
+
+  /** Drain waiting jobs from every queue and return the aggregate count. */
+  async drainAllAsync(): Promise<number> {
+    const counts = await Promise.all([...this.queues.values()].map((queue) => queue.drainAsync()));
+    return counts.reduce((total, count) => total + count, 0);
+  }
+
+  /** Remove all data from every queue created through this group. */
+  async obliterateAllAsync(): Promise<void> {
+    await Promise.all([...this.queues.values()].map((queue) => queue.obliterateAsync()));
   }
 }

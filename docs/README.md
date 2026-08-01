@@ -69,7 +69,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | [Wire Protocol Specification](./protocol.md) | The normative, versioned client-facing spec of the TCP protocol (framing, envelope, command shapes, semantics, conformance requirements) — the contract every SDK is certified against via `sdk/conformance/`. |
 | [Rust Client SDK](./features/rust-sdk.md) | Official Rust Queue/Worker/Flow client, verified TLS transport, and protocol conformance driver. |
 | [Elixir Client SDK](./features/elixir-sdk.md) | Official OTP-native Queue/Worker/Flow client, verified TLS transport, telemetry, and protocol conformance driver. |
-| [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) | Shared production invariants, telemetry behavior, regression coverage, and isolated SDK validation gate. |
+| [Polyglot SDK Quality Contract](./features/polyglot-sdks.md) | Shared production invariants, audited core-feature parity matrix, known semantic gaps, telemetry behavior, and isolated SDK validation gate. |
 | [TCP Wire Protocol & Framing](./features/tcp-protocol.md) | Binary length-prefixed MessagePack transport that frames, pipelines, and backpressure-manages all TCP client/server commands and responses. |
 | [TCP Server Command Handlers](./features/tcp-server-handlers.md) | Request-handling layer that authenticates decoded commands, dispatches them through category routers to thin handler adapters, and shapes results into typed responses; also wires the full server in bootstrap. |
 | [HTTP / REST / SSE / WebSocket API](./features/http-api.md) | HTTP transport (port 6790) exposing the queue control surface as REST plus SSE/WebSocket real-time event streams, diagnostics, and metrics — all over the shared `handleCommand` dispatcher. |
@@ -90,6 +90,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | [Client Transport](./features/client-transport.md) | Wire-level TCP transport (pool, pipelining, reconnect, health, TLS, add-batching) used by the Queue and Worker SDKs. |
 | [Client SDK: Queue](./features/client-queue-sdk.md) | Producer-side BullMQ-style `Queue<T>` SDK that transparently drives embedded (in-process) and TCP (msgpack-over-pool) backends. |
 | [Client SDK: Worker](./features/client-worker-sdk.md) | BullMQ-style consumer worker that pulls jobs (embedded or TCP), runs the user processor, and reports ack/fail — plus a process-isolated `SandboxedWorker` variant. |
+| [Public API Completeness](./features/public-api-completeness.md) | Audited public-method contract, exact missing/partial-method count, embedded/TCP parity rules, and per-method regression/E2E coverage. |
 | [Simple Mode (Bunqueue)](./features/simple-mode.md) | Thin all-in-one wrapper pairing a Queue and Worker with opt-in conveniences (routes, middleware, retry, circuit breaker, batching, aging, TTL, triggers, dedup, DLQ). |
 | [Store-and-Forward](./features/store-and-forward.md) | Client-side edge store-and-forward (idempotently drain a local queue to a remote bunqueue server) plus partial BullMQ v5 read-API shims on `Queue`. |
 
@@ -132,6 +133,9 @@ rather than runtime feature modules. They are covered by [Test
 Isolation](./testing.md), the *Performance Characteristics* and *Reliability &
 Battle-Testing* sections of [Architecture](./architecture.md), and the
 reproducible reports under `benchmarks/`.
+
+The Queue query split (`operations/query.ts`, `queryStates.ts`, and
+`queryTcpPages.ts`) is documented in [Client SDK: Queue](./features/client-queue-sdk.md).
 
 ---
 

@@ -29,7 +29,7 @@ function test(name: string, fn: () => Promise<void> | void) {
   };
 }
 
-async function cleanup() {
+function cleanup() {
   const queue = new Queue(QUEUE_NAME, { embedded: true });
   queue.obliterate();
   queue.close();
@@ -105,13 +105,14 @@ async function runTests() {
     }
   })();
 
-  // Test 8: removeChildDependency returns false for job without parent
-  await test('removeChildDependency returns false for job without parent', async () => {
+  // Test 8: removeChildDependency reports a job without a parent
+  await test('removeChildDependency reports a job without a parent', async () => {
     const job = await queue.add('test', { value: 8 });
-    const removed = await job.removeChildDependency();
-
-    if (removed !== false) {
-      throw new Error('Expected false');
+    try {
+      await job.removeChildDependency();
+      throw new Error('Expected rejection');
+    } catch (error) {
+      if (!/has no parent/.test(String(error))) throw error;
     }
   })();
 
@@ -124,19 +125,18 @@ async function runTests() {
     }
   })();
 
-  // Test 10: removeDeduplicationKey throws explicit error (no server primitive)
-  await test('removeDeduplicationKey throws explicit error', async () => {
-    const job = await queue.add('test', { value: 10 });
-    let threw = false;
-    try {
-      await job.removeDeduplicationKey();
-    } catch (err) {
-      threw = true;
-      if (!/removeDeduplicationKey is not implemented/.test(String(err))) {
-        throw new Error(`Wrong error: ${err}`);
-      }
+  // Test 10: removeDeduplicationKey releases the key owned by the job
+  await test('removeDeduplicationKey releases the owned key', async () => {
+    const deduplicationId = 'job-advanced-deduplication';
+    const job = await queue.add(
+      'test',
+      { value: 10 },
+      { deduplication: { id: deduplicationId, ttl: 60_000 } }
+    );
+    if (!(await job.removeDeduplicationKey())) throw new Error('Expected key removal');
+    if ((await queue.getDeduplicationJobId(deduplicationId)) !== null) {
+      throw new Error('Expected the key to be absent');
     }
-    if (!threw) throw new Error('Expected throw');
   })();
 
   // Test 11: Job has removeUnprocessedChildren method
@@ -169,7 +169,11 @@ async function runTests() {
 
   if (failed > 0) {
     console.log('\n❌ Failed tests:');
-    results.filter((r) => !r.passed).forEach((r) => console.log(`   - ${r.name}: ${r.error}`));
+    results
+      .filter((r) => !r.passed)
+      .forEach((r) => {
+        console.log(`   - ${r.name}: ${r.error}`);
+      });
     process.exit(1);
   }
 

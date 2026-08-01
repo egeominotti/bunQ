@@ -646,7 +646,7 @@ export class SandboxedWorker<T = unknown> extends EventEmitter {
       discard: createDiscardHandler(embedded, tcp),
       getDependencies: createGetDependenciesHandler(embedded, tcp, domainJob),
       getDependenciesCount: createGetDependenciesCountHandler(embedded, tcp, domainJob),
-      removeDeduplicationKey: createRemoveDeduplicationKeyHandler(),
+      removeDeduplicationKey: createRemoveDeduplicationKeyHandler(embedded, tcp),
       moveToCompleted,
       moveToFailed,
     });

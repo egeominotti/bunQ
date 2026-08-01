@@ -88,7 +88,7 @@ export function buildJobProperties<T>(
 export function buildStateCheckMethods(
   id: string,
   getState?: (id: string) => Promise<JobStateType>,
-  getDependenciesCount?: (id: string, opts?: GetDependenciesOpts) => Promise<JobDependenciesCount>
+  _getDependenciesCount?: (id: string, opts?: GetDependenciesOpts) => Promise<JobDependenciesCount>
 ): Pick<
   Job,
   'isWaiting' | 'isActive' | 'isDelayed' | 'isCompleted' | 'isFailed' | 'isWaitingChildren'
@@ -115,11 +115,8 @@ export function buildStateCheckMethods(
       return state === 'failed';
     },
     isWaitingChildren: async () => {
-      if (getDependenciesCount) {
-        const counts = await getDependenciesCount(id);
-        return counts.unprocessed > 0;
-      }
-      return false;
+      const state = await (getState ? getState(id) : Promise.resolve('unknown'));
+      return state === 'waiting-children';
     },
   };
 }

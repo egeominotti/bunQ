@@ -1,8 +1,4 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/switch-exhaustiveness-check */
-/**
- * Queue Query Operations
- * getJob, getJobs, getJobState, getJobsAsync
- */
 
 import { getSharedManager } from '../../manager';
 import type { TcpConnectionPool } from '../../tcpPool';
@@ -18,6 +14,8 @@ import { jobId } from '../../../domain/types/job';
 import type { Job as InternalJob } from '../../../domain/types/job';
 import { createSimpleJob } from '../jobProxy';
 import { buildJobOpts } from '../../jobHelpers';
+import { removeJobDeduplicationKey } from '../../jobDeduplication';
+import { fetchTcpJobRows } from './queryTcpPages';
 
 /** Last failure's error message from the job timeline (#74) */
 function lastFailedError(timeline: InternalJob['timeline'] | undefined): string | undefined {
@@ -48,7 +46,7 @@ function metaFromJob(job: InternalJob): {
   };
 }
 
-interface QueryContext {
+export interface QueryContext {
   name: string;
   embedded: boolean;
   tcp: TcpConnectionPool | null;
@@ -94,6 +92,10 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
       return toPublicJob<T>({
         job,
         name,
+        updateProgress: async (jid, progress, message) => {
+          await mgr.updateProgress(jobId(jid), progress, message);
+        },
+        log: (jid, message) => Promise.resolve(void mgr.addLog(jobId(jid), message)),
         getState: (jid) => ctx.getJobState(jid),
         remove: (jid) => ctx.removeAsync(jid),
         retry: (jid) => ctx.retryJob(jid),
@@ -122,6 +124,7 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
         getFailedChildrenValues: (jid) => mgr.getFailedChildrenValues(jobId(jid)),
         getIgnoredChildrenFailures: (jid) => mgr.getIgnoredChildrenFailures(jobId(jid)),
         removeChildDependency: (jid) => mgr.removeChildDependency(jobId(jid)),
+        removeDeduplicationKey: (jid) => removeJobDeduplicationKey(jid, true, null),
         removeUnprocessedChildren: async (jid) => {
           await mgr.removeUnprocessedChildren(jobId(jid));
         },
@@ -225,7 +228,13 @@ export function getJobs<T>(ctx: QueryContext, options: GetJobsOptions = {}): Job
   const jobs = manager.getJobs(ctx.name, {
     state: options.state,
     start: options.start ?? 0,
-    end: options.end !== undefined && options.end >= 0 ? options.end : 100,
+    asc: options.asc,
+    end:
+      options.end === -1
+        ? Number.MAX_SAFE_INTEGER
+        : options.end !== undefined && options.end >= 0
+          ? options.end
+          : 100,
   });
 
   return jobs.map((j) => {
@@ -255,25 +264,13 @@ export async function getJobsAsync<T>(
 ): Promise<Job<T>[]> {
   if (ctx.embedded) return getJobs(ctx, options);
 
-  // Handle end=-1 as "get all"
-  const end = options.end !== undefined && options.end >= 0 ? options.end : 1000;
-  const start = options.start ?? 0;
-
-  const response = await ctx.tcp!.send({
-    cmd: 'GetJobs',
-    queue: ctx.name,
-    state: options.state,
-    offset: start,
-    limit: end - start,
-  });
-
-  if (!response.ok || !Array.isArray((response as { jobs?: unknown[] }).jobs)) {
-    return [];
-  }
+  if (!ctx.tcp) return [];
+  const rows = await fetchTcpJobRows({ name: ctx.name, tcp: ctx.tcp }, options);
+  if (!rows) return [];
 
   // handleGetJobs returns the full internal job per element ({ ...job, state }),
   // so reflect the complete opts via metaFromJob instead of a slim subset (#90).
-  const jobs = (response as { jobs: Array<InternalJob & { data: T; progress?: number }> }).jobs;
+  const jobs = rows as unknown as Array<InternalJob & { data: T; progress?: number }>;
 
   const now = Date.now();
   return jobs.map((j) => {
@@ -299,69 +296,4 @@ export async function getJobsAsync<T>(
       (result as { finishedOn?: number }).finishedOn = j.completedAt;
     return result;
   });
-}
-
-/** Get waiting jobs */
-export function getWaiting<T>(ctx: QueryContext, start = 0, end = 100): Job<T>[] {
-  return getJobs(ctx, { state: 'waiting', start, end });
-}
-
-export async function getWaitingAsync<T>(
-  ctx: QueryContext,
-  start = 0,
-  end = 100
-): Promise<Job<T>[]> {
-  return getJobsAsync(ctx, { state: 'waiting', start, end });
-}
-
-/** Get delayed jobs */
-export function getDelayed<T>(ctx: QueryContext, start = 0, end = 100): Job<T>[] {
-  return getJobs(ctx, { state: 'delayed', start, end });
-}
-
-export async function getDelayedAsync<T>(
-  ctx: QueryContext,
-  start = 0,
-  end = 100
-): Promise<Job<T>[]> {
-  return getJobsAsync(ctx, { state: 'delayed', start, end });
-}
-
-/** Get active jobs */
-export function getActive<T>(ctx: QueryContext, start = 0, end = 100): Job<T>[] {
-  return getJobs(ctx, { state: 'active', start, end });
-}
-
-export async function getActiveAsync<T>(
-  ctx: QueryContext,
-  start = 0,
-  end = 100
-): Promise<Job<T>[]> {
-  return getJobsAsync(ctx, { state: 'active', start, end });
-}
-
-/** Get completed jobs */
-export function getCompleted<T>(ctx: QueryContext, start = 0, end = 100): Job<T>[] {
-  return getJobs(ctx, { state: 'completed', start, end });
-}
-
-export async function getCompletedAsync<T>(
-  ctx: QueryContext,
-  start = 0,
-  end = 100
-): Promise<Job<T>[]> {
-  return getJobsAsync(ctx, { state: 'completed', start, end });
-}
-
-/** Get failed jobs */
-export function getFailed<T>(ctx: QueryContext, start = 0, end = 100): Job<T>[] {
-  return getJobs(ctx, { state: 'failed', start, end });
-}
-
-export async function getFailedAsync<T>(
-  ctx: QueryContext,
-  start = 0,
-  end = 100
-): Promise<Job<T>[]> {
-  return getJobsAsync(ctx, { state: 'failed', start, end });
 }

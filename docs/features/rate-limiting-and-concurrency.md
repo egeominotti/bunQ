@@ -43,10 +43,12 @@ External/runtime:
   - `clearRateLimit(queue): void` — also nulls `rateLimitDuration`/`rateLimitExpiresAt`
   - `expireRateLimitIfNeeded(queue): void` — lazy TTL check; called from the acquire path and from limit reads, so no timer exists and an expired limit can never throttle a pull
   - `tryAcquireRateLimit(queue): boolean` — `true` if no limiter is set (runs the TTL check first)
+  - `getRateLimit(queue): { max; duration } | null`, `getRateLimitTtl(queue, maxJobs?): number`
   - `setConcurrency(queue, limit): void` — reuses/updates an existing `ConcurrencyLimiter`
   - `clearConcurrency(queue): void`
   - `tryAcquireConcurrency(queue): boolean` — `true` if no limiter is set
   - `releaseConcurrency(queue): void`
+  - `getConcurrency(queue): number | null`, `isConcurrencyMaxed(queue): boolean`
   - `deleteQueue(queue): void`, `getQueueNames(): string[]`, `getStateMap(): Map<string, QueueState>`
 - `class RateLimiter` (`src/domain/types/queue.ts:27`) — token bucket. `constructor(capacity, refillRate = capacity)`, `tryAcquire(): boolean`, `getTokens(): number`.
 - `class ConcurrencyLimiter` (`src/domain/types/queue.ts:66`) — `constructor(limit)`, `tryAcquire(): boolean`, `release(): void`, `getActive()`, `getLimit()`, `setLimit(limit)`.
@@ -63,7 +65,14 @@ External/runtime:
 - `setGlobalRateLimitAsync(max, duration?)` / `removeGlobalRateLimitAsync()` / `setGlobalConcurrencyAsync(n)` / `removeGlobalConcurrencyAsync()` — awaitable variants: resolve once the server has applied the change (no set-then-pull race).
 - `removeGlobalRateLimit()`, `setGlobalConcurrency(concurrency)`, `removeGlobalConcurrency()` — fire-and-forget forms.
 - `rateLimit(expireTimeMs)` — temporary throttle (`limit: 1` + broker-side `ttl`); throws on non-finite or non-positive input. The expiry lives on the broker, so it works identically embedded/TCP and survives client exit (see Edge Cases).
-- `getGlobalRateLimit()`, `getGlobalConcurrency()`, `getRateLimitTtl()`, `isMaxed()` — all are **stubs** that resolve to `null`/`0`/`false` (`src/client/queue/rateLimit.ts`).
+- `getGlobalRateLimit()` — returns `{ max, duration }` for the active queue limit, or `null`.
+- `getGlobalConcurrency()` — returns the configured global cap, or `null`.
+- `getRateLimitTtl(maxJobs?)` — returns the remaining temporary-limit TTL or token-bucket wait; `-2` means no rate limit.
+- `isMaxed()` — reports whether all configured global-concurrency slots are currently occupied.
+
+All four getters read the live `QueueManager` state in embedded mode and use
+`GetQueueLimits` in TCP mode. Reads apply lazy rate-limit expiry before
+returning, so an elapsed temporary limit is reported as absent.
 
 ### TCP commands (`src/domain/types/command.ts:295`, handlers `src/infrastructure/server/handlers/advanced.ts:239`)
 
@@ -71,6 +80,8 @@ External/runtime:
 - `RateLimitClear { queue }`
 - `SetConcurrency { queue, limit }` — same finite-number validation.
 - `ClearConcurrency { queue }`
+- `GetQueueLimits { queue, maxJobs? }` — returns
+  `{ data: { limits: { rateLimit, rateLimitTtl, concurrencyLimit, maxed } } }`.
 
 ### HTTP endpoints (`src/infrastructure/server/httpRouteQueueConfig.ts:84`)
 
@@ -141,6 +152,11 @@ Batch pull repeats the same selection and acquires **one rate token + one concur
 
 `QueueManager.setRateLimit/setConcurrency` (and their clears) route to the owning shard's `LimiterManager` then call `persistQueueState` (`src/application/queueManager.ts:1020`–`1056`), which UPSERTs the row, or DELETEs it when the state has returned fully to default (not paused, no limits). On startup, `loadQueueState()` re-applies paused/rate/concurrency directly to the shard, in-memory only, avoiding a write-back loop (`src/application/backgroundTasks.ts:390`–`396`). This is the issue #100 fix; without it every queue silently un-paused and lost its limits on restart.
 
+`QueueManager.getQueueLimitStatus(queue, maxJobs?)` is the single read model
+for the four public getters. It combines the configured `{max, duration}`, the
+remaining TTL/cooldown, the concurrency limit, and current slot saturation
+without mutating capacity except for the intentional lazy TTL expiry.
+
 ### Protocol-level limiting
 
 Every inbound TCP `data` callback and HTTP request first calls `getRateLimiter().isAllowed(clientId)` (`src/infrastructure/server/tcp.ts:218`, `src/infrastructure/server/http.ts:148`). `clientId` is the socket-derived id (TCP) or `x-forwarded-for`/`x-real-ip`/`'unknown'` (HTTP). `isAllowed` reads the per-client `SlidingWindowDeque` count and rejects when `count >= maxRequests` within `windowMs`; otherwise it records the timestamp (`src/infrastructure/server/rateLimiter.ts:81`). On disconnect, `removeClient` drops the client's deque (`tcp.ts:313`, `http.ts:235`). The singleton is torn down via `stopRateLimiter()` on shutdown (`src/infrastructure/server/bootstrap.ts:189`).
@@ -179,7 +195,8 @@ Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabl
 - **Default = unlimited per queue.** No `RateLimiter`/`ConcurrencyLimiter` exists until explicitly set; `tryAcquire*` returns `true` when absent (`limiterManager.ts:63`, `:90`). The only always-on throttle is the protocol limiter at 10000 req/60s per client (the known "rate limit defaults to Infinity" caveat refers to per-queue limits being off by default).
 - **`setGlobalRateLimit(max, duration)` honors `duration` end-to-end** (client → wire `duration` field → `LimiterManager` refill rate), matching BullMQ's `{max per duration}` semantics in both modes. Servers older than 2.8.35 ignore the field and fall back to the 1s bucket. The worker-side `WorkerRateLimiter` independently honors its own `{max, duration}`.
 - **`Queue.rateLimit(expireTimeMs)` expires broker-side** (`rateLimit.ts`): both modes set `limit: 1` with a broker-side `ttl`; there is no client timer, so the expiry survives client exit and behaves identically embedded/TCP. Lazy expiry: the limit clears on the first pull or limit read past the deadline. During the window jobs still trickle at 1/sec (token refill), matching the previous approximation. Invalid `expireTimeMs` (non-finite or ≤ 0) throws. A TTL'd limit persisted to `queue_state` is restored with its remaining time on restart and never resurrects once expired.
-- **Stub getters:** `getGlobalRateLimit`, `getGlobalConcurrency`, `getRateLimitTtl`, `isMaxed` always return `null`/`0`/`false`; do not rely on them to read back limits.
+- **TTL sentinel:** `getRateLimitTtl` returns `-2` when no rate limit exists. A temporary limit returns its remaining broker-side lifetime; a permanent token bucket returns the wait required for the requested token count.
+- **`isMaxed` scope:** it reflects the global concurrency limiter, not worker-local concurrency or rate-token availability. With no configured global concurrency it is `false`.
 - **Memory bounds.**
   - `SlidingWindowDeque` advances a head pointer for O(1) amortized expiry and compacts the array when `head > 1000` (`rateLimiter.ts:36`); the cleanup interval deletes empty per-client deques every `cleanupIntervalMs` (`rateLimiter.ts:130`).
   - `WorkerRateLimiter.evictExpired` advances head and compacts when more than half the token array is dead space (`workerRateLimiter.ts:108`).

@@ -53,10 +53,19 @@ billing.pauseAll();        // pause every queue in the group
 billing.resumeAll();       // resume them
 billing.drainAll();        // remove all waiting jobs
 billing.obliterateAll();   // remove ALL data from every queue
+
+// Awaitable forms are authoritative in embedded and TCP modes
+await billing.pauseAllAsync();
+await billing.resumeAllAsync();
+const removed = await billing.drainAllAsync();
+await billing.obliterateAllAsync();
 ```
 
-:::caution[Embedded mode only]
-`listQueues()` and the bulk operations (`pauseAll`, `resumeAll`, `drainAll`, `obliterateAll`) operate on the **in-process embedded manager**. In TCP mode they are no-ops for the server's queues; call `pause()` / `resume()` / `drain()` / `obliterate()` on each `Queue` instance instead. `getQueue()` and `getWorker()` work in both modes.
+:::note[Synchronous and awaitable forms]
+`listQueues()` and the synchronous bulk operations use the in-process embedded
+manager. For TCP queues, use `listQueuesAsync`, `pauseAllAsync`,
+`resumeAllAsync`, `drainAllAsync`, and `obliterateAllAsync`; they operate on
+every queue created through the group and wait for completion.
 :::
 
 ### Isolate tenants
@@ -89,6 +98,10 @@ const queue = group.getQueue('jobs', { embedded: true });
 | `resumeAll()` | Resume all queues in the group (embedded only) |
 | `drainAll()` | Remove waiting jobs from all queues (embedded only) |
 | `obliterateAll()` | Remove all data from all queues (embedded only) |
+| `listQueuesAsync()` | List tracked group queues in either runtime |
+| `pauseAllAsync()` / `resumeAllAsync()` | Await group control in either runtime |
+| `drainAllAsync()` | Drain all tracked queues and return the aggregate count |
+| `obliterateAllAsync()` | Await removal of all tracked queue data |
 
 :::tip[Related Guides]
 - [Queue API](/guide/queue/) - Options accepted by `getQueue`

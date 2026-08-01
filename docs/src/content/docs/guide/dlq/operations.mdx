@@ -25,14 +25,15 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 ### Filter entries
 
 ```typescript
-queue.getDlq({ reason: 'timeout' });                       // by failure reason
-queue.getDlq({ olderThan: Date.now() - 86400000 });        // older than 24h
-queue.getDlq({ newerThan: Date.now() - 3600000 });         // last hour
-queue.getDlq({ retriable: true });                         // still eligible for auto-retry
-queue.getDlq({ limit: 10, offset: 20 });                   // pagination
+await queue.getDlqAsync({ reason: 'timeout' });                       // by failure reason
+await queue.getDlqAsync({ olderThan: Date.now() - 86400000 });        // older than 24h
+await queue.getDlqAsync({ newerThan: Date.now() - 3600000 });         // last hour
+await queue.getDlqAsync({ retriable: true });                         // still eligible for auto-retry
+await queue.getDlqAsync({ limit: 10, offset: 20 });                   // pagination
 ```
 
-*Filter objects are an embedded-mode (Bun) API. Over TCP the SDKs accept only a count cap — `getDlq(10)` / `get_dlq(10)` / `GetDlq(10)` — and you filter client-side.*
+*The Bun async API applies the same filter in embedded and TCP modes. External
+SDK coverage is listed in the [SDK guide](/guide/sdks/).*
 
 ### Retry selectively
 
@@ -42,7 +43,8 @@ queue.getDlq({ limit: 10, offset: 20 });                   // pagination
 ```typescript
 queue.retryDlq();                                          // retry everything
 queue.retryDlq('job-123');                                 // retry one job
-queue.retryDlqByFilter({ reason: 'timeout' });             // retry by filter (embedded only)
+queue.retryDlqByFilter({ reason: 'timeout' });             // synchronous embedded form
+const filtered = await queue.retryDlqByFilterAsync({ reason: 'timeout' }); // TCP too
 const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
 ```
 
@@ -106,7 +108,7 @@ queue.retry_dlq(None, Some(100))?;         // retry only the first 100 entries
 ### Check DLQ health
 
 ```typescript
-const stats = queue.getDlqStats();
+const stats = await queue.getDlqStatsAsync();
 console.log(stats.total);         // total entries
 console.log(stats.byReason);      // { explicit_fail: 5, timeout: 2, ... }
 console.log(stats.pendingRetry);  // entries waiting for auto-retry
@@ -115,13 +117,14 @@ console.log(stats.pendingRetry);  // entries waiting for auto-retry
 A simple alert loop:
 
 ```typescript
-setInterval(() => {
-  const stats = queue.getDlqStats();
+setInterval(async () => {
+  const stats = await queue.getDlqStatsAsync();
   if (stats.total > 100) alertOps('High DLQ count', stats);
 }, 30000);
 ```
 
-*`getDlqStats()` is an embedded-mode (Bun) API. Over TCP, count the entries returned by `getDlq()` or alert from the [monitoring endpoints](/guide/monitoring/).*
+*Use synchronous `getDlqStats()` for an embedded snapshot and
+`getDlqStatsAsync()` for an authoritative result in either runtime.*
 
 ### Purge
 
@@ -187,4 +190,3 @@ let purged = queue.purge_dlq()?; // permanently deletes all entries, returns the
 | [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
 | [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
 | [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
-

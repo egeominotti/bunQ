@@ -55,10 +55,17 @@ export interface CreatePublicJobOptions {
   stacktrace?: string[] | null;
 }
 
+/** Complete operation set required when exposing a live job from another view. */
+export type PublicJobMethodContext = Required<
+  Omit<CreatePublicJobOptions, 'job' | 'name' | 'token' | 'processedBy' | 'stacktrace'>
+>;
+
 /** Options for creating a simple public job */
 export interface ToPublicJobOptions {
   job: InternalJob;
   name: string;
+  updateProgress?: (id: string, progress: number, message?: string) => Promise<void>;
+  log?: (id: string, message: string) => Promise<void>;
   getState?: (id: string) => Promise<JobStateType>;
   remove?: (id: string) => Promise<void>;
   retry?: (id: string) => Promise<void>;

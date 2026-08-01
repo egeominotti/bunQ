@@ -126,7 +126,7 @@ export async function processJob<T, R>(
     discard: createDiscardHandler(embedded, tcp),
     getDependencies: createGetDependenciesHandler(embedded, tcp, internalJob),
     getDependenciesCount: createGetDependenciesCountHandler(embedded, tcp, internalJob),
-    removeDeduplicationKey: createRemoveDeduplicationKeyHandler(),
+    removeDeduplicationKey: createRemoveDeduplicationKeyHandler(embedded, tcp),
     token: token ?? undefined,
   });
 

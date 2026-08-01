@@ -37,7 +37,7 @@ export async function moveJobToDelayed(
 
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     shard.getQueue(job.queue).push(job);
     const isDelayed = job.runAt > now;
     shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
@@ -88,10 +88,10 @@ export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promi
   const entry = await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     if (fromProcessing) {
-      shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId);
+      shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId, validJob.id);
       shard.notify(validJob.queue);
     } else if (validJob.uniqueKey) {
-      shard.releaseUniqueKey(validJob.queue, validJob.uniqueKey);
+      shard.releaseUniqueKeyIfOwned(validJob.queue, validJob.uniqueKey, validJob.id);
     }
     const dlqEntry = shard.addToDlq(validJob);
     ctx.jobIndex.set(jobId, { type: 'dlq', queueName: validJob.queue });

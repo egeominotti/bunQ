@@ -4,7 +4,7 @@
  */
 
 import type { Job, JobId, JobInput, JobLock, LockToken } from '../domain/types/job';
-import { DEFAULT_LOCK_TTL } from '../domain/types/job';
+import { DEFAULT_LOCK_TTL, jobId } from '../domain/types/job';
 import type { AtomicFlowBatchInput, AtomicFlowBatchResult } from '../domain/types/flow';
 import type { JobLocation, JobEvent } from '../domain/types/queue';
 import { EventType } from '../domain/types/queue';
@@ -660,7 +660,7 @@ export class QueueManager {
       job = pq.remove(jId);
       if (job) {
         shard.decrementQueued(jId);
-        shard.releaseJobResources(queueName, job.uniqueKey, job.groupId);
+        shard.releaseJobResources(queueName, job.uniqueKey, job.groupId, job.id);
       }
     });
 
@@ -1153,12 +1153,25 @@ export class QueueManager {
     return dlqOps.retryDlqJobs(queue, this.contextFactory.getDlqContext(), jobId, limit);
   }
 
+  retryDlqByFilter(queue: string, filter: DlqFilter): number {
+    return dlqOps.retryDlqByFilter(queue, this.contextFactory.getDlqContext(), filter);
+  }
+
   purgeDlq(queue: string): number {
     return dlqOps.purgeDlqJobs(queue, this.contextFactory.getDlqContext());
   }
 
-  retryCompleted(queue: string, jobId?: JobId): number {
-    return dlqOps.retryCompletedJobs(queue, this.contextFactory.getRetryCompletedContext(), jobId);
+  retryCompleted(
+    queue: string,
+    jobId?: JobId,
+    options?: { limit?: number; timestamp?: number }
+  ): number {
+    return dlqOps.retryCompletedJobs(
+      queue,
+      this.contextFactory.getRetryCompletedContext(),
+      jobId,
+      options
+    );
   }
 
   // ============ Rate Limiting ============
@@ -1229,13 +1242,53 @@ export class QueueManager {
     });
   }
 
-  /** Get rate limit and concurrency limit for a queue */
+  /** Get configured scalar limits (retained for internal/cloud compatibility). */
   getQueueLimits(queue: string): { rateLimit: number | null; concurrencyLimit: number | null } {
     const shard = this.shards[shardIndex(queue)];
-    // Lazy TTL expiry so reads never report a limit that no longer throttles.
     shard.expireRateLimitIfNeeded(queue);
     const state = shard.getState(queue);
     return { rateLimit: state.rateLimit, concurrencyLimit: state.concurrencyLimit };
+  }
+
+  /** Get the full live limit status exposed by public Queue getters. */
+  getQueueLimitStatus(queue: string, maxJobs?: number) {
+    const shard = this.shards[shardIndex(queue)];
+    return {
+      rateLimit: shard.getRateLimit(queue),
+      rateLimitTtl: shard.getRateLimitTtl(queue, maxJobs),
+      concurrencyLimit: shard.getConcurrency(queue),
+      maxed: shard.isConcurrencyMaxed(queue),
+    };
+  }
+
+  /** Resolve the current owner of a queue-scoped deduplication key. */
+  getDeduplicationJobId(queue: string, key: string): string | null {
+    return this.shards[shardIndex(queue)].getUniqueKeyEntry(queue, key)?.jobId ?? null;
+  }
+
+  /** Release the current owner of a queue-scoped deduplication key. */
+  async removeDeduplicationKey(queue: string, key: string): Promise<number> {
+    const idx = shardIndex(queue);
+    return withWriteLock(this.shardLocks[idx], () => {
+      const shard = this.shards[idx];
+      const owner = shard.getUniqueKeyEntry(queue, key)?.jobId;
+      if (!owner || !shard.releaseUniqueKeyIfOwned(queue, key, owner)) return 0;
+      this.storage?.clearJobUniqueKey(owner);
+      return 1;
+    });
+  }
+
+  /** Release only the deduplication key still owned by a specific job. */
+  async removeJobDeduplicationKey(id: string): Promise<boolean> {
+    const jid = jobId(id);
+    const job = await this.getJob(jid);
+    if (!job?.uniqueKey) return false;
+    const idx = shardIndex(job.queue);
+    return withWriteLock(this.shardLocks[idx], () => {
+      const removed = this.shards[idx].releaseUniqueKeyIfOwned(job.queue, job.uniqueKey!, jid);
+      if (removed) this.storage?.clearJobUniqueKey(jid);
+      return removed;
+    });
   }
 
   /** Get all job results (for cloud telemetry) */

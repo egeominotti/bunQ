@@ -91,12 +91,12 @@ describe('createSimpleJob (embedded): wired methods via Queue.getJob', () => {
     expect(state).toBe('delayed');
   });
 
-  test('removeDeduplicationKey throws explicit error instead of silent false', async () => {
-    const added = await queue.add('t', { kind: 'dd' });
+  test('removeDeduplicationKey releases the live job key', async () => {
+    const key = `wired-${Bun.randomUUIDv7()}`;
+    const added = await queue.add('t', { kind: 'dd' }, { deduplication: { id: key } });
     const job = await queue.getJob(added.id!);
-    await expect(job!.removeDeduplicationKey()).rejects.toThrow(
-      /removeDeduplicationKey is not implemented/
-    );
+    expect(await job!.removeDeduplicationKey()).toBe(true);
+    expect(await queue.getDeduplicationJobId(key)).toBeNull();
   });
 
   test('getDependenciesCount returns real counts (zero for childless job)', async () => {
@@ -128,9 +128,7 @@ describe('createFlowJobObject (embedded): wired methods', () => {
       name: 'parent',
       queueName: 'wired-flow',
       data: { kind: 'original' },
-      children: [
-        { name: 'child', queueName: 'wired-flow', data: { step: 1 } },
-      ],
+      children: [{ name: 'child', queueName: 'wired-flow', data: { step: 1 } }],
     });
     const parent = node.job as unknown as { id: string; updateData: (d: unknown) => Promise<void> };
 
@@ -140,7 +138,7 @@ describe('createFlowJobObject (embedded): wired methods', () => {
     expect(refetched?.data).toEqual({ kind: 'mutated' });
   });
 
-  test('removeDeduplicationKey throws explicit error on flow job', async () => {
+  test('removeDeduplicationKey returns false when a flow job has no key', async () => {
     const node = await producer.add({
       name: 'parent',
       queueName: 'wired-flow',
@@ -148,9 +146,7 @@ describe('createFlowJobObject (embedded): wired methods', () => {
       children: [{ name: 'c', queueName: 'wired-flow', data: {} }],
     });
     const parent = node.job as unknown as { removeDeduplicationKey: () => Promise<boolean> };
-    await expect(parent.removeDeduplicationKey()).rejects.toThrow(
-      /removeDeduplicationKey is not implemented/
-    );
+    expect(await parent.removeDeduplicationKey()).toBe(false);
   });
 
   test('state check methods return false (not true) on detached flow job without context', async () => {
@@ -166,15 +162,11 @@ describe('createFlowJobObject (embedded): wired methods', () => {
 
   test('detached waitUntilFinished throws rather than silently returning undefined', async () => {
     const job = createFlowJobObject('detached', 'test', {}, 'wired-flow');
-    await expect(job.waitUntilFinished(null)).rejects.toThrow(
-      /waitUntilFinished: no connection/
-    );
+    await expect(job.waitUntilFinished(null)).rejects.toThrow(/waitUntilFinished: no connection/);
   });
 
-  test('detached moveToWaitingChildren throws with a clear message (no server primitive in TCP)', async () => {
+  test('detached moveToWaitingChildren reports that no runtime can move it', async () => {
     const job = createFlowJobObject('detached', 'test', {}, 'wired-flow');
-    await expect(job.moveToWaitingChildren()).rejects.toThrow(
-      /moveToWaitingChildren is not supported in TCP mode/
-    );
+    expect(await job.moveToWaitingChildren()).toBe(false);
   });
 });

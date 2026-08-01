@@ -32,16 +32,22 @@ describe('Deduplication Recovery', () => {
       expect(job2.id).toBe(job1.id);
     });
 
-    test('should find job by customId using getDeduplicationJobId', async () => {
-      // Add job with custom ID
-      const job = await queue.add('test', { value: 1 }, { jobId: 'my-custom-id' });
+    test('custom job IDs and deduplication IDs use separate lookups', async () => {
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          jobId: 'my-custom-id',
+          deduplication: { id: 'my-deduplication-id', ttl: 60_000 },
+        }
+      );
 
-      // Should find the job by custom ID
-      const foundId = await queue.getDeduplicationJobId('my-custom-id');
-      expect(foundId).toBe(String(job.id));
+      expect(await queue.getDeduplicationJobId('my-deduplication-id')).toBe(String(job.id));
+      expect(await queue.getDeduplicationJobId('my-custom-id')).toBeNull();
+      expect((await queue.getJob('my-custom-id'))?.id).toBe(job.id);
     });
 
-    test('should return null for non-existent customId', async () => {
+    test('should return null for a non-existent deduplication ID', async () => {
       const foundId = await queue.getDeduplicationJobId('non-existent-id');
       expect(foundId).toBeNull();
     });
@@ -61,23 +67,19 @@ describe('Deduplication Recovery', () => {
   });
 
   describe('recovery simulation', () => {
-    test('customIdMap should be populated on recovery', async () => {
+    test('customIdMap should remain queryable after adding a job', async () => {
       const customId = 'recovery-test-id';
 
       // Add job with custom ID
       const originalJob = await queue.add('test', { value: 1 }, { jobId: customId });
       expect(originalJob.id).toBeDefined();
 
-      // Verify the job can be found
-      const foundBefore = await queue.getDeduplicationJobId(customId);
-      expect(foundBefore).toBe(String(originalJob.id));
-
-      // After recovery, the customIdMap should still have the entry
-      // (In a real scenario, this would involve restarting the server)
-      // Here we verify the job is in the queue and customIdMap
+      // The custom-ID index is distinct from the deduplication-key index.
       const manager = getSharedManager();
       const jobFromManager = manager.getJobByCustomId(customId);
       expect(jobFromManager).not.toBeNull();
+      expect(jobFromManager?.id).toBe(originalJob.id);
+      expect(await queue.getDeduplicationJobId(customId)).toBeNull();
     });
 
     test('should not create duplicate when jobId exists in queue', async () => {
@@ -94,7 +96,7 @@ describe('Deduplication Recovery', () => {
 
       // Verify only one job exists in queue (not duplicates)
       const jobs = await queue.getJobs(['waiting', 'delayed']);
-      const matchingJobs = jobs.filter(j => j.id === job1.id);
+      const matchingJobs = jobs.filter((j) => j.id === job1.id);
       expect(matchingJobs.length).toBe(1);
 
       // Should only have 1 job total in queue
@@ -108,10 +110,10 @@ describe('Deduplication Recovery', () => {
       const job2 = await queue.add('test', { value: 2 }, { jobId: 'id-2' });
       const job3 = await queue.add('test', { value: 3 }, { jobId: 'id-3' });
 
-      // All should be findable
-      expect(await queue.getDeduplicationJobId('id-1')).toBe(String(job1.id));
-      expect(await queue.getDeduplicationJobId('id-2')).toBe(String(job2.id));
-      expect(await queue.getDeduplicationJobId('id-3')).toBe(String(job3.id));
+      // All should be findable through the public job-ID lookup.
+      expect((await queue.getJob('id-1'))?.id).toBe(job1.id);
+      expect((await queue.getJob('id-2'))?.id).toBe(job2.id);
+      expect((await queue.getJob('id-3'))?.id).toBe(job3.id);
     });
   });
 
@@ -122,11 +124,10 @@ describe('Deduplication Recovery', () => {
       // Add and process job
       const job1 = await queue.add('test', { value: 1 }, { jobId: customId });
 
-      const worker = new Worker(
-        QUEUE_NAME,
-        async () => ({ done: true }),
-        { embedded: true, autorun: false }
-      );
+      const worker = new Worker(QUEUE_NAME, async () => ({ done: true }), {
+        embedded: true,
+        autorun: false,
+      });
 
       // Process the job
       worker.run();
@@ -145,14 +146,17 @@ describe('Deduplication Recovery', () => {
       const customId = 'remove-and-reuse';
 
       // Add job with removeOnComplete
-      const job1 = await queue.add('test', { value: 1 }, { jobId: customId, removeOnComplete: true });
+      const job1 = await queue.add(
+        'test',
+        { value: 1 },
+        { jobId: customId, removeOnComplete: true }
+      );
       expect(job1.id).toBe(customId);
 
-      const worker = new Worker(
-        QUEUE_NAME,
-        async () => ({ done: true }),
-        { embedded: true, autorun: false }
-      );
+      const worker = new Worker(QUEUE_NAME, async () => ({ done: true }), {
+        embedded: true,
+        autorun: false,
+      });
 
       // Process the job (should be removed after completion)
       worker.run();
@@ -170,25 +174,41 @@ describe('Deduplication Recovery', () => {
   describe('uniqueKey deduplication', () => {
     test('should deduplicate using uniqueKey with TTL', async () => {
       // Add job with deduplication TTL
-      const job1 = await queue.add('test', { value: 1 }, {
-        deduplication: { id: 'unique-key-1', ttl: 60000 }
-      });
+      const job1 = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          deduplication: { id: 'unique-key-1', ttl: 60000 },
+        }
+      );
       expect(job1.id).toBeDefined();
 
       // Try to add duplicate - should return existing job
-      const job2 = await queue.add('test', { value: 2 }, {
-        deduplication: { id: 'unique-key-1', ttl: 60000 }
-      });
+      const job2 = await queue.add(
+        'test',
+        { value: 2 },
+        {
+          deduplication: { id: 'unique-key-1', ttl: 60000 },
+        }
+      );
       expect(job2.id).toBe(job1.id);
     });
 
     test('should allow different uniqueKeys', async () => {
-      const job1 = await queue.add('test', { value: 1 }, {
-        deduplication: { id: 'key-a', ttl: 60000 }
-      });
-      const job2 = await queue.add('test', { value: 2 }, {
-        deduplication: { id: 'key-b', ttl: 60000 }
-      });
+      const job1 = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          deduplication: { id: 'key-a', ttl: 60000 },
+        }
+      );
+      const job2 = await queue.add(
+        'test',
+        { value: 2 },
+        {
+          deduplication: { id: 'key-b', ttl: 60000 },
+        }
+      );
 
       expect(job1.id).not.toBe(job2.id);
     });
@@ -205,17 +225,20 @@ describe('Deduplication Recovery', () => {
 
     test('jobs with all options should be tracked correctly', async () => {
       // Add job with both jobId and deduplication
-      const job = await queue.add('test', { value: 1 }, {
-        jobId: 'combined-id',
-        deduplication: { id: 'combined-dedup', ttl: 30000 },
-        delay: 1000
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          jobId: 'combined-id',
+          deduplication: { id: 'combined-dedup', ttl: 30000 },
+          delay: 1000,
+        }
+      );
 
       expect(job.id).toBeDefined();
 
-      // Should find by jobId
-      const foundByJobId = await queue.getDeduplicationJobId('combined-id');
-      expect(foundByJobId).toBe(String(job.id));
+      expect((await queue.getJob('combined-id'))?.id).toBe(job.id);
+      expect(await queue.getDeduplicationJobId('combined-dedup')).toBe(String(job.id));
     });
   });
 });

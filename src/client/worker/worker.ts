@@ -232,8 +232,16 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       this.subscribeToStalledEvents();
     }
 
-    // Register worker with server (TCP only)
-    if (!this.embedded && this.tcp && !this.registered) {
+    // Register the worker in the selected broker runtime.
+    if (this.embedded && !this.registered) {
+      getSharedManager().registerWorker(this.queueKey, [this.queueKey], this.opts.concurrency, {
+        workerId: this.workerId,
+        hostname: hostname(),
+        pid: process.pid,
+        startedAt: this.startedAt,
+      });
+      this.registered = true;
+    } else if (this.tcp && !this.registered) {
       this.registerWithServer();
     }
 
@@ -248,11 +256,9 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       } else {
         const deps = this.getHeartbeatDeps();
         this.heartbeatTimer = startHeartbeat(deps, this.opts.heartbeatInterval);
-
-        // Worker-level heartbeat (separate from job heartbeat)
-        this.startWorkerHeartbeat();
       }
     }
+    if (this.opts.heartbeatInterval > 0) this.startWorkerHeartbeat();
     this.poll();
   }
 
@@ -575,12 +581,16 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
     await this.ackBatcher.waitForInFlight();
     this.ackBatcher.stop();
 
-    // Unregister from server before closing connection
-    if (!this.embedded && this.tcp && this.registered) {
-      try {
-        await this.tcp.send({ cmd: 'UnregisterWorker', workerId: this.workerId });
-      } catch {
-        // Best-effort unregister — server will cleanup via stale timeout
+    // Unregister before closing the transport/runtime.
+    if (this.registered) {
+      if (this.embedded) {
+        getSharedManager().unregisterWorker(this.workerId);
+      } else if (this.tcp) {
+        try {
+          await this.tcp.send({ cmd: 'UnregisterWorker', workerId: this.workerId });
+        } catch {
+          // Best-effort unregister — server will cleanup via stale timeout
+        }
       }
       this.registered = false;
     }
@@ -966,11 +976,20 @@ export class Worker<T = unknown, R = unknown> extends EventEmitter {
       });
   }
 
-  /** Start periodic worker-level heartbeat (separate from job heartbeat) */
+  /** Start periodic worker-level heartbeat (separate from job heartbeat). */
   private startWorkerHeartbeat(): void {
-    if (this.workerHeartbeatTimer || !this.tcp) return;
+    if (this.workerHeartbeatTimer) return;
     this.workerHeartbeatTimer = setInterval(() => {
-      if (!this.tcp || !this.registered) return;
+      if (!this.registered) return;
+      if (this.embedded) {
+        getSharedManager().workerManager.heartbeat(this.workerId, {
+          activeJobs: this.activeJobs,
+          processed: this.processedCount,
+          failed: this.failedCount,
+        });
+        return;
+      }
+      if (!this.tcp) return;
       void this.tcp
         .send({
           cmd: 'Heartbeat',

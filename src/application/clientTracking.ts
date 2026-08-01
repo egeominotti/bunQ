@@ -214,7 +214,7 @@ function releaseJobToQueue(opts: ReleaseJobOptions): number {
   ctx.jobLocks.delete(jobId);
 
   // Release all job resources (concurrency, uniqueKey, groupId)
-  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
 
   // Discard cron jobs with preventOverlap instead of re-queuing (#73).
   // The cron scheduler will re-create them at the next scheduled tick.

@@ -100,7 +100,7 @@ async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number
         shard.unregisterDependencies(job.id, job.dependsOn);
         released.push(...job.dependsOn);
         if (job.uniqueKey && shard.getUniqueKeyEntry(job.queue, job.uniqueKey)?.jobId === job.id) {
-          shard.releaseUniqueKey(job.queue, job.uniqueKey);
+          shard.releaseUniqueKeyIfOwned(job.queue, job.uniqueKey, job.id);
         }
         if (job.customId && ctx.customIdMap.get(job.customId) === job.id) {
           ctx.customIdMap.delete(job.customId);

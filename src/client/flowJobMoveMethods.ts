@@ -2,6 +2,7 @@ import { jobId } from '../domain/types/job';
 import { getSharedManager } from './manager';
 import { buildFailCommand, failEmbeddedArgs } from './queue/failWire';
 import { assertFlowTcpOk, type FlowJobRuntime } from './flowJobTypes';
+import { removeJobDeduplicationKey } from './jobDeduplication';
 
 /** Lifecycle and failure-inspection methods exposed by a FlowProducer Job. */
 export function buildFlowJobMoveMethods(runtime: FlowJobRuntime) {
@@ -36,9 +37,10 @@ export function buildFlowJobMoveMethods(runtime: FlowJobRuntime) {
     },
     moveToWaitingChildren: async () => {
       if (embedded) return getSharedManager().moveToWaitingChildren(jobId(id));
-      throw new Error(
-        'moveToWaitingChildren is not supported in TCP mode — no server command available'
-      );
+      if (!tcp) return false;
+      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+      assertFlowTcpOk(response, 'MoveToWaitingChildren');
+      return true;
     },
     waitUntilFinished: async (_queueEvents: unknown, ttl?: number) => {
       const timeout = ttl ?? 30_000;
@@ -84,10 +86,7 @@ export function buildFlowJobMoveMethods(runtime: FlowJobRuntime) {
       assertFlowTcpOk(response, 'RemoveChildDependency');
       return (response.removed as boolean | undefined) ?? false;
     },
-    removeDeduplicationKey: (): Promise<boolean> =>
-      Promise.reject(
-        new Error('removeDeduplicationKey is not implemented — no server primitive available')
-      ),
+    removeDeduplicationKey: () => removeJobDeduplicationKey(id, embedded, tcp),
     removeUnprocessedChildren: async () => {
       if (embedded) return void (await getSharedManager().removeUnprocessedChildren(jobId(id)));
       if (!tcp) return;

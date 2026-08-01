@@ -61,6 +61,24 @@ disconnect(): Promise<void>
 `FlowProducer` extends `EventEmitter`; queue lifecycle events still originate
 from the broker rather than from this object.
 
+The ordinary `Queue` and returned `Job` surfaces expose graph introspection in
+both runtimes:
+
+```typescript
+queue.getDependencies(parentId, type?, start?, end?)
+queue.getJobDependencies(parentId, opts?)
+queue.getJobDependenciesCount(parentId, opts?)
+queue.getWaitingChildren(start?, end?)
+queue.getWaitingChildrenCount()
+queue.moveJobToWaitingChildren(id, token?, opts?)
+```
+
+Dependency keys use the actual child queue, are sorted before pagination, and
+separate completed/failed children from unresolved children. The TCP transition
+uses `MoveToWaitingChildren`; reads reuse authoritative job/result commands.
+A dependency query for a missing parent returns empty processed/unprocessed
+collections (and zero counts) in both embedded and TCP modes.
+
 ## Creation pipeline
 
 ### 1. Client planning
@@ -195,6 +213,11 @@ bounded child proof therefore cannot regress an already-promoted parent to
 `waiting-children`. Reusing a normal Queue custom ID first invalidates the old
 proof; reuse is rejected while an old dependency consumer is still unresolved.
 
+An explicit `moveToWaitingChildren` transition is persisted as
+`state='waiting-children'` with its active markers cleared. Recovery recognizes
+that state as intentionally parked even when it has no unresolved dependency
+edge; it does not enqueue the job as runnable after restart.
+
 `DependencyResultTracker` protects completed child results while a live parent
 may still read them. The ordinary result LRU remains bounded; protected results
 are released when the consumer finishes, fails, is removed, or loses the edge.
@@ -254,6 +277,8 @@ one authoritative snapshot per input.
 SQLite persists:
 
 - `jobs.parent_id`, `jobs.children_ids`, and `jobs.depends_on`;
+- explicit `jobs.state='waiting-children'` transitions made through the public
+  move operation;
 - the four failure-policy columns;
 - `flow_failures(parent_id, child_id, child_queue, mode, error, created_at)`;
 - payload-free
@@ -284,6 +309,10 @@ Coverage is deliberately layered:
   batch atomicity with shrinking/seed replay;
 - `flow-producer-real-e2e.test.ts` runs actual TCP clients against a dynamic-port
   broker and SQLite, including cross-queue execution and a full restart;
+- `stub-contract/worker-dependency-stubs.test.ts` checks embedded/TCP dependency
+  and waiting-children parity, while
+  `stub-contract/move-waiting-children-persistence.test.ts` proves the explicit
+  state survives SQLite restart;
 - the final sandbox runs unit, TCP integration, and embedded integration suites
   in disposable containers.
 

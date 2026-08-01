@@ -101,7 +101,7 @@ export async function handleGetJobs(
     state: stateFilter,
     start: cmd.offset ?? 0,
     end: (cmd.offset ?? 0) + (cmd.limit ?? 100),
-    asc: true,
+    asc: cmd.asc ?? true,
   });
 
   // Inject state into each job for display

@@ -1,6 +1,6 @@
 # Deduplication & Unique Jobs
 
-> **Category:** Jobs · **Source:** `src/domain/queue/uniqueKeyManager.ts`, `src/domain/types/deduplication.ts`, `src/client/queue/deduplication.ts`, `src/application/operations/push.ts`, `src/client/bunqueue/dedupDebounce.ts`, `src/client/forwarder.ts`
+> **Category:** Jobs · **Source:** `src/domain/queue/uniqueKeyManager.ts`, `src/domain/types/deduplication.ts`, `src/client/queue/deduplication.ts`, `src/client/jobDeduplication.ts`, `src/application/operations/push.ts`, `src/client/bunqueue/dedupDebounce.ts`, `src/client/forwarder.ts`
 
 ## Purpose
 
@@ -13,7 +13,7 @@ Owns:
 - The `UniqueKeyManager` (`src/domain/queue/uniqueKeyManager.ts`) — per-queue `key → UniqueKeyEntry` registry with TTL expiry, one instance per `Shard`.
 - The deduplication type model and strategy resolution (`reject` / `extend` / `replace`) in `src/domain/types/deduplication.ts`.
 - The push-time dedup decision logic (`handleCustomId`, `handleDeduplication`) in `src/application/operations/push.ts`.
-- The client-side `Bunqueue` dedup/debounce option merger (`DedupDebounceMerger`) and the read-only `getDeduplicationJobId` / `removeDeduplicationKey` client surface.
+- The client-side `Bunqueue` dedup/debounce option merger (`DedupDebounceMerger`) and the live lookup/release surfaces on `Queue` and `Job`.
 
 Does NOT own:
 
@@ -46,7 +46,8 @@ class UniqueKeyManager {
   register(queue: string, key: string, jobId: JobId): void;                  // :40  (legacy, no TTL)
   registerWithTtl(queue: string, key: string, jobId: JobId, ttl?: number): void; // :45
   extendTtl(queue: string, key: string, ttl: number): boolean;               // :60
-  release(queue: string, key: string): void;                                 // :68
+  release(queue: string, key: string): boolean;
+  releaseIfOwned(queue: string, key: string, ownerId: JobId): boolean;
   cleanExpired(): number;                                                     // :73
   clearQueue(queue: string): void;                                            // :88
   getMap(): Map<string, Map<string, UniqueKeyEntry>>;                         // :93
@@ -55,7 +56,7 @@ class UniqueKeyManager {
 
 `getEntry` and `isAvailable` are lazy-expiring: they delete the entry in place if `isUniqueKeyExpired` returns true, so an expired key transparently frees its slot on the next read (`uniqueKeyManager.ts:21-24`, `:32-35`).
 
-`Shard` exposes thin delegations (`src/domain/queue/shard.ts:125-155`): `isUniqueAvailable`, `getUniqueKeyEntry`, `registerUniqueKey`, `registerUniqueKeyWithTtl`, `extendUniqueKeyTtl`, `releaseUniqueKey`, `cleanExpiredUniqueKeys`, and the `uniqueKeys` getter.
+`Shard` exposes thin delegations: `isUniqueAvailable`, `getUniqueKeyEntry`, `registerUniqueKey`, `registerUniqueKeyWithTtl`, `extendUniqueKeyTtl`, `releaseUniqueKey`, `releaseUniqueKeyIfOwned`, `cleanExpiredUniqueKeys`, and the `uniqueKeys` getter.
 
 ### Deduplication types & helpers (`src/domain/types/deduplication.ts`)
 
@@ -72,11 +73,16 @@ calculateExpiration(ttl, now=Date.now()): number | null; // :56  ttl===undefined
 ### Client-side helpers (`src/client/queue/deduplication.ts`)
 
 ```typescript
-getDeduplicationJobId(ctx, deduplicationId): Promise<string | null>; // :13  embedded-only; TCP → null
-removeDeduplicationKey(ctx, deduplicationId): Promise<number>;        // :25  embedded-only; returns 1 if found, else 0
+getDeduplicationJobId(ctx, deduplicationId): Promise<string | null>;
+removeDeduplicationKey(ctx, deduplicationId): Promise<number>;
+removeJobDeduplicationKey(id, embedded, transport): Promise<boolean>;
 ```
 
-Both are surfaced on `Queue` (`src/client/queue/queue.ts:494-498`). In TCP mode they always resolve to `null` / `0` — there is no wire command for them.
+The first two are surfaced on `Queue`; the owner-aware third helper backs every
+public `Job.removeDeduplicationKey`. All three use `QueueManager` directly in
+embedded mode and dedicated TCP commands remotely. Queue-level removal returns
+`1` only when a live key was released. Job-level removal succeeds only when
+that exact job is still the registered owner.
 
 ### `DedupDebounceMerger` (`src/client/bunqueue/dedupDebounce.ts`)
 
@@ -90,7 +96,10 @@ class DedupDebounceMerger {
 
 ### TCP commands / events
 
-- This module does not own a dedicated TCP command. Dedup options ride on `PUSH` / `PUSHB` (`PushCommand.uniqueKey`, `.jobId`, `.dedup`, `.debounceId`, `.debounceTtl` — `src/domain/types/command.ts:27-56`).
+- Dedup options ride on `PUSH` / `PUSHB` (`PushCommand.uniqueKey`, `.jobId`, `.dedup`, `.debounceId`, `.debounceTtl`).
+- `GetDeduplicationJobId { queue, deduplicationId }` returns `{ data: { jobId } }`.
+- `RemoveDeduplicationKey { queue, deduplicationId }` returns `{ data: { count } }`.
+- `RemoveJobDeduplicationKey { id }` returns `{ data: { removed } }` and enforces ownership.
 - Event emitted on suppression: `EventType.Duplicated` = `'duplicated'` (`src/domain/types/queue.ts:121`), broadcast from the default reject path (`push.ts:189-194`).
 - Dashboard-only events: `job:deduplicated` (strategy `extend` / `default`) and `batch:pushed` with a `duplicates` count.
 
@@ -169,9 +178,10 @@ Lock order follows the global hierarchy (`jobIndex` → `completedJobs` → `sha
 
 Lifecycle / release:
 
-- On successful ack and on terminal fail, `Shard.releaseJobResources(queue, uniqueKey, groupId)` releases the key (`shard.ts:216-217`; called from `ack.ts:93,230`, `ackHelpers.ts:148`). The default-reject path intentionally holds the key for active jobs until ack (`push.ts:183-188`).
+- On successful ack and on terminal fail, `Shard.releaseJobResources(queue, uniqueKey, groupId, ownerId)` releases the key only if the terminating generation still owns it. The default-reject path intentionally holds the key for active jobs until ack.
 - `ack` paths also delete the `customId` mapping (`ack.ts:98,174,258`, `ackHelpers.ts:223`).
-- `cancelJob` releases the key whether the job is in the queue, `waitingChildren`, or `waitingDeps` (`jobManagement.ts:41,65`).
+- `cancelJob` releases the key owner-safely whether the job is in the queue, `waitingChildren`, or `waitingDeps`.
+- Explicit release also calls `SqliteStorage.clearJobUniqueKey(ownerId)`, so a restart cannot rehydrate a key that the client already removed.
 
 ## Edge Cases & Failure Modes
 
@@ -185,7 +195,7 @@ Lifecycle / release:
 - **Restart rehydration:** recovery re-populates `customIdMap` for pending jobs and re-registers unique keys via `registerUniqueKeyWithTtl(..., job.deduplicationTtl ?? undefined)` (`backgroundTasks.ts:356,361`). Completed jobs are deliberately **not** added to `customIdMap` during recovery to avoid LRU-evicting pending mappings (`backgroundTasks.ts:409-412`); custom-id collisions against completed jobs are caught by the storage fallback in `handleCustomId`.
 - **Memory bounds:** `customIdMap` is an `LRUMap` capped at `maxCustomIds` (default `50_000`, `application/types.ts:37`; init `queueManager.ts:162`). Unique-key registries are swept every cleanup tick (`cleanExpiredUniqueKeys`, `cleanupTasks.ts:101`) and any single-queue registry exceeding **1000** entries is force-trimmed by half via insertion-order iteration (`cleanupTasks.ts:104-113`) — under churn a still-live key can be evicted, weakening (not breaking) dedup. LRU eviction of `customIdMap` likewise allows a re-add to slip through.
 - **Debounce is metadata-only (gotcha):** `debounce` sets `job.debounceId`/`job.debounceTtl` (`add.ts:141-142`, `core.ts:89-90`) but does **not** populate `uniqueKey`, so it does not itself suppress pushes — `handleDeduplication` returns early when `uniqueKey` is falsy. BullMQ-style debounce behavior is achieved via `deduplication` with `extend: true` (which is what `DedupDebounceMerger` emits as `deduplication.id`).
-- **Client helpers are read-only / embedded-only:** `removeDeduplicationKey` (`deduplication.ts:25`) returns `1` if a job exists for the id but does **not** actually release the key; `getDeduplicationJobId` returns `null` in TCP mode. The `JobProxy.removeDeduplicationKey` surface rejects with "not implemented — no server primitive available" (`jobProxy.ts:236-239,537-540`).
+- **Stale-generation protection:** queue-level release resolves the current owner before deleting the key; job-level release compares the requested job id to that owner. If a replacement generation has acquired the same key, an old `Job` returns `false` and cannot clear either the in-memory registry or the replacement row's `unique_key` value.
 - **Obliterate:** `Shard` clears the per-queue unique-key registry (`uniqueKeyManager.clearQueue`, `shard.ts:484`) and `QueueManager` clears the whole registry on full obliterate (`queueManager.ts:1895`).
 - **Cron overlap:** `preventOverlap` derives the unique key `cron:<name>` (`cronScheduler.ts` `effectiveUniqueKey`, `queueManager.ts:1268-1270`); `removeOrphanedCronJob` releases it for stale waiting jobs on re-upsert (`queueManager.ts:1279-1297`).
 

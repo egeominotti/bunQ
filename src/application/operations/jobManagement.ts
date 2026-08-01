@@ -50,7 +50,9 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
       if (job) {
         // Update running counters for O(1) stats
         shard.decrementQueued(jobId);
-        if (job.uniqueKey) shard.releaseUniqueKey(location.queueName, job.uniqueKey);
+        if (job.uniqueKey) {
+          shard.releaseUniqueKeyIfOwned(location.queueName, job.uniqueKey, job.id);
+        }
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
         ctx.dependencyResults.releaseConsumer(jobId);
@@ -76,7 +78,9 @@ export async function cancelJob(jobId: JobId, ctx: JobManagementContext): Promis
       if (waiting) {
         shard.waitingDeps.delete(jobId);
         shard.unregisterDependencies(jobId, waiting.dependsOn);
-        if (waiting.uniqueKey) shard.releaseUniqueKey(location.queueName, waiting.uniqueKey);
+        if (waiting.uniqueKey) {
+          shard.releaseUniqueKeyIfOwned(location.queueName, waiting.uniqueKey, waiting.id);
+        }
         ctx.jobIndex.delete(jobId);
         ctx.storage?.deleteJob(jobId);
         ctx.dependencyResults.releaseConsumer(jobId);

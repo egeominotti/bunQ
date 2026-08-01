@@ -18,6 +18,7 @@ import type {
 import { toPublicJob } from '../../types';
 import { jobId } from '../../../domain/types/job';
 import { createJobProxy, createSimpleJob } from '../jobProxy';
+import { removeJobDeduplicationKey } from '../../jobDeduplication';
 
 // Extended options that exist internally but not in public JobOptions
 interface ExtendedJobOptions extends JobOptions {
@@ -145,6 +146,12 @@ export async function add<T>(
     return toPublicJob<T>({
       job,
       name: jobName,
+      updateProgress: async (jid, progress, message) => {
+        await manager.updateProgress(jobId(jid), progress, message);
+      },
+      log: async (jid, message) => {
+        manager.addLog(jobId(jid), message);
+      },
       getState: (jid) => ctx.getJobState(jid),
       remove: (jid) => ctx.removeAsync(jid),
       retry: (jid) => ctx.retryJob(jid),
@@ -163,6 +170,16 @@ export async function add<T>(
       moveToDelayed: (jid, timestamp, token) => ctx.moveJobToDelayed(jid, timestamp, token),
       moveToWaitingChildren: (jid, token, o) => ctx.moveJobToWaitingChildren(jid, token, o),
       waitUntilFinished: (jid, queueEvents, ttl) => ctx.waitJobUntilFinished(jid, queueEvents, ttl),
+      removeDeduplicationKey: (jid) => removeJobDeduplicationKey(jid, true, null),
+      discard: (jid) => {
+        void manager.discard(jobId(jid));
+      },
+      getFailedChildrenValues: (jid) => manager.getFailedChildrenValues(jobId(jid)),
+      getIgnoredChildrenFailures: (jid) => manager.getIgnoredChildrenFailures(jobId(jid)),
+      removeChildDependency: (jid) => manager.removeChildDependency(jobId(jid)),
+      removeUnprocessedChildren: async (jid) => {
+        await manager.removeUnprocessedChildren(jobId(jid));
+      },
     });
   }
 

@@ -258,7 +258,8 @@ interface Job<T = unknown> {
 
   /**
    * Remove the deduplication key associated with this job.
-   * @throws Not implemented, no server primitive available. Use `queue.removeDeduplicationKey()` instead.
+   * Returns false when this job no longer owns the key (for example, after a
+   * replacement generation acquired it).
    */
   removeDeduplicationKey(): Promise<boolean>;
 

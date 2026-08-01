@@ -501,13 +501,16 @@ the runtime:
 
 ### Job options
 
-Every option is validated server-side; identical semantics in every SDK.
-Naming follows each language's idiom: TypeScript and PHP use camelCase keys
+Every transmitted option is validated server-side. The typed mappers preserve
+the common option set, with one audited exception: Elixir's
+`deduplication: %{id: ...}` maps the nested settings but does not derive the
+owning `uniqueKey`, so supply `uniqueKey` explicitly for now. Naming follows
+each language's idiom: TypeScript and PHP use camelCase keys
 (`attempts`, `jobId`, `removeOnComplete`), Python uses snake_case
 (`attempts`, `job_id`, `remove_on_complete`), Go takes a
 `bunqueue.JobOptions` map with the camelCase keys, Rust uses typed
-`JobOptions` fields, and Elixir accepts keyword or map options. Unknown options
-raise an error in every SDK instead of being silently dropped.
+`JobOptions` fields, and Elixir accepts keyword or map options. Prefer typed
+builders: runtime handling of unknown keys differs by language.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
@@ -869,24 +872,35 @@ worker.Close() // unregister and close the connection
 
 ## Query, control and operations
 
-All SDKs implement the core producer, lookup, wait, queue-control, DLQ,
-scheduler, rate-limit, and global-concurrency operations with identical server
-semantics. TypeScript and PHP use camelCase, Python/Rust/Elixir use snake_case,
-and Go uses exported Go style (`GetJobCounts`, `RetryDlq`, ...). The broader
-webhook/stats/metrics convenience surface remains richest in TypeScript,
-Python, PHP, and Go; Rust and Elixir can always use the documented protocol or
-HTTP operations until typed helpers are added.
+Every SDK implements the producer/worker baseline, finite job queries, queue
+control, basic DLQ operations, schedulers, atomic flow trees/chains, auth, TLS,
+and telemetry. They do **not** yet expose the complete Bun core surface with
+identical semantics.
 
-| Area | Methods |
-|---|---|
-| Query | `getJob`, `getJobByCustomId`, `getJobs` + per-state helpers (`getWaiting`, `getActive`, `getCompleted`, `getFailed`, `getDelayed`, `getPrioritized`, `getWaitingChildren`), `getJobState` (Python name: `get_state`), `getResult`, `getProgress`, counts + counts-per-priority, `getChildrenValues`, job logs |
-| Waiting | `waitForJob(id, ttlMs)`, resolves with the result; **throws** on timeout (`CommandTimeoutError`) and on a failed job (`CommandError`), never silently returns `undefined` |
-| Control | `pause` / `resume` / `isPaused`, `drain`, `obliterate`, `clean`, `remove`, `discard`, `promoteJob(s)`, `retryJob` (failed → waiting), `updateJobData`, `updateJobProgress`, `changeJobPriority`, `changeJobDelay`, `moveJobToWait/Delayed/Completed/Failed`, `extendJobLock` |
-| DLQ | `getDlq`, `retryDlq(id?)`, `purgeDlq`, `retryJobs` (BullMQ semantics: retries the whole DLQ by default, or pass `count` to retry only the first N entries, honored by server 2.8.29 and later; Python `retry_dlq` accepts `count=` too), DLQ configuration |
-| Schedulers | `upsertJobScheduler` (cron pattern or fixed interval, timezone, `skipIfNoWorker`, `preventOverlap`, per-scheduler job options), `removeJobScheduler`, `getJobScheduler(s)`, `addCron`, `every` |
-| Admin | rate limiting, global concurrency, stall configuration, webhooks, `getStats`, `getMetrics`, `listQueues`, `getWorkers` |
+| Area | TypeScript | Python | PHP | Go | Rust | Elixir |
+|---|---|---|---|---|---|---|
+| Basic Queue + Worker | Full | Full | Full (sequential worker) | Full | Full | Full |
+| Full 32-operation Job API | 13 | 13 | 4 | 4 | 3 | 2 |
+| Dependency/waiting-children operations | Partial | Partial | Partial | Partial | Missing | Missing |
+| Limit mutation / readback | Partial / missing | Partial / missing | Partial / missing | Partial / missing | Partial / missing | Full / missing |
+| Rich DLQ + selector-aware bulk retry | Partial | Partial | Missing | Missing | Missing | Missing |
+| Flow bulk + fan-in + readback | Full | Full | Read only | Read only | Missing | Missing |
+| Queue-scoped workers/schedulers | Workers global | Workers global | Both global | Both global | Missing/partial | Missing/global |
+| QueueGroup, forwarding, workflow engine | Missing | Missing | Missing | Missing | Missing | Missing |
+| Simple Mode | Full | Full | Missing | Missing | Missing | Missing |
 
-A representative slice, in every language:
+Important current differences: TypeScript and Python dedup-owner lookup uses
+the custom-ID index, their rate-limit duration argument is not sent, and their
+completed bulk retry ignores `count` and has no `timestamp` selector. All
+external SDKs require explicit finite pagination; the Bun client's exhaustive
+`end: -1` behavior is not mirrored. The internal
+[SDK parity audit](https://github.com/egeominotti/bunqueue/blob/main/docs/features/polyglot-sdks.md)
+tracks the exact gaps and distinguishes missing helpers from Bun-only embedded,
+queue-event, and sandbox-worker features.
+
+TypeScript and PHP use camelCase, Python/Rust/Elixir use snake_case, and Go uses
+exported Go style (`GetJobCounts`, `RetryDlq`, ...). A representative shared
+baseline:
 
 <Tabs syncKey="lang">
 <TabItem label="TypeScript">
@@ -1135,8 +1149,10 @@ and visibility guarantee. Previously published versions that compose
 `PUSH`/`UpdateParent` remain server-compatible, but that historical
 multi-request sequence is not atomic.
 
-External-SDK `getFlow(id)` returns `null` for a missing root and skips children
-removed since creation, yielding the surviving partial tree. The Bun package
+Where exposed (TypeScript, Python, PHP, and Go), external-SDK `getFlow(id)`
+returns `null` for a missing root and skips children removed since creation,
+yielding the surviving partial tree. Rust and Elixir currently create atomic
+trees/chains but expose no typed flow reader. The Bun package
 fails on a missing descendant or malformed/cross-linked topology so corruption
 cannot masquerade as a valid partial graph. See the [Flow guide](/guide/flow/)
 for the exact per-client contract.
@@ -1297,11 +1313,10 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 </TabItem>
 </Tabs>
 
-Scheduler job options are honored end to end: the template's `attempts`,
-`backoff`, `timeout`, `delay`, `remove_on_complete` / `remove_on_fail`,
-`priority` and `deduplication` are applied to every cron-spawned job, in
-every SDK (scheduler support included: `upsertJobScheduler` exists in PHP
-and Go too).
+Scheduler job options are honored end to end for each SDK's supported fields.
+TypeScript, Python, PHP, and Go expose the broadest scheduler template and
+repeat flags. Rust omits list plus some flags, while Elixir's scheduler list is
+server-wide and its deduplication shorthand has the `uniqueKey` caveat above.
 
 One difference from the Bun original: `embedded: true` is not available,
 it requires the in-process Bun runtime. Connect to a server instead; the

@@ -333,6 +333,7 @@ export function getDlqConfig(queue: string, ctx: DlqContext): DlqConfig {
 /** Extended context for retryCompleted */
 export interface RetryCompletedContext extends DlqContext {
   completedJobs: { has(id: JobId): boolean; delete(id: JobId): boolean } & Iterable<JobId>;
+  completedJobsData: { get(id: JobId): Job | undefined };
   jobResults: { delete(id: JobId): boolean };
 }
 
@@ -340,19 +341,32 @@ export interface RetryCompletedContext extends DlqContext {
 export function retryCompletedJobs(
   queue: string,
   ctx: RetryCompletedContext,
-  jobId?: JobId
+  jobId?: JobId,
+  options: { limit?: number; timestamp?: number } = {}
 ): number {
   if (jobId) {
     if (!ctx.completedJobs.has(jobId)) return 0;
-    const job = ctx.storage?.getJob(jobId);
+    const job = ctx.completedJobsData.get(jobId) ?? ctx.storage?.getJob(jobId);
     if (job?.queue !== queue) return 0;
     return requeueCompletedJob(job, ctx);
   }
 
+  const limit =
+    options.limit === undefined
+      ? Number.POSITIVE_INFINITY
+      : Number.isFinite(options.limit) && options.limit > 0
+        ? Math.floor(options.limit)
+        : 0;
+  if (limit === 0) return 0;
+
+  const timestamp = options.timestamp ?? Number.POSITIVE_INFINITY;
   let count = 0;
-  for (const id of ctx.completedJobs) {
-    const job = ctx.storage?.getJob(id);
-    if (job?.queue === queue) count += requeueCompletedJob(job, ctx);
+  for (const id of [...ctx.completedJobs]) {
+    if (count >= limit) break;
+    const job = ctx.completedJobsData.get(id) ?? ctx.storage?.getJob(id);
+    if (job?.queue === queue && job.completedAt !== null && job.completedAt <= timestamp) {
+      count += requeueCompletedJob(job, ctx);
+    }
   }
   return count;
 }

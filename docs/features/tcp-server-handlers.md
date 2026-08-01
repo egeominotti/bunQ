@@ -1,6 +1,6 @@
 # TCP Server Command Handlers
 
-> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/core.ts`, `src/infrastructure/server/handlers/flow.ts`, `src/infrastructure/server/handlers/advanced.ts`, `src/infrastructure/server/handlers/monitoring.ts`, `src/infrastructure/server/handlers/management.ts`, `src/infrastructure/server/handlers/query.ts`, `src/infrastructure/server/handlers/cron.ts`, `src/infrastructure/server/handlers/dlq.ts`, `src/infrastructure/server/handlers/dashboard.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types.ts`
+> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/core.ts`, `src/infrastructure/server/handlers/flow.ts`, `src/infrastructure/server/handlers/advanced.ts`, `src/infrastructure/server/handlers/introspection.ts`, `src/infrastructure/server/handlers/monitoring.ts`, `src/infrastructure/server/handlers/management.ts`, `src/infrastructure/server/handlers/query.ts`, `src/infrastructure/server/handlers/cron.ts`, `src/infrastructure/server/handlers/dlq.ts`, `src/infrastructure/server/handlers/dashboard.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types.ts`
 
 ## Purpose
 
@@ -57,10 +57,10 @@ TCP commands handled (exact `cmd.cmd` values), by router:
 
 - **Auth** — handled inline before routing (`handler.ts:53`), always allowed.
 - **Core** (`routeCoreCommand`): `PUSH`, `PUSHB`, `PUSHF`, `PULL`, `PULLB`, `ACK`, `ACKB`, `FAIL`.
-- **Query** (`routeQueryCommand`): `GetJob`, `GetState`, `GetResult`, `GetJobCounts`, `GetCountsPerPriority`, `GetJobByCustomId`, `GetJobs`, `Count`, `GetProgress`, `GetChildrenValues`. (Note: `Count`'s handler lives in `advanced.ts` and `GetProgress`'s in `management.ts`, despite being routed here.)
-- **Management** (`routeManagementCommand`): `Cancel`, `Progress`, `Update`, `UpdateParent`, `ChangePriority`, `Promote`, `MoveToDelayed`, `Discard`, `WaitJob`, `ChangeDelay`, `MoveToWait`, `PromoteJobs`, `ExtendLock`, `ExtendLocks`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`.
+- **Query** (`routeQueryCommand`): `GetJob`, `GetState`, `GetResult`, `GetJobCounts`, `GetCountsPerPriority`, `GetJobByCustomId`, `GetJobs`, `Count`, `GetProgress`, `GetChildrenValues`, `GetQueueLimits`, `GetDeduplicationJobId`. (Note: `Count`'s handler lives in `advanced.ts` and `GetProgress`'s in `management.ts`, despite being routed here.)
+- **Management** (`routeManagementCommand`): `Cancel`, `Progress`, `Update`, `UpdateParent`, `ChangePriority`, `Promote`, `MoveToDelayed`, `MoveToWaitingChildren`, `Discard`, `WaitJob`, `ChangeDelay`, `MoveToWait`, `PromoteJobs`, `ExtendLock`, `ExtendLocks`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `RemoveUnprocessedChildren`.
 - **Queue control** (`routeQueueControlCommand`): `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`.
-- **DLQ** (`routeDlqCommand`): `Dlq`, `RetryDlq`, `PurgeDlq`, `RetryCompleted`.
+- **DLQ** (`routeDlqCommand`): `Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RetryCompleted`.
 - **Rate** (`routeRateLimitCommand`): `RateLimit`, `RateLimitClear`, `SetConcurrency`, `ClearConcurrency`.
 - **Config** (`routeConfigCommand`): `SetStallConfig`, `GetStallConfig`, `SetDlqConfig`, `GetDlqConfig`.
 - **Cron** (`routeCronCommand`): `Cron`, `CronGet`, `CronDelete`, `CronList`.
@@ -111,11 +111,18 @@ Core paths:
 Notable management/advanced flows:
 
 - `handleMoveToWait` (`advanced.ts:371`): dispatches on the job's current state — `active`→`moveActiveToWait`, `delayed`→`promote`, `failed`→`retryDlq`, `waiting`/`prioritized`→no-op success, anything else→error. Mirrors the embedded branching in `jobMove.ts`.
+- `handleMoveToWaitingChildren` requires an active job and delegates the full resource/index/persistence transition to `QueueManager`; a non-active id returns an error.
+- The introspection handlers return live queue-limit status and owner-aware deduplication lookup/removal through `DataResponse` payloads.
+- `handleDlq` returns both jobs and full filtered entries; `handleGetDlqStats` returns the authoritative aggregate. Filtered retries and completed retries pass their `count`/`timestamp` selectors to the manager instead of dropping them.
 - `handleProgress` / `handleGetProgress` / `handleMoveToDelayed`: on failure they re-query `getJobState` to disambiguate "Job not found" (state `unknown`) from "not active" (`management.ts:37`, `management.ts:60`, `advanced.ts:125`).
 - `handleWaitJob` (`advanced.ts:144`): caps `timeout` to `[0, 600000]` (default 30s); returns immediately if `job.completedAt` is set, otherwise awaits `waitForJobCompletion` (event-driven, no polling).
 - Config setters (`handleSetStallConfig`, `handleSetDlqConfig`): run `sanitizeConfigNumbers` (`advanced.ts:30`) to coerce numeric strings and drop non-numeric garbage so the manager's merge never stores `NaN` (a string `stallInterval` would otherwise silently disable stall detection).
 
 Query/dashboard count handling: `handleGetJobCounts` (`query.ts:47`) and `handleDashboardQueue` (`dashboard.ts:116`) both run `pausedView(waiting, prioritized, isPaused)` so a paused queue reports its ready jobs under `paused` rather than double-counting (#92, BullMQ semantics).
+
+`handleGetJobs` forwards `cmd.asc ?? true` to the manager. Ordering therefore
+occurs over the complete logical state result before `offset`/`limit` slicing;
+an explicit `false` must not be collapsed to the ascending default.
 
 Webhook creation (`handleAddWebhook`, `monitoring.ts:219`): validates the URL (SSRF guard via `validateWebhookUrl`) and rejects any event not in `WEBHOOK_EVENTS` (a webhook on a dead event would be created "ok" then never fire).
 

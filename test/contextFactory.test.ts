@@ -309,7 +309,9 @@ describe('ContextFactory', () => {
     test('should call registerQueueName callback', () => {
       let calledWith: string | undefined;
       const customCallbacks = createTestCallbacks({
-        registerQueueName: (queue) => { calledWith = queue; },
+        registerQueueName: (queue) => {
+          calledWith = queue;
+        },
       });
       const f = new ContextFactory(deps, customCallbacks);
       const ctx = f.getBackgroundContext();
@@ -325,7 +327,9 @@ describe('ContextFactory', () => {
     test('should call unregisterQueueName callback', () => {
       let calledWith: string | undefined;
       const customCallbacks = createTestCallbacks({
-        unregisterQueueName: (queue) => { calledWith = queue; },
+        unregisterQueueName: (queue) => {
+          calledWith = queue;
+        },
       });
       const f = new ContextFactory(deps, customCallbacks);
       const ctx = f.getBackgroundContext();
@@ -599,7 +603,9 @@ describe('ContextFactory', () => {
     test('should call onJobCompleted callback from callbacks', () => {
       let completedId: JobId | undefined;
       const customCallbacks = createTestCallbacks({
-        onJobCompleted: (id) => { completedId = id; },
+        onJobCompleted: (id) => {
+          completedId = id;
+        },
       });
       const f = new ContextFactory(deps, customCallbacks);
       const ctx = f.getAckContext();
@@ -615,7 +621,9 @@ describe('ContextFactory', () => {
     test('should call onJobsCompleted callback from callbacks', () => {
       let completedIds: JobId[] = [];
       const customCallbacks = createTestCallbacks({
-        onJobsCompleted: (ids) => { completedIds = ids; },
+        onJobsCompleted: (ids) => {
+          completedIds = ids;
+        },
       });
       const f = new ContextFactory(deps, customCallbacks);
       const ctx = f.getAckContext();
@@ -656,7 +664,9 @@ describe('ContextFactory', () => {
     test('should call onRepeat callback from callbacks', () => {
       let repeatJob: Job | undefined;
       const customCallbacks = createTestCallbacks({
-        onRepeat: (job) => { repeatJob = job; },
+        onRepeat: (job) => {
+          repeatJob = job;
+        },
       });
       const f = new ContextFactory(deps, customCallbacks);
       const ctx = f.getAckContext();
@@ -829,15 +839,16 @@ describe('ContextFactory', () => {
       expect(ctx.jobResults).toBe(deps.jobResults);
     });
 
-    test('should extend DlqContext with completedJobs and jobResults', () => {
+    test('should extend DlqContext with completed job data and results', () => {
       const ctx = factory.getRetryCompletedContext();
       const keys = Object.keys(ctx);
-      expect(keys.length).toBe(6);
+      expect(keys.length).toBe(7);
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
       expect(keys).toContain('jobLogs');
       expect(keys).toContain('storage');
       expect(keys).toContain('completedJobs');
+      expect(keys).toContain('completedJobsData');
       expect(keys).toContain('jobResults');
     });
   });

@@ -16,17 +16,47 @@ export interface WorkerInfo {
   id: string;
   name: string;
   addr?: string;
+  queues?: string[];
+  concurrency?: number;
+  hostname?: string;
+  pid?: number;
+  status?: 'active' | 'stale';
+  registeredAt?: number;
+  lastSeen?: number;
+  activeJobs?: number;
+  processedJobs?: number;
+  failedJobs?: number;
+  currentJob?: string | null;
+  uptime?: number;
 }
 
 /** Get workers processing this queue */
 export async function getWorkers(ctx: WorkersContext): Promise<WorkerInfo[]> {
   if (ctx.embedded) {
-    return [];
+    return getSharedManager()
+      .workerManager.getForQueue(ctx.name)
+      .map((worker) => ({
+        id: worker.id,
+        name: worker.name,
+        queues: worker.queues,
+        concurrency: worker.concurrency,
+        hostname: worker.hostname,
+        pid: worker.pid,
+        status: 'active' as const,
+        registeredAt: worker.registeredAt,
+        lastSeen: worker.lastSeen,
+        activeJobs: worker.activeJobs,
+        processedJobs: worker.processedJobs,
+        failedJobs: worker.failedJobs,
+        currentJob: worker.currentJob,
+        uptime: Date.now() - worker.registeredAt,
+      }));
   }
 
   const response = await ctx.tcp!.send({ cmd: 'ListWorkers' });
   if (!response.ok) return [];
-  return (response as { workers?: WorkerInfo[] }).workers ?? [];
+  const workers = (response.data as { workers?: WorkerInfo[] } | undefined)?.workers ?? [];
+  return workers.filter((worker) => worker.queues?.includes(ctx.name));
 }
 
 /** Get worker count */

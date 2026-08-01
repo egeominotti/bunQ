@@ -97,6 +97,19 @@ getStats(): { total: number; active: number; totalProcessed: number; totalFailed
   (`worker.ts:63,70`) but belong to [Webhooks, Events & Job Logs](./webhooks-and-events.md),
   not the worker registry.
 
+### Queue client discovery (`src/client/queue/workers.ts`)
+
+```typescript
+queue.getWorkers(): Promise<WorkerInfo[]>
+queue.getWorkersCount(): Promise<number>
+```
+
+Both methods are queue-scoped. Embedded queues read
+`WorkerManager.getForQueue(queue)` directly; TCP queues decode
+`response.data.workers` from `ListWorkers` and retain only workers whose
+`queues` include the queue key. `getWorkersCount` is the length of that same
+filtered live view.
+
 ### TCP commands handled (via `QueueManager` / `handlers/monitoring.ts`)
 
 - `RegisterWorker` → `handleRegisterWorker` (`handlers/monitoring.ts:134`); fields:
@@ -240,6 +253,12 @@ callback and, if no active worker serves the queue, skips the run and emits
 `getForQueue` filters on the `WORKER_TIMEOUT_MS` window, a worker that stopped
 heartbeating is treated as absent even before it is reaped. See
 [Scheduler & Cron](./scheduler-and-cron.md).
+
+The Bun client `Worker.run()` registers in the selected runtime. Embedded mode
+calls `QueueManager.registerWorker`; TCP mode sends `RegisterWorker` and
+re-registers after a pooled reconnect. A separate worker-level heartbeat keeps
+`activeJobs`, processed, failed, and liveness data current. `close()` unregisters
+before releasing the runtime/transport, including the embedded path.
 
 ### Disconnect cleanup
 

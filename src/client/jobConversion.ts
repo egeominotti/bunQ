@@ -11,10 +11,18 @@ import {
   buildStateCheckMethods,
   buildSerializationMethods,
 } from './jobConversionHelpers';
-import type { CreatePublicJobOptions, ToPublicJobOptions } from './jobConversionTypes';
+import type {
+  CreatePublicJobOptions,
+  PublicJobMethodContext,
+  ToPublicJobOptions,
+} from './jobConversionTypes';
 
 // Re-export types for backward compatibility
-export type { CreatePublicJobOptions, ToPublicJobOptions } from './jobConversionTypes';
+export type {
+  CreatePublicJobOptions,
+  PublicJobMethodContext,
+  ToPublicJobOptions,
+} from './jobConversionTypes';
 
 /** Convert internal job to public job (with methods) */
 export function createPublicJob<T>(opts: CreatePublicJobOptions): Job<T> {
@@ -139,6 +147,8 @@ export function toPublicJob<T>(opts: ToPublicJobOptions): Job<T> {
   const {
     job,
     name,
+    updateProgress,
+    log,
     getState,
     remove,
     retry,
@@ -177,9 +187,10 @@ export function toPublicJob<T>(opts: ToPublicJobOptions): Job<T> {
     ...stateChecks,
     ...serialization,
 
-    // Core methods (no-op for simple jobs)
-    updateProgress: async () => {},
-    log: async () => {},
+    // Core methods
+    updateProgress: (progress: number, message?: string) =>
+      updateProgress ? updateProgress(id, progress, message) : Promise.resolve(),
+    log: (message: string) => (log ? log(id, message) : Promise.resolve()),
     getState: () => (getState ? getState(id) : Promise.resolve('unknown' as JobStateType)),
     remove: () => (remove ? remove(id) : Promise.resolve()),
     retry: () => (retry ? retry(id) : Promise.resolve()),
@@ -249,10 +260,17 @@ export function toPublicJob<T>(opts: ToPublicJobOptions): Job<T> {
 }
 
 /** Convert internal DLQ entry to public DLQ entry */
-export function toDlqEntry<T>(entry: InternalDlqEntry): DlqEntry<T> {
+export function toDlqEntry<T>(
+  entry: InternalDlqEntry,
+  methods: PublicJobMethodContext
+): DlqEntry<T> {
   const jobData = entry.job.data as { name?: string } | null;
   return {
-    job: toPublicJob<T>({ job: entry.job, name: jobData?.name ?? 'default' }),
+    job: createPublicJob<T>({
+      job: entry.job,
+      name: jobData?.name ?? 'default',
+      ...methods,
+    }),
     enteredAt: entry.enteredAt,
     reason: entry.reason,
     error: entry.error,

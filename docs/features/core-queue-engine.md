@@ -71,9 +71,11 @@ Queries: `getJob`, `getJobState`, `getResult`, `getChildrenValues`, `getJobByCus
 
 Queue control: `pause`, `resume`, `isPaused`, `drain`, `obliterate`, `clean`, `listQueues` (`queueManager.ts:836-964`).
 
-Rate/concurrency: `setRateLimit`, `clearRateLimit`, `setConcurrency`, `clearConcurrency`, `getQueueLimits` (`queueManager.ts:1020-1063`). See [Rate Limiting & Concurrency](./rate-limiting-and-concurrency.md).
+Rate/concurrency: `setRateLimit`, `clearRateLimit`, `setConcurrency`, `clearConcurrency`, scalar `getQueueLimits`, and full `getQueueLimitStatus`. See [Rate Limiting & Concurrency](./rate-limiting-and-concurrency.md).
 
-DLQ: `getDlq`, `getDlqEntries`, `getDlqCount`, `getDlqStats`, `retryDlq`, `purgeDlq`, `retryCompleted` (`queueManager.ts:990-1016`).
+Deduplication introspection: `getDeduplicationJobId`, `removeDeduplicationKey`, and owner-aware `removeJobDeduplicationKey`.
+
+DLQ: `getDlq`, `getDlqEntries`, `getDlqCount`, `getDlqStats`, filtered/bounded `retryDlq`, `purgeDlq`, and selector-aware `retryCompleted`.
 
 Job management: `cancel`, `updateProgress`, `updateJobData`, `changePriority`, `promote`, `moveToDelayed`, `changeDelay`, `moveActiveToWait`, `moveToWaitingChildren`, `discard` (`queueManager.ts:1141-1221`).
 
@@ -90,7 +92,7 @@ Hashing functions (`src/shared/hash.ts`):
 - `processingShardIndex(jobId: string): number` → `fnv1a(jobId) & SHARD_MASK` (`hash.ts:54`).
 - `SHARD_COUNT` / `SHARD_MASK` (`hash.ts:44-45`), `uuid()` → `Bun.randomUUIDv7()` (`hash.ts:62`), `constantTimeEqual(a, b)` (`hash.ts:70`).
 
-`Shard` (exported class, `shard.ts:41`) — selected methods: `getQueue(name)` (`shard.ts:97`), `getState`/`isPaused`/`pause`/`resume` (`shard.ts:106-121`), unique-key methods (`shard.ts:125-155`), FIFO group methods (`shard.ts:159-173`), `releaseJobResources(queue, uniqueKey, groupId)` (`shard.ts:216`), queue-scoped `notify`/`notifyBatch`/`waitForJob`, DLQ delegates, counters, `drain(queue)`, and `obliterate(queue)`.
+`Shard` (exported class, `shard.ts:41`) — selected methods: `getQueue(name)`, `getState`/`isPaused`/`pause`/`resume`, unique-key methods including owner-aware release, FIFO group methods, `releaseJobResources(queue, uniqueKey, groupId, ownerId?)`, queue-scoped `notify`/`notifyBatch`/`waitForJob`, DLQ delegates, counters, `drain(queue)`, and `obliterate(queue)`.
 
 `ShardCounters` (exported, `shardCounters.ts:19`) + `ShardStats` interface (`shardCounters.ts:10`).
 

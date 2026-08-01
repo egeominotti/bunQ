@@ -18,6 +18,7 @@ import { jobId } from '../../domain/types/job';
 import { getSharedManager } from '../manager';
 import { UnrecoverableError } from '../errors';
 import type { AckBatcher } from './ackBatcher';
+import { removeJobDeduplicationKey } from '../jobDeduplication';
 
 export function createProgressHandler<T extends FlowJobData>(
   embedded: boolean,
@@ -399,9 +400,8 @@ export function createMoveToWaitingChildrenHandler(
       return await getSharedManager().moveToWaitingChildren(jobId(id));
     }
     if (!tcp) return false;
-    throw new Error(
-      'moveToWaitingChildren is not supported in TCP mode — no server command available'
-    );
+    const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+    return response.ok === true;
   };
 }
 
@@ -496,13 +496,9 @@ export function createGetDependenciesCountHandler(
   };
 }
 
-/**
- * removeDeduplicationKey — no server primitive; throw explicit error so callers
- * learn this isn't supported rather than silently getting `false`.
- */
-export function createRemoveDeduplicationKeyHandler(): (_id: string) => Promise<boolean> {
-  return (): Promise<boolean> =>
-    Promise.reject(
-      new Error('removeDeduplicationKey is not implemented — no server primitive available')
-    );
+export function createRemoveDeduplicationKeyHandler(
+  embedded: boolean,
+  tcp: TcpConnection | null
+): (id: string) => Promise<boolean> {
+  return (id) => removeJobDeduplicationKey(id, embedded, tcp);
 }

@@ -92,6 +92,25 @@ export class LimiterManager {
     return !limiter || limiter.tryAcquire();
   }
 
+  /** Read the active rate-limit configuration after applying lazy expiry. */
+  getRateLimit(queue: string): { max: number; duration: number } | null {
+    this.expireRateLimitIfNeeded(queue);
+    const state = this.queueState.get(queue);
+    if (state?.rateLimit === null || state?.rateLimit === undefined) return null;
+    return { max: state.rateLimit, duration: state.rateLimitDuration ?? 1000 };
+  }
+
+  /** Read the remaining temporary-limit TTL or token-bucket cooldown. */
+  getRateLimitTtl(queue: string, maxJobs?: number): number {
+    this.expireRateLimitIfNeeded(queue);
+    const state = this.queueState.get(queue);
+    if (state?.rateLimit === null || state?.rateLimit === undefined) return -2;
+    if (state.rateLimitExpiresAt !== null) {
+      return Math.max(0, state.rateLimitExpiresAt - Date.now());
+    }
+    return this.rateLimiters.get(queue)?.getTtl(maxJobs) ?? -2;
+  }
+
   // ============ Concurrency Limiting ============
 
   /** Set concurrency limit for queue */
@@ -122,6 +141,17 @@ export class LimiterManager {
   /** Release concurrency slot */
   releaseConcurrency(queue: string): void {
     this.concurrencyLimiters.get(queue)?.release();
+  }
+
+  /** Read the configured global concurrency limit. */
+  getConcurrency(queue: string): number | null {
+    return this.queueState.get(queue)?.concurrencyLimit ?? null;
+  }
+
+  /** Whether all configured global concurrency slots are currently occupied. */
+  isConcurrencyMaxed(queue: string): boolean {
+    const limiter = this.concurrencyLimiters.get(queue);
+    return limiter ? limiter.getActive() >= limiter.getLimit() : false;
   }
 
   // ============ Queue Management ============

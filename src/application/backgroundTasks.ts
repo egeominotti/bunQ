@@ -381,8 +381,11 @@ export function recover(ctx: BackgroundContext): void {
         hasDependencies &&
         !wasAlreadyPromoted &&
         !job.dependsOn.every((depId) => ctx.completedJobs.has(depId) || completedInDb.has(depId));
+      const manuallyWaitingChildren = recoveredState === 'waiting-children' && !hasDependencies;
 
-      if (needsWaitingDeps) {
+      if (manuallyWaitingChildren) {
+        shard.waitingChildren.set(job.id, job);
+      } else if (needsWaitingDeps) {
         // Job is waiting for dependencies - don't add to main queue
         shard.waitingDeps.set(job.id, job);
         shard.registerDependencies(job.id, job.dependsOn);

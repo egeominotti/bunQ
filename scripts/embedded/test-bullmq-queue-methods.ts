@@ -167,9 +167,13 @@ async function main() {
     await queue.add('clean-1', { value: 1 });
     await queue.add('clean-2', { value: 2 });
 
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      return { done: true };
-    }, { concurrency: 5, embedded: true });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async () => {
+        return { done: true };
+      },
+      { concurrency: 5, embedded: true }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -178,7 +182,8 @@ async function main() {
     const cleaned = await queue.cleanAsync(0, 100, 'completed');
     console.log(`   Cleaned: ${cleaned.length} jobs`);
 
-    if (cleaned.length >= 0) { // May be 0 if jobs already removed
+    if (cleaned.length >= 0) {
+      // May be 0 if jobs already removed
       console.log('   [PASS] clean/cleanAsync works');
       passed++;
     } else {
@@ -209,7 +214,9 @@ async function main() {
     const afterDelayed = await queue.getDelayedCount();
     const afterWaiting = await queue.getWaitingCount();
 
-    console.log(`   Before: ${beforeDelayed} delayed, After: ${afterDelayed} delayed, ${afterWaiting} waiting`);
+    console.log(
+      `   Before: ${beforeDelayed} delayed, After: ${afterDelayed} delayed, ${afterWaiting} waiting`
+    );
     console.log(`   Promoted: ${promoted}`);
 
     if (afterWaiting >= beforeDelayed - afterDelayed) {
@@ -244,7 +251,7 @@ async function main() {
     console.log(`   Logs: ${logs.logs.join(', ')}`);
 
     // Logs may have [info] prefix
-    const hasLog1 = logs.logs.some(l => l.includes('Log entry 1'));
+    const hasLog1 = logs.logs.some((l) => l.includes('Log entry 1'));
     if (logs.count === 3 && hasLog1) {
       console.log('   [PASS] getJobLogs/addJobLog works');
       passed++;
@@ -268,13 +275,17 @@ async function main() {
     // So we need to start processing and update during processing
     let progressUpdated = false;
 
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async (job) => {
-      // Update progress during processing
-      await job.updateProgress(50);
-      progressUpdated = true;
-      await Bun.sleep(100);
-      return { done: true };
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async (job) => {
+        // Update progress during processing
+        await job.updateProgress(50);
+        progressUpdated = true;
+        await Bun.sleep(100);
+        return { done: true };
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await queue.add('progress-test', { value: 1 });
     await Bun.sleep(500);
@@ -403,12 +414,16 @@ async function main() {
   console.log('\n16. Testing Job Scheduler methods...');
   try {
     // Create scheduler
-    const scheduler = await queue.upsertJobScheduler('test-scheduler', {
-      every: 60000,
-    }, {
-      name: 'scheduled-job',
-      data: { value: 42 },
-    });
+    const scheduler = await queue.upsertJobScheduler(
+      'test-scheduler',
+      {
+        every: 60000,
+      },
+      {
+        name: 'scheduled-job',
+        data: { value: 42 },
+      }
+    );
 
     console.log(`   Created scheduler: ${scheduler?.id}`);
 
@@ -447,10 +462,14 @@ async function main() {
   try {
     queue.obliterate();
 
-    const customId = 'dedupe-test-123';
-    await queue.add('dedupe-job', { value: 1 }, { jobId: customId });
+    const deduplicationId = 'dedupe-test-123';
+    await queue.add(
+      'dedupe-job',
+      { value: 1 },
+      { deduplication: { id: deduplicationId, ttl: 60_000 } }
+    );
 
-    const jobId = await queue.getDeduplicationJobId(customId);
+    const jobId = await queue.getDeduplicationJobId(deduplicationId);
     console.log(`   Dedup job ID: ${jobId}`);
 
     if (jobId) {

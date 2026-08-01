@@ -102,14 +102,17 @@ export function getPrioritized<T>(ctx, start = 0, end = -1): Promise<Job<T>[]>  
 export async function getPrioritizedCount<T>(ctx): Promise<number>                      // :43
 export async function getWaitingChildren<T>(ctx, start = 0, end = -1): Promise<Job<T>[]> // :49
 export async function getWaitingChildrenCount<T>(ctx): Promise<number>                   // :90
-export function getDependencies(ctx, parentId, type?, start?, end?): Promise<{…}>        // :96  (stub)
+export function getDependencies(ctx, parentId, type?, start?, end?): Promise<{…}>        // :73
 export async function getJobDependencies(ctx, id, opts?): Promise<JobDependencies>       // :112
 export async function getJobDependenciesCount(ctx, id, opts?): Promise<JobDependenciesCount> // :143
 ```
 
 Public `Queue` methods wiring to them: `getJobDependencies` / `getJobDependenciesCount` / `getDependencies` (`queue.ts:526-539`), `getPrioritized` / `getPrioritizedCount` (`queue.ts:542-561`), `getWaitingChildren` / `getWaitingChildrenCount` (`queue.ts:562-567`).
 
-No TCP commands, HTTP endpoints, or CLI commands are defined by this module. The forwarder reuses the standard `PULL`/`ACK`/`PUSH` path through its `Worker` and remote `Queue`; the BullMQ shims call into the in-process manager or existing query helpers.
+No HTTP endpoints or CLI commands are defined by this module. The forwarder
+reuses the standard `PULL`/`ACK`/`PUSH` path through its `Worker` and remote
+`Queue`; dependency reads reuse `GetJob`, `GetResult`, and `GetJobs`, while the
+state transition uses `MoveToWaitingChildren`.
 
 ## Data Models
 
@@ -158,10 +161,11 @@ A failed `remote.add` throws inside the processor → the local `Worker` marks t
 
 ### BullMQ shims
 
-- **`getPrioritized` / `getPrioritizedCount`** (`bullmqCompat.ts:38-46`): delegate to `ctx.getPrioritizedAsync`, which the `Queue` wires to `getJobsAsync({ state: 'prioritized', … })` (`queue.ts:547-548`). The count variant fetches `getPrioritizedAsync(0, 1000)` and returns `jobs.length` (`bullmqCompat.ts:44`).
-- **`getWaitingChildren`** (`bullmqCompat.ts:49-87`): embedded-only. It reads `getSharedManager().getJobs(name, { state: 'delayed', … })` (defaulting `end` to `1000` when `-1`), filters to jobs whose data has `_waitingParent === true`, and maps each through `toPublicJob` with the full bag of context callbacks (`bullmqCompat.ts:54-85`). In TCP mode it returns `[]` (`bullmqCompat.ts:86`).
-- **`getJobDependencies`** (`bullmqCompat.ts:112-140`): embedded-only. Loads the parent via `manager.getJob(jobId(id))`, iterates `job.childrenIds`, and for each child calls `manager.getResult(childId)`: a defined result is placed under key `` `${childJob.queue}:${childId}` `` in `processed`; otherwise the id is pushed to `unprocessed` (`bullmqCompat.ts:122-137`). TCP mode and missing parent both return `{ processed: {}, unprocessed: [] }`.
-- **`getJobDependenciesCount`** (`bullmqCompat.ts:143-156`): calls `getJobDependencies` and returns the cardinalities.
+- **`getPrioritized` / `getPrioritizedCount`** (`bullmqCompat.ts`): the list delegates to `getJobsAsync({ state: 'prioritized', … })`; `end=-1` exhausts every TCP page. The count reads the authoritative `prioritized` counter instead of deriving a total from a bounded list.
+- **`getWaitingChildren`** queries the dedicated `waiting-children` state through `getJobsAsync`, so embedded and TCP paths share ordering and pagination.
+- **`getDependencies`** resolves every child through `getFlowDependencies`, uses the child's actual queue in each key, sorts both result sets deterministically, applies `type` filtering, then slices the inclusive `start`/`end` range.
+- **`getJobDependencies`** uses the same authoritative graph and independently applies `processed` and `unprocessed` cursor/count windows, returning a next cursor of `0` at the end.
+- **`getJobDependenciesCount`** reads the same graph and returns total processed/unprocessed cardinalities.
 
 ## Concurrency & Locking
 
@@ -175,11 +179,9 @@ The Forwarder holds no locks of its own. Concurrency is the `Worker`'s `concurre
 - **Listener-error isolation.** A throwing `forwarded` listener is caught and ignored so it cannot fail an already-succeeded forward (`forwarder.ts:103-107`).
 - **`error` event suppression.** Worker `failed`/`error` are only re-emitted as `Forwarder` `error` when `listenerCount('error') > 0` (`forwarder.ts:123,126`). This prevents `EventEmitter`'s default "throw on unhandled error" from crashing the process on a transient uplink failure — but it also means errors are silently dropped if you never attach an `error` listener. Failed forwards are still durable locally regardless.
 - **Auto-batch disabled on the remote.** The remote queue forces `autoBatch:{ enabled:false }` (`forwarder.ts:88`); forwards are individual pushes, not coalesced.
-- **`getDependencies(parentId, …)` is a stub.** It ignores all arguments and unconditionally returns `{ processed: {}, unprocessed: [] }` (`bullmqCompat.ts:96-109`). Use `getJobDependencies(id)` instead for real data. Cursor/pagination fields (`nextProcessedCursor`, `nextUnprocessedCursor`) are never populated by any shim.
-- **TCP mode returns empty for child/dependency shims.** `getWaitingChildren`, `getJobDependencies`, and `getJobDependenciesCount` all short-circuit to empty results unless `ctx.embedded` is true (`bullmqCompat.ts:86,139,155`). These BullMQ APIs are effectively embedded-only.
-- **Hard 1000-row caps.** `getPrioritizedCount` only counts the first 1000 prioritized jobs (`bullmqCompat.ts:44`), and `getWaitingChildren`/`getWaitingChildrenCount` cap at 1000 delayed jobs when `end === -1` (`bullmqCompat.ts:58`). Counts above 1000 are undercounted.
-- **`GetDependenciesOpts` ignored.** `getJobDependencies`/`getJobDependenciesCount` accept `opts` but never read its `processed`/`unprocessed` cursor/count fields (`bullmqCompat.ts:115,146`); the full child set is always scanned.
-- **`getWaitingChildren` heuristic.** It identifies waiting-children by `state === 'delayed'` plus a `_waitingParent === true` flag in job data (`bullmqCompat.ts:55-65`), not by a dedicated state; jobs not carrying that flag are invisible to this view.
+- **Deterministic pagination:** dependency keys are sorted before slicing so repeated cursor reads cannot reorder cross-queue children. A missing parent or child is an explicit error instead of an empty-success sentinel.
+- **Waiting-children state:** manually parked jobs and flow parents are read through the dedicated state, not inferred from user data. The TCP and embedded views therefore expose the same jobs.
+- **Exact counts:** `getPrioritizedCount` and `getWaitingChildrenCount` read the broker's state counters and are not constrained by list-page size. See [Public API Completeness](./public-api-completeness.md) for the regression contract and the offset-pagination concurrency caveat.
 
 ## Configuration
 

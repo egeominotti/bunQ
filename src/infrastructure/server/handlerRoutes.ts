@@ -41,7 +41,21 @@ import {
   handleStorageStatus,
 } from './handlers/management';
 
-import { handleDlq, handleRetryDlq, handlePurgeDlq, handleRetryCompleted } from './handlers/dlq';
+import {
+  handleDlq,
+  handleGetDlqStats,
+  handleRetryDlq,
+  handlePurgeDlq,
+  handleRetryCompleted,
+} from './handlers/dlq';
+
+import {
+  handleGetQueueLimits,
+  handleGetDeduplicationJobId,
+  handleRemoveDeduplicationKey,
+  handleRemoveJobDeduplicationKey,
+  handleMoveToWaitingChildren,
+} from './handlers/introspection';
 
 import { handleCron, handleCronGet, handleCronDelete, handleCronList } from './handlers/cron';
 
@@ -160,6 +174,10 @@ export async function routeQueryCommand(
       return handleGetProgress(cmd, ctx, reqId);
     case 'GetChildrenValues':
       return handleGetChildrenValues(cmd, ctx, reqId);
+    case 'GetQueueLimits':
+      return handleGetQueueLimits(cmd, ctx, reqId);
+    case 'GetDeduplicationJobId':
+      return handleGetDeduplicationJobId(cmd, ctx, reqId);
     default:
       return null;
   }
@@ -209,6 +227,12 @@ export async function routeManagementCommand(
       return handleRemoveChildDependency(cmd, ctx, reqId);
     case 'RemoveUnprocessedChildren':
       return handleRemoveUnprocessedChildren(cmd, ctx, reqId);
+    case 'RemoveDeduplicationKey':
+      return handleRemoveDeduplicationKey(cmd, ctx, reqId);
+    case 'RemoveJobDeduplicationKey':
+      return handleRemoveJobDeduplicationKey(cmd, ctx, reqId);
+    case 'MoveToWaitingChildren':
+      return handleMoveToWaitingChildren(cmd, ctx, reqId);
     default:
       return null;
   }
@@ -251,6 +275,8 @@ export function routeDlqCommand(
   switch (cmd.cmd) {
     case 'Dlq':
       return handleDlq(cmd, ctx, reqId);
+    case 'GetDlqStats':
+      return handleGetDlqStats(cmd, ctx, reqId);
     case 'RetryDlq':
       return handleRetryDlq(cmd, ctx, reqId);
     case 'PurgeDlq':

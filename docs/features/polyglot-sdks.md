@@ -15,6 +15,83 @@ observability behavior must agree with `docs/protocol.md`.
 | Rust | yes | bounded threads | yes | yes | callback |
 | Elixir | yes | `Task.async_stream` | yes | yes | callback |
 
+## Core feature parity audit
+
+The source-level audit on **2026-08-01** compared the public Bun client with
+the six TCP SDKs. Its conclusion is unambiguous: **no external SDK currently
+has the complete core feature surface**. “Full” below means that the typed SDK
+exposes the core behavior with the same selectors and queue scoping; “partial”
+means that a subset exists or an exposed option has different semantics. A
+dash means there is no typed helper, even if an application could issue a raw
+protocol command itself.
+
+| Core surface | TypeScript | Python | PHP | Go | Rust | Elixir |
+| --- | --- | --- | --- | --- | --- | --- |
+| Producer, bulk add, job options | Full | Full | Full | Full | Full | Partial¹ |
+| Worker delivery, leases, heartbeat, ACK/FAIL | Full | Full | Full² | Full | Full | Full |
+| State queries and exhaustive pagination | Partial³ | Partial³ | Partial³ | Partial³ | Partial³ | Partial³ |
+| Non-serialization `Job` operations | 13/32 | 13/32 | 4/32 | 4/32 | 3/32 | 2/32 |
+| Dedup owner lookup and key release | Partial⁴ | Partial⁴ | — | — | — | — |
+| Dependency pagination/counts and waiting-children transition | Partial | Partial | Partial | Partial | — | — |
+| Rate/concurrency mutation | Partial⁵ | Partial⁵ | Partial⁶ | Partial⁶ | Partial⁶ | Full |
+| Rate/concurrency readback and max/TTL status | — | — | — | — | — | — |
+| Rich DLQ entries, statistics, filtered retry | — | — | — | — | — | — |
+| Bulk retry with state/count/timestamp selectors | Partial⁷ | Partial⁷ | — | — | — | — |
+| Atomic flow tree and chain creation | Full | Full | Full | Full | Full | Full |
+| Flow bulk, fan-in, and tree readback | Full | Full | Read only | Read only | — | — |
+| Queue-scoped worker discovery | Partial⁸ | Partial⁸ | Partial⁸ | Partial⁸ | — | — |
+| Scheduler CRUD and queue-scoped list | Full | Full | Partial⁹ | Partial⁹ | Partial | Partial⁹ |
+| Stats, metrics, and webhooks | Full | Full | Partial¹⁰ | Partial¹⁰ | — | — |
+| Queue groups and store-and-forward | — | — | — | — | — | — |
+| Simple all-in-one mode | Full | Full | — | — | — | — |
+| Workflow/saga engine | — | — | — | — | — | — |
+| Authentication, verified TLS, telemetry | Full | Full | Full | Full | Full | Full |
+| Embedded SQLite, queue events, sandboxed workers | Bun-only | Bun-only | Bun-only | Bun-only | Bun-only | Bun-only |
+
+Audit notes:
+
+1. Elixir maps `deduplication` to the nested wire object but does not derive
+   the owning `uniqueKey` from its `id`; explicit `uniqueKey` still works.
+2. PHP intentionally processes sequentially; this is a worker model choice,
+   not a delivery-correctness gap.
+3. All SDKs can request finite offset/limit pages. None mirrors the Bun
+   client's exhaustive `end=-1` contract: TypeScript substitutes a 1,000-row
+   cap, Python converts it to a zero limit, and the other clients expose only a
+   finite limit. Applications must paginate explicitly.
+4. TypeScript and Python expose an owner lookup but route it through
+   `GetJobByCustomId`. Custom IDs and deduplication keys are separate indexes,
+   so this can return the wrong answer; neither SDK exposes key release.
+5. TypeScript and Python expose rate and concurrency mutation, but accept a
+   rate-window duration without putting it on the wire.
+6. PHP, Go, and Rust preserve rate duration/TTL but expose no global
+   concurrency mutation helper.
+7. Failed-job count works. Completed retry drops `count`, neither client
+   exposes the terminal `timestamp` cutoff, and TypeScript discards the applied
+   count from its return type.
+8. These SDKs decode `ListWorkers` but return the server-wide registry rather
+   than filtering it to `queue.name`; their count helpers are global too.
+9. PHP, Go, and Elixir return every server scheduler from `CronList`, not just
+   the current queue. Rust has create/get/remove but no list helper and lacks
+   some scheduler flags.
+10. PHP and Go expose stats and webhooks but not metrics; Rust and Elixir expose
+    none of the three typed surfaces.
+
+The full 32-method Bun `Job` denominator excludes `toJSON` and `asJSON`.
+TypeScript/Python cover progress, logging, state, remove/retry, child values,
+data/priority/delay mutation, promote, lock extension, delayed transition, and
+discard. PHP/Go cover progress, logging, state, and lock extension; Rust covers
+progress, logging, and lock extension; Elixir covers progress and logging.
+
+As a secondary transport diagnostic, the broker command union contains 89
+literal commands. The production source trees reference 74 in TypeScript, 74
+in Python, 56 in PHP, 56 in Go, 44 in Rust, and 51 in Elixir. These are **not
+parity percentages**: the union includes dashboard, maintenance, and alternate
+primitive commands, while one higher-level feature can compose several
+commands. The method/semantics matrix above is the authoritative audit.
+
+No file under `sdk/` was changed by this audit. Closing these gaps requires a
+separate per-SDK TDD change and the mandatory `bun run test:sandbox:sdk` gate.
+
 WebAssembly is not treated as a seventh runtime yet. Browser WASM has no
 portable raw-TCP primitive, while WASI socket and TLS support depends on the
 host. A future WASM client must either target an authenticated HTTP/WebSocket

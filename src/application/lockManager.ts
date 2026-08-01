@@ -122,7 +122,7 @@ function processExpiredLockInner(
   // the job finishes. Re-queuing would cause "starts right away on reconnect".
   // The cron scheduler will re-create the job at the next scheduled tick.
   if (job.uniqueKey?.startsWith('cron:')) {
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     ctx.jobIndex.delete(jobId);
     ctx.storage?.deleteJob(jobId);
     ctx.jobLocks.delete(jobId);
@@ -180,7 +180,7 @@ function handleRecoveryBoundExceeded(opts: RecoveryBoundOptions): void {
   // Release the concurrency slot (+group+uniqueKey) acquired at pull before
   // moving to DLQ — otherwise the slot leaks (mirrors
   // stallDetection.moveStalliedJobToDlq).
-  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
   const entry = shard.addToDlq(
     job,
     attemptsExhausted ? FailureReason.MaxAttemptsExceeded : FailureReason.Stalled,
@@ -226,7 +226,7 @@ function requeueExpiredJob(opts: RequeueOptions): void {
   // Release the concurrency slot (+group+uniqueKey) acquired at pull before
   // re-pushing — otherwise the slot leaks and the queue wedges (mirrors
   // stallDetection.retryStalliedJob).
-  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+  shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
   queue.push(job);
   const isDelayed = job.runAt > now;
   shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);

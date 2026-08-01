@@ -161,7 +161,14 @@ bunqueue dlq purge emails
 ```
 
 :::note[Embedded vs TCP]
-The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqByFilter()`) reads in-process state and returns data only in **embedded mode**. In TCP mode these getters return empty results, while `setDlqConfig()`, `retryDlq()`, and `purgeDlq()` send fire-and-forget commands to the server and always return 0. The `Async` variants work in both modes: `await queue.getDlqJobsAsync(count?)` lists the dead jobs of a remote server (as plain Job objects, without DLQ metadata like the failure reason), `await queue.retryDlqAsync()` / `await queue.purgeDlqAsync()` wait for the command and return the real count, and `await queue.setDlqConfigAsync()` waits for the config to apply. For full DLQ metadata on a remote server, use the CLI or the dashboard.
+The synchronous query API on this page (`getDlq()`, `getDlqStats()`,
+`retryDlqByFilter()`) reads in-process state and therefore remains embedded-only;
+the synchronous TCP mutation forms are fire-and-forget. The `Async` variants
+work in both modes: `getDlqAsync(filter?)` returns full metadata and operational
+Job objects, `getDlqStatsAsync()` returns authoritative statistics,
+`retryDlqByFilterAsync(filter)` applies server-side filtering, and the existing
+retry/purge/config async forms wait for the real result. `getDlqJobsAsync(count?)`
+remains the compact jobs-only view.
 :::
 
 ## Where to go next
@@ -173,4 +180,3 @@ The synchronous query API on this page (`getDlq()`, `getDlqStats()`, `retryDlqBy
 | [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
 | [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
 | [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
-

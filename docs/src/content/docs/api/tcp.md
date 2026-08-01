@@ -550,7 +550,8 @@ List jobs with filtering and pagination.
   queue: string,
   state?: JobState | JobState[],  // e.g. 'waiting', 'delayed', 'active', 'completed', 'failed', or an array
   limit?: number,        // Max results (default: 100)
-  offset?: number        // Skip N results (default: 0)
+  offset?: number,       // Skip N results (default: 0)
+  asc?: boolean          // createdAt/id order (default: true)
 }
 ```
 
@@ -559,6 +560,9 @@ List jobs with filtering and pagination.
 ```typescript
 { ok: true, jobs: Job[] }
 ```
+
+Ordering is applied before pagination. Send the same `asc` value on every
+request when traversing multiple offset pages.
 
 ---
 
@@ -1002,14 +1006,35 @@ Retrieve jobs from the dead-letter queue.
 {
   cmd: 'Dlq',
   queue: string,
-  count?: number         // Max entries to return (optional)
+  count?: number,        // Max entries to return (optional)
+  filter?: {
+    reason?: string,
+    olderThan?: number,
+    newerThan?: number,
+    retriable?: boolean,
+    expired?: boolean,
+    limit?: number,
+    offset?: number
+  }
 }
 ```
 
 **Response:**
 
 ```typescript
-{ ok: true, jobs: Job[] }
+{ ok: true, jobs: Job[], entries: DlqEntry[] }
+```
+
+---
+
+#### GetDlqStats
+
+Read aggregate DLQ health for a queue.
+
+```typescript
+{ cmd: 'GetDlqStats', queue: string }
+
+{ ok: true, data: { stats: DlqStats } }
 ```
 
 ---
@@ -1025,7 +1050,8 @@ Retry jobs from the dead-letter queue (move them back to waiting).
   cmd: 'RetryDlq',
   queue: string,
   jobId?: string,        // Retry a specific job (optional; omit to retry all)
-  count?: number         // Cap the number of entries retried (omit = retry all)
+  count?: number,        // Cap the number of entries retried (omit = retry all)
+  filter?: DlqFilter     // Retry only matching entries
 }
 ```
 
@@ -1065,7 +1091,9 @@ Re-queue completed jobs back to waiting state.
 {
   cmd: 'RetryCompleted',
   queue: string,
-  id?: string            // Retry a specific job (optional; omit to retry all)
+  id?: string,           // Retry a specific job (optional; omit to retry all)
+  count?: number,        // Non-negative cap
+  timestamp?: number     // completedAt must be <= this epoch-ms cutoff
 }
 ```
 
@@ -1713,6 +1741,58 @@ Remove the concurrency limit from a queue.
 
 ---
 
+#### GetQueueLimits
+
+Read the live rate/concurrency configuration and saturation state.
+
+```typescript
+{ cmd: 'GetQueueLimits', queue: string, maxJobs?: number }
+
+{
+  ok: true,
+  data: {
+    limits: {
+      rateLimit: { max: number, duration: number } | null,
+      rateLimitTtl: number,          // -2 when no rate limit exists
+      concurrencyLimit: number | null,
+      maxed: boolean
+    }
+  }
+}
+```
+
+---
+
+#### Deduplication Introspection
+
+```typescript
+{ cmd: 'GetDeduplicationJobId', queue: string, deduplicationId: string }
+// -> { ok: true, data: { jobId: string | null } }
+
+{ cmd: 'RemoveDeduplicationKey', queue: string, deduplicationId: string }
+// -> { ok: true, data: { count: number } }
+
+{ cmd: 'RemoveJobDeduplicationKey', id: string }
+// -> { ok: true, data: { removed: boolean } }
+```
+
+The job-owned form removes a key only when the requested job is still its
+registered owner.
+
+---
+
+#### MoveToWaitingChildren
+
+```typescript
+{ cmd: 'MoveToWaitingChildren', id: string }
+// -> { ok: true, data: { moved: true } }
+```
+
+The job must be active. The transition releases its active resources and
+persists the parked state.
+
+---
+
 ### Log Commands
 
 #### AddLog
@@ -1985,12 +2065,15 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `Count` | Total job count for a queue |
 | | `GetProgress` | Get job progress |
 | | `GetChildrenValues` | Get child job return values |
+| | `GetQueueLimits` | Read live queue rate/concurrency status |
+| | `GetDeduplicationJobId` | Resolve a queue-scoped deduplication key |
 | **Control** | `Cancel` | Cancel a job |
 | | `Progress` | Update job progress |
 | | `Update` | Update job data |
 | | `ChangePriority` | Change job priority |
 | | `Promote` | Move delayed job to waiting |
 | | `MoveToDelayed` | Move active job to delayed |
+| | `MoveToWaitingChildren` | Park an active job for children |
 | | `ChangeDelay` | Change a delayed job's delay |
 | | `MoveToWait` | Move a job back to waiting |
 | | `PromoteJobs` | Promote all delayed jobs in a queue |
@@ -1998,6 +2081,8 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `WaitJob` | Wait for job completion |
 | | `ExtendLock` | Extend a job lock |
 | | `ExtendLocks` | Extend job locks (batch) |
+| | `RemoveDeduplicationKey` | Release a queue-scoped deduplication key |
+| | `RemoveJobDeduplicationKey` | Release only a job-owned key |
 | | `Pause` | Pause a queue |
 | | `Resume` | Resume a queue |
 | | `IsPaused` | Check if queue is paused |
@@ -2006,6 +2091,7 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `Clean` | Remove old jobs |
 | | `ListQueues` | List all queues |
 | **DLQ** | `Dlq` | Get DLQ entries |
+| | `GetDlqStats` | Get aggregate DLQ statistics |
 | | `RetryDlq` | Retry DLQ jobs |
 | | `PurgeDlq` | Clear DLQ |
 | | `RetryCompleted` | Re-queue completed jobs |

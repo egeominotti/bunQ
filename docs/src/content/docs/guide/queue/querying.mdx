@@ -39,6 +39,9 @@ const counts = await queue.getJobCountsAsync();
 
 // Lists, filtered by state
 const failed = await queue.getJobsAsync({ state: 'failed', start: 0, end: 50 });
+
+// Exhaustive traversal; TCP mode transparently drains consecutive pages
+const everyFailedJob = await queue.getFailedAsync(0, -1);
 ```
 
 </TabItem>
@@ -208,10 +211,19 @@ waiting_children = queue.get_waiting_children(0, 10)
 
 *Per-state shortcuts are available in TypeScript and Python; in PHP, Go, Rust, and Elixir use `getJobs` with a state filter.*
 
-`getPrioritized()` works in embedded and TCP modes. The BullMQ compatibility
-helper `getWaitingChildren()` is currently embedded-only; use the explicit
-`getJobsAsync({ state: 'waiting-children' })` query above when the same code must
-work in both modes.
+`getPrioritized()` and `getWaitingChildren()` work in embedded and TCP modes.
+Both use the asynchronous job-query path; waiting children are selected through
+the dedicated state rather than inferred from job data.
+
+On the Bun client, `end: -1` is an explicit exhaustive read for `getJobs`,
+`getJobsAsync`, every sync/async state shortcut, `getPrioritized`, and
+`getWaitingChildren`. TCP mode requests 1,000-row pages until exhaustion and
+removes duplicate IDs defensively; a finite `end` still denotes the exclusive
+end of one page. `getJobs[Async]({ asc: false })` reverses the stable
+createdAt/job-id order before that pagination. Because the broker protocol uses numeric offsets rather than a
+snapshot cursor, concurrent inserts/removals can shift later pages. Pause
+mutation or reconcile IDs in application code when a stable snapshot is
+required.
 
 :::note[Two states worth knowing]
 **Prioritized:** jobs with `priority > 0` report the state `'prioritized'`, not `'waiting'` (BullMQ v5 behavior). Both are pullable; prioritized jobs go first.
@@ -236,4 +248,3 @@ Jobs that exhaust their retries move to the dead letter queue (DLQ, a holding ar
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

@@ -149,7 +149,7 @@ the job. Lock order shard → processing matches the documented hierarchy.
 ### ACK (`ackJob`, `ack.ts:75`)
 
 1. Under `processingLocks[procIdx]`, remove the job from `processingShards`; if absent, **throw** `Job not found or not in processing state` (the `QueueManager` catches this to recover stall-retried jobs — see Edge Cases).
-2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId)` (frees concurrency slot, uniqueKey, group).
+2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId, job.id)` frees the concurrency slot/group and releases the unique key only if this job generation still owns it.
 3. Release `customId` from `customIdMap` so it can be reused.
 4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add
    to `completedJobs` + `completedJobsData`, store a defined result, set

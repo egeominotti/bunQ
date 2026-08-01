@@ -146,7 +146,7 @@ export async function releaseResources(
       await withWriteLock(ctx.shardLocks[idx], () => {
         const shard = ctx.shards[idx];
         for (const job of jobs) {
-          shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+          shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
         }
       });
     })

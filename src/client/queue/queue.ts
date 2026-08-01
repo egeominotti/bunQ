@@ -29,6 +29,7 @@ import { getSharedManager } from '../manager';
 // Import operation modules
 import * as addOps from './operations/add';
 import * as queryOps from './operations/query';
+import * as queryStateOps from './operations/queryStates';
 import * as countsOps from './operations/counts';
 import * as controlOps from './operations/control';
 import * as managementOps from './operations/management';
@@ -154,6 +155,13 @@ export class Queue<T = unknown> {
       getJobDependencies: (id: string, o?: GetDependenciesOpts) => this.getJobDependencies(id, o),
       getJobDependenciesCount: (id: string, o?: GetDependenciesOpts) =>
         this.getJobDependenciesCount(id, o),
+      getJobCountsAsync: () => this.getJobCountsAsync(),
+      getJobsAsync: (options: {
+        state?: string | string[];
+        start?: number;
+        end?: number;
+        asc?: boolean;
+      }) => this.getJobsAsync(options),
       moveJobToCompleted: (id: string, r: unknown, t?: string) => this.moveJobToCompleted(id, r, t),
       moveJobToFailed: (id: string, e: Error, t?: string) => this.moveJobToFailed(id, e, t),
       moveJobToWait: (id: string, t?: string) => this.moveJobToWait(id, t),
@@ -244,34 +252,34 @@ export class Queue<T = unknown> {
     return queryOps.getJobsAsync(this.queryCtx, opts);
   }
   getWaiting(start?: number, end?: number) {
-    return queryOps.getWaiting<T>(this.queryCtx, start, end);
+    return queryStateOps.getWaiting<T>(this.queryCtx, start, end);
   }
   getWaitingAsync(start?: number, end?: number) {
-    return queryOps.getWaitingAsync<T>(this.queryCtx, start, end);
+    return queryStateOps.getWaitingAsync<T>(this.queryCtx, start, end);
   }
   getDelayed(start?: number, end?: number) {
-    return queryOps.getDelayed<T>(this.queryCtx, start, end);
+    return queryStateOps.getDelayed<T>(this.queryCtx, start, end);
   }
   getDelayedAsync(start?: number, end?: number) {
-    return queryOps.getDelayedAsync<T>(this.queryCtx, start, end);
+    return queryStateOps.getDelayedAsync<T>(this.queryCtx, start, end);
   }
   getActive(start?: number, end?: number) {
-    return queryOps.getActive<T>(this.queryCtx, start, end);
+    return queryStateOps.getActive<T>(this.queryCtx, start, end);
   }
   getActiveAsync(start?: number, end?: number) {
-    return queryOps.getActiveAsync<T>(this.queryCtx, start, end);
+    return queryStateOps.getActiveAsync<T>(this.queryCtx, start, end);
   }
   getCompleted(start?: number, end?: number) {
-    return queryOps.getCompleted<T>(this.queryCtx, start, end);
+    return queryStateOps.getCompleted<T>(this.queryCtx, start, end);
   }
   getCompletedAsync(start?: number, end?: number) {
-    return queryOps.getCompletedAsync<T>(this.queryCtx, start, end);
+    return queryStateOps.getCompletedAsync<T>(this.queryCtx, start, end);
   }
   getFailed(start?: number, end?: number) {
-    return queryOps.getFailed<T>(this.queryCtx, start, end);
+    return queryStateOps.getFailed<T>(this.queryCtx, start, end);
   }
   getFailedAsync(start?: number, end?: number) {
-    return queryOps.getFailedAsync<T>(this.queryCtx, start, end);
+    return queryStateOps.getFailedAsync<T>(this.queryCtx, start, end);
   }
 
   // ============ Count Operations ============
@@ -432,13 +440,19 @@ export class Queue<T = unknown> {
     return dlqOps.getDlqConfigAsync(this.ctx);
   }
   getDlq(filter?: DlqFilter): DlqEntry<T>[] {
-    return dlqOps.getDlq<T>(this.ctx, filter);
+    return dlqOps.getDlq<T>(this.queryCtx, filter);
+  }
+  getDlqAsync(filter?: DlqFilter): Promise<DlqEntry<T>[]> {
+    return dlqOps.getDlqAsync<T>(this.queryCtx, filter);
   }
   getDlqJobsAsync(count?: number) {
     return dlqOps.getDlqJobsAsync<T>(this.queryCtx, count);
   }
   getDlqStats(): DlqStats {
     return dlqOps.getDlqStats(this.ctx);
+  }
+  getDlqStatsAsync(): Promise<DlqStats> {
+    return dlqOps.getDlqStatsAsync(this.ctx);
   }
   retryDlq(id?: string) {
     return dlqOps.retryDlq(this.ctx, id);
@@ -448,6 +462,9 @@ export class Queue<T = unknown> {
   }
   retryDlqByFilter(filter: DlqFilter) {
     return dlqOps.retryDlqByFilter(this.ctx, filter);
+  }
+  retryDlqByFilterAsync(filter: DlqFilter) {
+    return dlqOps.retryDlqByFilterAsync(this.ctx, filter);
   }
   purgeDlq() {
     return dlqOps.purgeDlq(this.ctx);

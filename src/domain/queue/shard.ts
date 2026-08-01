@@ -164,8 +164,12 @@ export class Shard {
     return this.uniqueKeyManager.extendTtl(queue, key, ttl);
   }
 
-  releaseUniqueKey(queue: string, key: string): void {
-    this.uniqueKeyManager.release(queue, key);
+  releaseUniqueKey(queue: string, key: string): boolean {
+    return this.uniqueKeyManager.release(queue, key);
+  }
+
+  releaseUniqueKeyIfOwned(queue: string, key: string, ownerId: JobId): boolean {
+    return this.uniqueKeyManager.releaseIfOwned(queue, key, ownerId);
   }
 
   cleanExpiredUniqueKeys(): number {
@@ -213,6 +217,14 @@ export class Shard {
     return this.limiterManager.tryAcquireRateLimit(queue);
   }
 
+  getRateLimit(queue: string): { max: number; duration: number } | null {
+    return this.limiterManager.getRateLimit(queue);
+  }
+
+  getRateLimitTtl(queue: string, maxJobs?: number): number {
+    return this.limiterManager.getRateLimitTtl(queue, maxJobs);
+  }
+
   setConcurrency(queue: string, limit: number): void {
     this.limiterManager.setConcurrency(queue, limit);
   }
@@ -229,6 +241,14 @@ export class Shard {
     this.limiterManager.releaseConcurrency(queue);
   }
 
+  getConcurrency(queue: string): number | null {
+    return this.limiterManager.getConcurrency(queue);
+  }
+
+  isConcurrencyMaxed(queue: string): boolean {
+    return this.limiterManager.isConcurrencyMaxed(queue);
+  }
+
   get queueState(): Map<string, QueueState> {
     return this.limiterManager.getStateMap();
   }
@@ -239,8 +259,16 @@ export class Shard {
 
   // ============ Resource Release ============
 
-  releaseJobResources(queue: string, uniqueKey: string | null, groupId: string | null): void {
-    if (uniqueKey) this.releaseUniqueKey(queue, uniqueKey);
+  releaseJobResources(
+    queue: string,
+    uniqueKey: string | null,
+    groupId: string | null,
+    ownerId?: JobId
+  ): void {
+    if (uniqueKey) {
+      if (ownerId) this.releaseUniqueKeyIfOwned(queue, uniqueKey, ownerId);
+      else this.releaseUniqueKey(queue, uniqueKey);
+    }
     if (groupId) this.releaseGroup(queue, groupId);
     this.releaseConcurrency(queue);
   }

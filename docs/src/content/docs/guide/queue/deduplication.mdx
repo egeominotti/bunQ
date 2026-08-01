@@ -339,6 +339,9 @@ Managing keys directly:
 ```typescript
 const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
 await queue.removeDeduplicationKey('my-unique-key');              // allow re-adding
+
+const job = await queue.getJob(jobId!);
+const removed = await job?.removeDeduplicationKey(); // only if this generation owns it
 ```
 
 </TabItem>
@@ -358,7 +361,10 @@ job_id = queue.get_deduplication_job_id("my-unique-key")  # look up
 </TabItem>
 </Tabs>
 
-*Key lookup is available in TypeScript and Python; `removeDeduplicationKey()` exists in the Bun `bunqueue` package only.*
+*The Bun queue lookup/removal methods work in embedded and TCP modes. Job-level
+removal is generation-safe: a stale job cannot clear a key already transferred
+to a replacement job. External SDK coverage is listed in the
+[SDK guide](/guide/sdks/).*
 
 ## Where to go next
 
@@ -375,4 +381,3 @@ job_id = queue.get_deduplication_job_id("my-unique-key")  # look up
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

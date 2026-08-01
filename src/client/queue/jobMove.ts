@@ -159,7 +159,10 @@ export async function moveJobToWaitingChildren(
     const manager = getSharedManager();
     return manager.moveToWaitingChildren(jobId(id));
   }
-  return false;
+  if (!ctx.tcp) return false;
+  const response = await ctx.tcp.send({ cmd: 'MoveToWaitingChildren', id });
+  if (!response.ok) return false;
+  return (response.data as { moved?: boolean } | undefined)?.moved ?? true;
 }
 
 /** Wait until job has finished */

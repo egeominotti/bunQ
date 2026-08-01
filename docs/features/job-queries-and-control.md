@@ -158,7 +158,7 @@ The hard part is correct pagination when results come from multiple non-offset-a
 - Normalizes `state` (string | string[] | empty → `null` = unfiltered).
 - Storage path: SQL applies the requested logical-state predicate, stable ordering, and pagination together. `waiting`, `prioritized`, and `delayed` are translated to predicates over persisted `state`, `run_at`, and `priority`; ordering is `(created_at, id)` in the requested direction and uses the schema-v14 queue indexes.
 - If a derived source contributes (DLQ, paused jobs, or `waiting-children`), every source is gathered from index zero, deduplicated by job ID, globally sorted by `(createdAt, id)`, and sliced `[start, end)` exactly once. Pushing an offset into only one source would drop or duplicate rows across pages.
-- Jobs parked in `waitingDeps`/`waitingChildren` remain persisted as `waiting`, `delayed`, or `active`; the in-memory parked state is authoritative. Their IDs are excluded from SQL results before pagination, and they appear only as `waiting-children` when that logical state is requested.
+- Dependency-gated jobs in `waitingDeps` may retain their ready-state row, while jobs explicitly moved into `waitingChildren` persist `state='waiting-children'`. In-memory membership is authoritative while running; their IDs are deduplicated against SQL before global pagination, and they appear only when that logical state is requested.
 - Paused semantics: `resolveStateNeeds` (`:341`) suppresses explicit `waiting`/`prioritized` queries on a paused queue; those jobs are returned only under `paused` (`:518`). An unfiltered query still lists them by their temporal state.
 - In-memory path (embedded, no storage): `collectJobsByState` gathers every matching source before sorting and slicing; it never truncates insertion order before applying descending order.
 
@@ -174,7 +174,17 @@ On success emits `Removed`. Returns `false` for active/completed/DLQ jobs.
 
 ### moveJobToDelayed (`jobMoveOperations.ts`)
 
-Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Inside the shard-lock section, before the re-push, it calls `shard.releaseJobResources(queue, uniqueKey, groupId)` and then `shard.notify()`, mirroring `moveActiveToWait`: the concurrency slot (+group+uniqueKey) acquired at pull is returned, otherwise `setConcurrency(N)` wedges after N moves (repro: `test/repro-slot-release-claim-paths.test.ts`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
+Handles **active** (`processing`) jobs only. Two-phase: remove from the processing shard under `processingLocks[procIdx]` (`:238`), then re-push into the destination shard under `shardLocks[idx]`, resetting `startedAt = null`, `runAt = now + delay`, and calling `incrementQueued` with the temporal flag (`:255`). Inside the shard-lock section, before the re-push, it calls `shard.releaseJobResources(queue, uniqueKey, groupId, job.id)` and then `shard.notify()`, mirroring `moveActiveToWait`: the concurrency slot (+group+owned uniqueKey) acquired at pull is returned, otherwise `setConcurrency(N)` wedges after N moves (repro: `test/repro-slot-release-claim-paths.test.ts`). Emits `Delayed`. Jobs already **in the queue** (`waiting`/`prioritized`/`delayed`) never reach this op — the `QueueManager.moveToDelayed`/`changeDelay` dispatcher routes them to `changeWaitingDelay` (in-place `runAt` update). Like the embedded `changeDelay` path, that in-queue route does **not** emit a `Delayed` event nor bump the O(1) `delayedJobs` aggregate, but `getJobState`/`getJob` correctly report the job as `delayed` from its future `runAt` and it is no longer pullable. Both routes **persist** the new `run_at` via `storage.updateRunAt(jobId, runAt)` (re-deriving `state` from the future timestamp and clearing `started_at`), so the delay survives a restart — without it, recovery would reload the stale on-disk `run_at` (the active path's row would still read `state='active'`) and the job would be immediately pullable again.
+
+### moveToWaitingChildren (`jobStateTransitions.ts`)
+
+Claims an active job from its processing shard, then under the queue shard lock
+releases its concurrency/group/owned unique-key resources, clears `startedAt`,
+stores it in `waitingChildren`, updates `jobIndex`, appends the transition,
+persists it through `markWaitingChildren`, and emits `waiting-children` once.
+The synchronous critical section contains no `await`. The TCP command and all
+public Queue/Worker/Job factories use this same transition, and restart
+recovery preserves the parked row.
 
 ### discardJob (`jobMoveOperations.ts`)
 
@@ -223,7 +233,7 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 
 ## Configuration
 
-- `cleanQueue` `limit` default: 1000 (`queueControl.ts:195`); `getJobs` default `end`: 100 (handler `cmd.limit ?? 100`).
+- `cleanQueue` `limit` default: 1000 (`queueControl.ts:195`); `getJobs` default `end`: 100. An explicit `end: -1` is exhaustive: embedded reads use an effectively unbounded end, while the TCP client drains 1,000-row pages until exhaustion.
 - `LOCK_TIMEOUT_MS` (default 5000) bounds the read/write locks taken by these operations.
 - Memory-bound sizes (affect query result availability): `completedJobs=50000`, `jobResults=10000`, `jobLogs=10000`, `customIdMap=50000`; cleanup runs every 10s. See [Configuration & Entrypoint](./configuration.md).
 - `BUNQUEUE_DATA_PATH` (and the `BQ_DATA_PATH`/`DATA_PATH`/`SQLITE_PATH` fallbacks) determine whether the SQLite fallback paths in queries are active.

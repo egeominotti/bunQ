@@ -6,8 +6,8 @@
  * - moveToWaitingChildren: Active -> WaitingChildren
  */
 
-import type { JobId } from '../../domain/types/job';
-import type { EventType } from '../../domain/types/queue';
+import { MAX_TIMELINE_ENTRIES, type JobId } from '../../domain/types/job';
+import { EventType } from '../../domain/types/queue';
 import type { JobManagementContext } from './jobManagement';
 import { shardIndex, processingShardIndex } from '../../shared/hash';
 import { withWriteLock } from '../../shared/lock';
@@ -39,7 +39,7 @@ export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext):
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     // Release concurrency/uniqueKey/group slots before re-queueing
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     shard.getQueue(job.queue).push(job);
     shard.incrementQueued(jobId, false, job.createdAt, job.queue, job.runAt);
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
@@ -104,14 +104,28 @@ export async function moveToWaitingChildren(
 
   if (!job) return false;
 
+  const now = Date.now();
+  job.startedAt = null;
+  if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
+    job.timeline.push({ state: 'waiting-children', timestamp: now });
+  }
   const idx = shardIndex(job.queue);
 
   await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     // Release concurrency/uniqueKey/group slots before moving to waitingChildren
-    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId);
+    shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     shard.waitingChildren.set(jobId, job);
     ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
+  });
+
+  ctx.storage?.markWaitingChildren(jobId, job.timeline);
+  ctx.eventsManager.broadcast({
+    eventType: EventType.WaitingChildren,
+    jobId,
+    queue: job.queue,
+    timestamp: now,
+    prev: 'active',
   });
 
   return true;

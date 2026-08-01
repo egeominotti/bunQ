@@ -6,6 +6,7 @@
 import type { JobInput, JobState } from './job';
 import type { AtomicFlowJobInput } from './flow';
 import type { CronJobOptions } from './cron';
+import type { DlqFilter } from './dlq';
 
 /** Base command interface */
 interface BaseCommand {
@@ -154,6 +155,7 @@ export interface GetJobsCommand extends BaseCommand {
   readonly state?: JobState | JobState[];
   readonly limit?: number;
   readonly offset?: number;
+  readonly asc?: boolean;
 }
 
 export interface GetJobCountsCommand extends BaseCommand {
@@ -276,6 +278,12 @@ export interface DlqCommand extends BaseCommand {
   readonly cmd: 'Dlq';
   readonly queue: string;
   readonly count?: number;
+  readonly filter?: DlqFilter;
+}
+
+export interface GetDlqStatsCommand extends BaseCommand {
+  readonly cmd: 'GetDlqStats';
+  readonly queue: string;
 }
 
 export interface RetryDlqCommand extends BaseCommand {
@@ -284,6 +292,7 @@ export interface RetryDlqCommand extends BaseCommand {
   readonly jobId?: string;
   /** Cap the number of DLQ entries retried (omit = retry all). #111-class. */
   readonly count?: number;
+  readonly filter?: DlqFilter;
 }
 
 export interface PurgeDlqCommand extends BaseCommand {
@@ -295,6 +304,38 @@ export interface RetryCompletedCommand extends BaseCommand {
   readonly cmd: 'RetryCompleted';
   readonly queue: string;
   readonly id?: string;
+  readonly count?: number;
+  readonly timestamp?: number;
+}
+
+// ============ Queue Introspection Commands ============
+
+export interface GetQueueLimitsCommand extends BaseCommand {
+  readonly cmd: 'GetQueueLimits';
+  readonly queue: string;
+  readonly maxJobs?: number;
+}
+
+export interface GetDeduplicationJobIdCommand extends BaseCommand {
+  readonly cmd: 'GetDeduplicationJobId';
+  readonly queue: string;
+  readonly deduplicationId: string;
+}
+
+export interface RemoveDeduplicationKeyCommand extends BaseCommand {
+  readonly cmd: 'RemoveDeduplicationKey';
+  readonly queue: string;
+  readonly deduplicationId: string;
+}
+
+export interface RemoveJobDeduplicationKeyCommand extends BaseCommand {
+  readonly cmd: 'RemoveJobDeduplicationKey';
+  readonly id: string;
+}
+
+export interface MoveToWaitingChildrenCommand extends BaseCommand {
+  readonly cmd: 'MoveToWaitingChildren';
+  readonly id: string;
 }
 
 // ============ Rate Limiting Commands ============
@@ -659,9 +700,15 @@ export type Command =
   | ListQueuesCommand
   | CleanCommand
   | DlqCommand
+  | GetDlqStatsCommand
   | RetryDlqCommand
   | PurgeDlqCommand
   | RetryCompletedCommand
+  | GetQueueLimitsCommand
+  | GetDeduplicationJobIdCommand
+  | RemoveDeduplicationKeyCommand
+  | RemoveJobDeduplicationKeyCommand
+  | MoveToWaitingChildrenCommand
   | RateLimitCommand
   | SetConcurrencyCommand
   | RateLimitClearCommand

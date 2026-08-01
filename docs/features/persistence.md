@@ -11,7 +11,7 @@ The persistence layer is the durable store that backs the in-memory sharded queu
 Owns:
 - The SQLite `Database` handle, PRAGMA tuning, schema creation, and incremental migrations (`sqlite.ts:71-121`, `sqlite.ts:255-278`).
 - Buffered and durable (immediate) job inserts, single and bulk (`insertJob`, `insertJobImmediate`, `insertJobsBatch`).
-- State-mutating writes: `markActive`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `deleteJob`.
+- State-mutating writes: `markActive`, `markWaitingChildren`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `clearJobUniqueKey`, `deleteJob`.
 - Results, DLQ rows, cron rows, queue control-state rows, the durable
   flow-failure outbox, and `removeOnComplete` dependency evidence with bounded
   recent retention plus live-edge pin ownership.
@@ -62,7 +62,7 @@ type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: numb
 
 Key methods (real signatures):
 - Inserts: `insertJob(job: Job, durable?: boolean): void`, `insertJobImmediate(job: Job): void`, `insertJobsBatch(jobs: Job[], durable?: boolean): void`.
-- State: `markActive(jobId, startedAt, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `deleteJob(jobId)`.
+- State: `markActive(jobId, startedAt, timeline?)`, `markWaitingChildren(jobId, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `clearJobUniqueKey(jobId)`, `deleteJob(jobId)`.
 - Flow transactions: `commitFailedJob(jobId, dlqEntry, flowFailure)`,
   `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
   `updateFlowParentResolution(parent)`, `saveFlowFailure(record)`,
@@ -152,7 +152,7 @@ the field existed while retaining the schema's
 still always provide the field explicitly.
 
 State transitions and the flush-before-update invariant:
-`markActive`/`markCompleted`/`markFailed`, `updateJobData`,
+`markActive`/`markWaitingChildren`/`markCompleted`/`markFailed`, `updateJobData`,
 `updateJobPriority`, `updateJobProgress`, and delay updates first call
 `flushIfBuffered(jobId)` (`sqlite.ts`). If the row's INSERT is still buffered,
 the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite
@@ -161,6 +161,10 @@ heartbeat in one synchronous update. Priority persistence writes both
 `priority` and the effective `lifo` tie-break so recovery reconstructs the same
 heap order. `moveActiveToWait` also uses `updateRunAt`, clearing the persisted
 active marker so restart recovery cannot treat a manual requeue as a crash.
+`markWaitingChildren` similarly flushes a buffered insert, writes the dedicated
+state, clears `started_at`, and persists the transition timeline. Explicit
+deduplication-key release uses `clearJobUniqueKey` after its owner-aware
+in-memory mutation so recovery cannot recreate the removed key.
 
 External snapshot flush invariant: `flushWriteBuffer()` invokes the synchronous
 buffer flush and then checks `pendingCount`. A storage error can re-buffer rows
@@ -206,6 +210,11 @@ deterministic priority/run-at/id ordering. A persisted ready state
 (`waiting`/`prioritized`/`delayed`) is an authoritative dependency checkpoint,
 so bounded-proof eviction cannot regress a promoted parent. Later phases
 restore the DLQ, limiter state, and bounded completed cache.
+
+A pending row already marked `waiting-children` is restored into the parked
+collection even when it was moved there manually and has no unresolved
+`depends_on` entries. It is never inserted into the runnable priority heap as a
+side effect of restart.
 
 Migrations (`sqlite.ts:255-278`): on construct, ensures `migrations` table,
 reads `MAX(version)`; if below `SCHEMA_VERSION` (29) it runs the idempotent base

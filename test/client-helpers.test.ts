@@ -917,7 +917,7 @@ describe('jobConversion', () => {
       expect(await publicJob.isFailed()).toBe(true);
     });
 
-    test('isWaitingChildren should use getDependenciesCount', async () => {
+    test('isWaitingChildren should use the broker state', async () => {
       const internalJob = makeInternalJob();
 
       const publicJob = createPublicJob({
@@ -925,7 +925,7 @@ describe('jobConversion', () => {
         name: 'test',
         updateProgress: async () => {},
         log: async () => {},
-        getDependenciesCount: async () => ({ processed: 2, unprocessed: 3 }),
+        getState: async () => 'waiting-children',
       });
 
       expect(await publicJob.isWaitingChildren()).toBe(true);
@@ -939,7 +939,7 @@ describe('jobConversion', () => {
         name: 'test',
         updateProgress: async () => {},
         log: async () => {},
-        getDependenciesCount: async () => ({ processed: 5, unprocessed: 0 }),
+        getState: async () => 'waiting',
       });
 
       expect(await publicJob.isWaitingChildren()).toBe(false);
@@ -1758,11 +1758,10 @@ describe('QueueEvents', () => {
         completedValue = returnvalue;
       });
 
-      const worker = new Worker(
-        'events-completed-test',
-        async (job) => job.data.value * 2,
-        { embedded: true, autorun: true }
-      );
+      const worker = new Worker('events-completed-test', async (job) => job.data.value * 2, {
+        embedded: true,
+        autorun: true,
+      });
 
       await queue.add('task', { value: 21 });
       await Bun.sleep(500);

@@ -11,6 +11,22 @@ interface RateLimitContext {
   tcp: TcpConnectionPool | null;
 }
 
+interface QueueLimits {
+  rateLimit: { max: number; duration: number } | null;
+  rateLimitTtl: number;
+  concurrencyLimit: number | null;
+  maxed: boolean;
+}
+
+async function getQueueLimits(ctx: RateLimitContext, maxJobs?: number): Promise<QueueLimits> {
+  if (ctx.embedded) return getSharedManager().getQueueLimitStatus(ctx.name, maxJobs);
+  if (!ctx.tcp) {
+    return { rateLimit: null, rateLimitTtl: -2, concurrencyLimit: null, maxed: false };
+  }
+  const response = await ctx.tcp.send({ cmd: 'GetQueueLimits', queue: ctx.name, maxJobs });
+  return (response.data as { limits: QueueLimits }).limits;
+}
+
 /** Set global concurrency limit */
 export function setGlobalConcurrency(ctx: RateLimitContext, concurrency: number): void {
   if (ctx.embedded) {
@@ -46,8 +62,8 @@ export async function removeGlobalConcurrencyAsync(ctx: RateLimitContext): Promi
 }
 
 /** Get global concurrency limit */
-export function getGlobalConcurrency(_ctx: RateLimitContext): Promise<number | null> {
-  return Promise.resolve(null);
+export async function getGlobalConcurrency(ctx: RateLimitContext): Promise<number | null> {
+  return (await getQueueLimits(ctx)).concurrencyLimit;
 }
 
 /**
@@ -89,9 +105,9 @@ export async function removeGlobalRateLimitAsync(ctx: RateLimitContext): Promise
 
 /** Get global rate limit */
 export function getGlobalRateLimit(
-  _ctx: RateLimitContext
+  ctx: RateLimitContext
 ): Promise<{ max: number; duration: number } | null> {
-  return Promise.resolve(null);
+  return getQueueLimits(ctx).then((limits) => limits.rateLimit);
 }
 
 /**
@@ -113,11 +129,11 @@ export async function rateLimit(ctx: RateLimitContext, expireTimeMs: number): Pr
 }
 
 /** Get rate limit TTL */
-export function getRateLimitTtl(_ctx: RateLimitContext, _maxJobs?: number): Promise<number> {
-  return Promise.resolve(0);
+export async function getRateLimitTtl(ctx: RateLimitContext, maxJobs?: number): Promise<number> {
+  return (await getQueueLimits(ctx, maxJobs)).rateLimitTtl;
 }
 
 /** Check if queue is at max capacity */
-export function isMaxed(_ctx: RateLimitContext): Promise<boolean> {
-  return Promise.resolve(false);
+export async function isMaxed(ctx: RateLimitContext): Promise<boolean> {
+  return (await getQueueLimits(ctx)).maxed;
 }

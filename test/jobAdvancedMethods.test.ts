@@ -53,10 +53,9 @@ describe('Job Advanced Methods - BullMQ v5', () => {
       expect(typeof job.removeChildDependency).toBe('function');
     });
 
-    test('removeChildDependency should return false for job without parent', async () => {
+    test('removeChildDependency reports that a standalone job has no parent', async () => {
       const job = await queue.add('test', { value: 1 });
-      const removed = await job.removeChildDependency();
-      expect(removed).toBe(false);
+      await expect(job.removeChildDependency()).rejects.toThrow(/has no parent/);
     });
   });
 
@@ -66,11 +65,11 @@ describe('Job Advanced Methods - BullMQ v5', () => {
       expect(typeof job.removeDeduplicationKey).toBe('function');
     });
 
-    test('removeDeduplicationKey throws explicit error (no server primitive)', async () => {
-      const job = await queue.add('test', { value: 1 });
-      await expect(job.removeDeduplicationKey()).rejects.toThrow(
-        /removeDeduplicationKey is not implemented/
-      );
+    test('removeDeduplicationKey releases the key owned by the job', async () => {
+      const key = `advanced-${Bun.randomUUIDv7()}`;
+      const job = await queue.add('test', { value: 1 }, { deduplication: { id: key } });
+      expect(await job.removeDeduplicationKey()).toBe(true);
+      expect(await queue.getDeduplicationJobId(key)).toBeNull();
     });
   });
 
@@ -118,17 +117,25 @@ describe('JobOptions - Parent Failure Handling', () => {
   describe('continueParentOnFailure', () => {
     test('should accept continueParentOnFailure option', async () => {
       // Option should be accepted without throwing
-      const job = await queue.add('test', { value: 1 }, {
-        continueParentOnFailure: true,
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          continueParentOnFailure: true,
+        }
+      );
       expect(job).toBeDefined();
       expect(job.id).toBeDefined();
     });
 
     test('should work with false value', async () => {
-      const job = await queue.add('test', { value: 1 }, {
-        continueParentOnFailure: false,
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          continueParentOnFailure: false,
+        }
+      );
       expect(job).toBeDefined();
     });
   });
@@ -136,17 +143,25 @@ describe('JobOptions - Parent Failure Handling', () => {
   describe('ignoreDependencyOnFailure', () => {
     test('should accept ignoreDependencyOnFailure option', async () => {
       // Option should be accepted without throwing
-      const job = await queue.add('test', { value: 1 }, {
-        ignoreDependencyOnFailure: true,
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          ignoreDependencyOnFailure: true,
+        }
+      );
       expect(job).toBeDefined();
       expect(job.id).toBeDefined();
     });
 
     test('should work with false value', async () => {
-      const job = await queue.add('test', { value: 1 }, {
-        ignoreDependencyOnFailure: false,
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          ignoreDependencyOnFailure: false,
+        }
+      );
       expect(job).toBeDefined();
     });
   });
@@ -154,9 +169,13 @@ describe('JobOptions - Parent Failure Handling', () => {
   describe('timestamp', () => {
     test('should accept custom timestamp option', async () => {
       const customTimestamp = Date.now() - 10000; // 10 seconds ago
-      const job = await queue.add('test', { value: 1 }, {
-        timestamp: customTimestamp,
-      });
+      const job = await queue.add(
+        'test',
+        { value: 1 },
+        {
+          timestamp: customTimestamp,
+        }
+      );
       expect(job).toBeDefined();
       // The job's timestamp should be close to our custom timestamp
       // (may be slightly different due to processing)

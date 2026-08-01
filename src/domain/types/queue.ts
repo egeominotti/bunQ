@@ -66,6 +66,18 @@ export class RateLimiter {
     this.refill();
     return this.tokens;
   }
+
+  /**
+   * Milliseconds until the bucket can admit another job. When `maxJobs` is
+   * provided, report 0 until at least that many tokens have been consumed.
+   */
+  getTtl(maxJobs?: number): number {
+    const tokens = this.getTokens();
+    const consumed = this.capacity - tokens;
+    if (maxJobs !== undefined && consumed < maxJobs) return 0;
+    if (tokens >= 1 || this.refillRate <= 0) return 0;
+    return Math.ceil(((1 - tokens) / this.refillRate) * 1000);
+  }
 }
 
 /** Concurrency limiter */

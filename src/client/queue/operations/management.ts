@@ -2,7 +2,6 @@
  * Queue Management Operations
  * remove, retry, clean, promote, updateProgress, logs
  */
-
 import { getSharedManager } from '../../manager';
 import type { TcpConnectionPool } from '../../tcpPool';
 import { jobId } from '../../../domain/types/job';
@@ -66,16 +65,42 @@ export async function retryJobs(
   ctx: ManagementContext,
   opts?: { state?: 'failed' | 'completed'; count?: number; timestamp?: number }
 ): Promise<void> {
+  const state = opts?.state ?? 'failed';
   if (ctx.embedded) {
-    if (opts?.state === 'failed') {
-      // #111-class: forward the count cap (was ignored → retried the whole DLQ).
-      getSharedManager().retryDlq(ctx.name, undefined, opts?.count);
+    const manager = getSharedManager();
+    if (state === 'completed') {
+      manager.retryCompleted(ctx.name, undefined, {
+        limit: opts?.count,
+        timestamp: opts?.timestamp,
+      });
+    } else if (opts?.timestamp !== undefined) {
+      manager.retryDlqByFilter(ctx.name, {
+        olderThan: opts.timestamp,
+        limit: opts.count,
+      });
+    } else {
+      manager.retryDlq(ctx.name, undefined, opts?.count);
     }
     return;
   }
 
-  if (opts?.state === 'failed') {
-    await ctx.tcp!.send({ cmd: 'RetryDlq', queue: ctx.name, count: opts?.count });
+  if (state === 'completed') {
+    await ctx.tcp!.send({
+      cmd: 'RetryCompleted',
+      queue: ctx.name,
+      count: opts?.count,
+      timestamp: opts?.timestamp,
+    });
+  } else {
+    await ctx.tcp!.send({
+      cmd: 'RetryDlq',
+      queue: ctx.name,
+      count: opts?.count,
+      filter:
+        opts?.timestamp === undefined
+          ? undefined
+          : { olderThan: opts.timestamp, limit: opts.count },
+    });
   }
 }
 

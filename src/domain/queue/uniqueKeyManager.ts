@@ -65,8 +65,16 @@ export class UniqueKeyManager {
   }
 
   /** Release unique key */
-  release(queue: string, key: string): void {
-    this.keys.get(queue)?.delete(key);
+  release(queue: string, key: string): boolean {
+    return this.keys.get(queue)?.delete(key) ?? false;
+  }
+
+  /** Release a key only when it is still owned by the given job. */
+  releaseIfOwned(queue: string, key: string, ownerId: JobId): boolean {
+    const queueKeys = this.keys.get(queue);
+    const entry = queueKeys?.get(key);
+    if (!entry || entry.jobId !== ownerId) return false;
+    return queueKeys?.delete(key) ?? false;
   }
 
   /** Clean expired unique keys (call periodically) */

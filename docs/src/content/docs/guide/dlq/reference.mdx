@@ -1,6 +1,6 @@
 ---
 title: "DLQ Reference: Reasons, Entry Shape, Methods"
-description: "Reference for the bunqueue Dead Letter Queue: every reason a job lands there, the full entry structure with attempt history, and the complete method surface."
+description: "Reference for bunqueue Dead Letter Queue reasons, reserved categories, the full entry structure with attempt history, and the complete method surface."
 head:
   - tag: meta
     attrs:
@@ -24,13 +24,18 @@ head:
 
 | Reason | Description |
 |--------|-------------|
-| `explicit_fail` | The processor threw an error |
-| `max_attempts_exceeded` | Job exceeded its retry attempts |
-| `timeout` | Job timed out during processing |
+| `explicit_fail` | A retryable processor failure in the attempt history |
+| `max_attempts_exceeded` | A normal processor failure exhausted the job's attempts |
+| `timeout` | A processing timeout; retained on retry attempts and terminal timeout entries |
 | `stalled` | Job stopped sending heartbeats (worker likely crashed) |
-| `ttl_expired` | Job expired before it was processed |
-| `worker_lost` | Worker disconnected during processing |
+| `ttl_expired` | Reserved category; current waiting-job TTL expiry removes the job instead of creating a DLQ entry |
+| `worker_lost` | Reserved category; current disconnect/lock recovery is classified as `stalled` |
 | `unknown` | Fallback for unclassified failures |
+
+The entry's `reason` is the terminal cause. Its `attempts` array preserves the
+cause of every failed attempt, so a timeout followed by a normal processor
+failure is represented as `[timeout, max_attempts_exceeded]`, while two
+consecutive timeouts remain `[timeout, timeout]`.
 
 ### Entry structure
 
@@ -65,4 +70,3 @@ Each `AttemptRecord` carries the attempt number, start and failure timestamps, f
 | [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
 | [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
 | [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
-

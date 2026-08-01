@@ -63,14 +63,18 @@ async function main() {
     let processed = 0;
 
     // Worker starts AFTER jobs added and concurrency set
-    const worker = new Worker<{ index: number }>(QUEUE_NAME, async () => {
-      currentConcurrent++;
-      maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
-      await Bun.sleep(50);
-      currentConcurrent--;
-      processed++;
-      return {};
-    }, { concurrency: 10, autorun: false, embedded: true }); // Worker allows 10, but queue limit is 2
+    const worker = new Worker<{ index: number }>(
+      QUEUE_NAME,
+      async () => {
+        currentConcurrent++;
+        maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+        await Bun.sleep(50);
+        currentConcurrent--;
+        processed++;
+        return {};
+      },
+      { concurrency: 10, autorun: false, embedded: true }
+    ); // Worker allows 10, but queue limit is 2
 
     // Small delay then start worker
     await Bun.sleep(50);
@@ -80,7 +84,7 @@ async function main() {
     await worker.close();
     manager.clearConcurrency(QUEUE_NAME);
 
-    if (maxConcurrent <= 2 && processed >= 4) {
+    if (maxConcurrent <= 2 && processed === 6) {
       console.log(`   ✅ Concurrency enforced: max=${maxConcurrent}, processed=${processed}`);
       passed++;
     } else {
@@ -133,10 +137,14 @@ async function main() {
 
     const timestamps: number[] = [];
 
-    const worker = new Worker<{ index: number }>(QUEUE_NAME, async () => {
-      timestamps.push(Date.now());
-      return {};
-    }, { concurrency: 10, autorun: false, embedded: true }); // Allow high concurrency, rate limit should throttle
+    const worker = new Worker<{ index: number }>(
+      QUEUE_NAME,
+      () => {
+        timestamps.push(Date.now());
+        return {};
+      },
+      { concurrency: 10, autorun: false, embedded: true }
+    ); // Allow high concurrency, rate limit should throttle
 
     // Small delay then start worker
     await Bun.sleep(50);
@@ -147,10 +155,11 @@ async function main() {
     manager.clearRateLimit(QUEUE_NAME);
 
     // With 5 jobs/sec limit and 10 jobs, it should take ~2 seconds
-    if (timestamps.length >= 5) {
+    if (timestamps.length === 10) {
       const duration = timestamps[timestamps.length - 1] - timestamps[0];
       // At 5 jobs/sec, 10 jobs should take ~1.8-2.5 seconds
-      if (duration >= 800) { // Some tolerance for timing
+      if (duration >= 800) {
+        // Some tolerance for timing
         console.log(`   ✅ Rate limit enforced: ${timestamps.length} jobs in ${duration}ms`);
         passed++;
       } else {
@@ -158,7 +167,7 @@ async function main() {
         failed++;
       }
     } else {
-      console.log(`   ❌ Not enough jobs processed: ${timestamps.length}`);
+      console.log(`   ❌ Expected exactly 10 jobs, processed: ${timestamps.length}`);
       failed++;
     }
   } catch (e) {

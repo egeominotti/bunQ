@@ -1,6 +1,6 @@
 ---
-title: "Automatic DLQ Retry with Backoff"
-description: "Enable autoRetry so bunqueue re-queues Dead Letter Queue entries on its own, spacing attempts with exponential backoff and giving up after a bounded number of tries."
+title: "Automatic DLQ Retry"
+description: "How bunqueue automatically redelivers DLQ jobs with a bounded exponential policy that survives SQLite-backed broker restarts."
 head:
   - tag: meta
     attrs:
@@ -17,12 +17,17 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · dead letter queue</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Retries that happen <em>without you.</em></h1>
-  <p class="bq-hero-sub">Some failures are transient: a provider was down for ten minutes. Auto-retry puts those entries back on a widening backoff, so they recover on their own while permanent failures stay put for a human.</p>
+  <p class="bq-hero-sub">Some failures are transient. Auto-retry puts a due DLQ entry back into its queue, preserves its failure history, and stops after the configured retry budget.</p>
 </div>
 
 ## Automatic Retry
 
-With `autoRetry` enabled, bunqueue re-queues DLQ entries on its own, spacing retries out with exponential backoff (each retry waits twice as long as the previous one):
+With `autoRetry` enabled, a new DLQ entry receives a `nextRetryAt` equal to its
+entry time plus `autoRetryInterval`. The broker's DLQ maintenance task checks
+due entries every 60 seconds by default, removes each due entry from the
+DLQ, advances its automatic retry counter, resets the job's normal attempt and
+stall counters, and re-queues it. SQLite-backed queues perform the DLQ deletion
+and waiting-job insertion atomically.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -33,10 +38,7 @@ queue.setDlqConfig({
   autoRetryInterval: 60000,  // base delay: 1 minute
   maxAutoRetries: 3,
 });
-// 1st retry: 1 min after entering the DLQ
-// 2nd retry: 1 min after the 1st  (60s x 2^0)
-// 3rd retry: 2 min after the 2nd  (60s x 2^1)
-// After that the entry stays in the DLQ permanently
+// In TCP mode, prefer await queue.setDlqConfigAsync(...) to confirm the write.
 ```
 
 </TabItem>
@@ -48,10 +50,6 @@ await queue.setDlqConfig({
   autoRetryInterval: 60000,  // base delay: 1 minute
   maxAutoRetries: 3,
 });
-// 1st retry: 1 min after entering the DLQ
-// 2nd retry: 1 min after the 1st  (60s x 2^0)
-// 3rd retry: 2 min after the 2nd  (60s x 2^1)
-// After that the entry stays in the DLQ permanently
 ```
 
 </TabItem>
@@ -64,18 +62,71 @@ queue.set_dlq_config({
     "autoRetryInterval": 60000,  # base delay: 1 minute
     "maxAutoRetries": 3,
 })
-# 1st retry: 1 min after entering the DLQ
-# 2nd retry: 1 min after the 1st  (60s x 2^0)
-# 3rd retry: 2 min after the 2nd  (60s x 2^1)
-# After that the entry stays in the DLQ permanently
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The PHP SDK has no config helper yet. Set the server-side policy through HTTP:
+
+```bash
+curl -X PUT http://localhost:6790/queues/emails/dlq-config \
+  -H 'content-type: application/json' \
+  -d '{"autoRetry":true,"autoRetryInterval":60000,"maxAutoRetries":3}'
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The Go SDK has no config helper yet. Set the server-side policy through HTTP:
+
+```bash
+curl -X PUT http://localhost:6790/queues/emails/dlq-config \
+  -H 'content-type: application/json' \
+  -d '{"autoRetry":true,"autoRetryInterval":60000,"maxAutoRetries":3}'
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK has no config helper yet. Set the server-side policy through HTTP:
+
+```bash
+curl -X PUT http://localhost:6790/queues/emails/dlq-config \
+  -H 'content-type: application/json' \
+  -d '{"autoRetry":true,"autoRetryInterval":60000,"maxAutoRetries":3}'
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK has no config helper yet. Set the server-side policy through HTTP:
+
+```bash
+curl -X PUT http://localhost:6790/queues/emails/dlq-config \
+  -H 'content-type: application/json' \
+  -d '{"autoRetry":true,"autoRetryInterval":60000,"maxAutoRetries":3}'
 ```
 
 </TabItem>
 </Tabs>
 
-*The PHP, Go, Rust, and Elixir SDKs do not expose DLQ configuration helpers yet. The config lives server-side per queue, so setting it once from any TypeScript or Python client applies to jobs produced and consumed in every language.*
+The config lives server-side per queue, so setting it from any client applies
+to jobs produced and consumed in every language. The policy, retry counter,
+complete failure history, original entry/expiry times, and next retry time all
+survive a SQLite-backed broker restart.
 
-A background task checks for due retries every minute and re-queues jobs with a reset attempt count.
+The first retry becomes due after the base interval. Each dispatch increments
+`retryCount`; if the redelivered job fails again, its next delay follows
+`autoRetryInterval * 2^(retryCount - 1)`. Once `retryCount` reaches
+`maxAutoRetries`, `nextRetryAt` becomes `null` and automatic redelivery stops.
+
+:::note[Maintenance cadence and manual retries]
+A due retry may start up to one maintenance interval after `nextRetryAt`; the
+default maintenance interval is 60 seconds. Calling a manual `retryDlq` API is
+an operator-directed new generation: it clears the automatic retry chain and
+normal attempt/stall counters before re-queuing the job.
+:::
 
 ## Where to go next
 
@@ -86,4 +137,3 @@ A background task checks for due retries every minute and re-queues jobs with a 
 | [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
 | [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
 | [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
-

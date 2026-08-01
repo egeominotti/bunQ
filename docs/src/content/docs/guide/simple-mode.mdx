@@ -869,7 +869,7 @@ app2 = Bunqueue(
 )
 
 # Runtime updates go through the underlying queue (server-side limit)
-app.queue.set_global_rate_limit(50)
+app.queue.set_global_rate_limit(50, 1000)
 app.queue.remove_global_rate_limit()
 ```
 

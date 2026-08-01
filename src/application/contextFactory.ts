@@ -2,19 +2,6 @@
  * ContextFactory - Builds context objects for delegated operations
  */
 
-import type { Job, JobId, JobLock } from '../domain/types/job';
-import type { JobLocation } from '../domain/types/queue';
-import type { JobLogEntry } from '../domain/types/worker';
-import type { Shard } from '../domain/queue/shard';
-import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
-import type { RWLock } from '../shared/lock';
-import type { LRUMap, BoundedSet, BoundedMap, MapLike } from '../shared/lru';
-import type { WebhookManager } from './webhookManager';
-import type { WorkerManager } from './workerManager';
-import type { EventsManager } from './eventsManager';
-import type { MonitoringState } from './monitoringChecks';
-import type { DependencyResultTracker } from './dependencyResultTracker';
-import type { DependencyCompletionTracker } from './dependencyCompletions';
 import type { LockContext, BackgroundContext, StatsContext } from './types';
 import type { PushContext } from './operations/push';
 import type { PullContext } from './operations/pull';
@@ -23,61 +10,9 @@ import type { JobManagementContext } from './operations/jobManagement';
 import type { QueryContext } from './operations/queryOperations';
 import type { DlqContext, RetryCompletedContext } from './dlqManager';
 
-import type { DEFAULT_CONFIG } from './types';
+import type { ContextCallbacks, ContextDependencies } from './types/contextFactory';
 
-/** Dependencies needed to build all contexts */
-export interface ContextDependencies {
-  config: typeof DEFAULT_CONFIG & { dataPath?: string };
-  storage: SqliteStorage | null;
-  shards: Shard[];
-  shardLocks: RWLock[];
-  customIdLock: RWLock;
-  processingShards: Map<JobId, Job>[];
-  processingLocks: RWLock[];
-  jobIndex: Map<JobId, JobLocation>;
-  completedJobs: BoundedSet<JobId>;
-  completedJobsData: BoundedMap<JobId, Job>;
-  depCompletions?: DependencyCompletionTracker;
-  timedOutJobs?: BoundedSet<JobId>;
-  jobResults: LRUMap<JobId, unknown>;
-  dependencyResults: DependencyResultTracker;
-  customIdMap: LRUMap<string, JobId>;
-  jobLogs: LRUMap<JobId, JobLogEntry[]>;
-  jobLocks: Map<JobId, JobLock>;
-  clientJobs: Map<string, Set<JobId>>;
-  stalledCandidates: Set<JobId>;
-  pendingDepChecks: Set<JobId>;
-  queueNamesCache: Set<string>;
-  repeatChain: Map<JobId, JobId>;
-  eventsManager: EventsManager;
-  webhookManager: WebhookManager;
-  workerManager: WorkerManager;
-  monitoringState: MonitoringState;
-  metrics: {
-    totalPushed: { value: bigint };
-    totalPulled: { value: bigint };
-    totalCompleted: { value: bigint };
-    totalFailed: { value: bigint };
-  };
-  startTime: number;
-  maxLogsPerJob: number;
-  perQueueMetrics: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
-}
-
-/** Callbacks needed for some contexts */
-export interface ContextCallbacks {
-  fail: (jobId: JobId, error?: string, token?: string) => Promise<void>;
-  registerQueueName: (queue: string) => void;
-  unregisterQueueName: (queue: string) => void;
-  onJobCompleted: (completedId: JobId) => void;
-  onJobFailed?: (failedId: JobId) => void;
-  onJobsCompleted: (completedIds: JobId[]) => void;
-  hasPendingDeps: () => boolean;
-  onRepeat: (job: Job) => void;
-  emitDashboardEvent?: (event: string, data: Record<string, unknown>) => void;
-  onChildTerminalFailure?: (childJob: Job, error: string | undefined) => Promise<void>;
-  onChildDependencyOption?: (childJob: Job, error: string | undefined) => Promise<void>;
-}
+export type { ContextCallbacks, ContextDependencies } from './types/contextFactory';
 
 /**
  * Factory for building context objects

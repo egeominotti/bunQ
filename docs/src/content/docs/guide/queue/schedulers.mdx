@@ -141,6 +141,13 @@ queue.remove_job_scheduler("daily-report")?;
 </TabItem>
 </Tabs>
 
+Scheduler IDs are global to the broker. The Bun client applies `prefixKey` to
+the ID automatically; external SDKs do not, so prefix IDs explicitly when
+applications share a server. TypeScript and Python filter scheduler lists to
+the current queue. PHP, Go, and Elixir currently return the broker-wide list,
+so filter its `queue` field in application code. Rust exposes get/remove but no
+list or count helper yet.
+
 ## Where to go next
 
 | | |
@@ -159,4 +166,3 @@ queue.remove_job_scheduler("daily-report")?;
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

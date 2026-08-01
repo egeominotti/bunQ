@@ -9,7 +9,7 @@
 import { Queue, SandboxedWorker, FlowProducer } from '../../src/client';
 import { unlink } from 'fs/promises';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -42,7 +42,11 @@ async function writeProcessor(name: string, code: string): Promise<string> {
 
 async function cleanup() {
   for (const f of processorFiles) {
-    try { await unlink(f); } catch { /* ignore */ }
+    try {
+      await unlink(f);
+    } catch {
+      /* ignore */
+    }
   }
   for (const q of queues) {
     q.obliterate();
@@ -62,13 +66,16 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('basic', `
+    const processorPath = await writeProcessor(
+      'basic',
+      `
       export default async (job: any) => {
         return { doubled: job.data.value * 2, pid: process.pid };
       };
-    `);
+    `
+    );
 
-    const completed: Array<{ id: string; result: any }> = [];
+    const completed: Array<{ id: string; result: { doubled: number; pid: number } }> = [];
 
     const worker = new SandboxedWorker('tcp-sbx-basic', {
       processor: processorPath,
@@ -78,9 +85,9 @@ async function main() {
     });
 
     worker.on('completed', (job, result) => {
-      completed.push({ id: job.id, result });
+      completed.push({ id: job.id, result: result as { doubled: number; pid: number } });
     });
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
     await q.add('double', { value: 21 });
@@ -105,12 +112,15 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('concurrent', `
+    const processorPath = await writeProcessor(
+      'concurrent',
+      `
       export default async (job: any) => {
         await Bun.sleep(200);
         return { value: job.data.value * 3 };
       };
-    `);
+    `
+    );
 
     const completed: unknown[] = [];
     const worker = new SandboxedWorker('tcp-sbx-concurrent', {
@@ -121,7 +131,7 @@ async function main() {
     });
 
     worker.on('completed', (_job, result) => completed.push(result));
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
 
@@ -137,7 +147,9 @@ async function main() {
     const elapsed = Date.now() - start;
 
     if (completed.length === 4) {
-      const values = completed.map((r: any) => r.value).sort((a: number, b: number) => a - b);
+      const values = completed
+        .map((result) => (result as { value: number }).value)
+        .sort((a, b) => a - b);
       if (JSON.stringify(values) === JSON.stringify([3, 6, 9, 12])) {
         ok(`4 concurrent jobs processed in ${elapsed}ms: ${values}`);
       } else {
@@ -159,7 +171,9 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('progress', `
+    const processorPath = await writeProcessor(
+      'progress',
+      `
       export default async (job: any) => {
         job.progress(25);
         await Bun.sleep(50);
@@ -170,7 +184,8 @@ async function main() {
         job.progress(100);
         return { done: true };
       };
-    `);
+    `
+    );
 
     const progressUpdates: number[] = [];
     let completed = false;
@@ -183,8 +198,10 @@ async function main() {
     });
 
     worker.on('progress', (_job, progress) => progressUpdates.push(progress));
-    worker.on('completed', () => { completed = true; });
-    worker.on('error', () => {});
+    worker.on('completed', () => {
+      completed = true;
+    });
+    worker.on('error', () => undefined);
 
     await worker.start();
     await q.add('task', {});
@@ -193,10 +210,8 @@ async function main() {
 
     if (completed && JSON.stringify(progressUpdates) === JSON.stringify([25, 50, 75, 100])) {
       ok(`Progress updates: ${progressUpdates.join(' -> ')}%`);
-    } else if (completed) {
-      ok(`Job completed, progress partial: [${progressUpdates.join(', ')}]`);
     } else {
-      fail(`Job not completed. Progress: [${progressUpdates.join(', ')}]`);
+      fail(`Expected completion with [25,50,75,100], got [${progressUpdates.join(', ')}]`);
     }
 
     await worker.stop();
@@ -211,14 +226,17 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('error', `
+    const processorPath = await writeProcessor(
+      'error',
+      `
       export default async (job: any) => {
         if (job.data.shouldFail) {
           throw new Error('Intentional failure: ' + job.data.reason);
         }
         return { ok: true };
       };
-    `);
+    `
+    );
 
     const failures: Array<{ id: string; error: string }> = [];
     const completions: string[] = [];
@@ -232,7 +250,7 @@ async function main() {
 
     worker.on('failed', (job, err) => failures.push({ id: job.id, error: err.message }));
     worker.on('completed', (job) => completions.push(job.id));
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
 
@@ -243,10 +261,16 @@ async function main() {
       await Bun.sleep(100);
     }
 
-    if (failures.length === 1 && failures[0].error.includes('Intentional failure: bad input') && completions.length === 1) {
+    if (
+      failures.length === 1 &&
+      failures[0].error.includes('Intentional failure: bad input') &&
+      completions.length === 1
+    ) {
       ok(`Error handled: "${failures[0].error}", success: ${completions[0]}`);
     } else {
-      fail(`Expected 1 fail + 1 success, got fails=${failures.length} completes=${completions.length}`);
+      fail(
+        `Expected 1 fail + 1 success, got fails=${failures.length} completes=${completions.length}`
+      );
     }
 
     await worker.stop();
@@ -261,12 +285,15 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('timeout', `
+    const processorPath = await writeProcessor(
+      'timeout',
+      `
       export default async (job: any) => {
         await Bun.sleep(30000);
         return { ok: true };
       };
-    `);
+    `
+    );
 
     const failures: string[] = [];
 
@@ -279,7 +306,7 @@ async function main() {
     });
 
     worker.on('failed', (_job, err) => failures.push(err.message));
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
     await q.add('slow-job', {});
@@ -304,14 +331,17 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('crash', `
+    const processorPath = await writeProcessor(
+      'crash',
+      `
       export default async (job: any) => {
         if (job.data.crash) {
           throw new Error('Simulated crash');
         }
         return { ok: true };
       };
-    `);
+    `
+    );
 
     const failures: string[] = [];
     const completions: unknown[] = [];
@@ -327,7 +357,7 @@ async function main() {
 
     worker.on('failed', (_job, err) => failures.push(err.message));
     worker.on('completed', (_job, result) => completions.push(result));
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
 
@@ -342,7 +372,9 @@ async function main() {
     if (failures.length >= 1 && completions.length >= 1) {
       ok(`Worker recovered: failure="${failures[0]}", then completed ${completions.length} job(s)`);
     } else {
-      fail(`Worker did not recover: completions=${completions.length}, failures=${failures.length}`);
+      fail(
+        `Worker did not recover: completions=${completions.length}, failures=${failures.length}`
+      );
     }
 
     await worker.stop();
@@ -357,12 +389,15 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('stats', `
+    const processorPath = await writeProcessor(
+      'stats',
+      `
       export default async (job: any) => {
         await Bun.sleep(500);
         return { ok: true };
       };
-    `);
+    `
+    );
 
     const worker = new SandboxedWorker('tcp-sbx-stats', {
       processor: processorPath,
@@ -371,7 +406,7 @@ async function main() {
       connection: connOpts,
     });
 
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
     await worker.start();
 
     // Before any jobs
@@ -417,12 +452,15 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('flow', `
+    const processorPath = await writeProcessor(
+      'flow',
+      `
       export default async (job: any) => {
         const step = job.data.step;
         return { step, result: step * 10 };
       };
-    `);
+    `
+    );
 
     const completed: Array<{ step: number; result: number }> = [];
 
@@ -433,10 +471,11 @@ async function main() {
       connection: connOpts,
     });
 
-    worker.on('completed', (_job, result: any) => {
-      completed.push({ step: result.step, result: result.result });
+    worker.on('completed', (_job, result) => {
+      const value = result as { step: number; result: number };
+      completed.push({ step: value.step, result: value.result });
     });
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
 
@@ -451,7 +490,9 @@ async function main() {
     if (completed.length === 3) {
       const steps = completed.map((c) => c.step).sort();
       if (JSON.stringify(steps) === JSON.stringify([0, 1, 2])) {
-        ok(`Flow chain: all 3 steps completed: ${completed.map((c) => `step${c.step}=${c.result}`).join(', ')}`);
+        ok(
+          `Flow chain: all 3 steps completed: ${completed.map((c) => `step${c.step}=${c.result}`).join(', ')}`
+        );
       } else {
         fail(`Steps wrong: ${JSON.stringify(steps)}`);
       }
@@ -460,7 +501,7 @@ async function main() {
     }
 
     await worker.stop();
-    flow.close();
+    await flow.close();
   }
 
   // ─────────────────────────────────────────────────
@@ -472,14 +513,17 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('log', `
+    const processorPath = await writeProcessor(
+      'log',
+      `
       export default async (job: any) => {
         job.log('Starting processing');
         await Bun.sleep(10);
         job.log('Almost done');
         return { ok: true };
       };
-    `);
+    `
+    );
 
     const logs: string[] = [];
     let completed = false;
@@ -492,8 +536,10 @@ async function main() {
     });
 
     worker.on('log', (_job, message) => logs.push(message));
-    worker.on('completed', () => { completed = true; });
-    worker.on('error', () => {});
+    worker.on('completed', () => {
+      completed = true;
+    });
+    worker.on('error', () => undefined);
 
     await worker.start();
     await q.add('log-job', {});
@@ -502,10 +548,8 @@ async function main() {
 
     if (completed && logs.includes('Starting processing') && logs.includes('Almost done')) {
       ok(`Logs received: "${logs.join('", "')}"`);
-    } else if (completed) {
-      ok(`Job completed, logs partial: [${logs.join(', ')}]`);
     } else {
-      fail(`Job not completed. Logs: [${logs.join(', ')}]`);
+      fail(`Expected both log messages before completion, got [${logs.join(', ')}]`);
     }
 
     await worker.stop();
@@ -520,11 +564,14 @@ async function main() {
     q.obliterate();
     await Bun.sleep(100);
 
-    const processorPath = await writeProcessor('throughput', `
+    const processorPath = await writeProcessor(
+      'throughput',
+      `
       export default async (job: any) => {
         return { idx: job.data.idx, squared: job.data.idx * job.data.idx };
       };
-    `);
+    `
+    );
 
     let completedCount = 0;
     const JOB_COUNT = 50;
@@ -537,7 +584,7 @@ async function main() {
     });
 
     worker.on('completed', () => completedCount++);
-    worker.on('error', () => {});
+    worker.on('error', () => undefined);
 
     await worker.start();
 

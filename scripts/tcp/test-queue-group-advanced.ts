@@ -1,15 +1,12 @@
 #!/usr/bin/env bun
 /**
- * QueueGroup Advanced Tests (TCP Mode)
- *
- * Since QueueGroup uses getSharedManager() (embedded-only),
- * this script simulates group behavior using prefixed queue names
- * to demonstrate namespace isolation patterns over TCP.
+ * Advanced namespace-isolation stress tests over TCP.
+ * The QueueGroup API contract itself is exercised in test-queue-group.ts.
  */
 
 import { Queue, Worker } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -38,9 +35,7 @@ async function test1_namespaceIsolation() {
   const billingInvoices = makeQueue<{ type: string }>('tcp-grp-billing:invoices');
   const shippingOrders = makeQueue<{ type: string }>('tcp-grp-shipping:orders');
 
-  billingInvoices.obliterate();
-  shippingOrders.obliterate();
-  await Bun.sleep(200);
+  await Promise.all([billingInvoices.obliterateAsync(), shippingOrders.obliterateAsync()]);
 
   await billingInvoices.add('inv', { type: 'billing-invoice' });
   await billingInvoices.add('inv', { type: 'billing-invoice-2' });
@@ -56,7 +51,7 @@ async function test1_namespaceIsolation() {
       billingReceived.push(job.data.type);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   const w2 = new Worker<{ type: string }>(
@@ -65,7 +60,7 @@ async function test1_namespaceIsolation() {
       shippingReceived.push(job.data.type);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   for (let i = 0; i < 30; i++) await Bun.sleep(100);
@@ -79,11 +74,11 @@ async function test1_namespaceIsolation() {
     shippingReceived.length === 2 &&
     shippingReceived.every((t) => t.startsWith('shipping-'))
   ) {
-    ok(`Billing got ${billingReceived.length} jobs, shipping got ${shippingReceived.length} jobs - isolation verified`);
-  } else {
-    fail(
-      `Billing: [${billingReceived.join(', ')}], Shipping: [${shippingReceived.join(', ')}]`,
+    ok(
+      `Billing got ${billingReceived.length} jobs, shipping got ${shippingReceived.length} jobs - isolation verified`
     );
+  } else {
+    fail(`Billing: [${billingReceived.join(', ')}], Shipping: [${shippingReceived.join(', ')}]`);
   }
 }
 
@@ -94,10 +89,7 @@ async function test2_multiplePrefixedQueues() {
   const q2 = makeQueue<{ idx: number }>('tcp-grp-multi:beta');
   const q3 = makeQueue<{ idx: number }>('tcp-grp-multi:gamma');
 
-  q1.obliterate();
-  q2.obliterate();
-  q3.obliterate();
-  await Bun.sleep(200);
+  await Promise.all([q1.obliterateAsync(), q2.obliterateAsync(), q3.obliterateAsync()]);
 
   await q1.add('task', { idx: 1 });
   await q1.add('task', { idx: 2 });
@@ -116,7 +108,7 @@ async function test2_multiplePrefixedQueues() {
       alphaResults.push(job.data.idx);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   const w2 = new Worker<{ idx: number }>(
@@ -125,7 +117,7 @@ async function test2_multiplePrefixedQueues() {
       betaResults.push(job.data.idx);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   const w3 = new Worker<{ idx: number }>(
@@ -134,7 +126,7 @@ async function test2_multiplePrefixedQueues() {
       gammaResults.push(job.data.idx);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   for (let i = 0; i < 30; i++) await Bun.sleep(100);
@@ -153,9 +145,7 @@ async function test2_multiplePrefixedQueues() {
   ) {
     ok('All 3 prefixed queues processed independently');
   } else {
-    fail(
-      `Alpha: [${alphaResults}], Beta: [${betaResults}], Gamma: [${gammaResults}]`,
-    );
+    fail(`Alpha: [${alphaResults}], Beta: [${betaResults}], Gamma: [${gammaResults}]`);
   }
 }
 
@@ -165,9 +155,7 @@ async function test3_crossGroupNoInterference() {
   const qA = makeQueue<{ src: string }>('tcp-grp-a:q1');
   const qB = makeQueue<{ src: string }>('tcp-grp-b:q1');
 
-  qA.obliterate();
-  qB.obliterate();
-  await Bun.sleep(200);
+  await Promise.all([qA.obliterateAsync(), qB.obliterateAsync()]);
 
   // Push only to group A
   await qA.add('task', { src: 'group-a-job-1' });
@@ -182,7 +170,7 @@ async function test3_crossGroupNoInterference() {
       bReceived.push(job.data.src);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   for (let i = 0; i < 20; i++) await Bun.sleep(100);
@@ -197,8 +185,8 @@ async function test3_crossGroupNoInterference() {
   }
 
   // Verify group A jobs are untouched (waiting or still in queue)
-  const countsA = await qA.getJobCounts();
-  if (countsA.waiting >= 0 && bReceived.length === 0) {
+  const countsA = await qA.getJobCountsAsync();
+  if (countsA.waiting === 2 && bReceived.length === 0) {
     ok(`grp-a:q1 jobs not consumed by grp-b worker (waiting=${countsA.waiting})`);
   } else {
     fail(`Unexpected state: waiting=${countsA.waiting}, bReceived=${bReceived.length}`);
@@ -211,16 +199,13 @@ async function test4_prefixedQueuePauseResume() {
   const q1 = makeQueue<{ idx: number }>('tcp-grp-pr:q1');
   const q2 = makeQueue<{ idx: number }>('tcp-grp-pr:q2');
 
-  q1.obliterate();
-  q2.obliterate();
-  await Bun.sleep(200);
+  await Promise.all([q1.obliterateAsync(), q2.obliterateAsync()]);
 
   await q1.add('task', { idx: 1 });
   await q2.add('task', { idx: 2 });
 
   // Pause only q1
-  q1.pause();
-  await Bun.sleep(200);
+  await q1.pauseAsync();
 
   const q1Received: number[] = [];
   const q2Received: number[] = [];
@@ -231,7 +216,7 @@ async function test4_prefixedQueuePauseResume() {
       q1Received.push(job.data.idx);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   const w2 = new Worker<{ idx: number }>(
@@ -240,7 +225,7 @@ async function test4_prefixedQueuePauseResume() {
       q2Received.push(job.data.idx);
       return {};
     },
-    { connection: connOpts, useLocks: false },
+    { connection: connOpts, useLocks: false }
   );
 
   // Wait for q2 to process while q1 stays paused
@@ -260,7 +245,7 @@ async function test4_prefixedQueuePauseResume() {
   }
 
   // Resume q1 and verify it processes
-  q1.resume();
+  await q1.resumeAsync();
 
   for (let i = 0; i < 20; i++) await Bun.sleep(100);
 
@@ -293,7 +278,7 @@ async function test5_highVolumeAcrossGroups() {
 
       const q = makeQueue<{ group: string; queue: string; idx: number }>(fullName);
       allQueues.push(q);
-      q.obliterate();
+      await q.obliterateAsync();
     }
   }
 
@@ -303,9 +288,6 @@ async function test5_highVolumeAcrossGroups() {
   for (const grp of groupNames) {
     for (const suf of queueSuffixes) {
       const fullName = `${grp}:${suf}`;
-      const q = allQueues.find(
-        (queue) => (queue as unknown as { name: string }).name === fullName,
-      );
       // Use a new reference to add
       const addQueue = makeQueue<{ group: string; queue: string; idx: number }>(fullName);
       for (let i = 0; i < 20; i++) {
@@ -324,7 +306,7 @@ async function test5_highVolumeAcrossGroups() {
           results[fullName].push(job.data.idx);
           return {};
         },
-        { connection: connOpts, concurrency: 5, useLocks: false },
+        { connection: connOpts, concurrency: 5, useLocks: false }
       );
       allWorkers.push(w);
     }
@@ -372,7 +354,7 @@ async function main() {
 
   // Cleanup
   for (const q of queues) {
-    q.obliterate();
+    await q.obliterateAsync();
     q.close();
   }
 

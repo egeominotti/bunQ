@@ -401,7 +401,7 @@ and custom object types are rejected as non-portable.
 | Query | `getJob`, `getJobByCustomId`, `getJobs` with per state helpers, state, result, progress, `waitForJob` (throws on timeout, BullMQ contract), counts, counts per priority, children values, job logs |
 | Control | pause, resume, drain, obliterate, clean, remove, discard, promote, `retryJob`, `retryJobs`, move to wait or delayed, change priority or delay, update data, extend lock |
 | Dead letter queue | `getDlq`, `retryDlq`, `purgeDlq`, DLQ configuration |
-| Administration | rate limiting, global concurrency, stall configuration, webhooks, stats, metrics, `listQueues`, `getWorkers` |
+| Administration | rate limiting with custom windows (`setGlobalRateLimit(max, duration)`), global concurrency, stall configuration, webhooks, stats, metrics, `listQueues`, `getWorkers` |
 | Worker events | `ready`, `active`, `completed`, `failed`, `progress`, `drained`, `error`, `closed`, with automatic lock heartbeats so that jobs longer than the lock TTL survive |
 | Simple Mode | `Bunqueue`: routes, middleware, in process retry (fixed, exponential, jitter, fibonacci, custom), circuit breaker, batch accumulation, triggers, TTL, priority aging, cancellation via `getSignal`, dedup and debounce defaults, cron shorthands |
 

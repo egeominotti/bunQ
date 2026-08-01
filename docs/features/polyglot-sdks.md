@@ -33,15 +33,15 @@ protocol command itself.
 | Non-serialization `Job` operations | 13/32 | 13/32 | 4/32 | 4/32 | 3/32 | 2/32 |
 | Dedup owner lookup and key release | Partial⁴ | Partial⁴ | — | — | — | — |
 | Dependency pagination/counts and waiting-children transition | Partial | Partial | Partial | Partial | — | — |
-| Rate/concurrency mutation | Partial⁵ | Partial⁵ | Partial⁶ | Partial⁶ | Partial⁶ | Full |
+| Rate/concurrency mutation | Full | Full | Partial⁵ | Partial⁵ | Partial⁵ | Full |
 | Rate/concurrency readback and max/TTL status | — | — | — | — | — | — |
 | Rich DLQ entries, statistics, filtered retry | — | — | — | — | — | — |
-| Bulk retry with state/count/timestamp selectors | Partial⁷ | Partial⁷ | — | — | — | — |
+| Bulk retry with state/count/timestamp selectors | Partial⁶ | Partial⁶ | — | — | — | — |
 | Atomic flow tree and chain creation | Full | Full | Full | Full | Full | Full |
 | Flow bulk, fan-in, and tree readback | Full | Full | Read only | Read only | — | — |
-| Queue-scoped worker discovery | Partial⁸ | Partial⁸ | Partial⁸ | Partial⁸ | — | — |
-| Scheduler CRUD and queue-scoped list | Full | Full | Partial⁹ | Partial⁹ | Partial | Partial⁹ |
-| Stats, metrics, and webhooks | Full | Full | Partial¹⁰ | Partial¹⁰ | — | — |
+| Queue-scoped worker discovery | Partial⁷ | Partial⁷ | Partial⁷ | Partial⁷ | — | — |
+| Scheduler CRUD and queue-scoped list | Full | Full | Partial⁸ | Partial⁸ | Partial | Partial⁸ |
+| Stats, metrics, and webhooks | Full | Full | Partial⁹ | Partial⁹ | — | — |
 | Queue groups and store-and-forward | — | — | — | — | — | — |
 | Simple all-in-one mode | Full | Full | — | — | — | — |
 | Workflow/saga engine | — | — | — | — | — | — |
@@ -61,19 +61,17 @@ Audit notes:
 4. TypeScript and Python expose an owner lookup but route it through
    `GetJobByCustomId`. Custom IDs and deduplication keys are separate indexes,
    so this can return the wrong answer; neither SDK exposes key release.
-5. TypeScript and Python expose rate and concurrency mutation, but accept a
-   rate-window duration without putting it on the wire.
-6. PHP, Go, and Rust preserve rate duration/TTL but expose no global
+5. PHP, Go, and Rust preserve rate duration/TTL but expose no global
    concurrency mutation helper.
-7. Failed-job count works. Completed retry drops `count`, neither client
+6. Failed-job count works. Completed retry drops `count`, neither client
    exposes the terminal `timestamp` cutoff, and TypeScript discards the applied
    count from its return type.
-8. These SDKs decode `ListWorkers` but return the server-wide registry rather
+7. These SDKs decode `ListWorkers` but return the server-wide registry rather
    than filtering it to `queue.name`; their count helpers are global too.
-9. PHP, Go, and Elixir return every server scheduler from `CronList`, not just
+8. PHP, Go, and Elixir return every server scheduler from `CronList`, not just
    the current queue. Rust has create/get/remove but no list helper and lacks
    some scheduler flags.
-10. PHP and Go expose stats and webhooks but not metrics; Rust and Elixir expose
+9. PHP and Go expose stats and webhooks but not metrics; Rust and Elixir expose
     none of the three typed surfaces.
 
 The full 32-method Bun `Job` denominator excludes `toJSON` and `asJSON`.
@@ -89,8 +87,10 @@ parity percentages**: the union includes dashboard, maintenance, and alternate
 primitive commands, while one higher-level feature can compose several
 commands. The method/semantics matrix above is the authoritative audit.
 
-No file under `sdk/` was changed by this audit. Closing these gaps requires a
-separate per-SDK TDD change and the mandatory `bun run test:sandbox:sdk` gate.
+The TypeScript and Python duration gap found by this audit is closed by a
+real-broker regression that reads the applied window through `GetQueueLimits`.
+The remaining gaps require separate per-SDK TDD changes and the mandatory
+`bun run test:sandbox:sdk` gate.
 
 WebAssembly is not treated as a seventh runtime yet. Browser WASM has no
 portable raw-TCP primitive, while WASI socket and TLS support depends on the

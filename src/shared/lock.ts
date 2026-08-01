@@ -6,25 +6,11 @@
 
 /** Default lock timeout in milliseconds */
 const DEFAULT_LOCK_TIMEOUT_MS = parseInt(Bun.env.LOCK_TIMEOUT_MS ?? '5000', 10);
+import { LockTimeoutError } from './lockError';
+import type { LockGuard, LockQueueEntry } from './types/lock';
 
-/** Lock acquisition result */
-export interface LockGuard {
-  release(): void;
-}
-
-/** Lock timeout error */
-export class LockTimeoutError extends Error {
-  constructor(message: string = 'Lock acquisition timed out') {
-    super(message);
-    this.name = 'LockTimeoutError';
-  }
-}
-
-/** Wrapper for queue entries to enable O(1) cancellation */
-interface QueueEntry {
-  resolve: () => void;
-  cancelled: boolean;
-}
+export { LockTimeoutError } from './lockError';
+export type { LockGuard } from './types/lock';
 
 /**
  * Simple async mutex lock
@@ -33,7 +19,7 @@ interface QueueEntry {
  */
 export class AsyncLock {
   private locked = false;
-  private readonly queue: QueueEntry[] = [];
+  private readonly queue: LockQueueEntry[] = [];
 
   /**
    * Acquire the lock
@@ -49,7 +35,7 @@ export class AsyncLock {
       }
 
       await new Promise<void>((resolve) => {
-        const entry: QueueEntry = { resolve, cancelled: false };
+        const entry: LockQueueEntry = { resolve, cancelled: false };
 
         const timer = setTimeout(() => {
           // O(1) cancellation - just mark as cancelled
@@ -111,8 +97,8 @@ export class RWLock {
   private readers = 0;
   private writer = false;
   private writerWaiting = 0;
-  private readonly readerQueue: QueueEntry[] = [];
-  private readonly writerQueue: QueueEntry[] = [];
+  private readonly readerQueue: LockQueueEntry[] = [];
+  private readonly writerQueue: LockQueueEntry[] = [];
 
   /**
    * Acquire read lock
@@ -129,7 +115,7 @@ export class RWLock {
       }
 
       await new Promise<void>((resolve) => {
-        const entry: QueueEntry = { resolve, cancelled: false };
+        const entry: LockQueueEntry = { resolve, cancelled: false };
 
         const timer = setTimeout(() => {
           // O(1) cancellation - just mark as cancelled
@@ -193,7 +179,7 @@ export class RWLock {
         }
 
         await new Promise<void>((resolve) => {
-          const entry: QueueEntry = { resolve, cancelled: false };
+          const entry: LockQueueEntry = { resolve, cancelled: false };
 
           const timer = setTimeout(() => {
             // O(1) cancellation - just mark as cancelled

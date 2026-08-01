@@ -6,14 +6,21 @@
  * Heavy: recentJobs, dlqEntries, topErrors, workerDetails, queueConfigs, webhooks — O(queues × shards)
  */
 
-import { hostname, arch, platform, cpus } from 'os';
-import type { QueueManager } from '../../application/queueManager';
 import { throughputTracker } from '../../application/throughputTracker';
 import { latencyTracker } from '../../application/latencyTracker';
 import { getTaskErrorStats } from '../../application/backgroundTasks';
 import { VERSION } from '../../shared/version';
 import type { CloudSnapshot } from './types';
 import { cloudLog } from './logger';
+import {
+  SNAPSHOT_HOST,
+  SNAPSHOT_RUNTIME,
+  collectCrons,
+  collectJobArtifacts,
+  collectWorkerDetails,
+  enrichFailedJobDurations,
+  resolveRedaction,
+} from './snapshot/collector';
 import {
   collectLiveJobs,
   collectDlqEntries,
@@ -29,120 +36,9 @@ import {
   collectStallDetails,
   collectPriorityDistribution,
 } from './snapshotHelpers';
+import type { CollectSnapshotParams } from './types/collector';
 
-/** Cached hostname — computed once */
-const HOST = hostname();
-
-/** Cached runtime info — computed once */
-const RUNTIME = {
-  bunVersion: typeof Bun !== 'undefined' ? Bun.version : 'unknown',
-  os: platform(),
-  arch: arch(),
-  cpus: cpus().length,
-};
-
-/** Optional server handles for connection stats + backup + storage */
-export interface ServerHandles {
-  getConnectionCount: () => number;
-  getWsClientCount: () => number;
-  getSseClientCount: () => number;
-  getBackupStatus?: () => {
-    enabled: boolean;
-    bucket: string;
-    endpoint: string;
-    intervalMs: number;
-    retention: number;
-    isRunning: boolean;
-  } | null;
-  getSqliteStats?: () => { dbSizeBytes: number; writeBufferPending: number } | null;
-  getMcpOperations?: () => {
-    operations: Array<{
-      tool: string;
-      queue: string | null;
-      timestamp: number;
-      durationMs: number;
-      success: boolean;
-      error: string | null;
-    }>;
-    summary: {
-      totalInvocations: number;
-      successCount: number;
-      failureCount: number;
-      avgDurationMs: number;
-      topTools: Array<{ tool: string; count: number }>;
-    };
-  };
-}
-
-/** Parameters for snapshot collection */
-export interface CollectSnapshotParams {
-  queueManager: QueueManager;
-  instanceId: string;
-  instanceName: string;
-  startedAt: number;
-  sequenceId: number;
-  serverHandles?: ServerHandles;
-  includeHeavy: boolean;
-  /** Fields to redact from job data (mirrors CloudConfig.redactFields). Default: none */
-  redactFields?: readonly string[];
-  /** Include job data in recentJobs/dlqEntries (mirrors CloudConfig.includeJobData). Default: true */
-  includeJobData?: boolean;
-}
-
-/** Enrich failed jobs in recentJobs with duration from DLQ attempt history */
-function enrichFailedJobDurations(
-  recentJobs: CloudSnapshot['recentJobs'],
-  dlqEntries: CloudSnapshot['dlqEntries']
-): void {
-  if (dlqEntries.length === 0) return;
-  const dlqMap = new Map<string, { duration: number; failedAt: number }>();
-  for (const e of dlqEntries) {
-    if (e.attemptHistory.length > 0) {
-      const last = e.attemptHistory[e.attemptHistory.length - 1];
-      dlqMap.set(e.jobId, { duration: last.duration, failedAt: last.failedAt });
-    }
-  }
-  for (const j of recentJobs) {
-    if (j.state === 'failed' && !j.duration) {
-      const dlq = dlqMap.get(j.id);
-      if (dlq) {
-        (j as { duration?: number }).duration = dlq.duration;
-        (j as { completedAt?: number }).completedAt = dlq.failedAt;
-        (j as { totalDuration?: number }).totalDuration = dlq.failedAt - j.createdAt;
-      }
-    }
-  }
-}
-
-/** Resolve redaction options with defaults (includeJobData defaults on). */
-function resolveRedaction(params: CollectSnapshotParams): {
-  redactFields: readonly string[];
-  includeJobData: boolean;
-} {
-  return {
-    redactFields: params.redactFields ?? [],
-    includeJobData: params.includeJobData ?? true,
-  };
-}
-
-/** Map cron definitions to snapshot shape */
-function collectCrons(queueManager: QueueManager): CloudSnapshot['crons'] {
-  return queueManager.listCrons().map((c) => ({
-    name: c.name,
-    queue: c.queue,
-    schedule: c.schedule ?? null,
-    repeatEvery: c.repeatEvery ?? null,
-    nextRun: c.nextRun,
-    executions: c.executions,
-    maxLimit: c.maxLimit,
-    lastRun: c.executions > 0 && c.repeatEvery ? c.nextRun - c.repeatEvery : null,
-    priority: c.priority,
-    timezone: c.timezone ?? null,
-    data: c.data,
-    uniqueKey: c.uniqueKey ?? null,
-    dedup: c.dedup ?? null,
-  }));
-}
+export type { CollectSnapshotParams, ServerHandles } from './types/collector';
 
 /** Collect a snapshot. Light data always fresh, heavy data cached between refreshes. */
 export async function collectSnapshot(params: CollectSnapshotParams): Promise<CloudSnapshot> {
@@ -207,69 +103,19 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
     queueManager,
     dlqQueues.map((q) => q.name)
   );
-  const now = Date.now();
-  const WORKER_TIMEOUT_MS = 30_000;
-  const workerDetails = queueManager.workerManager.list().map((w) => {
-    const totalJobs = w.processedJobs + w.failedJobs;
-    return {
-      id: w.id,
-      name: w.name,
-      queues: w.queues,
-      concurrency: w.concurrency,
-      hostname: w.hostname,
-      pid: w.pid,
-      registeredAt: w.registeredAt,
-      lastSeen: w.lastSeen,
-      activeJobs: w.activeJobs,
-      processedJobs: w.processedJobs,
-      failedJobs: w.failedJobs,
-      currentJob: w.currentJob,
-      // Computed fields
-      uptime: now - w.registeredAt,
-      status:
-        now - w.lastSeen > WORKER_TIMEOUT_MS
-          ? ('stalled' as const)
-          : w.activeJobs > 0
-            ? ('active' as const)
-            : ('idle' as const),
-      errorRate: totalJobs > 0 ? +(w.failedJobs / totalJobs).toFixed(4) : 0,
-      utilization: w.concurrency > 0 ? +(w.activeJobs / w.concurrency).toFixed(4) : 0,
-    };
-  });
+  const workerDetails = collectWorkerDetails(queueManager, Date.now());
   const queueConfigs = collectQueueConfigs(queueManager, new Set(queueNames));
   const webhooks = collectWebhooks(queueManager);
   const s3Backup = serverHandles?.getBackupStatus?.() ?? null;
   const telemetry = queueManager.getCloudTelemetry(allQueueNames);
 
-  // Job results, logs, and locks
-  const jobResultsMap = queueManager.getAllJobResults();
-  const jobResults: Record<string, unknown> = {};
-  for (const [id, val] of jobResultsMap) jobResults[id] = val;
-
-  const jobLogsMap = queueManager.getAllJobLogs();
-  const jobLogEntries: Record<
-    string,
-    Array<{ timestamp: number; level: 'info' | 'warn' | 'error'; message: string }>
-  > = {};
-  for (const [id, logs] of jobLogsMap) jobLogEntries[id] = logs;
-
-  const locksMap = queueManager.getAllJobLocks();
-  const activeLocks = [...locksMap.values()].map((l) => ({
-    jobId: String(l.jobId),
-    owner: l.owner,
-    token: l.token,
-    createdAt: l.createdAt,
-    expiresAt: l.expiresAt,
-    lastRenewalAt: l.lastRenewalAt,
-    renewalCount: l.renewalCount,
-    ttl: l.ttl,
-  }));
+  const { jobResults, jobLogEntries, activeLocks } = collectJobArtifacts(queueManager);
 
   const result: CloudSnapshot = {
     instanceId,
     instanceName,
     version: VERSION,
-    hostname: HOST,
+    hostname: SNAPSHOT_HOST,
     pid: process.pid,
     startedAt,
     timestamp: Date.now(),
@@ -334,7 +180,7 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
     durationHistogram: collectDurationHistogram(recentJobs),
     workerUtilization: collectWorkerUtilization(queueManager),
     sqliteStats: serverHandles?.getSqliteStats?.() ?? null,
-    runtime: RUNTIME,
+    runtime: SNAPSHOT_RUNTIME,
     queueWaitTime: collectQueueWaitTime(recentJobs),
     queueRetryRate: collectQueueRetryRate(recentJobs),
     queueBacklogVelocity: collectBacklogVelocity(queues),

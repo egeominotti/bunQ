@@ -24,7 +24,10 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ### Run every N milliseconds
 
-Use `every` instead of a cron pattern when you just want a fixed interval:
+Use `every` instead of a cron pattern when you want fixed-rate scheduled slots.
+The next slot is anchored to the previous scheduled time, not to completion of
+the generated job. With the default `preventOverlap: true`, a still-active
+previous generation blocks another one from being enqueued:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -238,7 +241,11 @@ bunqueue cron add daily-report -q reports -d '{"type":"daily"}' \
 
 ### Repeat a job after each completion
 
-For simple repetition tied to job completion, adding a job with the `repeat` option also works: the job re-enqueues itself `every` milliseconds after each run completes.
+For simple repetition tied to job completion, adding a job with the `repeat`
+option also works: the job re-enqueues itself `every` milliseconds after each
+successful completion. Here `limit` is the number of successors, so total
+executions are the initial job plus at most `limit` repeats. Failed terminal
+jobs do not create a successor.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -313,4 +320,3 @@ Note: `repeat.pattern` on `queue.add` is not evaluated. Cron patterns require `u
 | [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
 | [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
 | [Cron Reference](/guide/cron/reference/) | Expression syntax, every scheduler option, MCP |
-

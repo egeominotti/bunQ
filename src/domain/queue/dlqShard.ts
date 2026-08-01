@@ -18,6 +18,7 @@ import { DEFAULT_STALL_CONFIG } from '../types/stall';
 export interface DlqStatsCallback {
   incrementDlq(): void;
   decrementDlq(count?: number): void;
+  onEvict?(entry: DlqEntry): void;
 }
 
 /**
@@ -48,7 +49,26 @@ export class DlqShard {
   /** Set DLQ config for queue */
   setConfig(queue: string, config: Partial<DlqConfig>): void {
     const current = this.getConfig(queue);
-    this.dlqConfig.set(queue, { ...current, ...config });
+    const next: DlqConfig = { ...current };
+    if (typeof config.autoRetry === 'boolean') next.autoRetry = config.autoRetry;
+    if (Number.isFinite(config.autoRetryInterval)) {
+      next.autoRetryInterval = Math.max(0, Math.floor(config.autoRetryInterval!));
+    }
+    if (Number.isFinite(config.maxAutoRetries)) {
+      next.maxAutoRetries = Math.max(0, Math.floor(config.maxAutoRetries!));
+    }
+    if (config.maxAge === null) {
+      next.maxAge = null;
+    } else if (Number.isFinite(config.maxAge)) {
+      next.maxAge = Math.max(0, Math.floor(config.maxAge!));
+    }
+    if (Number.isFinite(config.maxEntries)) {
+      next.maxEntries = Math.max(1, Math.floor(config.maxEntries!));
+    }
+    this.dlqConfig.set(queue, next);
+
+    const entries = this.dlq.get(queue);
+    if (entries) this.evictUntil(entries, next.maxEntries, false);
   }
 
   /** Get stall config for queue */
@@ -78,10 +98,7 @@ export class DlqShard {
     const entry = createDlqEntry(job, reason, error, config);
 
     // Enforce max entries
-    while (entries.length >= config.maxEntries) {
-      entries.shift(); // Remove oldest
-      this.stats.decrementDlq();
-    }
+    this.evictUntil(entries, config.maxEntries, true);
 
     entries.push(entry);
     this.stats.incrementDlq();
@@ -99,10 +116,7 @@ export class DlqShard {
     const config = this.getConfig(queue);
 
     // Enforce max entries (mirror add(): evict oldest-first)
-    while (entries.length >= config.maxEntries) {
-      entries.shift(); // Remove oldest
-      this.stats.decrementDlq();
-    }
+    this.evictUntil(entries, config.maxEntries, true);
 
     entries.push(entry);
     this.stats.incrementDlq();
@@ -216,5 +230,15 @@ export class DlqShard {
     this.dlqConfig.delete(queue);
     this.stallConfig.delete(queue);
     return count;
+  }
+
+  private evictUntil(entries: DlqEntry[], maxEntries: number, reserveSlot: boolean): void {
+    const target = reserveSlot ? maxEntries - 1 : maxEntries;
+    while (entries.length > target) {
+      const evicted = entries.shift();
+      if (!evicted) break;
+      this.stats.decrementDlq();
+      this.stats.onEvict?.(evicted);
+    }
   }
 }

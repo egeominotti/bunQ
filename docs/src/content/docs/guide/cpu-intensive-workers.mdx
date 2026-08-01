@@ -1,0 +1,259 @@
+---
+title: "CPU-Intensive Workers: Preserve Heartbeats and Locks"
+description: "Run CPU-heavy bunqueue handlers without starving heartbeats: isolate computation, keep lease renewal enabled, and size stall and lock windows for bounded work."
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/cpu-intensive-workers.png
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · cpu-intensive-workers</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">CPU-intensive work, off the <em>control path.</em></h1>
+  <p class="bq-hero-sub">A long, non-yielding handler can starve the code that renews its lease. Keep the broker safety mechanisms on and move computation to a thread, process, or service that cannot block them.</p>
+</div>
+
+The important clock is not total job duration. A job can run for hours while
+heartbeats keep arriving. The dangerous interval is the longest period during
+which the worker cannot run its heartbeat or lock-renewal path.
+
+When that interval exceeds the queue's `stallInterval` or the job lock's TTL,
+bunqueue may recover and redeliver the job. A stale processor can still finish
+its local computation, but its expired token cannot safely acknowledge the new
+processing instance. CPU-heavy handlers must therefore remain idempotent.
+
+## Recommended topology
+
+Keep the queue processor responsive and hand CPU work to the runtime's native
+isolation mechanism. `runCpuTaskOffThread`, `heavy_computation`, and similar
+names below stand for application code, not bunqueue helpers.
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+import { Worker } from 'bunqueue/client';
+
+const worker = new Worker('heavy', async (job) => {
+  // Back this helper with a Bun Worker or a supervised child-process pool.
+  return runCpuTaskOffThread(job.data);
+}, {
+  connection: { host: '127.0.0.1', port: 6789 },
+  concurrency: 4,
+  heartbeatInterval: 10_000,
+  lockDuration: 120_000,
+});
+```
+
+The regular `Worker` owns the TCP connection and lease; the CPU pool does only
+the computation. The experimental built-in alternative is
+[`SandboxedWorker`](/guide/worker/sandboxed/).
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Worker } from 'bunqueue-client';
+
+const worker = new Worker('heavy', async (job) => {
+  // Use node:worker_threads in Node.js or a Web Worker in Deno.
+  return cpuPool.run(job.data);
+}, {
+  concurrency: 4,
+  heartbeatIntervalS: 10,
+  lockTtlMs: 120_000,
+});
+```
+
+Do not run the synchronous calculation on the JavaScript event loop that owns
+the queue connection.
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+from bunqueue import Worker
+
+pool = ProcessPoolExecutor(max_workers=4)
+
+def process(job):
+    return pool.submit(heavy_computation, job.data).result()
+
+worker = Worker(
+    "heavy",
+    process,
+    concurrency=4,
+    heartbeat_interval_s=10.0,
+    lock_ttl_ms=120_000,
+)
+worker.run()
+```
+
+A process pool avoids the GIL for Python CPU work. The SDK's heartbeat thread
+remains independent of the process doing the calculation.
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Job;
+use Bunqueue\Worker;
+
+$worker = new Worker('heavy', function (Job $job) {
+    // PHP's worker is sequential: extend before a bounded blocking segment,
+    // or delegate to a child process/service and renew while polling it.
+    $job->extendLock(120_000);
+    return runInChildProcess($job->data());
+}, [
+    'lockTtlMs' => 120_000,
+]);
+
+$worker->run();
+```
+
+The PHP worker sends automatic job heartbeats only between callbacks. A single
+callback that can outlive its extension needs a subprocess polling loop that
+calls `extendLock()` again, or a larger bounded lease.
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("heavy", func(job *bunqueue.Job) (any, error) {
+    // Processors run in the bounded goroutine pool; heartbeat has its own loop.
+    return heavyComputation(job.Data())
+}, bunqueue.WorkerOptions{
+    Concurrency:        4,
+    LockTtlMs:          120_000,
+    HeartbeatIntervalS: 10, // Go leaves heartbeats off unless enabled
+})
+
+if err := worker.Run(); err != nil { log.Fatal(err) }
+```
+
+Keep `HeartbeatIntervalS` positive for long-running jobs. For native code that
+blocks the Go runtime, isolate it in a subprocess.
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use std::time::Duration;
+use bunqueue_client::{Worker, WorkerOptions};
+
+let worker = Worker::new("heavy", |job| {
+    // Each processor runs on a worker thread; heartbeat runs independently.
+    heavy_computation(job.data())
+}, WorkerOptions {
+    concurrency: 4,
+    lock_ttl_ms: 120_000,
+    heartbeat_interval: Some(Duration::from_secs(10)),
+    ..Default::default()
+});
+
+worker.run()?;
+```
+
+If foreign code can block or abort the process, put that code behind a child
+process boundary rather than relying only on a Rust thread.
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+worker =
+  Bunqueue.Worker.new("heavy", fn job ->
+    {:ok, heavy_computation(job.data)}
+  end,
+    concurrency: 4,
+    lock_ttl: 120_000,
+    heartbeat_interval: 10_000
+  )
+
+Bunqueue.Worker.run(worker)
+```
+
+The SDK heartbeats from a separate BEAM process. Long-running native code must
+use dirty schedulers or an external port/process so it cannot block the VM's
+normal schedulers.
+
+</TabItem>
+</Tabs>
+
+## If the loop can yield
+
+For computation you control, small cooperative yields can be sufficient. This
+Bun example yields every 500 iterations so timers and TCP I/O can run:
+
+```typescript
+async function findNthPrime(n: number): Promise<number> {
+  let count = 0;
+  let candidate = 1;
+  let operations = 0;
+
+  while (count < n) {
+    candidate++;
+    if (isPrime(candidate)) count++;
+    if (++operations % 500 === 0) await Bun.sleep(0);
+  }
+
+  return candidate;
+}
+```
+
+Choose the yield frequency by measuring the longest uninterrupted block, not
+by iteration count alone. A large iteration can itself take longer than the
+lease window.
+
+## Size the broker policy as a safety margin
+
+Offloading is the primary fix. If a bounded segment can still delay ownership
+traffic, set both of these above its worst-case duration:
+
+- the Worker's job-lock TTL (`lockDuration` in Bun, `lockTtlMs` or its
+  language-specific equivalent in network SDKs);
+- the queue's server-side `stallInterval`.
+
+Keep the heartbeat interval comfortably below both. The queue-level policy is
+shared by every language; configure it as shown in
+[Stall Detection](/guide/stall-detection/#configuration).
+
+:::caution[Do not "fix" CPU stalls by disabling ownership]
+`heartbeatInterval: 0`, `skipLockRenewal`, and `useLocks: false` remove or weaken
+recovery signals. They do not make a blocked handler safe and can delay crash
+recovery or allow duplicate execution. Likewise, `pingInterval` and
+`commandTimeout` are connection-health settings, not job-processing timeouts.
+The TCP server does not close a healthy connection merely because it is idle.
+:::
+
+## What each timeout controls
+
+| Setting | Scope | What happens when it expires |
+|---|---|---|
+| `heartbeatInterval` / SDK equivalent | Worker | How often the current lease is renewed; `0` disables renewal where supported |
+| `lockDuration` / `lockTtlMs` | Job lease | The ownership token becomes eligible for expiry if it is not renewed |
+| `stallInterval` | Queue policy | A job with no recent heartbeat becomes a stall candidate and may be retried or sent to the DLQ |
+| `commandTimeout` | TCP command | An unanswered protocol request rejects; repeated command timeouts can reconnect the client |
+| `pingInterval` | TCP connection | Controls active health probes; it is unrelated to a job's allowed run time |
+| job `timeout` | Job execution policy | The worker/broker failure path treats the processing attempt as timed out |
+
+## Production checklist
+
+- Make the handler idempotent; bunqueue delivery is at least once.
+- Keep automatic heartbeats and lock renewal enabled.
+- Offload non-yielding CPU work from the connection/control thread.
+- Bound each isolated task with an application timeout and supervise its process.
+- Make lock and stall windows longer than the measured worst uninterrupted block.
+- Test process death as well as successful completion; recovery behavior matters
+  more than the happy-path benchmark.
+
+:::tip[Related]
+- [Worker Options](/guide/worker/options/) - Worker-side heartbeat and lock settings
+- [Stall Detection](/guide/stall-detection/) - Broker recovery policy
+- [SandboxedWorker](/guide/worker/sandboxed/) - Bun-only experimental thread pool
+- [Monitoring](/guide/monitoring/) - Observe active, stalled, failed, and DLQ jobs
+:::

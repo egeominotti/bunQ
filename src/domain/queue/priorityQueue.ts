@@ -5,52 +5,8 @@
  */
 
 import type { Job, JobId } from '../types/job';
-
-/** Heap entry - lightweight metadata for heap operations */
-interface HeapEntry {
-  jobId: JobId;
-  priority: number;
-  runAt: number;
-  lifo: boolean;
-  generation: bigint;
-}
-
-/**
- * Compare two heap entries
- * Order: higher priority first, then:
- *   - LIFO: newer jobs first (by jobId descending, since UUID7 is time-ordered)
- *   - FIFO: earlier runAt first, then older jobs first (by jobId ascending)
- *
- * Uses direct string comparison instead of localeCompare for ~10-50x faster performance.
- * This works because UUID7 is ASCII-only and lexicographically sortable.
- */
-function compareEntries(a: HeapEntry, b: HeapEntry): number {
-  // Higher priority first
-  if (a.priority !== b.priority) {
-    return b.priority - a.priority;
-  }
-
-  // For LIFO: newer jobs (higher UUID7) should come first
-  // UUID7 contains timestamp, so lexicographic comparison gives time order
-  if (a.lifo && b.lifo) {
-    // Direct comparison mimicking localeCompare(b, a) for descending order
-    // b > a means b is newer, should come first (return positive to put b before a)
-    if (b.jobId > a.jobId) return 1;
-    if (b.jobId < a.jobId) return -1;
-    return 0;
-  }
-
-  // For FIFO or mixed: earlier runAt first
-  if (a.runAt !== b.runAt) {
-    return a.runAt - b.runAt;
-  }
-
-  // Then by jobId (older first for FIFO)
-  // a < b means a is older, should come first (return negative)
-  if (a.jobId < b.jobId) return -1;
-  if (a.jobId > b.jobId) return 1;
-  return 0;
-}
+import type { HeapEntry, IndexedJob } from '../types/priorityQueue';
+import { comparePriorityEntries } from './priorityQueueOrder';
 
 /**
  * Indexed Priority Queue implementation with 4-ary heap
@@ -62,7 +18,7 @@ export class IndexedPriorityQueue {
   /** Branching factor - 4 provides optimal cache performance */
   private static readonly D = 4;
   private heap: HeapEntry[] = [];
-  private readonly index: Map<JobId, { job: Job; generation: bigint }> = new Map();
+  private readonly index: Map<JobId, IndexedJob> = new Map();
   // Use BigInt to prevent overflow at extreme throughput
   private generation = 0n;
 
@@ -289,7 +245,7 @@ export class IndexedPriorityQueue {
     const D = IndexedPriorityQueue.D;
     while (idx > 0) {
       const parentIdx = Math.floor((idx - 1) / D);
-      if (compareEntries(this.heap[idx], this.heap[parentIdx]) >= 0) {
+      if (comparePriorityEntries(this.heap[idx], this.heap[parentIdx]) >= 0) {
         break;
       }
       this.swap(idx, parentIdx);
@@ -312,7 +268,7 @@ export class IndexedPriorityQueue {
       const lastChild = Math.min(firstChild + D, length);
 
       for (let c = firstChild; c < lastChild; c++) {
-        if (compareEntries(heap[c], heap[smallest]) < 0) {
+        if (comparePriorityEntries(heap[c], heap[smallest]) < 0) {
           smallest = c;
         }
       }

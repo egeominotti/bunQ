@@ -110,6 +110,24 @@ test('admin: rate limit + concurrency accepted', async () => {
   }
 });
 
+test('admin: custom rate-limit duration reaches the broker', async () => {
+  const queue = makeQueue('rate-window');
+  try {
+    await queue.setGlobalRateLimit(7, 12_345);
+    const response = await queue.connection.call({
+      cmd: 'GetQueueLimits',
+      queue: queue.name,
+    });
+    const data = (response.data ?? {}) as Record<string, unknown>;
+    const limits = (data.limits ?? {}) as Record<string, unknown>;
+    const rateLimit = (limits.rateLimit ?? {}) as Record<string, unknown>;
+    assertEq(Number(rateLimit.duration), 12_345, 'custom rate-limit duration');
+  } finally {
+    await queue.removeGlobalRateLimit();
+    queue.close();
+  }
+});
+
 test('admin: global concurrency enforced via PULLB', async () => {
   const queue = makeQueue('gconc');
   try {

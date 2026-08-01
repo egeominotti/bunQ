@@ -5,6 +5,13 @@ All notable changes to `bunqueue-client` (Python SDK) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Forward `duration_ms` from `set_global_rate_limit(max_jobs, duration_ms)` as
+  the broker's `duration` field instead of silently using one second.
+
 ## [0.1.6] - 2026-07-30
 
 ### Added

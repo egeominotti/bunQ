@@ -19,6 +19,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../../src/client';
 import { Engine, type Execution } from '../../src/client/workflow';
 import { checkInvariants, type InvariantState } from './workflow-invariants';
 import { buildChildWorkflows, buildWorkflow } from './workflow-build';
@@ -291,6 +292,7 @@ function campaignDir(): string {
 
 /** Remove the campaign directory. Safe to call when no campaign ever ran. */
 export function disposeCampaign(): void {
+  shutdownManager();
   if (sharedDir) rmSync(sharedDir, { recursive: true, force: true });
   sharedDir = null;
 }

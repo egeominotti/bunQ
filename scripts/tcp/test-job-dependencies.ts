@@ -6,7 +6,7 @@
 import { Queue, Worker, FlowProducer } from '../../src/client';
 
 const QUEUE_NAME = 'tcp-test-dependencies';
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 
 async function main() {
   console.log('=== Test Job Dependencies (TCP) ===\n');
@@ -43,20 +43,24 @@ async function main() {
   console.log('\n2. Testing CHAIN EXECUTION...');
   try {
     const executed: string[] = [];
-    const worker = new Worker<{ step: string }>(QUEUE_NAME, async (job) => {
-      executed.push((job.data as { step: string }).step);
-      await Bun.sleep(50);
-      return { completed: (job.data as { step: string }).step };
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ step: string }>(
+      QUEUE_NAME,
+      async (job) => {
+        executed.push((job.data as { step: string }).step);
+        await Bun.sleep(50);
+        return { completed: (job.data as { step: string }).step };
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(3000);
     await worker.close();
 
-    if (executed.length >= 2) {
-      console.log(`   ✅ Chain executed: ${executed.join(' -> ')} (${executed.length} jobs)`);
+    if (JSON.stringify(executed) === JSON.stringify(['first', 'second', 'third'])) {
+      console.log(`   ✅ Chain executed exactly once and in order: ${executed.join(' -> ')}`);
       passed++;
     } else {
-      console.log(`   ❌ Expected at least 2 jobs, executed: ${executed.length}`);
+      console.log(`   ❌ Expected first -> second -> third, got: ${executed.join(' -> ')}`);
       failed++;
     }
   } catch (e) {
@@ -94,14 +98,18 @@ async function main() {
     const parallelCompleted: string[] = [];
     let finalExecuted = false;
 
-    const worker = new Worker<{ step: string }>(QUEUE_NAME, async (job) => {
-      if (job.data.step.startsWith('p')) {
-        parallelCompleted.push(job.data.step);
-      } else if (job.data.step === 'final') {
-        finalExecuted = true;
-      }
-      return { done: job.data.step };
-    }, { concurrency: 5, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ step: string }>(
+      QUEUE_NAME,
+      (job) => {
+        if (job.data.step.startsWith('p')) {
+          parallelCompleted.push(job.data.step);
+        } else if (job.data.step === 'final') {
+          finalExecuted = true;
+        }
+        return { done: job.data.step };
+      },
+      { concurrency: 5, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(2000);
     await worker.close();
@@ -130,9 +138,7 @@ async function main() {
           name: 'child-1',
           queueName: QUEUE_NAME,
           data: { step: 'child-1' },
-          children: [
-            { name: 'grandchild-1', queueName: QUEUE_NAME, data: { step: 'gc-1' } },
-          ],
+          children: [{ name: 'grandchild-1', queueName: QUEUE_NAME, data: { step: 'gc-1' } }],
         },
         { name: 'child-2', queueName: QUEUE_NAME, data: { step: 'child-2' } },
       ],
@@ -154,10 +160,14 @@ async function main() {
   console.log('\n6. Testing TREE EXECUTION...');
   try {
     const executed: string[] = [];
-    const worker = new Worker<{ step: string }>(QUEUE_NAME, async (job) => {
-      executed.push((job.data as { step: string }).step);
-      return { done: (job.data as { step: string }).step };
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ step: string }>(
+      QUEUE_NAME,
+      (job) => {
+        executed.push((job.data as { step: string }).step);
+        return { done: (job.data as { step: string }).step };
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(3000);
     await worker.close();
@@ -166,7 +176,9 @@ async function main() {
       console.log(`   ✅ Tree executed: ${executed.join(' -> ')}`);
       passed++;
     } else {
-      console.log(`   ❌ Expected 4 nodes, executed: ${executed.length} (${executed.join(' -> ')})`);
+      console.log(
+        `   ❌ Expected 4 nodes, executed: ${executed.length} (${executed.join(' -> ')})`
+      );
       failed++;
     }
   } catch (e) {

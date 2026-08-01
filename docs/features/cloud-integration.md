@@ -1,6 +1,6 @@
 # bunqueue Cloud Dashboard Integration
 
-> **Category:** Integration · **Source:** `src/infrastructure/cloud/cloudAgent.ts`, `src/infrastructure/cloud/snapshotCollector.ts`, `src/infrastructure/cloud/snapshotHelpers.ts`, `src/infrastructure/cloud/httpSender.ts`, `src/infrastructure/cloud/wsSender.ts`, `src/infrastructure/cloud/commandHandler.ts`, `src/infrastructure/cloud/commands.ts`, `src/infrastructure/cloud/circuitBreaker.ts`, `src/infrastructure/cloud/buffer.ts`, `src/infrastructure/cloud/config.ts`, `src/infrastructure/cloud/redact.ts`, `src/infrastructure/cloud/types.ts`
+> **Category:** Integration · **Source:** `src/infrastructure/cloud/cloudAgent.ts`, `src/infrastructure/cloud/commands/`, `src/infrastructure/cloud/snapshot/`, `src/infrastructure/cloud/types/`, `src/infrastructure/cloud/httpSender.ts`, `src/infrastructure/cloud/wsSender.ts`, `src/infrastructure/cloud/commandHandler.ts`, `src/infrastructure/cloud/circuitBreaker.ts`, `src/infrastructure/cloud/buffer.ts`, `src/infrastructure/cloud/config.ts`, `src/infrastructure/cloud/redact.ts`
 
 ## Purpose
 
@@ -99,8 +99,15 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 ### Remote command path (`wsSender.ts:116` → `commandHandler.ts:85`)
 1. Incoming binary frame is auto-detected as zstd (magic `28 b5 2f fd`) or plain msgpack, or JSON text, then unpacked (`wsSender.ts:146-171`).
 2. A `command` is forwarded only if `remoteCommands` is set and `action`+`id` are present (`wsSender.ts:129`).
-3. `handleCommand` looks up the action in `COMMANDS`; unknown actions return `success:false` with `Unknown command:` (`commandHandler.ts:113`). The handler runs against `QueueManager`, the raw result is `camelKeys`-normalized (PascalCase→camelCase, skipping user-data keys), and wrapped in a `command_result` (`commandHandler.ts:123-127`).
+3. `handleCommand` looks up the action in `COMMANDS`; unknown actions return `success:false` with `Unknown command:`. The handler receives both `QueueManager` and `CommandContext`, the raw result is `camelKeys`-normalized (PascalCase→camelCase, skipping user-data keys), and wrapped in a `command_result`.
 4. Result is zstd(msgpack)-encoded and sent back over WS (`wsSender.ts:141`).
+
+For `s3:backup`, `CloudAgent` resolves its current `ServerHandles` at command
+time and invokes the injected `triggerBackup`. `bootstrap.ts` exposes this
+trigger only when S3 backup is enabled and a manager exists. A disabled setup or
+a rejected backup therefore returns an explicit `command_result` with
+`success:false`; it cannot report a false successful no-op. Resolving the handle
+at command time is required because `start()` precedes `setServerHandles()`.
 
 ### Shutdown (`cloudAgent.ts:119`)
 Idempotent (`stopped` flag). Clears timers, unsubscribes events, collects one final snapshot with `shutdown=true`, and races `httpSender.send` against a 2s `Bun.sleep` (best-effort), then stops the WS sender (`cloudAgent.ts:138-159`). Wired into `bootstrap.ts:183` after active jobs drain.
@@ -130,7 +137,6 @@ No queue locks are taken by this module; it is a read-mostly observer that calls
 - `statsUpdateTimer` is declared and cleared in `stop()` but **never assigned** — there is no live 15s `stats_update` WS push (`cloudAgent.ts:32,128`).
 - `buildStatsRefresh` (`statsRefresh.ts`) and `buildStatsUpdate` (`statsUpdate.ts`) are exported but not referenced anywhere in `src`; the `stats:refresh` command instead calls `qm.getStats()` directly (`commands.ts:356`). Treat both files as legacy/unwired.
 - Post-command immediate-snapshot trigger is commented out — the dashboard is expected to refresh via WS command results, not via an HTTP re-push (`cloudAgent.ts:100-103`).
-- The `s3:backup` command is effectively a stub: it reads `(qm as unknown).serverHandles?.triggerBackup`, but `QueueManager` has no `serverHandles` property (handles are set on the `CloudAgent`, not the manager) and `ServerHandles` declares no `triggerBackup` member (no caller injects one). Every invocation returns `{ error: 'S3 backup not configured' }` (`commands.ts:359-367`, `snapshotCollector.ts:45`).
 
 ## Configuration
 

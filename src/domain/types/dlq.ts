@@ -39,6 +39,84 @@ export interface AttemptRecord {
   readonly duration: number;
 }
 
+/** Internal lifecycle state carried while a DLQ auto-retry is live. */
+export interface DlqRetryState {
+  readonly enteredAt: number | null;
+  readonly expiresAt: number | null;
+  readonly attempts: AttemptRecord[];
+  readonly retryCount: number;
+  readonly lastRetryAt: number | null;
+  readonly nextRetryAt: number | null;
+}
+
+const DLQ_RETRY_STATE = Symbol('bunqueue.dlqRetryState');
+
+/** Read internal DLQ state without exposing it on the public Job wire shape. */
+export function getDlqRetryState(job: Job): DlqRetryState | null {
+  return (job as { [DLQ_RETRY_STATE]?: DlqRetryState })[DLQ_RETRY_STATE] ?? null;
+}
+
+/** Restore internal DLQ state from SQLite as a non-enumerable Job property. */
+export function setDlqRetryState(job: Job, state: DlqRetryState | null): void {
+  if (state === null) {
+    delete (job as { [DLQ_RETRY_STATE]?: DlqRetryState })[DLQ_RETRY_STATE];
+    return;
+  }
+  Object.defineProperty(job, DLQ_RETRY_STATE, {
+    value: state,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+}
+
+function createAttemptRecord(
+  job: Job,
+  reason: FailureReason,
+  error: string | null,
+  failedAt: number = Date.now()
+): AttemptRecord {
+  return {
+    attempt: job.attempts,
+    startedAt: job.startedAt ?? job.createdAt,
+    failedAt,
+    reason,
+    error,
+    duration: job.startedAt ? failedAt - job.startedAt : 0,
+  };
+}
+
+/** Retain a non-terminal failed attempt so a later DLQ entry has full history. */
+export function recordJobFailureAttempt(
+  job: Job,
+  reason: FailureReason,
+  error: string | null,
+  failedAt: number = Date.now()
+): void {
+  const state = getDlqRetryState(job) ?? {
+    enteredAt: null,
+    expiresAt: null,
+    attempts: [],
+    retryCount: 0,
+    lastRetryAt: null,
+    nextRetryAt: null,
+  };
+  state.attempts.push(createAttemptRecord(job, reason, error, failedAt));
+  setDlqRetryState(job, state);
+}
+
+/** Carry a dispatched DLQ entry through its live auto-retry execution. */
+export function retainDlqRetryState(job: Job, entry: DlqEntry): void {
+  setDlqRetryState(job, {
+    enteredAt: entry.enteredAt,
+    expiresAt: entry.expiresAt,
+    attempts: [...entry.attempts],
+    retryCount: entry.retryCount,
+    lastRetryAt: entry.lastRetryAt,
+    nextRetryAt: entry.nextRetryAt,
+  });
+}
+
 /** DLQ Entry with full metadata */
 export interface DlqEntry {
   /** Original job */
@@ -92,25 +170,29 @@ export function createDlqEntry(
   config: DlqConfig = DEFAULT_DLQ_CONFIG
 ): DlqEntry {
   const now = Date.now();
-  const attemptRecord: AttemptRecord = {
-    attempt: job.attempts,
-    startedAt: job.startedAt ?? job.createdAt,
-    failedAt: now,
-    reason,
-    error,
-    duration: job.startedAt ? now - job.startedAt : 0,
-  };
+  const retained = getDlqRetryState(job);
+  const alreadyEntered = retained?.enteredAt !== null && retained?.enteredAt !== undefined;
+  const attemptRecord = createAttemptRecord(job, reason, error, now);
+  setDlqRetryState(job, null);
 
   return {
     job,
-    enteredAt: now,
+    enteredAt: alreadyEntered ? retained.enteredAt! : now,
     reason,
     error,
-    attempts: [attemptRecord],
-    retryCount: 0,
-    lastRetryAt: null,
-    nextRetryAt: config.autoRetry ? now + config.autoRetryInterval : null,
-    expiresAt: config.maxAge ? now + config.maxAge : null,
+    attempts: [...(retained?.attempts ?? []), attemptRecord],
+    retryCount: retained?.retryCount ?? 0,
+    lastRetryAt: retained?.lastRetryAt ?? null,
+    nextRetryAt: alreadyEntered
+      ? retained.nextRetryAt
+      : config.autoRetry
+        ? now + config.autoRetryInterval
+        : null,
+    expiresAt: alreadyEntered
+      ? retained.expiresAt
+      : config.maxAge !== null
+        ? now + config.maxAge
+        : null,
   };
 }
 

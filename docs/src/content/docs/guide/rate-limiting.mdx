@@ -51,21 +51,19 @@ await queue.removeGlobalRateLimitAsync();
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.setGlobalRateLimit(100);    // 100 jobs per second
+await queue.setGlobalRateLimit(100);          // 100 jobs per second
+await queue.setGlobalRateLimit(100, 60_000);  // 100 jobs per minute
 await queue.removeGlobalRateLimit();
 ```
-
-*The TypeScript TCP SDK does not send a custom `duration` yet, so the window is always 1 second; set a custom window from the Bun client or the PHP, Go, Rust, or Elixir SDK.*
 
 </TabItem>
 <TabItem label="Python">
 
 ```python
-queue.set_global_rate_limit(100)    # 100 jobs per second
+queue.set_global_rate_limit(100)         # 100 jobs per second
+queue.set_global_rate_limit(100, 60000)  # 100 jobs per minute
 queue.remove_global_rate_limit()
 ```
-
-*The Python SDK does not send a custom duration yet, so the window is always 1 second; set a custom window from the Bun client or the PHP, Go, Rust, or Elixir SDK.*
 
 </TabItem>
 <TabItem label="PHP">
@@ -142,6 +140,39 @@ queue.remove_global_concurrency()
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+The PHP SDK does not expose this broker command yet. Configure the same
+server-side limit with the CLI; it still applies to PHP workers:
+
+```bash
+bunqueue concurrency set emails 5
+bunqueue concurrency clear emails
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The Go SDK does not expose this broker command yet. Configure the same
+server-side limit with the CLI; it still applies to Go workers:
+
+```bash
+bunqueue concurrency set emails 5
+bunqueue concurrency clear emails
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK does not expose this broker command yet. Configure the same
+server-side limit with the CLI; it still applies to Rust workers:
+
+```bash
+bunqueue concurrency set emails 5
+bunqueue concurrency clear emails
+```
+
+</TabItem>
 <TabItem label="Elixir">
 
 ```elixir
@@ -182,6 +213,16 @@ worker = Worker("emails", process, concurrency=5)  # at most 5 jobs at once
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+// A PHP Worker is intentionally sequential. Run five worker processes when
+// this service should process up to five jobs in parallel.
+$worker = new Worker('emails', $processor);
+$worker->run();
+```
+
+</TabItem>
 <TabItem label="Go">
 
 ```go
@@ -216,15 +257,79 @@ worker = Bunqueue.Worker.new("emails", processor, concurrency: 5)
 
 The queue-level limit above already supports any window via the `duration` argument. If you instead want the cap enforced per single worker, use the `limiter` option:
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const worker = new Worker('emails', processor, {
   limiter: { max: 100, duration: 60_000 }, // 100 jobs per minute, per worker
 });
 ```
 
-The limit is enforced client-side by each worker, so with 3 identical workers the effective rate is 3x.
+</TabItem>
+<TabItem label="Node.js / Deno">
 
-*The worker `limiter` option is available in the Bun client. In the TCP SDKs, use the queue-level rate limit above (which supports any window) or a client-side limiter of your own in the processor.*
+The TypeScript network SDK has no per-worker limiter. Use a custom queue-wide
+broker window instead:
+
+```typescript
+await queue.setGlobalRateLimit(100, 60_000); // 100 starts/min across all workers
+```
+
+</TabItem>
+<TabItem label="Python">
+
+The Python SDK has no per-worker limiter. Use a custom queue-wide broker window
+instead:
+
+```python
+queue.set_global_rate_limit(100, 60000)  # 100 starts/min across all workers
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The PHP SDK supports a custom window as a queue-wide broker limit:
+
+```php
+$queue->setRateLimit(100, 60000); // 100 starts/min across all workers
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The Go SDK supports a custom window as a queue-wide broker limit:
+
+```go
+err := queue.SetRateLimit(100, bunqueue.RateLimitOptions{DurationMs: 60000})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK supports a custom window as a queue-wide broker limit:
+
+```rust
+queue.set_rate_limit(100, Some(60_000), None)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK supports a custom window as a queue-wide broker limit:
+
+```elixir
+:ok = Bunqueue.Queue.set_rate_limit(queue, 100, duration: 60_000)
+```
+
+</TabItem>
+</Tabs>
+
+The Bun worker limit is enforced client-side by each worker, so with 3 identical workers the effective rate is 3x.
+
+*The worker `limiter` option is available in the Bun client. In the network
+SDKs, use the queue-level rate limit shown in each tab or a client-side limiter
+of your own in the processor.*
 
 ## Using AI agents?
 

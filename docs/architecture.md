@@ -42,7 +42,7 @@ Producers ──add()──┐                          ┌──process()──
 | Choice | Where | Why |
 | --- | --- | --- |
 | **Bun runtime** (`>=1.3.9`) | [`package.json:147`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
-| **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite.ts:7`](../src/infrastructure/persistence/sqlite.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
+| **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
 | **MessagePack** (`msgpackr`) | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties. |
 | **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:66`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
 | **Zero external deps** | [`package.json:74`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
@@ -85,17 +85,29 @@ be claimed.
   ([`src/domain/queue/shard.ts`](../src/domain/queue/shard.ts)). Plus all type
   definitions in `domain/types/`. → [Data Structures](./features/data-structures.md),
   [Core Queue Engine](./features/core-queue-engine.md), [`./data-model.md`](./data-model.md).
-- **`application/`** — The `QueueManager` central coordinator owns the shards,
-  global indexes, and managers, and delegates every operation to pure modules
-  through context objects built by `ContextFactory`
-  ([`src/application/queueManager.ts:50`](../src/application/queueManager.ts),
-  [`operations/`](../src/application/operations)). Active-job management claims
+- **`application/`** — The six-line public `QueueManager` façade inherits a
+  responsibility-ordered capability chain under `queue-manager/`. `state.ts`
+  owns the shards, global indexes, and managers; delivery, ACK/failure, queries,
+  control, limits, job management, stats, observability, dependency propagation,
+  and lifecycle each live in their own module. Stateless hot-path algorithms
+  remain under [`operations/`](../src/application/operations) and receive
+  explicit contexts from `ContextFactory`; their contracts live separately in
+  [`application/types/`](../src/application/types). Active-job management claims
   are split into `jobMoveOperations.ts` (state/resource transitions) and
   `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
-  JobLogs, Stats managers, the batch `QueueStatsAggregator`,
+  JobLogs, Stats managers, and the batch `QueueStatsAggregator`. DLQ reads/purge
+  live in `dlqManager.ts`; manual and automatic retry transitions live in
+  `dlqRetry.ts`. It also owns the
   [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) for
   live flow-result retention, and background-task wiring.
-- **`infrastructure/`** — `SqliteStorage` (+ `WriteBuffer`, `BatchInsertManager`),
+- **`infrastructure/`** — The ten-line `SqliteStorage` façade composes focused
+  lifecycle, job, query, mutation, flow, control and record capabilities under
+  `persistence/sqlite/`; persistence contracts live in `persistence/types/`.
+  Server handler routing, protocol parsing, TCP connection state, HTTP routes,
+  SSE and WebSocket state are likewise split by responsibility. Cloud command
+  families, snapshot collectors and contracts live under `cloud/commands/`,
+  `cloud/snapshot/` and `cloud/types/`. The layer also provides `WriteBuffer`,
+  `BatchInsertManager`,
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
   `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates.
   HTTP responsibilities are split across `http.ts` (server/auth/upgrades),
@@ -109,7 +121,11 @@ be claimed.
   generic conversion/query module, state aliases (`queryStates.ts`), and
   exhaustive TCP traversal (`queryTcpPages.ts`); see
   [Client SDK: Queue](./features/client-queue-sdk.md). Each facade transparently
-  targets embedded or TCP where its contract permits it.
+  targets embedded or TCP where its contract permits it. Their public entry
+  files are deliberately tiny façades: `Queue` is 27 lines and `Worker` /
+  `SandboxedWorker` are four lines each. Runtime behavior is grouped under each
+  component's `runtime/` directory, while contracts live in its `types/`
+  directory.
 - **`shared/`** — Cross-cutting primitives: `fnv1a`/`uuid`/`shardIndex`
   ([`src/shared/hash.ts`](../src/shared/hash.ts)), `RWLock`/`Semaphore`,
   `LRUMap`/`BoundedSet`/`BoundedMap`/`TtlMap`, `MinHeap`, `SkipList`, `Histogram`,
@@ -117,6 +133,31 @@ be claimed.
 - **`cli/`** — `bunqueue` executable: server boot detection + thin TCP client that
   maps verbs to protocol commands.
 - **`mcp/`** — `bunqueue-mcp` binary exposing the queue to AI agents over MCP/stdio.
+
+### Structural boundaries
+
+Logic and types are intentionally separate, and every TypeScript source file
+under `src/` is capped at 300 lines. A façade only establishes the stable import
+surface; it does not duplicate implementation logic.
+
+| Public surface | Focused implementation | Dedicated contracts |
+| --- | --- | --- |
+| `application/queueManager.ts` | `application/queue-manager/`, `application/operations/`, `application/background/` | `application/types/` |
+| `client/queue/queue.ts` | `client/queue/runtime/`, `client/queue/operations/`, job/DLQ helpers | `client/queue/types/` |
+| `client/worker/worker.ts` | `client/worker/runtime/`, processor, pull, heartbeat and ACK modules | `client/worker/types/` |
+| `client/sandboxed/worker.ts` | `client/sandboxed/runtime/`, wrapper and queue adapters | `client/sandboxed/types/` |
+| `infrastructure/persistence/sqlite.ts` | `infrastructure/persistence/sqlite/`, buffering and schema modules | `infrastructure/persistence/types/` |
+
+`test/source-architecture.test.ts` enforces the 300-line ceiling, the small
+façade boundaries, the presence of dedicated type modules, and the absence of
+line-number references from internal documentation into those façades. This is
+an architectural regression gate, not a style convention left to review.
+
+Public behavior remains transport-neutral across those boundaries. The
+[documented feature verification matrix](./features/documented-feature-verification.md)
+maps every Queue, Worker, Cron, and DLQ guide section to executable TCP and
+embedded evidence. Shared contracts hold the assertions once; thin discovered
+wrappers select the transport, preventing the two implementations from drifting.
 
 ## Component Diagram
 
@@ -180,8 +221,9 @@ See [TCP Server Handlers](./features/tcp-server-handlers.md) and
 
 **(a) Embedded (in-process).** `new Queue('q', { embedded: true, dataPath: './q.db' })`
 instantiates a `QueueManager` inside the application process — no sockets, no
-serialization. Lowest latency and the only mode where client-side stall detection
-and DLQ config apply directly. Trade-off: scoped to one process; multiple
+serialization. Lowest latency; synchronous snapshot helpers are available here,
+while async variants provide the same authoritative stall and DLQ configuration
+over TCP. Trade-off: scoped to one process; multiple
 processes pointing at the same SQLite file is **not** supported for concurrent
 writers.
 
@@ -212,7 +254,7 @@ IoT/edge that must tolerate intermittent connectivity. See
    (embedded) or sends a `PUSH`/`PUSHB` msgpack frame over the `TcpPool`.
 2. TCP server decodes + authenticates the frame and dispatches to the push handler.
 3. `QueueManager.push()` registers the queue name and delegates to `pushJob()`
-   ([`queueManager.ts:299`](../src/application/queueManager.ts),
+   ([`queue-manager/delivery.ts`](../src/application/queue-manager/delivery.ts),
    [`operations/push.ts`](../src/application/operations/push.ts)).
 4. `shardIndex(queue)` selects the shard; under its write lock the job is dedup-
    checked (custom id / unique key) and enqueued into the `IndexedPriorityQueue`
@@ -250,7 +292,7 @@ mutates both sides of the topology.
 **PULL** (`Worker` poll)
 1. Worker requests work (`PULL`/`PULLB`, optionally with a lease/owner) for a queue.
 2. Dispatch → `QueueManager.pull()` / `pullWithLock()`
-   ([`queueManager.ts:309`](../src/application/queueManager.ts),
+   ([`queue-manager/delivery.ts`](../src/application/queue-manager/delivery.ts),
    [`operations/pull.ts`](../src/application/operations/pull.ts)); atomic
    queue-state transitions and the reusable dequeue scratch live in
    [`operations/pullStateTransition.ts`](../src/application/operations/pullStateTransition.ts).
@@ -353,10 +395,10 @@ proceed during the writer's flush.
 
 - **Buffered (default).** Jobs flow into a `WriteBuffer` and are flushed in batches
   every **10 ms** or when **100** jobs accumulate
-  ([`sqlite.ts:91`](../src/infrastructure/persistence/sqlite.ts)). The buffer is
+  ([`sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts)). The buffer is
   **double-buffered** — an `activeBuffer` keeps accepting writes while the
   `flushBuffer` is committed in one transaction, so writers never block on disk
-  ([`sqliteBatch.ts:180`](../src/infrastructure/persistence/sqliteBatch.ts)).
+  ([`writeBuffer.ts`](../src/infrastructure/persistence/writeBuffer.ts)).
 - **Durable.** `add(..., { durable: true })` bypasses the buffer for an immediate
   synchronous write — zero data-loss window at lower throughput.
 - **Resilience.** Flush failures retry with exponential backoff (100ms → 30s, 10
@@ -368,7 +410,7 @@ proceed during the writer's flush.
 - **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, bounded
   dependency-completion proofs, results, DLQ, cron, and queue control-state
   back into memory before serving traffic
-  ([`queueManager.ts:202`](../src/application/queueManager.ts)).
+  ([`background/recovery.ts`](../src/application/background/recovery.ts)).
 
 Persisted tables: `jobs`, `flow_failures`, `dependency_completions`,
 `job_results`, `dlq`, `cron_jobs`, `queue_state` (plus the `migrations`
@@ -431,8 +473,8 @@ See [Workflow Engine](./features/workflow-engine.md) and the workflow section in
 ## Background Tasks
 
 `startBackgroundTasks()` arms one timer per maintenance concern; intervals come
-from `DEFAULT_CONFIG` ([`src/application/types.ts:33`](../src/application/types.ts),
-[`src/application/backgroundTasks.ts:43`](../src/application/backgroundTasks.ts)).
+from `DEFAULT_CONFIG` ([`application/types/config.ts`](../src/application/types/config.ts),
+[`application/background/lifecycle.ts`](../src/application/background/lifecycle.ts)).
 
 | Task | Interval (default) | Purpose |
 | --- | --- | --- |

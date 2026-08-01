@@ -162,6 +162,95 @@ const remoteQueue = new Queue('tasks', {
 ```
 
 </TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue
+
+remote_queue = Queue(
+    "tasks",
+    host="192.168.1.100",
+    port=6789,
+    token="secret-token",  # If AUTH_TOKENS is set on the server
+)
+
+# External SDKs take job options on each add.
+remote_queue.add("send", {"user_id": 42}, attempts=3, remove_on_complete=True)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+
+$remoteQueue = new Queue('tasks', [
+    'host' => '192.168.1.100',
+    'port' => 6789,
+    'token' => 'secret-token', // If AUTH_TOKENS is set on the server
+]);
+
+$remoteQueue->add('send', ['userId' => 42], [
+    'attempts' => 3,
+    'removeOnComplete' => true,
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+remoteQueue := bunqueue.NewQueue("tasks", bunqueue.Options{
+    Host:  "192.168.1.100",
+    Port:  6789,
+    Token: "secret-token", // If AUTH_TOKENS is set on the server
+})
+defer remoteQueue.Close()
+
+remoteQueue.Add("send", map[string]any{"userId": 42}, bunqueue.JobOptions{
+    "attempts": 3, "removeOnComplete": true,
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value};
+
+let remote_queue = Queue::new("tasks", ConnectionOptions {
+    host: "192.168.1.100".into(),
+    port: 6789,
+    token: Some("secret-token".into()), // If AUTH_TOKENS is set on the server
+    ..Default::default()
+});
+
+remote_queue.add("send", Value::Nil, JobOptions {
+    attempts: Some(3),
+    remove_on_complete: Some(true),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+remote_queue =
+  Bunqueue.queue("tasks",
+    host: "192.168.1.100",
+    port: 6789,
+    token: "secret-token" # If AUTH_TOKENS is set on the server
+  )
+
+{:ok, _job} =
+  Bunqueue.Queue.add(remote_queue, "send", %{user_id: 42},
+    attempts: 3,
+    removeOnComplete: true
+  )
+```
+
+</TabItem>
 </Tabs>
 
 *`embedded: true` and `defaultJobOptions` exist in the Bun `bunqueue` package only; the `poolSize` connection pool is TypeScript-only. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call.*
@@ -181,4 +270,3 @@ const remoteQueue = new Queue('tasks', {
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

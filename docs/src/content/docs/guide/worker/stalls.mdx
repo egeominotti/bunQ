@@ -17,7 +17,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · worker</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Proving the worker is <em>still alive.</em></h1>
-  <p class="bq-hero-sub">A crashed worker cannot tell anyone. Heartbeats let the queue notice, and locks make sure the recovered job is picked up by exactly one replacement.</p>
+  <p class="bq-hero-sub">A crashed worker cannot tell anyone. Heartbeats let the queue notice, and lease tokens ensure only the current owner can settle a recovered job.</p>
 </div>
 
 ## Heartbeats and stall detection
@@ -92,7 +92,13 @@ Keep the heartbeat interval shorter than the queue's `stallInterval` to avoid fa
 
 ## Lock-based ownership
 
-With `useLocks: true` (the default), each pulled job gets a lock, a temporary claim that says "this worker owns this job". The lock is renewed by heartbeats (`lockDuration` sets its TTL) and must be presented when completing or failing the job. This prevents two workers from processing the same job, and prevents a slow worker's job from being grabbed by a faster one.
+With `useLocks: true` (the default), each pulled job gets a lock, a temporary
+claim that says "this worker owns this job". The lock is renewed by heartbeats
+(`lockDuration` sets its TTL) and must be presented when completing or failing
+the job. Delivery is exclusive while the lease is valid. After expiry, the
+broker may redeliver while the stale handler is still running, but its old token
+can no longer acknowledge the job. This is at-least-once processing, so handlers
+must still be idempotent.
 
 Locks matter most in **server mode** with multiple workers. In embedded mode with a single process you can trade the safety for a bit of throughput:
 
@@ -104,6 +110,70 @@ const worker = new Worker('queue', processor, {
   embedded: true,
   useLocks: false, // Rely on stall detection only
 });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const worker = new Worker('queue', async (job) => {
+  await job.extendLock(60_000); // optional explicit lease extension
+  return processor(job);
+}, { lockTtlMs: 30_000 });      // lock ownership cannot be disabled
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+def process(job):
+    job.extend_lock(60_000)  # optional explicit lease extension
+    return handle(job)
+
+worker = Worker("queue", process, lock_ttl_ms=30_000)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$worker = new Worker('queue', function (Bunqueue\Job $job) {
+    // PHP is sequential, so extend manually before work longer than the TTL.
+    $job->extendLock(60000);
+    return processJob($job);
+}, ['lockTtlMs' => 30000]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
+    if err := job.ExtendLock(60_000); err != nil { return nil, err }
+    return processor(job)
+}, bunqueue.WorkerOptions{LockTtlMs: 30_000})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let worker = Worker::new("queue", |job| {
+    job.extend_lock(60_000)
+        .map_err(|error| ProcessError::retryable(error.to_string()))?;
+    processor(job)
+}, WorkerOptions {
+    lock_ttl_ms: 30_000,
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Elixir always uses lock ownership and renews it automatically.
+worker = Bunqueue.Worker.new("queue", handler, lock_ttl: 30_000)
 ```
 
 </TabItem>
@@ -125,4 +195,3 @@ In the Bun client, locks can also be extended explicitly: `worker.extendJobLocks
 | [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

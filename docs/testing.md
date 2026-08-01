@@ -26,6 +26,19 @@ bun scripts/tcp/run-all-tests.ts
 bun scripts/embedded/run-all-tests.ts
 ```
 
+Queue, Worker, Cron, and DLQ guide coverage is tracked explicitly in
+[Documented Feature Verification](./features/documented-feature-verification.md).
+`test/documented-feature-coverage.test.ts` requires every requested section to
+retain both TCP and embedded evidence and checks that every authoritative
+shared contract has symmetric wrappers. The functional runners discover those
+wrappers by their `test-*.ts` names, so the matrix is exercised by the same
+sandbox gate rather than by a separate optional suite.
+
+`test/source-architecture.test.ts` additionally enforces the 300-line source
+ceiling, thin QueueManager/Queue/Worker/SandboxedWorker façades, dedicated type
+modules, and documentation references that point at focused implementation
+modules instead of obsolete line numbers in the façades.
+
 The Docker build includes uncommitted files from the current worktree, so the
 validated source is the source being reviewed. It never bind-mounts the host
 repository into a test container.
@@ -118,6 +131,11 @@ BUNQUEUE_MODEL_SEED=424242 \
 bun run test:model
 ```
 
+The workflow campaign closes every `Engine`, shuts down the process-wide
+embedded `QueueManager`, and only then removes its shared temporary SQLite
+directory. This ordering prevents background lock/DLQ timers from touching a
+database after teardown and keeps model output free of false disk-I/O alarms.
+
 Failures report a seed, a minimized command history, and a replay path. Convert
 every confirmed engine divergence into a deterministic
 `test/repro-model-*.test.ts` regression before applying the fix. Model
@@ -205,13 +223,24 @@ diagnostic only and must never be published as benchmark results.
 
 `Dockerfile.test` is deliberately separate from the production `Dockerfile`.
 The production image contains only the compiled server; the test image contains
-`src/`, `test/`, `scripts/`, `bench/`, configuration, and development
-dependencies. The allow-listed configuration includes `docs/vercel.json`, the
-CI workflow files, and the small per-SDK mutation configuration files consumed
-by structural regressions. It also includes `Dockerfile.test` itself so tests
-can verify that this contract stays synchronized with the workflow files. It
-does not install SDK toolchains or copy credentials into the core test image.
-`Dockerfile.test.dockerignore` limits the build context to those inputs.
+`src/`, `test/`, `scripts/`, `bench/`, configuration, internal technical
+Markdown, and the Astro documentation content exercised by documentation
+contracts. Copying the documentation is intentional: section coverage,
+language-tab parity, and stale architecture-reference checks must execute in
+the sandbox instead of passing vacuously against an empty tree. The allow-listed
+configuration also includes `docs/vercel.json`, the CI workflow files, and the
+small per-SDK mutation configuration files consumed by structural regressions.
+It includes `Dockerfile.test` itself so tests can verify that this contract stays
+synchronized with the workflow files. It does not install SDK toolchains or
+copy credentials into the core test image. `Dockerfile.test.dockerignore`
+limits the build context to those inputs.
+
+Regression helpers that poll state must fail closed when their deadline expires.
+Tests concerned with failure classification rather than scheduling explicitly
+set `backoff: 0`, so randomized production retry jitter cannot turn an incomplete
+observation into a misleading downstream assertion. Migration regressions always
+verify the current schema version; schema 30 also has a direct 29-to-30 upgrade
+test for the durable `jobs.dlq_retry_state` column.
 
 The environment is reproducible:
 

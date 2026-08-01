@@ -40,6 +40,9 @@ Cloudflare Workers with `nodejs_compat`; it is not an alternate queue engine.
   `attempts -> maxAttempts`, `jobId -> jobId` for ordinary `PUSH`, snake-free
   camelCase wire names for every other option. Adding an option requires a
   mapping assertion and a real-server test.
+- Public administrative options supported by the broker must reach the wire;
+  in particular `setGlobalRateLimit(max, duration)` sends `duration` while an
+  omitted value stays omitted and retains the broker's one-second default.
 
 ## Queue and idempotency
 

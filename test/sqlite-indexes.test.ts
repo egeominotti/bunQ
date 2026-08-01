@@ -40,8 +40,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 29', () => {
-    expect(SCHEMA_VERSION).toBe(29);
+  test('schema version is 30', () => {
+    expect(SCHEMA_VERSION).toBe(30);
   });
 
   test('bounded dependency-completion table and queue index exist', () => {
@@ -231,7 +231,7 @@ describe('SQLite Performance Indexes', () => {
     expect(plan.some((row) => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 
-  test('migrations 28-29 restore completion evidence and pin ownership', () => {
+  test('migrations through the current schema restore completion evidence and pin ownership', () => {
     const path = join(tmpdir(), `bunqueue-index-migration-${crypto.randomUUID()}.db`);
     const legacy = new Database(path, { create: true });
     legacy.run(SCHEMA);
@@ -267,7 +267,7 @@ describe('SQLite Performance Indexes', () => {
         migrated
           .query<{ version: number }, []>('SELECT MAX(version) AS version FROM migrations')
           .get()?.version
-      ).toBe(29);
+      ).toBe(SCHEMA_VERSION);
       expect(
         migrated
           .query<{ name: string }, []>(

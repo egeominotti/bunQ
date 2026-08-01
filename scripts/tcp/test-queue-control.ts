@@ -6,7 +6,7 @@
 import { Queue, Worker } from '../../src/client';
 
 const QUEUE_NAME = 'tcp-test-control';
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 
 async function main() {
   console.log('=== Test Queue Control (TCP) ===\n');
@@ -33,10 +33,14 @@ async function main() {
     await Bun.sleep(100);
 
     let processed = 0;
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      processed++;
-      return {};
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      () => {
+        processed++;
+        return {};
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -60,10 +64,14 @@ async function main() {
     await Bun.sleep(100);
 
     let processed = 0;
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      processed++;
-      return {};
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      () => {
+        processed++;
+        return {};
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -83,8 +91,7 @@ async function main() {
   // Test 3: Drain queue
   console.log('\n3. Testing DRAIN...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     await queue.addBulk([
       { name: 'drain-1', data: { value: 1 } },
@@ -96,10 +103,14 @@ async function main() {
     await Bun.sleep(100);
 
     let processed = 0;
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      processed++;
-      return {};
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      () => {
+        processed++;
+        return {};
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -128,10 +139,14 @@ async function main() {
     await Bun.sleep(100);
 
     let processed = 0;
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      processed++;
-      return {};
-    }, { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      () => {
+        processed++;
+        return {};
+      },
+      { concurrency: 1, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -165,12 +180,16 @@ async function main() {
     let processedAfterPause = 0;
     let paused = false;
 
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      if (!paused) processedBeforePause++;
-      else processedAfterPause++;
-      await Bun.sleep(100);
-      return {};
-    }, { concurrency: 2, connection: { port: TCP_PORT }, useLocks: false });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async () => {
+        if (!paused) processedBeforePause++;
+        else processedAfterPause++;
+        await Bun.sleep(100);
+        return {};
+      },
+      { concurrency: 2, connection: { port: TCP_PORT }, useLocks: false }
+    );
 
     await Bun.sleep(300);
     queue.pause();
@@ -180,7 +199,9 @@ async function main() {
 
     // Should have processed some before pause, none after
     if (processedBeforePause >= 1 && processedAfterPause <= 2) {
-      console.log(`   ✅ Pause during processing: ${processedBeforePause} before, ${processedAfterPause} after`);
+      console.log(
+        `   ✅ Pause during processing: ${processedBeforePause} before, ${processedAfterPause} after`
+      );
       passed++;
     } else {
       console.log(`   ❌ Before: ${processedBeforePause}, After: ${processedAfterPause}`);
@@ -205,11 +226,11 @@ async function main() {
 
     const counts = await queue.getJobCountsAsync();
 
-    if (counts.waiting >= 0) {
-      console.log(`   ✅ Got job counts: waiting=${counts.waiting}`);
+    if (counts.waiting === 3) {
+      console.log('   ✅ Job counts report exactly 3 waiting jobs');
       passed++;
     } else {
-      console.log('   ❌ Could not get job counts');
+      console.log(`   ❌ Expected waiting=3, got ${counts.waiting}`);
       failed++;
     }
   } catch (e) {

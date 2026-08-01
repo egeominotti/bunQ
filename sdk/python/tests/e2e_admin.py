@@ -113,6 +113,16 @@ def rate_limit_and_concurrency(server: Server) -> None:
 
 
 @test
+def custom_rate_limit_duration_reaches_broker(server: Server) -> None:
+    with Queue(unique_name("rate-window"), port=server.port) as queue:
+        queue.set_global_rate_limit(7, 12345)
+        response = queue.connection.call({"cmd": "GetQueueLimits", "queue": queue.name})
+        limits = (response.get("data") or {}).get("limits") or {}
+        rate_limit = limits.get("rateLimit") or {}
+        assert rate_limit.get("duration") == 12345, rate_limit
+
+
+@test
 def global_concurrency_enforced(server: Server) -> None:
     with Queue(unique_name("gconc"), port=server.port) as queue:
         queue.set_global_concurrency(1)

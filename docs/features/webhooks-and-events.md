@@ -140,7 +140,7 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 
 ### Event broadcast → webhook delivery
 
-1. The queue engine builds a `JobEvent` and calls `eventsManager.broadcast(...)` (e.g. `queueManager.ts:840`).
+1. The queue engine builds a `JobEvent` and calls `eventsManager.broadcast(...)` (for example from `queue-manager/control.ts` and the lifecycle operations under `application/operations/`).
 2. `broadcast` computes `hasSubscribers`, `hasWebhooks` (`webhookManager.hasEnabledWebhooks()`), and `hasWaiters` (only for `Completed`). **Fast path:** if all three are false it returns immediately, doing zero work (`eventsManager.ts:133`).
 3. Subscribers are invoked in a try/catch — a throwing subscriber is swallowed so one bad listener can't break the fan-out (`eventsManager.ts:139`).
 4. For `Completed`, all completion waiters for that `jobId` are resolved and the map entry deleted (`eventsManager.ts:149`).
@@ -182,7 +182,7 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 - **`hasEnabledWebhooks` / `getStats` are O(1)** thanks to the `enabledCount` running counter maintained in `add`/`remove`/`setEnabled` (`webhookManager.ts:39`).
 - **Completion-waiter memory safety:** `waitForJobCompletion` registers a timer that, on timeout, marks the waiter `cancelled`, splices it out, and deletes empty arrays — preventing a leak when `WaitJob` times out without completion (`eventsManager.ts:78`). `clear()` resolves all outstanding non-cancelled waiters on shutdown.
 - **Subscriber isolation:** exceptions thrown by subscribers in `broadcast` are caught and ignored (`eventsManager.ts:142`).
-- **Job-log bounds:** per-job cap is `maxLogsPerJob = 100` (`queueManager.ts:114`); the `jobLogs` LRU itself holds at most `maxJobLogs = 10_000` distinct jobs (`types.ts:36`), evicting whole-job entries. Adding logs to a job not in `jobIndex` returns `false`.
+- **Job-log bounds:** per-job cap is `maxLogsPerJob = 100` (`queue-manager/state.ts`); the `jobLogs` LRU itself holds at most `maxJobLogs = 10_000` distinct jobs (`application/types/config.ts`), evicting whole-job entries. Adding logs to a job not in `jobIndex` returns `false`.
 - **Cron `preventOverlap` invariant:** disconnect release must discard (not requeue) `cron:*` jobs, or they re-run immediately on reconnect (#73).
 
 ## Configuration
@@ -192,7 +192,7 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 | `WEBHOOK_MAX_RETRIES` | `3` | Max delivery attempts per webhook (`webhookManager.ts:17`) |
 | `WEBHOOK_RETRY_DELAY_MS` | `1000` | Base inter-attempt delay; actual wait = `delay * (attempt+1)` (`webhookManager.ts:20`) |
 
-Options (not env): `WebhookManager({ validateUrls })` — defaults ON; wired from `config.validateWebhookUrls` (`queueManager.ts:187`). Job-log bounds: `maxLogsPerJob = 100`, `maxJobLogs = 10_000` (config default). Webhook fetch timeout is a hardcoded 10 000 ms.
+Options (not env): `WebhookManager({ validateUrls })` — defaults ON; wired from `config.validateWebhookUrls` in `queue-manager/state.ts`. Job-log bounds: `maxLogsPerJob = 100`, `maxJobLogs = 10_000` (config default). Webhook fetch timeout is a hardcoded 10 000 ms.
 
 ## Related Docs
 

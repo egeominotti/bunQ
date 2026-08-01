@@ -13,7 +13,7 @@ The same logical `Job` flows through all three: a client sends a `PushCommand`
 over TCP (msgpack), the server materializes a `Job` object in a shard's
 in-memory `PriorityQueue`, and a `WriteBuffer` persists it to the `jobs` table
 where mutable/structured fields (`data`, `depends_on`, `children_ids`, `tags`,
-`timeline`, `stacktrace`) are stored as MessagePack BLOBs. These three shapes
+`timeline`, `stacktrace`, internal `dlq_retry_state`) are stored as MessagePack BLOBs. These three shapes
 are **not identical** — fields such as `backoffConfig` and
 `childrenCompleted` are reconstructed on reload. Recovery-critical
 `stallCount` and all four BullMQ-v5 child-failure policies are persisted so a
@@ -188,7 +188,7 @@ Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 > `moveToDelayed(id, timestamp)` to `delay = max(0, timestamp - now)`. In-queue
 > jobs route through `changeWaitingDelay`, active jobs through the two-phase
 > `moveJobToDelayed` — both share `QueueManager.moveToDelayed`/`changeDelay`
-> (`queueManager.ts:1171`), so `MoveToDelayed` works over TCP/HTTP/MCP for
+> (`application/queue-manager/job-management.ts`), so `MoveToDelayed` works over TCP/HTTP/MCP for
 > waiting **and** active jobs (was previously a silent no-op for waiting jobs).
 
 Helper predicates: `isDelayed`, `isReady`, `isExpired`, `isTimedOut`,
@@ -343,6 +343,21 @@ Auto-retry uses exponential backoff: `autoRetryInterval * 2^(retryCount-1)`
 
 The entire `DlqEntry` is persisted as a single MessagePack BLOB in the `dlq`
 table's `entry` column. See [Dead Letter Queue](./features/dead-letter-queue.md).
+
+While an automatic DLQ retry is waiting or active, its original entry times,
+attempt history, retry count and next backoff live in a non-enumerable Job
+symbol and in `jobs.dlq_retry_state`. This state is absent from the public Job
+wire shape. Completion and manual retry clear it; a terminal re-failure consumes
+it to reconstruct the same bounded DLQ generation.
+
+`DlqEntry.reason` is the final failure classification, while each
+`AttemptRecord.reason` describes its own attempt. The timeout sweep passes
+`FailureReason.Timeout` explicitly through the internal failure transition, so
+timeout history and terminal classification survive retries and SQLite restart.
+Ordinary processor failures keep their existing `ExplicitFail` retry records
+and `MaxAttemptsExceeded` terminal reason. `TtlExpired` and `WorkerLost` remain
+reserved enum values; current TTL removal and disconnect recovery do not emit
+them as terminal DLQ entries.
 
 ---
 
@@ -696,7 +711,8 @@ Source: `src/infrastructure/persistence/schema.ts`. Connection PRAGMAs
 `temp_store=MEMORY`, 256 MB mmap, 4 KB page, 5 s busy timeout.
 
 All structured/payload columns are `BLOB` holding MessagePack — `data`,
-`depends_on`, `children_ids`, `tags`, `timeline`, `stacktrace`, DLQ `entry`,
+`depends_on`, `children_ids`, `tags`, `timeline`, `stacktrace`, internal
+`dlq_retry_state`, DLQ `entry`,
 cron `dedup`/`job_options`, and `job_results.result`.
 
 ### `jobs` (schema.ts:20-51)
@@ -737,7 +753,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_heartbeat INTEGER,
     stall_count INTEGER NOT NULL DEFAULT 0,
     timeline BLOB,
-    stacktrace BLOB
+    stacktrace BLOB,
+    dlq_retry_state BLOB
 );
 ```
 
@@ -912,7 +929,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (schema.ts:140-210)
 
-`SCHEMA_VERSION = 29`. The migrate routine reads
+`SCHEMA_VERSION = 30`. The migrate routine reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version (wrapped in try/catch since columns may already exist),
@@ -946,6 +963,7 @@ then records `SCHEMA_VERSION`.
 | 27      | `flow_failures` durable outbox + parent index; rebuild pending indexes for `prioritized`/`waiting-children` |
 | 28      | Bounded `dependency_completions` evidence for crash-safe `removeOnComplete` dependency recovery |
 | 29      | `dependency_completions.pinned` ownership for proofs referenced by live waiting parents |
+| 30      | `jobs.dlq_retry_state` (bounded auto-retry chain/history across restart) |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -955,8 +973,9 @@ See [Persistence](./features/persistence.md).
 
 ## In-Memory Collections & Bounds
 
-Defined on `QueueManagerState` (`src/application/types.ts:47-92`), sized by
-`DEFAULT_CONFIG` (`types.ts:33-44`). Cleanup runs every `cleanupIntervalMs`
+Defined on `QueueManagerState` (`src/application/queue-manager/state.ts`), with
+its context interfaces in `src/application/types/contexts.ts`, and sized by
+`DEFAULT_CONFIG` (`src/application/types/config.ts`). Cleanup runs every `cleanupIntervalMs`
 (default 10 s).
 
 | Collection        | Type                       | Max     | Eviction                       |

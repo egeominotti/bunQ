@@ -34,6 +34,13 @@ pending, the flush throws and the backup aborts: bunqueue never reports a
 snapshot as complete while accepted state exists only in memory. CLI commands
 operate locally and therefore require the server to be stopped before restore.
 
+When the Cloud agent is enabled, bootstrap also injects a `triggerBackup`
+server handle. The whitelisted `s3:backup` remote command awaits the same
+manager's `backup()` method and returns its real result. The handle is omitted
+when backup is disabled, in which case the Cloud command fails explicitly with
+`S3 backup not configured`; a rejected backup is likewise returned as a failed
+command result.
+
 ## Configuration
 
 `S3BackupConfig` contains:

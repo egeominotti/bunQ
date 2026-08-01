@@ -5,7 +5,7 @@
 
 import type { Job } from '../domain/types/job';
 import { calculateBackoff, MAX_TIMELINE_ENTRIES } from '../domain/types/job';
-import { FailureReason } from '../domain/types/dlq';
+import { FailureReason, recordJobFailureAttempt } from '../domain/types/dlq';
 import { StallAction, getStallAction, incrementStallCount } from '../domain/types/stall';
 import { EventType } from '../domain/types/queue';
 import type { WebhookEvent } from '../domain/types/webhook';
@@ -185,8 +185,9 @@ function retryStalliedJob(
 
   incrementStallCount(job);
   job.attempts++;
-  job.startedAt = null;
   const stallNow = Date.now();
+  recordJobFailureAttempt(job, FailureReason.Stalled, 'stalled', stallNow);
+  job.startedAt = null;
   job.runAt = stallNow + calculateBackoff(job);
   job.lastHeartbeat = stallNow;
   if (job.timeline.length < MAX_TIMELINE_ENTRIES) {

@@ -169,7 +169,7 @@ async function main() {
 
     const worker = new Worker<{ value: number }>(
       QUEUE_NAME,
-      async () => {
+      () => {
         return { done: true };
       },
       { concurrency: 5, embedded: true }
@@ -180,14 +180,16 @@ async function main() {
 
     // Clean completed jobs (older than 0ms)
     const cleaned = await queue.cleanAsync(0, 100, 'completed');
+    const remainingCompleted = await queue.getCompletedCount();
     console.log(`   Cleaned: ${cleaned.length} jobs`);
 
-    if (cleaned.length >= 0) {
-      // May be 0 if jobs already removed
-      console.log('   [PASS] clean/cleanAsync works');
+    if (cleaned.length === 2 && remainingCompleted === 0) {
+      console.log('   [PASS] clean removed exactly both completed jobs');
       passed++;
     } else {
-      console.log('   [FAIL] clean should return array');
+      console.log(
+        `   [FAIL] Expected 2 cleaned and 0 remaining, got ${cleaned.length}/${remainingCompleted}`
+      );
       failed++;
     }
   } catch (e) {

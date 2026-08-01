@@ -4,14 +4,13 @@
  */
 
 import type { EventEmitter } from 'events';
-import type { TcpConnection } from './types';
-import type { Processor, Job, FlowJobData } from '../types';
+import type { Job, FlowJobData } from '../types';
 import { createPublicJob } from '../types';
 import type { Job as InternalJob } from '../../domain/types/job';
 import { getSharedManager } from '../manager';
 import { UnrecoverableError } from '../errors';
 import { DelayedError } from '../errors';
-import type { AckBatcher } from './ackBatcher';
+import type { FailureContext, ProcessorConfig } from './types';
 import {
   createProgressHandler,
   createLogHandler,
@@ -42,17 +41,7 @@ import {
   computeStackLines,
 } from './processorHandlers';
 
-/** Processor configuration */
-export interface ProcessorConfig<T, R> {
-  name: string;
-  processor: Processor<T, R>;
-  embedded: boolean;
-  tcp: TcpConnection | null;
-  ackBatcher: AckBatcher;
-  emitter: EventEmitter;
-  token?: string | null; // Lock token for ownership verification
-  onOutcome?: (succeeded: boolean) => void;
-}
+export type { ProcessorConfig } from './types';
 
 /**
  * Process a single job
@@ -203,12 +192,6 @@ function handleManualMove<T extends FlowJobData>(
     return true;
   }
   return false;
-}
-
-interface FailureContext<T extends FlowJobData> {
-  job: Job<T>;
-  jobIdStr: string;
-  token?: string | null;
 }
 
 /** Check if error is a "job not found" error from stale ACK/FAIL (Issue #33) */

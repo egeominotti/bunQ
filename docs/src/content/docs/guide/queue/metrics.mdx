@@ -76,6 +76,28 @@ stats, _ := queue.GetStats()         // Server-wide stats
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+The Rust SDK does not expose queue monitoring helpers yet. Read the broker's
+Prometheus endpoint instead:
+
+```bash
+curl --fail http://localhost:6790/metrics
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK does not expose queue monitoring helpers yet. Read the broker's
+Prometheus endpoint with the standard Erlang HTTP client instead:
+
+```elixir
+:inets.start()
+{:ok, {{_, 200, _}, _headers, body}} =
+  :httpc.request(~c"http://localhost:6790/metrics")
+```
+
+</TabItem>
 </Tabs>
 
 *Worker and stats helpers are not yet exposed in Rust and Elixir; scrape the server's HTTP `/metrics` endpoint instead. `trimEvents()` and windowed `getMetrics(state, start, end)` exist in the Bun `bunqueue` package only.*
@@ -95,4 +117,3 @@ stats, _ := queue.GetStats()         // Server-wide stats
 | [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

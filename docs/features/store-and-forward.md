@@ -32,7 +32,7 @@ This module groups two unrelated client-side concerns that share the "compatibil
 - `./types` — `ConnectionOptions`, `Job`, `QueueOptions` (`forwarder.ts:17`).
 - `../manager` (`getSharedManager`) — embedded job/result lookups for the BullMQ shims (`bullmqCompat.ts:6`).
 - `../types` (`toPublicJob`) and `../../domain/types/job` (`jobId`) — public-job conversion and id branding (`bullmqCompat.ts:9-10`).
-- A `RemoteQueueCtor` (the `Queue` class itself) is injected by `Queue.forward()` to avoid an import cycle (`queue.ts:602`).
+- A `RemoteQueueCtor` (the `Queue` class itself) is injected by `Queue.forward()` to avoid an import cycle (`src/client/queue/queue.ts`).
 
 **External / runtime:** Node `events` (`EventEmitter`) for `Forwarder` (`forwarder.ts:15`). No other external runtime dependencies; the remote transport reuses Bun's TCP socket layer via the injected `Queue`.
 
@@ -40,10 +40,10 @@ This module groups two unrelated client-side concerns that share the "compatibil
 
 ### Store-and-Forward (`forwarder.ts`)
 
-Entry point is `Queue.forward()` (`queue.ts:591`), which constructs a `Forwarder`:
+Entry point is `Queue.forward()` (`src/client/queue/queue.ts`), which constructs a `Forwarder`:
 
 ```typescript
-// src/client/queue/queue.ts:591
+// src/client/queue/queue.ts
 forward(options: ForwardOptions): Forwarder
 ```
 

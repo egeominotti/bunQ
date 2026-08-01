@@ -1,6 +1,6 @@
 # Background Tasks
 
-> **Category:** Scheduling · **Source:** `src/application/backgroundTasks.ts`, `src/application/cleanupTasks.ts`, `src/application/dependencyProcessor.ts`, `src/application/monitoringChecks.ts`, `src/application/taskErrorTracking.ts`
+> **Category:** Scheduling · **Source:** `src/application/backgroundTasks.ts`, `src/application/background/`, `src/application/cleanupTasks.ts`, `src/application/dependencyProcessor.ts`, `src/application/monitoringChecks.ts`, `src/application/taskErrorTracking.ts`
 
 ## Purpose
 
@@ -10,10 +10,10 @@ This module orchestrates all of the periodic, server-side maintenance work that 
 
 Owns:
 
-- The interval lifecycle: `startBackgroundTasks` / `stopBackgroundTasks` and the `BackgroundTaskHandles` returned to `QueueManager` (`backgroundTasks.ts:39`, `backgroundTasks.ts:114`).
-- Job-timeout enforcement (`checkJobTimeouts`, `backgroundTasks.ts:147`).
-- DLQ maintenance dispatch — iterating queues and calling into the DLQ manager (`performDlqMaintenance`, `backgroundTasks.ts:175`).
-- Startup recovery: rebuilding active/pending/completed jobs, DLQ entries, and queue control-state from disk (`recover`, `backgroundTasks.ts:227`).
+- The stable export surface in `backgroundTasks.ts` and the interval lifecycle in `background/lifecycle.ts`.
+- Job-timeout enforcement and explicit failure classification (`background/timeouts.ts`).
+- DLQ maintenance dispatch in `background/dlq.ts`.
+- Startup recovery, split by lifecycle state under `background/recovery/`.
 - Memory-bound cleanup of orphaned processing entries, stale waiting-deps, unique keys/groups, stalled candidates, orphaned `jobIndex`/`jobLocks`, and empty queues (`cleanup`, `cleanupTasks.ts:15`).
 - Dependency resolution as a safety fallback to the event-driven fast path (`processPendingDependencies`, `dependencyProcessor.ts:16`).
 - Dashboard threshold monitoring and hysteresis state (`runMonitoringChecks`, `monitoringChecks.ts:56`).
@@ -122,8 +122,8 @@ No TCP commands, HTTP endpoints, or CLI commands are defined here. `getTaskError
 
 Emitted via `ctx.dashboardEmit?.(event, data)` (consumed by [bunqueue Cloud Dashboard Integration](./cloud-integration.md)):
 
-- `job:timeout` — `checkJobTimeouts` (`backgroundTasks.ts:152`)
-- `dlq:auto-retried`, `dlq:expired` — `performDlqMaintenance` (`backgroundTasks.ts:186`, `:189`)
+- `job:timeout` — `checkJobTimeouts` (`background/timeouts.ts`)
+- `dlq:auto-retried`, `dlq:expired` — `performDlqMaintenance` (`background/dlq.ts`)
 - `cleanup:orphans-removed` — `cleanOrphanedProcessingEntries` (`cleanupTasks.ts:69`)
 - `cleanup:stale-deps-removed` — `cleanStaleWaitingDependencies` (`cleanupTasks.ts:91`)
 - `queue:removed` — `cleanEmptyQueues` (`cleanupTasks.ts:257`)
@@ -137,35 +137,35 @@ The stall and lock-expiry intervals additionally drive `job:stalled` / `job:lock
 See [data-model](../data-model.md) for full definitions. The most relevant shapes:
 
 - `BackgroundContext` extends `QueueManagerState` and adds the callbacks and
-  collections the tasks need: `fail(jobId, error?)`,
+  collections the tasks need: `fail(jobId, error?, failureReason?)`,
   `registerQueueName`/`unregisterQueueName`, `dashboardEmit`, `workerManager`,
   `monitoringState`, `completedJobsData: BoundedMap<JobId, Job>`,
   `depCompletions?: DependencyCompletionTracker` (bounded recent bare IDs plus
   IDs pinned by live dependency edges), and `timedOutJobs?: BoundedSet<JobId>`
   (guard against late ACKs from timed-out workers).
-- `LockContext` (`src/application/types.ts:95`) — narrowed view passed to `checkExpiredLocks`, built by `getLockContext` (`backgroundTasks.ts:125`). It MUST carry `storage: ctx.storage`: this is the only production path to `checkExpiredLocks`, and without it the `saveDlqEntry`/`deleteJob` persistence inside `handleMaxStallsExceeded` silently no-ops through optional chaining (issue #110 — the #97 fix never executed on this path from 2.8.17 to 2.8.27, leaving orphan `active` rows in SQLite and memory-only DLQ entries).
-- `DEFAULT_CONFIG` (`src/application/types.ts:33`) — the interval defaults (see [Configuration](#configuration)).
+- `LockContext` (`src/application/types/contexts.ts`) — narrowed view passed to `checkExpiredLocks`, built by `getLockContext` in `background/lifecycle.ts`. It MUST carry `storage: ctx.storage`: this is the only production path to `checkExpiredLocks`, and without it the `saveDlqEntry`/`deleteJob` persistence inside `handleMaxStallsExceeded` silently no-ops through optional chaining (issue #110 — the #97 fix never executed on this path from 2.8.17 to 2.8.27, leaving orphan `active` rows in SQLite and memory-only DLQ entries).
+- `DEFAULT_CONFIG` (`src/application/types/config.ts`) — the interval defaults (see [Configuration](#configuration)).
 - `Job` — fields read/written by these tasks: `timeout`, `startedAt`, `lastHeartbeat`, `stallCount`, `attempts`, `runAt`, `dependsOn`, `uniqueKey`, `customId`, `deduplicationTtl`, `timeline`.
 - `TaskErrorState` / `MonitoringState` — module-local tracking shapes shown above.
 
 ## Business Logic / Control Flow
 
-### Startup: `recover(ctx)` (`backgroundTasks.ts:227`)
+### Startup: `recover(ctx)` (`background/recovery/index.ts`)
 
-Runs once before the intervals start (called from `QueueManager` constructor, `queueManager.ts:202`). No-op if `ctx.storage` is null (in-memory mode). It loads `loadCompletedJobIds()` and `loadDlqJobIds()` up front, then:
+Runs once before the intervals start (called from the `QueueManagerState` constructor in `queue-manager/state.ts`). No-op if `ctx.storage` is null (in-memory mode). It loads `loadCompletedJobIds()` and `loadDlqJobIds()` up front, then:
 
-1. **Phase 1 — active jobs** (`:238`): before scanning, recovery restores each
+1. **Phase 1 — active jobs** (`background/recovery/active.ts`): before scanning, recovery restores each
    persisted custom `StallConfig` and `DlqConfig` from `queue_state`, because
    their bounds, retry scheduling, and retention fields are needed to classify
    interrupted work. It then repeatedly loads the first
    `RECOVERY_BATCH_SIZE = 10000` rows. Every handled row leaves the active result
    set, so incrementing `OFFSET` over the shrinking set would skip rows.
-2. **Phase 2 — pending jobs** (`:312`): paginated by deterministic `priority DESC, run_at ASC, id ASC`. This phase is the single authoritative enqueue path for both original pending jobs and retries persisted by Phase 1, preventing duplicate heap entries/counter increments. Corrupt-deps are quarantined; unsatisfied dependencies enter `waitingDeps`; dedup mappings are restored.
-3. **DLQ restore** (`:378`): `loadDlq()` restores every persisted entry into memory exactly once (this is why `quarantineCorruptDependsOn` deliberately does NOT touch in-memory DLQ — it only persists + drops the job row).
-4. **Queue control-state restore** (`:391`, issue #100): the `loadQueueState()` snapshot used before Phase 1 for stall policy is reused to apply `paused` / `rateLimit` / `concurrencyLimit` directly to the owning shard; without it every queue silently un-pauses on restart. In-memory only, no write-back loop.
-5. **Phase 3 — completed jobs** (`:404`): loads up to `maxCompletedJobs` rows into `completedJobs`/`completedJobsData` so `clean('completed')`, stats, and lookups work post-restart (issue #84). `customIdMap` is intentionally NOT populated here to avoid LRU-evicting pending-job mappings.
+2. **Phase 2 — pending jobs** (`background/recovery/pending.ts`): paginated by deterministic `priority DESC, run_at ASC, id ASC`. This phase is the single authoritative enqueue path for both original pending jobs and retries persisted by Phase 1, preventing duplicate heap entries/counter increments. Corrupt-deps are quarantined; unsatisfied dependencies enter `waitingDeps`; dedup mappings are restored.
+3. **DLQ restore** (`background/recovery/restore.ts`): `loadDlq()` restores every persisted entry into memory exactly once (this is why `quarantineCorruptDependsOn` deliberately does NOT touch in-memory DLQ — it only persists + drops the job row).
+4. **Queue control-state restore** (`background/recovery/restore.ts`, issue #100): the `loadQueueState()` snapshot used before Phase 1 for stall policy is reused to apply `paused` / `rateLimit` / `concurrencyLimit` directly to the owning shard; without it every queue silently un-pauses on restart. In-memory only, no write-back loop.
+5. **Phase 3 — completed jobs** (`background/recovery/restore.ts`): loads up to `maxCompletedJobs` rows into `completedJobs`/`completedJobsData` so `clean('completed')`, stats, and lookups work post-restart (issue #84). `customIdMap` is intentionally NOT populated here to avoid LRU-evicting pending-job mappings.
 
-### `startBackgroundTasks` (`backgroundTasks.ts:39`)
+### `startBackgroundTasks` (`background/lifecycle.ts`)
 
 Registers six intervals plus `cronScheduler.start()`:
 
@@ -178,13 +178,13 @@ Registers six intervals plus `cronScheduler.start()`:
 | `dlqMaintenanceInterval` | `dlqMaintenanceMs` | 60s | `performDlqMaintenance(ctx)` |
 | `lockCheckInterval` | `stallCheckMs` | 5s | `checkExpiredLocks(getLockContext(ctx))` with `lockExpiration` error tracking |
 
-Note: monitoring runs on the cleanup tick (10s), not its own timer — it is invoked inside the `cleanup().then()` callback (`:48`). The dependency interval is a **safety fallback only**; the fast path is event-driven in `QueueManager` (the 30s default and the `pendingDepChecks.size` guard reflect this — it is not a 100ms hot loop).
+Note: monitoring runs on the cleanup tick (10s), not its own timer — it is invoked inside the `cleanup().then()` callback in `background/lifecycle.ts`. The dependency interval is a **safety fallback only**; the fast path is event-driven in `QueueManager` (the 30s default and the `pendingDepChecks.size` guard reflect this — it is not a 100ms hot loop).
 
-### `checkJobTimeouts` (`backgroundTasks.ts:147`)
+### `checkJobTimeouts` (`background/timeouts.ts`)
 
-Scans every `processingShards` map. If `job.timeout && job.startedAt && now - job.startedAt > job.timeout`, it emits `job:timeout`, **adds the id to `timedOutJobs` BEFORE** calling `ctx.fail(jobId, 'Job timeout exceeded')`. The ordering is load-bearing: it ensures a late ACK from the still-hung worker is discarded by `ack`'s `timedOutJobs` guard rather than phantom-completing the job and skipping the retry.
+Scans every `processingShards` map. If `job.timeout && job.startedAt && now - job.startedAt > job.timeout`, it emits `job:timeout`, **adds the id to `timedOutJobs` BEFORE** calling the internal failure callback with `FailureReason.Timeout`. The ordering is load-bearing: it ensures a late ACK from the still-hung worker is discarded by `ack`'s `timedOutJobs` guard rather than phantom-completing the job and skipping the retry. Passing the reason explicitly also records `timeout` for every timed-out attempt and for a terminal DLQ entry; a later ordinary processor failure still uses the normal `explicit_fail` attempt / `max_attempts_exceeded` terminal classification.
 
-### `performDlqMaintenance` (`backgroundTasks.ts:175`)
+### `performDlqMaintenance` (`background/dlq.ts`)
 
 For each queue in `queueNamesCache`, calls `processAutoRetry` (re-queues entries whose retry schedule is due, when `autoRetry` is enabled) and `purgeExpiredDlq` (drops entries past `maxAge`), emitting `dlq:auto-retried`/`dlq:expired` with the counts. Per-queue `try/catch` logs `DLQ maintenance failed` and continues — one bad queue cannot stall the rest.
 
@@ -239,7 +239,7 @@ Stall detection uses two-phase confirmation (a job must be flagged in two consec
 
 ## Configuration
 
-Interval timings come from `DEFAULT_CONFIG` (`src/application/types.ts:33`), overridable via the `QueueManagerConfig` passed to `QueueManager`:
+Interval timings come from `DEFAULT_CONFIG` (`src/application/types/config.ts`), overridable via the `QueueManagerConfig` passed to `QueueManager`:
 
 | Option | Default | Effect |
 | --- | --- | --- |

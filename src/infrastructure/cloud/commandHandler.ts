@@ -7,47 +7,11 @@
  */
 
 import type { QueueManager } from '../../application/queueManager';
-import type { CloudSnapshot } from './types';
 import { cloudLog } from './logger';
 import { COMMANDS } from './commands';
+import type { CloudCommand, CloudCommandResult, CommandContext } from './types/command';
 
-/** Incoming command from dashboard (fields at top level) */
-export interface CloudCommand {
-  type: 'command';
-  id: string;
-  action: string;
-  queue?: string;
-  jobId?: string;
-  name?: string;
-  schedule?: string;
-  data?: unknown;
-  config?: Record<string, unknown>;
-  graceMs?: number;
-  state?: string;
-  limit?: number;
-  offset?: number;
-  priority?: number;
-  delay?: number;
-  url?: string;
-  events?: string[];
-  secret?: string;
-  webhookId?: string;
-  enabled?: boolean;
-  keepLogs?: number;
-  max?: number;
-  concurrency?: number;
-  sort?: string;
-  search?: string;
-}
-
-/** Result sent back to dashboard */
-export interface CloudCommandResult {
-  type: 'command_result';
-  id: string;
-  success: boolean;
-  data?: unknown;
-  error?: string;
-}
+export type { CloudCommand, CloudCommandResult, CommandContext } from './types/command';
 
 /**
  * Normalize object keys: PascalCase/UpperCase → camelCase.
@@ -74,11 +38,6 @@ function camelKeys(obj: unknown, isUserData = false): unknown {
     return Object.fromEntries(mapped);
   }
   return obj;
-}
-
-/** Optional context for commands that need more than QueueManager */
-export interface CommandContext {
-  getSnapshot?: () => Promise<CloudSnapshot>;
 }
 
 /** Process a command and return the result */
@@ -121,7 +80,7 @@ export async function handleCommand(
   }
 
   try {
-    const raw = await handler(queueManager, cmd);
+    const raw = await handler(queueManager, cmd, context);
     const data = camelKeys(raw);
     cloudLog.info('Remote command executed', { action: cmd.action, id: cmd.id });
     return { type: 'command_result', id: cmd.id, success: true, data };

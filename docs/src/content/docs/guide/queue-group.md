@@ -8,6 +8,8 @@ head:
       content: https://bunqueue.dev/og/guide/queue-group.png
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue-group</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Many queues, one <em>namespace.</em></h1>
@@ -21,6 +23,9 @@ A QueueGroup is a thin organizer: it creates normal `Queue` and `Worker` instanc
 :::
 
 ## Quick Start
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 import { QueueGroup } from 'bunqueue/client';
@@ -41,11 +46,127 @@ const invoiceWorker = billing.getWorker('invoices', async (job) => {
 }, { embedded: true });
 ```
 
-`getQueue` and `getWorker` accept the same options as `Queue` and `Worker`, so you can pass `defaultJobOptions`, `concurrency`, or `connection` settings for TCP mode.
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { Queue, Worker } from 'bunqueue-client';
+
+const invoices = new Queue('billing:invoices');
+const payments = new Queue('billing:payments');
+
+await invoices.add('create', { amount: 100 });
+await payments.add('process', { orderId: '123' });
+
+const invoiceWorker = new Worker('billing:invoices', async (job) => ({
+  processed: true,
+  invoice: job.data,
+}));
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from bunqueue import Queue, Worker
+
+invoices = Queue("billing:invoices")
+payments = Queue("billing:payments")
+
+invoices.add("create", {"amount": 100})
+payments.add("process", {"order_id": "123"})
+
+invoice_worker = Worker(
+    "billing:invoices",
+    lambda job: {"processed": True, "invoice": job.data},
+)
+invoice_worker.run()  # blocking loop
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+use Bunqueue\Queue;
+use Bunqueue\Worker;
+
+$invoices = new Queue('billing:invoices');
+$payments = new Queue('billing:payments');
+
+$invoices->add('create', ['amount' => 100]);
+$payments->add('process', ['orderId' => '123']);
+
+$invoiceWorker = new Worker('billing:invoices',
+    fn (Bunqueue\Job $job) => ['processed' => true, 'invoice' => $job->data()]
+);
+$invoiceWorker->run(); // blocking loop
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+invoices := bunqueue.NewQueue("billing:invoices", bunqueue.Options{})
+payments := bunqueue.NewQueue("billing:payments", bunqueue.Options{})
+
+invoices.Add("create", map[string]any{"amount": 100}, nil)
+payments.Add("process", map[string]any{"orderId": "123"}, nil)
+
+invoiceWorker := bunqueue.NewWorker("billing:invoices", processor,
+    bunqueue.WorkerOptions{})
+invoiceWorker.Run() // blocking loop
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{ConnectionOptions, JobOptions, Queue, Value, Worker, WorkerOptions};
+
+let options = ConnectionOptions::default();
+let invoices = Queue::new("billing:invoices", options.clone());
+let payments = Queue::new("billing:payments", options);
+
+invoices.add("create", Value::from(100), JobOptions::default())?;
+payments.add("process", Value::from("123"), JobOptions::default())?;
+
+let invoice_worker = Worker::new(
+    "billing:invoices", processor, WorkerOptions::default(),
+);
+invoice_worker.run()?; // blocking loop
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+invoices = Bunqueue.queue("billing:invoices")
+payments = Bunqueue.queue("billing:payments")
+
+{:ok, _job} = Bunqueue.Queue.add(invoices, "create", %{amount: 100})
+{:ok, _job} = Bunqueue.Queue.add(payments, "process", %{order_id: "123"})
+
+invoice_worker =
+  Bunqueue.Worker.new("billing:invoices", fn job ->
+    {:ok, %{processed: true, invoice: job.data}}
+  end)
+Bunqueue.Worker.run(invoice_worker) # blocking loop
+```
+
+</TabItem>
+</Tabs>
+
+In Bun, `getQueue` and `getWorker` accept the same options as `Queue` and
+`Worker`, including embedded mode. The network SDK examples create normal
+queues and workers with the same prefixed broker names, which is the portable
+equivalent.
 
 ## Common Tasks
 
 ### Operate on the whole group
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 billing.listQueues();      // ['invoices', 'payments'] (names without prefix)
@@ -61,6 +182,88 @@ const removed = await billing.drainAllAsync();
 await billing.obliterateAllAsync();
 ```
 
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const queues = [invoices, payments];
+await Promise.all(queues.map((queue) => queue.pause()));
+await Promise.all(queues.map((queue) => queue.resume()));
+const removed = await Promise.all(queues.map((queue) => queue.drain()));
+await Promise.all(queues.map((queue) => queue.obliterate()));
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queues = [invoices, payments]
+for queue in queues:
+    queue.pause()
+for queue in queues:
+    queue.resume()
+removed = [queue.drain() for queue in queues]
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queues = [$invoices, $payments];
+foreach ($queues as $queue) {
+    $queue->pause();
+}
+foreach ($queues as $queue) {
+    $queue->resume();
+}
+$removed = array_map(fn ($queue) => $queue->drain(), $queues);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queues := []*bunqueue.Queue{invoices, payments}
+for _, queue := range queues {
+    if err := queue.Pause(); err != nil { return err }
+}
+for _, queue := range queues {
+    if err := queue.Resume(); err != nil { return err }
+}
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let queues = [&invoices, &payments];
+for queue in queues {
+    queue.pause()?;
+}
+for queue in queues {
+    queue.resume()?;
+}
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+queues = [invoices, payments]
+Enum.each(queues, fn queue -> :ok = Bunqueue.Queue.pause(queue) end)
+Enum.each(queues, fn queue -> :ok = Bunqueue.Queue.resume(queue) end)
+{:ok, removed} =
+  Enum.reduce_while(queues, {:ok, []}, fn queue, {:ok, counts} ->
+    case Bunqueue.Queue.drain(queue) do
+      {:ok, count} -> {:cont, {:ok, [count | counts]}}
+      {:error, error} -> {:halt, {:error, error}}
+    end
+  end)
+```
+
+</TabItem>
+</Tabs>
+
 :::note[Synchronous and awaitable forms]
 `listQueues()` and the synchronous bulk operations use the in-process embedded
 manager. For TCP queues, use `listQueuesAsync`, `pauseAllAsync`,
@@ -70,6 +273,9 @@ every queue created through the group and wait for completion.
 
 ### Isolate tenants
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const tenantA = new QueueGroup('tenant-a');
 const tenantB = new QueueGroup('tenant-b');
@@ -78,7 +284,61 @@ const tasksA = tenantA.getQueue('tasks', { embedded: true });  // "tenant-a:task
 const tasksB = tenantB.getQueue('tasks', { embedded: true });  // "tenant-b:tasks"
 ```
 
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const tasksA = new Queue('tenant-a:tasks');
+const tasksB = new Queue('tenant-b:tasks');
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+tasks_a = Queue("tenant-a:tasks")
+tasks_b = Queue("tenant-b:tasks")
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$tasksA = new Queue('tenant-a:tasks');
+$tasksB = new Queue('tenant-b:tasks');
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+tasksA := bunqueue.NewQueue("tenant-a:tasks", bunqueue.Options{})
+tasksB := bunqueue.NewQueue("tenant-b:tasks", bunqueue.Options{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let tasks_a = Queue::new("tenant-a:tasks", ConnectionOptions::default());
+let tasks_b = Queue::new("tenant-b:tasks", ConnectionOptions::default());
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+tasks_a = Bunqueue.queue("tenant-a:tasks")
+tasks_b = Bunqueue.queue("tenant-b:tasks")
+```
+
+</TabItem>
+</Tabs>
+
 ### Separate environments
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 const env = process.env.NODE_ENV || 'development';
@@ -86,6 +346,58 @@ const group = new QueueGroup(`${env}-tasks`);
 const queue = group.getQueue('jobs', { embedded: true });
 // "development-tasks:jobs" or "production-tasks:jobs"
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const env = process.env.NODE_ENV || 'development';
+const queue = new Queue(`${env}-tasks:jobs`);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+env = os.getenv("APP_ENV", "development")
+queue = Queue(f"{env}-tasks:jobs")
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$env = getenv('APP_ENV') ?: 'development';
+$queue = new Queue("{$env}-tasks:jobs");
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+env := os.Getenv("APP_ENV")
+if env == "" { env = "development" }
+queue := bunqueue.NewQueue(env+"-tasks:jobs", bunqueue.Options{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".into());
+let queue = Queue::new(format!("{env}-tasks:jobs"), ConnectionOptions::default());
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+env = System.get_env("APP_ENV", "development")
+queue = Bunqueue.queue("#{env}-tasks:jobs")
+```
+
+</TabItem>
+</Tabs>
 
 ## Methods Reference
 

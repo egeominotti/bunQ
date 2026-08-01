@@ -1,17 +1,17 @@
 # Client SDK: Queue
 
-> **Category:** Client SDK · **Source:** `src/client/queue/queue.ts`, `src/client/queue/operations/add.ts`, `src/client/queue/operations/query.ts`, `src/client/queue/operations/queryStates.ts`, `src/client/queue/operations/queryTcpPages.ts`, `src/client/queue/operations/management.ts`, `src/client/queue/operations/counts.ts`, `src/client/queue/operations/control.ts`, `src/client/queue/jobMove.ts`, `src/client/queue/stall.ts`, `src/client/queue/workers.ts`, `src/client/queue/jobProxy.ts`, `src/client/queue/dlq.ts`, `src/client/queue/dlqJobMethods.ts`, `src/client/queue/addBatcher.ts`, `src/client/events.ts`, `src/client/jobConversion.ts`, `src/client/jobConversionTypes.ts`, `src/client/jobConversionHelpers.ts`, `src/client/jobDeduplication.ts`, `src/client/jobHelpers.ts`, `src/client/types.ts`, `src/client/errors.ts`, `src/client/manager.ts`, `src/client/queueGroup.ts`, `src/client/index.ts`
+> **Category:** Client SDK · **Source:** `src/client/queue/queue.ts`, `src/client/queue/runtime/`, `src/client/queue/types/`, `src/client/queue/operations/`, `src/client/queue/job-proxy/`, `src/client/queue/dlq.ts`, `src/client/queue/addBatcher.ts`, `src/client/events.ts`, `src/client/jobConversion.ts`, `src/client/manager.ts`, `src/client/queueGroup.ts`
 
 ## Purpose
 
-`Queue<T>` is the producer-side, BullMQ-style SDK surface for adding and managing jobs. A single class transparently drives two backends: **embedded mode** (in-process `QueueManager` over SQLite, no network) and **TCP mode** (msgpack commands to a bunqueue server over `TcpConnectionPool`). It exists to give application code one BullMQ-compatible API (`add`, `addBulk`, `getJob`, `pause`, DLQ, scheduler, rate-limit, flow dependencies, etc.) regardless of where the broker actually lives, and to normalize the difference into per-operation context objects rather than scattering `if (embedded)` branches across the class.
+`Queue<T>` is the producer-side, BullMQ-style SDK surface for adding and managing jobs. Its 27-line public façade inherits focused runtime capabilities for state, queries, control, configuration, scheduling, compatibility and connection lifecycle. Those layers transparently drive **embedded mode** or **TCP mode**, while public and internal contracts live separately under `queue/types/`.
 
 ## Responsibilities & Scope
 
 Owns:
 
-- The `Queue<T>` class: constructor wiring (embedded vs TCP, shared vs dedicated pool, auto-batcher, `prefixKey` namespacing) and the full public method surface (`queue.ts:48`).
-- Building the per-concern context objects (`ctx`, `addCtx`, `queryCtx`, `moveCtx`) that thin operation modules consume (`queue.ts:131`–`queue.ts:211`).
+- The stable `Queue<T>` façade and inherited capability chain under `queue/runtime/`.
+- Constructor/state wiring in `runtime/state.ts`, transport cleanup in `runtime/connection.ts`, and per-concern contexts consumed by thin operation modules.
 - Job-add option translation: merging `defaultJobOptions`, injecting `__parentId`/`__parentQueue` into data, mapping public `JobOptions` to the embedded `manager.push` shape and to the compacted `PUSH`/`PUSHB` wire payload (`add.ts`).
 - Constructing the public `Job<T>` object via three builders — `createJobProxy` (TCP single add), `createSimpleJob` (embedded + TCP query results), and `toPublicJob`/`createPublicJob` (`jobProxy.ts`, `jobConversion.ts`).
 - Auto-batching `add()` calls into `PUSHB` in TCP mode (`addBatcher.ts`).
@@ -41,14 +41,22 @@ External / runtime: Bun only (`import '../require-bun'` guard in `index.ts:23`),
 
 ## Public Interface
 
-`new Queue<T>(name: string, opts: QueueOptions = {})` — exported from `src/client/index.ts` (and `bunqueue/client`). The server-side key is `prefixKey + name`; `queue.name` stays the logical name (`queue.ts:64`–`queue.ts:67`).
+`new Queue<T>(name: string, opts: QueueOptions = {})` — exported from
+`src/client/index.ts` (and `bunqueue/client`). The server-side key is
+`prefixKey + name`; `queue.name` stays the logical name
+(`queue/runtime/state.ts`).
 
-Add (`queue.ts:214`):
+Add (`queue/runtime/queries.ts`, `queue/operations/add/`):
 
-- `add(name: string, data: T, opts?: JobOptions): Promise<Job<T>>` — routes through `AddBatcher` unless `opts.durable` or batcher disabled (`queue.ts:216`).
+- `add(name: string, data: T, opts?: JobOptions): Promise<Job<T>>` — routes
+  through `AddBatcher` unless `opts.durable` or batching is disabled.
 - `addBulk(jobs: Array<{ name; data: T; opts? }>): Promise<Job<T>[]>`
 
-Query (`queue.ts:226`): `getJob`, `getJobState`, `getChildrenValues`, `getJobs(opts?)` / `getJobsAsync(opts?)`, and per-state pairs `getWaiting`/`getWaitingAsync`, `getDelayed[Async]`, `getActive[Async]`, `getCompleted[Async]`, `getFailed[Async]`. **Sync variants return `[]` in TCP mode** (`query.ts:222`); use the `Async` form over TCP.
+Query (`queue/runtime/queries.ts`, `queue/operations/query.ts`): `getJob`,
+`getJobState`, `getChildrenValues`, `getJobs(opts?)` / `getJobsAsync(opts?)`, and
+per-state pairs `getWaiting`/`getWaitingAsync`, `getDelayed[Async]`,
+`getActive[Async]`, `getCompleted[Async]`, `getFailed[Async]`. **Sync variants
+return `[]` in TCP mode**; use the `Async` form over TCP.
 
 For all list methods, `end: -1` means exhaustive traversal. Embedded queries
 pass an effectively unbounded end to the manager; TCP queries page in chunks of
@@ -58,15 +66,28 @@ existing half-open `[start,end)` contract. Per-state aliases live in
 repository size boundary. `getJobs[Async]({ asc: false })` applies descending
 createdAt/job-id order before slicing, in both runtimes and on every TCP page.
 
-Counts (`queue.ts:278`): `getJobCounts()` / `getJobCountsAsync()`, `getWaitingCount`, `getActiveCount`, `getCompletedCount`, `getFailedCount`, `getDelayedCount`, `count()` / `countAsync()`, `getCountsPerPriority()` / `getCountsPerPriorityAsync()`. Sync `count()`/`getCountsPerPriority()` return `0`/`{}` over TCP (`counts.ts:135`, `counts.ts:150`).
+Counts (`queue/runtime/queries.ts`, `queue/operations/counts.ts`):
+`getJobCounts()` / `getJobCountsAsync()`, `getWaitingCount`, `getActiveCount`,
+`getCompletedCount`, `getFailedCount`, `getDelayedCount`, `count()` /
+`countAsync()`, `getCountsPerPriority()` / `getCountsPerPriorityAsync()`. Sync
+`count()` / `getCountsPerPriority()` return `0` / `{}` over TCP.
 
-Control (`queue.ts:313`): `pause()`, `resume()`, `drain()`, `obliterate()` (all sync, fire-and-forget), `pauseAsync()`, `resumeAsync()`, `drainAsync()` (resolves with the removed count), `obliterateAsync()`, `isPaused()` / `isPausedAsync()`, `waitUntilReady()`.
+Control (`queue/runtime/control.ts`, `queue/operations/control.ts`): `pause()`,
+`resume()`, `drain()`, `obliterate()` (all sync, fire-and-forget),
+`pauseAsync()`, `resumeAsync()`, `drainAsync()` (resolves with the removed
+count), `obliterateAsync()`, `isPaused()` / `isPausedAsync()`,
+`waitUntilReady()`.
 
 The async control variants resolve only after the server has processed the command; `drainAsync()`/`retryDlqAsync()`/`purgeDlqAsync()` also return the server count that the fire-and-forget forms discard (they always return 0 over TCP).
 
 `obliterateAsync()` resolves only after the server has processed the wipe. The fire-and-forget `obliterate()` gives no ordering guarantee over the multi-connection TCP pool (default 4 sockets, round-robin): a `PUSH` sent right after it can travel on a different socket, be processed first, and then be wiped by the late-arriving obliterate, even with a sleep in between, if the server event loop is busy. Await `obliterateAsync()` before enqueuing follow-up jobs on the same queue (`control.ts:44`).
 
-Management (`queue.ts:336`): `remove(id)` (sync) / `removeAsync(id)`, `retryJob(id)`, `retryJobs(opts?)`, `clean(grace, limit, type?)` / `cleanAsync(...)`, `promoteJobs(opts?)`, `promoteJob(id)`, `updateJobProgress`, `getJobLogs`, `addJobLog`, `clearJobLogs`, `updateJobData`, `changeJobDelay`, `changeJobPriority`, `extendJobLock`.
+Management (`queue/runtime/control.ts`, `queue/operations/management.ts`):
+`remove(id)` (sync) / `removeAsync(id)`, `retryJob(id)`, `retryJobs(opts?)`,
+`clean(grace, limit, type?)` / `cleanAsync(...)`, `promoteJobs(opts?)`,
+`promoteJob(id)`, `updateJobProgress`, `getJobLogs`, `addJobLog`,
+`clearJobLogs`, `updateJobData`, `changeJobDelay`, `changeJobPriority`,
+`extendJobLock`.
 
 `retryJobs({ state, count, timestamp })` supports both declared states. `failed`
 retries matching DLQ entries and `completed` re-queues completed jobs; `count`
@@ -76,9 +97,25 @@ selection rules.
 
 `promoteJobs({ count? })` delegates to the manager/server bulk operation in both embedded and TCP modes. The operation selects delayed jobs from the live shard queue in stable `(createdAt, id)` order rather than from the eventually consistent SQLite `GetJobs` view; `count: 0` promotes none. Each promotion updates the priority queue, delayed counter/temporal tracking, persisted `run_at`, and queue waiter notification before the call resolves.
 
-Move / BullMQ-v5 (`queue.ts:502`): `moveJobToCompleted`, `moveJobToFailed`, `moveJobToWait`, `moveJobToDelayed`, `moveJobToWaitingChildren`, `waitJobUntilFinished`. `moveJobToFailed(id, error)` forwards the error's stacktrace (#74) and honours `UnrecoverableError` (skip retry) via the shared `failWire` helper, matching the worker failure path — previously both were silently dropped on this and the job-proxy paths. `moveJobToDelayed(id, timestamp)` takes an **absolute** timestamp; embedded routes waiting/active jobs via `changeWaitingDelay`/`changeDelay`, while the TCP path (`jobMove.ts`) sends the `MoveToDelayed` command with a **relative** `delay = max(0, timestamp - now)` (not the raw timestamp) and surfaces a server `ok:false` as a thrown error. Works for both waiting and active jobs.
+Move / BullMQ-v5 (`queue/runtime/scheduling.ts`, `queue/jobMove.ts`):
+`moveJobToCompleted`, `moveJobToFailed`, `moveJobToWait`,
+`moveJobToDelayed`, `moveJobToWaitingChildren`, `waitJobUntilFinished`.
+`moveJobToFailed(id, error)` forwards the error's stacktrace (#74) and honours
+`UnrecoverableError` (skip retry) via the shared `failWire` helper, matching the
+worker failure path. `moveJobToDelayed(id, timestamp)` takes an **absolute**
+timestamp; embedded routes waiting/active jobs via
+`changeWaitingDelay`/`changeDelay`, while the TCP path sends `MoveToDelayed`
+with `delay = max(0, timestamp - now)` and surfaces `ok:false` as an error.
 
-Stall (`queue.ts:396`): `setStallConfig` / `setStallConfigAsync`, `getStallConfig`, `getStallConfigAsync`. DLQ: `setDlqConfig` / `setDlqConfigAsync`, embedded snapshot reads `getDlq` / `getDlqStats`, authoritative cross-runtime reads `getDlqAsync(filter?)` / `getDlqStatsAsync`, public-job reads `getDlqJobsAsync(count?)`, retry methods `retryDlq[Async]` / `retryDlqByFilter[Async]` / `retryCompleted[Async]`, and `purgeDlq[Async]`. Jobs returned inside full DLQ entries have the same live mutation, transition, dependency, ownership, and wait methods as jobs returned by ordinary queue reads. Rate-limit methods include setters/removers, `rateLimit(expireTimeMs)`, and live getters `getGlobalRateLimit`, `getGlobalConcurrency`, `getRateLimitTtl`, `isMaxed` in both runtimes. Deduplication lookup/removal, dependency/waiting-children queries, and queue-filtered worker discovery likewise work embedded and over TCP. Scheduler, compatibility reads, metrics, `trimEvents`, and `forward(options)` complete the surface.
+Stall and DLQ configuration live in `queue/runtime/configuration.ts`, backed by
+`queue/stall.ts`, `queue/dlq.ts`, and `queue/dlqOps.ts`:
+`setStallConfig[Async]`, `getStallConfig[Async]`, `setDlqConfig[Async]`,
+`getDlqConfig[Async]`, embedded snapshot reads `getDlq` / `getDlqStats`, and
+authoritative cross-runtime reads `getDlqAsync(filter?)` /
+`getDlqStatsAsync`. Retry and purge have both fire-and-forget and acknowledged
+forms. Rate-limit methods include setters/removers, `rateLimit(expireTimeMs)`,
+and live getters in both runtimes. Scheduler and compatibility methods are in
+`runtime/scheduling.ts` and `runtime/compatibility.ts`.
 
 `QueueGroup` keeps track of queues created through the group. Its synchronous
 bulk methods operate on the embedded manager; `listQueuesAsync`,
@@ -86,7 +123,8 @@ bulk methods operate on the embedded manager; `listQueuesAsync`,
 are the authoritative operations for either runtime. `drainAllAsync` returns
 the aggregate removed count.
 
-Connection: `disconnect()` (flushes + waits for in-flight batcher, then closes) and `close()` (`queue.ts:607`, `queue.ts:616`).
+Connection: `disconnect()` (flushes + waits for the in-flight batcher, then
+closes) and `close()` (`queue/runtime/connection.ts`).
 
 Also exported: `QueueEvents<R, P>` (`events.ts:98`), `UnrecoverableError`, `DelayedError` (`errors.ts`).
 
@@ -96,25 +134,47 @@ TCP commands emitted by this module (exact names): `PUSH`, `PUSHB`, `GetJob`, `G
 
 ## Data Models
 
-See [data-model](../data-model.md) for full definitions. Key shapes (all in `types.ts`):
+See [data-model](../data-model.md) for full definitions. Public types are split
+by responsibility under `src/client/types/`:
 
-- `Job<T>` (`types.ts:81`): `id`, `name`, `data`, `queueName`, `attemptsMade`, `timestamp`, `progress`, `delay`, `priority`, `processedOn?`, `finishedOn?`, `stacktrace`, `stalledCounter`, `parent?`, `parentKey?`, `opts`, `deduplicationId?`, `repeatJobKey?`, `attemptsStarted`, plus BullMQ-v5 methods (`updateProgress`, `log`, `getState`, `is*`, `updateData`, `promote`, `changeDelay`, `changePriority`, `extendLock`, dependency/move/serialization methods).
-- `JobOptions` (`types.ts:332`): `priority`, `delay`, `attempts`, `backoff` (`number | BackoffOptions`), `timeout`, `jobId`, `removeOnComplete?`/`removeOnFail?` (**boolean only** — age/count retention is unimplemented and the type was narrowed, #90), `stallTimeout`, `repeat`, `durable`, `parent`, `lifo`, `stackTraceLimit`, `keepLogs`, `sizeLimit`, `failParentOnFailure`, `removeDependencyOnFailure`, `continueParentOnFailure`, `ignoreDependencyOnFailure`, `timestamp`, `deduplication`, `debounce`.
-- `QueueOptions` (`types.ts:443`): `defaultJobOptions`, `connection`, `embedded`, `dataPath`, `autoBatch`, `prefixKey`.
-- `ConnectionOptions` (`types.ts:403`): `host` (default `localhost`), `port` (default `6789`), `socketPath` (declared in the type but currently ignored, the client transport always dials `host`/`port`), `tls`, `token`, `poolSize` (default `4` in the constructor), `pingInterval`, `commandTimeout`, `maxCommandTimeouts`, `pipelining`, `maxInFlight`.
-- `AutoBatchOptions` (`types.ts:433`): `enabled`, `maxSize` (default `50`), `maxDelayMs` (default `5`).
-- `StallConfig` (`types.ts:531`), `DlqConfig` (`types.ts:543`), `DlqEntry<T>` / `DlqStats` / `DlqFilter` (`types.ts:567`), `JobStateType` union (`types.ts:7`), `JobJson` / `JobJsonRaw` for `toJSON()` / `asJSON()`.
-- `FlowJobData` (`types.ts:611`): internal fields (`__parentId`, `__parentQueue`, `__childrenIds`, …) merged into `job.data` by FlowProducer.
+- `Job<T>`, `JobStateType`, `JobJson`, and `JobJsonRaw`:
+  `client/types/job.ts`.
+- `JobOptions`, backoff, repeat, deduplication, debounce, and parent options:
+  `client/types/options.ts`.
+- `QueueOptions`, `ConnectionOptions`, and `AutoBatchOptions`:
+  `client/types/connection.ts`.
+- `StallConfig`: `client/types/worker.ts`; DLQ types:
+  `client/types/dlq.ts`; `FlowJobData`: `client/types/flow.ts`.
+- Queue-internal contexts, reflection metadata, and runtime contracts:
+  `client/queue/types/`.
 
 ## Business Logic / Control Flow
 
-**Construction** (`queue.ts:64`): `embedded = opts.embedded ?? FORCE_EMBEDDED` (the latter is `Bun.env.BUNQUEUE_EMBEDDED === '1'`, `helpers.ts:14`). Embedded path calls `getSharedManager(opts.dataPath)` and leaves `tcpPool`/`addBatcher` null (`queue.ts:71`). TCP path: when `poolSize === 4` and no token, a *shared* pool is reused (`getSharedPool`, `useSharedPool = true`); otherwise a dedicated `TcpConnectionPool` is built with `host`/`port` defaults (`queue.ts:82`–`queue.ts:109`). The `AddBatcher` is created unless `autoBatch.enabled === false` (`queue.ts:112`).
+**Construction** (`queue/runtime/state.ts`): `embedded = opts.embedded ??
+FORCE_EMBEDDED` (`FORCE_EMBEDDED` lives in `queue/helpers.ts`). Embedded mode
+warms `getSharedManager(opts.dataPath)` and leaves `tcpPool` / `addBatcher`
+null. TCP mode reuses the shared pool for the default unauthenticated
+four-connection case, otherwise creates a dedicated `TcpConnectionPool`. The
+`AddBatcher` is created unless `autoBatch.enabled === false`.
 
-**add()** (`add.ts:63`): merges `defaultJobOptions` then per-call `opts`, injects `__parentId`/`__parentQueue` if `parent` set (`add.ts:73`). Embedded: maps to `manager.push(name, {...})` and wraps the returned internal job via `toPublicJob` (`add.ts:100`, `add.ts:140`). TCP: `buildPushPayload` builds a `compact`-ed `PUSH` frame — undefined keys are stripped to keep msgpack frames small (`add.ts:195`) — sends it, throws on `!response.ok`, then builds a `Job` via `createJobProxy(id, ...)` carrying reflection meta so the returned object mirrors requested `priority`/`delay`/`opts` (`add.ts:164`–`add.ts:186`, #88).
+**add()** (`queue/operations/add/single.ts`): merges `defaultJobOptions` then
+per-call `opts`, injects `__parentId` / `__parentQueue` when a parent is set,
+and maps to `manager.push` in embedded mode. TCP uses `buildPushPayload` from
+`add/payload.ts`, throws on `!response.ok`, and builds a live job through the
+split proxy modules under `queue/job-proxy/`.
 
-**addBulk()** (`add.ts:276`): returns `[]` immediately for empty input; merges defaults once per job to keep payload and reflected meta in sync. Embedded uses `manager.pushBatch` → `createSimpleJob` per id; TCP sends one `PUSHB` and maps `response.ids` to `createJobProxy`. A non-ok response throws (so the batcher rejects all callers); an ok response with zero ids is a legitimate empty result, not an error (`add.ts:421`).
+**addBulk()** (`queue/operations/add/bulk.ts`): returns `[]` immediately for an
+empty input and merges defaults once per job. Embedded uses
+`manager.pushBatch`; TCP sends one `PUSHB`. A non-ok response throws so the
+batcher rejects every caller; an ok response with zero IDs is a legitimate
+empty result.
 
-**Job object construction.** `createJobProxy` (`jobProxy.ts:72`) builds a TCP-backed job whose methods send commands. `createSimpleJob` (`jobProxy.ts:291`) builds a dual-mode job (branches on `embedded`) used by query results. Both call `reflectFields` (`jobProxy.ts:53`) to derive `deduplicationId`, `parentKey`, `parent`, `repeatJobKey` from `meta.opts`. `toPublicJob`/`createPublicJob` (`jobConversion.ts`) build from an internal job using `buildJobProperties`/`buildSerializationMethods` (`jobConversionHelpers.ts`), with `extractUserData` stripping the internal `name` field from `data` (`jobHelpers.ts:10`). Full DLQ entries use `createDlqJobMethods` (`dlqJobMethods.ts`) to supply every non-serialization callback before `toDlqEntry` constructs their public `Job`; this prevents a broker-returned job from falling back to detached placeholder behavior.
+**Job object construction.** `queue/job-proxy/tcp.ts` builds a TCP-backed job;
+`queue/job-proxy/simple.ts` builds the dual-mode form used by query results;
+`queue/job-proxy/reflection.ts` derives reflected option fields. Public
+conversion lives in `client/jobConversion.ts`. Full DLQ entries use
+`queue/dlqJobMethods.ts` so broker-returned jobs keep live methods rather than
+detached placeholders.
 
 **getJob()** (`query.ts:85`): embedded uses full `toPublicJob` wiring when `ctx.updateJobData` is present (all callbacks route to the shared manager); the simple-job fallback reflects opts via `metaFromJob`. TCP sends `GetJob`, returns null on `!ok`, and copies `progress`, `processedOn` (from `startedAt`), `finishedOn` (from `completedAt`) only when numeric (`query.ts:160`, #104).
 
@@ -129,12 +189,15 @@ See [data-model](../data-model.md) for full definitions. Key shapes (all in `typ
 `Queue` itself takes no shard/job locks; in embedded mode all locking happens inside `QueueManager` (see [Concurrency & Locking](./concurrency-and-locking.md)). The client-side concurrency surface is the `AddBatcher`:
 
 - **Strategy** (`addBatcher.ts:61`): if no flush is in flight, flush immediately (zero latency for sequential `await`); if a flush is in flight, buffer until `maxSize` or a `maxDelayMs` timer fires. After each flush completes, accumulated items are drained immediately (`doFlush` loops while `pending.length > 0`, `addBatcher.ts:108`).
-- **In-flight tracking**: `triggerFlush` registers each flush promise in `inFlightFlushes`; `disconnect()` calls `flush()` then `waitForInFlight()` before closing so no buffered job is silently dropped (`queue.ts:607`, `addBatcher.ts:167`).
+- **In-flight tracking**: `triggerFlush` registers each flush promise in
+  `inFlightFlushes`; `disconnect()` in `queue/runtime/connection.ts` calls
+  `flush()` then `waitForInFlight()` before closing.
 - **`removeAsync` ordering invariant** (`management.ts:26`): the embedded path *must* `await manager.cancel()` because the removal happens inside an async write-lock; without the await the promise would resolve before the job is gone and cancel errors would be swallowed — divergent from the TCP path.
 
 ## Edge Cases & Failure Modes
 
-- **Durable bypass**: `opts.durable` jobs skip the `AddBatcher` and are sent as individual `PUSH` (immediate disk write) instead of being batched (`queue.ts:216`).
+- **Durable bypass**: `opts.durable` jobs skip the `AddBatcher` in
+  `queue/runtime/queries.ts` and are sent as individual `PUSH` operations.
 - **Batcher overflow**: when `pending.length >= maxPending` (default `10000`), the oldest ~10% are spliced and rejected with `"Add buffer overflow - oldest entries dropped"` (`addBatcher.ts:69`). `stop()` rejects all remaining entries with `"AddBatcher stopped"`.
 - **Error propagation**: `add`/`addBulk` throw on `!response.ok`, ensuring the batcher rejects queued callers (e.g. auth failure) rather than resolving them with `undefined` jobs (`add.ts:168`, `add.ts:421`).
 - **Synchronous TCP boundaries**: `getJobs`/`getWaiting`/… (sync) return `[]`, `count()` returns `0`, `getCountsPerPriority()` returns `{}`, and `isPaused()` returns `false` in TCP mode because their signatures cannot await a round trip. Use the corresponding `Async` variants for authoritative remote results. The same rule applies to synchronous DLQ reads and fire-and-forget mutation forms; use `getDlqAsync`, `getDlqStatsAsync`, `retryDlqAsync`, `retryDlqByFilterAsync`, `purgeDlqAsync`, and `retryCompletedAsync` when the result matters. Limit getters, worker discovery, dependency methods, deduplication methods, and `moveToWaitingChildren` are asynchronous and now query or mutate the selected broker runtime directly.
@@ -143,14 +206,22 @@ See [data-model](../data-model.md) for full definitions. Key shapes (all in `typ
 - **`retryJob` state machine** (embedded, `management.ts:40`): `failed` → `retryDlq` (throws if not in DLQ), `active` → `moveActiveToWait`, `waiting`/`prioritized`/`delayed` → no-op, anything else throws. TCP path issues `MoveToWait` and throws on `ok !== true`.
 - **`waitUntilFinished` TTL**: defaults to `30000ms`; rejects on timeout. The embedded short-circuit returns the persisted result if `job.completedAt` is already set (`jobProxy.ts:494`). The `jobMove.ts` variant additionally subscribes to a `QueueEvents` instance and races against an already-finished state check (`jobMove.ts:166`).
 - **`QueueEvents` is embedded-only**: it subscribes to the shared manager's event bus and filters by queue name; it has no TCP transport. Handler exceptions are caught and re-emitted as `error` (`events.ts:204`–`events.ts:220`).
-- **`prefixKey` isolation invariant**: every operation forwards `this.queueKey` (`prefixKey + name`), so two queues with the same logical name but different `prefixKey` never collide on the broker; a consuming `Worker` must use the same `prefixKey` (`queue.ts:56`, `types.ts:467`).
+- **`prefixKey` isolation invariant**: every context created by
+  `queue/runtime/state.ts` forwards `queueKey = prefixKey + name`, so two queues
+  with the same logical name but different prefixes never collide; a consuming
+  Worker must use the same prefix.
 - **Processor error classes**: throwing `UnrecoverableError` skips remaining retries (straight to failed/DLQ); `DelayedError` re-delays without counting as a failure (`errors.ts`).
 
 ## Configuration
 
-Constructor `QueueOptions` (`types.ts:443`): `embedded` (default falls back to `BUNQUEUE_EMBEDDED=1`), `dataPath` (embedded; overrides env), `defaultJobOptions`, `connection` (`ConnectionOptions`), `autoBatch`, `prefixKey`.
+Constructor `QueueOptions` (`client/types/connection.ts`): `embedded` (default
+falls back to `BUNQUEUE_EMBEDDED=1`), `dataPath` (embedded; overrides env),
+`defaultJobOptions`, `connection`, `autoBatch`, `prefixKey`.
 
-`ConnectionOptions` defaults applied here: `poolSize = 4` (`queue.ts:79`; `4` + no token ⇒ shared pool), `host = 'localhost'`, `port = 6789` (`queue.ts:97`–`queue.ts:98`). `commandTimeout`/`pingInterval`/`maxCommandTimeouts`/`pipelining`/`maxInFlight` defaults are owned by the transport — see [Client Transport](./client-transport.md).
+`ConnectionOptions` defaults applied in `queue/runtime/state.ts` are
+`poolSize = 4` (`4` + no token ⇒ shared pool), `host = 'localhost'`, and
+`port = 6789`. Timeout, ping, pipelining, and in-flight defaults are owned by
+the transport — see [Client Transport](./client-transport.md).
 
 `AutoBatchOptions`: `enabled` default true for TCP / disabled for embedded, `maxSize = 50`, `maxDelayMs = 5`.
 

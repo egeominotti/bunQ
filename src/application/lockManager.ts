@@ -5,7 +5,7 @@
 
 import type { Job, JobId, JobLock } from '../domain/types/job';
 import { isLockExpired } from '../domain/types/job';
-import { FailureReason } from '../domain/types/dlq';
+import { FailureReason, recordJobFailureAttempt } from '../domain/types/dlq';
 import { EventType } from '../domain/types/queue';
 import type { IndexedPriorityQueue } from '../domain/queue/priorityQueue';
 import { shardIndex, processingShardIndex } from '../shared/hash';
@@ -131,7 +131,6 @@ function processExpiredLockInner(
 
   // Increment attempts and reset state
   job.attempts++;
-  job.startedAt = null;
   job.lastHeartbeat = now;
   job.stallCount++;
 
@@ -188,6 +187,7 @@ function handleRecoveryBoundExceeded(opts: RecoveryBoundOptions): void {
       ? `Lock expired at max attempts (${job.maxAttempts})`
       : `Lock expired after ${lock.renewalCount} renewals`
   );
+  job.startedAt = null;
   ctx.jobIndex.set(jobId, { type: 'dlq', queueName: job.queue });
   // Persist the DLQ move like the sibling paths (ack.moveFailedJobToDlq,
   // stallDetection.moveStalliedJobToDlq, backgroundTasks startup-recovery).
@@ -223,6 +223,8 @@ interface RequeueOptions {
 function requeueExpiredJob(opts: RequeueOptions): void {
   const { jobId, job, queue, idx, ctx, now } = opts;
   const shard = ctx.shards[idx];
+  recordJobFailureAttempt(job, FailureReason.Stalled, 'Lock expired', now);
+  job.startedAt = null;
   // Release the concurrency slot (+group+uniqueKey) acquired at pull before
   // re-pushing — otherwise the slot leaks and the queue wedges (mirrors
   // stallDetection.retryStalliedJob).
@@ -231,6 +233,7 @@ function requeueExpiredJob(opts: RequeueOptions): void {
   const isDelayed = job.runAt > now;
   shard.incrementQueued(jobId, isDelayed, job.createdAt, job.queue, job.runAt);
   ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: idx, queueName: job.queue });
+  ctx.storage?.updateForRetry(job);
   shard.notify(job.queue);
 
   ctx.eventsManager.broadcast({

@@ -5,8 +5,18 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { pack, unpack, rowToJob, reconstructDlqEntry } from '../src/infrastructure/persistence/sqliteSerializer';
-import { SQL_STATEMENTS, prepareStatements, type StatementName, type DbJob } from '../src/infrastructure/persistence/statements';
+import {
+  pack,
+  unpack,
+  rowToJob,
+  reconstructDlqEntry,
+} from '../src/infrastructure/persistence/sqliteSerializer';
+import {
+  SQL_STATEMENTS,
+  prepareStatements,
+  type StatementName,
+  type DbJob,
+} from '../src/infrastructure/persistence/statements';
 import { PRAGMA_SETTINGS, SCHEMA } from '../src/infrastructure/persistence/schema';
 import { jobId } from '../src/domain/types/job';
 import type { DlqEntry } from '../src/domain/types/dlq';
@@ -870,7 +880,7 @@ describe('SQL_STATEMENTS', () => {
     });
 
     test('should not have any extra undefined statements', () => {
-      for (const [name, sql] of Object.entries(SQL_STATEMENTS)) {
+      for (const sql of Object.values(SQL_STATEMENTS)) {
         expect(sql).not.toBeUndefined();
         expect(sql).not.toBeNull();
       }
@@ -886,21 +896,44 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertJob).toContain('jobs');
     });
 
-    test('should have 29 placeholder parameters', () => {
+    test('should have 30 placeholder parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertJob.match(/\?/g) || []).length;
-      expect(paramCount).toBe(29);
+      expect(paramCount).toBe(30);
     });
 
     test('should include all required columns', () => {
       const sql = SQL_STATEMENTS.insertJob;
       const requiredColumns = [
-        'id', 'queue', 'data', 'priority', 'created_at', 'run_at',
-        'attempts', 'max_attempts', 'backoff', 'ttl', 'timeout',
-        'unique_key', 'custom_id', 'depends_on', 'parent_id',
-        'children_ids', 'tags', 'state', 'lifo', 'group_id',
-        'remove_on_complete', 'remove_on_fail', 'stall_timeout', 'stall_count',
-        'fail_parent_on_failure', 'remove_dependency_on_failure',
-        'continue_parent_on_failure', 'ignore_dependency_on_failure',
+        'id',
+        'queue',
+        'data',
+        'priority',
+        'created_at',
+        'run_at',
+        'attempts',
+        'max_attempts',
+        'backoff',
+        'ttl',
+        'timeout',
+        'unique_key',
+        'custom_id',
+        'depends_on',
+        'parent_id',
+        'children_ids',
+        'tags',
+        'state',
+        'lifo',
+        'group_id',
+        'remove_on_complete',
+        'remove_on_fail',
+        'stall_timeout',
+        'stall_count',
+        'fail_parent_on_failure',
+        'remove_dependency_on_failure',
+        'continue_parent_on_failure',
+        'ignore_dependency_on_failure',
+        'timeline',
+        'dlq_retry_state',
       ];
       for (const col of requiredColumns) {
         expect(sql).toContain(col);
@@ -1072,7 +1105,7 @@ describe('prepareStatements', () => {
     const statements = prepareStatements(db);
 
     // Each value should be a prepared statement (has .run, .get, .all methods)
-    for (const [name, stmt] of statements) {
+    for (const stmt of statements.values()) {
       expect(stmt).toBeDefined();
       expect(typeof stmt.run).toBe('function');
       expect(typeof stmt.get).toBe('function');
@@ -1089,35 +1122,36 @@ describe('prepareStatements', () => {
     // Insert a job using the prepared statement
     expect(() => {
       insertStmt.run(
-        'prepared-test-1',       // id
-        'test-queue',            // queue
-        data,                    // data (BLOB)
-        5,                       // priority
-        now,                     // created_at
-        now,                     // run_at
-        0,                       // attempts
-        3,                       // max_attempts
-        1000,                    // backoff
-        null,                    // ttl
-        null,                    // timeout
-        null,                    // unique_key
-        null,                    // custom_id
-        null,                    // depends_on
-        null,                    // parent_id
-        null,                    // children_ids
-        null,                    // tags
-        'waiting',               // state
-        0,                       // lifo
-        null,                    // group_id
-        0,                       // remove_on_complete
-        0,                       // remove_on_fail
-        0,                       // fail_parent_on_failure
-        0,                       // remove_dependency_on_failure
-        0,                       // continue_parent_on_failure
-        0,                       // ignore_dependency_on_failure
-        null,                    // stall_timeout
-        0,                       // stall_count
-        null                     // timeline
+        'prepared-test-1', // id
+        'test-queue', // queue
+        data, // data (BLOB)
+        5, // priority
+        now, // created_at
+        now, // run_at
+        0, // attempts
+        3, // max_attempts
+        1000, // backoff
+        null, // ttl
+        null, // timeout
+        null, // unique_key
+        null, // custom_id
+        null, // depends_on
+        null, // parent_id
+        null, // children_ids
+        null, // tags
+        'waiting', // state
+        0, // lifo
+        null, // group_id
+        0, // remove_on_complete
+        0, // remove_on_fail
+        0, // fail_parent_on_failure
+        0, // remove_dependency_on_failure
+        0, // continue_parent_on_failure
+        0, // ignore_dependency_on_failure
+        null, // stall_timeout
+        0, // stall_count
+        null, // timeline
+        null // dlq_retry_state
       );
     }).not.toThrow();
   });
@@ -1223,22 +1257,22 @@ describe('prepareStatements', () => {
     // Insert
     expect(() => {
       insertCronStmt.run(
-        'test-cron',       // name
-        'cron-queue',      // queue
-        cronData,          // data
-        '0 * * * *',      // schedule
-        null,              // repeat_every
-        5,                 // priority
-        now + 3600000,     // next_run
-        0,                 // executions
-        null,              // max_limit
-        'UTC',             // timezone
-        null,              // unique_key
-        null,              // dedup
-        0,                 // skip_missed_on_restart
-        0,                 // skip_if_no_worker
-        1,                 // prevent_overlap
-        null               // job_options
+        'test-cron', // name
+        'cron-queue', // queue
+        cronData, // data
+        '0 * * * *', // schedule
+        null, // repeat_every
+        5, // priority
+        now + 3600000, // next_run
+        0, // executions
+        null, // max_limit
+        'UTC', // timezone
+        null, // unique_key
+        null, // dedup
+        0, // skip_missed_on_restart
+        0, // skip_if_no_worker
+        1, // prevent_overlap
+        null // job_options
       );
     }).not.toThrow();
 
@@ -1325,6 +1359,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       0,
       15000,
       2,
+      null,
       null
     );
 
@@ -1391,6 +1426,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       0,
       null,
       0,
+      null,
       null
     );
 

@@ -63,9 +63,84 @@ queue.set_dlq_config({
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->connection->call([
+    'cmd' => 'SetDlqConfig',
+    'queue' => $queue->name,
+    'config' => [
+        'autoRetry' => true,
+        'autoRetryInterval' => 3600000,
+        'maxAutoRetries' => 3,
+        'maxAge' => 604800000,
+        'maxEntries' => 10000,
+    ],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+_, err := queue.Connection.Call(map[string]any{
+    "cmd":   "SetDlqConfig",
+    "queue": queue.Name,
+    "config": map[string]any{
+        "autoRetry":         true,
+        "autoRetryInterval": 3600000,
+        "maxAutoRetries":    3,
+        "maxAge":            604800000,
+        "maxEntries":        10000,
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::{Connection, ConnectionOptions, Value};
+
+let connection = Connection::new(ConnectionOptions::default());
+connection.call(vec![
+    (Value::from("cmd"), Value::from("SetDlqConfig")),
+    (Value::from("queue"), Value::from("emails")),
+    (Value::from("config"), Value::Map(vec![
+        (Value::from("autoRetry"), Value::from(true)),
+        (Value::from("autoRetryInterval"), Value::from(3_600_000)),
+        (Value::from("maxAutoRetries"), Value::from(3)),
+        (Value::from("maxAge"), Value::from(604_800_000)),
+        (Value::from("maxEntries"), Value::from(10_000)),
+    ])),
+])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, _response} =
+  Bunqueue.Queue.call(queue, %{
+    "cmd" => "SetDlqConfig",
+    "queue" => queue.name,
+    "config" => %{
+      "autoRetry" => true,
+      "autoRetryInterval" => 3_600_000,
+      "maxAutoRetries" => 3,
+      "maxAge" => 604_800_000,
+      "maxEntries" => 10_000
+    }
+  })
+```
+
+</TabItem>
 </Tabs>
 
-*The DLQ policy is server-side state per queue: set it once from any client and it governs jobs failed by workers in every language. The typed helper ships in the Bun package, the TypeScript SDK and the Python SDK; from PHP, Go, Rust and Elixir use `PUT /queues/:queue/dlq-config` over HTTP, or the `SetDlqConfig` TCP command.*
+*The DLQ policy is server-side state per queue: set it once from any client and it governs jobs failed by workers in every language. A dedicated helper ships in the Bun package, the TypeScript SDK and the Python SDK; the other tabs issue the same `SetDlqConfig` command through each SDK's public TCP connection.*
 
 :::note[Confirming the write in TCP mode]
 In the Bun client `setDlqConfig()` is fire-and-forget over TCP: it updates the local cache and sends the command without waiting, so a transport failure is not reported to you. Use `await queue.setDlqConfigAsync(config)` when you need the call to resolve only once the server has applied the policy. In embedded mode the two are equivalent.
@@ -88,4 +163,3 @@ In the Bun client `setDlqConfig()` is fire-and-forget over TCP: it updates the l
 | [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
 | [Automatic DLQ Retry with Backoff](/guide/dlq/auto-retry/) | Let bunqueue re-queue dead entries on a backoff |
 | [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
-

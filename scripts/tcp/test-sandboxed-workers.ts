@@ -1,47 +1,28 @@
 #!/usr/bin/env bun
 /**
- * Test Sandboxed Workers (TCP Mode)
- *
- * NOTE: SandboxedWorker is designed for embedded mode only.
- * It uses the shared QueueManager directly and does not communicate via TCP.
- *
- * In a TCP environment, you would typically:
- * 1. Run the bunqueue server (which handles job storage and coordination)
- * 2. Use regular Worker class with TCP connection for distributed processing
- *
- * SandboxedWorker is useful for:
- * - Crash isolation (processor crashes don't crash the main process)
- * - Memory isolation (each worker process has its own memory space)
- * - But only in embedded/single-process deployments
- *
- * This test file documents the embedded-only behavior of SandboxedWorker.
- * All tests use embedded mode since that's the only mode SandboxedWorker supports.
- *
- * Run with: BUNQUEUE_EMBEDDED=1 bun run scripts/tcp/test-sandboxed-workers.ts
- * Or use: bun run scripts/tcp/run-all-tests.ts
+ * Test SandboxedWorker lifecycle, processing and recovery over a real TCP broker.
  */
 
 import { Queue, SandboxedWorker } from '../../src/client';
 
 const QUEUE_NAME = 'tcp-test-sandboxed-workers';
 const PROCESSOR_PATH = `${import.meta.dir}/../embedded/processor.ts`;
+const TCP_PORT = Number.parseInt(process.env.TCP_PORT ?? '16789', 10);
+const connection = { port: TCP_PORT };
 
 async function main() {
-  console.log('=== Test Sandboxed Workers (TCP Context) ===\n');
-  console.log('NOTE: SandboxedWorker only works in embedded mode.');
-  console.log('These tests verify SandboxedWorker behavior using the embedded manager.\n');
+  console.log('=== Test Sandboxed Workers (TCP) ===\n');
 
-  // SandboxedWorker always uses embedded manager, so we need an embedded queue
-  const queue = new Queue<{ message?: string; shouldFail?: boolean; shouldTimeout?: boolean }>(QUEUE_NAME, {
-    embedded: true,
-  });
+  const queue = new Queue<{ message?: string; shouldFail?: boolean; shouldTimeout?: boolean }>(
+    QUEUE_NAME,
+    { connection }
+  );
 
   let passed = 0;
   let failed = 0;
 
   // Clean state
-  queue.obliterate();
-  await Bun.sleep(100);
+  await queue.obliterateAsync();
 
   // Test 1: SandboxedWorker basic - Create and start sandboxed worker
   console.log('1. Testing SANDBOXED WORKER BASIC...');
@@ -52,6 +33,7 @@ async function main() {
       timeout: 5000,
       autoRestart: true,
       maxRestarts: 3,
+      connection,
     });
 
     await worker.start();
@@ -75,8 +57,7 @@ async function main() {
   // Test 2: SandboxedWorker processes jobs - Jobs are processed by sandboxed worker
   console.log('\n2. Testing SANDBOXED WORKER PROCESSES JOBS...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     // Add jobs
     await queue.add('job-1', { message: 'Hello from job 1' });
@@ -87,6 +68,7 @@ async function main() {
       processor: PROCESSOR_PATH,
       concurrency: 2,
       timeout: 5000,
+      connection,
     });
 
     await worker.start();
@@ -94,14 +76,16 @@ async function main() {
     // Wait for jobs to be processed
     await Bun.sleep(2000);
 
-    const counts = queue.getJobCounts();
+    const counts = await queue.getJobCountsAsync();
     await worker.stop();
 
     if (counts.waiting === 0 && counts.completed === 3) {
       console.log('   [PASS] All jobs processed by sandboxed workers');
       passed++;
     } else {
-      console.log(`   [FAIL] Jobs not fully processed: waiting=${counts.waiting}, completed=${counts.completed}`);
+      console.log(
+        `   [FAIL] Jobs not fully processed: waiting=${counts.waiting}, completed=${counts.completed}`
+      );
       failed++;
     }
   } catch (e) {
@@ -112,11 +96,10 @@ async function main() {
   // Test 3: SandboxedWorker crash recovery - Worker restarts after crash
   console.log('\n3. Testing SANDBOXED WORKER CRASH RECOVERY...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     // Add a job that will cause the processor to fail
-    await queue.add('fail-job', { shouldFail: true }, { attempts: 1 });
+    const failedJob = await queue.add('fail-job', { shouldFail: true }, { attempts: 1 });
 
     const worker = new SandboxedWorker(QUEUE_NAME, {
       processor: PROCESSOR_PATH,
@@ -124,6 +107,7 @@ async function main() {
       timeout: 5000,
       autoRestart: true,
       maxRestarts: 3,
+      connection,
     });
 
     await worker.start();
@@ -132,14 +116,18 @@ async function main() {
     await Bun.sleep(1500);
 
     const stats = worker.getStats();
+    const state = await queue.getJobState(failedJob.id);
     await worker.stop();
 
-    // Worker should still be running (restarted after failure)
-    if (stats.total === 1) {
-      console.log(`   [PASS] Worker recovered after job failure (restarts: ${stats.restarts})`);
+    if (stats.total === 1 && state === 'failed') {
+      console.log(
+        '   [PASS] Processor failure reached the TCP DLQ and the worker stayed available'
+      );
       passed++;
     } else {
-      console.log(`   [FAIL] Worker not recovered: ${JSON.stringify(stats)}`);
+      console.log(
+        `   [FAIL] Failure recovery mismatch: state=${state}, stats=${JSON.stringify(stats)}`
+      );
       failed++;
     }
   } catch (e) {
@@ -150,11 +138,10 @@ async function main() {
   // Test 4: SandboxedWorker timeout - Jobs timeout and fail
   console.log('\n4. Testing SANDBOXED WORKER TIMEOUT...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     // Add a job that will timeout
-    await queue.add('timeout-job', { shouldTimeout: true }, { attempts: 1 });
+    const timeoutJob = await queue.add('timeout-job', { shouldTimeout: true }, { attempts: 1 });
 
     const worker = new SandboxedWorker(QUEUE_NAME, {
       processor: PROCESSOR_PATH,
@@ -162,6 +149,7 @@ async function main() {
       timeout: 1000, // 1 second timeout
       autoRestart: true,
       maxRestarts: 3,
+      connection,
     });
 
     await worker.start();
@@ -169,16 +157,20 @@ async function main() {
     // Wait for the job to timeout
     await Bun.sleep(2500);
 
-    const counts = queue.getJobCounts();
+    const counts = await queue.getJobCountsAsync();
     const stats = worker.getStats();
+    const state = await queue.getJobState(timeoutJob.id);
     await worker.stop();
 
-    // Job should have failed due to timeout, and worker should have restarted
-    if (counts.failed >= 1 || stats.restarts >= 1) {
-      console.log(`   [PASS] Job timed out as expected (restarts: ${stats.restarts}, failed: ${counts.failed})`);
+    if (counts.failed === 1 && state === 'failed' && stats.restarts >= 1) {
+      console.log(
+        `   [PASS] Timeout failed exactly one job and restarted the sandbox (${stats.restarts})`
+      );
       passed++;
     } else {
-      console.log(`   [FAIL] Timeout not triggered: failed=${counts.failed}, restarts=${stats.restarts}`);
+      console.log(
+        `   [FAIL] Timeout mismatch: state=${state}, failed=${counts.failed}, restarts=${stats.restarts}`
+      );
       failed++;
     }
   } catch (e) {
@@ -189,13 +181,13 @@ async function main() {
   // Test 5: SandboxedWorker getStats - Get worker statistics
   console.log('\n5. Testing SANDBOXED WORKER GETSTATS...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     const worker = new SandboxedWorker(QUEUE_NAME, {
       processor: PROCESSOR_PATH,
       concurrency: 3,
       timeout: 5000,
+      connection,
     });
 
     await worker.start();
@@ -212,7 +204,9 @@ async function main() {
       stats.busy === 0 &&
       stats.idle === 3
     ) {
-      console.log(`   [PASS] Stats returned correctly: total=${stats.total}, busy=${stats.busy}, idle=${stats.idle}, restarts=${stats.restarts}`);
+      console.log(
+        `   [PASS] Stats returned correctly: total=${stats.total}, busy=${stats.busy}, idle=${stats.idle}, restarts=${stats.restarts}`
+      );
       passed++;
     } else {
       console.log(`   [FAIL] Stats incorrect: ${JSON.stringify(stats)}`);
@@ -228,8 +222,7 @@ async function main() {
   // Test 6: SandboxedWorker stop - Graceful shutdown
   console.log('\n6. Testing SANDBOXED WORKER STOP...');
   try {
-    queue.obliterate();
-    await Bun.sleep(100);
+    await queue.obliterateAsync();
 
     // Add jobs
     await queue.add('job-1', { message: 'Job 1' });
@@ -239,6 +232,7 @@ async function main() {
       processor: PROCESSOR_PATH,
       concurrency: 2,
       timeout: 5000,
+      connection,
     });
 
     await worker.start();
@@ -263,8 +257,8 @@ async function main() {
   }
 
   // Cleanup
-  queue.obliterate();
-  queue.close();
+  await queue.obliterateAsync();
+  await queue.close();
 
   // Summary
   console.log('\n=== Summary ===');

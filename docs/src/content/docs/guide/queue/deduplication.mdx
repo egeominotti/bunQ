@@ -111,7 +111,11 @@ job1.id == job2.id  # true, same job returned
 Typical uses: webhook retries, double-submits from a UI, restoring jobs on service startup without duplicating them.
 
 :::note[Completed ids are reused, not returned]
-Deduplication only collapses onto a job that is still pending. If the previous job with that `jobId` already completed (or is currently processing), re-adding the same id starts a fresh job under it, and the stale completed record is evicted first. So a `jobId` like `report-2026-06-17` is safe to reuse: you get idempotency within a run and a clean re-run afterwards.
+Idempotency collapses onto every unfinished generation, including a job that is
+currently active. Only after the previous job completes or fails does re-adding
+the same `jobId` start a fresh generation; bunqueue evicts the stale terminal
+record first. So an id such as `report-2026-06-17` is safe to reuse: it is
+idempotent during one run and starts cleanly after that run becomes terminal.
 :::
 
 ### With a TTL window
@@ -359,12 +363,50 @@ job_id = queue.get_deduplication_job_id("my-unique-key")  # look up
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+// Deduplication ids are stored as custom ids on the broker.
+$job = $queue->getJobByCustomId('my-unique-key');
+$jobId = $job?->id();
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Deduplication ids are stored as custom ids on the broker.
+job, err := queue.GetJobByCustomID("my-unique-key")
+if err != nil {
+    return err
+}
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Deduplication ids are stored as custom ids on the broker.
+let job = queue.get_job_by_custom_id("my-unique-key")?;
+let job_id = job.map(|job| job.id());
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Deduplication ids are stored as custom ids on the broker.
+{:ok, job} = Bunqueue.Queue.get_job_by_custom_id(queue, "my-unique-key")
+job_id = if job, do: job.id, else: nil
+```
+
+</TabItem>
 </Tabs>
 
 *The Bun queue lookup/removal methods work in embedded and TCP modes. Job-level
 removal is generation-safe: a stale job cannot clear a key already transferred
-to a replacement job. External SDK coverage is listed in the
-[SDK guide](/guide/sdks/).*
+to a replacement job. The network SDKs shown above can look up the owner through
+the equivalent custom-id query; explicit key removal is currently Bun-only.*
 
 ## Where to go next
 

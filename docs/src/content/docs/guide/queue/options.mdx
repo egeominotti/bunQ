@@ -12,6 +12,8 @@ head:
       content: "joboptions, job options reference, priority delay attempts backoff, removeOnComplete, durable job, bunqueue api reference"
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Every option, <em>with its default.</em></h1>
@@ -19,6 +21,110 @@ head:
 </div>
 
 ## Job Options Reference
+
+Pass options with each add. The field names follow the host language while the
+broker receives the same values:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
+```typescript
+await queue.add('report', data, {
+  priority: 10,
+  delay: 5000,
+  attempts: 5,
+  jobId: 'report-42',
+  durable: true,
+});
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+await queue.add('report', data, {
+  priority: 10,
+  delay: 5000,
+  attempts: 5,
+  jobId: 'report-42',
+  durable: true,
+});
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+queue.add(
+    "report", data,
+    priority=10,
+    delay=5000,
+    attempts=5,
+    job_id="report-42",
+    durable=True,
+)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$queue->add('report', $data, [
+    'priority' => 10,
+    'delay' => 5000,
+    'attempts' => 5,
+    'jobId' => 'report-42',
+    'durable' => true,
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+queue.Add("report", data, bunqueue.JobOptions{
+    "priority": 10,
+    "delay": 5000,
+    "attempts": 5,
+    "jobId": "report-42",
+    "durable": true,
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+queue.add("report", data, JobOptions {
+    priority: Some(10),
+    delay: Some(5000),
+    attempts: Some(5),
+    job_id: Some("report-42".into()),
+    durable: Some(true),
+    ..Default::default()
+})?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, _job} =
+  Bunqueue.Queue.add(queue, "report", data,
+    priority: 10,
+    delay: 5000,
+    attempts: 5,
+    jobId: "report-42",
+    durable: true
+  )
+```
+
+</TabItem>
+</Tabs>
+
+Python uses snake_case keyword arguments and Rust uses snake_case struct
+fields. Go uses a `JobOptions` map; PHP and Elixir use the camelCase protocol
+names shown in the table.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -59,4 +165,3 @@ head:
 | [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
-

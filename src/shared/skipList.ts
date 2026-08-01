@@ -1,26 +1,11 @@
-/**
- * Skip List Implementation
- * Probabilistic data structure with O(log n) insert, delete, search
- * Ideal for sorted collections with frequent modifications
- */
-
-/** Skip list node */
-interface SkipNode<T> {
-  value: T;
-  forward: Array<SkipNode<T> | null>;
-}
-
-/** Sentinel node (head) */
-function createHead<T>(maxLevel: number): SkipNode<T> {
-  const forward: Array<SkipNode<T> | null> = [];
-  for (let i = 0; i <= maxLevel; i++) {
-    forward.push(null);
-  }
-  return {
-    value: null as unknown as T,
-    forward,
-  };
-}
+import {
+  collectSkipRange,
+  createSkipHead,
+  iterateSkipValues,
+  randomSkipLevel,
+  removeMatchingSkipValues,
+} from './skipListNodes';
+import type { SkipNode } from './types/skipList';
 
 /**
  * Skip List with O(log n) operations
@@ -57,7 +42,7 @@ export class SkipList<T> {
     this.maxLevel = maxLevel;
     this.probability = probability;
     this.equals = equals;
-    this.head = createHead<T>(maxLevel);
+    this.head = createSkipHead<T>(maxLevel);
   }
 
   /** Current number of elements */
@@ -72,11 +57,7 @@ export class SkipList<T> {
 
   /** Generate random level for new node */
   private randomLevel(): number {
-    let lvl = 0;
-    while (Math.random() < this.probability && lvl < this.maxLevel) {
-      lvl++;
-    }
-    return lvl;
+    return randomSkipLevel(this.probability, this.maxLevel);
   }
 
   /**
@@ -263,16 +244,11 @@ export class SkipList<T> {
    * @param limit Maximum number of results
    */
   rangeUntil(maxValue: T, limit?: number): T[] {
-    const result: T[] = [];
-    let current = this.head.forward[0];
-
-    while (current !== null && this.compare(current.value, maxValue) <= 0) {
-      result.push(current.value);
-      if (limit !== undefined && result.length >= limit) break;
-      current = current.forward[0];
-    }
-
-    return result;
+    return collectSkipRange(
+      this.head.forward[0],
+      (value) => this.compare(value, maxValue) <= 0,
+      limit
+    );
   }
 
   /**
@@ -281,27 +257,14 @@ export class SkipList<T> {
    * O(k) where k = matching results
    */
   takeWhile(predicate: (value: T) => boolean, limit?: number): T[] {
-    const result: T[] = [];
-    let current = this.head.forward[0];
-
-    while (current !== null && predicate(current.value)) {
-      result.push(current.value);
-      if (limit !== undefined && result.length >= limit) break;
-      current = current.forward[0];
-    }
-
-    return result;
+    return collectSkipRange(this.head.forward[0], predicate, limit);
   }
 
   /**
    * Iterate all values in order
    */
   *values(): Generator<T> {
-    let current = this.head.forward[0];
-    while (current !== null) {
-      yield current.value;
-      current = current.forward[0];
-    }
+    yield* iterateSkipValues(this.head.forward[0]);
   }
 
   /**
@@ -315,7 +278,7 @@ export class SkipList<T> {
    * Clear all elements
    */
   clear(): void {
-    this.head = createHead<T>(this.maxLevel);
+    this.head = createSkipHead<T>(this.maxLevel);
     this.level = 0;
     this._size = 0;
   }
@@ -326,18 +289,8 @@ export class SkipList<T> {
    * O(n) but removes in-place
    */
   removeAll(predicate: (value: T) => boolean): T[] {
-    const removed: T[] = [];
-    let current = this.head.forward[0];
-
-    while (current !== null) {
-      const next = current.forward[0];
-      if (predicate(current.value)) {
-        removed.push(current.value);
-        this.delete(current.value);
-      }
-      current = next;
-    }
-
-    return removed;
+    return removeMatchingSkipValues(this.head.forward[0], predicate, (value) => {
+      this.delete(value);
+    });
   }
 }

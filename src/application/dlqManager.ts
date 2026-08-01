@@ -8,7 +8,7 @@ import { MAX_TIMELINE_ENTRIES } from '../domain/types/job';
 import type { JobLocation } from '../domain/types/queue';
 import type { Shard } from '../domain/queue/shard';
 import type { DlqEntry, DlqConfig, DlqFilter, DlqStats } from '../domain/types/dlq';
-import { FailureReason, scheduleNextRetry } from '../domain/types/dlq';
+import { FailureReason, setDlqRetryState } from '../domain/types/dlq';
 import { shardIndex } from '../shared/hash';
 import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 
@@ -22,6 +22,13 @@ export interface DlqContext {
   // builder silently drop persistence (#110-class bug).
   storage: SqliteStorage | null;
 }
+
+export {
+  processAutoRetry,
+  retryDlqByFilter,
+  retryDlqJob,
+  retryDlqJobs,
+} from './dlqRetry';
 
 /** Get jobs from DLQ (backward compatible) */
 export function getDlqJobs(queue: string, ctx: DlqContext, count?: number): Job[] {
@@ -85,180 +92,6 @@ export function getDlqStats(queue: string, ctx: DlqContext): DlqStats {
   }
 
   return stats;
-}
-
-/** Retry a single job from DLQ */
-export function retryDlqJob(queue: string, jobId: JobId, ctx: DlqContext): Job | null {
-  const idx = shardIndex(queue);
-  const shard = ctx.shards[idx];
-  const now = Date.now();
-
-  const entry = shard.removeFromDlq(queue, jobId);
-  if (!entry) return null;
-
-  // Delete from SQLite
-  ctx.storage?.deleteDlqEntry(jobId);
-
-  const job = entry.job;
-  job.attempts = 0;
-  job.runAt = now;
-  job.stallCount = 0;
-  job.lastHeartbeat = now;
-  if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-    job.timeline.push({ state: 'waiting', timestamp: now });
-  }
-
-  shard.getQueue(queue).push(job);
-  const isDelayed = job.runAt > now;
-  shard.incrementQueued(job.id, isDelayed, job.createdAt, queue, job.runAt);
-  ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: queue });
-  // Re-insert jobs row (deleted when job entered DLQ) so retry survives restart
-  ctx.storage?.insertJob(job, true);
-
-  return job;
-}
-
-/** Retry jobs from DLQ (backward compatible) */
-export function retryDlqJobs(
-  queue: string,
-  ctx: DlqContext,
-  jobId?: JobId,
-  limit?: number
-): number {
-  if (jobId) {
-    return retryDlqJob(queue, jobId, ctx) ? 1 : 0;
-  }
-
-  // Bounded retry (#111-class: `retryJobs({ state:'failed', count })`). Retry
-  // only the first `limit` DLQ entries, reusing the tested single-entry path so
-  // the remaining entries stay in the DLQ (memory + SQLite) instead of the
-  // clear-all fast path below wrongly draining the whole queue. Any provided
-  // `limit` engages the bounded path; a negative/NaN/fractional cap is clamped
-  // to a safe non-negative integer so it can never fall through to clear-all
-  // (skeptic: `limit >= 0` let `-1`/`NaN` drain the entire DLQ). `undefined`
-  // (no cap requested) still means "retry all" via the fast path below.
-  if (limit !== undefined) {
-    const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
-    const idx = shardIndex(queue);
-    const shard = ctx.shards[idx];
-    // Snapshot ids first: retryDlqJob mutates the DLQ as it goes.
-    const ids = shard
-      .getDlqEntries(queue)
-      .slice(0, cap)
-      .map((e) => e.job.id);
-    let retried = 0;
-    for (const id of ids) {
-      if (retryDlqJob(queue, id, ctx)) retried++;
-    }
-    return retried;
-  }
-
-  const idx = shardIndex(queue);
-  const shard = ctx.shards[idx];
-  const entries = shard.getDlqEntries(queue);
-  const count = entries.length;
-
-  // Clear all entries from memory
-  shard.clearDlq(queue);
-  // Clear from SQLite
-  ctx.storage?.clearDlqQueue(queue);
-
-  const now = Date.now();
-  for (const entry of entries) {
-    const job = entry.job;
-    job.attempts = 0;
-    job.runAt = now;
-    job.stallCount = 0;
-    job.lastHeartbeat = now;
-    if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-      job.timeline.push({ state: 'waiting', timestamp: now });
-    }
-
-    shard.getQueue(queue).push(job);
-    const isDelayed = job.runAt > now;
-    shard.incrementQueued(job.id, isDelayed, job.createdAt, queue, job.runAt);
-    ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: queue });
-    ctx.storage?.insertJob(job, true);
-  }
-
-  return count;
-}
-
-/** Retry jobs by filter */
-export function retryDlqByFilter(queue: string, ctx: DlqContext, filter: DlqFilter): number {
-  const idx = shardIndex(queue);
-  const shard = ctx.shards[idx];
-  const entries = shard.getDlqFiltered(queue, filter);
-
-  let count = 0;
-  const now = Date.now();
-
-  for (const entry of entries) {
-    const removed = shard.removeFromDlq(queue, entry.job.id);
-    if (!removed) continue;
-
-    // Delete from SQLite
-    ctx.storage?.deleteDlqEntry(entry.job.id);
-
-    const job = entry.job;
-    job.attempts = 0;
-    job.runAt = now;
-    job.stallCount = 0;
-    job.lastHeartbeat = now;
-    if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-      job.timeline.push({ state: 'waiting', timestamp: now });
-    }
-
-    shard.getQueue(queue).push(job);
-    const isDelayed = job.runAt > now;
-    shard.incrementQueued(job.id, isDelayed, job.createdAt, queue, job.runAt);
-    ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: queue });
-    ctx.storage?.insertJob(job, true);
-    count++;
-  }
-
-  return count;
-}
-
-/** Process auto-retry for a queue */
-export function processAutoRetry(queue: string, ctx: DlqContext): number {
-  const idx = shardIndex(queue);
-  const shard = ctx.shards[idx];
-  const config = shard.getDlqConfig(queue);
-
-  if (!config.autoRetry) return 0;
-
-  const now = Date.now();
-  const entries = shard.getAutoRetryEntries(queue, now);
-
-  let count = 0;
-  for (const entry of entries) {
-    // Update retry tracking
-    scheduleNextRetry(entry, config);
-
-    // Remove from DLQ
-    const removed = shard.removeFromDlq(queue, entry.job.id);
-    if (!removed) continue;
-
-    // Re-queue job
-    const job = entry.job;
-    job.attempts = 0;
-    job.runAt = now;
-    job.stallCount = 0;
-    job.lastHeartbeat = now;
-    if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-      job.timeline.push({ state: 'waiting', timestamp: now });
-    }
-
-    shard.getQueue(queue).push(job);
-    const isDelayed = job.runAt > now;
-    shard.incrementQueued(job.id, isDelayed, job.createdAt, queue, job.runAt);
-    ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: queue });
-    ctx.storage?.insertJob(job, true);
-    count++;
-  }
-
-  return count;
 }
 
 /** Purge expired entries from DLQ */
@@ -373,6 +206,7 @@ export function retryCompletedJobs(
 
 /** Requeue a single completed job */
 function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
+  setDlqRetryState(job, null);
   job.attempts = 0;
   job.startedAt = null;
   job.completedAt = null;

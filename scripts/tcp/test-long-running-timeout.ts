@@ -5,13 +5,12 @@
  * Tests for concurrent long-running jobs, progress tracking during long jobs,
  * heartbeat keep-alive, and job timeout.
  *
- * Note: Stall detection config (setStallConfig) is embedded-only.
- * Timeout-with-retry is complex in TCP (worker dedup). Those are skipped here.
+ * Timeout classification itself is also covered by the shared TCP/embedded contract.
  */
 
 import { Queue, Worker } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -45,8 +44,7 @@ async function main() {
   console.log('1. Testing MULTIPLE LONG-RUNNING CONCURRENT (5 jobs x 1s, concurrency:5)...');
   {
     const q = makeQueue('tcp-longrun-concurrent');
-    q.obliterate();
-    await Bun.sleep(200);
+    await q.obliterateAsync();
 
     const completedIndices: number[] = [];
 
@@ -102,8 +100,7 @@ async function main() {
   console.log('\n2. Testing PROGRESS DURING LONG JOB (1s job, 4 progress updates)...');
   {
     const q = makeQueue('tcp-longrun-progress');
-    q.obliterate();
-    await Bun.sleep(200);
+    await q.obliterateAsync();
 
     const progressValues: number[] = [];
     let completed = false;
@@ -166,8 +163,7 @@ async function main() {
   console.log('\n3. Testing HEARTBEAT KEEPS JOB ALIVE (2s job, heartbeat:500ms)...');
   {
     const q = makeQueue('tcp-longrun-heartbeat');
-    q.obliterate();
-    await Bun.sleep(200);
+    await q.obliterateAsync();
 
     let completed = false;
     let jobFailed = false;
@@ -222,16 +218,14 @@ async function main() {
   console.log('\n4. Testing JOB TIMEOUT (timeout:500, job sleeps 30s)...');
   {
     const q = makeQueue('tcp-longrun-timeout');
-    q.obliterate();
-    await Bun.sleep(200);
+    await q.obliterateAsync();
 
-    let capturedJobId: string | null = null;
-    let jobTimedOut = false;
+    let processingStarted = false;
 
     const worker = new Worker(
       'tcp-longrun-timeout',
-      async (job) => {
-        capturedJobId = job.id;
+      async () => {
+        processingStarted = true;
         // Sleep long enough for the server-side timeout check to fire
         await Bun.sleep(30000);
         return { done: true };
@@ -239,37 +233,34 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    // The server-side timeout handler removes the job from processing.
-    // When the processor finishes, the ACK fails which emits an error event.
-    worker.on('error', () => {
-      jobTimedOut = true;
-    });
+    worker.on('error', () => undefined);
 
-    await q.add('slow-timeout-job', { value: 1 }, { timeout: 500, attempts: 1 });
+    const job = await q.add('slow-timeout-job', { value: 1 }, { timeout: 500, attempts: 1 });
 
-    // Wait for the timeout check to fire (runs every ~5s).
-    // Check job state -- once timeout handler fires, job is no longer 'active'.
+    let entries = await q.getDlqAsync({ reason: 'timeout' });
     for (let i = 0; i < 150; i++) {
-      if (capturedJobId) {
-        try {
-          const state = await q.getJobState(capturedJobId);
-          if (state !== 'active' && state !== 'waiting') {
-            jobTimedOut = true;
-          }
-        } catch {
-          // ignore query errors
-        }
-      }
-      if (jobTimedOut) break;
+      if (entries.length === 1) break;
       await Bun.sleep(100);
+      entries = await q.getDlqAsync({ reason: 'timeout' });
     }
 
     await worker.close(true);
+    const state = await q.getJobState(job.id);
+    const entry = entries[0];
 
-    if (jobTimedOut) {
-      ok('Job with timeout:500 was timed out by server');
+    if (
+      processingStarted &&
+      state === 'failed' &&
+      entries.length === 1 &&
+      entry.reason === 'timeout' &&
+      entry.attempts.length === 1 &&
+      entry.attempts[0]?.reason === 'timeout'
+    ) {
+      ok('Job timeout produced one correctly classified terminal DLQ entry');
     } else {
-      fail('Job was not timed out within 15s');
+      fail(
+        `Timeout contract failed (started=${processingStarted}, state=${state}, entries=${JSON.stringify(entries)})`
+      );
     }
   }
 
@@ -277,8 +268,8 @@ async function main() {
   // Cleanup
   // ─────────────────────────────────────────────────
   for (const q of queues) {
-    q.obliterate();
-    q.close();
+    await q.obliterateAsync();
+    await q.close();
   }
 
   console.log('\n=== Summary ===');

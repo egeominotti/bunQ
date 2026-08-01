@@ -19,6 +19,15 @@
 !monitoring/**
 !docker-compose.yml
 !docs/
+!docs/*.md
+!docs/benchmarks/
+!docs/benchmarks/**
+!docs/features/
+!docs/features/**
+!docs/src/
+!docs/src/content/
+!docs/src/content/docs/
+!docs/src/content/docs/**
 !docs/vercel.json
 !.github/
 !.github/workflows/

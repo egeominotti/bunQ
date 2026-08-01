@@ -24,16 +24,98 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ### Filter entries
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
-await queue.getDlqAsync({ reason: 'timeout' });                       // by failure reason
+await queue.getDlqAsync({ reason: 'max_attempts_exceeded' });         // by emitted reason
 await queue.getDlqAsync({ olderThan: Date.now() - 86400000 });        // older than 24h
 await queue.getDlqAsync({ newerThan: Date.now() - 3600000 });         // last hour
-await queue.getDlqAsync({ retriable: true });                         // still eligible for auto-retry
+await queue.getDlqAsync({ retriable: true });                         // auto-retry is due now
 await queue.getDlqAsync({ limit: 10, offset: 20 });                   // pagination
 ```
 
-*The Bun async API applies the same filter in embedded and TCP modes. External
-SDK coverage is listed in the [SDK guide](/guide/sdks/).*
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+The SDK's `getDlq()` returns jobs only. Use the HTTP endpoint for full entry
+metadata, then filter the returned page in the client:
+
+```typescript
+const response = await fetch('http://localhost:6790/queues/emails/dlq?limit=100&offset=0');
+const { entries, total } = await response.json();
+const stalled = entries.filter((entry) => entry.reason === 'stalled');
+```
+
+</TabItem>
+<TabItem label="Python">
+
+The SDK's `get_dlq()` returns jobs only. The standard library can read full
+entries from HTTP:
+
+```python
+import json
+from urllib.request import urlopen
+
+with urlopen("http://localhost:6790/queues/emails/dlq?limit=100&offset=0") as response:
+    payload = json.load(response)
+stalled = [entry for entry in payload["entries"] if entry["reason"] == "stalled"]
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The SDK's `getDlq()` returns jobs only. Read full entries through HTTP:
+
+```php
+$json = file_get_contents('http://localhost:6790/queues/emails/dlq?limit=100&offset=0');
+$payload = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+$stalled = array_filter($payload['entries'], fn ($entry) => $entry['reason'] === 'stalled');
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The SDK's `GetDlq()` returns jobs only. Read full entries through HTTP with the
+standard library:
+
+```go
+response, err := http.Get("http://localhost:6790/queues/emails/dlq?limit=100&offset=0")
+if err != nil { return err }
+defer response.Body.Close()
+
+var payload struct { Entries []map[string]any `json:"entries"` }
+err = json.NewDecoder(response.Body).Decode(&payload)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK's `get_dlq()` returns jobs only. Use the broker HTTP endpoint (and
+your application's HTTP/JSON crate) for full entries:
+
+```bash
+curl 'http://localhost:6790/queues/emails/dlq?limit=100&offset=0'
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK's `dlq/2` returns jobs only. Use the broker HTTP endpoint for
+full entries:
+
+```bash
+curl 'http://localhost:6790/queues/emails/dlq?limit=100&offset=0'
+```
+
+</TabItem>
+</Tabs>
+
+The Bun async API applies `reason`, time, due-retry, expiry, limit, and offset
+filters server-side in both embedded and TCP modes. The HTTP endpoint currently
+supports only `limit` and `offset`; external clients must filter that page
+locally. `retriable: true` means `nextRetryAt` is already due, not merely that
+the entry has retry budget remaining.
 
 ### Retry selectively
 
@@ -43,8 +125,8 @@ SDK coverage is listed in the [SDK guide](/guide/sdks/).*
 ```typescript
 queue.retryDlq();                                          // retry everything
 queue.retryDlq('job-123');                                 // retry one job
-queue.retryDlqByFilter({ reason: 'timeout' });             // synchronous embedded form
-const filtered = await queue.retryDlqByFilterAsync({ reason: 'timeout' }); // TCP too
+queue.retryDlqByFilter({ reason: 'stalled' });             // synchronous embedded form
+const filtered = await queue.retryDlqByFilterAsync({ reason: 'stalled' }); // TCP too
 const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
 ```
 
@@ -107,11 +189,14 @@ queue.retry_dlq(None, Some(100))?;         // retry only the first 100 entries
 
 ### Check DLQ health
 
+<Tabs syncKey="lang">
+<TabItem label="Bun">
+
 ```typescript
 const stats = await queue.getDlqStatsAsync();
 console.log(stats.total);         // total entries
-console.log(stats.byReason);      // { explicit_fail: 5, timeout: 2, ... }
-console.log(stats.pendingRetry);  // entries waiting for auto-retry
+console.log(stats.byReason);      // { max_attempts_exceeded: 5, stalled: 2, ... }
+console.log(stats.pendingRetry);  // entries whose auto-retry time is due
 ```
 
 A simple alert loop:
@@ -123,8 +208,63 @@ setInterval(async () => {
 }, 30000);
 ```
 
-*Use synchronous `getDlqStats()` for an embedded snapshot and
-`getDlqStatsAsync()` for an authoritative result in either runtime.*
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const { stats } = await (await fetch(
+  'http://localhost:6790/queues/emails/dlq/stats'
+)).json();
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+with urlopen("http://localhost:6790/queues/emails/dlq/stats") as response:
+    stats = json.load(response)["stats"]
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$payload = json_decode(
+    file_get_contents('http://localhost:6790/queues/emails/dlq/stats'),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$stats = $payload['stats'];
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+response, err := http.Get("http://localhost:6790/queues/emails/dlq/stats")
+// Decode response.Body and read the top-level "stats" object.
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```bash
+curl 'http://localhost:6790/queues/emails/dlq/stats'
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```bash
+curl 'http://localhost:6790/queues/emails/dlq/stats'
+```
+
+</TabItem>
+</Tabs>
+
+Use synchronous `getDlqStats()` for a Bun embedded snapshot and
+`getDlqStatsAsync()` for an authoritative Bun result in either runtime. The
+other SDKs do not expose a stats helper yet; the HTTP result is authoritative.
 
 ### Purge
 

@@ -28,33 +28,45 @@ async function main() {
     queue.obliterate();
     queue.purgeDlq();
 
-    // Add a job with a very short timeout (100ms) that will take longer to process
-    await queue.add('slow-job', { value: 1 }, { timeout: 100, attempts: 1 });
+    // Keep the processor active until the periodic timeout sweep runs.
+    const job = await queue.add('slow-job', { value: 1 }, { timeout: 100, attempts: 1 });
 
-    let jobTimedOut = false;
     let processingStarted = false;
 
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async () => {
-      processingStarted = true;
-      // Simulate work that takes longer than timeout
-      await Bun.sleep(300);
-      return { success: true };
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      async () => {
+        processingStarted = true;
+        await new Promise<never>(() => undefined);
+      },
+      { concurrency: 1, embedded: true }
+    );
+    worker.on('error', () => undefined);
 
-    // Wait for job to be processed and timeout checked
-    await Bun.sleep(800);
-    await worker.close();
+    let dlq = await queue.getDlqAsync({ reason: 'timeout' });
+    const deadline = Date.now() + 12_000;
+    while (dlq.length !== 1 && Date.now() < deadline) {
+      await Bun.sleep(50);
+      dlq = await queue.getDlqAsync({ reason: 'timeout' });
+    }
+    await worker.close(true);
+    const state = await queue.getJobState(job.id);
+    const entry = dlq[0];
 
-    // Check if job went to DLQ due to timeout
-    const dlq = queue.getDlq();
-    jobTimedOut = dlq.some(entry => entry.reason === 'timeout');
-
-    if (processingStarted) {
-      // Note: Timeout detection happens asynchronously; the job may succeed before timeout check
-      console.log(`   ✅ Job with timeout processed (timeout enforcement depends on stall checker interval)`);
+    if (
+      processingStarted &&
+      state === 'failed' &&
+      dlq.length === 1 &&
+      entry.reason === 'timeout' &&
+      entry.attempts.length === 1 &&
+      entry.attempts[0]?.reason === 'timeout'
+    ) {
+      console.log('   ✅ Timeout produced one correctly classified terminal DLQ entry');
       passed++;
     } else {
-      console.log('   ❌ Job was not processed');
+      console.log(
+        `   ❌ Timeout contract failed: started=${processingStarted}, state=${state}, dlq=${JSON.stringify(dlq)}`
+      );
       failed++;
     }
   } catch (e) {
@@ -76,7 +88,7 @@ async function main() {
     // Create a job that has a TTL (this verifies TTL field is stored)
     const ttlJob = await manager.push(QUEUE_NAME, {
       data: { name: 'ttl-test', value: 999 },
-      ttl: 100,  // TTL 100ms - job must be processed within 100ms of creation
+      ttl: 100, // TTL 100ms - job must be processed within 100ms of creation
     });
 
     // Verify TTL is stored on the job
@@ -91,10 +103,14 @@ async function main() {
     const normalHasNoTtl = retrievedNormal?.ttl === null || retrievedNormal?.ttl === undefined;
 
     if (hasTtl && normalHasNoTtl) {
-      console.log('   ✅ TTL is stored correctly on jobs (ttl job has ttl=100, normal job has no ttl)');
+      console.log(
+        '   ✅ TTL is stored correctly on jobs (ttl job has ttl=100, normal job has no ttl)'
+      );
       passed++;
     } else {
-      console.log(`   ❌ TTL storage issue: ttlJob.ttl=${retrievedJob?.ttl}, normalJob.ttl=${retrievedNormal?.ttl}`);
+      console.log(
+        `   ❌ TTL storage issue: ttlJob.ttl=${retrievedJob?.ttl}, normalJob.ttl=${retrievedNormal?.ttl}`
+      );
       failed++;
     }
   } catch (e) {
@@ -136,7 +152,9 @@ async function main() {
       retrievedJob3?.tags.includes('sms');
 
     if (hasCorrectTags) {
-      console.log(`   ✅ Jobs have correct tags: job1=[${retrievedJob1?.tags}], job2=[${retrievedJob2?.tags}], job3=[${retrievedJob3?.tags}]`);
+      console.log(
+        `   ✅ Jobs have correct tags: job1=[${retrievedJob1?.tags}], job2=[${retrievedJob2?.tags}], job3=[${retrievedJob3?.tags}]`
+      );
       passed++;
     } else {
       console.log('   ❌ Tags not stored correctly');
@@ -179,7 +197,9 @@ async function main() {
       retrievedJobA2?.groupId === 'group-A';
 
     if (groupsCorrect) {
-      console.log(`   ✅ Jobs have correct groupIds: A=${retrievedJobA?.groupId}, B=${retrievedJobB?.groupId}, A2=${retrievedJobA2?.groupId}`);
+      console.log(
+        `   ✅ Jobs have correct groupIds: A=${retrievedJobA?.groupId}, B=${retrievedJobB?.groupId}, A2=${retrievedJobA2?.groupId}`
+      );
       passed++;
     } else {
       console.log('   ❌ GroupIds not stored correctly');
@@ -237,13 +257,19 @@ async function main() {
     const lifoCorrect = lifoData1 === 30 && lifoData2 === 20 && lifoData3 === 10;
 
     if (fifoCorrect && lifoCorrect) {
-      console.log(`   ✅ FIFO order: [${fifoData1}, ${fifoData2}, ${fifoData3}], LIFO order: [${lifoData1}, ${lifoData2}, ${lifoData3}]`);
+      console.log(
+        `   ✅ FIFO order: [${fifoData1}, ${fifoData2}, ${fifoData3}], LIFO order: [${lifoData1}, ${lifoData2}, ${lifoData3}]`
+      );
       passed++;
     } else if (!fifoCorrect) {
-      console.log(`   ❌ FIFO order wrong: [${fifoData1}, ${fifoData2}, ${fifoData3}] expected [1, 2, 3]`);
+      console.log(
+        `   ❌ FIFO order wrong: [${fifoData1}, ${fifoData2}, ${fifoData3}] expected [1, 2, 3]`
+      );
       failed++;
     } else {
-      console.log(`   ❌ LIFO order wrong: [${lifoData1}, ${lifoData2}, ${lifoData3}] expected [30, 20, 10]`);
+      console.log(
+        `   ❌ LIFO order wrong: [${lifoData1}, ${lifoData2}, ${lifoData3}] expected [30, 20, 10]`
+      );
       failed++;
     }
   } catch (e) {
@@ -283,13 +309,17 @@ async function main() {
 
     // Process jobs
     const processedIds: string[] = [];
-    const worker = new Worker<{ value: number }>(QUEUE_NAME, async (job) => {
-      processedIds.push(job.id);
-      if ((job.data as { value: number }).value === 222) {
-        throw new Error('Intentional failure');
-      }
-      return { processed: true };
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ value: number }>(
+      QUEUE_NAME,
+      (job) => {
+        processedIds.push(job.id);
+        if ((job.data as { value: number }).value === 222) {
+          throw new Error('Intentional failure');
+        }
+        return { processed: true };
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(800);
     await worker.close();
@@ -304,16 +334,24 @@ async function main() {
     // Fail job with removeOnFail should be gone (not in DLQ)
     const failRemoved = failJobAfter === null || failJobAfter === undefined;
     const dlqEntries = queue.getDlq();
-    const notInDlq = !dlqEntries.some(e => e.job.id === String(failJob.id));
+    const notInDlq = !dlqEntries.some((e) => e.job.id === String(failJob.id));
 
     // Check that jobs were processed
     const allProcessed = processedIds.length === 2;
 
-    if (successHasFlag && failHasFlag && allProcessed && successRemoved && (failRemoved || notInDlq)) {
+    if (
+      successHasFlag &&
+      failHasFlag &&
+      allProcessed &&
+      successRemoved &&
+      (failRemoved || notInDlq)
+    ) {
       console.log('   ✅ removeOnComplete and removeOnFail flags are honored');
       passed++;
     } else {
-      console.log(`   ❌ successHasFlag=${successHasFlag}, failHasFlag=${failHasFlag}, processed=${processedIds.length}, successRemoved=${successRemoved}, failRemoved=${failRemoved}, notInDlq=${notInDlq}`);
+      console.log(
+        `   ❌ successHasFlag=${successHasFlag}, failHasFlag=${failHasFlag}, processed=${processedIds.length}, successRemoved=${successRemoved}, failRemoved=${failRemoved}, notInDlq=${notInDlq}`
+      );
       failed++;
     }
   } catch (e) {

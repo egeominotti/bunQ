@@ -15,7 +15,9 @@ const PROCESSOR_PATH = `${import.meta.dir}/processor.ts`;
 async function main() {
   console.log('=== Test Sandboxed Workers (Embedded) ===\n');
 
-  const queue = new Queue<{ message?: string; shouldFail?: boolean; shouldTimeout?: boolean }>(QUEUE_NAME);
+  const queue = new Queue<{ message?: string; shouldFail?: boolean; shouldTimeout?: boolean }>(
+    QUEUE_NAME
+  );
   let passed = 0;
   let failed = 0;
 
@@ -80,7 +82,9 @@ async function main() {
       console.log('   [PASS] All jobs processed by sandboxed workers');
       passed++;
     } else {
-      console.log(`   [FAIL] Jobs not fully processed: waiting=${counts.waiting}, completed=${counts.completed}`);
+      console.log(
+        `   [FAIL] Jobs not fully processed: waiting=${counts.waiting}, completed=${counts.completed}`
+      );
       failed++;
     }
   } catch (e) {
@@ -133,7 +137,7 @@ async function main() {
     await Bun.sleep(100);
 
     // Add a job that will timeout
-    await queue.add('timeout-job', { shouldTimeout: true }, { attempts: 1 });
+    const timeoutJob = await queue.add('timeout-job', { shouldTimeout: true }, { attempts: 1 });
 
     const worker = new SandboxedWorker(QUEUE_NAME, {
       processor: PROCESSOR_PATH,
@@ -150,14 +154,18 @@ async function main() {
 
     const counts = queue.getJobCounts();
     const stats = worker.getStats();
+    const state = await queue.getJobState(timeoutJob.id);
     await worker.stop();
 
-    // Job should have failed due to timeout, and worker should have restarted
-    if (counts.failed >= 1 || stats.restarts >= 1) {
-      console.log(`   [PASS] Job timed out as expected (restarts: ${stats.restarts}, failed: ${counts.failed})`);
+    if (counts.failed === 1 && state === 'failed' && stats.restarts >= 1) {
+      console.log(
+        `   [PASS] Timeout failed exactly one job and restarted the sandbox (${stats.restarts})`
+      );
       passed++;
     } else {
-      console.log(`   [FAIL] Timeout not triggered: failed=${counts.failed}, restarts=${stats.restarts}`);
+      console.log(
+        `   [FAIL] Timeout mismatch: state=${state}, failed=${counts.failed}, restarts=${stats.restarts}`
+      );
       failed++;
     }
   } catch (e) {
@@ -191,7 +199,9 @@ async function main() {
       stats.busy === 0 &&
       stats.idle === 3
     ) {
-      console.log(`   [PASS] Stats returned correctly: total=${stats.total}, busy=${stats.busy}, idle=${stats.idle}, restarts=${stats.restarts}`);
+      console.log(
+        `   [PASS] Stats returned correctly: total=${stats.total}, busy=${stats.busy}, idle=${stats.idle}, restarts=${stats.restarts}`
+      );
       passed++;
     } else {
       console.log(`   [FAIL] Stats incorrect: ${JSON.stringify(stats)}`);

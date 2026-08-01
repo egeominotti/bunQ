@@ -37,6 +37,8 @@ worker.on('failed', (job, error) => {
 worker.on('progress', (job, progress) => {
   console.log(`Progress: ${job.id} - ${progress}%`);
 });
+
+worker.on('error', (error) => console.error(error)); // always attach
 ```
 
 </TabItem>
@@ -84,9 +86,55 @@ worker.On("error", func(args ...any) { log.Println(args[0]) })
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+Rust exposes transport and worker-retry telemetry rather than per-job event
+listeners:
+
+```rust
+use std::sync::Arc;
+use bunqueue_client::{
+    ConnectionOptions, TelemetryCallback, TelemetryEvent, Worker, WorkerOptions,
+};
+
+let telemetry: TelemetryCallback = Arc::new(|event| match event {
+    TelemetryEvent::WorkerRetry { queue, message, .. } => {
+        eprintln!("{queue}: retrying after {message}");
+    }
+    TelemetryEvent::Error { operation, message } => {
+        eprintln!("{operation}: {message}");
+    }
+    _ => {}
+});
+
+let worker = Worker::new("queue", processor, WorkerOptions {
+    connection: ConnectionOptions { telemetry: Some(telemetry), ..Default::default() },
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+Elixir exposes connection telemetry; record per-job outcomes in the handler's
+normal return path:
+
+```elixir
+telemetry = fn event -> Logger.info("bunqueue", bunqueue: event) end
+
+worker =
+  Bunqueue.Worker.new("queue", handler,
+    connection: [event_handler: telemetry]
+  )
+```
+
+</TabItem>
 </Tabs>
 
-*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+*Rust and Elixir telemetry covers connection, command, retry, timeout and error
+lifecycle, but it does not synthesize `completed`/`failed` listener events.
+Record per-job outcomes inside the processor. See the
+[SDK guide](/guide/sdks/#worker-events).*
 
 All Bun client events are fully typed. The complete list (external SDK event sets are listed in the [SDK guide](/guide/sdks/#worker-events)):
 
@@ -118,4 +166,3 @@ Remove a listener with `worker.off('completed', handler)`.
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

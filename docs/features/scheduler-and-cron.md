@@ -30,7 +30,9 @@ Internal:
 - `src/infrastructure/scheduler/cronParser.ts` — `validateCronExpression`, `getNextCronRun`, `getNextIntervalRun`, `expandCronShortcut` (+ unused-by-scheduler helpers `isDue`, `describeCron`).
 - `src/shared/minHeap.ts` — `MinHeap` for the next-run-ordered heap.
 - `src/shared/logger.ts` — `cronLog`.
-- `QueueManager` (`src/application/queueManager.ts`) wires callbacks: push → `push()`, persist → `storage.updateCron()`, worker-check → `workerManager.getForQueue()` (`queueManager.ts:175-192`); dashboard emit is wired later via `setDashboardEmit` (`queueManager.ts:1318`).
+- `QueueManager` wires push, persistence, and worker-presence callbacks in
+  `application/queue-manager/state.ts`; dashboard wiring and the public cron
+  methods live in `application/queue-manager/services.ts`.
 - `src/client/manager.ts` (`getSharedManager`) and `src/client/tcpPool.ts` for the embedded vs TCP split in `scheduler.ts`.
 
 External / runtime:
@@ -63,7 +65,8 @@ type PushJobCallback = (queue: string, input: JobInput) => Promise<void>;
 type PersistCronCallback = (name: string, executions: number, nextRun: number) => void;
 ```
 
-The `QueueManager` re-exposes these as `addCron(input)`, `removeCron(name)`, `getCron(name)`, `listCrons()` (`queueManager.ts:1262-1311`).
+The `QueueManager` re-exposes these as `addCron(input)`, `removeCron(name)`,
+`getCron(name)`, and `listCrons()` (`application/queue-manager/services.ts`).
 
 ### Parser functions (`cronParser.ts`)
 
@@ -150,7 +153,10 @@ Canonical definition is `CronJob` (`src/domain/types/cron.ts:28-52`). See [data-
 5. `immediately` sets `nextRun = now` **only on first creation**, never on upsert (so it doesn't clobber restart-skip logic) (`cronScheduler.ts:175-177`).
 6. Assign a fresh `generation`, store in map + heap, then `scheduleNext()`.
 
-At the manager layer, `addCron` first calls `removeOrphanedCronJob` when `preventOverlap` is set: it deletes any still-`waiting`/queued job under the cron's uniqueKey before re-arming, so a stale job left over a disconnect window isn't immediately consumed by the new worker (`queueManager.ts:1262-1297`, #73). It then persists via `storage.saveCron`.
+At the manager layer, `addCron` first removes an orphaned queued job when
+`preventOverlap` is set, so a stale job from a disconnect window is not
+immediately consumed by the new worker (`application/queue-manager/services.ts`,
+#73). It then persists via `storage.saveCron`.
 
 ### Event-driven wake (`scheduleNext`, `cronScheduler.ts:262-289`)
 Clears the current timer, pops stale heap entries (generation mismatch), then arms a single `setTimeout` for `max(0, nextRun - now)` on the soonest live cron. Re-run after every mutation (add/remove/load/tick).

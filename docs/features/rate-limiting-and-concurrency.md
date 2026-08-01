@@ -26,7 +26,8 @@ Does NOT own:
 Internal:
 - `QueueState` / `createQueueState` / `RateLimiter` / `ConcurrencyLimiter` from `src/domain/types/queue.ts` — consumed by `LimiterManager`.
 - `Shard` wraps one `LimiterManager` per shard and exposes `setRateLimit` / `tryAcquireRateLimit` / `tryAcquireConcurrency` / `releaseConcurrency` (`src/domain/queue/shard.ts:52`, `:178`–`:203`).
-- `QueueManager` routes limit mutations to the owning shard and write-throughs to SQLite (`src/application/queueManager.ts:1020`–`1056`).
+- `QueueManager` routes limit mutations to the owning shard and writes them
+  through to SQLite (`src/application/queue-manager/limits.ts`).
 - Pull operations gate on the limiters (`src/application/operations/pull.ts:263`, `:360`); `releaseJobResources` releases the concurrency slot on terminal transitions (`src/domain/queue/shard.ts:216`).
 - `RateLimiterOptions` from `src/client/types.ts:471` configures the worker-side limiters.
 
@@ -59,7 +60,7 @@ External/runtime:
 - `class WorkerRateLimiter` (`src/client/worker/workerRateLimiter.ts:12`) — `constructor(limiter: RateLimiterOptions | null)`, `canProcessWithinLimit(): boolean`, `recordJobForLimiter(): void`, `getTimeUntilNextSlot(): number`, `getRateLimiterInfo()`, `rateLimit(expireTimeMs): void`, `isRateLimited(): boolean`.
 - `class GroupConcurrencyLimiter` (`src/client/worker/groupConcurrency.ts:11`) — `static fromOptions(limiter): GroupConcurrencyLimiter | null`, `canProcess(job): boolean`, `increment(job)`, `decrement(job)`, `getGroupValue(job)`, `getGroupCount(group)`, `getMax()`, `getGroupKey()`, `clear()`.
 
-### Client SDK (Queue) methods (`src/client/queue/rateLimit.ts`, surfaced in `src/client/queue/queue.ts:438`)
+### Client SDK (Queue) methods (`src/client/queue/rateLimit.ts`, surfaced by `src/client/queue/runtime/configuration.ts`)
 
 - `setGlobalRateLimit(max: number, duration?: number)` — `max` jobs per `duration` ms (default 1000). The window is honored in both embedded and TCP modes; fire-and-forget over TCP.
 - `setGlobalRateLimitAsync(max, duration?)` / `removeGlobalRateLimitAsync()` / `setGlobalConcurrencyAsync(n)` / `removeGlobalConcurrencyAsync()` — awaitable variants: resolve once the server has applied the change (no set-then-pull race).
@@ -150,7 +151,12 @@ Batch pull repeats the same selection and acquires **one rate token + one concur
 
 ### Mutation + persistence
 
-`QueueManager.setRateLimit/setConcurrency` (and their clears) route to the owning shard's `LimiterManager` then call `persistQueueState` (`src/application/queueManager.ts:1020`–`1056`), which UPSERTs the row, or DELETEs it when the state has returned fully to default (not paused, no limits). On startup, `loadQueueState()` re-applies paused/rate/concurrency directly to the shard, in-memory only, avoiding a write-back loop (`src/application/backgroundTasks.ts:390`–`396`). This is the issue #100 fix; without it every queue silently un-paused and lost its limits on restart.
+`QueueManager.setRateLimit/setConcurrency` (and their clears) route to the
+owning shard's `LimiterManager`, then call `persistQueueState`
+(`application/queue-manager/limits.ts`). The persistence helper upserts the row
+or deletes it when all queue policy has returned to defaults. Startup recovery
+reapplies the state directly to the shard without a write-back loop
+(`application/background/recovery/`).
 
 `QueueManager.getQueueLimitStatus(queue, maxJobs?)` is the single read model
 for the four public getters. It combines the configured `{max, duration}`, the
@@ -163,15 +169,18 @@ Every inbound TCP `data` callback and HTTP request first calls `getRateLimiter()
 
 ### Worker-side rate limiting
 
-In the worker constructor (`src/client/worker/worker.ts:180`):
+In the worker state constructor (`src/client/worker/runtime/state.ts`):
 ```typescript
 this.rateLimiter = new WorkerRateLimiter(opts.limiter?.groupKey ? null : (opts.limiter ?? null));
 this.groupLimiter = GroupConcurrencyLimiter.fromOptions(opts.limiter);
 ```
 Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabled** and `limiter.max` instead becomes a per-group concurrency cap. A single `limiter` option is therefore *either* a global rate limit *or* a per-group concurrency limit, never both.
 
-- `poll()` (`worker.ts:658`) calls `canProcessWithinLimit()` before processing; if blocked it reschedules itself after `max(getTimeUntilNextSlot(), 10)` ms.
-- A token is pushed on **job completion** via `recordJobForLimiter()` (`worker.ts:486`, `:910`). So the window measures completed throughput; `canProcessWithinLimit` returns `activeCount() < limiter.max` (`workerRateLimiter.ts:24`).
+- `poll()` (`worker/runtime/polling.ts`) calls `canProcessWithinLimit()` before
+  processing; if blocked it waits at least 10ms for the next slot.
+- A token is pushed on **job completion** via `recordJobForLimiter()`
+  (`worker/runtime/execution.ts`, `runtime/manual.ts`). The window therefore
+  measures completed throughput.
 - `getTimeUntilNextSlot` returns `oldestToken + duration - now`, reading the oldest live token at the head pointer (O(1), `workerRateLimiter.ts:44`).
 - `Worker.rateLimit(expireTimeMs)` (BullMQ v5 manual throttle) pushes `max` synthetic tokens timed to expire at `now + expireTimeMs` and sets `rateLimitExpiration`; `isRateLimited()` is `Date.now() < rateLimitExpiration` (`workerRateLimiter.ts:78`, `:92`).
 
@@ -180,8 +189,12 @@ Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabl
 `GroupConcurrencyLimiter` (`src/client/worker/groupConcurrency.ts`) tracks `activeByGroup: Map<groupValue, count>`:
 - `getGroupValue(job)` reads `job.data[groupKey]`; `null`/`undefined`/missing → `null` (not subject to the limit); non-strings are stringified.
 - `canProcess(job)` → `current < maxPerGroup` (jobs without a group always pass).
-- The worker's `getNextEligibleJob()` (`worker.ts:787`) scans the pending buffer for the first job whose group has capacity, leaving group-blocked jobs buffered. `increment` is called in `startJob` (`worker.ts:876`), `decrement` in the `finally` after processing (`worker.ts:908`).
-- **Group pull-ahead exception** (`worker.ts:824-838`): when a group limiter is set and the buffer is non-empty but unrunnable (all buffered jobs group-blocked), the leased count uses `activeJobs` instead of `pulledJobIds.size`, so the worker pulls ahead to discover jobs from other runnable groups instead of wedging.
+- `getNextEligibleJob()` (`worker/runtime/buffer.ts`) scans for the first group
+  with capacity. `startJob()` in `runtime/execution.ts` owns the exactly-once
+  increment/decrement pair.
+- **Group pull-ahead exception** (`worker/runtime/polling.ts`): when the buffer
+  is non-empty but every buffered group is blocked, the leased count uses
+  `activeJobs` so the worker may discover another runnable group.
 
 ## Concurrency & Locking
 
@@ -194,6 +207,10 @@ Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabl
 
 - **Default = unlimited per queue.** No `RateLimiter`/`ConcurrencyLimiter` exists until explicitly set; `tryAcquire*` returns `true` when absent (`limiterManager.ts:63`, `:90`). The only always-on throttle is the protocol limiter at 10000 req/60s per client (the known "rate limit defaults to Infinity" caveat refers to per-queue limits being off by default).
 - **`setGlobalRateLimit(max, duration)` honors `duration` end-to-end** (client → wire `duration` field → `LimiterManager` refill rate), matching BullMQ's `{max per duration}` semantics in both modes. Servers older than 2.8.35 ignore the field and fall back to the 1s bucket. The worker-side `WorkerRateLimiter` independently honors its own `{max, duration}`.
+- The official TypeScript and Python network SDKs forward the same custom
+  window as wire `duration`; omitting it preserves the broker's 1,000 ms
+  default. Real-broker regressions read the applied window through
+  `GetQueueLimits` so a silently dropped field cannot pass.
 - **`Queue.rateLimit(expireTimeMs)` expires broker-side** (`rateLimit.ts`): both modes set `limit: 1` with a broker-side `ttl`; there is no client timer, so the expiry survives client exit and behaves identically embedded/TCP. Lazy expiry: the limit clears on the first pull or limit read past the deadline. During the window jobs still trickle at 1/sec (token refill), matching the previous approximation. Invalid `expireTimeMs` (non-finite or ≤ 0) throws. A TTL'd limit persisted to `queue_state` is restored with its remaining time on restart and never resurrects once expired.
 - **TTL sentinel:** `getRateLimitTtl` returns `-2` when no rate limit exists. A temporary limit returns its remaining broker-side lifetime; a permanent token bucket returns the wait required for the requested token count.
 - **`isMaxed` scope:** it reflects the global concurrency limiter, not worker-local concurrency or rate-token availability. With no configured global concurrency it is `false`.

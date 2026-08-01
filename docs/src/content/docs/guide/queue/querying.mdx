@@ -207,6 +207,68 @@ waiting_children = queue.get_waiting_children(0, 10)
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+```php
+// These SDKs use the general state-filtered query.
+$waiting = $queue->getJobs('waiting', 0, 10);
+$failed = $queue->getJobs('failed', 0, 10);
+
+$counts = $queue->getJobCounts();
+$failedCount = $counts['failed'] ?? 0;
+
+$prioritized = $queue->getJobs('prioritized', 0, 10);
+$waitingChildren = $queue->getJobs('waiting-children', 0, 10);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// These SDKs use the general state-filtered query.
+waiting, err := queue.GetJobs("waiting", 0, 10)
+failed, err := queue.GetJobs("failed", 0, 10)
+
+counts, err := queue.GetJobCounts()
+failedCount := counts["failed"]
+
+prioritized, err := queue.GetJobs("prioritized", 0, 10)
+waitingChildren, err := queue.GetJobs("waiting-children", 0, 10)
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+use bunqueue_client::Value;
+
+// Rust takes an offset and a limit.
+let waiting = queue.get_jobs(Value::from("waiting"), 0, 10)?;
+let failed = queue.get_jobs(Value::from("failed"), 0, 10)?;
+
+let counts = queue.get_job_counts()?;
+let failed_count = counts.get("failed").copied().unwrap_or(0);
+
+let prioritized = queue.get_jobs(Value::from("prioritized"), 0, 10)?;
+let waiting_children = queue.get_jobs(Value::from("waiting-children"), 0, 10)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Elixir takes an offset and a limit.
+{:ok, waiting} = Bunqueue.Queue.get_jobs(queue, "waiting", 0, 10)
+{:ok, failed} = Bunqueue.Queue.get_jobs(queue, "failed", 0, 10)
+
+{:ok, counts} = Bunqueue.Queue.get_job_counts(queue)
+failed_count = Map.get(counts, "failed", 0)
+
+{:ok, prioritized} = Bunqueue.Queue.get_jobs(queue, "prioritized", 0, 10)
+{:ok, waiting_children} = Bunqueue.Queue.get_jobs(queue, "waiting-children", 0, 10)
+```
+
+</TabItem>
 </Tabs>
 
 *Per-state shortcuts are available in TypeScript and Python; in PHP, Go, Rust, and Elixir use `getJobs` with a state filter.*

@@ -79,7 +79,8 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
 - **DLQ**: `get_dlq`, `retry_dlq`, `purge_dlq`, DLQ config
 - **Schedulers**: `upsert_job_scheduler` (cron pattern or interval),
   `add_cron` / `every` shorthands, get/list/remove
-- **Admin**: rate limit, global concurrency, stall config, webhooks,
+- **Admin**: rate limit with custom windows
+  (`set_global_rate_limit(max_jobs, duration_ms)`), global concurrency, stall config, webhooks,
   stats/metrics/list_queues/get_workers
 - **Worker**: events (`ready`, `active`, `completed`, `failed`, `progress`,
   `drained`, `error`, `closed`), pause/resume, graceful `close()` (also a

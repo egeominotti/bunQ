@@ -42,12 +42,13 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       depends_on, parent_id, children_ids, tags, state, lifo, group_id,
       remove_on_complete, remove_on_fail, fail_parent_on_failure,
       remove_dependency_on_failure, continue_parent_on_failure,
-      ignore_dependency_on_failure, stall_timeout, stall_count, timeline
+      ignore_dependency_on_failure, stall_timeout, stall_count, timeline,
+      dlq_retry_state
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       queue=excluded.queue, data=excluded.data, priority=excluded.priority,
@@ -62,7 +63,7 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       continue_parent_on_failure=excluded.continue_parent_on_failure,
       ignore_dependency_on_failure=excluded.ignore_dependency_on_failure,
       stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
-      timeline=excluded.timeline,
+      timeline=excluded.timeline, dlq_retry_state=excluded.dlq_retry_state,
       -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
       -- resolves to each column's DEFAULT (NULL / 0) — i.e. the fresh-job value. Reset
       -- them too, otherwise an upsert over an ORPHAN row would leave a brand-new job
@@ -75,7 +76,7 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
   updateJobState: 'UPDATE jobs SET state = ?, started_at = ?, timeline = ? WHERE id = ?',
 
   completeJob:
-    'UPDATE jobs SET state = ?, completed_at = ?, progress = 100, timeline = ? WHERE id = ?',
+    'UPDATE jobs SET state = ?, completed_at = ?, progress = 100, timeline = ?, dlq_retry_state = NULL WHERE id = ?',
 
   updateJobProgress:
     'UPDATE jobs SET progress = ?, progress_msg = ?, last_heartbeat = ? WHERE id = ?',
@@ -169,6 +170,7 @@ export interface DbJob {
   stall_count: number;
   timeline: Uint8Array | null;
   stacktrace: Uint8Array | null; // MessagePack BLOB (#74)
+  dlq_retry_state: Uint8Array | null;
 }
 
 /** Database row type for cron jobs */

@@ -49,7 +49,7 @@ const remoteStats = await queue.getDlqStatsAsync();
 queue.retryDlq();           // Retry all
 queue.retryDlq('job-123');  // Retry one
 queue.purgeDlq();           // Clear all
-const retried = await queue.retryDlqByFilterAsync({ reason: 'timeout' });
+const retried = await queue.retryDlqByFilterAsync({ reason: 'stalled' });
 ```
 
 </TabItem>
@@ -149,7 +149,12 @@ queue.purge_dlq()?;                      // Clear all
 </TabItem>
 </Tabs>
 
-*DLQ auto-retry configuration (`setDlqConfig`) is available in TypeScript and Python; `getDlqStats()` and reason filters exist in the Bun `bunqueue` package only.*
+*DLQ configuration (`setDlqConfig`) is available in Bun, TypeScript, and
+Python; PHP, Go, Rust, and Elixir can set the same server policy through
+`PUT /queues/:queue/dlq-config`. Full metadata, stats, and server-side reason
+filters exist in the Bun package only; every SDK can use the HTTP metadata and
+stats endpoints. Automatic retries preserve their bounded retry chain and
+failure history across redelivery and SQLite-backed broker restarts.*
 
 :::note[TCP mode]
 The synchronous `getDlq()` / `getDlqStats()` methods are embedded snapshots,

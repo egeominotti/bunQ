@@ -37,6 +37,18 @@ await prodQueue.getJobCountsAsync();  // never sees dev jobs
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// Prefix the broker queue name directly.
+const devQueue = new Queue('dev:emails');
+const prodQueue = new Queue('prod:emails');
+
+await devQueue.add('send', { to: 'tester@example.com' });
+await prodQueue.getJobCounts(); // never sees dev jobs
+```
+
+</TabItem>
 <TabItem label="Python">
 
 ```python
@@ -46,6 +58,54 @@ prod_queue = Queue("emails", prefix_key="prod:")
 
 dev_queue.add("send", {"to": "tester@example.com"})
 prod_queue.get_job_counts()  # never sees dev jobs
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// Prefix the broker queue name directly.
+$devQueue = new Queue('dev:emails');
+$prodQueue = new Queue('prod:emails');
+
+$devQueue->add('send', ['to' => 'tester@example.com']);
+$prodQueue->getJobCounts(); // never sees dev jobs
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// Prefix the broker queue name directly.
+devQueue := bunqueue.NewQueue("dev:emails", bunqueue.Options{})
+prodQueue := bunqueue.NewQueue("prod:emails", bunqueue.Options{})
+
+devQueue.Add("send", map[string]any{"to": "tester@example.com"}, nil)
+prodQueue.GetJobCounts() // never sees dev jobs
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Prefix the broker queue name directly.
+let dev_queue = Queue::new("dev:emails", ConnectionOptions::default());
+let prod_queue = Queue::new("prod:emails", ConnectionOptions::default());
+
+dev_queue.add("send", data, JobOptions::default())?;
+let counts = prod_queue.get_job_counts()?; // never sees dev jobs
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Prefix the broker queue name directly.
+dev_queue = Bunqueue.queue("dev:emails")
+prod_queue = Bunqueue.queue("prod:emails")
+
+{:ok, _job} = Bunqueue.Queue.add(dev_queue, "send", %{to: "tester@example.com"})
+{:ok, _counts} = Bunqueue.Queue.get_job_counts(prod_queue) # never sees dev jobs
 ```
 
 </TabItem>
@@ -60,6 +120,48 @@ A Worker must use the same `prefixKey` to consume the prefixed queue:
 
 ```typescript
 const devWorker = new Worker('emails', processor, { prefixKey: 'dev:' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const devWorker = new Worker('dev:emails', processor);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+dev_worker = Worker("dev:emails", process)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$devWorker = new Worker('dev:emails', $processor);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+devWorker := bunqueue.NewWorker("dev:emails", processor, bunqueue.WorkerOptions{})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+let dev_worker = Worker::new("dev:emails", processor, WorkerOptions::default());
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+dev_worker = Bunqueue.Worker.new("dev:emails", processor)
 ```
 
 </TabItem>
@@ -93,6 +195,73 @@ const queue = new Queue('tasks', {
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+// The network SDK sends this batch in one round-trip.
+await queue.addBulk([
+  { name: 'task', data: { id: 1 } },
+  { name: 'task', data: { id: 2 } },
+]);
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+# The network SDK sends this batch in one round-trip.
+queue.add_bulk([
+    {"name": "task", "data": {"id": 1}},
+    {"name": "task", "data": {"id": 2}},
+])
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+// The network SDK sends this batch in one round-trip.
+$queue->addBulk([
+    ['name' => 'task', 'data' => ['id' => 1]],
+    ['name' => 'task', 'data' => ['id' => 2]],
+]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+// The network SDK sends this batch in one round-trip.
+ids, err := queue.AddBulk([]bunqueue.BulkEntry{
+    {Name: "task", Data: map[string]any{"id": 1}},
+    {Name: "task", Data: map[string]any{"id": 2}},
+})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// The network SDK sends this batch in one round-trip.
+let ids = queue.add_bulk(vec![
+    BulkEntry { name: "task".into(), data: Value::from(1), options: JobOptions::default() },
+    BulkEntry { name: "task".into(), data: Value::from(2), options: JobOptions::default() },
+])?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# The network SDK sends this batch in one round-trip.
+{:ok, ids} =
+  Bunqueue.Queue.add_bulk(queue, [
+    %{name: "task", data: %{id: 1}},
+    %{name: "task", data: %{id: 2}}
+  ])
+```
+
+</TabItem>
 </Tabs>
 
 *Auto-batching is available in the Bun `bunqueue` package only; in the other SDKs, use `addBulk` to batch producer traffic into one round-trip.*
@@ -103,7 +272,9 @@ Jobs with `durable: true` are always sent individually so they hit the disk imme
 
 ## Store-and-forward: `queue.forward()`
 
-Drain a local embedded queue to a remote bunqueue server, the edge/IoT pattern (local queue as offline buffer, central server as destination):
+Drain a source queue to a remote bunqueue server. The usual edge/IoT pattern
+uses an embedded SQLite queue as the offline buffer and a central server as the
+destination; the same API also supports a TCP source broker:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -122,9 +293,96 @@ await forwarder.close();
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```typescript
+const central = new Queue('central-name', {
+  host: 'queue.example.com', port: 6789, token: process.env.BQ_TOKEN,
+});
+await central.add('event', data, { durable: true });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```python
+central = Queue(
+    "central-name", host="queue.example.com", port=6789,
+    token=os.environ["BQ_TOKEN"],
+)
+central.add("event", data, durable=True)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```php
+$central = new Queue('central-name', [
+    'host' => 'queue.example.com', 'port' => 6789, 'token' => getenv('BQ_TOKEN'),
+]);
+$central->add('event', $data, ['durable' => true]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```go
+central := bunqueue.NewQueue("central-name", bunqueue.Options{
+    Host: "queue.example.com", Port: 6789, Token: os.Getenv("BQ_TOKEN"),
+})
+central.Add("event", data, bunqueue.JobOptions{"durable": true})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```rust
+let central = Queue::new("central-name", ConnectionOptions {
+    host: "queue.example.com".into(),
+    port: 6789,
+    token: std::env::var("BQ_TOKEN").ok(),
+    ..Default::default()
+});
+central.add("event", data, JobOptions { durable: Some(true), ..Default::default() })?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The network SDK has no local embedded buffer. When offline buffering is not
+required, write directly to the central broker:
+
+```elixir
+central =
+  Bunqueue.queue("central-name",
+    host: "queue.example.com", port: 6789, token: System.fetch_env!("BQ_TOKEN")
+  )
+
+{:ok, _job} = Bunqueue.Queue.add(central, "event", data, durable: true)
+```
+
+</TabItem>
 </Tabs>
 
-*Store-and-forward requires the embedded Bun `bunqueue` package, it drains a local embedded queue to a remote server.*
+*Only the Bun-runtime `bunqueue` package provides the `forward()` drain loop.
+Its source may be embedded or TCP, but only an embedded source provides the
+in-process SQLite offline buffer. Direct network writes do not retain jobs
+locally while the central broker is unavailable.*
 
 If the remote is down, jobs stay local (retry, then DLQ), nothing is lost. Full guide: [IoT & Edge](/guide/iot-edge/).
 
@@ -143,4 +401,3 @@ If the remote is down, jobs stay local (retry, then DLQ), nothing is lost. Full 
 | [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

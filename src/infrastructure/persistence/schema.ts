@@ -1,8 +1,4 @@
-/**
- * SQLite schema and migrations
- */
 import { DEPENDENCY_COMPLETION_SCHEMA } from './dependencyCompletionSchema';
-
 /** SQLite PRAGMA settings for optimal performance */
 export const PRAGMA_SETTINGS = `
 PRAGMA journal_mode = WAL;
@@ -13,7 +9,7 @@ PRAGMA mmap_size = 268435456;
 PRAGMA page_size = 4096;
 PRAGMA busy_timeout = 5000;
 `;
-/** Main schema creation */
+/** Main schema creation. */
 export const SCHEMA = `
 -- Jobs table (using UUIDv7 for job IDs)
 -- Uses BLOB for data fields (MessagePack serialization for ~2-3x faster than JSON)
@@ -52,7 +48,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_heartbeat INTEGER,
     stall_count INTEGER NOT NULL DEFAULT 0,
     timeline BLOB,
-    stacktrace BLOB
+    stacktrace BLOB,
+    dlq_retry_state BLOB
 );
 
 -- Indexes for common queries
@@ -158,7 +155,6 @@ CREATE TABLE IF NOT EXISTS queue_state (
     dlq_config BLOB
 );
 `;
-
 /** Migration version table */
 export const MIGRATION_TABLE = `
 CREATE TABLE IF NOT EXISTS migrations (
@@ -167,7 +163,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 `;
 /** Current schema version */
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 30;
 /** All migrations in order */
 export const MIGRATIONS: Record<number, string> = {
   1: SCHEMA,
@@ -297,4 +293,6 @@ CREATE INDEX idx_jobs_pending_priority
 `,
   28: DEPENDENCY_COMPLETION_SCHEMA,
   29: 'ALTER TABLE dependency_completions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;',
+  // Preserve bounded DLQ auto-retry metadata while the job is live.
+  30: 'ALTER TABLE jobs ADD COLUMN dlq_retry_state BLOB;',
 };

@@ -5,7 +5,7 @@
  */
 
 import { type Job, type JobId, type JobTimelineEntry, jobId } from '../../domain/types/job';
-import type { DlqEntry } from '../../domain/types/dlq';
+import { type DlqEntry, type DlqRetryState, setDlqRetryState } from '../../domain/types/dlq';
 import type { DbJob } from './statements';
 import { storageLog } from '../../shared/logger';
 import {
@@ -175,6 +175,10 @@ export function rowToJob(row: DbJob): Job {
       ? unpack<string[] | null>(row.stacktrace, null, `${jobContext}:stacktrace`)
       : null,
   };
+  const dlqRetryState = row.dlq_retry_state
+    ? unpack<DlqRetryState | null>(row.dlq_retry_state, null, `${jobContext}:dlqRetryState`)
+    : null;
+  setDlqRetryState(job, dlqRetryState);
   Object.defineProperty(job, PERSISTED_JOB_STATE, {
     value: row.state as PersistedJobState,
     enumerable: false,

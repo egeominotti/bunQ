@@ -36,6 +36,9 @@ must preserve the wire contract and lifecycle semantics.
 - `job_options` is the canonical snake_case-to-wire mapping:
   `attempts -> maxAttempts`, `job_id -> jobId`, and corresponding camelCase
   names for retention, lease, dependency, and failure-policy fields.
+- Public administrative options supported by the broker must reach the wire;
+  in particular `set_global_rate_limit(max_jobs, duration_ms)` maps the window
+  to `duration`, while `None` is omitted and retains the one-second default.
 
 ## Queue and idempotency
 

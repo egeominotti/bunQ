@@ -20,7 +20,7 @@ head:
 
 ## Cron Expression Cheat Sheet
 
-Five fields, left to right: minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week (0-6, Sunday = 0).
+Five fields, left to right: minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week (0-7; both 0 and 7 are Sunday).
 
 | Expression | Meaning |
 |---|---|
@@ -46,7 +46,28 @@ Options on the repeat object of `upsertJobScheduler`:
 | `preventOverlap` | `true` | Skip a run while the previous job is still active |
 | `skipMissedOnRestart` | `true` | On server restart, recompute the next run instead of firing missed runs |
 
-*Naming per SDK: the embedded Bun client uses `timezone`; the TypeScript (`bunqueue-client`), Python and PHP SDKs use the repeat key `tz`; Go uses the `Timezone` field, Rust `timezone`, and Elixir accepts both `tz` and `timezone`. Go and Rust name the interval `EveryMs` / `every_ms`. `addCron` and `every` convenience helpers exist in TypeScript and Python only; in PHP, Go, Rust and Elixir use the scheduler API directly.*
+### SDK naming and availability
+
+| Semantic option | Bun | Node.js / Deno | Python | PHP | Go | Rust | Elixir |
+|---|---|---|---|---|---|---|---|
+| cron pattern | `pattern` | `pattern` | `pattern` | `pattern` | `Pattern` | `pattern` | `pattern` |
+| interval | `every` | `every` | `every` | `every` | `EveryMs` | `every_ms` | `every` |
+| timezone | `timezone` | `tz` | `tz` | `tz` | `Timezone` | `timezone` | `tz` or `timezone` |
+| skip with no worker | `skipIfNoWorker` | `skipIfNoWorker` | `skip_if_no_worker` | `skipIfNoWorker` | `SkipIfNoWorker` | `skip_if_no_worker` | `skipIfNoWorker` |
+| missed-run policy | `skipMissedOnRestart` | `skipMissedOnRestart` | `skip_missed_on_restart` | `skipMissedOnRestart` | `SkipMissedOnRestart` (`*bool`) | server default only | `skipMissedOnRestart` |
+| overlap policy | `preventOverlap` | `preventOverlap` | `prevent_overlap` | `preventOverlap` | `PreventOverlap` (`*bool`) | server default only | `preventOverlap` |
+
+Rust's scheduler type currently omits `skipMissedOnRestart` and
+`preventOverlap`; both therefore use the server default `true`. Go uses pointer
+booleans for those two fields so explicit `false` is distinct from omission.
+`addCron` and `every` convenience helpers exist in TypeScript and Python only;
+PHP, Go, Rust, and Elixir use the scheduler API directly.
+
+:::note[Fixed-rate and global identity]
+Scheduler `every` advances from its previous scheduled slot. It is not a delay
+after job completion. Scheduler IDs are also global to the broker, so prefix
+them when multiple applications or queues share one server.
+:::
 
 ## AI Agents (MCP)
 
@@ -70,4 +91,3 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 | [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
 | [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
 | [Cron Recipes](/guide/cron/recipes/) | Fixed intervals, timezones, repeat-after-completion |
-

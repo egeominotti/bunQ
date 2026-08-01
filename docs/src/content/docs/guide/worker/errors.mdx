@@ -33,9 +33,7 @@ const worker = new Worker('queue', async (job) => {
 }, { embedded: true });
 
 worker.on('failed', (job, error) => {
-  if (job.attemptsMade >= 3) {
-    alertOps(job, error);  // Final failure, tell someone
-  }
+  console.warn(`Attempt ${job.attemptsMade + 1} failed`, error);
 });
 ```
 
@@ -48,9 +46,8 @@ const worker = new Worker('queue', async (job) => {
 });
 
 worker.on('failed', (job, error) => {
-  if (job.attempts >= 3) {
-    alertOps(job, error);  // Final failure, tell someone
-  }
+  const finalAttempt = job.attempts + 1 >= job.maxAttempts;
+  if (finalAttempt) alertOps(job, error);
 });
 ```
 
@@ -64,8 +61,9 @@ def process(job):
 worker = Worker("queue", process)
 
 def on_failed(job, error):
-    if job.attempts >= 3:
-        alert_ops(job, error)  # Final failure, tell someone
+    final_attempt = job.attempts + 1 >= job.max_attempts
+    if final_attempt:
+        alert_ops(job, error)
 
 worker.on("failed", on_failed)
 ```
@@ -79,9 +77,8 @@ $worker = new Worker('queue', function (Bunqueue\Job $job) {
 });
 
 $worker->on('failed', function ($job, $error) {
-    if ($job->attemptsMade() >= 3) {
-        alertOps($job, $error); // Final failure, tell someone
-    }
+    // This event reports every failed attempt; inspect the DLQ for terminal jobs.
+    logAttemptFailure($job, $error);
 });
 ```
 
@@ -95,9 +92,8 @@ worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
 
 worker.On("failed", func(args ...any) {
     job := args[0].(*bunqueue.Job)
-    if job.AttemptsMade() >= 3 {
-        alertOps(job, args[1]) // Final failure, tell someone
-    }
+    // This event reports every failed attempt; inspect the DLQ for terminal jobs.
+    logAttemptFailure(job, args[1])
 })
 ```
 
@@ -133,7 +129,14 @@ worker =
 </TabItem>
 </Tabs>
 
-*Rust and Elixir surface lifecycle through the telemetry callback, see the [SDK guide](/guide/sdks/#worker-events).*
+The `failed` listener fires after each broker-confirmed failed attempt, not only
+after retry exhaustion. The job snapshot was pulled before that failure, so the
+attempt that just failed is `attemptsMade + 1` (Bun), `attempts + 1`
+(TypeScript/Python). PHP and Go do not expose `maxAttempts` on their Job view;
+use the queue's DLQ operations for authoritative terminal-failure alerts. Rust
+and Elixir record per-job outcomes in normal processor control flow and expose
+transport/retry failures through telemetry; see the
+[SDK guide](/guide/sdks/#worker-events).
 
 ## Where to go next
 
@@ -147,4 +150,3 @@ worker =
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

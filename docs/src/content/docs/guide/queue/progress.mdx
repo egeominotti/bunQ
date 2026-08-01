@@ -189,6 +189,15 @@ queue.MoveJobToFailed("job-id", errors.New("reason"), token)
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+// Worker::run() completes or fails pulled jobs with the lease token for you.
+// Queue-level recovery remains available for an already failed job:
+queue.retry_job("job-id")?;
+```
+
+</TabItem>
 <TabItem label="Elixir">
 
 ```elixir
@@ -199,7 +208,10 @@ queue.MoveJobToFailed("job-id", errors.New("reason"), token)
 </TabItem>
 </Tabs>
 
-*The full transition set is available in TypeScript and Python; PHP and Go expose `moveJobToFailed`, Elixir exposes `move_to_delayed` and `retry_job`, and Rust omits manual transitions.*
+*The full token-bound transition set is available in TypeScript and Python;
+PHP and Go expose `moveJobToFailed`, Elixir exposes `move_to_delayed` and
+`retry_job`, and Rust intentionally leaves completion/failure acknowledgements
+to `Worker` while exposing queue-level retry.*
 
 ## Where to go next
 
@@ -216,4 +228,3 @@ queue.MoveJobToFailed("job-id", errors.New("reason"), token)
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

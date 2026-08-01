@@ -31,7 +31,7 @@ Internal:
 - `src/domain/types/stall.ts` — `StallConfig`, `StallAction`, `getStallAction`, `incrementStallCount`.
 - `src/domain/types/dlq.ts` — `FailureReason`.
 - `src/shared/hash.ts` — `shardIndex`, `processingShardIndex`, `SHARD_COUNT` (route a job to its shard / processing shard).
-- `src/application/types.ts` — `LockContext`, `BackgroundContext` (the state bags these functions operate on).
+- `src/application/types/contexts.ts` — `LockContext`, `BackgroundContext` (the state bags these functions operate on).
 - `src/shared/logger.ts` — `queueLog`.
 
 External / runtime:
@@ -63,7 +63,7 @@ export function withReadLock<T>(lock: RWLock, fn, timeoutMs?): Promise<T>;
 export function withWriteLock<T>(lock: RWLock, fn, timeoutMs?): Promise<T>;
 ```
 
-> Note: `RWLock` is the primitive actually used for per-shard locks (`shardLocks[]`, `processingLocks[]` are `RWLock[]`, instantiated at queueManager.ts:168/170). `AsyncLock`/`withLock` are exported but not used by the shard machinery.
+> Note: `RWLock` is the primitive actually used for per-shard locks (`shardLocks[]`, `processingLocks[]` are `RWLock[]`, instantiated by `queue-manager/state.ts`). `AsyncLock`/`withLock` are exported but not used by the shard machinery.
 
 ### `src/shared/semaphore.ts`
 
@@ -107,11 +107,11 @@ export function checkStalledJobs(ctx: BackgroundContext): void;
 
 Lease renewal / heartbeat flow through the TCP handlers (`src/infrastructure/server/handlers/monitoring.ts`) into `QueueManager`:
 
-- `JobHeartbeat` / `JobHeartbeatBatch` → `renewJobLock` when a `token` is present, else updates `job.lastHeartbeat` (queueManager.ts:643).
+- `JobHeartbeat` / `JobHeartbeatBatch` → `renewJobLock` when a `token` is present, else updates `job.lastHeartbeat` (`queue-manager/locks.ts`).
 - `ExtendLock` / `ExtendLocks` → `extendLock` → `renewJobLock`.
 - `Heartbeat` → worker-level liveness (worker registry, not job leases).
 
-Leases are created implicitly by `PULL`/`PULLB` via `pullWithLock`/`pullBatchWithLock` (queueManager.ts:313–348) and released by `ACK`/`FAIL`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
+Leases are created implicitly by `PULL`/`PULLB` via `pullWithLock`/`pullBatchWithLock` (`queue-manager/delivery.ts`) and released by `ACK`/`FAIL` (`queue-manager/ack.ts`). See [TCP Server Command Handlers](./tcp-server-handlers.md).
 
 ### Events emitted
 
@@ -156,7 +156,7 @@ interface StallConfig {
 
 **`StallAction`** (stall.ts:92): `Retry` | `MoveToDlq` | `Keep`.
 
-Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall candidates live in `ctx.stalledCandidates: Set<JobId>` (types.ts:69/144).
+Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` and stall candidates live in `ctx.stalledCandidates: Set<JobId>` (`application/types/contexts.ts`, with storage and collection ownership in `queue-manager/state.ts`).
 
 ## Business Logic / Control Flow
 
@@ -170,7 +170,7 @@ Lease state lives in `ctx.jobLocks: Map<JobId, JobLock>` (types.ts:65/97). Stall
 
 ### Lease lifecycle
 
-1. **Acquire** — on `PULL`, `pullWithLock` calls `createLock(jobId, owner, ctx, ttl)` (queueManager.ts:321). `createLock` returns `null` unless the job is in `processing` and has no existing lock (lockOperations.ts:19–24, defensive against double-lease).
+1. **Acquire** — on `PULL`, `pullWithLock` calls `createLock(jobId, owner, ctx, ttl)` (`queue-manager/delivery.ts`). `createLock` returns `null` unless the job is in `processing` and has no existing lock (lockOperations.ts:19–24, defensive against double-lease).
 2. **Renew** — `JobHeartbeat`/`ExtendLock` → `renewJobLock`. Fails if no lock, token mismatch, or already expired (in which case the stale lock is deleted) (lockOperations.ts:48–73). On success it also refreshes `job.lastHeartbeat` for legacy stall detection (lockOperations.ts:66–69).
 3. **Release** — `ACK`/`FAIL` → `releaseLock`. Returns `true` when there is nothing to release; if a `token` is supplied it must match (lockOperations.ts:96–107).
 
@@ -184,11 +184,11 @@ requeued job a second time.
 
 ### ACK ownership check + #101 grace window
 
-`ack` rejects a token only when `verifyLock` fails **and** `isExpiredButOwned` is false (queueManager.ts:350–356). `isExpiredButOwned` (queueManager.ts:562) grants a late ACK iff all hold: (1) job still `processing`, (2) lock token still matches, (3) `job.startedAt <= lock.createdAt` — the **re-lease guard**. If a stall retry re-pulled the job, `startedAt` is newer than the lingering lock's `createdAt`, condition 3 fails, and the timed-out worker's late ACK is rejected to prevent double-completion. `throwIfOwnershipConflict` (queueManager.ts:529) raises only when the job is still `processing` with a live lock; if the background sweep already requeued it, the failed verification is swallowed silently.
+`ack` rejects a token only when `verifyLock` fails **and** `isExpiredButOwned` is false (`queue-manager/ack.ts`). `isExpiredButOwned` (`queue-manager/delivery.ts`) grants a late ACK iff all hold: (1) job still `processing`, (2) lock token still matches, (3) `job.startedAt <= lock.createdAt` — the **re-lease guard**. If a stall retry re-pulled the job, `startedAt` is newer than the lingering lock's `createdAt`, condition 3 fails, and the timed-out worker's late ACK is rejected to prevent double-completion. `throwIfOwnershipConflict` in the same delivery module raises only when the job is still `processing` with a live lock; if the background sweep already requeued it, the failed verification is swallowed silently.
 
 ### `checkExpiredLocks` (lock-expiry sweep)
 
-Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:88–96). Three phases (lockManager.ts:40):
+Runs on the background timer at `stallCheckMs` (5 s), registered in `background/lifecycle.ts`. Three phases (lockManager.ts:40):
 
 1. **Collect** (lock-free read) — scan `ctx.jobLocks`; for each `isLockExpired` lock, look up the job in its processing shard. If the job is gone, delete the orphan lock immediately (lockManager.ts:61–63).
 2. **Group** by `shardIdx` then `procIdx` (lockManager.ts:71–84) so locks are acquired in hierarchy order.
@@ -198,11 +198,11 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:88–96
    - Otherwise: `attempts++`, `startedAt = null`, `stallCount++`. If `attempts >= maxAttempts` or `stallCount >= maxStalls` → terminal DLQ; otherwise `requeueExpiredJob`.
    - Delete the lock and emit `job:lock-expired`.
 
-`handleRecoveryBoundExceeded` calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-INSERTs it, throwing `UNIQUE constraint failed: jobs.id` (#97). Those two writes only execute if the caller's `LockContext` carries `storage`: the background sweep's `getLockContext` (backgroundTasks.ts) omitted it until #110, so the persistence silently no-op'd on the only production path (`LockContext.storage` is optional — the omission compiled unnoticed). `requeueExpiredJob` releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
+`handleRecoveryBoundExceeded` calls `releaseJobResources` (else the concurrency slot leaks), `addToDlq`, then **persists both** `saveDlqEntry` and `deleteJob` — without both writes the `jobs` row survives as an orphan and a later retry re-inserts it, throwing `UNIQUE constraint failed: jobs.id` (#97). Those two writes require the caller's `LockContext` to carry `storage`: the background sweep's context builder omitted it until #110, so the persistence silently no-op'd on the only production path. `LockContext.storage` is now required (nullable) in `application/types/contexts.ts`, and `background/lifecycle.ts` always supplies it. `requeueExpiredJob` releases resources, re-pushes to the priority queue, re-increments queued counters, and notifies.
 
 ### `checkStalledJobs` (two-phase stall detection)
 
-Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81). Two-phase to avoid false positives (stallDetection.ts:21):
+Runs on the background timer at `stallCheckMs` (5 s), registered in `background/lifecycle.ts`. Two-phase to avoid false positives (stallDetection.ts:21):
 
 1. **Phase 1** — for each `jobId` carried over in `ctx.stalledCandidates`, re-check `getStallAction`. If the job vanished or stall detection is disabled, drop the candidate. A still-non-`Keep` action is confirmed (stallDetection.ts:25–47).
 2. **Phase 2** — scan all `processingShards`; any job whose `getStallAction !== Keep` becomes a candidate for the **next** cycle (stallDetection.ts:50–62). A job must be flagged stalled in two consecutive cycles before action is taken.
@@ -219,7 +219,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 
 **Races handled:**
 
-- *Late ACK after lock expiry* — the #101 grace window (`isExpiredButOwned`) honors a genuine same-instance completion while rejecting a re-pulled-job double-completion via the `createdAt >= startedAt` guard (queueManager.ts:562–576).
+- *Late ACK after lock expiry* — the #101 grace window (`isExpiredButOwned`) honors a genuine same-instance completion while rejecting a re-pulled-job double-completion via the `createdAt >= startedAt` guard (`queue-manager/delivery.ts`).
 - *Lingering lock is load-bearing* — the stall retry path requeues a job **without** deleting its (now-expired) lock; that lingering token is what the re-lease guard inspects and what the worker-dedup (#33) path keys on. The lock-expiry path, by contrast, *does* delete the lock so a re-lease installs a fresh token.
 - *Concurrent completion vs. stall handler* — both `checkExpiredLocks` and `handleStalledJob` re-verify membership in `processingShards` under the locks before mutating (lockManager.ts:57, stallDetection.ts:94), so a job completed between phases is skipped and no stale `Stalled`/`Failed` event fires.
 - *Atomic pull handoff (2.8.31):* the queue to processing transition happens in one synchronous critical section under the shard write lock: `tryDequeueNextJob` pops the job, inserts it into `processingShards`, and flips the `jobIndex` entry to `processing` before yielding (pull.ts:97-117). The processing-shard `Map` is written without taking `processingLocks` there; this is safe because until the flip no id-targeted critical section can be mid-operation on that id, and it avoids holding the hot shard write lock across an await. `finalizeProcessing` (pull.ts:133) then does only post-await bookkeeping (markActive persistence, counters, broadcast) and re-checks membership in `processingShards` first: if a management op (discard, moveToDelayed, obliterate) claimed the job in between, the pull does not deliver it to the worker.
@@ -227,7 +227,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 
 ## Edge Cases & Failure Modes
 
-- **Lock timeout** — `acquire`/`acquireRead`/`acquireWrite` throw `LockTimeoutError` after `LOCK_TIMEOUT_MS` (default 5 s). Callers using `withWriteLock` propagate the rejection; background sweeps wrap calls in `.catch(...)` (backgroundTasks.ts:93).
+- **Lock timeout** — `acquire`/`acquireRead`/`acquireWrite` throw `LockTimeoutError` after `LOCK_TIMEOUT_MS` (default 5 s). Callers using `withWriteLock` propagate the rejection; background sweeps wrap calls in `.catch(...)` (`background/lifecycle.ts`).
 - **Resource-slot leaks** — every reclaim path (`handleRecoveryBoundExceeded`, `requeueExpiredJob`, `moveStalliedJobToDlq`, `retryStalliedJob`) calls `shard.releaseJobResources(queue, uniqueKey, groupId, ownerId)` before moving the job; omitting it wedges the queue's concurrency limiter. Passing `ownerId` also prevents a stale generation from releasing a replacement job's unique key.
 - **Orphan SQLite rows (#97)** — DLQ moves must `saveDlqEntry` + `deleteJob`; missing the delete leaves a `jobs` row that collides on retry with `UNIQUE constraint failed: jobs.id`.
 - **Cron preventOverlap (#73/#75)** — `cron:`-prefixed jobs are discarded rather than requeued/DLQ'd on stall or lock expiry, since the scheduler re-creates them on the next tick; requeuing would cause "starts right away on reconnect".
@@ -247,7 +247,7 @@ Runs on the background timer at `stallCheckMs` (5 s) (backgroundTasks.ts:79–81
 | `StallConfig.stallInterval` | `30_000` ms | No-heartbeat window before a job is a stall candidate; per-job `stallTimeout` overrides. |
 | `StallConfig.maxStalls` | `3` | Stalls before the job is moved to DLQ. |
 | `StallConfig.gracePeriod` | `5_000` ms | Quiet period after start before stall checks apply. |
-| `stallCheckMs` (config) | `5_000` ms | Interval for **both** `checkStalledJobs` and `checkExpiredLocks` (types.ts:42, backgroundTasks.ts:81/96). |
+| `stallCheckMs` (config) | `5_000` ms | Interval for **both** `checkStalledJobs` and `checkExpiredLocks` (`application/types/config.ts`, `background/lifecycle.ts`). |
 | `MAX_CONCURRENT_PER_CONNECTION` | `50` | Per-socket semaphore permits for pipelined TCP command processing (tcp.ts:27). |
 
 Per-queue `StallConfig` is set via `queue.setStallConfig({...})` (embedded) and read by the sweeps through `shard.getStallConfig(queue)`.

@@ -161,16 +161,16 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
 
 ## Configuration
 
-These structures take sizes as constructor arguments; defaults that bind them come from `DEFAULT_CONFIG` (`src/application/types.ts:33`):
+These structures take sizes as constructor arguments; defaults that bind them come from `DEFAULT_CONFIG` (`src/application/types/config.ts`):
 
 | Collection (consumer) | Container | Default cap | Source |
 | --- | --- | --- | --- |
-| `completedJobs`, `completedJobsData`, `timedOutJobs` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `types.ts` |
+| `completedJobs`, `completedJobsData`, `timedOutJobs` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `application/types/config.ts` |
 | `depCompletions` recent tier | `DependencyCompletionTracker` | `maxCompletedJobs = 50_000` | `dependencyCompletions.ts` |
 | `depCompletions` pinned tier | `Set` | Live completed IDs referenced by `waitingDeps` | `dependencyCompletions.ts` |
-| `jobResults` | `LRUMap` | `maxJobResults = 10_000` | `types.ts:35` |
-| `jobLogs` | `LRUMap` | `maxJobLogs = 10_000` | `types.ts:36` |
-| `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `types.ts:37` |
+| `jobResults` | `LRUMap` | `maxJobResults = 10_000` | `application/types/config.ts` |
+| `jobLogs` | `LRUMap` | `maxJobLogs = 10_000` | `application/types/config.ts` |
+| `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `application/types/config.ts` |
 
 Other tunables: `SkipList` `maxLevel = 16`, `probability = 0.5`; `MinHeap`/`IndexedPriorityQueue` branching `D = 4`; delayed-heap compaction minimum `256` stale entries with `stale >= live`; `TTLMap` `cleanupIntervalMs = 60_000`, compaction `threshold = 0.5` / `minSize = 100`; priority-queue compaction thresholds `0.2` (cleanup) and `0.1` (stats); `Histogram` `DEFAULT_BUCKETS` `[0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms. No environment variables affect this module directly.
 

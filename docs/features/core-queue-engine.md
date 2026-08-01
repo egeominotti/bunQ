@@ -1,22 +1,22 @@
 # Core Queue Engine (QueueManager & Shards)
 
-> **Category:** Engine · **Source:** `src/application/queueManager.ts`, `src/domain/queue/shard.ts`, `src/domain/queue/shardCounters.ts`, `src/application/contextFactory.ts`, `src/application/types.ts`, `src/shared/hash.ts`, `src/domain/types/queue.ts`
+> **Category:** Engine · **Source:** `src/application/queueManager.ts`, `src/application/queue-manager/`, `src/application/operations/`, `src/application/types/`, `src/domain/queue/shard.ts`, `src/domain/queue/shard/`, `src/shared/hash.ts`
 
 ## Purpose
 
-`QueueManager` is the central coordinator that owns all in-memory queue state and orchestrates every job operation in the server. It partitions queues across a fixed array of `Shard` instances (selected by hashing the queue name), maintains the global indexes that map a job ID to its current location, and exposes the full operation surface (push / pull / ack / fail, queries, queue control, DLQ, cron, locks, stats). It exists to keep hot-path operations sharded and lock-scoped while delegating the actual algorithms to focused operation modules via context objects.
+`QueueManager` is the stable public façade for the central coordinator. The façade itself is six lines; a capability chain under `queue-manager/` owns state and exposes push / pull / ack / fail, queries, queue control, DLQ, cron, locks, stats, dependencies and lifecycle. It partitions queues across a fixed array of `Shard` instances, maintains the global indexes that map a job ID to its current location, and keeps hot-path operations sharded and lock-scoped while delegating algorithms to focused operation modules through typed contexts.
 
 ## Responsibilities & Scope
 
 Owns:
 
-- The shard arrays: `shards`, `shardLocks`, `processingShards`, `processingLocks` (`queueManager.ts:55-58`), one entry per `SHARD_COUNT`.
+- The shard arrays: `shards`, `shardLocks`, `processingShards`, `processingLocks` (`queue-manager/state.ts`), one entry per `SHARD_COUNT`.
 - The global indexes: `jobIndex` (Map), `completedJobs` (BoundedSet),
   `completedJobsData` (BoundedMap), `depCompletions`
   (`DependencyCompletionTracker`: exact recent FIFO plus live pins),
   `timedOutJobs` (BoundedSet), and
   `jobResults`/`customIdMap`/`jobLogs` (LRUMap).
-- Lock-ownership tracking: `jobLocks` and `clientJobs` (`queueManager.ts:89-90`); flow-failure maps `failedChildrenValues`/`ignoredChildrenFailures` (`queueManager.ts:97-99`); `repeatChain` for repeat-job succession (`queueManager.ts:93`).
+- Lock ownership and flow state in `queue-manager/state.ts`; ACK/lease recovery in `queue-manager/ack.ts`, `delivery.ts` and `locks.ts`; flow propagation in `flow-failures.ts`, `flow-options.ts` and `dependency-runtime.ts`.
 - Shard selection and routing of every operation to the owning shard.
 - Lifecycle: recovery from storage at construction, background-task startup, and `shutdown()` teardown of all collections.
 - `Shard` owns per-shard queue containers (`IndexedPriorityQueue` per queue name), unique-key dedup, DLQ, rate/concurrency limiters, dependency tracking, temporal index, waiter notifications, and O(1) running counters (`shard.ts:41-79`).
@@ -41,35 +41,38 @@ Internal:
 - `ContextFactory` (`src/application/contextFactory.ts`) — builds the per-operation context objects passed to delegated modules.
 - Operation modules: `operations/push`, `operations/pull`, `operations/ack`, `operations/queueControl`, `operations/jobManagement`, `operations/jobMoveOperations`, `operations/jobClaim`, `operations/jobStateTransitions`, `operations/queryOperations`.
 - Managers: `WebhookManager`, `WorkerManager`, `EventsManager`, `CronScheduler`, `dlqManager`, `jobLogsManager`, `lockManager`, `statsManager`, `backgroundTasks`, `dependencyProcessor`.
-- `SqliteStorage` (`src/infrastructure/persistence/sqlite.ts`) — optional; only constructed when `config.dataPath` is set (`queueManager.ts:148`).
+- `SqliteStorage` (`src/infrastructure/persistence/sqlite.ts`) — optional; only constructed by `queue-manager/state.ts` when `config.dataPath` is set.
 
 External / runtime:
 
-- Bun APIs: `Bun.randomUUIDv7()` (`hash.ts:62`), `navigator.hardwareConcurrency` for shard sizing (`hash.ts:29`), `queueMicrotask` for dependency-flush coalescing (`queueManager.ts:1765`).
+- Bun APIs: `Bun.randomUUIDv7()` and `navigator.hardwareConcurrency` in
+  `shared/hash.ts`; `queueMicrotask` for dependency-flush coalescing in
+  `queue-manager/dependency-runtime.ts`.
 
 ## Public Interface
 
-`QueueManager` (exported class, `queueManager.ts:50`). Selected real signatures:
+`QueueManager` is exported from `queueManager.ts`; all methods below are inherited
+from focused classes in `queue-manager/`. Selected real signatures:
 
 Core operations:
 
-- `push(queue: string, input: JobInput): Promise<Job>` (`queueManager.ts:299`)
-- `pushBatch(queue: string, inputs: JobInput[]): Promise<JobId[]>` (`queueManager.ts:304`)
-- `pull(queue: string, timeoutMs?: number): Promise<Job | null>` (`queueManager.ts:309`)
-- `pullWithLock(queue, owner, timeoutMs?, lockTtl?): Promise<{ job: Job | null; token: string | null }>` (`queueManager.ts:313`)
-- `pullBatch(queue, count, timeoutMs?): Promise<Job[]>` (`queueManager.ts:325`)
-- `pullBatchWithLock(queue, count, owner, timeoutMs?, lockTtl?): Promise<{ jobs: Job[]; tokens: string[] }>` (`queueManager.ts:329`)
-- `ack(jobId, result?, token?): Promise<void>` (`queueManager.ts:350`)
-- `ackBatch(jobIds, tokens?): Promise<void>` (`queueManager.ts:408`)
-- `ackBatchWithResults(items): Promise<void>` (`queueManager.ts:457`)
-- `fail(jobId, error?, token?, unrecoverable?, stack?): Promise<void>` (`queueManager.ts:496`)
-- `jobHeartbeat(jobId, token?): boolean` / `jobHeartbeatBatch(...)` (`queueManager.ts:643`, `660`)
+- `push(queue: string, input: JobInput): Promise<Job>` / `pushBatch(...)`
+- `pull(queue: string, timeoutMs?: number): Promise<Job | null>` / `pullBatch(...)`
+- `pullWithLock(...)` / `pullBatchWithLock(...)`
+- `ack(...)` / `ackBatch(...)` / `ackBatchWithResults(...)`
+- `fail(jobId, error?, token?, unrecoverable?, stack?): Promise<void>`
+- `jobHeartbeat(jobId, token?): boolean` / `jobHeartbeatBatch(...)`
 
-Locks: `createLock`, `verifyLock`, `renewJobLock`, `renewJobLockBatch`, `releaseLock`, `getLockInfo`, `removeLock`, `extendLock` (`queueManager.ts:668-697`, `1206`).
+Locks: `createLock`, `verifyLock`, `renewJobLock`, `renewJobLockBatch`,
+`releaseLock`, `getLockInfo`, `removeLock`, `extendLock`
+(`queue-manager/locks.ts`, `queue-manager/job-management.ts`).
 
-Queries: `getJob`, `getJobState`, `getResult`, `getChildrenValues`, `getJobByCustomId`, `getProgress`, `count`, `getJobs`, `getCountsPerPriority` (`queueManager.ts:725-986`).
+Queries: `getJob`, `getJobState`, `getResult`, `getChildrenValues`,
+`getJobByCustomId`, `getProgress`, `count`, `getJobs`, `getCountsPerPriority`
+(`queue-manager/queries.ts`, `queue-manager/limits.ts`).
 
-Queue control: `pause`, `resume`, `isPaused`, `drain`, `obliterate`, `clean`, `listQueues` (`queueManager.ts:836-964`).
+Queue control: `pause`, `resume`, `isPaused`, `drain`, `obliterate`, `clean`,
+`listQueues` (`queue-manager/control.ts`).
 
 Rate/concurrency: `setRateLimit`, `clearRateLimit`, `setConcurrency`, `clearConcurrency`, scalar `getQueueLimits`, and full `getQueueLimitStatus`. See [Rate Limiting & Concurrency](./rate-limiting-and-concurrency.md).
 
@@ -77,11 +80,20 @@ Deduplication introspection: `getDeduplicationJobId`, `removeDeduplicationKey`, 
 
 DLQ: `getDlq`, `getDlqEntries`, `getDlqCount`, `getDlqStats`, filtered/bounded `retryDlq`, `purgeDlq`, and selector-aware `retryCompleted`.
 
-Job management: `cancel`, `updateProgress`, `updateJobData`, `changePriority`, `promote`, `moveToDelayed`, `changeDelay`, `moveActiveToWait`, `moveToWaitingChildren`, `discard` (`queueManager.ts:1141-1221`).
+Job management: `cancel`, `updateProgress`, `updateJobData`, `changePriority`,
+`promote`, `moveToDelayed`, `changeDelay`, `moveActiveToWait`,
+`moveToWaitingChildren`, `discard` (`queue-manager/job-management.ts`).
 
-Flow/dependencies: `updateJobParent`, `removeChildDependency`, `removeUnprocessedChildren`, `getFailedChildrenValues`, `getIgnoredChildrenFailures` (`queueManager.ts:768-1743`). See [FlowProducer](./flow-producer.md).
+Flow/dependencies: `updateJobParent`, `removeChildDependency`,
+`removeUnprocessedChildren`, `getFailedChildrenValues`,
+`getIgnoredChildrenFailures` (`queue-manager/queries.ts`,
+`queue-manager/dependencies.ts`, `queue-manager/flow-options.ts`). See
+[FlowProducer](./flow-producer.md).
 
-Stats/lifecycle: `getStats`, `getQueuesSummary`, `getQueueJobCounts`, `getMemoryStats`, `getStorageStatus`, `compactMemory`, `getPrometheusMetrics`, `shutdown` (`queueManager.ts:1802-1899`). See [Stats & Monitoring](./stats-and-monitoring.md).
+Stats/lifecycle: `getStats`, `getQueuesSummary`, `getQueueJobCounts`,
+`getMemoryStats`, `getStorageStatus`, `compactMemory`, `getPrometheusMetrics`,
+`shutdown` (`queue-manager/stats.ts`, `queue-manager/observability.ts`,
+`queue-manager/lifecycle.ts`). See [Stats & Monitoring](./stats-and-monitoring.md).
 
 This class is invoked by the TCP and HTTP command handlers; it does not itself parse the wire protocol or expose endpoints. See [TCP Server Handlers](./tcp-server-handlers.md) and [HTTP API](./http-api.md) for the command/endpoint surface that maps onto these methods.
 
@@ -102,47 +114,89 @@ Hashing functions (`src/shared/hash.ts`):
 
 See [data-model](../data-model.md) for full definitions. Most relevant here:
 
-- `JobLocation` (`queue.ts:104-108`) — discriminated union stored in `jobIndex`:
+- `JobLocation` (`src/domain/types/queue.ts`) — discriminated union stored in `jobIndex`:
   - `{ type: 'queue'; shardIdx: number; queueName: string }`
   - `{ type: 'processing'; shardIdx: number }`
   - `{ type: 'completed'; queueName: string }`
   - `{ type: 'dlq'; queueName: string }`
-- `QueueState` (`queue.ts:7-13`) — `{ name; paused; rateLimit; concurrencyLimit; activeCount }`, per-queue control state held in the shard's `LimiterManager`.
+- `QueueState` (`src/domain/types/queue.ts`) — `{ name; paused; rateLimit; concurrencyLimit; activeCount }`, per-queue control state held in the shard's `LimiterManager`.
 - `ShardStats` (`shardCounters.ts:10-17`) — `{ queuedJobs; delayedJobs; dlqJobs }`, O(1) running counters.
-- `QueueManagerConfig` / `DEFAULT_CONFIG` (`types.ts:18-44`) — see [Configuration](#configuration).
-- `EventType` enum and `JobEvent` (`queue.ts:111-142`) — events broadcast via `EventsManager` on push/pull/complete/fail/pause/resume/etc.
+- `QueueManagerConfig` / `DEFAULT_CONFIG` (`src/application/types/config.ts`) — see [Configuration](#configuration).
+- `EventType` enum and `JobEvent` (`src/domain/types/queue.ts`) — events broadcast via `EventsManager` on push/pull/complete/fail/pause/resume/etc.
 - `JobLock` — held in `jobLocks` Map; `lock.token` and `lock.createdAt` are load-bearing for the #101 grace window.
 
 ## Business Logic / Control Flow
 
-**Construction & recovery (`queueManager.ts:146-211`):**
+**Construction & recovery (`queue-manager/state.ts`):**
 
-1. Merge config over `DEFAULT_CONFIG`; create `SqliteStorage` only if `config.dataPath` is set (`:148`).
-2. Allocate bounded collections from config sizes (`:151-163`).
-3. Allocate `SHARD_COUNT` shards, each with its own `RWLock` for the waiting/delayed queue and a separate `RWLock` + `Map` for processing (`:166-171`).
+1. Merge config over `DEFAULT_CONFIG`; create `SqliteStorage` only if `config.dataPath` is set.
+2. Allocate bounded collections from config sizes.
+3. Allocate `SHARD_COUNT` shards, each with its own `RWLock` for the waiting/delayed queue and a separate `RWLock` + `Map` for processing.
 4. Wire `CronScheduler` push/persist/worker-check callbacks; construct `WebhookManager`/`WorkerManager`/`EventsManager`.
 5. Build `ContextFactory` from `getContextDependencies()` + `getContextCallbacks()`.
 6. `bgTasks.recover(...)` reloads persisted jobs/queues; record `recoveryStats`; load crons; `startBackgroundTasks(...)`.
 
-**Sharding:** `shardIndex(queue)` routes a queue name to a single shard; the waiting/delayed state for that queue lives only there (`queueManager.ts:966-968`, `981`). `processingShards` is indexed by the job's *location* (`loc.shardIdx`), captured when the job was pulled — not re-derived from the queue name. `SHARD_COUNT` is computed once at module load as the next power of two ≥ `navigator.hardwareConcurrency` (fallback 4), capped at 64 (`hash.ts:28-44`); `SHARD_MASK = SHARD_COUNT - 1` enables a bitwise-AND modulo.
+**Sharding:** `shardIndex(queue)` routes a queue name to a single shard; the
+waiting/delayed state for that queue lives only there
+(`queue-manager/state.ts`, `queue-manager/delivery.ts`). `processingShards` is
+indexed by the job's *location* (`loc.shardIdx`), captured when the job was
+pulled — not re-derived from the queue name. `SHARD_COUNT` is computed once at
+module load as the next power of two ≥ `navigator.hardwareConcurrency`
+(fallback 4), capped at 64 (`shared/hash.ts`); `SHARD_MASK = SHARD_COUNT - 1`
+enables a bitwise-AND modulo.
 
-**Delegation pattern:** Public methods are thin. Each builds the appropriate context via `contextFactory.getXxxContext()` and calls a stateless operation function. Contexts bundle exactly the collections/managers a module needs (`contextFactory.ts:86-281`), so the operation modules never close over `QueueManager` itself.
+**Delegation pattern:** The public façade contains no operational logic. Each
+capability class either builds the appropriate context through `ContextFactory`
+and calls a stateless operation, or owns one cohesive orchestration concern.
+Context contracts are isolated in `application/types/`, so operation modules do
+not close over the concrete manager.
 
-**ACK with lock & recovery paths (`queueManager.ts:350-406`):** If a token is supplied and `verifyLock` fails, the manager checks `isExpiredButOwned` (#101 grace) and `throwIfOwnershipConflict`. It then handles three recovery cases against `jobIndex`: still `processing` → proceed to `ackJob`; requeued to `queue` and not in `timedOutJobs` → `completeStallRetriedJob` to prevent duplicate execution (Issue #33); in `timedOutJobs` → discard so the retry wins. A "not found" error from `ackJob` triggers the same stall-retry recovery.
+**ACK with lock & recovery paths (`queue-manager/ack.ts`,
+`queue-manager/delivery.ts`):** If a token is supplied and `verifyLock` fails,
+the manager checks `isExpiredButOwned` (#101 grace) and
+`throwIfOwnershipConflict`. It then handles three recovery cases against
+`jobIndex`: still `processing` → proceed to `ackJob`; requeued to `queue` and
+not in `timedOutJobs` → `completeStallRetriedJob` to prevent duplicate execution
+(Issue #33); in `timedOutJobs` → discard so the retry wins. A "not found" error
+from `ackJob` triggers the same stall-retry recovery.
 
-**Dependency flush (`queueManager.ts:1753-1791`):** On job completion, IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces multiple completions in a tick via `queueMicrotask`; `runDependencyFlush` loops `processPendingDependencies` until the set drains, with a reentrancy guard (`depFlushRunning`) and re-scheduling if new IDs arrive mid-flush.
+**Dependency flush (`queue-manager/dependency-runtime.ts`):** On job completion,
+IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces
+multiple completions in a tick via `queueMicrotask`; `runDependencyFlush` loops
+`processPendingDependencies` until the set drains, with a reentrancy guard
+(`depFlushRunning`) and re-scheduling if new IDs arrive mid-flush.
 
-**Obliterate (`queueManager.ts:870-940`):** Clears the shard's waiting/delayed queue and DLQ, then explicitly sweeps every global index (`jobIndex`, `completedJobs`, `completedJobsData`, `jobResults`, `jobLogs`, `jobLocks`, flow maps, `repeatChain`, `customIdMap`), purges per-queue metrics + persisted queue-state row, deletes processing-shard entries for the queue, and removes SQLite rows. This is the documented way to reclaim ALL state for a queue.
+**Obliterate (`queue-manager/control.ts`):** Clears the shard's waiting/delayed
+queue and DLQ, then explicitly sweeps every global index (`jobIndex`,
+`completedJobs`, `completedJobsData`, `jobResults`, `jobLogs`, `jobLocks`, flow
+maps, `repeatChain`, `customIdMap`), purges per-queue metrics + persisted
+queue-state row, deletes processing-shard entries for the queue, and removes
+SQLite rows. This is the documented way to reclaim ALL state for a queue.
 
 **Counters and snapshots:** `incrementQueued`/`decrementQueued` keep shard totals in sync and feed `TemporalManager`. Public global/per-queue state snapshots still classify current `runAt` values so a matured delayed job cannot be counted as both delayed and ready before the periodic counter refresh. `queueStatsAggregator.ts` batches all requested queue counts into one pass over shared collections; WS/SSE count events are coalesced by `QueueCountsScheduler`.
 
 ## Concurrency & Locking
 
-Per-shard `RWLock`s are the synchronization primitive; there is no global queue lock. Mutations to a shard's waiting/delayed queue run inside `withWriteLock(this.shardLocks[idx], () => { ... })` (e.g. `completeStallRetriedJob` `queueManager.ts:601`, parent promotion `:1443`, `:1556`, `:1624`, `:1682`). The processing map has its own `processingLocks[idx]`.
+Per-shard `RWLock`s are the synchronization primitive; there is no global queue
+lock. Mutations to a shard's waiting/delayed queue run inside
+`withWriteLock(this.shardLocks[idx], () => { ... })` (for example
+`completeStallRetriedJob` in `queue-manager/delivery.ts` and parent transitions
+in `queue-manager/flow-failures.ts`, `flow-options.ts`, and `dependencies.ts`).
+The processing map has its own `processingLocks[idx]`.
 
-The documented acquisition order is `jobIndex` → `completedJobs` → `shards[N]` → `processingShards[N]`: read the unguarded global indexes first, then take the shard write lock. Several paths re-check `jobIndex.get(id)?.type` *inside* the shard lock as a TOCTOU guard before mutating (`queueManager.ts:1445`, `1558`, `1625`, `1683`).
+The documented acquisition order is `jobIndex` → `completedJobs` → `shards[N]`
+→ `processingShards[N]`: read prerequisite global-index state first, then take
+the shard write lock. Flow paths re-check `jobIndex.get(id)?.type` *inside* the
+shard lock as a TOCTOU guard before mutating (`queue-manager/flow-failures.ts`,
+`flow-options.ts`, `dependencies.ts`).
 
-Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`; `QueueManager` only adds the #101 grace window. `isExpiredButOwned` (`queueManager.ts:562-576`) honors a late ACK only when the job is still `processing`, the stored `lock.token` still matches, and `job.startedAt <= lock.createdAt` (the re-lease guard: a re-pulled job has a newer `startedAt`, so a stale token is rejected — preventing the double-completion the skeptic confirmed). See [Concurrency & Locking](./concurrency-and-locking.md).
+Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`;
+`QueueManager` only adds the #101 grace window. `isExpiredButOwned`
+(`queue-manager/delivery.ts`) honors a late ACK only when the job is still
+`processing`, the stored `lock.token` still matches, and
+`job.startedAt <= lock.createdAt` (the re-lease guard: a re-pulled job has a
+newer `startedAt`, so a stale token is rejected). See
+[Concurrency & Locking](./concurrency-and-locking.md).
 
 ## Edge Cases & Failure Modes
 
@@ -157,21 +211,34 @@ Lock-token lifecycle (lease/heartbeat) is delegated to `lockManager`; `QueueMana
   capacity. `jobIndex` is a plain `Map`, kept bounded indirectly: the
   `completedJobs` eviction callback deletes the corresponding `jobIndex` and
   `completedJobsData` entries.
-- **Stale-token / duplicate execution.** Issue #33 (lock removed but job still present), #75 (lock expired + requeued), and #101 (expired-but-owned grace) are all handled in `ack`/`ackBatch`/`ackBatchWithResults`. Jobs in `timedOutJobs` are never completed by a late ACK so the retry proceeds (`queueManager.ts:372-375`, `393-396`, `428`, `476`).
+- **Stale-token / duplicate execution.** Issue #33 (lock removed but job still
+  present), #75 (lock expired + requeued), and #101 (expired-but-owned grace)
+  are handled in `queue-manager/ack.ts` and `delivery.ts`. Jobs in
+  `timedOutJobs` are never completed by a late ACK so the retry proceeds.
 - **`removeOnComplete`.** Completed jobs with `removeOnComplete` are dropped
   from normal indexes; their bare ID is kept as recent evidence, or pinned
   while a waiting parent owns it. Recovery reconstructs ownership before
   pruning, so lowering the cap cannot strand an accepted parent.
-- **Repeat-chain leak guard.** `repeatChain` is capped at 10,000 entries; the oldest key is evicted past the cap (`queueManager.ts:290-293`).
-- **Flow-failure map leak guard.** `failedChildrenValues`/`ignoredChildrenFailures` are released on parent terminal completion (`onJobCompleted` `:1388-1389`), on DLQ move (`:1476-1477`), and on `obliterate`/`shutdown` (AUDIT H8).
-- **Cron orphan removal.** On `preventOverlap` upsert, a stale waiting cron job is removed by unique key so a reconnecting worker doesn't pick it up immediately (#73, `queueManager.ts:1254-1289`).
-- **Per-queue metric growth.** `perQueueMetrics` is LRU-bounded by `maxCustomIds` so dynamically-named queues can't grow it unbounded; live queues stay resident, `obliterate` deletes the entry (`queueManager.ts:123-132`, `937-940`).
+- **Repeat-chain leak guard.** `repeatChain` is capped at 10,000 entries; the
+  oldest key is evicted past the cap (`queue-manager/context.ts`).
+- **Flow-failure map leak guard.** `failedChildrenValues` /
+  `ignoredChildrenFailures` are released on parent terminal completion or DLQ
+  move (`queue-manager/flow-failures.ts`) and on `obliterate` / `shutdown`
+  (`control.ts`, `lifecycle.ts`).
+- **Cron orphan removal.** On `preventOverlap` upsert, a stale waiting cron job
+  is removed by unique key so a reconnecting worker does not pick it up
+  immediately (#73, `queue-manager/services.ts`).
+- **Per-queue metric growth.** `perQueueMetrics` is LRU-bounded by
+  `maxCustomIds` in `queue-manager/state.ts`; `obliterate` deletes the entry in
+  `queue-manager/control.ts`.
 - **Storage optional.** All `storage?.` calls are guarded; with no `dataPath`, the manager runs fully in-memory and recovery is a no-op.
-- **`shutdown()`** clears every in-memory collection and per-shard structure (`queueManager.ts:1864-1898`); it does not flush in-flight work beyond closing storage.
+- **`shutdown()`** clears every in-memory collection and per-shard structure
+  (`queue-manager/lifecycle.ts`); it does not flush in-flight work beyond
+  closing storage.
 
 ## Configuration
 
-`QueueManagerConfig` / `DEFAULT_CONFIG` (`types.ts:18-44`):
+`QueueManagerConfig` / `DEFAULT_CONFIG` (`src/application/types/config.ts`):
 
 | Option | Default | Effect |
 | --- | --- | --- |

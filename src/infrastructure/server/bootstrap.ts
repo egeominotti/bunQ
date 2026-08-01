@@ -187,6 +187,9 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
       getWsClientCount: () => httpServer.getWsClientCount(),
       getSseClientCount: () => httpServer.getSseClientCount(),
       getBackupStatus: () => backupManager?.getStatus() ?? null,
+      ...(config.s3BackupEnabled && backupManager
+        ? { triggerBackup: () => backupManager.backup() }
+        : {}),
     });
   }
 

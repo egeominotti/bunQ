@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Forward the optional `duration` from `setGlobalRateLimit(max, duration)` to
+  the broker instead of silently applying the one-second default.
 - Let the operating system allocate an independent HTTP port for every E2E
   broker fixture, preventing nested auth and restart fixtures from colliding
   with an adjacent TCP listener.

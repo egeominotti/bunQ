@@ -20,11 +20,11 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   <p class="bq-hero-sub">Nightly reports, hourly cleanups, a health ping every thirty seconds. Schedules live in SQLite next to the jobs, so they survive a restart and need no extra scheduler process.</p>
 </div>
 
-A scheduler is a named rule that keeps producing jobs on a queue. Create it once with `upsertJobScheduler()` and bunqueue fires the job on every tick, whether that tick comes from a cron pattern or a fixed interval.
+A scheduler is a named rule that keeps producing jobs on a queue. Create it once with `upsertJobScheduler()` and bunqueue fires the job on every tick, whether that tick comes from a cron pattern or a fixed interval. Scheduler IDs are global to one broker, not scoped by queue: use names such as `reports:daily-report` when several applications share a server.
 
 ## Quick Start
 
-Create a scheduler with `upsertJobScheduler`. It works in both embedded and TCP mode, in every SDK (Python: `upsert_job_scheduler`, Rust: `upsert_job_scheduler`, Go: `UpsertJobScheduler`, Elixir: `upsert_scheduler`), and calling it again with the same name updates the schedule instead of duplicating it:
+Create a scheduler with `upsertJobScheduler`. It works in both embedded and TCP mode, in every SDK (Python: `upsert_job_scheduler`, Rust: `upsert_job_scheduler`, Go: `UpsertJobScheduler`, Elixir: `upsert_scheduler`), and calling it again with the same global ID replaces that scheduler definition instead of duplicating it. Reusing an ID with a different queue moves the definition to that queue.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -208,4 +208,3 @@ bunqueue cron delete daily-report
 | [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
 | [Cron Recipes](/guide/cron/recipes/) | Fixed intervals, timezones, repeat-after-completion |
 | [Cron Reference](/guide/cron/reference/) | Expression syntax, every scheduler option, MCP |
-

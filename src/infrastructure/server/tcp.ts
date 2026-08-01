@@ -1,414 +1,142 @@
-/**
- * TCP Server
- * Handles TCP connections with msgpack binary protocol
- * Supports pipelining with parallel command processing
- */
-
 import type { Socket, TCPSocketListener } from 'bun';
 import type { QueueManager } from '../../application/queueManager';
-import type { Response } from '../../domain/types/response';
 import type { Command } from '../../domain/types/command';
-import { handleCommand, type HandlerContext } from './handler';
-import {
-  FrameParser,
-  FrameSizeError,
-  createConnectionState,
-  type ConnectionState,
-} from './protocol';
-import { uuid } from '../../shared/hash';
 import { tcpLog } from '../../shared/logger';
+import { decodeMessagePack } from '../../shared/msgpack';
+import { withSemaphore } from '../../shared/semaphore';
+import { handleCommand } from './handler';
+import { FrameSizeError } from './protocol';
 import { getRateLimiter } from './rateLimiter';
-import { Semaphore, withSemaphore } from '../../shared/semaphore';
-import { SocketWriteQueue } from './socketWriteQueue';
-import { loadTlsOptions, type TlsServerOptions } from './tls';
-import { decodeMessagePack, encodeMessagePack } from '../../shared/msgpack';
+import { TcpConnectionRegistry } from './tcp/connections';
+import { MAX_WRITE_QUEUE_BYTES, TCP_IDLE_TIMEOUT_MS } from './tcp/constants';
+import { serializeTcpResponse, tcpErrorResponse } from './tcp/responses';
+import { loadTlsOptions } from './tls';
+import type { TcpConnectionData, TcpServerConfig } from './types/tcpServer';
 
-/** Max concurrent commands per connection for pipelining */
-const MAX_CONCURRENT_PER_CONNECTION = 50;
+export type { TcpServerConfig } from './types/tcpServer';
 
-/**
- * Idle/read stall timeout (ms) for the slowloris mitigation. A connection that
- * has STARTED a frame (partial bytes buffered) but makes no further progress
- * toward completing it within this window is closed. Healthy connections that
- * are simply idle (no partial frame buffered) are never affected, so long-lived
- * idle-but-healthy clients are not disturbed. 0 disables the timeout.
- *
- * Implemented with a manual per-connection timer (Bun.listen has no
- * `idleTimeout` socket option as of Bun 1.3.x, and `socket.timeout()` resets on
- * every byte — so a slowloris that trickles one byte per window would defeat
- * it). The manual timer is armed only while a partial frame is in progress.
- */
-const TCP_IDLE_TIMEOUT_MS = Math.max(0, parseInt(Bun.env.TCP_IDLE_TIMEOUT_MS ?? '60000', 10) || 0);
-
-/**
- * Maximum bytes that may be buffered in a connection's outbound write queue
- * before the connection is dropped. A client that stops reading while the
- * server keeps producing responses would otherwise grow the pending queue
- * without bound (write-side memory DoS). Generous default (64MB). 0 disables.
- */
-const MAX_WRITE_QUEUE_BYTES = Math.max(
-  0,
-  parseInt(Bun.env.TCP_MAX_WRITE_QUEUE_BYTES ?? String(64 * 1024 * 1024), 10) || 0
-);
-
-/**
- * Release client jobs with retry logic and exponential backoff.
- * Ensures jobs are not left in an inconsistent state if release fails.
- */
-async function releaseClientJobsWithRetry(
-  queueManager: QueueManager,
-  clientId: string,
-  maxRetries = 3
-): Promise<number> {
-  let lastError: Error | undefined;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await queueManager.releaseClientJobs(clientId);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      // Exponential backoff: 100ms, 200ms, 400ms
-      await Bun.sleep(100 * Math.pow(2, attempt));
-    }
-  }
-
-  tcpLog.error('Failed to release client jobs after retries', {
-    clientId,
-    error: lastError?.message,
-  });
-  throw lastError ?? new Error('Failed to release client jobs after retries');
-}
-
-/** TCP Server configuration */
-export interface TcpServerConfig {
-  /** TCP port */
-  port?: number;
-  /** Hostname to bind */
-  hostname?: string;
-  /** Auth tokens for authentication */
-  authTokens?: string[];
-  /**
-   * Slowloris stall timeout (ms): close a connection that started a frame but
-   * made no progress completing it within this window. 0 disables. Defaults to
-   * TCP_IDLE_TIMEOUT_MS env (60s). Mainly for tests.
-   */
-  idleTimeoutMs?: number;
-  /**
-   * Max outbound write-queue bytes before dropping a connection (write-side
-   * memory bound). 0 disables. Defaults to TCP_MAX_WRITE_QUEUE_BYTES env (64MB).
-   * Mainly for tests.
-   */
-  maxWriteQueueBytes?: number;
-  /**
-   * Native TLS termination. When set, the server only accepts TLS clients —
-   * the msgpack protocol is unchanged, only the transport is wrapped.
-   */
-  tls?: TlsServerOptions;
-}
-
-/** Per-connection data */
-interface ConnectionData {
-  state: ConnectionState;
-  abortController: AbortController;
-  frameParser: FrameParser;
-  ctx: HandlerContext;
-  /** Semaphore for limiting concurrent command processing (pipelining) */
-  semaphore: Semaphore;
-  /** Backpressure-aware write queue: buffers unwritten tails, flushes on drain */
-  writeQueue: SocketWriteQueue;
-  /** Active partial-frame stall timer (slowloris mitigation); null when idle. */
-  stallTimer: ReturnType<typeof setTimeout> | null;
-}
-
-/** Serialize response to framed msgpack */
-function serializeResponse(response: Response): Uint8Array {
-  return FrameParser.frame(encodeMessagePack(response));
-}
-
-/** Error response as framed msgpack */
-function errorResponse(message: string, reqId?: string): Uint8Array {
-  return FrameParser.frame(encodeMessagePack({ ok: false, error: message, reqId }));
-}
-
-/**
- * Create and start TCP server
- */
+/** Create and start the MessagePack TCP server. */
 export function createTcpServer(queueManager: QueueManager, config: TcpServerConfig) {
   const authTokens = new Set(config.authTokens ?? []);
-  const connections = new Map<string, Socket<ConnectionData>>();
-  const idleTimeoutMs = config.idleTimeoutMs ?? TCP_IDLE_TIMEOUT_MS;
-  const maxWriteQueueBytes = config.maxWriteQueueBytes ?? MAX_WRITE_QUEUE_BYTES;
-
-  /** Cancel any pending stall timer for a connection. */
-  function clearStallTimer(socket: Socket<ConnectionData>): void {
-    if (socket.data.stallTimer !== null) {
-      clearTimeout(socket.data.stallTimer);
-      socket.data.stallTimer = null;
-    }
-  }
-
-  /**
-   * (Re)arm the slowloris stall timer based on parser state. The timer runs
-   * ONLY while a partial frame is buffered (a frame was started but not yet
-   * completed). It is reset on every data event that still leaves a partial
-   * frame, and cleared once the buffer drains to empty (frame completed). If it
-   * fires, the peer started a frame and then stalled -> terminate.
-   */
-  function updateStallTimer(socket: Socket<ConnectionData>): void {
-    if (idleTimeoutMs <= 0) return;
-    clearStallTimer(socket);
-    if (!socket.data.frameParser.hasPartialFrame) return;
-    socket.data.stallTimer = setTimeout(() => {
-      socket.data.stallTimer = null;
-      tcpLog.warn('Closing stalled connection (incomplete frame)', {
-        clientId: socket.data.state.clientId,
-        bufferedBytes: socket.data.frameParser.bufferedBytes,
-        idleTimeoutMs,
-      });
-      socket.data.writeQueue.clear();
-      socket.terminate();
-    }, idleTimeoutMs);
-  }
-
-  /**
-   * Initialise the per-socket state. Idempotent: safe to call from both `open`
-   * and lazily from `data`. Under native TLS, Bun can deliver a `data` event
-   * BEFORE `open` has run (observed near-deterministically when a Worker boots
-   * its connections concurrently) — the handler would then destructure a null
-   * `socket.data` and the resulting TypeError escalates to the process-level
-   * unhandledRejection handler, taking the whole server down (a pre-auth remote
-   * DoS on an exposed TLS port). Initialising lazily preserves that first frame
-   * instead of dropping it; the guard makes a second `open` a no-op. See #108.
-   */
-  function initConnection(socket: Socket<ConnectionData>): void {
-    if (socket.data) return;
-    const clientId = uuid();
-    const state = createConnectionState(clientId);
-    const abortController = new AbortController();
-    const ctx: HandlerContext = {
-      queueManager,
-      authTokens,
-      authenticated: authTokens.size === 0, // Auto-auth if no tokens
-      clientId, // For job ownership tracking
-      signal: abortController.signal,
-    };
-
-    socket.data = {
-      state,
-      abortController,
-      frameParser: new FrameParser(),
-      ctx,
-      semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
-      writeQueue: new SocketWriteQueue(maxWriteQueueBytes),
-      stallTimer: null,
-    };
-
-    connections.set(clientId, socket);
-    queueManager.emitDashboardEvent('client:connected', { clientId, transport: 'tcp' });
-  }
+  const registry = new TcpConnectionRegistry(
+    queueManager,
+    authTokens,
+    config.idleTimeoutMs ?? TCP_IDLE_TIMEOUT_MS,
+    config.maxWriteQueueBytes ?? MAX_WRITE_QUEUE_BYTES
+  );
 
   const socketHandlers = {
-    open(socket: Socket<ConnectionData>) {
-      initConnection(socket);
+    open(socket: Socket<TcpConnectionData>) {
+      registry.init(socket);
     },
 
-    async data(socket: Socket<ConnectionData>, data: Buffer) {
-      // TLS may deliver `data` before `open` — ensure per-socket state exists. #108
-      initConnection(socket);
+    async data(socket: Socket<TcpConnectionData>, data: Buffer) {
+      registry.init(socket);
       const { frameParser, ctx, state, semaphore, writeQueue } = socket.data;
       const rateLimiter = getRateLimiter();
 
       let frames: Uint8Array[];
       try {
-        // `data` is a Bun Buffer (a Uint8Array). addData copies it into its own
-        // buffer synchronously and never retains it, so the previous defensive
-        // `new Uint8Array(data)` wrapper was a redundant full copy per read.
         frames = frameParser.addData(data);
-      } catch (err) {
-        if (err instanceof FrameSizeError) {
-          clearStallTimer(socket);
+      } catch (error) {
+        if (error instanceof FrameSizeError) {
+          registry.clearStallTimer(socket);
           writeQueue.write(
             socket,
-            errorResponse(
-              `Frame too large: ${err.requestedSize} bytes exceeds maximum ${err.maxSize}`
+            tcpErrorResponse(
+              `Frame too large: ${error.requestedSize} bytes exceeds maximum ${error.maxSize}`
             )
           );
           socket.end();
           return;
         }
-        throw err;
+        throw error;
       }
 
-      // Slowloris mitigation: (re)arm the stall timer based on whether a partial
-      // frame is now buffered. Progress (a completed frame draining the buffer)
-      // disarms it; a started-but-unfinished frame arms it. This bounds memory
-      // held by a peer that declares a large (legal) frame then never finishes.
-      updateStallTimer(socket);
-
-      // Drop a connection whose outbound queue grew unbounded (client stopped
-      // reading while we keep producing responses) — bounds write-side memory.
-      const dropForWriteOverflow = (): boolean => {
-        if (writeQueue.isOverBudget) {
-          tcpLog.warn('Closing connection: write queue exceeded budget', {
-            clientId: state.clientId,
-            queuedBytes: writeQueue.bytesQueued,
-          });
-          clearStallTimer(socket);
-          writeQueue.clear();
-          socket.terminate();
-          return true;
-        }
-        return false;
-      };
-
-      // Process frames in parallel for pipelining support
-      // Each command is processed with semaphore-controlled concurrency
+      registry.updateStallTimer(socket);
       const processFrame = async (frame: Uint8Array): Promise<void> => {
-        let cmd: Command | undefined;
+        let command: Command | undefined;
         try {
-          cmd = decodeMessagePack<Command>(frame);
+          command = decodeMessagePack<Command>(frame);
         } catch {
-          // Invalid complete frames still consume protocol quota. They cannot
-          // carry a trustworthy reqId because msgpack decoding failed.
+          // Invalid frames still consume protocol quota.
         }
 
-        const reqId = typeof cmd?.reqId === 'string' ? cmd.reqId : undefined;
+        const requestId = typeof command?.reqId === 'string' ? command.reqId : undefined;
         if (!rateLimiter.isAllowed(state.clientId)) {
           ctx.queueManager.emitDashboardEvent('ratelimit:hit', { clientId: state.clientId });
-          writeQueue.write(socket, errorResponse('Rate limit exceeded', reqId));
-          dropForWriteOverflow();
+          writeQueue.write(socket, tcpErrorResponse('Rate limit exceeded', requestId));
+          registry.dropForWriteOverflow(socket);
           return;
         }
 
-        if (!cmd) {
-          writeQueue.write(socket, errorResponse('Invalid command format'));
-          dropForWriteOverflow();
+        if (!command) {
+          writeQueue.write(socket, tcpErrorResponse('Invalid command format'));
+          registry.dropForWriteOverflow(socket);
+          return;
+        }
+        if (!command.cmd) {
+          writeQueue.write(socket, tcpErrorResponse('Invalid command', requestId));
+          registry.dropForWriteOverflow(socket);
           return;
         }
 
-        if (!cmd?.cmd) {
-          writeQueue.write(socket, errorResponse('Invalid command', reqId));
-          dropForWriteOverflow();
-          return;
-        }
-
-        // Process with concurrency limit
         await withSemaphore(semaphore, async () => {
           try {
-            const response = await handleCommand(cmd, ctx);
-            writeQueue.write(socket, serializeResponse(response));
-            dropForWriteOverflow();
-          } catch (err) {
-            const raw = err instanceof Error ? err.message : 'Unknown error';
+            const response = await handleCommand(command, ctx);
+            writeQueue.write(socket, serializeTcpResponse(response));
+            registry.dropForWriteOverflow(socket);
+          } catch (error) {
+            const raw = error instanceof Error ? error.message : 'Unknown error';
             const message =
               raw.includes('SQLITE') || raw.includes('database') ? 'Internal server error' : raw;
-            writeQueue.write(socket, errorResponse(message, cmd.reqId));
-            dropForWriteOverflow();
+            writeQueue.write(socket, tcpErrorResponse(message, command.reqId));
+            registry.dropForWriteOverflow(socket);
           }
         });
       };
 
-      // Process all frames in parallel (client uses reqId to match responses)
       await Promise.all(frames.map(processFrame));
     },
 
-    close(socket: Socket<ConnectionData>) {
-      // A socket can close before `open`/`data` ever initialised its state
-      // (e.g. TLS handshake aborted) — nothing to release. #108
-      if (!socket.data) return;
-      socket.data.abortController.abort();
-      const clientId = socket.data.state.clientId;
-      // Cancel the slowloris stall timer and drop any buffered-but-unwritten
-      // bytes; the socket is gone.
-      clearStallTimer(socket);
-      socket.data.writeQueue.clear();
-      connections.delete(clientId);
-      getRateLimiter().removeClient(clientId);
-      queueManager.unregisterWorkersByClientId(clientId);
-      queueManager.emitDashboardEvent('client:disconnected', { clientId, transport: 'tcp' });
-
-      // Release all jobs owned by this client back to queue with retry logic
-      releaseClientJobsWithRetry(queueManager, clientId)
-        .then(() => {
-          // Jobs released successfully
-        })
-        .catch((err: unknown) => {
-          // After all retries failed, fall back to a force-release that
-          // unconditionally clears client tracking (prevents Map leak) and
-          // resets heartbeats so the stall detector recovers any orphaned
-          // 'active' jobs on its next tick.
-          const touched = queueManager.forceReleaseClientJobs(clientId);
-          tcpLog.error('Client jobs release failed; fell back to force-release', {
-            clientId,
-            error: String(err),
-            forcedJobs: touched,
-            note: 'Stall detector will recover orphaned active jobs on next tick',
-          });
-        });
+    close(socket: Socket<TcpConnectionData>) {
+      registry.close(socket);
     },
 
-    error(_socket: Socket<ConnectionData>, error: Error) {
+    error(_socket: Socket<TcpConnectionData>, error: Error) {
       tcpLog.error('Connection error', { error: error.message });
     },
 
-    drain(socket: Socket<ConnectionData>) {
-      // Can fire before per-socket state is initialised under TLS. #108
+    drain(socket: Socket<TcpConnectionData>) {
       if (!socket.data) return;
-      // Socket is ready for more writes after backpressure: flush any unwritten
-      // tail bytes buffered by short writes, preserving frame order.
       socket.data.writeQueue.flush(socket);
     },
   };
 
-  // Create TCP server (validate TLS files BEFORE binding the port, so a bad
-  // path doesn't leave a half-started listener behind)
   const tlsOptions = config.tls ? loadTlsOptions(config.tls) : undefined;
-  const server: TCPSocketListener<ConnectionData> = Bun.listen<ConnectionData>({
+  const server: TCPSocketListener<TcpConnectionData> = Bun.listen<TcpConnectionData>({
     hostname: config.hostname ?? '0.0.0.0',
     port: config.port ?? 6789,
     ...(tlsOptions && { tls: tlsOptions }),
     socket: socketHandlers,
   });
+
   return {
     server,
-    connections,
-
-    /**
-     * Raw Bun socket handlers. Exposed for tests that need to drive the socket
-     * lifecycle directly (e.g. a `data` event arriving before `open` under TLS,
-     * #108) — production code goes through Bun.listen above.
-     */
+    connections: registry.connections,
     _socketHandlers: socketHandlers,
 
-    /** Get connection count */
     getConnectionCount(): number {
-      return connections.size;
+      return registry.connections.size;
     },
 
-    /** Broadcast to all connections */
     broadcast(message: unknown): void {
-      const frame = FrameParser.frame(encodeMessagePack(message));
-      for (const socket of connections.values()) {
-        // Each connection writes through its own backpressure-aware queue so a
-        // slow reader buffers (in order) instead of dropping frame tail bytes.
-        socket.data.writeQueue.write(socket, frame);
-        // Drop any reader that has fallen too far behind (write-side bound).
-        if (socket.data.writeQueue.isOverBudget) {
-          clearStallTimer(socket);
-          socket.data.writeQueue.clear();
-          socket.terminate();
-        }
-      }
+      registry.broadcast(message);
     },
 
-    /** Stop the server */
     stop(): void {
       server.stop();
-      for (const socket of connections.values()) {
-        clearStallTimer(socket);
-        socket.end();
-      }
-      connections.clear();
+      registry.closeAll();
     },
   };
 }

@@ -50,9 +50,16 @@ class QueueAdminOps:
     # ------------------------------------------------- rate limit/concurrency
 
     def set_global_rate_limit(self, max_jobs: int, duration_ms: Optional[int] = None) -> None:
-        """`duration_ms` accepted for TS-signature parity; the wire carries only `limit`."""
-        del duration_ms
-        self.connection.call({"cmd": "RateLimit", "queue": self.name, "limit": max_jobs})
+        self.connection.call(
+            _compact(
+                {
+                    "cmd": "RateLimit",
+                    "queue": self.name,
+                    "limit": max_jobs,
+                    "duration": duration_ms,
+                }
+            )
+        )
 
     def remove_global_rate_limit(self) -> None:
         self.connection.call({"cmd": "RateLimitClear", "queue": self.name})

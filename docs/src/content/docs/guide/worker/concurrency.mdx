@@ -98,6 +98,75 @@ worker.concurrency = 2;   // Scale back down (minimum: 1)
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+The network SDK fixes concurrency at construction. Drain and replace the worker
+to change it safely:
+
+```typescript
+await worker.close();
+worker = new Worker('my-queue', processor, { concurrency: 10 });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+The Python SDK fixes concurrency at construction. Drain and replace the worker
+to change it safely:
+
+```python
+worker.close()
+worker = Worker("my-queue", process, concurrency=10)
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+PHP workers are sequential. Change process-level parallelism by starting or
+stopping worker processes under your process supervisor.
+
+```bash
+php worker.php &
+php worker.php &
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The Go SDK fixes concurrency at construction. Stop and replace the worker:
+
+```go
+worker.Stop()
+worker.Close()
+worker = bunqueue.NewWorker("my-queue", processor,
+    bunqueue.WorkerOptions{Concurrency: 10})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK fixes concurrency at construction. Stop and replace the worker:
+
+```rust
+worker.stop();
+worker.close();
+let worker = Worker::new("my-queue", processor, WorkerOptions {
+    concurrency: 10,
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK fixes concurrency at construction. Stop and replace the worker:
+
+```elixir
+:ok = Bunqueue.Worker.stop(worker)
+worker = Bunqueue.Worker.new("my-queue", handler, concurrency: 10)
+```
+
+</TabItem>
 </Tabs>
 
 *Runtime concurrency changes are a Bun client feature; the external SDKs fix `concurrency` at construction.*
@@ -112,7 +181,7 @@ For high-volume queues, pull many jobs per round-trip and long-poll while idle:
 ```typescript
 const worker = new Worker('queue', processor, {
   embedded: true,
-  batchSize: 100,     // Pull 100 jobs at once
+  batchSize: 100,     // Request up to 100; free concurrency slots cap the pull
   pollTimeout: 5000,  // Wait up to 5s for jobs (long polling)
 });
 ```
@@ -122,7 +191,7 @@ const worker = new Worker('queue', processor, {
 
 ```typescript
 const worker = new Worker('queue', processor, {
-  batchSize: 100,       // Pull 100 jobs at once
+  batchSize: 100,       // Request up to 100; free concurrency slots cap the pull
   pollTimeoutMs: 5000,  // Wait up to 5s for jobs (long polling)
 });
 ```
@@ -134,7 +203,7 @@ const worker = new Worker('queue', processor, {
 worker = Worker(
     "queue",
     process,
-    batch_size=100,        # Pull 100 jobs at once
+    batch_size=100,        # Request up to 100; free concurrency slots cap the pull
     poll_timeout_ms=5000,  # Wait up to 5s for jobs (long polling)
 )
 ```
@@ -144,7 +213,7 @@ worker = Worker(
 
 ```php
 $worker = new Worker('queue', $processor, [
-    'batchSize' => 100,       // Pull 100 jobs at once
+    'batchSize' => 100,       // Request up to 100; free slots cap the pull
     'pollTimeoutMs' => 5000,  // Wait up to 5s for jobs (long polling)
 ]);
 ```
@@ -154,7 +223,7 @@ $worker = new Worker('queue', $processor, [
 
 ```go
 worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
-    BatchSize:     100,  // Pull 100 jobs at once
+    BatchSize:     100,  // Request up to 100; free slots cap the pull
     PollTimeoutMs: 5000, // Wait up to 5s for jobs (long polling)
 })
 ```
@@ -164,7 +233,7 @@ worker := bunqueue.NewWorker("queue", processor, bunqueue.WorkerOptions{
 
 ```rust
 let worker = Worker::new("queue", processor, WorkerOptions {
-    batch_size: 100,        // Pull 100 jobs at once
+    batch_size: 100,        // Request up to 100; free slots cap the pull
     poll_timeout_ms: 5_000, // Wait up to 5s for jobs (long polling)
     ..Default::default()
 });
@@ -176,7 +245,7 @@ let worker = Worker::new("queue", processor, WorkerOptions {
 ```elixir
 worker =
   Bunqueue.Worker.new("queue", handler,
-    batch_size: 100,     # Pull 100 jobs at once
+    batch_size: 100,     # Request up to 100; free slots cap the pull
     poll_timeout: 5_000  # Wait up to 5s for jobs (long polling)
   )
 ```
@@ -198,4 +267,3 @@ Bulk pushes wake idle long-polling workers immediately, they never wait out the 
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

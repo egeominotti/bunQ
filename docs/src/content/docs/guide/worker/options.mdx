@@ -135,8 +135,8 @@ The table below documents the Bun client's options; the external SDK worker opti
 | `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
 | `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max jobs per window. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
 | `lockDuration` | `number` | `30000` | Job lock TTL in ms |
-| `maxStalledCount` | `number` | `1` | Max stalls before the job moves to failed |
-| `skipStalledCheck` | `boolean` | `false` | Skip stalled job detection |
+| `maxStalledCount` | `number` | `1` | Accepted for BullMQ compatibility, but not applied by the Worker. Configure the broker's per-queue `maxStalls` policy with `Queue.setStallConfig()` or the HTTP API instead |
+| `skipStalledCheck` | `boolean` | `false` | In embedded mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery |
 | `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
 | `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
 | `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |
@@ -145,6 +145,14 @@ The table below documents the Bun client's options; the external SDK worker opti
 | `prefixKey` | `string` | - | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey) |
 
 **Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
+
+:::caution[Worker options are not the queue's stall policy]
+`maxStalledCount` and `skipStalledCheck` do not change when the broker recovers
+an unresponsive job. Use the queue-level `stallInterval`, `maxStalls`,
+`gracePeriod`, and `enabled` settings described in [Stall Detection](/guide/stall-detection/).
+`skipLockRenewal`, by contrast, does stop this Worker's automatic lock-renewal
+heartbeats and can therefore cause long-running jobs to be redelivered.
+:::
 
 ## Where to go next
 
@@ -158,4 +166,3 @@ The table below documents the Bun client's options; the external SDK worker opti
 | [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
-

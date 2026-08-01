@@ -44,10 +44,11 @@ Jobs move to the DLQ when they meet specific failure conditions:
 | Condition | Reason | Example |
 |-----------|--------|---------|
 | Max attempts exhausted | `max_attempts_exceeded` | Job failed 3 times with exponential backoff |
+| Processing timeout | `timeout` | A job exceeded its per-attempt processing deadline |
 | Stall limit reached | `stalled` | Worker died 3 times while processing this job |
 | Manual discard | `unknown` | Explicitly moved via the discard API |
 
-A processing timeout counts as a failed attempt, so a job that keeps timing out also ends up in the DLQ with reason `max_attempts_exceeded` once its attempts run out.
+A processing timeout counts as a failed attempt and retains the `timeout` cause in attempt history. If the final attempt also times out, the DLQ entry's terminal reason is `timeout`; if a later processor error exhausts the attempts instead, the terminal reason is `max_attempts_exceeded`.
 
 ```typescript
 const queue = new Queue('payments', { embedded: true });
@@ -59,8 +60,8 @@ await queue.add('charge', { amount: 99.99 }, {
   timeout: 30_000,
 });
 
-// If all 3 attempts fail, the job moves to DLQ
-// with reason: 'max_attempts_exceeded'
+// Final processor error: 'max_attempts_exceeded'
+// Final processing timeout: 'timeout'
 ```
 
 ## Configuring the DLQ

@@ -32,16 +32,25 @@ async function main() {
     await queue.add('fail-job', { attempt: 0 }, { attempts: 2, backoff: 50 });
 
     let attempts = 0;
-    const worker = new Worker<{ attempt: number }>(QUEUE_NAME, async () => {
-      attempts++;
-      throw new Error(`Attempt ${attempts} failed`);
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ attempt: number }>(
+      QUEUE_NAME,
+      () => {
+        attempts++;
+        throw new Error(`Attempt ${attempts} failed`);
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(1000);
     await worker.close();
 
     const dlq = queue.getDlq();
-    if (attempts >= 2 && dlq.length >= 1) {
+    if (
+      attempts === 2 &&
+      dlq.length === 1 &&
+      dlq[0].reason === 'max_attempts_exceeded' &&
+      dlq[0].attempts.length === 2
+    ) {
       console.log(`   ✅ Job in DLQ after ${attempts} attempts`);
       passed++;
     } else {
@@ -60,7 +69,9 @@ async function main() {
 
     if (dlq.length > 0) {
       const entry = dlq[0];
-      console.log(`   ✅ DLQ entry found: reason=${entry.reason}, attempts=${entry.attempts.length}`);
+      console.log(
+        `   ✅ DLQ entry found: reason=${entry.reason}, attempts=${entry.attempts.length}`
+      );
       passed++;
     } else {
       console.log('   ❌ No DLQ entries found');
@@ -77,7 +88,9 @@ async function main() {
     const stats = queue.getDlqStats();
 
     if (stats.total >= 1) {
-      console.log(`   ✅ DLQ stats: total=${stats.total}, byReason=${JSON.stringify(stats.byReason)}`);
+      console.log(
+        `   ✅ DLQ stats: total=${stats.total}, byReason=${JSON.stringify(stats.byReason)}`
+      );
       passed++;
     } else {
       console.log(`   ❌ Unexpected stats: ${JSON.stringify(stats)}`);
@@ -97,9 +110,13 @@ async function main() {
 
     await queue.add('retry-job', { attempt: 0 }, { attempts: 1, backoff: 50 });
 
-    const worker1 = new Worker<{ attempt: number }>(QUEUE_NAME, async () => {
-      throw new Error('First failure');
-    }, { concurrency: 1, embedded: true });
+    const worker1 = new Worker<{ attempt: number }>(
+      QUEUE_NAME,
+      () => {
+        throw new Error('First failure');
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(500);
     await worker1.close();
@@ -111,10 +128,14 @@ async function main() {
 
     // Now process with success
     let retrySucceeded = false;
-    const worker2 = new Worker<{ attempt: number }>(QUEUE_NAME, async () => {
-      retrySucceeded = true;
-      return { success: true };
-    }, { concurrency: 1, embedded: true });
+    const worker2 = new Worker<{ attempt: number }>(
+      QUEUE_NAME,
+      () => {
+        retrySucceeded = true;
+        return { success: true };
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(500);
     await worker2.close();
@@ -140,9 +161,13 @@ async function main() {
     // Add job that will fail and go to DLQ
     await queue.add('purge-job', { attempt: 0 }, { attempts: 1 });
 
-    const worker = new Worker<{ attempt: number }>(QUEUE_NAME, async () => {
-      throw new Error('Fail for purge');
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ attempt: number }>(
+      QUEUE_NAME,
+      () => {
+        throw new Error('Fail for purge');
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(500);
     await worker.close();
@@ -172,18 +197,24 @@ async function main() {
     // Add job that will fail
     await queue.add('entry-job', { attempt: 0 }, { attempts: 1 });
 
-    const worker = new Worker<{ attempt: number }>(QUEUE_NAME, async () => {
-      throw new Error('Entry test failure');
-    }, { concurrency: 1, embedded: true });
+    const worker = new Worker<{ attempt: number }>(
+      QUEUE_NAME,
+      () => {
+        throw new Error('Entry test failure');
+      },
+      { concurrency: 1, embedded: true }
+    );
 
     await Bun.sleep(500);
     await worker.close();
 
     const allDlq = queue.getDlq();
 
-    if (allDlq.length >= 1) {
+    if (allDlq.length === 1) {
       const entry = allDlq[0];
-      console.log(`   ✅ DLQ entry: reason=${entry.reason}, error=${entry.error?.substring(0, 30)}`);
+      console.log(
+        `   ✅ DLQ entry: reason=${entry.reason}, error=${entry.error?.substring(0, 30)}`
+      );
       passed++;
     } else {
       console.log(`   ❌ No DLQ entries found`);

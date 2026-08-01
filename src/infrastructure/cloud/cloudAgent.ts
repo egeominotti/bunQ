@@ -92,6 +92,11 @@ export class CloudAgent {
         cloudLog.info('Remote commands enabled');
         const commandContext: CommandContext = {
           getSnapshot: () => this.getSnapshot(),
+          triggerBackup: () => {
+            const trigger = this.serverHandles?.triggerBackup;
+            if (!trigger) throw new Error('S3 backup not configured');
+            return trigger();
+          },
         };
         this.wsSender.setCommandHandler((cmd) => {
           handleCommand(this.queueManager, cmd, commandContext)

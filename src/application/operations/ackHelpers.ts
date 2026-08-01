@@ -1,33 +1,15 @@
 /** Shared batch acknowledgement utilities. */
 import type { Job, JobId } from '../../domain/types/job';
 import { MAX_TIMELINE_ENTRIES } from '../../domain/types/job';
-import type { JobLocation, EventType } from '../../domain/types/queue';
-import type { Shard } from '../../domain/queue/shard';
-import type { RWLock } from '../../shared/lock';
+import { setDlqRetryState } from '../../domain/types/dlq';
+import { EventType } from '../../domain/types/queue';
 import { withWriteLock } from '../../shared/lock';
 import { shardIndex, processingShardIndex } from '../../shared/hash';
-import type { SetLike, MapLike } from '../../shared/lru';
-import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { throughputTracker } from '../throughputTracker';
-import type { DependencyResultTracker } from '../dependencyResultTracker';
-import {
-  commitRemovedCompletion,
-  type DependencyCompletionTracker,
-} from '../dependencyCompletions';
+import { commitRemovedCompletion } from '../dependencyCompletions';
+import type { BatchContext, ExtractedJob, FinalizeContext } from '../types/ack';
 
-export interface ExtractedJob<T = unknown> {
-  id: JobId;
-  job: Job;
-  result?: T;
-}
-
-/** Context for batch operations */
-export interface BatchContext {
-  processingShards: Map<JobId, Job>[];
-  processingLocks: RWLock[];
-  shards: Shard[];
-  shardLocks: RWLock[];
-}
+export type { BatchContext, ExtractedJob, FinalizeContext } from '../types/ack';
 
 /**
  * Group job IDs by processing shard
@@ -153,35 +135,6 @@ export async function releaseResources(
   );
 }
 
-/** Context for finalize operations */
-export interface FinalizeContext {
-  storage: SqliteStorage | null;
-  shards: Shard[];
-  completedJobs: SetLike<JobId>;
-  completedJobsData: MapLike<JobId, Job>;
-  /** Bare completion ids for removeOnComplete jobs so dependents can unblock */
-  depCompletions?: DependencyCompletionTracker;
-  maxDependencyCompletions: number;
-  jobResults: MapLike<JobId, unknown>;
-  dependencyResults?: DependencyResultTracker;
-  jobIndex: Map<JobId, JobLocation>;
-  customIdMap?: MapLike<string, JobId>;
-  totalCompleted: { value: bigint };
-  perQueueMetrics?: MapLike<string, { totalCompleted: bigint; totalFailed: bigint }>;
-  broadcast: (event: {
-    eventType: EventType;
-    queue: string;
-    jobId: JobId;
-    timestamp: number;
-    data?: unknown;
-  }) => void;
-  onJobCompleted: (jobId: JobId) => void;
-  onJobsCompleted?: (jobIds: JobId[]) => void;
-  needsBroadcast?: () => boolean;
-  hasPendingDeps?: () => boolean;
-  onRepeat?: (job: Job) => void;
-}
-
 /**
  * Finalize batch ack - update indexes, metrics, broadcast, notify
  */
@@ -221,6 +174,7 @@ export function finalizeBatchAck<T>(
   // checking completedJobs.has(jobId) will always find the result available.
   for (let i = 0; i < jobCount; i++) {
     const { id: jobId, job, result } = extractedJobs[i];
+    setDlqRetryState(job, null);
 
     // Release customId so it can be reused
     if (job.customId && ctx.customIdMap) {

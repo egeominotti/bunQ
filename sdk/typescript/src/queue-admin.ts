@@ -70,9 +70,8 @@ export const adminMethods = {
 
   // -------------------------------------------------- rate limit / concurrency
 
-  /** `duration` accepted for signature parity; the TCP wire carries only `limit`. */
-  async setGlobalRateLimit(this: Ctx, max: number, _duration?: number): Promise<void> {
-    await this.call({ cmd: 'RateLimit', queue: this.name, limit: max });
+  async setGlobalRateLimit(this: Ctx, max: number, duration?: number): Promise<void> {
+    await this.call({ cmd: 'RateLimit', queue: this.name, limit: max, duration });
   },
 
   async removeGlobalRateLimit(this: Ctx): Promise<void> {

@@ -21,7 +21,7 @@ Does NOT own:
 - Push/pull/ack/fail lifecycle transitions — see [Job Lifecycle](./job-lifecycle.md).
 - Per-state numeric aggregation (`getQueueJobCounts`) — lives in `statsManager`, see [Stats, Metrics & Monitoring](./stats-and-monitoring.md). This module only consumes those counts through `pausedView`.
 - DLQ insertion mechanics and retry/purge — see [Dead Letter Queue](./dead-letter-queue.md). `discardJob` calls `shard.addToDlq` but the DLQ store/maintenance is elsewhere.
-- The manager-level extra cleanup that `obliterate` requires (processing shards, completed/result/log/lock indexes, `customIdMap`, metrics, persisted queue state) — that lives in `QueueManager.obliterate` (`queueManager.ts:870`), not in `obliterateQueue` here.
+- The manager-level extra cleanup that `obliterate` requires (processing shards, completed/result/log/lock indexes, `customIdMap`, metrics, persisted queue state) — that lives in `QueueManagerControl.obliterate` (`queue-manager/control.ts`), not in `obliterateQueue` here.
 - Counters/temporal index internals — owned by `Shard`, see [Core Queue Engine](./core-queue-engine.md) and [Data Structures](./data-structures.md).
 - Wire framing, command dispatch, and response shaping — see [TCP Server Command Handlers](./tcp-server-handlers.md).
 
@@ -97,14 +97,14 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 - Job management: `Cancel`, `Progress`, `Promote`, `Discard`, `Update`, `ChangePriority`, `MoveToDelayed`, `ChangeDelay` (`handlers/management.ts`, `handlers/advanced.ts`).
 - Queue control: `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `Clean`, `ListQueues` (`handlers/management.ts`, `handlers/advanced.ts`).
 
-`ChangeDelay` and `MoveToDelayed` share one manager-level dispatcher (`queueManager.ts:1183`): for jobs already queued (`waiting`/`prioritized`/`delayed`) it calls `changeWaitingDelay` (in-place `runAt` mutation → the job becomes/stays `delayed`); for active (`processing`) jobs it falls back to the two-phase `moveJobToDelayed`. `QueueManager.moveToDelayed` (`queueManager.ts:1171`) delegates to `changeDelay` so the two stay in lock-step. Previously `moveToDelayed` only handled `processing` jobs, so a waiting job was a **silent no-op over TCP/HTTP/MCP** while the embedded SDK special-cased it; routing through `changeDelay` fixes parity for waiting **and** active jobs. Wire field: the public `moveToDelayed(id, timestamp)` API takes an **absolute** timestamp, but `MoveToDelayedCommand` carries a **relative** `delay` (ms) — the TCP client (`jobMove.ts`) converts `delay = max(0, timestamp - now)` before sending, matching the server op and the sibling `ChangeDelay` command (the HTTP route `POST /jobs/:id/move-to-delayed` already posts `{ delay }`).
+`ChangeDelay` and `MoveToDelayed` share the manager-level dispatcher in `queue-manager/job-management.ts`: for jobs already queued (`waiting`/`prioritized`/`delayed`) it calls `changeWaitingDelay` (in-place `runAt` mutation → the job becomes/stays `delayed`); for active (`processing`) jobs it falls back to the two-phase `moveJobToDelayed`. `QueueManager.moveToDelayed` delegates to `changeDelay` there so the two stay in lock-step. Previously `moveToDelayed` only handled `processing` jobs, so a waiting job was a **silent no-op over TCP/HTTP/MCP** while the embedded SDK special-cased it; routing through `changeDelay` fixes parity for waiting **and** active jobs. Wire field: the public `moveToDelayed(id, timestamp)` API takes an **absolute** timestamp, but `MoveToDelayedCommand` carries a **relative** `delay` (ms) — the TCP client (`jobMove.ts`) converts `delay = max(0, timestamp - now)` before sending, matching the server op and the sibling `ChangeDelay` command (the HTTP route `POST /jobs/:id/move-to-delayed` already posts `{ delay }`).
 
 ### Events emitted
 
 - `cancelJob` → `EventType.Removed` with `prev: 'waiting'` (`jobManagement.ts:75`).
 - `updateJobProgress` → `progress` event + `job.progress` webhook (`jobManagement.ts:108`).
 - `moveJobToDelayed` → `EventType.Delayed` (`jobMoveOperations.ts`).
-- `QueueManager.pause`/`resume` wrap `pauseQueue`/`resumeQueue` and emit `EventType.Paused`/`EventType.Resumed` plus dashboard events `queue:paused`/`queue:resumed` (`queueManager.ts:836`).
+- `QueueManager.pause`/`resume` wrap `pauseQueue`/`resumeQueue` and emit `EventType.Paused`/`EventType.Resumed` plus dashboard events `queue:paused`/`queue:resumed` (`queue-manager/control.ts`).
 - Dashboard-only events from handlers: `job:priority-changed`, `job:promoted`, `job:discarded`, `job:data-updated`, `job:moved-to-delayed`, `queue:drained`, `queue:obliterated`, `queue:removed`, `queue:cleaned`.
 
 `updateJobData` mutates and persists the payload while holding the job's owning
@@ -194,7 +194,7 @@ Removes the job from its run queue (with `decrementQueued`) or from the processi
 
 - `drainQueue` (`queueControl.ts:45`): `shard.drain` returns `{count, jobIds}`; the operation then deletes each `jobIndex` entry and calls `safeDeleteJob` so a buffered/on-disk add cannot resurrect a drained job.
 - `cleanQueue` (`queueControl.ts:188`): normalizes `wait`→`waiting`, dispatches to `cleanWaitingLike` (`:100`, also covers `delayed`/`prioritized`/`paused`/undefined), `cleanCompleted` (`:124`), or `cleanFailed` (`:152`). Each respects `graceMs` (age threshold) and `maxJobs` (default 1000). Returns removed `JobId[]`.
-- `obliterateQueue` (`queueControl.ts:60`): calls `shard.obliterate(queue)`, which clears the run queue, DLQ, dependency-gated `waitingDeps`/`waitingChildren` jobs, reverse dependency registrations, unique keys, limiters, and temporal indexes. It returns every removed id so `QueueManager.obliterate` can purge global indexes and SQLite even if a prior inconsistency left an id out of `jobIndex`. The manager also discovers and purges processing/completed/results/logs/locks/customIdMap/metrics/queue-state (`queueManager.ts:870`).
+- `obliterateQueue` (`queueControl.ts:60`): calls `shard.obliterate(queue)`, which clears the run queue, DLQ, dependency-gated `waitingDeps`/`waitingChildren` jobs, reverse dependency registrations, unique keys, limiters, and temporal indexes. It returns every removed id so `QueueManagerControl.obliterate` can purge global indexes and SQLite even if a prior inconsistency left an id out of `jobIndex`. The manager also discovers and purges processing/completed/results/logs/locks/customIdMap/metrics/queue-state (`queue-manager/control.ts`).
 
 ## Concurrency & Locking
 

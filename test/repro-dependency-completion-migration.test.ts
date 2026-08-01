@@ -4,9 +4,10 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStorage } from '../src/infrastructure/persistence/sqlite';
+import { SCHEMA_VERSION } from '../src/infrastructure/persistence/schema';
 
 test('schema 28 completion evidence gains conservative pin ownership', () => {
-  const path = join(tmpdir(), `bunqueue-completion-v29-${crypto.randomUUID()}.db`);
+  const path = join(tmpdir(), `bunqueue-completion-v28-upgrade-${crypto.randomUUID()}.db`);
   const legacy = new Database(path, { create: true });
   legacy.run(`
     CREATE TABLE migrations (
@@ -38,7 +39,7 @@ test('schema 28 completion evidence gains conservative pin ownership', () => {
       .query<{ version: number }, []>('SELECT MAX(version) AS version FROM migrations')
       .get();
     expect(row?.pinned).toBe(0);
-    expect(version?.version).toBe(29);
+    expect(version?.version).toBe(SCHEMA_VERSION);
   } finally {
     migrated.close();
     for (const suffix of ['', '-wal', '-shm']) {

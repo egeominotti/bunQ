@@ -9,14 +9,13 @@
  * 4. Purge DLQ
  * 5. Multiple failures accumulate in DLQ
  *
- * Note: getDlq() returns [] in TCP mode (embedded-only), so we use
- * direct TCP commands { cmd: 'Dlq' } to query the server-side DLQ.
+ * Uses acknowledged TCP commands and exact broker-side counts throughout.
  */
 
 import { Queue, Worker } from '../../src/client';
 import { TcpConnectionPool } from '../../src/client/tcpPool';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -75,8 +74,7 @@ async function main() {
   {
     const qName = 'tcp-dlq-pat-failed';
     const q = makeQueue(qName);
-    q.obliterate();
-    await Bun.sleep(300);
+    await q.obliterateAsync();
 
     await q.add('will-fail', { value: 42 }, { attempts: 1, backoff: 0 });
 
@@ -89,7 +87,9 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    worker.on('failed', () => { failCount++; });
+    worker.on('failed', () => {
+      failCount++;
+    });
 
     // Wait for the job to fail and land in DLQ
     for (let i = 0; i < 60; i++) {
@@ -101,11 +101,8 @@ async function main() {
     // Query DLQ via raw TCP command
     const dlqJobs = await queryDlq(rawPool, qName);
 
-    if (dlqJobs.length >= 1) {
-      ok(`Failed job appeared in DLQ (${dlqJobs.length} entry)`);
-    } else if (failCount >= 1) {
-      // Server DLQ might not have entries yet or might use different storage
-      ok(`Job failed as expected (failCount=${failCount}), DLQ query returned ${dlqJobs.length}`);
+    if (failCount === 1 && dlqJobs.length === 1) {
+      ok('The failed job appeared exactly once in the DLQ');
     } else {
       fail(`Job did not fail (failCount=${failCount}, dlq=${dlqJobs.length})`);
     }
@@ -119,8 +116,7 @@ async function main() {
   {
     const qName = 'tcp-dlq-pat-errors';
     const q = makeQueue(qName);
-    q.obliterate();
-    await Bun.sleep(300);
+    await q.obliterateAsync();
 
     const errorMessages = [
       'database connection timeout',
@@ -142,7 +138,9 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    worker.on('failed', () => { failCount++; });
+    worker.on('failed', () => {
+      failCount++;
+    });
 
     // Wait for all 3 to fail
     for (let i = 0; i < 60; i++) {
@@ -154,10 +152,8 @@ async function main() {
     // Query DLQ via raw TCP
     const dlqJobs = await queryDlq(rawPool, qName);
 
-    if (failCount === 3 && dlqJobs.length >= 3) {
-      ok(`All 3 jobs with different errors in DLQ (dlq=${dlqJobs.length})`);
-    } else if (failCount === 3) {
-      ok(`All 3 jobs failed with different errors (failCount=${failCount}, dlq=${dlqJobs.length})`);
+    if (failCount === 3 && dlqJobs.length === 3) {
+      ok('All 3 jobs with different errors entered the DLQ exactly once');
     } else {
       fail(`Expected 3 failures, got failCount=${failCount}, dlq=${dlqJobs.length}`);
     }
@@ -171,8 +167,7 @@ async function main() {
   {
     const qName = 'tcp-dlq-pat-retry';
     const q = makeQueue(qName);
-    q.obliterate();
-    await Bun.sleep(300);
+    await q.obliterateAsync();
 
     await q.add('retry-me', { key: 'retry-test' }, { attempts: 1, backoff: 0 });
 
@@ -186,7 +181,9 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    worker1.on('failed', () => { failCount++; });
+    worker1.on('failed', () => {
+      failCount++;
+    });
 
     // Wait for job to fail
     for (let i = 0; i < 60; i++) {
@@ -222,12 +219,12 @@ async function main() {
     // DLQ should be empty after retry
     const dlqAfter = await queryDlq(rawPool, qName);
 
-    if (processedCount >= 1) {
-      ok(`Job retried from DLQ and processed (retried=${retried}, processed=${processedCount}, dlqBefore=${dlqBefore.length}, dlqAfter=${dlqAfter.length})`);
-    } else if (retried >= 1 || dlqBefore.length >= 1) {
-      ok(`DLQ retry sent (retried=${retried}, dlqBefore=${dlqBefore.length}, processed=${processedCount})`);
+    if (dlqBefore.length === 1 && retried === 1 && processedCount === 1 && dlqAfter.length === 0) {
+      ok('One DLQ job was retried, completed once, and removed from the DLQ');
     } else {
-      fail(`Retry from DLQ failed (retried=${retried}, processed=${processedCount}, dlqBefore=${dlqBefore.length})`);
+      fail(
+        `Retry from DLQ failed (retried=${retried}, processed=${processedCount}, dlqBefore=${dlqBefore.length})`
+      );
     }
   }
 
@@ -239,8 +236,7 @@ async function main() {
   {
     const qName = 'tcp-dlq-pat-purge';
     const q = makeQueue(qName);
-    q.obliterate();
-    await Bun.sleep(300);
+    await q.obliterateAsync();
 
     // Push 5 jobs that will all fail
     for (let i = 0; i < 5; i++) {
@@ -256,7 +252,9 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    worker.on('failed', () => { failCount++; });
+    worker.on('failed', () => {
+      failCount++;
+    });
 
     // Wait for all 5 to fail
     for (let i = 0; i < 60; i++) {
@@ -274,12 +272,12 @@ async function main() {
     // Query DLQ after purge
     const dlqAfter = await queryDlq(rawPool, qName);
 
-    if (failCount >= 5 && dlqAfter.length === 0) {
-      ok(`DLQ purged (failCount=${failCount}, dlqBefore=${dlqBefore.length}, purged=${purged}, dlqAfter=${dlqAfter.length})`);
-    } else if (failCount >= 5 && purged >= 0) {
-      ok(`Purge sent (failCount=${failCount}, dlqBefore=${dlqBefore.length}, purged=${purged}, dlqAfter=${dlqAfter.length})`);
+    if (failCount === 5 && dlqBefore.length === 5 && purged === 5 && dlqAfter.length === 0) {
+      ok('Purge removed exactly all 5 DLQ entries');
     } else {
-      fail(`Purge DLQ failed (failCount=${failCount}, dlqBefore=${dlqBefore.length}, purged=${purged}, dlqAfter=${dlqAfter.length})`);
+      fail(
+        `Purge DLQ failed (failCount=${failCount}, dlqBefore=${dlqBefore.length}, purged=${purged}, dlqAfter=${dlqAfter.length})`
+      );
     }
   }
 
@@ -291,8 +289,7 @@ async function main() {
   {
     const qName = 'tcp-dlq-pat-accumulate';
     const q = makeQueue(qName);
-    q.obliterate();
-    await Bun.sleep(300);
+    await q.obliterateAsync();
 
     for (let i = 0; i < 10; i++) {
       await q.add(`fail-${i}`, { seq: i }, { attempts: 1, backoff: 0 });
@@ -307,7 +304,9 @@ async function main() {
       { concurrency: 1, connection: connOpts, useLocks: false }
     );
 
-    worker.on('failed', () => { failCount++; });
+    worker.on('failed', () => {
+      failCount++;
+    });
 
     // Wait for all 10 to fail
     for (let i = 0; i < 100; i++) {
@@ -319,10 +318,8 @@ async function main() {
     // Query DLQ
     const dlqJobs = await queryDlq(rawPool, qName);
 
-    if (failCount === 10 && dlqJobs.length >= 10) {
-      ok(`All 10 failures accumulated in DLQ (failCount=${failCount}, dlq=${dlqJobs.length})`);
-    } else if (failCount === 10) {
-      ok(`All 10 jobs failed (failCount=${failCount}, dlq=${dlqJobs.length})`);
+    if (failCount === 10 && dlqJobs.length === 10) {
+      ok('All 10 failures accumulated exactly once in the DLQ');
     } else {
       fail(`Expected 10 failures, got failCount=${failCount}, dlq=${dlqJobs.length}`);
     }
@@ -332,7 +329,7 @@ async function main() {
   // Cleanup
   // ─────────────────────────────────────────────────
   for (const q of queues) {
-    q.obliterate();
+    await q.obliterateAsync();
     q.close();
   }
   rawPool.close();

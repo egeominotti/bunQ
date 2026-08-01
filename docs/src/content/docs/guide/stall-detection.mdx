@@ -24,7 +24,10 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 While a worker processes a job it sends periodic **heartbeats**, small "I'm still alive" signals. If heartbeats stop (crashed process, hung code, dead network), the job is **stalled**: bunqueue re-queues it for another worker, and after too many stalls moves it to the [dead letter queue](/guide/dlq/) (DLQ), the holding area for jobs that keep failing.
 
-**Stall detection is on by default with sensible defaults.** You only need this page if your jobs run longer than 30 seconds, or you want to tune the thresholds.
+**Stall detection is on by default with sensible defaults.** A job may run for
+hours without stalling as long as automatic heartbeats continue. Tune these
+thresholds when one uninterrupted work segment can block heartbeats for more
+than 30 seconds, or when you need a different recovery budget.
 
 ## Configuration
 
@@ -74,6 +77,54 @@ queue.set_stall_config({
     "maxStalls": 3,          # move to DLQ after 3 stalls
     "gracePeriod": 5000,     # no stall checks in the first 5s of a job
 })
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The PHP SDK does not expose this broker command yet. Set the same queue policy
+through the HTTP API:
+
+```bash
+curl -X PUT http://localhost:6790/queues/my-queue/stall-config \
+  -H 'content-type: application/json' \
+  -d '{"config":{"enabled":true,"stallInterval":30000,"maxStalls":3,"gracePeriod":5000}}'
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The Go SDK does not expose this broker command yet. Set the same queue policy
+through the HTTP API:
+
+```bash
+curl -X PUT http://localhost:6790/queues/my-queue/stall-config \
+  -H 'content-type: application/json' \
+  -d '{"config":{"enabled":true,"stallInterval":30000,"maxStalls":3,"gracePeriod":5000}}'
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The Rust SDK does not expose this broker command yet. Set the same queue policy
+through the HTTP API:
+
+```bash
+curl -X PUT http://localhost:6790/queues/my-queue/stall-config \
+  -H 'content-type: application/json' \
+  -d '{"config":{"enabled":true,"stallInterval":30000,"maxStalls":3,"gracePeriod":5000}}'
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK does not expose this broker command yet. Set the same queue
+policy through the HTTP API:
+
+```bash
+curl -X PUT http://localhost:6790/queues/my-queue/stall-config \
+  -H 'content-type: application/json' \
+  -d '{"config":{"enabled":true,"stallInterval":30000,"maxStalls":3,"gracePeriod":5000}}'
 ```
 
 </TabItem>
@@ -164,7 +215,9 @@ cannot reset either retry budget.
 
 ## Long-running jobs
 
-Jobs longer than 30 seconds need a wider stall window, or they will be re-queued while still running:
+A long total runtime is safe with heartbeats. Use a wider stall window when a
+single processing segment can block the runtime or network long enough to miss
+the default 30-second window:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -230,6 +283,80 @@ worker = Worker("video-processing", process, heartbeat_interval_s=30.0)
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Configure the five-minute broker policy through the HTTP API shown above, then
+report progress from the sequential handler so it also refreshes the stall
+timer:
+
+```php
+$worker = new Worker('video-processing', function (Bunqueue\Job $job) use ($video) {
+    foreach ($video->chunks as $chunk) {
+        processChunk($chunk);
+        $job->updateProgress($chunk->progress);
+    }
+}, ['lockTtlMs' => 300000]);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+Configure the five-minute broker policy through the HTTP API shown above. The
+worker heartbeat and progress updates both refresh liveness:
+
+```go
+worker := bunqueue.NewWorker("video-processing", func(job *bunqueue.Job) (any, error) {
+    for _, chunk := range video.Chunks {
+        processChunk(chunk)
+        if err := job.UpdateProgress(chunk.Progress, ""); err != nil { return nil, err }
+    }
+    return nil, nil
+}, bunqueue.WorkerOptions{HeartbeatIntervalS: 30, LockTtlMs: 300_000})
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+Configure the five-minute broker policy through the HTTP API shown above. The
+worker heartbeat and progress updates both refresh liveness:
+
+```rust
+let worker = Worker::new("video-processing", move |job| {
+    for chunk in &video.chunks {
+        process_chunk(chunk);
+        job.update_progress(chunk.progress, None)
+            .map_err(|error| ProcessError::retryable(error.to_string()))?;
+    }
+    Ok(Value::Nil)
+}, WorkerOptions {
+    heartbeat_interval: Some(Duration::from_secs(30)),
+    lock_ttl_ms: 300_000,
+    ..Default::default()
+});
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+Configure the five-minute broker policy through the HTTP API shown above. The
+worker heartbeat and progress updates both refresh liveness:
+
+```elixir
+handler = fn job ->
+  Enum.each(video.chunks, fn chunk ->
+    process_chunk(chunk)
+    {:ok, _} = Bunqueue.Job.update_progress(job, chunk.progress)
+  end)
+  {:ok, nil}
+end
+
+worker =
+  Bunqueue.Worker.new("video-processing", handler,
+    heartbeat_interval: 30_000, lock_ttl: 300_000
+  )
+```
+
+</TabItem>
 </Tabs>
 
 Two things reset the stall timer: the worker's automatic heartbeat (every `heartbeatInterval` ms) and any `job.updateProgress()` call. For long jobs without natural progress points, the automatic heartbeat is enough.
@@ -237,11 +364,14 @@ Two things reset the stall timer: the worker's automatic heartbeat (every `heart
 ## What happens when a job stalls
 
 1. **Retry**: the job goes back to waiting with its stall count incremented, and waiting workers are notified immediately, so it is picked up without delay.
-2. **DLQ**: once the stall count exceeds `maxStalls`, the job moves to the dead letter queue with reason `stalled`.
+2. **DLQ**: the job becomes terminal when either its cumulative stall count reaches `maxStalls` or the interrupted delivery consumes its final normal `attempts` slot. A stall-budget terminal is classified as `stalled`; an attempts-budget terminal is classified as `max_attempts_exceeded`.
 
 ## Listening for stalls
 
 In embedded mode (queue and listener in the same process), use `QueueEvents`:
+
+<Tabs syncKey="lang">
+<TabItem label="Bun">
 
 ```typescript
 import { QueueEvents } from 'bunqueue/client';
@@ -252,7 +382,73 @@ events.on('stalled', ({ jobId }) => {
 });
 ```
 
-In TCP mode, use the Worker's `stalled` event or subscribe via [webhooks](/guide/webhooks/).
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+<TabItem label="Python">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+<TabItem label="Go">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+The network SDK does not receive broker-side stall events. Subscribe to the
+queue's SSE stream and handle frames whose `eventType` is `stalled`:
+
+```bash
+curl -N http://localhost:6790/events/queues/my-queue
+```
+
+</TabItem>
+</Tabs>
+
+The Bun `Worker` also emits `stalled` in embedded mode. TCP workers do not;
+stall events originate in the broker after the original worker may already be
+gone. The SSE or WebSocket stream is the portable live channel. Stall webhooks
+are not emitted, so do not register `job.stalled` as a webhook event.
 
 ## Monitoring
 
@@ -264,6 +460,60 @@ const stats = queue.getDlqStats();
 console.log('Stalled jobs in DLQ:', stats.byReason.stalled);
 
 const stalledJobs = queue.getDlq({ reason: 'stalled' });
+```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+const entries = await queue.getDlq();
+const stalledJobs = entries.filter((entry) => entry.reason === 'stalled');
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+entries = queue.get_dlq()
+stalled_jobs = [entry for entry in entries if entry.get("reason") == "stalled"]
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+$entries = $queue->getDlq();
+$stalledJobs = array_filter(
+    $entries,
+    fn ($entry) => ($entry['reason'] ?? null) === 'stalled'
+);
+```
+
+</TabItem>
+<TabItem label="Go">
+
+```go
+entries, err := queue.GetDlq(0) // 0 means no explicit count bound
+stalledJobs := make([]map[string]any, 0)
+for _, entry := range entries {
+    if entry["reason"] == "stalled" { stalledJobs = append(stalledJobs, entry) }
+}
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust
+// Entries are MessagePack maps; inspect each map's `reason` field.
+let entries = queue.get_dlq(None)?;
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+{:ok, entries} = Bunqueue.Queue.dlq(queue)
+stalled_jobs = Enum.filter(entries, &(&1["reason"] == "stalled"))
 ```
 
 </TabItem>

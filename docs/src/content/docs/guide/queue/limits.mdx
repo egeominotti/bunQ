@@ -49,8 +49,9 @@ await queue.rateLimit(5000);
 await queue.setGlobalConcurrency(10);
 await queue.removeGlobalConcurrency();
 
-// Cap throughput: max jobs per window (1 second)
-await queue.setGlobalRateLimit(100);   // max 100 jobs per second
+// Cap throughput: max jobs per window (default: 1 second)
+await queue.setGlobalRateLimit(100);          // max 100 jobs per second
+await queue.setGlobalRateLimit(100, 60_000);  // max 100 jobs per minute
 await queue.removeGlobalRateLimit();
 ```
 
@@ -62,8 +63,9 @@ await queue.removeGlobalRateLimit();
 queue.set_global_concurrency(10)
 queue.remove_global_concurrency()
 
-# Cap throughput: max jobs per window (1 second)
-queue.set_global_rate_limit(100)   # max 100 jobs per second
+# Cap throughput: max jobs per window (default: 1 second)
+queue.set_global_rate_limit(100)         # max 100 jobs per second
+queue.set_global_rate_limit(100, 60000)  # max 100 jobs per minute
 queue.remove_global_rate_limit()
 ```
 

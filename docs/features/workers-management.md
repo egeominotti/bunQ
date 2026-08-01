@@ -54,7 +54,7 @@ Internal:
   `createWorker()`.
 - `src/shared/hash` — `uuid()` for generating worker IDs when the client does
   not supply one (`worker.ts:46`).
-- Consumed by `QueueManager` (`queueManager.ts:188`), which owns the singleton
+- Consumed by `QueueManager` (`queue-manager/state.ts`), which owns the singleton
   `workerManager` instance and wires the dashboard emitter and the
   `skipIfNoWorker` callback.
 
@@ -142,8 +142,8 @@ filtered live view.
 
 ### Dashboard events emitted
 
-`worker:connected` and `worker:disconnected` are emitted by `QueueManager`
-wrappers (`queueManager.ts:1343,1357`). `WorkerManager` itself emits:
+`worker:connected` and `worker:disconnected` are emitted by the `QueueManager`
+wrappers in `queue-manager/services.ts`. `WorkerManager` itself emits:
 
 - `worker:disconnected` — per worker removed in `unregisterByClientId` (`workerManager.ts:82`)
 - `worker:idle` — when a worker's `activeJobs` reaches 0 (`workerManager.ts:148,166`)
@@ -238,8 +238,8 @@ handler injects the connection's `clientId` so disconnect cleanup can find it
 
 ### `skipIfNoWorker` integration
 
-At startup `QueueManager` wires the cron worker check
-(`queueManager.ts:190-192`):
+At startup `QueueManagerState` wires the cron worker check
+(`queue-manager/state.ts`):
 
 ```typescript
 this.cronScheduler.setWorkerCheckCallback((queue) =>
@@ -268,8 +268,8 @@ connection closes (`server/tcp.ts:314`, `server/http.ts:236`,
 `unregisterByClientId(clientId)` — removing every worker registered over that
 connection and emitting `worker:disconnected` per removal
 (`workerManager.ts:76-87`). Because pooled clients get a fresh server-side
-`clientId` on reconnect, the client `Worker` re-sends `RegisterWorker` on
-reconnect to stay visible (`client/worker/worker.ts:198-207`).
+`clientId` on reconnect, the client `Worker` re-sends `RegisterWorker` from its
+runtime reconnect callback to stay visible (`client/worker/runtime/state.ts`).
 
 ## Concurrency & Locking
 
@@ -306,7 +306,7 @@ renewal live in the job subsystem (`renewJobLock`), reached via `JobHeartbeat`.
 - **No persistence:** a server restart drops the entire registry; clients must
   re-register (the client `Worker` does this automatically on (re)connect).
 - **Cleanup leak on shutdown:** `stop()` must be called to clear the interval;
-  `QueueManager.shutdown` calls `workerManager.stop()` (`queueManager.ts:1866`).
+  `QueueManager.shutdown` calls `workerManager.stop()` (`queue-manager/lifecycle.ts`).
 
 ## Configuration
 

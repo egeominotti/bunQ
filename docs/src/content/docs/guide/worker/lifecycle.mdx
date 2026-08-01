@@ -158,9 +158,36 @@ worker.Run()
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+// `ctrlc` is the signal-hook crate used by this application.
+let shutdown_worker = worker.clone();
+ctrlc::set_handler(move || shutdown_worker.stop())?;
+
+worker.run()?; // returns after the handler calls stop()
+worker.close();
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+task = Task.async(fn -> Bunqueue.Worker.run(worker) end)
+
+receive do
+  :shutdown ->
+    :ok = Bunqueue.Worker.stop(worker) # waits for the active run_once batch
+    Task.await(task, :infinity)
+end
+```
+
+</TabItem>
 </Tabs>
 
-*In Rust and Elixir, calling `worker.stop()` / `Bunqueue.Worker.stop(worker)` from another thread or process makes the blocking run loop drain and return; there is no shared machinery to tear down.*
+*In Rust and Elixir, calling `worker.stop()` / `Bunqueue.Worker.stop(worker)`
+from another thread or process makes the blocking run loop drain and return;
+there is no shared client machinery to tear down.*
 
 ## Where to go next
 
@@ -174,4 +201,3 @@ worker.Run()
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

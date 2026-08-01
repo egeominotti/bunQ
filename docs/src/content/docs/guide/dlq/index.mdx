@@ -1,6 +1,6 @@
 ---
 title: "Dead Letter Queue: What Happens to Failed Jobs"
-description: "bunqueue keeps failed jobs in a Dead Letter Queue with full error history. Inspect them, retry manually or automatically, and expire old entries."
+description: "bunqueue keeps terminally failed jobs in a Dead Letter Queue with failure metadata. Inspect them, retry manually, and configure retention."
 head:
   - tag: meta
     attrs:
@@ -17,10 +17,20 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · dead letter queue</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Failed jobs, kept in the <em>DLQ.</em></h1>
-  <p class="bq-hero-sub">When a job runs out of retries, bunqueue does not throw it away. It lands in the Dead Letter Queue with its error and full attempt history, so you can see what went wrong and retry it.</p>
+  <p class="bq-hero-sub">When a job runs out of retries, bunqueue can retain it in the Dead Letter Queue with the terminal error and attempt metadata, so you can inspect it and retry it deliberately.</p>
 </div>
 
-The Dead Letter Queue (DLQ) is a holding area for jobs that failed permanently, for example after exhausting all their retry attempts. Nothing is lost: each entry keeps the original job, the error message, and a record of every attempt.
+The Dead Letter Queue (DLQ) is a holding area for jobs that failed permanently,
+for example after exhausting all retry attempts. Unless `removeOnFail` is set,
+each entry keeps the original job, its terminal error, and a complete ordered
+array of `AttemptRecord` values. The history includes retryable failures before
+the terminal attempt and remains attached across automatic DLQ redeliveries.
+
+Entries are not permanent by definition: `maxAge`, `maxEntries`, an explicit
+purge, or `Queue.obliterate()` can remove them. The defaults retain entries for
+seven days and cap each queue at 10,000 entries. Capacity eviction removes the
+oldest entry from memory and SQLite together, including its terminal ownership
+and stored result/log data.
 
 ## Quick Start
 

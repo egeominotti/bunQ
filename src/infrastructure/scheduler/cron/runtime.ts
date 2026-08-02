@@ -15,6 +15,7 @@ import type {
 } from '../types/cronScheduler';
 
 const SAFETY_FALLBACK_MS = 60_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** Registry, timers, and schedule mutation shared with cron execution. */
 export abstract class CronRuntime {
@@ -157,7 +158,7 @@ export abstract class CronRuntime {
         continue;
       }
 
-      const delay = Math.max(0, entry.cron.nextRun - Date.now());
+      const delay = Math.min(Math.max(0, entry.cron.nextRun - Date.now()), MAX_TIMER_DELAY_MS);
       this.nextTimer = setTimeout(() => {
         this.nextTimer = null;
         void this.tick();

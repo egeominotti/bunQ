@@ -1,5 +1,16 @@
 # bunqueue
 
+**MANDATORY — SKEPTIC AGENT**: before every `git commit` and every `git push`,
+invoke the `skeptic` agent and wait for its verdict. It must read the complete
+staged diff, identify at least three potential failure points per changed file,
+and verify race conditions, error handling, idempotency, type safety and test
+coverage. `FAIL` blocks commit and push; `CONDITIONAL` requires the user's
+explicit confirmation. The project profile is `.claude/agents/skeptic.md`.
+
+**ENGLISH ONLY**: keep all repository content in English, including source
+comments, tests, technical documentation, user documentation and agent
+configuration.
+
 "When I report a bug, don't start by trying to fix it. Instead, start by writing a test that reproduces the bug. Then, have subagents try to fix the bug and prove it with a passing test."
 
 **MANDATORY: After ANY code modification, run the isolated validation before committing:**

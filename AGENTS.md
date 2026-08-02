@@ -21,11 +21,20 @@ clients may run in other runtimes through the network protocol.
 
 ## Working rules
 
+- Before every `git commit` and every `git push`, invoke the `skeptic` custom
+  subagent and wait for its verdict. It must inspect the complete staged diff,
+  identify at least three potential failure points per changed file, verify
+  error handling, races, idempotency, type safety and test evidence, and run
+  applicable checks. `FAIL` blocks the operation; `CONDITIONAL` requires the
+  user's explicit confirmation. The project profiles live at
+  `.codex/agents/skeptic.toml` and `.claude/agents/skeptic.md`.
 - When a bug is reported, first add a regression test that reproduces it. Only
   after the test fails for the expected reason, use subagents to investigate
   fixes and prove the chosen fix with the passing regression test.
 - Preserve user changes. Never run `git reset`, `git checkout`, `git clean`, or
   discard unrelated edits unless the user explicitly requests it.
+- Keep all repository content in English, including source comments, tests,
+  internal documentation, user-facing documentation and agent configuration.
 - Keep changes narrowly scoped to the requested behavior. Do not refactor
   unrelated code while fixing a bug.
 - Use `rg`/`rg --files` for repository searches and `apply_patch` for manual

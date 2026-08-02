@@ -1,5 +1,5 @@
 import type { JobNode } from '../../client/flowTypes';
-import type { CronJobInput } from '../../domain/types/cron';
+import type { CronJob } from '../../domain/types/cron';
 import type { Job } from '../../domain/types/job';
 import type { FlowNodeResult, SerializedCron, SerializedJob } from '../types/adapter';
 
@@ -18,10 +18,7 @@ export function serializeMcpJob(job: Job): SerializedJob {
 }
 
 export function serializeMcpCron(
-  cron: Pick<CronJobInput, 'name' | 'queue' | 'schedule' | 'repeatEvery'> & {
-    nextRun: number | null;
-    executions: number;
-  }
+  cron: Pick<CronJob, 'name' | 'queue' | 'schedule' | 'repeatEvery' | 'nextRun' | 'executions'>
 ): SerializedCron {
   return {
     name: cron.name,

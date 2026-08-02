@@ -158,8 +158,14 @@ At the manager layer, `addCron` first removes an orphaned queued job when
 immediately consumed by the new worker (`application/queue-manager/services.ts`,
 #73). It then persists via `storage.saveCron`.
 
-### Event-driven wake (`scheduleNext`, `cronScheduler.ts:262-289`)
-Clears the current timer, pops stale heap entries (generation mismatch), then arms a single `setTimeout` for `max(0, nextRun - now)` on the soonest live cron. Re-run after every mutation (add/remove/load/tick).
+### Event-driven wake (`scheduleNext`, `runtime.ts`)
+Clears the current timer, pops stale heap entries (generation mismatch), then
+arms one `setTimeout` for the soonest live cron. Runtime timers cannot represent
+delays above `2_147_483_647ms`, so a farther `nextRun` is reached through bounded
+timer chunks. Each intermediate wake runs the normal due-time guard and rearms
+from the unchanged absolute `nextRun`; it does not persist, increment, or push.
+This prevents Bun from coercing a far-future timer to `1ms` and hot-looping.
+The timer is rearmed after every mutation (add/remove/load/tick).
 
 ### Tick / fire (`tick`, `cronScheduler.ts:296-440`)
 1. Drain heap entries whose `nextRun <= now` (`O(k log n)`).
@@ -179,8 +185,13 @@ Clears the current timer, pops stale heap entries (generation mismatch), then ar
 ### Restart recovery (`load`, `cronScheduler.ts:230-256`)
 For each loaded cron, if (`skipMissedOnRestart || skipIfNoWorker`) and `nextRun < now`, recompute `nextRun` forward and persist it (fixes #73). Since `skipMissedOnRestart` defaults to `true`, missed runs are skipped by default. Heap is rebuilt with `buildFrom` in `O(n)`.
 
-### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts:114-183`)
+### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts`)
 Builds cron `data` from the template (`buildCronData`), merges queue `defaultJobOptions` under per-scheduler `opts` into `CronJobOptions` (`buildCronJobOptions`, issue #86), extracts dedup from `opts.deduplication`, derives spawned-job `priority` from `opts.priority`/queue default (carried on the top-level field the handler reads), and namespaces the id via `toCronName`. Embedded mode calls `manager.addCron` (timezone defaults to `'UTC'`); TCP mode sends the `Cron` command. `removeJobScheduler`/`getJobScheduler(s)` mirror this over `CronDelete`/`CronList`.
+The immediate upsert result preserves the scheduler's normalized `pattern` or
+`every` field and exact `nextRun`. Embedded mode uses the `CronJob` returned by
+`manager.addCron`; TCP uses the broker's nested `cron` response. Both therefore
+match a subsequent `getJobScheduler()` read without approximating pattern
+schedules as 60-second intervals.
 
 ## Concurrency & Locking
 
@@ -196,6 +207,9 @@ Builds cron `data` from the template (`buildCronData`), merges queue `defaultJob
 - **Push failure** → state already persisted, slot's job lost, `cron:missed` emitted, scheduling continues.
 - **`maxLimit` exhaustion** → cron removed from the in-memory map on the tick that would exceed it (`isAtLimit`); `0`/negative limits are normalized to "unlimited" everywhere (`cron.ts:97-99`, `cli/commands/cron.ts:81-89`).
 - **Timer drift / missed `setTimeout`** → the 60s `SAFETY_FALLBACK_MS` interval re-runs `tick` as a backstop (`cronScheduler.ts:25-26,110-112`).
+- **Far-future timer** → delays above the runtime's signed 32-bit timer ceiling
+  are chunked without changing the persisted absolute `nextRun`; no early
+  execution or 1ms hot loop occurs.
 - **Overlap from slow jobs** → suppressed via the `interval * 0.8` window and `preventOverlap` uniqueKey; interval-rate crons anchor to the scheduled slot to avoid drift.
 - **`every <= 0`** → CLI rejects it; otherwise `getNextIntervalRun` would always be in the past and fire every tick (`cli/commands/cron.ts:70-75`).
 - **Restart with past `nextRun`** → recalculated forward; missed runs skipped by default (`skipMissedOnRestart` default `true`).
@@ -207,6 +221,8 @@ Builds cron `data` from the template (`buildCronData`), merges queue `defaultJob
 
 - `CronSchedulerConfig.checkIntervalMs` — **deprecated/no-op**; the scheduler uses precise `setTimeout` (`cronScheduler.ts:19-23,68-71`).
 - `SAFETY_FALLBACK_MS = 60_000` — internal constant, not env-configurable.
+- `MAX_TIMER_DELAY_MS = 2_147_483_647` — internal timer-chunk ceiling, not
+  env-configurable; it does not cap cron intervals or persisted timestamps.
 - Per-cron knobs (via `CronJobInput`/`RepeatOpts`): `schedule`/`repeatEvery`, `timezone` (embedded default `'UTC'`), `priority`, `maxLimit`, `uniqueKey`/`dedup`, `skipMissedOnRestart` (default `true`), `skipIfNoWorker` (default `false`), `preventOverlap` (default `true`), `immediately`, and `jobOptions` (`maxAttempts`/`backoff`/`timeout`/`delay`/`stallTimeout`/`removeOnComplete`/`removeOnFail`).
 - Queue-level `defaultJobOptions` feed `buildCronJobOptions` as the base, overridden by the per-scheduler template `opts` (`scheduler.ts:87-101`).
 - Data path / persistence env vars (`BUNQUEUE_DATA_PATH`, etc.) are owned by [Configuration & Entrypoint](./configuration.md) and [Persistence](./persistence.md); this module has no dedicated env vars.

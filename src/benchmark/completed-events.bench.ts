@@ -13,7 +13,7 @@ function fmt(n: number): string {
 }
 
 async function main(): Promise<void> {
-  console.log(`\n🧪 Test: ${fmt(JOBS)} jobs con evento COMPLETED\n`);
+  console.log(`\n🧪 Test: ${fmt(JOBS)} jobs with COMPLETED events\n`);
 
   const qm = new QueueManager();
   let completedEvents = 0;
@@ -61,32 +61,32 @@ async function main(): Promise<void> {
 
   // Results
   console.log('\n' + '═'.repeat(50));
-  console.log('📊 RISULTATI');
+  console.log('📊 RESULTS');
   console.log('═'.repeat(50));
-  console.log(`Jobs totali:        ${fmt(JOBS)}`);
-  console.log(`Eventi COMPLETED:   ${fmt(completedEvents)}`);
-  console.log(`Job IDs unici:      ${fmt(receivedJobIds.size)}`);
+  console.log(`Total jobs:         ${fmt(JOBS)}`);
+  console.log(`COMPLETED events:   ${fmt(completedEvents)}`);
+  console.log(`Unique job IDs:     ${fmt(receivedJobIds.size)}`);
   console.log('─'.repeat(50));
   console.log(
-    `Tempo push:         ${pushTime.toFixed(0)}ms (${fmt((JOBS / pushTime) * 1000)} jobs/sec)`
+    `Push time:          ${pushTime.toFixed(0)}ms (${fmt((JOBS / pushTime) * 1000)} jobs/sec)`
   );
   console.log(
-    `Tempo process:      ${processTime.toFixed(0)}ms (${fmt((JOBS / processTime) * 1000)} jobs/sec)`
+    `Processing time:    ${processTime.toFixed(0)}ms (${fmt((JOBS / processTime) * 1000)} jobs/sec)`
   );
   console.log(
-    `Tempo totale:       ${totalTime.toFixed(0)}ms (${fmt((JOBS / totalTime) * 1000)} jobs/sec)`
+    `Total time:         ${totalTime.toFixed(0)}ms (${fmt((JOBS / totalTime) * 1000)} jobs/sec)`
   );
   console.log('─'.repeat(50));
 
   if (completedEvents === JOBS && receivedJobIds.size === JOBS) {
-    console.log('✅ TEST PASSED: Tutti gli eventi COMPLETED ricevuti!');
+    console.log('✅ TEST PASSED: all COMPLETED events received!');
   } else {
-    console.log(`❌ TEST FAILED: Attesi ${JOBS}, ricevuti ${completedEvents}`);
+    console.log(`❌ TEST FAILED: expected ${JOBS}, received ${completedEvents}`);
   }
 
   // Stats
   const stats = qm.getStats();
-  console.log('\n📈 Stats finali:');
+  console.log('\n📈 Final stats:');
   console.log(`   Completed in memory: ${fmt(stats.completed)}`);
   console.log(`   Total pushed:        ${fmt(Number(stats.totalPushed))}`);
   console.log(`   Total completed:     ${fmt(Number(stats.totalCompleted))}`);

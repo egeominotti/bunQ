@@ -566,6 +566,15 @@ new server, dynamic ports, and a unique SQLite directory that is removed in
 `finally`. See [Test Isolation and Reproducibility](./testing.md) for the threat
 model, commands, cleanup behavior, and native-only benchmark policy.
 
+The dedicated [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md)
+adds a fail-closed API boundary. The TypeScript checker discovers every callable
+method on exported core client classes, then the suite requires the exact
+applicable method set to complete against a fresh embedded SQLite manager and a
+real dynamic-port TCP broker backed by SQLite. Transport-only
+`TcpConnectionPool` methods are real-TCP tested and explicitly marked embedded
+`N/A`. GitHub Actions exposes this as the required `test-core-e2e` job; no
+manually maintained class or method allowlist can hide a new uncovered API.
+
 The Astro documentation site is deployed from the `docs/` Vercel project root.
 Its `vercel.json` keeps the versioned TypeDoc dump crawlable but out of search
 indexes with `X-Robots-Tag: noindex, follow`; per-page Markdown twins receive
@@ -597,6 +606,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 ### Engineering tooling
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
+- [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) — Compiler-discovered exact coverage of every callable Queue/Worker/Job/Cron/DLQ/Flow/Workflow facade method in every applicable mode, plus the TCP-only connection pool, without test doubles.
 - [Benchmarking and Performance Evidence](./features/benchmarks.md) — Native measurement contract, evidence levels, runner catalogue, Workflow Engine single/scale harnesses, persistence labels, protocol-cap handling, integrity requirements, and publication checklist.
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.
 

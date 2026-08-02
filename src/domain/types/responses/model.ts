@@ -120,6 +120,13 @@ export interface CronInfo {
   readonly repeatEvery: number | null;
   readonly nextRun: number;
   readonly executions: number;
+  readonly maxLimit?: number | null;
+  readonly timezone?: string | null;
+  readonly priority?: number;
+}
+export interface CronResponse extends BaseResponse {
+  readonly ok: true;
+  readonly cron: CronInfo;
 }
 export interface CronListResponse extends BaseResponse {
   readonly ok: true;
@@ -159,6 +166,7 @@ export type Response =
   | CountResponse
   | StatsResponse
   | MetricsResponse
+  | CronResponse
   | CronListResponse
   | HelloResponse
   | ErrorResponse

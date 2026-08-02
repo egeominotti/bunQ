@@ -48,11 +48,13 @@ export function handleCron(
         schedule: cron.schedule,
         repeatEvery: cron.repeatEvery,
         nextRun: cron.nextRun,
+        executions: cron.executions,
+        maxLimit: cron.maxLimit,
         timezone: cron.timezone,
         priority: cron.priority,
       },
       reqId,
-    } as Response;
+    };
   } catch (err) {
     return resp.error(err instanceof Error ? err.message : 'Failed to add cron', reqId);
   }

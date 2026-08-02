@@ -59,6 +59,7 @@
     "docs:api": "bun run scripts/build-api-reference.ts",
     "check:docs-data": "bun run scripts/check-docs-data.ts",
     "test": "BUNQUEUE_EMBEDDED=1 bun test",
+    "test:core-e2e": "bun test test/core-e2e/core-public-api.e2e.test.ts",
     "test:model": "BUNQUEUE_EMBEDDED=1 bun test test/model-based/queue-model.test.ts test/model-based/workflow-model.test.ts test/model-based/flow-producer-model.test.ts test/model-based/backup-model.test.ts test/model-based/monitoring-model.test.ts test/model-based/enterprise-telemetry-model.test.ts",
     "test:sandbox": "bun run scripts/test-sandbox.ts",
     "test:sandbox:sdk": "bun run scripts/test-sdk-sandbox.ts",

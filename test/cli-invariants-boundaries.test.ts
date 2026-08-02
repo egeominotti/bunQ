@@ -11,7 +11,7 @@ const UNICODE_TEXT = [
   '日本語',
   'e\u0301',
   '\u0000',
-  'linea\nnuova',
+  'line\nbreak',
   'مهمة',
   '👩🏽‍💻',
 ];

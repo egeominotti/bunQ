@@ -16,9 +16,17 @@ head:
 
 ## Unreleased
 
-## [2.8.55] - 2026-08-01
+## [2.8.55] - 2026-08-02
 
 ### Engine correctness
+
+- Preserved complete `SchedulerInfo` values from `upsertJobScheduler()` in both
+  embedded and TCP modes: immediate results now retain `pattern`/`every` and
+  use the exact scheduler or broker `nextRun` value instead of approximating
+  pattern schedules as a 60-second interval.
+- Chunked cron timers at the runtime's signed 32-bit timeout ceiling while
+  retaining the absolute persisted `nextRun`. Yearly and other far-future
+  schedules no longer collapse to a 1ms hot loop or flood overflow warnings.
 
 - Preserved DLQ automatic-retry history, retry count, expiry and backoff across
   repeated terminal failures and broker restarts. SQLite now moves each retried
@@ -32,6 +40,14 @@ head:
 - Forwarded custom rate-limit durations from the TypeScript and Python SDKs,
   restoring the requested limiter window instead of silently using the broker
   default.
+- Unblocked the publish-time TypeScript build by typing MCP cron serialization
+  against normalized domain `CronJob` values. Embedded and TCP MCP backends now
+  expose identical optional cron fields instead of leaking protocol `null`
+  values from TCP operations. TCP creation now reads authoritative nested cron
+  metadata and propagates broker validation errors instead of returning a
+  fabricated success. Dedicated embedded and real-TCP functional contracts now
+  cover invalid input, add/list/get metadata parity, delete and post-delete
+  lookup behavior.
 
 ### Architecture
 
@@ -45,6 +61,15 @@ head:
 
 ### Documentation and verification
 
+- Added a fail-closed, no-mock core E2E matrix that automatically discovers all
+  298 callable Queue, Worker, Job, Cron, DLQ, Flow, Workflow, transport and
+  related facade instance methods from TypeScript. It exercises the exact
+  applicable surface against fresh embedded and real TCP SQLite runtimes. A
+  dedicated required CI job now blocks the release graph when any public class
+  or method is uncovered or fails its runtime contract.
+- Expanded that gate into 583 applicable method/transport checks and a complete
+  298-row Markdown/JSON evidence matrix uploaded by CI for direct review.
+
 - Audited all 33 requested Queue, Worker, Cron and DLQ guide sections and added
   discoverable real TCP and embedded evidence for every section. Shared parity
   contracts now cover DLQ maintenance, stall detection, queue groups,
@@ -55,6 +80,10 @@ head:
 - Completed every audited multi-language example group with Bun, Node.js/Deno,
   Python, PHP, Go, Rust and Elixir tabs, guarded by an executable documentation
   test.
+- Added shared `skeptic` reviewer profiles for Claude Code and Codex CLI, with
+  repository instructions requiring the review before every commit and push.
+  Repository content is now English-only, and obsolete design plans plus a
+  redundant manual Simple Mode script were removed.
 
 ## [2.8.54] - 2026-08-01
 

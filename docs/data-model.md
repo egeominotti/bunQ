@@ -666,10 +666,17 @@ sharing `ok`. Key variants:
 | `CountResponse`        | `{ count: number; ids?: string[] }`           | Count / Clean       |
 | `StatsResponse`        | `{ stats: StatsData }`                        | Stats               |
 | `MetricsResponse`      | `{ metrics: MetricsData }`                    | Metrics             |
+| `CronResponse`         | `{ cron: CronInfo }`                          | Cron                |
 | `CronListResponse`     | `{ crons: CronInfo[] }`                       | CronList            |
 | `HelloResponse`        | `{ protocolVersion; capabilities; server; version }` | Hello        |
 | `DataResponse<T>`      | `{ data: T }`                                 | generic payloads    |
 | `ErrorResponse`        | `{ ok: false; error: string }`                | failures            |
+
+`CronInfo` carries `name`, `queue`, nullable `schedule`/`repeatEvery`, the
+authoritative numeric `nextRun`, `executions`, and optional `maxLimit`,
+`timezone`, and `priority`. The `Cron` add response uses `CronResponse`; MCP and
+client adapters must read the nested `cron` object rather than inventing
+top-level scheduling metadata.
 
 `JobCounts` (`response.ts:73-82`) carries all 8 buckets including the virtual
 `'waiting-children'` and `paused`. Builder helpers (`ok`, `batch`, `job`,

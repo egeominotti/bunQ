@@ -3,44 +3,51 @@ import type { JobLogEntry } from '../../../domain/types/worker';
 import type { SerializedCron, WebhookInfo, WorkerInfo } from '../../types/adapter';
 import { TcpQueueBackend } from './queues';
 
+function serializeTcpCron(value: unknown): SerializedCron {
+  if (!value || typeof value !== 'object') throw new Error('Invalid cron response from broker');
+  const cron = value as Record<string, unknown>;
+  const schedule = cron.schedule;
+  const repeatEvery = cron.repeatEvery;
+  if (
+    typeof cron.name !== 'string' ||
+    typeof cron.queue !== 'string' ||
+    typeof cron.nextRun !== 'number' ||
+    !Number.isFinite(cron.nextRun) ||
+    (schedule != null && typeof schedule !== 'string') ||
+    (repeatEvery != null && (typeof repeatEvery !== 'number' || !Number.isFinite(repeatEvery)))
+  ) {
+    throw new Error('Invalid cron response from broker');
+  }
+  const nextRun = new Date(cron.nextRun);
+  if (Number.isNaN(nextRun.getTime())) throw new Error('Invalid cron response from broker');
+  return {
+    name: cron.name,
+    queue: cron.queue,
+    schedule: schedule ?? undefined,
+    repeatEvery: repeatEvery ?? undefined,
+    nextRun: nextRun.toISOString(),
+    executions: typeof cron.executions === 'number' ? cron.executions : 0,
+  };
+}
+
 export class TcpServiceBackend extends TcpQueueBackend {
   async addCron(input: CronJobInput): Promise<SerializedCron> {
     const response = await this.send({ cmd: 'Cron', ...input });
-    return {
-      name: input.name,
-      queue: input.queue,
-      schedule: input.schedule ?? undefined,
-      repeatEvery: input.repeatEvery ?? undefined,
-      nextRun: response.nextRun ? new Date(response.nextRun as number).toISOString() : null,
-      executions: 0,
-    };
+    if (response.ok !== true) {
+      throw new Error(typeof response.error === 'string' ? response.error : 'Failed to add cron');
+    }
+    return serializeTcpCron(response.cron);
   }
 
   async listCrons(): Promise<SerializedCron[]> {
     const response = await this.send({ cmd: 'CronList' });
-    return ((response.crons as Array<Record<string, unknown>>) ?? []).map((cron) => ({
-      name: cron.name as string,
-      queue: cron.queue as string,
-      schedule: cron.schedule as string | undefined,
-      repeatEvery: cron.repeatEvery as number | undefined,
-      nextRun: cron.nextRun ? new Date(cron.nextRun as number).toISOString() : null,
-      executions: (cron.executions as number) ?? 0,
-    }));
+    return ((response.crons as unknown[]) ?? []).map(serializeTcpCron);
   }
 
   async getCron(name: string): Promise<SerializedCron | null> {
     const response = await this.send({ cmd: 'CronGet', name });
     if (!response.ok) return null;
-    const cron = response.cron as Record<string, unknown>;
-    if (!cron) return null;
-    return {
-      name: cron.name as string,
-      queue: cron.queue as string,
-      schedule: cron.schedule as string | undefined,
-      repeatEvery: cron.repeatEvery as number | undefined,
-      nextRun: cron.nextRun ? new Date(cron.nextRun as number).toISOString() : null,
-      executions: (cron.executions as number) ?? 0,
-    };
+    return serializeTcpCron(response.cron);
   }
 
   async deleteCron(name: string) {

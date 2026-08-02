@@ -104,6 +104,15 @@ pause mutation or use finite pages with application-level reconciliation.
 
 ## Verification contract
 
+The exhaustive successor to this focused remediation audit is the
+[Core Public API End-to-End Matrix](./core-public-api-e2e.md). It automatically
+discovers all 298 callable instance methods on exported core client objects and
+requires exact, no-test-double coverage in every applicable runtime. The 285
+dual-mode methods run against embedded SQLite and a real TCP/SQLite broker; the
+13 `TcpConnectionPool` methods are TCP-only and carry explicit embedded `N/A`
+cells. A newly exported class or method therefore fails CI until a successful
+runtime scenario covers it.
+
 The regression suite under `test/stub-contract/` was written red before the
 implementations. It contains:
 

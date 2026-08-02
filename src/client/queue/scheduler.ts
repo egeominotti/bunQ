@@ -129,7 +129,7 @@ export async function upsertJobScheduler(
 
   if (ctx.embedded) {
     const manager = getSharedManager();
-    manager.addCron({
+    const cron = manager.addCron({
       name: cronName,
       queue: ctx.name,
       data,
@@ -149,8 +149,10 @@ export async function upsertJobScheduler(
     return {
       id: schedulerId,
       name: jobTemplate?.name ?? 'default',
-      next: Date.now() + (repeatEvery ?? 60000),
-      limit: repeatOpts.limit && repeatOpts.limit > 0 ? repeatOpts.limit : undefined,
+      next: cron.nextRun,
+      pattern: cron.schedule ?? undefined,
+      every: cron.repeatEvery ?? undefined,
+      limit: cron.maxLimit ?? undefined,
     };
   }
 
@@ -172,12 +174,14 @@ export async function upsertJobScheduler(
     jobOptions,
     ...dedupFields,
   });
-
   if (!response.ok) return null;
+  const returnedCron = (response as { cron?: { nextRun?: number } }).cron;
   return {
     id: schedulerId,
     name: jobTemplate?.name ?? 'default',
-    next: (response.nextRun ?? Date.now()) as number,
+    next: returnedCron?.nextRun ?? Date.now(),
+    pattern: cronPattern,
+    every: repeatEvery,
     limit: repeatOpts.limit && repeatOpts.limit > 0 ? repeatOpts.limit : undefined,
   };
 }

@@ -1,19 +1,19 @@
 /**
- * Benchmark per verificare le ottimizzazioni algoritmiche P0 + P1
+ * Benchmark for the P0 + P1 algorithmic optimizations.
  *
- * Testa:
- * 1. getStats() - O(32) invece di O(n)
- * 2. Cron tick - O(k log n) invece di O(n)
- * 3. Dependency resolution - O(m) invece di O(n×k)
- * 4. Rate limiter - O(1) invece di O(w)
- * 5. cleanQueue() - O(log n + k) invece di O(n)
- * 6. Batch pull - O(1) lock invece di O(b)
+ * Covers:
+ * 1. getStats() - O(32) instead of O(n)
+ * 2. Cron tick - O(k log n) instead of O(n)
+ * 3. Dependency resolution - O(m) instead of O(n×k)
+ * 4. Rate limiter - O(1) instead of O(w)
+ * 5. cleanQueue() - O(log n + k) instead of O(n)
+ * 6. Batch pull - O(1) lock instead of O(b)
  */
 
 import { QueueManager } from '../application/queueManager';
 import { ProtocolRateLimiter } from '../infrastructure/server/rateLimiter';
 
-// Utility per misurare il tempo
+// Timing utility.
 function measure(name: string, fn: () => void, iterations: number = 1): number {
   const start = performance.now();
   for (let i = 0; i < iterations; i++) {
@@ -50,7 +50,7 @@ async function benchmarkGetStats() {
 
   const qm = new QueueManager();
 
-  // Popola con job
+  // Populate with jobs.
   const jobCounts = [1000, 10000, 50000];
 
   for (const count of jobCounts) {
@@ -88,18 +88,18 @@ function benchmarkCronTick() {
   const cronCounts = [100, 1000, 5000];
 
   for (const count of cronCounts) {
-    // Aggiungi cron job
+    // Add cron jobs.
     console.log(`\n  Adding ${count} cron jobs...`);
     for (let i = 0; i < count; i++) {
       qm.addCron({
         name: `cron-${i}`,
         queue: 'cron-queue',
         data: { i },
-        repeatEvery: 3600000 + i * 1000, // 1 ora + offset per evitare tutti insieme
+        repeatEvery: 3600000 + i * 1000, // One hour plus an offset to spread executions.
       });
     }
 
-    // Benchmark getStats del cron (include nextRun lookup)
+    // Benchmark cron getStats, including the nextRun lookup.
     measure(
       `Cron getStats with ${count} crons`,
       () => {
@@ -108,7 +108,7 @@ function benchmarkCronTick() {
       1000
     );
 
-    // Pulisci
+    // Clean up.
     for (let i = 0; i < count; i++) {
       qm.removeCron(`cron-${i}`);
     }
@@ -129,13 +129,13 @@ function benchmarkRateLimiter() {
       maxRequests: maxReq,
     });
 
-    // Riempi la finestra
+    // Fill the window.
     console.log(`\n  Filling window with ${maxReq} requests...`);
     for (let i = 0; i < maxReq - 1; i++) {
       limiter.isAllowed('client-1');
     }
 
-    // Benchmark isAllowed con finestra quasi piena
+    // Benchmark isAllowed with an almost-full window.
     measure(
       `isAllowed() with ${maxReq - 1} requests in window`,
       () => {
@@ -158,17 +158,17 @@ async function benchmarkCleanQueue() {
   for (const count of jobCounts) {
     const qm = new QueueManager();
 
-    // Push job con createdAt vecchio (simulato tramite delay negativo non possibile, usiamo job normali)
+    // Use regular jobs because a negative delay cannot simulate an old createdAt value.
     console.log(`\n  Pushing ${count} jobs...`);
     for (let i = 0; i < count; i++) {
       await qm.push('clean-queue', { data: { i } });
     }
 
-    // Benchmark cleanQueue (con graceMs molto grande, non pulisce nulla ma deve cercare)
+    // Benchmark cleanQueue with a large graceMs: it scans without removing anything.
     measure(
       `cleanQueue() scan with ${count} jobs`,
       () => {
-        qm.clean('clean-queue', 1, undefined, 100); // graceMs=1ms, cerca job vecchi di 1ms
+        qm.clean('clean-queue', 1, undefined, 100); // graceMs=1 ms scans for jobs older than 1 ms.
       },
       100
     );
@@ -186,7 +186,7 @@ async function benchmarkBatchPull() {
   for (const batchSize of batchSizes) {
     const qm = new QueueManager();
 
-    // Push abbastanza job
+    // Push enough jobs for the batch.
     const totalJobs = batchSize * 10;
     console.log(`\n  Pushing ${totalJobs} jobs for batch size ${batchSize}...`);
     for (let i = 0; i < totalJobs; i++) {
@@ -222,11 +222,11 @@ async function benchmarkDependencyResolution() {
 
   const qm = new QueueManager();
 
-  // Crea job parent
+  // Create the parent job.
   console.log('\n  Creating parent job...');
   const parent = await qm.push('dep-queue', { data: { type: 'parent' } });
 
-  // Crea job con dipendenze
+  // Create dependent jobs.
   const childCounts = [10, 50, 100];
 
   for (const count of childCounts) {
@@ -238,18 +238,18 @@ async function benchmarkDependencyResolution() {
       });
     }
 
-    // Il parent è in queue, estrailo e completalo per triggerare la dependency resolution
+    // Pull and complete the queued parent to trigger dependency resolution.
     const pulledParent = await qm.pull('dep-queue', 0);
     if (pulledParent) {
       const start = performance.now();
       await qm.ack(pulledParent.id);
-      // Aspetta che la dependency resolution completi
+      // Wait for dependency resolution to finish.
       await Bun.sleep(100);
       const elapsed = performance.now() - start;
       console.log(`  Dependency resolution for ${count} children: ${elapsed.toFixed(2)}ms`);
     }
 
-    // Pulisci i child
+    // Clean up the child jobs.
     for (let i = 0; i < count; i++) {
       const child = await qm.pull('dep-queue', 0);
       if (child) await qm.ack(child.id);

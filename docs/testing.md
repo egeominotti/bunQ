@@ -358,10 +358,25 @@ and embedded jobs remain parallel rather than starting nested Docker. They use
 the same pinned Bun version and frozen lockfile as the local sandbox. A CI job is
 the isolation equivalent of one local suite container.
 
+`test-core-e2e` runs `bun run test:core-e2e` as a distinct required job. Its
+TypeScript-compiler inventory currently covers 298 public instance methods
+across Queue, Worker, Job, schedulers, DLQ, FlowProducer, QueueGroup, Bunqueue,
+SandboxedWorker, Forwarder, Workflow, Engine, event facades, and
+TcpConnectionPool. Exported runtime classes are discovered automatically. The
+285 dual-mode methods use a fresh embedded SQLite manager and a real
+dynamic-port TCP broker with a separate SQLite database; the 13 transport-only
+pool methods run against the broker and carry explicit embedded `N/A` cells.
+The suite scans its contracts for test doubles and compares successful coverage
+to the applicable discovered surface exactly. It exposes 583 applicable
+method-mode checks and uploads the full 298-row Markdown/JSON evidence matrix as
+a CI artifact. See
+[Core Public API End-to-End Matrix](./features/core-public-api-e2e.md).
+
 `.github/workflows/sdk.yml` is both reusable and directly schedulable. CI calls
 it once and waits for an explicit `sdk-gate` that checks the result of all six
 language jobs even when an earlier one failed or was cancelled. A root
-`quality-gate` similarly checks every core, docs, and SDK result. The version
+`quality-gate` similarly checks the public-API E2E job plus every other core,
+docs, and SDK result. The version
 gate, binary matrix, container publication, and GitHub release are all
 transitively downstream; Docker publication also waits for the complete binary
 matrix. The TypeScript package publisher is manual, runs the same reusable

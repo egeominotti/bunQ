@@ -82,6 +82,12 @@ All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], 
 - `SerializedJob` — `{ id, queue, data, priority, state?, progress, attempts, maxAttempts, createdAt (ISO), startedAt? (ISO) }`. Built by `serializeJob` (embedded, `adapter.ts:209`) or `parseJob` (TCP, `adapter.ts:694`); both stringify the numeric `id`/timestamps.
 - `JobCounts` — `{ waiting, prioritized, delayed, active, completed, failed, paused }`.
 - `SerializedCron` — `{ name, queue, schedule?, repeatEvery?, nextRun (ISO|null), executions }`.
+  The embedded serializer accepts the normalized domain `CronJob`, where the
+  inactive scheduling field is `null`, and converts it to `undefined`. The TCP
+  adapter performs the same boundary conversion on `CronInfo`, so JSON output
+  omits `schedule` for interval crons and `repeatEvery` for pattern crons in
+  both modes. TCP creation reads the authoritative nested `cron` response,
+  including its ISO `nextRun` and preserved execution count.
 - `WebhookInfo` — `{ id, url, events[], queue?, enabled }`.
 - `WorkerInfo` — `{ id, name, queues[], active, processed, failed, lastHeartbeat }`.
 - `FlowNodeResult` — recursive `{ jobId, name, queueName, children? }` (`toFlowNodeResult`, `adapter.ts:248`).
@@ -124,6 +130,19 @@ The MCP server holds no locks of its own; concurrency safety is delegated to the
 - **Pagination translation (issue #87):** the MCP `get_jobs` tool exposes `start`/`end`, but the TCP protocol uses `offset`/`limit`; `TcpBackend.getJobs` translates `limit = end - start` (`adapter.ts:863-876`) so pagination actually applies in TCP mode.
 - **Per-queue stats (issue #87):** `TcpBackend.getPerQueueStats` queries `DashboardQueues` (not `Metrics`) to get a real per-queue breakdown (`adapter.ts:1094-1114`).
 - **Response-envelope variance:** `TcpBackend` defensively reads nested envelopes — `GetJobCounts` under `res.counts`, `ListWorkers` under `res.data.workers` (falling back to `res.workers`), `StorageStatus` under `res.data` (`adapter.ts:878-891`, `:1040-1054`, `:1134-1141`).
+- **Cron null normalization:** the domain and TCP protocol intentionally retain
+  `null` for the inactive cron scheduling field, while the MCP
+  `SerializedCron` contract uses optional fields. Both backends normalize the
+  boundary to `undefined`; regression coverage exercises `add`, `list` and
+  `get` for interval and pattern crons against embedded and a real TCP broker.
+  The same shared contract also runs explicitly in both functional matrices via
+  `scripts/embedded/test-mcp-cron-serialization.ts` and
+  `scripts/tcp/test-mcp-cron-serialization.ts`, including metadata, deletion
+  and post-delete lookup behavior.
+- **Cron creation errors:** protocol-level `{ ok: false, error }` responses are
+  rejected with the broker error instead of being converted into fabricated
+  cron metadata. Successful responses must contain a valid nested cron
+  envelope; malformed success payloads are rejected.
 - **HTTP handler single-per-queue:** registering a handler on a queue that already has one silently `unregister`s the previous worker first (`httpHandler.ts:27-29`); only one handler per queue can be active.
 - **HTTP handler timeout:** request aborts via `AbortController` after `timeoutMs` (default 30s; tool schema clamps 1000–120000ms); the timer is always cleared in `finally` (`httpHandler.ts:68`).
 - **Webhook event validation:** `add_webhook` accepts only `WEBHOOK_EVENTS` (`job.pushed|started|completed|failed|progress`); `job.stalled` is accepted by stored types for backward-compat but is never emitted.

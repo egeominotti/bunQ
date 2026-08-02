@@ -226,8 +226,11 @@ await this.fireCronJob(cron, now);
 There is no configurable polling interval. The scheduler is event-driven:
 
 ```typescript
-// Precise timer: wakes exactly when the next cron is due
-const delay = Math.max(0, nextEntry.cron.nextRun - Date.now());
+// Precise timer, chunked at the runtime's signed 32-bit timeout ceiling
+const delay = Math.min(
+  Math.max(0, nextEntry.cron.nextRun - Date.now()),
+  2_147_483_647,
+);
 this.nextTimer = setTimeout(() => void this.tick(), delay);
 
 // Safety fallback: catches timer drift and missed events
@@ -237,9 +240,21 @@ this.safetyInterval = setInterval(() => void this.tick(), SAFETY_FALLBACK_MS);
 
 The legacy `checkIntervalMs` config option is still accepted for backward compatibility but is deprecated and ignored.
 
+Schedules farther than about 24.8 days keep their original absolute `nextRun`
+in memory and SQLite. The bounded timer wakes at the ceiling, the normal due
+guard observes that the cron is still in the future, and the scheduler rearms
+for the remaining duration. This avoids Bun's overflow fallback to a 1ms timer
+without consuming an execution, persisting an intermediate timestamp, or
+creating a job early.
+
 ## Usage Example
 
 The client SDK exposes the scheduler through `Queue.upsertJobScheduler()` (embedded mode calls `QueueManager.addCron()` directly; TCP mode sends the `Cron` command):
+
+The returned `SchedulerInfo.next` is authoritative in both modes: embedded uses
+the `CronJob.nextRun` returned by the scheduler, while TCP reads the nested
+`cron.nextRun` returned by the broker. It therefore matches an immediate
+`getJobScheduler()` lookup for both interval and pattern schedules.
 
 ```typescript
 // Add a cron job (2 AM daily, Rome time, at most 365 runs)

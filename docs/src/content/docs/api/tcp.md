@@ -1153,8 +1153,10 @@ Create or update a cron/repeating job schedule.
     schedule: string | null,
     repeatEvery: number | null,
     nextRun: number,
-    timezone: string | undefined,
-    priority: number | undefined
+    executions: number,
+    maxLimit: number | null,
+    timezone: string | null,
+    priority: number
   }
 }
 ```

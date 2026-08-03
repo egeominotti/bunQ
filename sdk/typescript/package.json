@@ -57,6 +57,9 @@
     "typescript": "^5.7.0",
     "@types/node": "^22.0.0"
   },
+  "overrides": {
+    "qs": "^6.15.2"
+  },
   "author": "Egeo Minotti",
   "homepage": "https://bunqueue.dev/guide/sdks/",
   "repository": {

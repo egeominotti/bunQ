@@ -11,6 +11,7 @@
  */
 
 import { describe, test, expect, afterEach } from 'bun:test';
+import { shutdownManager } from '../src/client';
 import { Workflow, Engine } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
@@ -141,7 +142,11 @@ describe('Workflow E2E - Production Scenarios', () => {
   let engine: Engine;
 
   afterEach(async () => {
-    if (engine) await engine.close(true);
+    try {
+      if (engine) await engine.close(true);
+    } finally {
+      shutdownManager();
+    }
   });
 
   test('SCENARIO 1: Full e-commerce order pipeline with real service simulation', async () => {

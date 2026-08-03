@@ -2,7 +2,57 @@
 
 All notable changes to bunqueue are documented here.
 
-## [2.8.56] - 2026-08-03
+## [2.8.57] - 2026-08-03
+
+### Release verification
+
+- Fixed an order-dependent CI failure in the Workflow production scenarios.
+  Their teardown now closes the process-wide embedded `QueueManager` after the
+  owning Engine is closed, so later SQLite restart tests cannot inherit an
+  in-memory singleton and silently write to the wrong persistence backend.
+  `Engine.close()` itself remains ownership-safe and does not shut down a
+  manager that may still be shared by unrelated Queue or Worker instances.
+- Made the affected suite immune to the same class instead of only to the one
+  file that triggered it. `test/parent-option-restart.test.ts` now claims the
+  shared manager in `beforeEach`, because Bun discovers test files in readdir
+  order and any of the other suites that leave an embedded manager alive
+  reproduces the identical failure — a different suite on macOS than on Linux.
+  `test/repro-embedded-manager-leak-order.test.ts` reproduces the hazard
+  deterministically in one file and locks the remedy.
+- Added a packed-tarball consumer regression. The test builds the library,
+  creates the exact npm archive, installs it as a package in an isolated
+  consumer, and imports the documented root configuration, client Queue/Worker,
+  and Workflow Engine entrypoints. Release validation can no longer pass by
+  testing only source-tree imports. The consumer unpacks the archive into its
+  own `node_modules` and links only the manifest's declared dependencies, so it
+  asserts that `croner` and `msgpackr` are sufficient to import every
+  entrypoint. Symlinking the package instead resolved dependencies from the
+  extraction directory and passed on macOS while failing on Linux. All five
+  runtime entrypoints are imported, and `bunqueue/mcp` is asserted to fail with
+  the actionable `bun add @modelcontextprotocol/sdk` message rather than a
+  resolution stack trace when that optional peer is absent.
+- Fixed the scheduled `Go / Gremlins` mutation job, which failed before running
+  a single mutant with `server start failed: exec: "bun": executable file not
+  found in $PATH`. The Go suite's `TestMain` spawns a real broker with `bun
+  src/main.ts`, so the job now installs the pinned Bun toolchain like every
+  other job that needs it.
+- Cleared the weekly SDK advisory gate. The TypeScript SDK pinned `qs@6.15.1`
+  transitively through `@stryker-mutator/core` → `typed-rest-client`, which is
+  affected by GHSA-q8mj-m7cp-5q26 (`qs.stringify` DoS). A `qs: ^6.15.2` override
+  moves the mutation toolchain to a patched release; the published client itself
+  never depended on `qs`.
+
+### Do not use 2.8.56
+
+- **2.8.56 is broken. Install 2.8.57 or newer.** Its CI run was red — the unit
+  suite failed on `parent option dependency recovery > embedded keeps the parent
+  dependency across a broker restart` — so the quality gate blocked the tag, the
+  GitHub release, and the container image. There is no `v2.8.56` tag and no
+  `2.8.56` image; only the npm artifact exists, because it was pushed by hand
+  while the gate was failing. It is being deprecated on npm as part of this
+  release, and unpublished as well if that happens inside npm's 72-hour window.
+
+## [2.8.56] - 2026-08-03 (do not use)
 
 This release is the result of a method-by-method core audit across Embedded and
 real TCP+SQLite runtimes. The complete release notes, including the executable

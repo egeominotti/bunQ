@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,17 @@ import { createTcpServer } from '../src/infrastructure/server/tcp';
 import { waitForState } from './docs-guide-support';
 
 const directories: string[] = [];
+
+// `getSharedManager()` keeps the first manager it built and ignores a later
+// caller's `dataPath`, so ANY earlier test file that leaves an embedded manager
+// alive makes this file's queues write into that file's database instead of
+// their own — the parent then reads back as `unknown`. Bun discovers test files
+// in readdir order, not sorted, so which file runs first differs between macOS
+// and Linux. Claiming the leak here keeps this file order-independent rather
+// than depending on every other suite cleaning up after itself.
+beforeEach(() => {
+  shutdownManager();
+});
 
 afterEach(async () => {
   closeAllSharedPools();

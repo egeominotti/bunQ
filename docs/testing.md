@@ -32,6 +32,67 @@ bun scripts/tcp/run-all-tests.ts
 bun scripts/embedded/run-all-tests.ts
 ```
 
+The unit command includes `test/package-consumer-smoke.test.ts`. That test runs
+the library build, creates the exact npm tarball without network access, unpacks
+it into an isolated consumer's `node_modules`, and imports every documented Bun
+entrypoint. This guards package `exports`, included files, generated
+declarations, and runtime module resolution rather than relying on source-tree
+imports.
+
+Two details of that test are load-bearing, and both were found by the Linux
+sandbox after the macOS host had passed:
+
+- **Unpack the package, never symlink it.** Bun resolves a dependency by walking
+  up from the importing file's realpath, so a symlinked package searches next to
+  its extraction directory and never sees the consumer's `node_modules`. Only
+  the real installed layout exercises the published resolution paths.
+- **Provide exactly the manifest's declared dependencies.** The consumer links
+  `croner` and `msgpackr` from the repository's `node_modules`, which keeps the
+  test offline while asserting the stronger property: the declared dependency
+  set is sufficient to import every entrypoint. A runtime import that the
+  manifest forgets to declare fails here instead of in a user's project.
+
+It imports all five runtime entrypoints — `bunqueue`, `bunqueue/client`,
+`bunqueue/queue`, `bunqueue/workflow` and `bunqueue/mcp`. `./mcp` is the only
+one with an optional peer, so it is asserted separately: without
+`@modelcontextprotocol/sdk` a consumer must get the actionable install message
+and a non-zero exit, never a module-resolution stack trace.
+
+`test/repro-embedded-manager-leak-order.test.ts` locks the order-dependent
+failure that shipped in 2.8.56. Bun discovers test files in readdir order rather
+than sorted order, so a suite that leaves an embedded manager alive corrupts
+whichever suite happens to run next — a different one on macOS than on Linux.
+Embedded suites therefore claim the singleton with `shutdownManager()` in
+`beforeEach` instead of trusting every other file to clean up after itself.
+
+`test/issue-93-bun-only.test.ts` follows the same principle. Its end-to-end
+`node` spawn used to skip whenever `dist/bun-only.js` was missing, which made its
+coverage depend on whether some other file had run `build:lib` first; it now
+builds the artifact itself. The remaining gate is a real Node on `PATH`, which is
+a stable property of the environment rather than of test ordering. That check is
+deliberately stricter than "is `node` callable": the Bun image ships
+`/usr/local/bun-node-fallback-bin/node`, a shim that runs Bun, and under it the
+import resolves the `bun` condition and exits 0 — passing while asserting the
+opposite of the contract.
+
+Be explicit about where that end-to-end case actually executes, so nobody later
+mistakes it for coverage it does not provide:
+
+| Environment | `node` on `PATH` | e2e case |
+| --- | --- | --- |
+| GitHub Actions `ubuntu-latest` | real Node from the runner image | runs |
+| macOS host with Node installed | real Node | runs |
+| `bun run test:sandbox` (`oven/bun`) | Bun fallback shim | skipped |
+| Ubuntu 24.04 / Debian 13 Machine (Bun only) | absent | skipped |
+
+CI is therefore the environment that enforces the contract; the container and
+Machine gates only assert the three Node-independent contract checks. The probe
+must survive the absent case as well as the shim case: `Bun.spawnSync` throws on
+a missing binary instead of returning a non-zero exit code, and an uncaught throw
+in a `describe` body aborts the entire file — reporting `0 pass / 1 error` and
+silently dropping the Node-independent assertions with it. It is wrapped in
+`try`/`catch` for that reason.
+
 ### OrbStack Machine isolation
 
 The canonical local Machine is Ubuntu 24.04 on the Mac's native architecture,

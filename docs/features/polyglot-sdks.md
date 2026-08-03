@@ -196,6 +196,20 @@ ratchet stricter than the tool configuration, but it may not override it with a
 lower value; in particular, PHP's Infection gate enforces the checked-in 99%
 MSI and covered-MSI floor.
 
+A mutation job must provision every toolchain its SDK suite spawns, not only
+the mutation engine. The Go campaign gathers baseline coverage by running
+`go test`, whose `TestMain` starts a real broker with `bun src/main.ts`, so the
+job installs the pinned Bun version alongside Go; without it the campaign dies
+at `server start failed: exec: "bun": executable file not found in $PATH`
+before a single mutant is generated.
+
+The weekly advisory job audits each SDK's own dependency graph, including the
+mutation toolchain, which is where transitive advisories usually surface. The
+TypeScript SDK therefore carries a `qs: ^6.15.2` override for the `qs@6.15.1`
+that `@stryker-mutator/core` pins through `typed-rest-client`. The published
+clients keep their single msgpack runtime dependency; overrides of this kind
+only constrain development tooling.
+
 The manual TypeScript SDK publisher accepts only the current `origin/main`
 commit. Selecting a feature branch or a stale main commit in the Actions UI
 fails before dependencies are installed, packaged artifacts are created, or

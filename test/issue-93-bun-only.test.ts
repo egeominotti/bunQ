@@ -24,7 +24,15 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { existsSync, readFileSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  mkdtempSync,
+  mkdirSync,
+  symlinkSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 
@@ -84,29 +92,77 @@ describe('#93 Bun-only contract', () => {
 
   // End-to-end proof: a real `node` process importing `bunqueue/client` resolves
   // the `node` condition -> stub -> clear throw, NOT ERR_UNSUPPORTED_DIR_IMPORT.
-  // Gated on a built dist (the stub artifact). Skipped (with a notice) otherwise
-  // so the suite stays green without a build; run `bun run build:lib` to exercise.
-  const built = existsSync(join(ROOT, 'dist', 'bun-only.js'));
-  if (!built) {
-    // eslint-disable-next-line no-console
-    console.warn('[#93] e2e node-spawn skipped: dist/bun-only.js not built (run `bun run build:lib`)');
-  }
-  test.skipIf(!built)('node import of bunqueue/client throws the clear Bun-required message', async () => {
-    const consumer = mkdtempSync(join(tmpdir(), 'bq93-'));
-    try {
-      mkdirSync(join(consumer, 'node_modules'), { recursive: true });
-      symlinkSync(ROOT, join(consumer, 'node_modules', 'bunqueue'), 'dir');
-      writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'c', type: 'module' }));
-      const repro = join(consumer, 'repro.mjs');
-      writeFileSync(repro, `await import('bunqueue/client');\n`);
-
-      const proc = Bun.spawnSync(['node', repro], { cwd: consumer, stderr: 'pipe', stdout: 'pipe' });
-      const stderr = proc.stderr.toString();
-      expect(proc.exitCode).not.toBe(0);
-      expect(stderr).not.toContain('ERR_UNSUPPORTED_DIR_IMPORT');
-      expect(stderr).toMatch(/bun\.sh/);
-    } finally {
-      rmSync(consumer, { recursive: true, force: true });
+  // The stub is a build artifact, so build it when it is missing rather than
+  // skipping. Skipping made this test's coverage depend on whether some other
+  // file (e.g. the packed-tarball consumer test, which runs `build:lib` as a
+  // side effect) happened to run first — and Bun discovers test files in
+  // readdir order, so that differed between macOS and Linux.
+  if (!existsSync(join(ROOT, 'dist', 'bun-only.js'))) {
+    const build = Bun.spawnSync([process.execPath, 'run', 'build:lib'], {
+      cwd: ROOT,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (build.exitCode !== 0) {
+      throw new Error(
+        `build:lib failed with exit ${build.exitCode}:\n${build.stdout.toString()}${build.stderr.toString()}`
+      );
     }
-  });
+  }
+
+  // The remaining gate is the toolchain, which is deterministic per environment
+  // rather than dependent on test-file order. It must be a REAL Node: the Bun
+  // image ships `/usr/local/bun-node-fallback-bin/node`, a shim that runs Bun.
+  // Under that shim the import resolves the `bun` condition, loads the real
+  // client and exits 0 — so an unguarded spawn asserts the opposite of the
+  // contract while looking green.
+  // `Bun.spawnSync` THROWS on a missing binary instead of returning a non-zero
+  // exit code, and an uncaught throw in a describe body aborts the whole FILE
+  // (0 tests run, 1 error) — it would take the three Node-independent contract
+  // assertions with it. A node-less environment is not hypothetical: the
+  // canonical release Machines are stock Ubuntu 24.04 / Debian 13 with only Bun
+  // installed, and Bun's installer ships no `node` shim.
+  let realNode = false;
+  try {
+    const nodeProbe = Bun.spawnSync(
+      ['node', '-e', 'process.stdout.write(process.versions.bun ? "bun" : "node")'],
+      { stdout: 'pipe', stderr: 'pipe' }
+    );
+    realNode = nodeProbe.exitCode === 0 && nodeProbe.stdout.toString() === 'node';
+  } catch {
+    realNode = false;
+  }
+  if (!realNode) {
+    console.warn('[#93] e2e node-spawn skipped: no real Node on PATH (Bun shim or absent)');
+  }
+
+  test.skipIf(!realNode)(
+    'node import of bunqueue/client throws the clear Bun-required message',
+    async () => {
+      expect(existsSync(join(ROOT, 'dist', 'bun-only.js'))).toBe(true);
+      const consumer = mkdtempSync(join(tmpdir(), 'bq93-'));
+      try {
+        mkdirSync(join(consumer, 'node_modules'), { recursive: true });
+        symlinkSync(ROOT, join(consumer, 'node_modules', 'bunqueue'), 'dir');
+        writeFileSync(
+          join(consumer, 'package.json'),
+          JSON.stringify({ name: 'c', type: 'module' })
+        );
+        const repro = join(consumer, 'repro.mjs');
+        writeFileSync(repro, `await import('bunqueue/client');\n`);
+
+        const proc = Bun.spawnSync(['node', repro], {
+          cwd: consumer,
+          stderr: 'pipe',
+          stdout: 'pipe',
+        });
+        const stderr = proc.stderr.toString();
+        expect(proc.exitCode).not.toBe(0);
+        expect(stderr).not.toContain('ERR_UNSUPPORTED_DIR_IMPORT');
+        expect(stderr).toMatch(/bun\.sh/);
+      } finally {
+        rmSync(consumer, { recursive: true, force: true });
+      }
+    }
+  );
 });

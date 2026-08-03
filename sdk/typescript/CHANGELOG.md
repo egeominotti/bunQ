@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the StrykerJS mutation gate, its `stryker.config.mjs` configuration
+  and the `test:mutation` script. The engine's transitive dependencies were the
+  only source of this package's advisory findings and never reached published
+  code; the pure planners and snapshot validator stay covered by the fast-check
+  campaigns in `bun run test:property`. The published runtime dependency set is
+  unchanged (`msgpackr` only).
+
 ### Added
 
 - Add independent-connection idempotency and single-lease race tests,

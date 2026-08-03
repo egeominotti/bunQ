@@ -44,7 +44,6 @@
 !sdk/typescript/tests/workers/
 !sdk/typescript/tests/workers/run.mjs
 !sdk/typescript/package.json
-!sdk/typescript/stryker.config.mjs
 !sdk/python/
 !sdk/python/pyproject.toml
 !sdk/php/

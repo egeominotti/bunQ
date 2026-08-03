@@ -433,7 +433,6 @@ bun install
 bun run build          # tsc, emits dist/
 bun run check          # Biome lint and format verification
 BUNQUEUE_FLOW_PBT_SEED=20260730 bun run test:property
-bun run test:mutation  # Stryker, pure flow planners + snapshot validator
 
 bun tests/integration.ts                            # smoke suite
 bun tests/e2e.ts                                    # full surface, edge cases, realistic load

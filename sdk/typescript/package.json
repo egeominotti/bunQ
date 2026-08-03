@@ -28,7 +28,6 @@
     "prepublishOnly": "bun run build",
     "test": "bun tests/e2e.ts",
     "test:property": "bun test tests/flow-plan.property.test.ts tests/flow-identity.property.test.ts tests/flow-plan.validation.test.ts tests/flow-plan.limits.test.ts tests/flow-plan.contract.test.ts tests/flow-commit.test.ts",
-    "test:mutation": "stryker run",
     "test:integration": "bun tests/integration.ts",
     "test:soak": "bun tests/soak.ts",
     "lint": "biome lint src tests",
@@ -52,13 +51,9 @@
     "msgpackr": "^1.11.8"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "9.6.1",
     "fast-check": "4.9.0",
     "typescript": "^5.7.0",
     "@types/node": "^22.0.0"
-  },
-  "overrides": {
-    "qs": "^6.15.2"
   },
   "author": "Egeo Minotti",
   "homepage": "https://bunqueue.dev/guide/sdks/",

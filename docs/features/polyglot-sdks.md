@@ -204,11 +204,16 @@ at `server start failed: exec: "bun": executable file not found in $PATH`
 before a single mutant is generated.
 
 The weekly advisory job audits each SDK's own dependency graph, including the
-mutation toolchain, which is where transitive advisories usually surface. The
-TypeScript SDK therefore carries a `qs: ^6.15.2` override for the `qs@6.15.1`
-that `@stryker-mutator/core` pins through `typed-rest-client`. The published
-clients keep their single msgpack runtime dependency; overrides of this kind
-only constrain development tooling.
+mutation toolchain, which is where transitive advisories usually surface. That
+is why the TypeScript SDK no longer has one. StrykerJS pulled the only advisory
+findings this repository ever had to answer for — `qs@6.15.1` through
+`typed-rest-client` (GHSA-q8mj-m7cp-5q26), then `fast-uri@3.1.4` through `ajv`
+(GHSA-7p8r-x3mc-p8w7) — and neither package was ever reachable from the
+published client. Pinning overrides for a development-only mutation engine
+traded recurring audit noise for no user-visible safety, so the engine was
+removed instead. The TypeScript planners keep their generated-property coverage
+via fast-check in `bun run test:property`, and the other five SDKs still mutate
+the same planner and snapshot-validator surface.
 
 The manual TypeScript SDK publisher accepts only the current `origin/main`
 commit. Selecting a feature branch or a stale main commit in the Actions UI

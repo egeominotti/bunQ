@@ -2,5 +2,3 @@ node_modules/
 dist/
 *.tsbuildinfo
 !bun.lock
-reports/
-.stryker-tmp/

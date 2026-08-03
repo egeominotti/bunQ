@@ -364,7 +364,7 @@ suite is green.
 `.github/workflows/sdk-mutation.yml` is that campaign. It pins every mutation
 engine, retains the machine-readable/native report, and must never weaken a
 language's checked-in ratchet at the command line. The current minimums are
-98% for StrykerJS, 97% for mutmut, 100% for Muex, 99% MSI/covered MSI for
+97% for mutmut, 100% for Muex, 99% MSI/covered MSI for
 Infection, and 99.9% efficacy/coverage for Gremlins. `cargo-mutants` fails on
 every viable survivor. A score above a ratchet is not sufficient by itself:
 every survivor is classified as a missing assertion or a behaviorally

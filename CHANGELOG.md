@@ -2,6 +2,26 @@
 
 All notable changes to bunqueue are documented here.
 
+## [Unreleased]
+
+### Removed
+
+- Removed StrykerJS from the TypeScript SDK: the mutation job, the
+  `stryker.config.mjs` configuration, the `test:mutation` script, the
+  `@stryker-mutator/core` dev dependency and the `qs` override it required.
+  Its dependency graph was the only source of the findings the weekly advisory
+  gate kept reporting — `qs@6.15.1` via `typed-rest-client`
+  (GHSA-q8mj-m7cp-5q26), then `fast-uri@3.1.4` via `ajv`
+  (GHSA-7p8r-x3mc-p8w7) — and neither package was reachable from the published
+  client. Pinning a new override for each advisory traded recurring noise for
+  no user-visible safety. The TypeScript planners and snapshot validator keep
+  their generated-property coverage through fast-check in
+  `bun run test:property`, and the other five SDKs still mutate the same
+  surface. The SDK's dev dependency tree drops from 163 packages to 10 and
+  `bun audit` reports no vulnerabilities.
+- `test/sdk-mutation-workflow.test.ts` now asserts the removal instead of the
+  configuration, so Stryker cannot return unnoticed.
+
 ## [2.8.57] - 2026-08-03
 
 ### Release verification

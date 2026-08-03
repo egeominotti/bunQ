@@ -144,14 +144,13 @@ BUNQUEUE_FLOW_PBT_SEED=<signed-seed> \
   BUNQUEUE_FLOW_PBT_PATH='<printed-path>' bun run test:property
 ```
 
-Mutation is a final gate, not an edit-loop command. `stryker.config.mjs`
-mutates only `src/flow-plan.ts`, `src/flow-plan-legacy.ts`, and the pure
-snapshot validator in `src/flow-commit.ts`; its command runner executes only
-no-broker planner/commit tests:
-
-```bash
-bun run test:mutation
-```
+This SDK has no mutation engine. StrykerJS previously mutated the planners and
+the snapshot validator, but its dependency graph was the only source of the
+advisories the weekly audit reported, and none of those packages was reachable
+from the published client. Carrying pinned overrides for a development-only
+tool bought recurring audit noise and no user-visible safety, so the engine was
+removed. The same surface stays covered by the fast-check campaigns above; the
+other five SDKs still run mutation against their equivalents.
 
 Public behavior requires real-server evidence and cross-runtime evidence:
 

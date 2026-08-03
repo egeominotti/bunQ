@@ -2,7 +2,11 @@ import { expect, test } from 'bun:test';
 
 const root = `${import.meta.dir}/..`;
 const path = `${root}/.github/workflows/sdk-mutation.yml`;
-const sdkNames = ['typescript', 'python', 'php', 'go', 'rust', 'elixir'] as const;
+// StrykerJS was removed, so the TypeScript SDK has no mutation job: its
+// dependency graph was the only source of the weekly advisory failures and
+// none of it ever reached the published client. The planners keep their
+// generated-property coverage in `bun run test:property`.
+const sdkNames = ['python', 'php', 'go', 'rust', 'elixir'] as const;
 
 type Workflow = {
   jobs: Record<
@@ -21,7 +25,6 @@ test('scheduled SDK mutation campaigns cover every official client with pinned e
   const workflow = Bun.YAML.parse(text) as Workflow;
   const [
     typescriptPackage,
-    typescriptMutation,
     pythonProject,
     phpMutation,
     goMutation,
@@ -30,7 +33,6 @@ test('scheduled SDK mutation campaigns cover every official client with pinned e
     sandboxDockerfile,
   ] = await Promise.all([
     Bun.file(`${root}/sdk/typescript/package.json`).text(),
-    Bun.file(`${root}/sdk/typescript/stryker.config.mjs`).text(),
     Bun.file(`${root}/sdk/python/pyproject.toml`).text(),
     Bun.file(`${root}/sdk/php/infection.json5`).text(),
     Bun.file(`${root}/sdk/go/.gremlins.yaml`).text(),
@@ -54,9 +56,11 @@ test('scheduled SDK mutation campaigns cover every official client with pinned e
     ).toBe(true);
   }
 
-  expect(typescriptPackage).toContain('"@stryker-mutator/core": "9.6.1"');
-  expect(typescriptMutation).toContain('src/flow-commit.ts');
-  expect(typescriptMutation).toContain('break: 98');
+  // Stryker must stay gone: it is the regression this assertion exists for.
+  expect(typescriptPackage).not.toContain('stryker');
+  expect(typescriptPackage).not.toContain('test:mutation');
+  expect(workflow.jobs.typescript).toBeUndefined();
+  expect(await Bun.file(`${root}/sdk/typescript/stryker.config.mjs`).exists()).toBe(false);
   expect(pythonProject).toContain('"mutmut==3.6.0;');
   expect(pythonProject).toContain('"bunqueue/flow_commit.py"');
   expect(text).toContain('score < 97.0');
@@ -78,7 +82,6 @@ test('scheduled SDK mutation campaigns cover every official client with pinned e
   }
   for (const config of [
     'sdk/typescript/package.json',
-    'sdk/typescript/stryker.config.mjs',
     'sdk/python/pyproject.toml',
     'sdk/php/infection.json5',
     'sdk/php/src/Flow/SnapshotValidator.php',

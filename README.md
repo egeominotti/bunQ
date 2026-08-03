@@ -242,12 +242,17 @@ implementation:
 
 | SDK | Runtime invariants | Generated tests | Mutation engine |
 | --- | --- | --- | --- |
-| [TypeScript](./sdk/typescript/README.md) | [contract](./sdk/typescript/INVARIANTS.md) | fast-check | StrykerJS |
+| [TypeScript](./sdk/typescript/README.md) | [contract](./sdk/typescript/INVARIANTS.md) | fast-check | none¹ |
 | [Python](./sdk/python/README.md) | [contract](./sdk/python/INVARIANTS.md) | Hypothesis | mutmut |
 | [PHP](./sdk/php/README.md) | [contract](./sdk/php/INVARIANTS.md) | Eris | Infection |
 | [Go](./sdk/go/README.md) | [contract](./sdk/go/INVARIANTS.md) | Rapid | Gremlins |
 | [Rust](./sdk/rust/README.md) | [contract](./sdk/rust/INVARIANTS.md) | proptest | cargo-mutants |
 | [Elixir](./sdk/elixir/README.md) | [contract](./sdk/elixir/INVARIANTS.md) | StreamData | Muex |
+
+¹ The TypeScript SDK has no mutation engine. StrykerJS was removed because its
+dependency graph produced every advisory the weekly audit had to answer for,
+none of it reachable from the published client; the planners keep their
+fast-check coverage.
 
 Property campaigns run in the ordinary SDK gate with deterministic replay
 seeds. Mutation campaigns run separately against the pure planners and

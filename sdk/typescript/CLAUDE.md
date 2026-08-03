@@ -93,9 +93,10 @@ BUNQUEUE_SDK_SOAK_SECONDS=3600 bun tests/soak.ts
 ```
 
 Set `BUNQUEUE_FLOW_PBT_SEED=<signed-seed>` and
-`BUNQUEUE_FLOW_PBT_PATH='<path>'` to replay fast-check output. Mutation is
-scoped to the pure flow planners and snapshot validator; do not broaden it to
-socket or broker E2E code.
+`BUNQUEUE_FLOW_PBT_PATH='<path>'` to replay fast-check output. This SDK has no
+mutation engine (StrykerJS was removed); keep the planner/commit coverage in
+`bun run test:property` and do not broaden those tests to socket or broker E2E
+code.
 
 Tests spawn a real server (`bun src/main.ts` from the repo root, random
 port, temp DB). The auth suite uses a dedicated server with `AUTH_TOKENS`.

@@ -41,12 +41,10 @@ bun run check
 ```
 
 Replay fast-check with both `BUNQUEUE_FLOW_PBT_SEED` and the printed
-`BUNQUEUE_FLOW_PBT_PATH`. Run mutation once, after tests stabilize. Its scope
-is the pure planners and snapshot validator and it must not start a broker:
-
-```bash
-bun run test:mutation
-```
+`BUNQUEUE_FLOW_PBT_PATH`. This SDK has no mutation engine: StrykerJS was
+removed because its dependency graph was the only source of the advisories the
+weekly audit reported, none of it reachable from the published client. The pure
+planners and snapshot validator stay covered by `bun run test:property`.
 
 Then exercise the built package and real broker:
 

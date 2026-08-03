@@ -188,8 +188,8 @@ determinism under a supplied ID stream, and no transport call for invalid
 input. Seeds and minimized counterexamples are printed by the native tools.
 
 Mutation testing is a distinct scheduled/manual campaign after the bounded
-suite is green. Each SDK has a pinned mutation engine scoped to the planner and
-its properties. Surviving mutations are either killed with a stronger invariant
+suite is green. Every SDK except TypeScript has a pinned mutation engine scoped
+to the planner and its properties. Surviving mutations are either killed with a stronger invariant
 or documented as equivalent; mutation is not placed inside the ordinary
 test-driven edit loop or the offline release sandbox. The workflow may make a
 ratchet stricter than the tool configuration, but it may not override it with a

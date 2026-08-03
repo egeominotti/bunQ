@@ -603,7 +603,10 @@ native property-based flow planners with reproducible seeds and shrinking,
 malformed-input fuzz corpora, bounded spikes, and durable SIGKILL/restart
 recovery. Go additionally runs its race detector. A separate scheduled/manual
 mutation campaign runs each ecosystem's mutation engine against those planner
-properties; it is intentionally outside the bounded offline sandbox.
+properties; it is intentionally outside the bounded offline sandbox. The
+TypeScript SDK is the one exception: StrykerJS was removed because its
+dependency graph was the only source of the weekly advisory findings, so those
+planners are covered by fast-check alone.
 Long-lived soak/stress profiles and live dependency-advisory checks are weekly
 CI jobs because the local release gate is bounded and networkless.
 The unit suite also runs a

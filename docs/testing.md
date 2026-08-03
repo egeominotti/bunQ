@@ -324,7 +324,7 @@ language covers the same failure classes, with idiomatic mechanics:
 | Contract | All 17 independent producer/consumer conformance checks |
 | Race / idempotency | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded |
 | Property / fuzz | Native generators shrink flow plans while checking graph conservation, reciprocal edges, ordering, reserved metadata, and zero I/O on invalid input; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
-| Mutation | A pinned native mutation engine challenges each SDK's pure flow planner on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant |
+| Mutation | A pinned native mutation engine challenges the pure flow planner of every SDK except TypeScript (no engine, fast-check only) on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant |
 | Chaos / recovery | Hard process termination, half-open timeout, reconnect and durable-job visibility after restart |
 | Load / spike | Bounded bulk and worker bursts run in the normal gate, including 512-1500 job spikes |
 | Soak / stress | One long-lived SDK connection repeatedly adds, queries, and resets batches for a configurable duration and batch size |

@@ -110,16 +110,18 @@ export const controlMethods = {
     await this.call({ cmd: 'ChangePriority', id, priority: opts.priority, lifo: opts.lifo });
   },
 
-  async changeJobDelay(this: Ctx, id: string, delayMs: number): Promise<void> {
-    await this.call({ cmd: 'ChangeDelay', id, delay: delayMs });
+  async changeJobDelay(this: Ctx, id: string, delayMs: number, token?: string): Promise<void> {
+    await this.call(compact({ cmd: 'ChangeDelay', id, delay: delayMs, token }) as { cmd: string });
   },
 
-  async moveJobToWait(this: Ctx, id: string): Promise<void> {
-    await this.call({ cmd: 'MoveToWait', id });
+  async moveJobToWait(this: Ctx, id: string, token?: string): Promise<void> {
+    await this.call(compact({ cmd: 'MoveToWait', id, token }) as { cmd: string });
   },
 
-  async moveJobToDelayed(this: Ctx, id: string, delayMs: number): Promise<void> {
-    await this.call({ cmd: 'MoveToDelayed', id, delay: delayMs });
+  async moveJobToDelayed(this: Ctx, id: string, delayMs: number, token?: string): Promise<void> {
+    await this.call(
+      compact({ cmd: 'MoveToDelayed', id, delay: delayMs, token }) as { cmd: string }
+    );
   },
 
   async extendJobLock(this: Ctx, id: string, token: string, durationMs: number): Promise<void> {

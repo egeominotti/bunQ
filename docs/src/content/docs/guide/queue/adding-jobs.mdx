@@ -26,10 +26,10 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <TabItem label="Bun">
 
 ```typescript
-const job = await queue.add('job-name', { key: 'value' });
+const basicJob = await queue.add('job-name', { key: 'value' });
 
 // With options
-const job = await queue.add('job-name', data, {
+const configuredJob = await queue.add('job-name', data, {
   priority: 10,           // Higher = processed first
   delay: 5000,            // Wait 5s before processing
   attempts: 5,            // Max retries if the processor throws (default: 3)
@@ -45,10 +45,10 @@ const job = await queue.add('job-name', data, {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const job = await queue.add('job-name', { key: 'value' });
+const basicJob = await queue.add('job-name', { key: 'value' });
 
 // With options
-const job = await queue.add('job-name', data, {
+const configuredJob = await queue.add('job-name', data, {
   priority: 10,           // Higher = processed first
   delay: 5000,            // Wait 5s before processing
   attempts: 5,            // Max retries if the processor throws (default: 3)
@@ -161,6 +161,10 @@ let job = queue.add("job-name", data, JobOptions {
 
 The full option list is in the [reference table](/guide/queue/options/).
 
+`timeout` starts when the broker marks the job active. The broker tracks the
+absolute processing deadline and fails the job with reason `timeout` when it is
+reached; it is not rounded to a maintenance sweep interval.
+
 ### Add many at once
 
 `addBulk` inserts all jobs in one batch, much faster than a loop of `add`:
@@ -261,6 +265,12 @@ let ids = queue.add_bulk(vec![
 
 </TabItem>
 </Tabs>
+
+`addBulk` is ordered and uses accepted-prefix semantics; it is not an
+all-or-nothing flow transaction. If a later entry is rejected, earlier entries
+that were already accepted remain in the queue and later entries are not
+evaluated. The rejected entry itself is never left as a hidden in-memory job.
+Use `FlowProducer` when the whole graph must commit atomically.
 
 ### Repeat on a schedule
 
@@ -507,6 +517,15 @@ queue.add("process-payment", data, JobOptions {
 </TabItem>
 </Tabs>
 
+Durable acceptance is fail closed. `add()` resolves only after SQLite commits
+the job and any related custom-ID retirement, dedup replacement, dependency
+pin, or parent link. If SQLite rejects the write—for example because the disk
+is full—the call rejects and that candidate is not queryable, counted, or
+available to a Worker. Reusing a completed or DLQ `jobId` is also atomic: a
+failed replacement preserves the previous generation and its result across a
+broker restart. The same contract applies in Embedded and TCP mode and to
+durable entries in `addBulk`.
+
 | Mode | Throughput | Data loss window | Use for |
 |------|------------|------------------|---------|
 | Default | ~100k jobs/sec | Up to 10ms | Emails, notifications, analytics |
@@ -527,4 +546,3 @@ queue.add("process-payment", data, JobOptions {
 | [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
 | [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
 | [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
-

@@ -65,7 +65,7 @@ describe('STABILITY: moveToWaitingChildren strands the job (query inconsistency 
     expect(await qm.getJobState(id)).toBe('active');
 
     // 2. Move the active job to waiting-children.
-    const moved = await qm.moveToWaitingChildren(id);
+    const moved = await qm.moveToWaitingChildren(id, token!);
     expect(moved).toBe(true);
 
     // The job is now reported as waiting-children by getJobState.

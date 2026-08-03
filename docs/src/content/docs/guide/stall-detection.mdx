@@ -368,7 +368,7 @@ Two things reset the stall timer: the worker's automatic heartbeat (every `heart
 
 ## Listening for stalls
 
-In embedded mode (queue and listener in the same process), use `QueueEvents`:
+The Bun package can listen through embedded or TCP `QueueEvents`:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -376,7 +376,11 @@ In embedded mode (queue and listener in the same process), use `QueueEvents`:
 ```typescript
 import { QueueEvents } from 'bunqueue/client';
 
-const events = new QueueEvents('my-queue');
+const events = new QueueEvents('my-queue', {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+});
+await events.waitUntilReady();
 events.on('stalled', ({ jobId }) => {
   console.log(`Job ${jobId} stalled`);
 });
@@ -445,10 +449,14 @@ curl -N http://localhost:6790/events/queues/my-queue
 </TabItem>
 </Tabs>
 
-The Bun `Worker` also emits `stalled` in embedded mode. TCP workers do not;
-stall events originate in the broker after the original worker may already be
-gone. The SSE or WebSocket stream is the portable live channel. Stall webhooks
-are not emitted, so do not register `job.stalled` as a webhook event.
+The Bun `Worker` also emits `stalled` in both embedded and TCP modes. Its TCP
+path uses the same dedicated authenticated broker subscription as QueueEvents
+and re-subscribes after reconnect. External network SDKs should use SSE or
+WebSocket for this broker-side event. Stall webhooks are not emitted, so do not
+register `job.stalled` as a webhook event. This notification is preserved when
+an expired lease consumes the final `maxStalls` or `maxAttempts` slot: the
+broker publishes `stalled` before the terminal `failed` queue event and moves
+the job to the DLQ.
 
 ## Monitoring
 

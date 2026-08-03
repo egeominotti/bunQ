@@ -1,6 +1,7 @@
 /** Nested-saga compensation. */
 
 import { isLive } from './admission';
+import type { LostCompensationClaim } from './compensationClaim';
 import type { WorkflowEmitter } from './emitter';
 import type { WorkflowStore } from './store';
 import type { Execution, StepRecord } from './types';
@@ -15,7 +16,7 @@ export interface ChildUnwindRequest {
   retryFailed?: boolean;
 }
 
-export type ChildUnwind = (request: ChildUnwindRequest) => Promise<'ran' | 'claim-lost'>;
+export type ChildUnwind = (request: ChildUnwindRequest) => Promise<'ran' | LostCompensationClaim>;
 
 export interface UnwindChildRequest {
   record: StepRecord;
@@ -58,7 +59,7 @@ export async function unwindChild(request: UnwindChildRequest): Promise<void> {
     workflows,
     retryFailed,
   });
-  if (outcome === 'claim-lost') {
+  if (outcome !== 'ran') {
     throw new Error(
       `child "${child.workflowName}" (${childId}) is being rolled back by another driver; ` +
         'outcome unknown'

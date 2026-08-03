@@ -1,8 +1,8 @@
 # Elixir client SDK
 
 `sdk/elixir/` is the official OTP-native client for bunqueue server mode. It
-uses the version 2 TCP protocol and MessagePack framing; the broker remains a
-Bun application.
+uses the version 3 TCP protocol and MessagePack framing, including the separate
+job-name capability; the broker remains a Bun application.
 
 ## Components
 

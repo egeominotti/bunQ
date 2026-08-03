@@ -11,7 +11,7 @@ import (
 )
 
 // ProtocolVersion matches the version the server advertises in Hello.
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 // MaxFrameSize mirrors the server-side frame cap.
 const MaxFrameSize = 64 * 1024 * 1024
@@ -32,24 +32,9 @@ func compact(command map[string]any) map[string]any {
 	return out
 }
 
-// jobPayload mirrors the JS SDK: the job name travels INSIDE `data`.
-// Non-map data is wrapped so the payload always stays a msgpack map.
+// jobPayload builds protocol-owned name and data fields without changing data.
 func jobPayload(name string, data any) map[string]any {
-	if data == nil {
-		return map[string]any{"name": name}
-	}
-	if m, ok := data.(map[string]any); ok {
-		// Parity contract (protocol spec §5): the job name is set FIRST so a
-		// user `name` key overrides it, exactly like the reference client's
-		// `{name, ...data}` spread. Never reorder.
-		out := make(map[string]any, len(m)+1)
-		out["name"] = name
-		for key, value := range m {
-			out[key] = value
-		}
-		return out
-	}
-	return map[string]any{"name": name, "payload": data}
+	return map[string]any{"name": name, "data": data}
 }
 
 // nowMs returns the current time in ms as float64 (already js-safe).

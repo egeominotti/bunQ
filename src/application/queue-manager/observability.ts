@@ -4,9 +4,18 @@ import * as logsOps from '../jobLogsManager';
 import { generatePrometheusMetrics, type OperationalMetrics } from '../metricsExporter';
 import { selectPrometheusQueues } from '../prometheusOperationalMetrics';
 import * as statsMgr from '../statsManager';
+import type { QueueMetricType } from '../../domain/types/metrics';
 import { QueueManagerStats } from './stats';
 
 export class QueueManagerObservability extends QueueManagerStats {
+  getQueueMetrics(queue: string, type: QueueMetricType, start = 0, end = -1) {
+    return this.telemetryJournal.getMetrics(queue, type, start, end);
+  }
+
+  trimQueueEvents(queue: string, maxLength: number): number {
+    return this.telemetryJournal.trimEvents(queue, maxLength);
+  }
+
   addLog(jobId: JobId, message: string, level: 'info' | 'warn' | 'error' = 'info'): boolean {
     return logsOps.addJobLog(jobId, message, this.contextFactory.getLogsContext(), level);
   }

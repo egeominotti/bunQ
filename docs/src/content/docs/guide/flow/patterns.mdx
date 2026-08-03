@@ -214,29 +214,47 @@ const { jobIds } = await flow.addTree({
 
 In `flow.add()` flows, the parent calls `await job.getChildrenValues()` (shown in the Quick Start).
 
-In `addChain` / `addBulkThen` / `addTree` flows, bunqueue injects parent IDs into the job data, and FlowProducer can look up their results (embedded mode only):
+In `addChain` / `addBulkThen` / `addTree` flows, bunqueue injects parent IDs into the job data, and FlowProducer can look up their results in embedded or TCP mode:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
 
 ```typescript
+const runtimeOptions = { embedded: false, connection: { host: '127.0.0.1', port: 6789 } };
+const flow = new FlowProducer(runtimeOptions);
+
 const worker = new Worker('pipeline', async (job) => {
   if (job.data.__flowParentId) {           // chain: one parent
-    const parentResult = flow.getParentResult(job.data.__flowParentId);
+    const parentResult = await flow.getParentResult(job.data.__flowParentId);
   }
   if (job.data.__flowParentIds) {          // merge: many parents
-    const results = flow.getParentResults(job.data.__flowParentIds);
+    const results = await flow.getParentResults(job.data.__flowParentIds);
   }
   return { processed: true };
-}, { embedded: true });
+}, runtimeOptions);
 ```
 
 </TabItem>
 </Tabs>
 
-*`getParentResult` / `getParentResults` are embedded-mode helpers of the Bun package. The `__flowParentId` / `__flowParentIds` fields are injected by every SDK's chain (and fan-in) methods; in TCP mode read a parent's result with `getResult(parentId)` (`get_result` in Python).*
+*`getParentResult` / `getParentResults` are Bun-package helpers for both
+embedded and TCP runtimes. Await them in transport-neutral code: embedded keeps
+the historical synchronous return, while TCP performs `GetResult` round trips.
+The external SDKs can read a parent with `getResult(parentId)` (`get_result` in
+Python).*
 
-Injected fields: `__flowParentId`, `__flowParentIds`, plus the BullMQ-compatible `__parentId`, `__parentQueue`, and `__childrenIds`. They are typed via the `FlowJobData` interface, so IntelliSense works inside processors. Parent-child links are persisted to SQLite and survive restarts.
+Injected fields: `__flowParentId`, `__flowParentIds`, plus the BullMQ-compatible
+`__parentId`, `__parentQueue`, and `__childrenIds`. A non-root `addChain` or
+`addTree` step receives `__flowParentId`, `__parentId`, and `__parentQueue` for
+its exact predecessor, including the predecessor's real queue in cross-queue
+flows. Fan-in jobs retain their existing parent/children fields. They are typed
+via the `FlowJobData` interface, exposed by Worker and Queue reads, persisted to
+SQLite, and survive restarts.
+
+Keys beginning with `__` are reserved on flow input. `job.updateData(userData)`
+preserves the engine-owned topology fields and rejects attempts to forge them;
+the user payload, including a user `name` key, remains separate from the job's
+own name.
 
 ### Set per-job and per-queue options
 
@@ -327,4 +345,3 @@ so cross-queue keys are `childQueue:childId`.
 | [Flow Producer](/guide/flow/) | Your first parent/child graph, and what is guaranteed |
 | [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
 | [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field |
-

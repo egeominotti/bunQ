@@ -12,20 +12,27 @@ import type {
   JobDependenciesCount,
 } from './types';
 import {
-  extractUserData,
   extractParent,
   buildJobOpts,
   buildParentKey,
   buildRepeatJobKey,
+  resolvePublicJobPayload,
 } from './jobHelpers';
+import { serializeReturnvalue } from './queue/jobMetadata';
+
+interface JobPropertyOptions {
+  stacktrace?: string[] | null;
+  token?: string;
+  processedBy?: string;
+  returnvalue?: unknown;
+  failedReason?: string;
+}
 
 /** Build common job properties from internal job */
 export function buildJobProperties<T>(
   job: InternalJob,
   name: string,
-  stacktrace?: string[] | null,
-  token?: string,
-  processedBy?: string
+  options: JobPropertyOptions = {}
 ): Pick<
   Job<T>,
   | 'id'
@@ -40,6 +47,8 @@ export function buildJobProperties<T>(
   | 'processedOn'
   | 'finishedOn'
   | 'stacktrace'
+  | 'returnvalue'
+  | 'failedReason'
   | 'stalledCounter'
   | 'priority'
   | 'parentKey'
@@ -50,14 +59,16 @@ export function buildJobProperties<T>(
   | 'repeatJobKey'
   | 'attemptsStarted'
 > {
+  const { stacktrace, token, processedBy, returnvalue, failedReason } = options;
   const id = String(job.id);
   const parent = extractParent(job.data);
   const jobOpts = buildJobOpts(job);
+  const payload = resolvePublicJobPayload(job);
 
   return {
     id,
     name,
-    data: extractUserData(job.data) as T,
+    data: payload.data as T,
     queueName: job.queue,
     attemptsMade: job.attempts,
     timestamp: job.createdAt,
@@ -68,6 +79,8 @@ export function buildJobProperties<T>(
     finishedOn: job.completedAt ?? undefined,
     // Fall back to the stack persisted on the internal job at FAIL time (#74)
     stacktrace: stacktrace ?? job.stacktrace ?? null,
+    returnvalue,
+    failedReason,
     stalledCounter: job.stallCount,
     priority: job.priority,
     parentKey: buildParentKey(job),
@@ -121,29 +134,37 @@ export function buildStateCheckMethods(
   };
 }
 
+interface JobSerializationOptions {
+  id: string;
+  name: string;
+  jobOpts: JobOptions;
+  stacktrace?: string[] | null;
+  returnvalue?: unknown;
+  failedReason?: string;
+}
+
 /** Build serialization methods */
 export function buildSerializationMethods<T>(
   job: InternalJob,
-  id: string,
-  name: string,
-  jobOpts: JobOptions,
-  stacktrace?: string[] | null
+  options: JobSerializationOptions
 ): Pick<Job<T>, 'toJSON' | 'asJSON'> {
+  const { id, name, jobOpts, stacktrace, returnvalue, failedReason } = options;
   // Fall back to the stack persisted on the internal job at FAIL time (#74)
   const stack = stacktrace ?? job.stacktrace ?? null;
+  const payload = resolvePublicJobPayload(job);
   return {
     toJSON: () => ({
       id,
       name,
-      data: extractUserData(job.data) as T,
+      data: payload.data as T,
       opts: jobOpts,
       progress: job.progress,
       delay: job.runAt > job.createdAt ? job.runAt - job.createdAt : 0,
       timestamp: job.createdAt,
       attemptsMade: job.attempts,
       stacktrace: stack,
-      returnvalue: undefined,
-      failedReason: undefined,
+      returnvalue,
+      failedReason,
       finishedOn: job.completedAt ?? undefined,
       processedOn: job.startedAt ?? undefined,
       queueQualifiedName: `bull:${job.queue}`,
@@ -152,15 +173,15 @@ export function buildSerializationMethods<T>(
     asJSON: () => ({
       id,
       name,
-      data: JSON.stringify(extractUserData(job.data)),
+      data: JSON.stringify(payload.data),
       opts: JSON.stringify(jobOpts),
       progress: JSON.stringify(job.progress),
       delay: String(job.runAt > job.createdAt ? job.runAt - job.createdAt : 0),
       timestamp: String(job.createdAt),
       attemptsMade: String(job.attempts),
       stacktrace: stack ? JSON.stringify(stack) : null,
-      returnvalue: undefined,
-      failedReason: undefined,
+      returnvalue: serializeReturnvalue(returnvalue),
+      failedReason,
       finishedOn: job.completedAt ? String(job.completedAt) : undefined,
       processedOn: job.startedAt ? String(job.startedAt) : undefined,
       parentKey: buildParentKey(job),

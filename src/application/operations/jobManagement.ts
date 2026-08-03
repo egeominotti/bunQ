@@ -20,6 +20,41 @@ import {
 
 export { discardJob, moveJobToDelayed } from './jobMoveOperations';
 
+const FLOW_METADATA_KEYS = [
+  '__parentId',
+  '__parentQueue',
+  '__childrenIds',
+  '__flowParentId',
+  '__flowParentIds',
+] as const;
+
+function dataRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Merge caller data without allowing it to erase or forge broker-owned flow metadata. */
+function updatedJobData(job: Pick<Job, 'data'>, userData: unknown): unknown {
+  const current = dataRecord(job.data);
+  const metadata = current
+    ? Object.fromEntries(
+        FLOW_METADATA_KEYS.filter((key) => Object.hasOwn(current, key)).map((key) => [
+          key,
+          current[key],
+        ])
+      )
+    : {};
+  if (Object.keys(metadata).length === 0) return userData;
+
+  const next = dataRecord(userData);
+  if (!next) throw new Error('flow job data must be an object');
+  for (const key of Object.keys(next)) {
+    if (key.startsWith('__')) throw new Error(`flow job data key is reserved: ${key}`);
+  }
+  return { ...next, ...metadata };
+}
+
 /** Context for job management operations */
 export interface JobManagementContext {
   storage: SqliteStorage | null;
@@ -167,10 +202,14 @@ export async function updateJobData(
   if (location?.type === 'queue') {
     return withWriteLock(ctx.shardLocks[location.shardIdx], () => {
       const shard = ctx.shards[location.shardIdx];
-      const job = shard.getQueue(location.queueName).find(jobId) ?? shard.waitingDeps.get(jobId);
+      const job =
+        shard.getQueue(location.queueName).find(jobId) ??
+        shard.waitingDeps.get(jobId) ??
+        shard.waitingChildren.get(jobId);
       if (job) {
-        (job as { data: unknown }).data = data;
-        ctx.storage?.updateJobData(jobId, data);
+        const updated = updatedJobData(job, data);
+        ctx.storage?.updateJobData(jobId, updated);
+        (job as { data: unknown }).data = updated;
         return true;
       }
       return false;
@@ -180,8 +219,9 @@ export async function updateJobData(
     return withWriteLock(ctx.processingLocks[procIdx], () => {
       const job = ctx.processingShards[procIdx].get(jobId);
       if (job) {
-        (job as { data: unknown }).data = data;
-        ctx.storage?.updateJobData(jobId, data);
+        const updated = updatedJobData(job, data);
+        ctx.storage?.updateJobData(jobId, updated);
+        (job as { data: unknown }).data = updated;
         return true;
       }
       return false;
@@ -215,8 +255,9 @@ async function updateRepeatSuccessor(
       .getQueue(successorLoc.queueName)
       .find(successorId);
     if (job) {
-      (job as { data: unknown }).data = data;
-      ctx.storage?.updateJobData(successorId, data);
+      const updated = updatedJobData(job, data);
+      ctx.storage?.updateJobData(successorId, updated);
+      (job as { data: unknown }).data = updated;
       return true;
     }
     return false;

@@ -149,6 +149,12 @@ let failed = queue.get_jobs(Value::from("failed"), 0, 50)?;
 
 Most read methods come in two flavors: a sync version that only works in embedded mode (`getJobCounts()`, `getJobs()`, `getCountsPerPriority()`, `count()`, `isPaused()`) and an async version that works in both modes (`getJobCountsAsync()`, `getJobsAsync()`, `getCountsPerPriorityAsync()`, `countAsync()`, `isPausedAsync()`). Prefer the async ones unless you know you're embedded.
 
+Jobs returned by `getJob()` and `getJobsAsync()` reflect the authoritative
+broker generation in both modes. In particular, `attemptsMade`,
+`attemptsStarted`, `stalledCounter`, progress, priority, processing/completion
+timestamps, and their `toJSON()` / `asJSON()` representations are not reset by
+the TCP query proxy.
+
 Per-state shortcuts:
 
 <Tabs syncKey="lang">

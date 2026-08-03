@@ -38,9 +38,8 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
-artifacts/test-sandbox/
-artifacts/test-sandbox-sdk/
-artifacts/core-e2e/
+# Local release-gate, matrix, Machine, and benchmark evidence.
+artifacts/
 
 # Test coverage
 coverage/

@@ -93,6 +93,7 @@ impl Driver {
             }
             "upsertScheduler" => {
                 let repeat = &request["repeat"];
+                let template = &request["template"];
                 self.queue(text(request, "queue")).upsert_job_scheduler(
                     text(request, "schedulerId"),
                     SchedulerRepeat {
@@ -102,7 +103,11 @@ impl Driver {
                         timezone: repeat["tz"].as_str().map(str::to_owned),
                         ..Default::default()
                     },
-                    SchedulerTemplate::default(),
+                    SchedulerTemplate {
+                        name: template["name"].as_str().map(str::to_owned),
+                        data: json_to_value(template["data"].clone()),
+                        options: options(&template["opts"]),
+                    },
                 )?;
                 Ok(json!({}))
             }
@@ -128,9 +133,13 @@ impl Driver {
             "retryDlq" => {
                 Ok(json!({"count": self.queue(text(request, "queue")).retry_dlq(None, None)?}))
             }
-            "hello" => Ok(
-                json!({"protocolVersion": Connection::new(self.options.clone()).protocol_version()?}),
-            ),
+            "hello" => {
+                let connection = Connection::new(self.options.clone());
+                Ok(json!({
+                    "protocolVersion": connection.protocol_version()?,
+                    "capabilities": connection.capabilities()?,
+                }))
+            }
             "process" => {
                 self.process_until(request)?;
                 Ok(json!({}))

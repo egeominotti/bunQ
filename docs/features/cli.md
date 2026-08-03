@@ -11,7 +11,7 @@ Owns:
 - **Command building** — translating CLI verbs into protocol command objects (`{ cmd, ... }`) under `src/cli/commands/`.
 - **Surface registry and routing** — `CLI_COMMAND_SURFACE` is the canonical list
   of network verbs/subcommands; `commandRouter.ts` gates and dispatches builders.
-- **TCP client transport for the one-shot CLI** — connect, optional `Auth`, send one command, await one framed msgpack response, close (`src/cli/client.ts:180`).
+- **TCP client transport for the one-shot CLI** — connect, optional `Auth`, send one command, await one framed msgpack response, close (`src/cli/client.ts:181-258`).
 - **Output formatting** — colorized tables/objects and error rendering, plus a JSON pass-through (`src/cli/output.ts`). `localOutput.ts` is the single writer for local commands.
 - **Local (non-TCP) commands** — `version`, `doctor`, and `backup` run client-side against HTTP/health or S3 directly. Doctor separates HTTP collection, pure evaluation, and rendering.
 - **Help text** (`src/cli/help.ts`), including the polyglot product line
@@ -40,11 +40,11 @@ External / runtime:
 ## Public Interface
 
 ### Exported functions
-- `main(): Promise<void>` — entry point; runs only under `import.meta.main` (`src/cli/index.ts:325`, `:414`).
+- `main(): Promise<void>` — entry point; runs only under `import.meta.main` (`src/cli/index.ts:95`, `:149`).
 - `parseGlobalOptions(): { options: GlobalOptions; commandArgs: string[] }` (`src/cli/globalOptions.ts`, re-exported by `index.ts`).
-- `executeCommand(command: string, args: string[], options: ClientOptions): Promise<void>` (`src/cli/client.ts:180`).
-- `clientTimeoutFor(cmd: Record<string, unknown>): number` (`src/cli/client.ts:43`).
-- `formatOutput(response, command, asJson, subcommand?): string` and `formatError(message, asJson): string` (`src/cli/output.ts:422`, `:440`).
+- `executeCommand(command: string, args: string[], options: ClientOptions): Promise<void>` (`src/cli/client.ts:181`).
+- `clientTimeoutFor(cmd: Record<string, unknown>): number` (`src/cli/client.ts:44`).
+- `formatOutput(response, command, asJson, subcommand?): string` and `formatError(message, asJson): string` (`src/cli/output.ts:6`, `:17`).
 - Pure `renderHelp`/`renderServerHelp`/`renderPushHelp`/`renderCronAddHelp`/`renderVersion` plus compatible `print*` wrappers (`src/cli/help.ts`).
 - Command builders: `buildCoreCommand`, `buildJobCommand`, `buildQueueCommand`, `buildDlqCommand`, `buildCronCommand`, `buildWorkerCommand`, `buildWebhookCommand`, `buildRateLimitCommand`, `buildMonitorCommand`, and the backup runners `isBackupCommand` / `executeBackupCommand` / `runDoctor` / `runServer`.
 - Shared helpers + `CommandError` in `src/cli/commands/types.ts`: `requireArg`, `parseJsonArg`, `parseNumberArg`, `parseBigIntArg`.
@@ -53,7 +53,7 @@ External / runtime:
   `src/cli/commandRouter.ts`).
 
 ### CLI commands → TCP `cmd`
-The CLI itself emits no HTTP; it maps verbs to TCP commands (`src/cli/client.ts:276`):
+The CLI itself emits no HTTP; it maps verbs to TCP commands (`src/cli/commandRouter.ts:8-52`):
 
 | CLI command | TCP `cmd` |
 | --- | --- |
@@ -76,10 +76,10 @@ The CLI itself emits no HTTP; it maps verbs to TCP commands (`src/cli/client.ts:
 `health` reuses `Stats` and lets the formatter render it (`src/cli/commands/monitor.ts:13`). When a `--token` is set, an `Auth` command is sent first on the same socket (`src/cli/client.ts:199`).
 
 ### Commands handled locally (no TCP `cmd`)
-- `version` → client version + HTTP `/health` probe at TCP-port + 1 (`src/cli/index.ts:359`, `:306`).
-- `doctor` → HTTP `/health` diagnostics (`src/cli/index.ts:365` → `runDoctor`).
-- `backup now|create|list|restore|status` → `S3BackupManager` directly (`src/cli/index.ts:371`).
-- bare `bunqueue` / `start` / a leading `-flag` → server mode via `runServer` (`src/cli/index.ts:344`).
+- `version` → client version + HTTP `/health` probe at TCP-port + 1 (`src/cli/index.ts:44-53`).
+- `doctor` → HTTP `/health` diagnostics (`src/cli/index.ts:56-65` → `runDoctor`).
+- `backup now|create|list|restore|status` → `S3BackupManager` directly (`src/cli/index.ts:68-91`).
+- bare `bunqueue` / `start` / a leading `-flag` → server mode via `runServer` (`src/cli/index.ts:122-125`).
 
 ## Data Models
 The CLI is schemaless on the wire: every command is a plain `Record<string, unknown>` carrying a `cmd` discriminator, and every response is a `Record<string, unknown>` with an `ok: boolean`. See [data-model](../data-model.md) for the canonical Job shape.
@@ -89,7 +89,7 @@ The CLI is schemaless on the wire: every command is a plain `Record<string, unkn
 - `SocketData` (`src/cli/client.ts:29`): `{ frameParser: FrameParser; resolve; reject }` — one outstanding request per socket.
 - `BackupCommandResult` (`src/cli/commands/backup.ts:11`): `{ success: boolean; message: string; data?: unknown }`.
 
-Job fields the formatter reads (`src/cli/output.ts`): `id`, `queue`, `state`, `priority`, `attempts`/`maxAttempts`, `data`, `progress`, `createdAt`, `startedAt`, `completedAt`, `runAt`, `error`. Because the server-side Job carries no explicit `state`, `deriveJobState` infers it from timestamps (`completed`/`active`/`delayed`/`waiting`) and falls back to `'unknown'` for the ambiguous cases: retries exhausted without completion, or no timestamps at all (`src/cli/output.ts:52`).
+Job fields the formatter reads (`src/cli/output/jobs.ts`): `id`, `queue`, `state`, `priority`, `attempts`/`maxAttempts`, `data`, `progress`, `createdAt`, `startedAt`, `completedAt`, `runAt`, `error`. Because the server-side Job carries no explicit `state`, `deriveJobState` infers it from timestamps (`completed`/`active`/`delayed`/`waiting`) and falls back to `'unknown'` for the ambiguous cases: retries exhausted without completion, or no timestamps at all (`src/cli/output/jobs.ts:4-19`).
 
 ## Business Logic / Control Flow
 
@@ -110,7 +110,7 @@ With `--json`, global/command help, both version forms, doctor, backup, and
 fatal local errors all pass through `emitLocalOutput`: one ANSI-free JSON
 document on exactly one stream, with the historical exit code preserved.
 
-### 3. Client execution (`executeCommand`, `src/cli/client.ts:180`)
+### 3. Client execution (`executeCommand`, `src/cli/client.ts:181`)
 1. **Build first, connect second** — `buildCommand` runs before any socket is opened, so unknown commands and parse errors are reported without a reachable server (`:190`). Unknown command → exit 1.
 2. `connect()` opens `Bun.connect` (TLS wrapped if `buildClientTls` returns a value), with a 5s connection timeout (`:171`).
 3. If a token is present, send `{ cmd:'Auth', token }`; non-`ok` → "Authentication failed" exit 1 (`:199`).
@@ -119,8 +119,8 @@ document on exactly one stream, with the historical exit code preserved.
 6. `RegisterWorker` prints a stderr warning that the registration is transient and dies with the CLI process (`:245`).
 7. `finally` closes the socket.
 
-### 4. Output (`formatOutput` → `formatSuccess`, `src/cli/output.ts:422`, `:352`)
-`--json` returns `JSON.stringify(response, null, 2)` of the raw response (pretty-printed, no unwrapping). Otherwise `unwrap` flattens a `{ data: {...} }` envelope (`:296`), then `formatSuccess` checks `id`→"Job created" (only for `push`) and `ids`→verb chosen by command+subcommand first, then a collection cascade picks a renderer: job / jobs-table (DLQ-aware) / workers / webhooks / crons / dlqJobs / logs / stats / counts / queues, then the remaining scalar shapes (`workerId`, `webhookId`, `cron`, `state`, `result`, `progress`, `paused`, `count`, `metrics`), falling back to `OK` (`:418`). The subcommand (first positional) is forwarded so batch responses read "Drained"/"Cleaned"/"Retried"/"Purged" correctly (`src/cli/client.ts:218`).
+### 4. Output (`formatOutput` → `formatSuccess`, `src/cli/output.ts:6`, `src/cli/output/success.ts:65`)
+`--json` returns `JSON.stringify(response, null, 2)` of the raw response (pretty-printed, no unwrapping). Otherwise `unwrap` flattens a `{ data: {...} }` envelope (`src/cli/output/success.ts:14-24`), then `formatSuccess` checks `id`→"Job created" (only for `push`) and `ids`→verb chosen by command+subcommand first, then a collection cascade picks a renderer: job / jobs-table (DLQ-aware) / workers / webhooks / crons / dlqJobs / logs / stats / counts / queues, then the remaining scalar shapes (`workerId`, `webhookId`, `cron`, `state`, `result`, `progress`, `paused`, `count`, `metrics`), falling back to `OK` (`src/cli/output/success.ts:65-120`). The subcommand (first positional) is forwarded so batch responses read "Drained"/"Cleaned"/"Retried"/"Purged" correctly (`src/cli/client.ts:216-220`).
 
 ### 5. Server mode (`runServer`, `src/cli/commands/server.ts:118`)
 Parse CLI flags (`parseCliFlags`, `:37`) → `loadConfigFile(configPath)` → `applyCliFlags` (CLI wins over file config, `:83`) → `resolveServerConfig` → `bootServer`. Invalid ports warn and fall back to defaults (6789/6790).
@@ -207,10 +207,10 @@ handoff so a later one-shot CLI invocation can `ack`/`fail` that delivered job.
 - **Integer grammar**: numeric fields accept signed base-10 JavaScript safe integers only. Leading zeroes remain compatible, `-0` canonicalizes to `0`, and unsafe/enormous values fail before connecting. Job IDs remain opaque lossless strings.
 - **JSON positional data**: negative JSON primitives are protected from `parseArgs` option tokenization, so flag order around queue/data does not change meaning.
 - **Object-key safety**: `__proto__`, `__proto_`, `constructor`, and `prototype` remain distinct own properties through TCP and SQLite. The rare safe decode path uses `Object.defineProperty`, so decoding cannot mutate `Object.prototype`.
-- **Job IDs are passed as strings** (`parseBigIntArg`) so UUIDs, numeric, and custom IDs all work; the server parses them (`src/cli/commands/types.ts:42`).
-- **Transient worker registration**: `worker register` over the CLI is gone the instant the process exits (TCP close auto-unregisters); a stderr warning points users to the SDK `Worker` or `bunqueue start --processor` (`src/cli/client.ts:245`).
+- **Job IDs are passed as strings** (`parseBigIntArg`) so UUIDs, numeric, and custom IDs all work; the server parses them (`src/cli/commands/types.ts:46-52`).
+- **Transient worker registration**: `worker register` over the CLI is gone the instant the process exits (TCP close auto-unregisters); a stderr warning points users to the SDK `Worker` or `bunqueue start --processor` (`src/cli/client.ts:241-250`).
 - **Invalid server response**: a frame that fails `unpack` rejects with "Invalid response from server" (`:121`).
-- **Color suppression**: ANSI is emitted only when `process.stdout.isTTY` and `NO_COLOR !== '1'` (`src/cli/output.ts:19`).
+- **Color suppression**: ANSI is emitted only when `process.stdout.isTTY` and `NO_COLOR !== '1'` (`src/cli/output/style.ts:13-16`).
 - **No retry/reconnect**: unlike the SDK pool, the one-shot CLI does not retry a failed connection or resend on a dropped socket.
 
 ## Configuration
@@ -221,7 +221,7 @@ Client-affecting env vars / flags (defaults in parentheses):
 - `--tls` / `--tls-ca <file>` / `--tls-no-verify` (plaintext by default).
 - `--json` (off), `--help`/`-h`, `--version`/`-v`.
 - `NO_COLOR=1` disables ANSI output.
-- Connection timeout 5000 ms; command timeout 30000 ms base (`src/cli/client.ts:53`, `:171`).
+- Connection timeout 5000 ms (`src/cli/client.ts:171-176`); command timeout has a 30000 ms base (`src/cli/client.ts:44-48`).
 - `backup` data path ← `BUNQUEUE_DATA_PATH` / `BQ_DATA_PATH` / `DATA_PATH` / `SQLITE_PATH` plus S3 vars consumed by `S3BackupManager.fromEnv`.
 
 Server-start flags (`bunqueue start`, merged over `bunqueue.config.ts`, CLI wins): `--tcp-port` (6789), `--http-port` (6790), `--host` (0.0.0.0), `--data-path`, `--auth-tokens`, `--tls-cert`, `--tls-key`, `--config`/`-c`. Env fallbacks resolved in `resolveServerConfig`. See [Configuration & Entrypoint](./configuration.md) and [Security: TLS, Auth, CORS](./security-tls-auth.md).

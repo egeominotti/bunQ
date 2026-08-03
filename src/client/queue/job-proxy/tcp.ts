@@ -4,6 +4,12 @@ import { buildFailCommand } from '../failWire';
 import type { JobProxyContext, JobReflectionMeta } from '../types/job';
 import { computeDependencies } from './dependencies';
 import { reflectFields } from './reflection';
+import { serializeReturnvalue } from '../jobMetadata';
+
+function assertMoveResponse(response: Record<string, unknown>, operation: string): void {
+  if (response.ok === true) return;
+  throw new Error(typeof response.error === 'string' ? response.error : `${operation} failed`);
+}
 
 /** Create a full Job proxy whose methods use the TCP transport. */
 export function createJobProxy<T>(
@@ -16,21 +22,26 @@ export function createJobProxy<T>(
   const { tcp, queueName } = ctx;
   const timestamp = meta?.timestamp ?? Date.now();
   const reflected = reflectFields(id, queueName, meta);
+  const attemptsMade = meta?.attemptsMade ?? 0;
+  const attemptsStarted = meta?.attemptsStarted ?? attemptsMade;
+  const progress = meta?.progress ?? 0;
+  const stalledCounter = meta?.stalledCounter ?? 0;
 
   return {
     id,
     name,
     data,
     queueName,
-    attemptsMade: 0,
+    attemptsMade,
     timestamp,
-    progress: 0,
+    progress,
     delay: reflected.delay,
-    processedOn: undefined,
-    finishedOn: undefined,
+    processedOn: meta?.processedOn,
+    finishedOn: meta?.finishedOn,
     stacktrace: reflected.stacktrace,
+    returnvalue: reflected.returnvalue,
     failedReason: reflected.failedReason,
-    stalledCounter: 0,
+    stalledCounter,
     priority: reflected.priority,
     parent: reflected.parent,
     parentKey: reflected.parentKey,
@@ -39,7 +50,7 @@ export function createJobProxy<T>(
     processedBy: undefined,
     deduplicationId: reflected.deduplicationId,
     repeatJobKey: reflected.repeatJobKey,
-    attemptsStarted: 0,
+    attemptsStarted,
     updateProgress: async (progress: number, message?: string) => {
       await tcp.send({ cmd: 'Progress', id, progress, message });
     },
@@ -57,7 +68,7 @@ export function createJobProxy<T>(
     isFailed: async () => (await ctx.getJobState(id)) === 'failed',
     isWaitingChildren: async () => (await ctx.getJobState(id)) === 'waiting-children',
     updateData: async (newData) => {
-      await tcp.send({ cmd: 'Update', id, data: newData });
+      assertMoveResponse(await tcp.send({ cmd: 'Update', id, data: newData }), 'Update');
     },
     promote: async () => {
       await tcp.send({ cmd: 'Promote', id });
@@ -88,12 +99,15 @@ export function createJobProxy<T>(
       name,
       data,
       opts: reflected.opts,
-      progress: 0,
+      progress,
       delay: reflected.delay,
       timestamp,
-      attemptsMade: 0,
+      attemptsMade,
       stacktrace: reflected.stacktrace,
+      returnvalue: reflected.returnvalue,
       failedReason: reflected.failedReason,
+      processedOn: meta?.processedOn,
+      finishedOn: meta?.finishedOn,
       queueQualifiedName: `bull:${queueName}`,
       parentKey: reflected.parentKey,
     }),
@@ -102,31 +116,64 @@ export function createJobProxy<T>(
       name,
       data: JSON.stringify(data),
       opts: JSON.stringify(reflected.opts),
-      progress: '0',
+      progress: String(progress),
       delay: String(reflected.delay),
       timestamp: String(timestamp),
-      attemptsMade: '0',
+      attemptsMade: String(attemptsMade),
       stacktrace: reflected.stacktrace ? JSON.stringify(reflected.stacktrace) : null,
+      returnvalue: serializeReturnvalue(reflected.returnvalue),
       failedReason: reflected.failedReason,
+      processedOn: meta?.processedOn === undefined ? undefined : String(meta.processedOn),
+      finishedOn: meta?.finishedOn === undefined ? undefined : String(meta.finishedOn),
       parentKey: reflected.parentKey,
     }),
-    moveToCompleted: async (returnValue) => {
-      await tcp.send({ cmd: 'ACK', id, result: returnValue });
+    moveToCompleted: async (returnValue, token) => {
+      assertMoveResponse(
+        await tcp.send({
+          cmd: 'ACK',
+          id,
+          result: returnValue,
+          ...(token === undefined ? {} : { token }),
+        }),
+        'ACK'
+      );
       return null;
     },
-    moveToFailed: async (error) => {
-      await tcp.send(buildFailCommand(id, error));
+    moveToFailed: async (error, token) => {
+      assertMoveResponse(await tcp.send(buildFailCommand(id, error, token)), 'FAIL');
     },
-    moveToWait: async () => {
-      const response = await tcp.send({ cmd: 'MoveToWait', id });
+    moveToWait: async (token) => {
+      const response = await tcp.send({
+        cmd: 'MoveToWait',
+        id,
+        ...(token === undefined ? {} : { token }),
+      });
+      if (response.ok === false && /token/i.test(String(response.error))) {
+        assertMoveResponse(response, 'MoveToWait');
+      }
       return response.ok === true;
     },
-    moveToDelayed: async (targetTimestamp) => {
+    moveToDelayed: async (targetTimestamp, token) => {
       const delay = Math.max(0, targetTimestamp - Date.now());
-      await tcp.send({ cmd: 'MoveToDelayed', id, delay });
+      assertMoveResponse(
+        await tcp.send({
+          cmd: 'MoveToDelayed',
+          id,
+          delay,
+          ...(token === undefined ? {} : { token }),
+        }),
+        'MoveToDelayed'
+      );
     },
-    moveToWaitingChildren: async () => {
-      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+    moveToWaitingChildren: async (token) => {
+      const response = await tcp.send({
+        cmd: 'MoveToWaitingChildren',
+        id,
+        ...(token === undefined ? {} : { token }),
+      });
+      if (response.ok === false && /token/i.test(String(response.error))) {
+        assertMoveResponse(response, 'MoveToWaitingChildren');
+      }
       return response.ok === true;
     },
     waitUntilFinished: async (_queueEvents, ttl) => {

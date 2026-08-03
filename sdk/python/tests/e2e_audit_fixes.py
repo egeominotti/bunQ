@@ -505,14 +505,14 @@ def test_012_ack_batcher_settles_error_per_job(server: Server) -> None:
 
     settled: list = []
     batcher = AckBatcher(BoomConnection(), max_size=10, max_delay_ms=60000)
-    batcher.add(AckItem("1", "t1", None, lambda err: settled.append(err)))
+    batcher.add(AckItem("1", "t1", None, lambda err, _applied: settled.append(err)))
 
-    def throwing_callback(err: Optional[BaseException]) -> None:
+    def throwing_callback(err: Optional[BaseException], _applied: bool) -> None:
         settled.append(err)
         raise RuntimeError("listener boom")  # must not starve item 3
 
     batcher.add(AckItem("2", "t2", None, throwing_callback))
-    batcher.add(AckItem("3", "t3", {"r": 1}, lambda err: settled.append(err)))
+    batcher.add(AckItem("3", "t3", {"r": 1}, lambda err, _applied: settled.append(err)))
     batcher.flush()
     assert len(settled) == 3, f"all items must settle exactly once, got {len(settled)}"
     assert all(isinstance(err, CommandError) for err in settled), settled

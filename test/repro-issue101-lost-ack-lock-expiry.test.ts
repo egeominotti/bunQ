@@ -37,21 +37,14 @@ import { QueueManager } from '../src/application/queueManager';
 import { checkExpiredLocks } from '../src/application/lockManager';
 import { checkStalledJobs } from '../src/application/stallDetection';
 
-function getInternalLockContext(qm: QueueManager): any {
-  const qmAny = qm as any;
-  return {
-    shards: qmAny.shards,
-    shardLocks: qmAny.shardLocks,
-    processingShards: qmAny.processingShards,
-    processingLocks: qmAny.processingLocks,
-    jobIndex: qmAny.jobIndex,
-    jobLocks: qmAny.jobLocks,
-    clientJobs: qmAny.clientJobs,
-    eventsManager: qmAny.eventsManager,
-    stalledCandidates: qmAny.stalledCandidates,
-    storage: qmAny.storage,
-    dashboardEmit: null,
-  };
+function getInternalLockContext(qm: QueueManager): Parameters<typeof checkExpiredLocks>[0] {
+  return (
+    qm as unknown as {
+      contextFactory: {
+        getLockContext(): Parameters<typeof checkExpiredLocks>[0];
+      };
+    }
+  ).contextFactory.getLockContext();
 }
 
 describe('Issue #101: a successful completion must not be lost on lock expiry', () => {
@@ -106,7 +99,7 @@ describe('Issue #101: a successful completion must not be lost on lock expiry', 
     expect(qm.getResult(job.id)).toEqual({ ok: true });
   });
 
-  test('genuinely re-leased job: the stale worker\'s completion is rejected (no double-complete)', async () => {
+  test("genuinely re-leased job: the stale worker's completion is rejected (no double-complete)", async () => {
     const QUEUE = 'lost-ack-conflict';
     const job = await qm.push(QUEUE, { data: { n: 2 }, maxAttempts: 50, durable: true });
 

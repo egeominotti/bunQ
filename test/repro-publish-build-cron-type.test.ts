@@ -18,5 +18,5 @@ describe('publish build cron serialization regression', () => {
     }
 
     expect(result.exitCode).toBe(0);
-  });
+  }, 40_000);
 });

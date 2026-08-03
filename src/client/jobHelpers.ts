@@ -3,16 +3,18 @@
  * Internal utilities for extracting and building job data
  */
 
-import type { Job as InternalJob } from '../domain/types/job';
+import { normalizeLegacyJobPayload, type Job as InternalJob } from '../domain/types/job';
 import type { RepeatOptions, JobOptions } from './types';
 
-/** Extract user data from stored job data (removes internal 'name' field) */
+/** Decode a bare pre-name-field payload. Modern conversions use normalizeJobPayload(job). */
 export function extractUserData(jobData: unknown): unknown {
-  if (typeof jobData === 'object' && jobData !== null) {
-    const { name: _name, ...userData } = jobData as Record<string, unknown>;
-    return userData;
-  }
-  return jobData;
+  return normalizeLegacyJobPayload({ data: jobData }).data;
+}
+
+/** Resolve legacy names while preserving documented engine-owned flow metadata. */
+export function resolvePublicJobPayload(job: InternalJob): { name: string; data: unknown } {
+  const payload = normalizeLegacyJobPayload(job);
+  return { name: payload.name, data: payload.data };
 }
 
 /** Extract parent info from job data if present */
@@ -96,9 +98,15 @@ export function buildJobOpts(job: InternalJob): JobOptions {
     removeDependencyOnFailure: job.removeDependencyOnFailure,
     continueParentOnFailure: job.continueParentOnFailure,
     ignoreDependencyOnFailure: job.ignoreDependencyOnFailure,
+    durable: job.durable ?? false,
     deduplication:
-      job.deduplicationTtl !== null
-        ? { id: job.customId ?? '', ttl: job.deduplicationTtl }
+      job.uniqueKey !== null
+        ? {
+            id: job.uniqueKey,
+            ttl: job.deduplicationTtl ?? undefined,
+            extend: job.deduplicationExtend,
+            replace: job.deduplicationReplace,
+          }
         : undefined,
     debounce:
       job.debounceId && job.debounceTtl !== null

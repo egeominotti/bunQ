@@ -13,7 +13,7 @@ export abstract class SandboxedDispatch<T = unknown> extends SandboxedPool<T> {
 
     if (this.options.timeout > 0) {
       worker.timeoutId = setTimeout(() => {
-        this.handleTimeout(worker, job);
+        void this.handleTimeout(worker, job);
       }, this.options.timeout);
     }
 
@@ -24,6 +24,7 @@ export abstract class SandboxedDispatch<T = unknown> extends SandboxedPool<T> {
       type: 'job',
       job: {
         id: String(job.id),
+        name: job.name,
         data: job.data,
         queue: job.queue,
         attempts: job.attempts,
@@ -62,13 +63,13 @@ export abstract class SandboxedDispatch<T = unknown> extends SandboxedPool<T> {
 
     switch (message.type) {
       case 'result':
-        this.complete(worker, message.result);
+        void this.complete(worker, message.result);
         break;
       case 'error':
-        this.fail(worker, message.error ?? 'Unknown error');
+        void this.fail(worker, message.error ?? 'Unknown error');
         break;
       case 'fail':
-        this.fail(worker, message.error ?? 'Job explicitly failed');
+        void this.fail(worker, message.error ?? 'Job explicitly failed');
         break;
       case 'progress':
         if (message.progress !== undefined) {
@@ -92,57 +93,97 @@ export abstract class SandboxedDispatch<T = unknown> extends SandboxedPool<T> {
     }
   }
 
-  protected complete(worker: WorkerProcess, result: unknown): void {
+  protected async complete(worker: WorkerProcess, result: unknown): Promise<void> {
     this.lastActivityTime = Date.now();
     const job = worker.currentJob;
-    if (job) {
-      const token = worker.currentToken ?? undefined;
-      this.ops.ack(job.id, result, token).catch((error: unknown) => {
-        log('error', 'Failed to ack job', {
-          jobId: String(job.id),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-      const eventJob = this.createEventJob(job);
-      (eventJob as { returnvalue?: unknown }).returnvalue = result;
-      this.emit('completed', eventJob, result);
+    if (!job) return;
+    const token = worker.currentToken ?? undefined;
+    // Claim this result message locally before awaiting the broker so duplicate
+    // thread messages cannot send a second outcome for the same generation.
+    worker.currentJob = null;
+    if (worker.timeoutId) {
+      clearTimeout(worker.timeoutId);
+      worker.timeoutId = null;
     }
-    this.resetWorkerState(worker);
+    try {
+      const applied = await this.ops.ack(job.id, result, token);
+      if (applied) {
+        const eventJob = this.createEventJob(job);
+        (eventJob as { returnvalue?: unknown }).returnvalue = result;
+        this.emit('completed', eventJob, result);
+      }
+    } catch (error) {
+      const ackError = error instanceof Error ? error : new Error(String(error));
+      log('error', 'Failed to ack job', {
+        jobId: String(job.id),
+        error: ackError.message,
+      });
+      this.safeEmitError(Object.assign(ackError, { context: 'ack', jobId: String(job.id) }));
+    } finally {
+      this.resetWorkerState(worker);
+    }
   }
 
-  protected fail(worker: WorkerProcess, error: string): void {
+  protected async fail(worker: WorkerProcess, error: string): Promise<void> {
     const job = worker.currentJob;
-    if (job) {
-      const token = worker.currentToken ?? undefined;
-      this.ops.fail(job.id, error, token).catch((failure: unknown) => {
-        log('error', 'Failed to mark job as failed', {
-          jobId: String(job.id),
-          error: failure instanceof Error ? failure.message : String(failure),
-        });
-      });
-      const eventJob = this.createEventJob(job);
-      (eventJob as { failedReason?: string }).failedReason = error;
-      this.emit('failed', eventJob, new Error(error));
+    if (!job) return;
+    const token = worker.currentToken ?? undefined;
+    worker.currentJob = null;
+    if (worker.timeoutId) {
+      clearTimeout(worker.timeoutId);
+      worker.timeoutId = null;
     }
-    this.resetWorkerState(worker);
+    try {
+      const applied = await this.ops.fail(job.id, error, token);
+      if (applied) {
+        const eventJob = this.createEventJob(job);
+        (eventJob as { failedReason?: string }).failedReason = error;
+        this.emit('failed', eventJob, new Error(error));
+      }
+    } catch (failure) {
+      const failError = failure instanceof Error ? failure : new Error(String(failure));
+      log('error', 'Failed to mark job as failed', {
+        jobId: String(job.id),
+        error: failError.message,
+      });
+      this.safeEmitError(Object.assign(failError, { context: 'fail', jobId: String(job.id) }));
+    } finally {
+      this.resetWorkerState(worker);
+    }
   }
 
-  protected handleTimeout(worker: WorkerProcess, job: DomainJob): void {
+  protected async handleTimeout(worker: WorkerProcess, job: DomainJob): Promise<void> {
+    if (worker.currentJob !== job) return;
+    const token = worker.currentToken ?? undefined;
+    worker.currentJob = null;
+    if (worker.timeoutId) {
+      clearTimeout(worker.timeoutId);
+      worker.timeoutId = null;
+    }
     worker.worker.terminate();
     const errorMessage = `Job timed out after ${this.options.timeout}ms`;
-    const token = worker.currentToken ?? undefined;
-    this.ops.fail(job.id, errorMessage, token).catch((error: unknown) => {
+    let applied = false;
+    try {
+      applied = await this.ops.fail(job.id, errorMessage, token);
+      if (applied) {
+        const eventJob = this.createEventJob(job);
+        (eventJob as { failedReason?: string }).failedReason = errorMessage;
+        this.emit('failed', eventJob, new Error(errorMessage));
+      }
+    } catch (error) {
+      const failError = error instanceof Error ? error : new Error(String(error));
       log('error', 'Failed to mark timed-out job as failed', {
         jobId: String(job.id),
-        error: error instanceof Error ? error.message : String(error),
+        error: failError.message,
       });
-    });
-    const eventJob = this.createEventJob(job);
-    (eventJob as { failedReason?: string }).failedReason = errorMessage;
-    this.emit('failed', eventJob, new Error(errorMessage));
-    this.resetWorkerState(worker);
-    const index = this.workers.indexOf(worker);
-    if (index !== -1) this.handleCrash(worker, index);
+      this.safeEmitError(
+        Object.assign(failError, { context: 'timeout-fail', jobId: String(job.id) })
+      );
+    } finally {
+      this.resetWorkerState(worker);
+      const index = this.workers.indexOf(worker);
+      if (index !== -1) this.handleCrash(worker, index, applied);
+    }
   }
 
   protected abstract safeEmitError(error: Error): void;

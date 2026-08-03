@@ -133,10 +133,10 @@ The table below documents the Bun client's options; the external SDK worker opti
 | `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
 | `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
 | `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
-| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max jobs per window. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
+| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max job starts per rolling window, acquired atomically even with concurrent or manual processing. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
 | `lockDuration` | `number` | `30000` | Job lock TTL in ms |
 | `maxStalledCount` | `number` | `1` | Accepted for BullMQ compatibility, but not applied by the Worker. Configure the broker's per-queue `maxStalls` policy with `Queue.setStallConfig()` or the HTTP API instead |
-| `skipStalledCheck` | `boolean` | `false` | In embedded mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery |
+| `skipStalledCheck` | `boolean` | `false` | In embedded or TCP mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery |
 | `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
 | `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
 | `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |

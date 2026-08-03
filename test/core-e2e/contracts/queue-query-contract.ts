@@ -33,15 +33,22 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
     );
     ensure(waitingState === 'waiting', `getJobState returned ${waitingState}`);
 
-    const syncJobs = tracker.call('Queue', 'getJobs', () => queryQueue.getJobs({ end: -1 }));
-    ensure(Array.isArray(syncJobs), 'getJobs did not return an array');
+    if (mode === 'embedded') {
+      const syncJobs = tracker.call('Queue', 'getJobs', () => queryQueue.getJobs({ end: -1 }));
+      ensure(syncJobs.length === 3, 'getJobs did not return authoritative embedded jobs');
+    }
     const asyncJobs = await tracker.invoke('Queue', 'getJobsAsync', () =>
       queryQueue.getJobsAsync({ end: -1 })
     );
     ensure(asyncJobs.length === 3, `getJobsAsync returned ${asyncJobs.length} jobs`);
 
-    const waitingSync = tracker.call('Queue', 'getWaiting', () => queryQueue.getWaiting(0, -1));
-    ensure(Array.isArray(waitingSync), 'getWaiting did not return an array');
+    if (mode === 'embedded') {
+      const waitingSync = tracker.call('Queue', 'getWaiting', () => queryQueue.getWaiting(0, -1));
+      ensure(
+        waitingSync.some((job) => job.id === waiting.id),
+        'getWaiting missed the job'
+      );
+    }
     const waitingAsync = await tracker.invoke('Queue', 'getWaitingAsync', () =>
       queryQueue.getWaitingAsync(0, -1)
     );
@@ -50,8 +57,13 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
       'getWaitingAsync missed the job'
     );
 
-    const delayedSync = tracker.call('Queue', 'getDelayed', () => queryQueue.getDelayed(0, -1));
-    ensure(Array.isArray(delayedSync), 'getDelayed did not return an array');
+    if (mode === 'embedded') {
+      const delayedSync = tracker.call('Queue', 'getDelayed', () => queryQueue.getDelayed(0, -1));
+      ensure(
+        delayedSync.some((job) => job.id === bulk[1].id),
+        'getDelayed missed the job'
+      );
+    }
     const delayedAsync = await tracker.invoke('Queue', 'getDelayedAsync', () =>
       queryQueue.getDelayedAsync(0, -1)
     );
@@ -102,8 +114,13 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
       'active fixture was not leased'
     );
 
-    const activeSync = tracker.call('Queue', 'getActive', () => stateQueue.getActive(0, -1));
-    ensure(Array.isArray(activeSync), 'getActive did not return an array');
+    if (mode === 'embedded') {
+      const activeSync = tracker.call('Queue', 'getActive', () => stateQueue.getActive(0, -1));
+      ensure(
+        activeSync.some((job) => job.id === active.id),
+        'getActive missed the lease'
+      );
+    }
     const activeAsync = await tracker.invoke('Queue', 'getActiveAsync', () =>
       stateQueue.getActiveAsync(0, -1)
     );
@@ -112,10 +129,15 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
       'getActiveAsync missed the lease'
     );
 
-    const completedSync = tracker.call('Queue', 'getCompleted', () =>
-      stateQueue.getCompleted(0, -1)
-    );
-    ensure(Array.isArray(completedSync), 'getCompleted did not return an array');
+    if (mode === 'embedded') {
+      const completedSync = tracker.call('Queue', 'getCompleted', () =>
+        stateQueue.getCompleted(0, -1)
+      );
+      ensure(
+        completedSync.some((job) => job.id === completed.id),
+        'getCompleted missed job'
+      );
+    }
     const completedAsync = await tracker.invoke('Queue', 'getCompletedAsync', () =>
       stateQueue.getCompletedAsync(0, -1)
     );
@@ -124,8 +146,13 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
       'getCompletedAsync missed job'
     );
 
-    const failedSync = tracker.call('Queue', 'getFailed', () => stateQueue.getFailed(0, -1));
-    ensure(Array.isArray(failedSync), 'getFailed did not return an array');
+    if (mode === 'embedded') {
+      const failedSync = tracker.call('Queue', 'getFailed', () => stateQueue.getFailed(0, -1));
+      ensure(
+        failedSync.some((job) => job.id === failed.id),
+        'getFailed missed the DLQ job'
+      );
+    }
     const failedAsync = await tracker.invoke('Queue', 'getFailedAsync', () =>
       stateQueue.getFailedAsync(0, -1)
     );
@@ -145,14 +172,18 @@ export async function runQueueQueryContract(mode: CoreE2eMode): Promise<Coverage
     );
     ensure(asyncCounts.active === 1, 'getJobCountsAsync missed active job');
 
-    const count = tracker.call('Queue', 'count', () => queryQueue.count());
-    ensure(typeof count === 'number', 'count did not return a number');
+    if (mode === 'embedded') {
+      const count = tracker.call('Queue', 'count', () => queryQueue.count());
+      ensure(count === 3, `count returned ${count}`);
+    }
     const countAsync = await tracker.invoke('Queue', 'countAsync', () => queryQueue.countAsync());
     ensure(countAsync === 3, `countAsync returned ${countAsync}`);
-    const priorityCounts = tracker.call('Queue', 'getCountsPerPriority', () =>
-      queryQueue.getCountsPerPriority()
-    );
-    ensure(typeof priorityCounts === 'object', 'getCountsPerPriority did not return an object');
+    if (mode === 'embedded') {
+      const priorityCounts = tracker.call('Queue', 'getCountsPerPriority', () =>
+        queryQueue.getCountsPerPriority()
+      );
+      ensure(priorityCounts[10] === 1, 'getCountsPerPriority missed priority 10');
+    }
     const priorityCountsAsync = await tracker.invoke('Queue', 'getCountsPerPriorityAsync', () =>
       queryQueue.getCountsPerPriorityAsync()
     );

@@ -157,6 +157,8 @@ export interface JobEvent {
   readonly prev?: string;
   /** Delay in ms (for delayed event) */
   readonly delay?: number;
+  /** Internal marker used to exclude retry-attempt failures from terminal metrics. */
+  readonly terminal?: boolean;
 }
 
 /** Webhook configuration */

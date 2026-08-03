@@ -1,5 +1,6 @@
 import { FlowProducer } from '../../../client/flow';
 import { TcpConnectionPool } from '../../../client/tcpPool';
+import { normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { SerializedJob } from '../../types/adapter';
 
 export interface TcpBackendOptions {
@@ -43,10 +44,12 @@ export class TcpBackendBase {
   }
 
   protected parseJob(job: Record<string, unknown>): SerializedJob {
+    const payload = normalizeLegacyJobPayload({ name: job.name, data: job.data });
     return {
       id: String(job.id),
+      name: payload.name,
       queue: (job.queue as string) ?? '',
-      data: job.data,
+      data: payload.data,
       priority: (job.priority as number) ?? 0,
       progress: (job.progress as number) ?? 0,
       attempts: (job.attempts as number) ?? 0,

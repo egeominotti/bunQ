@@ -1,155 +1,159 @@
 /**
- * Issue #33 - Jobs running twice (duplicate execution)
+ * Issue #33 - stalled processing generations
  *
- * Reproduces the bug where stall detection retries a job while it's still
- * being processed, causing duplicate execution. This happens when:
- * 1. Heartbeats are disabled or not sent (e.g., heavy CPU processing)
- * 2. Processing time exceeds stallInterval
- * 3. Worker concurrency > 1 allows pulling the retried job
- *
- * The stall check runs every 5s. Two-phase detection means:
- * - At ~5s: job marked as stall candidate
- * - At ~10s: stall confirmed, job retried (pushed back to queue)
- * - Original worker still processing → duplicate execution
+ * A worker with heartbeats disabled can receive the same job again after the
+ * broker confirms a stall. Delivery is at-least-once, so processor invocation
+ * may repeat; the safety contract is that a stale invocation cannot complete
+ * or overwrite the newer processing generation.
  */
 
-import { describe, test, expect, afterEach } from 'bun:test';
-import { Queue, Worker, shutdownManager } from '../src/client';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { checkStalledJobs } from '../src/application/stallDetection';
+import type { BackgroundContext } from '../src/application/types';
+import { FlowProducer, Queue, Worker, shutdownManager } from '../src/client';
+import { getSharedManager } from '../src/client/manager';
 
-describe('Issue #33 - Duplicate job execution via stall detection', () => {
-  afterEach(() => {
-    shutdownManager();
-  });
-
-  test('job should not execute twice when processing is slow and heartbeats disabled', async () => {
-    const queue = new Queue('issue33-dup-exec', { embedded: true });
-    queue.obliterate();
-
-    // Short stall interval so stall detection triggers quickly
-    queue.setStallConfig({
-      stallInterval: 500, // 500ms - very short
-      gracePeriod: 100, // 100ms grace
-      maxStalls: 3,
-    });
-
-    const executionLog: Array<{ jobId: string; startTime: number }> = [];
-    const errors: string[] = [];
-    let firstDone: (() => void) | null = null;
-    const firstExecDone = new Promise<void>((r) => (firstDone = r));
-
-    const worker = new Worker(
-      'issue33-dup-exec',
-      async (job) => {
-        const startTime = Date.now();
-        executionLog.push({ jobId: job.id, startTime });
-
-        // Simulate slow processing (large file)
-        // Must span two stall check cycles (5s each = 10s total)
-        await Bun.sleep(12000);
-
-        firstDone?.();
-        firstDone = null;
-        return { processed: true };
-      },
-      {
-        embedded: true,
-        concurrency: 2, // Must be > 1 so worker can pull retried job
-        heartbeatInterval: 0, // Disabled - simulates blocked event loop
-      }
-    );
-
-    worker.on('error', (err) => {
-      errors.push(err.message);
-    });
-
-    await queue.add('process-large-file', { file: 'large-file.zip' });
-
-    // Wait for first execution to complete
-    await firstExecDone;
-    // Give time for any duplicate to start
-    await Bun.sleep(1000);
-
-    // Count how many times the job was executed
-    const uniqueJobIds = new Set(executionLog.map((e) => e.jobId));
-
-    // BUG: With stall detection, the same job gets executed multiple times
-    // Each job should execute exactly once
-    for (const jobId of uniqueJobIds) {
-      const executions = executionLog.filter((e) => e.jobId === jobId);
-      expect(executions.length).toBe(1);
+function backgroundContext(): BackgroundContext {
+  return (
+    getSharedManager() as unknown as {
+      contextFactory: { getBackgroundContext(): BackgroundContext };
     }
+  ).contextFactory.getBackgroundContext();
+}
 
-    await worker.close();
-    queue.close();
-  }, 25000);
+async function forceConfirmedStall(): Promise<void> {
+  await Bun.sleep(5);
+  const context = backgroundContext();
+  checkStalledJobs(context);
+  checkStalledJobs(context);
+}
 
-  test('flow chain: stall-retried job breaks flow - last step never reached', async () => {
-    const queue = new Queue('issue33-flow-break', { embedded: true });
-    const { FlowProducer } = await import('../src/client');
-    const flow = new FlowProducer({ embedded: true });
-    queue.obliterate();
+async function waitUntil(
+  predicate: () => boolean | Promise<boolean>,
+  label: string
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+    await Bun.sleep(10);
+  }
+}
 
-    queue.setStallConfig({
-      stallInterval: 500,
-      gracePeriod: 100,
-      maxStalls: 3,
+afterEach(() => {
+  shutdownManager();
+});
+
+describe('Issue #33 - stalled processing generations', () => {
+  test('a stale invocation cannot overwrite the current generation', async () => {
+    const queue = new Queue('issue33-generation', { embedded: true });
+    await queue.obliterateAsync();
+    await queue.setStallConfigAsync({
+      enabled: true,
+      stallInterval: 0,
+      gracePeriod: 0,
+      maxStalls: 5,
     });
 
-    const stepExecutions = new Map<number, number>();
-    let lastStepReached = false;
-    let resolve: (() => void) | null = null;
-    const done = new Promise<void>((r) => (resolve = r));
-
-    // Timeout to detect if flow never completes
-    const timeout = setTimeout(() => {
-      resolve?.();
-    }, 20000);
-
+    let releaseFirst = (): void => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const tokens: Array<string | undefined> = [];
+    let deliveries = 0;
     const worker = new Worker(
-      'issue33-flow-break',
+      queue.name,
       async (job) => {
-        const data = job.data as { step: number };
-        const count = (stepExecutions.get(data.step) ?? 0) + 1;
-        stepExecutions.set(data.step, count);
-
-        if (data.step === 1) {
-          // Step 1 is slow - triggers stall detection
-          await Bun.sleep(12000);
-        }
-
-        if (data.step === 2) {
-          lastStepReached = true;
-          clearTimeout(timeout);
-          resolve?.();
-        }
-
-        return { step: data.step, result: `step-${data.step}-done` };
+        const generation = ++deliveries;
+        tokens.push(job.token);
+        if (generation === 1) await firstGate;
+        return { generation };
       },
-      {
-        embedded: true,
-        concurrency: 2,
-        heartbeatInterval: 0,
-      }
+      { embedded: true, concurrency: 2, heartbeatInterval: 0, lockDuration: 60_000 }
     );
 
-    await flow.addChain([
-      { name: 'step-0', queueName: 'issue33-flow-break', data: { step: 0 } },
-      { name: 'step-1', queueName: 'issue33-flow-break', data: { step: 1 } },
-      { name: 'step-2', queueName: 'issue33-flow-break', data: { step: 2 } },
-    ]);
+    try {
+      const job = await queue.add(
+        'process-large-file',
+        { file: 'large-file.zip' },
+        { attempts: 10, backoff: 0 }
+      );
+      await waitUntil(() => deliveries === 1, 'the first delivery');
 
-    await done;
-    await Bun.sleep(500);
+      await forceConfirmedStall();
+      await waitUntil(() => deliveries === 2, 'the replacement delivery');
+      expect(tokens[0]).toBeString();
+      expect(tokens[1]).toBeString();
+      expect(tokens[1]).not.toBe(tokens[0]);
 
-    // Step 1 should execute exactly once (BUG: may execute twice due to stall)
-    const step1Execs = stepExecutions.get(1) ?? 0;
-    expect(step1Execs).toBe(1);
+      await waitUntil(async () => (await queue.getJobState(job.id)) === 'completed', 'completion');
+      expect(getSharedManager().getResult(job.id)).toEqual({ generation: 2 });
 
-    // Last step should be reached (BUG: may never reach due to broken flow)
-    expect(lastStepReached).toBe(true);
+      releaseFirst();
+      await Bun.sleep(50);
+      expect(await queue.getJobState(job.id)).toBe('completed');
+      expect(getSharedManager().getResult(job.id)).toEqual({ generation: 2 });
+      expect(deliveries).toBe(2);
+    } finally {
+      releaseFirst();
+      await worker.close(true);
+      await queue.close();
+    }
+  }, 15_000);
 
-    await worker.close();
-    flow.close();
-    queue.close();
-  }, 30000);
+  test('a stale flow step does not block or duplicate the next step', async () => {
+    const queue = new Queue('issue33-flow-generation', { embedded: true });
+    const flow = new FlowProducer({ embedded: true });
+    await queue.obliterateAsync();
+    await queue.setStallConfigAsync({
+      enabled: true,
+      stallInterval: 0,
+      gracePeriod: 0,
+      maxStalls: 5,
+    });
+
+    const executions = new Map<number, number>();
+    let releaseFirst = (): void => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let worker: Worker<{ step: number }, { step: number; generation: number }> | null = null;
+
+    try {
+      worker = new Worker(
+        queue.name,
+        async (job) => {
+          const step = job.data.step;
+          const generation = (executions.get(step) ?? 0) + 1;
+          executions.set(step, generation);
+          if (step === 1 && generation === 1) await firstGate;
+          return { step, generation };
+        },
+        { embedded: true, concurrency: 2, heartbeatInterval: 0, lockDuration: 60_000 }
+      );
+
+      await flow.addChain([
+        { name: 'step-0', queueName: queue.name, data: { step: 0 } },
+        { name: 'step-1', queueName: queue.name, data: { step: 1 } },
+        { name: 'step-2', queueName: queue.name, data: { step: 2 } },
+      ]);
+
+      await waitUntil(() => executions.get(1) === 1, 'the first stalled flow delivery');
+      await forceConfirmedStall();
+      await waitUntil(() => executions.get(1) === 2, 'the replacement flow delivery');
+      await waitUntil(() => executions.get(2) === 1, 'the final flow step');
+
+      expect(executions.get(0)).toBe(1);
+      expect(executions.get(1)).toBe(2);
+      expect(executions.get(2)).toBe(1);
+
+      releaseFirst();
+      await Bun.sleep(50);
+      expect(executions.get(2)).toBe(1);
+    } finally {
+      releaseFirst();
+      await worker?.close(true);
+      await flow.close();
+      await queue.close();
+    }
+  }, 15_000);
 });

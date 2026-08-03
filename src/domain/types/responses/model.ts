@@ -1,4 +1,7 @@
 import type { Job, JobState } from '../job';
+import type { ProtocolCapability } from '../protocol';
+
+export type { ProtocolCapability } from '../protocol';
 
 interface BaseResponse {
   readonly ok: boolean;
@@ -115,6 +118,7 @@ export interface MetricsResponse extends BaseResponse {
 }
 export interface CronInfo {
   readonly name: string;
+  readonly jobName?: string;
   readonly queue: string;
   readonly schedule: string | null;
   readonly repeatEvery: number | null;
@@ -136,7 +140,6 @@ export interface ErrorResponse extends BaseResponse {
   readonly ok: false;
   readonly error: string;
 }
-export type ProtocolCapability = 'pipelining';
 export interface HelloResponse extends BaseResponse {
   readonly ok: true;
   readonly protocolVersion: number;

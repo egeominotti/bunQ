@@ -43,10 +43,10 @@ final class Queue
         $response = $this->connection->call([
             'cmd' => 'PUSH',
             'queue' => $this->name,
-            'data' => $payload,
+            ...$payload,
             ...Options::toWire($opts),
         ]);
-        return new Job(['id' => (string) $response['id'], 'queue' => $this->name, 'data' => $payload], $this->connection);
+        return new Job(['id' => (string) $response['id'], 'queue' => $this->name, ...$payload], $this->connection);
     }
 
     /**
@@ -70,7 +70,7 @@ final class Queue
                 $wire['customId'] = $wire['jobId'];
                 unset($wire['jobId']);
             }
-            $inputs[] = ['data' => Protocol::jobPayload($name, $data), ...$wire];
+            $inputs[] = [...Protocol::jobPayload($name, $data), ...$wire];
         }
         $response = $this->connection->call([
             'cmd' => 'PUSHB',

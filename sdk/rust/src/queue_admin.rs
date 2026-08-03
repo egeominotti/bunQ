@@ -1,6 +1,5 @@
 use rmpv::Value;
 
-use crate::queue::job_payload;
 use crate::wire::{Map, as_map, command, get, map};
 use crate::{JobOptions, Queue, Result};
 
@@ -80,8 +79,8 @@ impl Queue {
         let name = template.name.as_deref().unwrap_or(id);
         let mut fields = map([
             ("name", Value::from(id)),
+            ("jobName", Value::from(name)),
             ("queue", Value::from(self.name.clone())),
-            ("data", job_payload(name, template.data)),
             (
                 "schedule",
                 repeat.pattern.map(Value::from).unwrap_or(Value::Nil),
@@ -101,6 +100,7 @@ impl Queue {
             ("immediately", Value::from(repeat.immediately)),
             ("skipIfNoWorker", Value::from(repeat.skip_if_no_worker)),
         ]);
+        fields.push((Value::from("data"), template.data));
         let cron_options = template.options.cron_options();
         if cron_options.as_map().is_some_and(|map| !map.is_empty()) {
             fields.push((Value::from("jobOptions"), cron_options));

@@ -35,10 +35,12 @@ export interface MoveToDelayedCommand extends BaseCommand {
   readonly cmd: 'MoveToDelayed';
   readonly id: string;
   readonly delay: number;
+  readonly token?: string;
 }
 export interface DiscardCommand extends BaseCommand {
   readonly cmd: 'Discard';
   readonly id: string;
+  readonly token?: string;
 }
 export interface PauseCommand extends BaseCommand {
   readonly cmd: 'Pause';

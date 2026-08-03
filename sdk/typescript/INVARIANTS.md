@@ -34,8 +34,12 @@ Cloudflare Workers with `nodejs_compat`; it is not an alternate queue engine.
   before writing. Plain objects, arrays, dates, and binary values remain valid.
 - `undefined` fields are omitted; meaningful `false`, `0`, empty strings, and
   explicit empty arrays are not removed accidentally.
-- The public job name always travels in `data.name`. User data cannot silently
-  replace protocol-owned fields.
+- `PUSH` and `PUSHB` send the job name in top-level `name` and preserve `data`
+  byte-for-byte at the value-model level, including a user-owned `data.name`,
+  scalars, arrays, and null. Job readers prefer top-level `name` and unwrap
+  only legacy envelopes that stored a string name inside `data`.
+- Scheduler identity stays in `name`; the spawned job name uses `jobName`, and
+  scheduler `data` remains user-owned.
 - `wireJobOptions` is the single public-to-wire mapping:
   `attempts -> maxAttempts`, `jobId -> jobId` for ordinary `PUSH`, snake-free
   camelCase wire names for every other option. Adding an option requires a
@@ -61,8 +65,8 @@ Cloudflare Workers with `nodejs_compat`; it is not an alternate queue engine.
 ## Worker leases, heartbeat, ACK, and FAIL
 
 - One job delivery has one lease token and at most one active processor in the
-  client. ACK, FAIL, heartbeat, and lock-extension commands use that exact
-  token.
+  client. ACK, FAIL, heartbeat, lock-extension, and Worker-owned discard
+  commands use that exact token.
 - Heartbeats continue while user work or an ACK batch is unsettled and stop on
   every terminal path. A heartbeat failure is observable; it cannot fabricate
   completion.
@@ -71,6 +75,10 @@ Cloudflare Workers with `nodejs_compat`; it is not an alternate queue engine.
   and raising event listeners.
 - `completed` and processed counters advance only after ACK succeeds. ACK or
   ACKB transport failure emits `error`, not a false completion.
+- A successful transport response is not necessarily an applied transition.
+  `{applied:false, reason:'already-finalized'}` suppresses the local terminal
+  event and counter without emitting `error`. ACKB uses validated positional
+  `ignoredIndices`; duplicate IDs must not be resolved from `ignoredIds` alone.
 - Processor failure sends FAIL with the configured stack limit.
   `UnrecoverableError` sets `unrecoverable: true`; retryable failures do not.
 - Graceful close stops pulling, keeps required heartbeats alive, flushes

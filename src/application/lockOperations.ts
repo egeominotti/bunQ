@@ -19,9 +19,21 @@ export function createLock(
   const loc = ctx.jobIndex.get(jobId);
   if (loc?.type !== 'processing') return null;
 
-  // Check if lock already exists (shouldn't happen, but defensive)
-  if (ctx.jobLocks.has(jobId)) {
-    return null;
+  const existing = ctx.jobLocks.get(jobId);
+  if (existing) {
+    const job = ctx.processingShards[loc.shardIdx].get(jobId);
+    const isNewGeneration =
+      job?.startedAt !== null && job?.startedAt !== undefined && job.startedAt > existing.createdAt;
+    if (!isNewGeneration) return null;
+
+    // Stall retry deliberately leaves the previous lease as a stale-outcome
+    // guard. Once that job is pulled again, replace the lease and detach the
+    // old connection before the new connection registers ownership.
+    ctx.jobLocks.delete(jobId);
+    for (const [clientId, jobs] of ctx.clientJobs) {
+      if (!jobs.delete(jobId)) continue;
+      if (jobs.size === 0) ctx.clientJobs.delete(clientId);
+    }
   }
 
   const lock = createJobLock(jobId, owner, ttl);

@@ -27,6 +27,7 @@ export async function routeQueueJobOperations(
       const command = {
         cmd: 'PUSH' as const,
         queue,
+        name: typeof body.name === 'string' ? body.name : 'default',
         data: body.data,
         priority: body.priority,
         delay: body.delay,
@@ -65,10 +66,12 @@ export async function routeQueueJobOperations(
     } catch {
       return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400, cors);
     }
+    const jobs = ((body['jobs'] as Record<string, unknown>[]) ?? []).map((job) => ({
+      ...job,
+      name: typeof job.name === 'string' ? job.name : 'default',
+    }));
     const result = await handleCommand(
-      { cmd: 'PUSHB', queue, jobs: body['jobs'] as unknown[] } as Parameters<
-        typeof handleCommand
-      >[0],
+      { cmd: 'PUSHB', queue, jobs } as Parameters<typeof handleCommand>[0],
       context
     );
     return jsonResponse(result, result.ok ? 200 : 400, cors);

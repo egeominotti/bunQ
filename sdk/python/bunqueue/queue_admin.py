@@ -85,12 +85,8 @@ class QueueAdminOps:
         """
         template = template or {}
         opts = template.get("opts") or {}
-        data: Dict[str, Any] = {"name": template.get("name", scheduler_id)}
-        tdata = template.get("data")
-        if isinstance(tdata, dict):
-            data.update(tdata)
-        elif tdata is not None:
-            data["payload"] = tdata
+        job_name = template.get("name", scheduler_id)
+        data = template["data"] if "data" in template else {}
         # Priority and deduplication of spawned jobs travel as TOP-LEVEL Cron
         # fields (the handler reads cmd.priority/uniqueKey/dedup); inside
         # jobOptions the server's CronJobOptions silently ignores them (#111).
@@ -102,6 +98,7 @@ class QueueAdminOps:
             {
                 "cmd": "Cron",
                 "name": scheduler_id,
+                "jobName": job_name,
                 "queue": self.name,
                 "data": data,
                 "schedule": repeat.get("pattern"),

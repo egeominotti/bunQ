@@ -130,7 +130,7 @@ func TestHardeningGeneratedPayloadsPreserveInvariants(t *testing.T) {
 		if getErr != nil || job == nil {
 			t.Fatalf("generated job %d unavailable: %v", index, getErr)
 		}
-		data := job.Data()
+		data := asMap(job.Data())
 		if asInt(data["index"]) != index ||
 			asInt(data["signed"]) != payloads[index]["signed"] ||
 			asBool(data["flag"]) != payloads[index]["flag"] ||

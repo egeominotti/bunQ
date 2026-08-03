@@ -5,8 +5,9 @@
  * the background lock expiration task removes the lock and requeues the job.
  * Previously, fail() would throw "Invalid or expired lock token".
  *
- * Fix: fail()/ack() now silently return when the lock was already cleaned up
- * by the background task, but still throw on genuine ownership conflicts.
+ * Fix: fail()/ack() now return the broker-authoritative already-finalized
+ * outcome when the lock was already cleaned up by the background task, but
+ * still throw on genuine ownership conflicts.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
@@ -45,8 +46,11 @@ describe('Bug #28: Invalid or expired lock token at high concurrency', () => {
     const state = await qm.getJobState(jobId);
     expect(['waiting', 'delayed']).toContain(state);
 
-    // FIX: fail() should NOT throw - the job was already handled
-    await expect(qm.fail(jobId, 'processing error', oldToken)).resolves.toBeUndefined();
+    // The stale failure is accepted as a no-op with an explicit terminal outcome.
+    await expect(qm.fail(jobId, 'processing error', oldToken)).resolves.toEqual({
+      applied: false,
+      reason: 'already-finalized',
+    });
   }, 15_000);
 
   test('fail() still throws on genuine ownership conflict', async () => {

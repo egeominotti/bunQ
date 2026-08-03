@@ -4,6 +4,7 @@ import type { BaseCommand } from './base';
 export interface CronCommand extends BaseCommand {
   readonly cmd: 'Cron';
   readonly name: string;
+  readonly jobName?: string;
   readonly queue: string;
   readonly data: unknown;
   readonly schedule?: string;

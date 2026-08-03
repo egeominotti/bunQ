@@ -2,6 +2,7 @@ import { hostname } from 'os';
 import { jobId } from '../../../domain/types/job';
 import { EventType } from '../../../domain/types/queue';
 import { getSharedManager } from '../../manager';
+import { TcpEventSubscription } from '../../queue-events/tcpSubscription';
 import { startHeartbeat } from '../workerHeartbeat';
 import { WorkerState } from './state';
 
@@ -17,7 +18,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
       if (!this.closed) this.emit('ready');
     });
 
-    if (this.embedded && !this.stalledUnsubscribe && !this.opts.skipStalledCheck) {
+    if (!this.stalledUnsubscribe && !this.opts.skipStalledCheck) {
       this.subscribeToStalledEvents();
     }
 
@@ -33,29 +34,55 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
       this.registerWithServer();
     }
 
-    if (this.opts.heartbeatInterval > 0 && !this.opts.skipLockRenewal) {
+    if (this.opts.heartbeatInterval > 0 && !this.opts.skipLockRenewal && !this.heartbeatTimer) {
       if (this.embedded) {
         this.heartbeatTimer = setInterval(() => {
           const manager = getSharedManager();
-          for (const id of this.pulledJobIds) manager.jobHeartbeat(jobId(id));
+          for (const id of this.pulledJobIds) {
+            const token = this.opts.useLocks ? this.jobTokens.get(id) : undefined;
+            manager.jobHeartbeat(jobId(id), token);
+          }
         }, this.opts.heartbeatInterval);
       } else {
         this.heartbeatTimer = startHeartbeat(this.getHeartbeatDeps(), this.opts.heartbeatInterval);
       }
     }
     if (this.opts.heartbeatInterval > 0) this.startWorkerHeartbeat();
-    this.poll();
+    if (this.stalledSubscription) {
+      void this.stalledSubscription.waitUntilReady().then(
+        () => this.poll(),
+        () => this.poll()
+      );
+    } else {
+      this.poll();
+    }
   }
 
   protected subscribeToStalledEvents(): void {
-    if (!this.embedded) return;
-    const manager = getSharedManager();
-    this.stalledUnsubscribe = manager.subscribe((event) => {
+    const handleEvent = (event: { queue: string; eventType: EventType; jobId: string }) => {
       if (event.queue !== this.queueKey) return;
       if (event.eventType === EventType.Stalled) {
         this.emit('stalled', event.jobId, 'active');
       }
+    };
+    if (this.embedded) {
+      this.stalledUnsubscribe = getSharedManager().subscribe(handleEvent);
+      return;
+    }
+
+    const subscription = new TcpEventSubscription({
+      connection: this.opts.connection,
+      queue: this.queueKey,
+      onEvent: handleEvent,
+      onError: (error) => {
+        if (this.listenerCount('error') > 0) this.emit('error', error);
+      },
     });
+    this.stalledSubscription = subscription;
+    this.stalledUnsubscribe = () => {
+      subscription.close();
+      if (this.stalledSubscription === subscription) this.stalledSubscription = null;
+    };
   }
 
   pause(): void {
@@ -104,10 +131,11 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
   async waitUntilReady(): Promise<void> {
     if (this.embedded) return;
     if (this.tcpPool) await this.tcpPool.send({ cmd: 'Ping' });
+    if (this.stalledSubscription) await this.stalledSubscription.waitUntilReady();
   }
 
   cancelJob(jobId: string, reason?: string): boolean {
-    if (this.activeJobIds.has(jobId)) {
+    if (this.hasActiveDelivery(jobId)) {
       this.cancelledJobs.add(jobId);
       this.emit('cancelled', { jobId, reason: reason ?? 'Job cancelled by worker' });
       return true;
@@ -116,7 +144,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
   }
 
   cancelAllJobs(reason?: string): void {
-    for (const jobId of this.activeJobIds) {
+    for (const jobId of this.activeDeliveryIds()) {
       this.cancelledJobs.add(jobId);
       this.emit('cancelled', { jobId, reason: reason ?? 'All jobs cancelled' });
     }

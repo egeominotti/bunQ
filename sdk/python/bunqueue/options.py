@@ -10,12 +10,8 @@ Backoff = Union[int, Dict[str, Any]]  # ms or {"type": "fixed"|"exponential", "d
 
 
 def job_payload(name: str, data: Any) -> Dict[str, Any]:
-    """Mirror the JS SDK: the job name travels inside ``data``."""
-    if data is None:
-        return {"name": name}
-    if isinstance(data, dict):
-        return {"name": name, **data}
-    return {"name": name, "payload": data}
+    """Build protocol-owned name and data fields without changing user data."""
+    return {"name": name, "data": data}
 
 
 def build_cron_job_options(job_opts: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

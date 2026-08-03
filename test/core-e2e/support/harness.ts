@@ -141,6 +141,27 @@ export class CoreE2eHarness {
     return this.manager ?? getSharedManager(this.dataPath);
   }
 
+  /** Restart the broker over the same SQLite file and TCP endpoint. */
+  async restartBroker(): Promise<void> {
+    const port = this.tcpPort;
+    this.server?.stop();
+    this.server = null;
+    this.manager?.shutdown();
+    this.manager = null;
+    closeAllSharedPools();
+    shutdownManager();
+
+    if (this.mode === 'tcp') {
+      await Bun.sleep(20);
+      this.manager = new QueueManager({ dataPath: this.dataPath });
+      this.server = createTcpServer(this.manager, {
+        hostname: '127.0.0.1',
+        port: port ?? 0,
+      });
+      this.tcpPort = this.server.server.port;
+    }
+  }
+
   addCleanup(cleanup: Cleanup): void {
     this.cleanups.push(cleanup);
   }

@@ -140,6 +140,7 @@ function moveStalliedJobToDlq(
   attemptsExhausted: boolean
 ): void {
   ctx.processingShards[procIdx].delete(job.id);
+  ctx.timeoutScheduler.cancel(job.id);
   shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
 
   // Discard cron jobs with preventOverlap instead of sending to DLQ (#73).
@@ -177,6 +178,7 @@ function retryStalliedJob(
   // The cron scheduler will re-create them at the next scheduled tick.
   if (job.uniqueKey?.startsWith('cron:')) {
     ctx.processingShards[procIdx].delete(job.id);
+    ctx.timeoutScheduler.cancel(job.id);
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     ctx.jobIndex.delete(job.id);
     ctx.storage?.deleteJob(job.id);
@@ -201,6 +203,7 @@ function retryStalliedJob(
   }
 
   ctx.processingShards[procIdx].delete(job.id);
+  ctx.timeoutScheduler.cancel(job.id);
   shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
 
   shard.getQueue(job.queue).push(job);

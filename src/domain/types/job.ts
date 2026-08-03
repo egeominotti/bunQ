@@ -4,4 +4,5 @@ export * from '../job/constants';
 export * from '../job/create';
 export * from '../job/ids';
 export * from '../job/locks';
+export * from '../job/payload';
 export * from '../job/state';

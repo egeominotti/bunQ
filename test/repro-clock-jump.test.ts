@@ -326,9 +326,9 @@ describe('CJ3 — lock TTL under forward jump: exactly-once reclaim, no double-c
     expect(m.getResult(job.id)).toEqual({ late: true });
     expect(await m.pull(Q, 0)).toBeNull(); // no duplicate execution
 
-    // A second stale ACK with the same dead token is a graceful no-op — no
-    // throw, no state change (never double-completed).
-    await m.ack(job.id, { again: true }, token!);
+    // A second ACK targets an already terminal job and is rejected, while the
+    // first committed result remains authoritative.
+    await expect(m.ack(job.id, { again: true }, token!)).rejects.toThrow(/not found/i);
     expect(await m.getJobState(job.id)).toBe('completed');
     expect(m.getResult(job.id)).toEqual({ late: true });
   }, 20_000);

@@ -9,22 +9,34 @@ import {
   reconstructDlqEntry,
   unpack,
 } from '../sqliteSerializer';
-import { SqliteState } from './state';
+import { encodeJobOptions } from '../jobOptionsBlob';
+import type { DurableAdmissionMetadata } from '../types/admission';
+import { SqliteAdmission } from './admission';
 
 /** Job insertion, state transitions, and DLQ persistence. */
-export abstract class SqliteJobs extends SqliteState {
-  insertJob(job: Job, durable?: boolean): void {
+export abstract class SqliteJobs extends SqliteAdmission {
+  insertJob(job: Job, durable?: boolean, admission?: DurableAdmissionMetadata): void {
     if (durable) {
-      this.insertJobImmediate(job);
+      this.insertJobImmediate(job, admission);
       return;
     }
+    this.commitBufferedAdmissionMetadata(admission);
     this.writeBuffer.add(job);
   }
 
-  insertJobImmediate(job: Job): void {
+  insertJobImmediate(job: Job, admission?: DurableAdmissionMetadata): void {
+    if (!this.hasAdmissionMetadata(admission)) {
+      this.safeWrite(() => this.runInsertJobStmt(job));
+      return;
+    }
     this.safeWrite(() => {
-      this.runInsertJobStmt(job);
+      const transaction = this.db.transaction(() => {
+        this.runAdmissionMetadata(admission);
+        this.runInsertJobStmt(job);
+      });
+      transaction();
     });
+    this.finalizeAdmissionMetadata(admission);
   }
 
   protected runInsertJobStmt(job: Job): void {
@@ -34,6 +46,7 @@ export abstract class SqliteJobs extends SqliteState {
       .run(
         job.id,
         job.queue,
+        job.name,
         pack(job.data),
         job.priority,
         job.createdAt,
@@ -61,7 +74,8 @@ export abstract class SqliteJobs extends SqliteState {
         job.stallTimeout,
         persistedStallCount(job),
         job.timeline.length > 0 ? pack(job.timeline) : null,
-        dlqRetryState ? pack(dlqRetryState) : null
+        dlqRetryState ? pack(dlqRetryState) : null,
+        encodeJobOptions(job)
       );
   }
 

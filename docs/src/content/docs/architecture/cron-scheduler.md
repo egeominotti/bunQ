@@ -48,6 +48,7 @@ head:
 ```typescript
 interface CronJob {
   name: string;               // Unique identifier
+  jobName: string;            // Name of each spawned Job
   queue: string;              // Target queue
   data: unknown;              // Job payload
   schedule: string | null;    // Cron expression (5-6 fields)
@@ -92,7 +93,9 @@ if (current?.generation !== entry.generation) {
 }
 ```
 
-Source: `src/infrastructure/scheduler/cronScheduler.ts`.
+Source: `src/infrastructure/scheduler/cron/runtime.ts` and
+`src/infrastructure/scheduler/cron/execution.ts`; the public façade remains
+`src/infrastructure/scheduler/cronScheduler.ts`.
 
 ## Scheduling Modes
 
@@ -160,6 +163,7 @@ Interval crons run at a fixed rate: the next run is anchored to the slot the fir
 CREATE TABLE cron_jobs (
   name TEXT PRIMARY KEY,
   queue TEXT NOT NULL,
+  job_name TEXT,
   data BLOB NOT NULL,          -- MessagePack
   schedule TEXT,
   repeat_every INTEGER,

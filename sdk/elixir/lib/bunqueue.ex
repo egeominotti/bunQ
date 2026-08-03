@@ -1,6 +1,6 @@
 defmodule Bunqueue do
   @moduledoc """
-  Official Elixir client for bunqueue protocol version 2.
+  Official Elixir client for bunqueue protocol version 3.
 
   `Bunqueue.Queue` is the producing and administration API, while
   `Bunqueue.Worker` implements lease-aware job consumption.

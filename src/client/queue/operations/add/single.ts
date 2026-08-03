@@ -6,7 +6,7 @@ import { toPublicJob } from '../../../types';
 import { jobId } from '../../../../domain/types/job';
 import { createJobProxy } from '../../jobProxy';
 import type { AddContext, ExtendedJobOptions } from '../../types/add';
-import { buildPushPayload, buildRepeatOptions } from './payload';
+import { buildJobData, buildPushPayload, buildRepeatOptions } from './payload';
 
 export async function add<T>(
   context: AddContext,
@@ -15,11 +15,7 @@ export async function add<T>(
   options: JobOptions = {}
 ): Promise<Job<T>> {
   const merged = { ...context.opts.defaultJobOptions, ...options } as ExtendedJobOptions;
-  const jobData: Record<string, unknown> = { name: jobName, ...(data as object) };
-  if (merged.parent) {
-    jobData.__parentId = merged.parent.id;
-    jobData.__parentQueue = merged.parent.queue;
-  }
+  const jobData = buildJobData(data, merged);
 
   if (context.embedded) {
     const manager = getSharedManager();
@@ -29,6 +25,7 @@ export async function add<T>(
     const repeat = merged.repeat ? buildRepeatOptions(merged.repeat) : undefined;
 
     const job = await manager.push(context.name, {
+      name: jobName,
       data: jobData,
       priority: merged.priority,
       delay: merged.delay,
@@ -110,7 +107,7 @@ export async function add<T>(
   }
 
   const tcp = context.tcp as TcpConnectionPool;
-  const response = await tcp.send(buildPushPayload(context.name, jobData, merged));
+  const response = await tcp.send(buildPushPayload(context.name, jobName, jobData, merged));
   if (!response.ok) {
     throw new Error((response.error as string | undefined) ?? 'Failed to add job');
   }

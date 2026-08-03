@@ -1,11 +1,7 @@
-/**
- * Job Conversion Functions
- * Convert internal job types to public API types
- */
-
 import type { DlqEntry as InternalDlqEntry } from '../domain/types/dlq';
 import type { Job, JobStateType, ChangePriorityOpts, GetDependenciesOpts, DlqEntry } from './types';
 import { buildJobOpts } from './jobHelpers';
+import { convertDlqEntry } from './dlqConversion';
 import {
   buildJobProperties,
   buildStateCheckMethods,
@@ -17,7 +13,6 @@ import type {
   ToPublicJobOptions,
 } from './jobConversionTypes';
 
-// Re-export types for backward compatibility
 export type {
   CreatePublicJobOptions,
   PublicJobMethodContext,
@@ -58,13 +53,28 @@ export function createPublicJob<T>(opts: CreatePublicJobOptions): Job<T> {
     token,
     processedBy,
     stacktrace,
+    returnvalue,
+    failedReason,
   } = opts;
 
   const id = String(job.id);
   const jobOpts = buildJobOpts(job);
-  const props = buildJobProperties<T>(job, name, stacktrace, token, processedBy);
+  const props = buildJobProperties<T>(job, name, {
+    stacktrace,
+    token,
+    processedBy,
+    returnvalue,
+    failedReason,
+  });
   const stateChecks = buildStateCheckMethods(id, getState, getDependenciesCount);
-  const serialization = buildSerializationMethods<T>(job, id, name, jobOpts, stacktrace);
+  const serialization = buildSerializationMethods<T>(job, {
+    id,
+    name,
+    jobOpts,
+    stacktrace,
+    returnvalue,
+    failedReason,
+  });
 
   return {
     ...props,
@@ -174,13 +184,26 @@ export function toPublicJob<T>(opts: ToPublicJobOptions): Job<T> {
     removeDeduplicationKey,
     removeUnprocessedChildren,
     stacktrace,
+    returnvalue,
+    failedReason,
   } = opts;
 
   const id = String(job.id);
   const jobOpts = buildJobOpts(job);
-  const props = buildJobProperties<T>(job, name, stacktrace, undefined, undefined);
+  const props = buildJobProperties<T>(job, name, {
+    stacktrace,
+    returnvalue,
+    failedReason,
+  });
   const stateChecks = buildStateCheckMethods(id, getState, getDependenciesCount);
-  const serialization = buildSerializationMethods<T>(job, id, name, jobOpts, stacktrace);
+  const serialization = buildSerializationMethods<T>(job, {
+    id,
+    name,
+    jobOpts,
+    stacktrace,
+    returnvalue,
+    failedReason,
+  });
 
   return {
     ...props,
@@ -264,27 +287,5 @@ export function toDlqEntry<T>(
   entry: InternalDlqEntry,
   methods: PublicJobMethodContext
 ): DlqEntry<T> {
-  const jobData = entry.job.data as { name?: string } | null;
-  return {
-    job: createPublicJob<T>({
-      job: entry.job,
-      name: jobData?.name ?? 'default',
-      ...methods,
-    }),
-    enteredAt: entry.enteredAt,
-    reason: entry.reason,
-    error: entry.error,
-    attempts: entry.attempts.map((a) => ({
-      attempt: a.attempt,
-      startedAt: a.startedAt,
-      failedAt: a.failedAt,
-      reason: a.reason,
-      error: a.error,
-      duration: a.duration,
-    })),
-    retryCount: entry.retryCount,
-    lastRetryAt: entry.lastRetryAt,
-    nextRetryAt: entry.nextRetryAt,
-    expiresAt: entry.expiresAt,
-  };
+  return convertDlqEntry(entry, methods, (options) => createPublicJob<T>(options));
 }

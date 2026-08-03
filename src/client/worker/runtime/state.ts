@@ -10,6 +10,16 @@ import type { HeartbeatDeps } from '../workerHeartbeat';
 import { WorkerRateLimiter } from '../workerRateLimiter';
 import type { ExtendedWorkerOptions, TcpConnection } from '../types';
 import { createTcpPool, resolveWorkerOptions } from './options';
+import type { TcpEventSubscription } from '../../queue-events/tcpSubscription';
+
+export interface PulledJob {
+  job: InternalJob;
+  token: string | null;
+}
+
+export interface WorkerDelivery extends PulledJob {
+  generation: number;
+}
 
 export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter {
   readonly name: string;
@@ -32,10 +42,12 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected activeJobs = 0;
   protected pollTimer: ReturnType<typeof setTimeout> | null = null;
   protected consecutiveErrors = 0;
-  protected readonly activeJobIds: Set<string> = new Set();
   protected readonly pulledJobIds: Set<string> = new Set();
   protected readonly jobTokens: Map<string, string> = new Map();
   protected readonly cancelledJobs: Set<string> = new Set();
+  private deliverySequence = 0;
+  private readonly currentDeliveries = new Map<string, WorkerDelivery>();
+  private readonly activeDeliveries = new Map<string, Set<number>>();
   protected heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   protected workerHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
   protected processedCount = 0;
@@ -43,12 +55,13 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected readonly startedAt: number;
   protected registered = false;
   protected readonly workerId: string;
-  protected pendingJobs: Array<{ job: InternalJob; token: string | null }> = [];
+  protected pendingJobs: WorkerDelivery[] = [];
   protected pendingJobsHead = 0;
   protected processingScheduled = false;
   protected pendingPull = 0;
   protected lastDrainedEmit = 0;
   protected stalledUnsubscribe: (() => void) | null = null;
+  protected stalledSubscription: TcpEventSubscription | null = null;
 
   on(event: 'ready' | 'drained' | 'closed', listener: () => void): this;
   on(event: 'active', listener: (job: Job<T>) => void): this;
@@ -127,6 +140,72 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
     }
 
     if (this.opts.autorun) this.run();
+  }
+
+  protected trackDelivery(item: PulledJob): WorkerDelivery {
+    const delivery = { ...item, generation: ++this.deliverySequence };
+    const jobId = String(item.job.id);
+    this.currentDeliveries.set(jobId, delivery);
+    this.pulledJobIds.add(jobId);
+    if (this.opts.useLocks && item.token) this.jobTokens.set(jobId, item.token);
+    else this.jobTokens.delete(jobId);
+    return delivery;
+  }
+
+  protected currentDelivery(jobId: string): WorkerDelivery | undefined {
+    return this.currentDeliveries.get(jobId);
+  }
+
+  protected isCurrentDelivery(delivery: WorkerDelivery): boolean {
+    return this.currentDeliveries.get(String(delivery.job.id))?.generation === delivery.generation;
+  }
+
+  protected isActiveDelivery(delivery: WorkerDelivery): boolean {
+    return this.activeDeliveries.get(String(delivery.job.id))?.has(delivery.generation) ?? false;
+  }
+
+  protected beginDelivery(delivery: WorkerDelivery): void {
+    const jobId = String(delivery.job.id);
+    let generations = this.activeDeliveries.get(jobId);
+    if (!generations) {
+      generations = new Set();
+      this.activeDeliveries.set(jobId, generations);
+    }
+    generations.add(delivery.generation);
+  }
+
+  protected finishDelivery(delivery: WorkerDelivery): void {
+    const jobId = String(delivery.job.id);
+    const generations = this.activeDeliveries.get(jobId);
+    generations?.delete(delivery.generation);
+    if (generations?.size === 0) this.activeDeliveries.delete(jobId);
+    if (this.isCurrentDelivery(delivery)) {
+      this.currentDeliveries.delete(jobId);
+      this.pulledJobIds.delete(jobId);
+      this.jobTokens.delete(jobId);
+    }
+    if (!this.activeDeliveries.has(jobId)) this.cancelledJobs.delete(jobId);
+  }
+
+  protected forgetDelivery(delivery: WorkerDelivery): void {
+    if (!this.isCurrentDelivery(delivery)) return;
+    const jobId = String(delivery.job.id);
+    this.currentDeliveries.delete(jobId);
+    this.pulledJobIds.delete(jobId);
+    this.jobTokens.delete(jobId);
+  }
+
+  protected hasActiveDelivery(jobId: string): boolean {
+    return this.activeDeliveries.has(jobId);
+  }
+
+  protected activeDeliveryIds(): IterableIterator<string> {
+    return this.activeDeliveries.keys();
+  }
+
+  protected clearDeliveries(): void {
+    this.currentDeliveries.clear();
+    this.activeDeliveries.clear();
   }
 
   abstract run(): void;

@@ -85,6 +85,14 @@ describe('#2 proxy reflects dedup/parent/repeat keys (TCP, matches embedded)', (
   test('parentKey + parent reflect the requested parent', async () => {
     const tcp = freshTcp('issue90-parent');
     const emb = freshEmb('issue90-parent-emb');
+    const tcpParentQueue = freshTcp('parent-q');
+    const embeddedParentQueue = freshEmb('parent-q');
+    const tcpParent = await tcpParentQueue.add('parent', { mode: 'tcp' }, { jobId: 'p1' });
+    const embeddedParent = await embeddedParentQueue.add(
+      'parent',
+      { mode: 'embedded' },
+      { jobId: 'p1' }
+    );
     const opts = { parent: { id: 'p1', queue: 'parent-q' } };
     const tj = await tcp.add('child', { v: 1 }, opts);
     const ej = await emb.add('child', { v: 1 }, opts);
@@ -92,6 +100,8 @@ describe('#2 proxy reflects dedup/parent/repeat keys (TCP, matches embedded)', (
     expect(tj.parent).toEqual({ id: 'p1', queueQualifiedName: 'parent-q' });
     expect(tj.parentKey).toBe(ej.parentKey);
     expect(tj.parent).toEqual(ej.parent);
+    expect(await tcpParentQueue.getJobState(tcpParent.id)).toBe('waiting-children');
+    expect(await embeddedParentQueue.getJobState(embeddedParent.id)).toBe('waiting-children');
   });
 
   test('deduplicationId reflects the requested dedup id', async () => {

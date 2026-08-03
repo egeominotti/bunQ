@@ -1,5 +1,9 @@
 import { queueManager as qm, section, test } from './harness';
 
+export function retryWaitMs(deadline: number, now = Date.now()): number {
+  return Math.max(25, deadline - now + 25);
+}
+
 export async function runCoreFeatureSections(): Promise<void> {
   await section('Basic Operations', async () => {
     const job1 = await qm.push('basic', { data: { msg: 'hello' } });
@@ -83,11 +87,11 @@ export async function runCoreFeatureSections(): Promise<void> {
     let pulled = await qm.pull('retry', 0);
     await test('job has maxAttempts=3', () => pulled?.maxAttempts === 3);
     await qm.fail(pulled!.id, 'First failure');
-    await Bun.sleep(100);
+    await Bun.sleep(retryWaitMs(pulled!.runAt));
     pulled = await qm.pull('retry', 0);
     await test('attempts incremented after fail', () => pulled?.attempts === 1);
     await qm.fail(pulled!.id, 'Second failure');
-    await Bun.sleep(200);
+    await Bun.sleep(retryWaitMs(pulled!.runAt));
     pulled = await qm.pull('retry', 0);
     await test('job retried correctly', () => !!pulled && pulled.attempts === 2);
     if (pulled) await qm.ack(pulled.id);

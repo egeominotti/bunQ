@@ -23,25 +23,25 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   test('worker.getNextJob should fetch a job manually', async () => {
     await queue.add('test', { value: 42 });
 
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     const job = await worker.getNextJob();
     expect(job).toBeDefined();
-    expect(job?.data).toEqual({ name: 'test', value: 42 });
+    expect(job?.name).toBe('test');
+    expect(job?.data).toEqual({ value: 42 });
+    expect(job?.token).toBeString();
 
     await worker.close();
   });
 
   test('worker.getNextJob should return undefined when queue is empty', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     const job = await worker.getNextJob();
     expect(job).toBeUndefined();
@@ -75,11 +75,11 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   });
 
   test('worker.extendJobLocks should extend locks', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false, useLocks: true }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+      useLocks: true,
+    });
 
     // Add and fetch a job with lock
     await queue.add('test', { value: 1 });
@@ -97,11 +97,10 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   });
 
   test('worker has getNextJob method', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     expect(typeof worker.getNextJob).toBe('function');
 
@@ -109,11 +108,10 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   });
 
   test('worker has processJobManually method', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     expect(typeof worker.processJobManually).toBe('function');
 
@@ -121,11 +119,10 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   });
 
   test('worker has extendJobLocks method', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     expect(typeof worker.extendJobLocks).toBe('function');
 
@@ -133,17 +130,13 @@ describe('Worker Manual Job Control - BullMQ v5', () => {
   });
 
   test('worker emits stalled event', async () => {
-    const worker = new Worker(
-      'manual-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('manual-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     // Check that stalled event listener can be added
-    let stalledEmitted = false;
-    worker.on('stalled', () => {
-      stalledEmitted = true;
-    });
+    worker.on('stalled', () => undefined);
 
     // The stalled event is emitted by the system when jobs stall
     // Here we just verify the listener works
@@ -158,15 +151,14 @@ describe('Worker extendJobLocks validation', () => {
     const queue = new Queue('extend-test', { embedded: true });
     queue.obliterate();
 
-    const worker = new Worker(
-      'extend-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('extend-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
-    await expect(
-      worker.extendJobLocks(['job1', 'job2'], ['token1'], 1000)
-    ).rejects.toThrow('jobIds and tokens arrays must have the same length');
+    await expect(worker.extendJobLocks(['job1', 'job2'], ['token1'], 1000)).rejects.toThrow(
+      'jobIds and tokens arrays must have the same length'
+    );
 
     await worker.close();
     queue.close();
@@ -177,11 +169,10 @@ describe('Worker extendJobLocks validation', () => {
     const queue = new Queue('extend-empty-test', { embedded: true });
     queue.obliterate();
 
-    const worker = new Worker(
-      'extend-empty-test',
-      async () => ({ done: true }),
-      { embedded: true, autorun: false }
-    );
+    const worker = new Worker('extend-empty-test', async () => ({ done: true }), {
+      embedded: true,
+      autorun: false,
+    });
 
     const result = await worker.extendJobLocks([], [], 1000);
     expect(result).toBe(0);

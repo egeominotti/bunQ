@@ -53,11 +53,16 @@ export interface CreatePublicJobOptions {
   token?: string;
   processedBy?: string;
   stacktrace?: string[] | null;
+  returnvalue?: unknown;
+  failedReason?: string;
 }
 
 /** Complete operation set required when exposing a live job from another view. */
 export type PublicJobMethodContext = Required<
-  Omit<CreatePublicJobOptions, 'job' | 'name' | 'token' | 'processedBy' | 'stacktrace'>
+  Omit<
+    CreatePublicJobOptions,
+    'job' | 'name' | 'token' | 'processedBy' | 'stacktrace' | 'returnvalue' | 'failedReason'
+  >
 >;
 
 /** Options for creating a simple public job */
@@ -99,4 +104,6 @@ export interface ToPublicJobOptions {
   removeUnprocessedChildren?: (id: string) => Promise<void>;
   // Additional job metadata
   stacktrace?: string[] | null;
+  returnvalue?: unknown;
+  failedReason?: string;
 }

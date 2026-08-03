@@ -49,6 +49,26 @@ describe('AsyncLock', () => {
     expect(order).toEqual([1, 2]);
   });
 
+  test('does not let a new acquirer barge ahead of an already queued acquirer', async () => {
+    const lock = new AsyncLock();
+    const order: string[] = [];
+    const initialGuard = await lock.acquire();
+
+    const queued = lock.acquire(1000).then((guard) => {
+      order.push('queued');
+      guard.release();
+    });
+
+    initialGuard.release();
+    const newcomer = lock.acquire(1000).then((guard) => {
+      order.push('new');
+      guard.release();
+    });
+
+    await Promise.all([queued, newcomer]);
+    expect(order).toEqual(['queued', 'new']);
+  });
+
   test('should timeout on lock acquisition', async () => {
     const lock = new AsyncLock();
 
@@ -168,6 +188,26 @@ describe('RWLock', () => {
 
     // Writer should go before the second reader
     expect(order[0]).toBe('writer');
+  });
+
+  test('does not let a new writer barge ahead of an already queued writer', async () => {
+    const lock = new RWLock();
+    const order: string[] = [];
+    const initialGuard = await lock.acquireWrite();
+
+    const queuedWriter = lock.acquireWrite(1000).then((guard) => {
+      order.push('queued');
+      guard.release();
+    });
+
+    initialGuard.release();
+    const newWriter = lock.acquireWrite(1000).then((guard) => {
+      order.push('new');
+      guard.release();
+    });
+
+    await Promise.all([queuedWriter, newWriter]);
+    expect(order).toEqual(['queued', 'new']);
   });
 
   test('withReadLock should auto-release', async () => {

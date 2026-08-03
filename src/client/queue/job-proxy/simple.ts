@@ -6,8 +6,8 @@ import { buildFailCommand, failEmbeddedArgs } from '../failWire';
 import type { SimpleJobContext } from '../types/job';
 import { computeSimpleDependencies } from './dependencies';
 import { reflectFields } from './reflection';
-
-/** Create a Job wired to either the embedded manager or a TCP connection. */
+import { serializeReturnvalue } from '../jobMetadata';
+import { assertFlowTcpOk } from '../../flowJobTypes';
 export function createSimpleJob<T>(
   id: string,
   name: string,
@@ -17,21 +17,25 @@ export function createSimpleJob<T>(
 ): Job<T> {
   const { queueName, embedded, tcp, meta } = ctx;
   const reflected = reflectFields(id, queueName, meta);
-
+  const attemptsMade = meta?.attemptsMade ?? 0;
+  const attemptsStarted = meta?.attemptsStarted ?? attemptsMade;
+  const progress = meta?.progress ?? 0;
+  const stalledCounter = meta?.stalledCounter ?? 0;
   return {
     id,
     name,
     data,
     queueName,
-    attemptsMade: 0,
+    attemptsMade,
     timestamp,
-    progress: 0,
+    progress,
     delay: reflected.delay,
-    processedOn: undefined,
-    finishedOn: undefined,
+    processedOn: meta?.processedOn,
+    finishedOn: meta?.finishedOn,
     stacktrace: reflected.stacktrace,
+    returnvalue: reflected.returnvalue,
     failedReason: reflected.failedReason,
-    stalledCounter: 0,
+    stalledCounter,
     priority: reflected.priority,
     parent: reflected.parent,
     parentKey: reflected.parentKey,
@@ -40,7 +44,7 @@ export function createSimpleJob<T>(
     processedBy: undefined,
     deduplicationId: reflected.deduplicationId,
     repeatJobKey: reflected.repeatJobKey,
-    attemptsStarted: 0,
+    attemptsStarted,
     updateProgress: async (progress, message) => {
       if (embedded) {
         await getSharedManager().updateProgress(jobId(id), progress, message);
@@ -70,7 +74,7 @@ export function createSimpleJob<T>(
         await getSharedManager().updateJobData(jobId(id), newData);
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'Update', id, data: newData });
+      if (tcp) assertFlowTcpOk(await tcp.send({ cmd: 'Update', id, data: newData }), 'Update');
     },
     promote: async () => {
       if (embedded) {
@@ -124,12 +128,15 @@ export function createSimpleJob<T>(
       name,
       data,
       opts: reflected.opts,
-      progress: 0,
+      progress,
       delay: reflected.delay,
       timestamp,
-      attemptsMade: 0,
+      attemptsMade,
       stacktrace: reflected.stacktrace,
+      returnvalue: reflected.returnvalue,
       failedReason: reflected.failedReason,
+      processedOn: meta?.processedOn,
+      finishedOn: meta?.finishedOn,
       queueQualifiedName: `bull:${queueName}`,
       parentKey: reflected.parentKey,
     }),
@@ -138,34 +145,52 @@ export function createSimpleJob<T>(
       name,
       data: JSON.stringify(data),
       opts: JSON.stringify(reflected.opts),
-      progress: '0',
+      progress: String(progress),
       delay: String(reflected.delay),
       timestamp: String(timestamp),
-      attemptsMade: '0',
+      attemptsMade: String(attemptsMade),
       stacktrace: reflected.stacktrace ? JSON.stringify(reflected.stacktrace) : null,
+      returnvalue: serializeReturnvalue(reflected.returnvalue),
       failedReason: reflected.failedReason,
+      processedOn: meta?.processedOn === undefined ? undefined : String(meta.processedOn),
+      finishedOn: meta?.finishedOn === undefined ? undefined : String(meta.finishedOn),
       parentKey: reflected.parentKey,
     }),
-    moveToCompleted: async (returnValue) => {
+    moveToCompleted: async (returnValue, token) => {
       if (embedded) {
-        await getSharedManager().ack(jobId(id), returnValue);
+        await getSharedManager().ack(jobId(id), returnValue, token);
         return null;
       }
-      if (tcp) await tcp.send({ cmd: 'ACK', id, result: returnValue });
+      if (tcp) {
+        const response = await tcp.send({
+          cmd: 'ACK',
+          id,
+          result: returnValue,
+          ...(token === undefined ? {} : { token }),
+        });
+        if (response.ok !== true) {
+          throw new Error(typeof response.error === 'string' ? response.error : 'ACK failed');
+        }
+      }
       return null;
     },
-    moveToFailed: async (error) => {
+    moveToFailed: async (error, token) => {
       if (embedded) {
-        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error));
+        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error, token));
         return;
       }
-      if (tcp) await tcp.send(buildFailCommand(id, error));
+      if (tcp) {
+        const response = await tcp.send(buildFailCommand(id, error, token));
+        if (response.ok !== true) {
+          throw new Error(typeof response.error === 'string' ? response.error : 'FAIL failed');
+        }
+      }
     },
-    moveToWait: async () => {
+    moveToWait: async (token) => {
       if (embedded) {
         const manager = getSharedManager();
         const state = await manager.getJobState(jobId(id));
-        if (state === 'active') return await manager.moveActiveToWait(jobId(id));
+        if (state === 'active') return await manager.moveActiveToWait(jobId(id), token);
         if (state === 'delayed') return await manager.promote(jobId(id));
         if (state === 'failed') {
           const job = await manager.getJob(jobId(id));
@@ -176,23 +201,49 @@ export function createSimpleJob<T>(
         return false;
       }
       if (!tcp) return false;
-      const response = await tcp.send({ cmd: 'MoveToWait', id });
+      const response = await tcp.send({
+        cmd: 'MoveToWait',
+        id,
+        ...(token === undefined ? {} : { token }),
+      });
+      if (response.ok === false && /token/i.test(String(response.error))) {
+        throw new Error(typeof response.error === 'string' ? response.error : 'Invalid lock token');
+      }
       return response.ok === true;
     },
-    moveToDelayed: async (targetTimestamp) => {
+    moveToDelayed: async (targetTimestamp, token) => {
       const delay = Math.max(0, targetTimestamp - Date.now());
       if (embedded) {
-        await getSharedManager().moveToDelayed(jobId(id), delay);
+        await getSharedManager().moveToDelayed(jobId(id), delay, token);
         return;
       }
-      if (tcp) await tcp.send({ cmd: 'MoveToDelayed', id, delay });
+      if (tcp) {
+        const response = await tcp.send({
+          cmd: 'MoveToDelayed',
+          id,
+          delay,
+          ...(token === undefined ? {} : { token }),
+        });
+        if (response.ok !== true) {
+          throw new Error(
+            typeof response.error === 'string' ? response.error : 'MoveToDelayed failed'
+          );
+        }
+      }
     },
-    moveToWaitingChildren: async () => {
+    moveToWaitingChildren: async (token) => {
       if (embedded) {
-        return await getSharedManager().moveToWaitingChildren(jobId(id));
+        return await getSharedManager().moveToWaitingChildren(jobId(id), token);
       }
       if (!tcp) return false;
-      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+      const response = await tcp.send({
+        cmd: 'MoveToWaitingChildren',
+        id,
+        ...(token === undefined ? {} : { token }),
+      });
+      if (response.ok === false && /token/i.test(String(response.error))) {
+        throw new Error(typeof response.error === 'string' ? response.error : 'Invalid lock token');
+      }
       return response.ok === true;
     },
     waitUntilFinished: async (_queueEvents, ttl) => {

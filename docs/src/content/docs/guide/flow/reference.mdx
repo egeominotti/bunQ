@@ -32,14 +32,22 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 | `addChain(steps[])` | Sequential execution: A → B → C |
 | `addBulkThen(parallel[], final)` | Parallel then converge: [A, B, C] → D |
 | `addTree(root)` | Hierarchical tree with nested children |
-| `getParentResult(parentId)` | Result of a single parent job (embedded only) |
-| `getParentResults(parentIds[])` | Results of multiple parent jobs (embedded only) |
+| `getParentResult(parentId)` | Exact result of one completed parent, embedded or TCP |
+| `getParentResults(parentIds[])` | Ordered results for completed parents, embedded or TCP |
 | `close()` / `disconnect()` | Close the connection pool |
 | `waitUntilReady()` | Wait until the FlowProducer is connected |
 
 The table describes the Bun package. SDK availability: `add` and `addChain` exist in all six SDKs; `getFlow` in TypeScript, Python, PHP and Go; `addBulk` and `addBulkThen` in TypeScript and Python; `addTree`, `getParentResult` and `getParentResults` in the Bun package only.
 
-FlowProducer extends Node.js `EventEmitter` (BullMQ v5 compatible); `closing` tracks shutdown state.
+FlowProducer extends Node.js `EventEmitter` (BullMQ v5 compatible). Its
+`closing` property is `null` while live, then becomes the stable Promise returned
+by the first `close()` or `disconnect()` call. Repeated shutdown calls return
+that same Promise, including if teardown fails.
+
+The result helpers stay synchronous in embedded mode for compatibility and
+return Promises in TCP mode. Always `await` them in portable code. They preserve
+`0`, `false`, an empty string, and persisted `null`; an ID with no stored result
+is omitted from the map (or resolves to `undefined` for the single read).
 
 The Bun snippets in this guide are exercised in
 `test/flow-docs-examples.test.ts`, including the complete Quick Start, chain,
@@ -197,4 +205,3 @@ node = %{name: "...", queue: "...", data: %{}, options: [],
 | [Flow Producer](/guide/flow/) | Your first parent/child graph, and what is guaranteed |
 | [Flow Patterns](/guide/flow/patterns/) | Chains, fan-in, trees, reading child results, options |
 | [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
-

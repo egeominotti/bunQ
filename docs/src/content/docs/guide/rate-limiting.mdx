@@ -327,6 +327,27 @@ The Elixir SDK supports a custom window as a queue-wide broker limit:
 
 The Bun worker limit is enforced client-side by each worker, so with 3 identical workers the effective rate is 3x.
 
+The budget counts **job starts**, not completions. Admission is synchronous at
+the processor dispatch boundary, so `concurrency: 20` cannot overshoot a
+`max: 2` window. Batch pulling is capped by the same remaining budget: jobs
+beyond those two starts stay `waiting` on the broker instead of being leased
+and parked inside the worker.
+
+The same gate applies to `getNextJob()` + `processJobManually()`. Manual
+processing waits until a start token is available before invoking the
+processor. When locks are enabled, `getNextJob()` exposes the broker lease on
+`job.token`, and `processJobManually(job)` reuses that tracked token if its
+explicit token argument is omitted.
+
+You can also apply a temporary worker-local pause dynamically:
+
+```typescript
+worker.rateLimit(5_000); // do not start another job for at least five seconds
+```
+
+This override works with or without a configured `limiter`, including workers
+using `groupKey`, and never alters tokens already consumed by previous starts.
+
 *The worker `limiter` option is available in the Bun client. In the network
 SDKs, use the queue-level rate limit shown in each tab or a client-side limiter
 of your own in the processor.*
@@ -342,7 +363,8 @@ Agents connected via [MCP](/guide/mcp/) can set and clear both limits in natural
 | Rate limit | Queue (all workers) | Any duration (default 1s) | `bunqueue rate-limit set`, `queue.setGlobalRateLimit(max, duration?)` |
 | Concurrency limit | Queue (all workers) | n/a | `bunqueue concurrency set`, `queue.setGlobalConcurrency(n)` |
 | Worker concurrency | One worker | n/a | `new Worker(..., { concurrency })` |
-| Worker limiter | One worker | Any duration | `new Worker(..., { limiter: { max, duration } })` |
+| Worker limiter | One worker | Rolling duration | `new Worker(..., { limiter: { max, duration } })` |
+| Temporary worker override | One worker | Explicit TTL | `worker.rateLimit(ms)` |
 
 ## Gotchas
 

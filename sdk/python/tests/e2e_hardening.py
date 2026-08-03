@@ -94,9 +94,10 @@ def hardening_generated_payloads_preserve_invariants(server: Server) -> None:
             for index, job_id in enumerate(ids):
                 fetched = queue.get_job(job_id)
                 assert fetched is not None
-                data = dict(fetched.data)
-                assert data.pop("name") == f"generated-{index % 7}"
-                assert data == payloads[index], f"payload {index} changed: {data}"
+                assert fetched.name == f"generated-{index % 7}"
+                assert fetched.data == payloads[index], (
+                    f"payload {index} changed: {fetched.data}"
+                )
         finally:
             queue.obliterate()
 

@@ -41,8 +41,9 @@ methods.
 The original synchronous queue-query/control methods that cannot await a TCP
 round trip remain embedded-only by contract. Their existing async companions
 are the authoritative remote APIs and are covered by regression tests. They are
-not counted as missing implementations. `trimEvents` is also excluded: event
-history is not retained, so returning `0` is its explicit contract.
+not counted as missing implementations. `trimEvents` is a real dual-mode
+operation over the bounded per-queue lifecycle journal; its contract is covered
+by the guide suite and the exhaustive public-API matrix.
 
 ## DLQ `Job` factory fan-out
 
@@ -106,12 +107,19 @@ pause mutation or use finite pages with application-level reconciliation.
 
 The exhaustive successor to this focused remediation audit is the
 [Core Public API End-to-End Matrix](./core-public-api-e2e.md). It automatically
-discovers all 298 callable instance methods on exported core client objects and
-requires exact, no-test-double coverage in every applicable runtime. The 285
+discovers all 308 callable instance methods on exported core client objects and
+requires exact, no-test-double coverage in every applicable runtime. The 272
 dual-mode methods run against embedded SQLite and a real TCP/SQLite broker; the
-13 `TcpConnectionPool` methods are TCP-only and carry explicit embedded `N/A`
-cells. A newly exported class or method therefore fails CI until a successful
-runtime scenario covers it.
+13 `TcpConnectionPool` methods are TCP-only and 23 synchronous snapshot methods
+have async TCP counterparts. Those boundaries carry explicit `N/A` cells. A
+newly exported class or method therefore fails CI until a successful runtime
+scenario covers it.
+
+The parity remediation also made QueueEvents delivery, Worker `stalled`
+notifications, exact `Queue.waitJobUntilFinished()` results, and
+`FlowProducer.getParentResult(s)` authoritative over TCP. The matrix exercises
+those paths in both runtimes; focused regressions additionally cover event
+authentication, unsubscribe and reconnect/resubscribe behavior.
 
 The regression suite under `test/stub-contract/` was written red before the
 implementations. It contains:

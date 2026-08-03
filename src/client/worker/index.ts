@@ -3,7 +3,7 @@
  * Re-exports all worker components
  */
 
-export type { PendingAck, ExtendedWorkerOptions, TcpConnection } from './types';
+export type { PendingAck, ExtendedWorkerOptions, ManualJob, TcpConnection } from './types';
 export { FORCE_EMBEDDED, WORKER_CONSTANTS } from './constants';
 export { AckBatcher, type AckBatcherConfig } from './ackBatcher';
 export { parseJobFromResponse } from './jobParser';

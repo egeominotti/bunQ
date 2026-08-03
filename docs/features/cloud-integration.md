@@ -26,7 +26,7 @@ Does NOT own:
 
 Internal:
 - `QueueManager` (`application/queueManager`) — sole telemetry source and command target; `getStats`, `getMemoryStats`, `getQueueJobCounts`, `getJobs`, `getDlqEntries`, `listCrons`, `getCloudTelemetry`, `getAllJobResults/Logs/Locks`, plus all control methods (`commands.ts`).
-- `throughputTracker`, `latencyTracker`, `backgroundTasks.getTaskErrorStats` (`application/*`) — rate/latency/error analytics folded into snapshots (`snapshotCollector.ts:11-13`).
+- `throughputTracker`, `latencyTracker`, `backgroundTasks.getTaskErrorStats` (`application/*`) — rate/latency/error analytics folded into snapshots (`snapshotCollector.ts:9-12`).
 - `shared/version` (`VERSION`), `shared/logger` (`cloudLog`).
 - `domain/types/job` (`jobId` brand constructor) and `domain/types/queue` (`JobEvent`).
 
@@ -46,8 +46,8 @@ Exported from `src/infrastructure/cloud/index.ts`:
 - Types `CloudConfig`, `CloudSnapshot`, `CloudEvent` (`types.ts`).
 
 Internal but load-bearing:
-- `collectSnapshot(params: CollectSnapshotParams): Promise<CloudSnapshot>` (`snapshotCollector.ts:148`) and its `ServerHandles` interface (`snapshotCollector.ts:45`).
-- `handleCommand(queueManager, cmd: CloudCommand, context?): Promise<CloudCommandResult>` (`commandHandler.ts:85`).
+- `collectSnapshot(params: CollectSnapshotParams): Promise<CloudSnapshot>` (`snapshotCollector.ts:44-210`) and its `ServerHandles` interface (`types/collector.ts:4-35`).
+- `handleCommand(queueManager, cmd: CloudCommand, context?): Promise<CloudCommandResult>` (`commandHandler.ts:44-100`).
 - `redactData(data, redactFields): unknown` (`redact.ts:11`).
 - `class HttpSender`, `class WsSender`, `class CircuitBreaker`, `class SnapshotBuffer`.
 
@@ -55,23 +55,23 @@ Network endpoints **called** (this process is the client, not a server):
 - `POST {BUNQUEUE_CLOUD_URL}/api/v1/ingest` — snapshot upload, `Content-Type: application/x-msgpack`, `Content-Encoding: zstd` (`httpSender.ts:26,92`).
 - `WS {BUNQUEUE_CLOUD_URL→ws(s)}/api/v1/commands` — command channel (`wsSender.ts:41`).
 
-Remote command actions (whitelist in `COMMANDS`, `commands.ts:89`):
-`queue:pause`, `queue:resume`, `queue:drain`, `queue:clean`, `queue:obliterate`, `queue:promoteAll`, `queue:retryCompleted`, `queue:rateLimit`, `queue:clearRateLimit`, `queue:concurrency`, `queue:clearConcurrency`, `queue:stallConfig`, `queue:dlqConfig`, `queue:detail`, `queue:list`, `job:cancel`, `job:promote`, `job:push`, `job:priority`, `job:discard`, `job:delay`, `job:updateData`, `job:clearLogs`, `job:retry`, `job:logs`, `job:result`, `job:list`, `job:get`, `job:listAll`, `dlq:retry`, `dlq:purge`, `cron:upsert`, `cron:delete`, `webhook:add`, `webhook:remove`, `webhook:set-enabled`, `stats:refresh`, `s3:backup`. Plus `snapshot:get`, handled specially in `handleCommand` because it needs the agent's `getSnapshot` context (`commandHandler.ts:91`).
+Remote command actions (whitelist composed in `commands.ts:8-12` from `commands/queues.ts`, `commands/jobs.ts`, and `commands/integrations.ts`):
+`queue:pause`, `queue:resume`, `queue:drain`, `queue:clean`, `queue:obliterate`, `queue:promoteAll`, `queue:retryCompleted`, `queue:rateLimit`, `queue:clearRateLimit`, `queue:concurrency`, `queue:clearConcurrency`, `queue:stallConfig`, `queue:dlqConfig`, `queue:detail`, `queue:list`, `job:cancel`, `job:promote`, `job:push`, `job:priority`, `job:discard`, `job:delay`, `job:updateData`, `job:clearLogs`, `job:retry`, `job:logs`, `job:result`, `job:list`, `job:get`, `job:listAll`, `dlq:retry`, `dlq:purge`, `cron:upsert`, `cron:delete`, `webhook:add`, `webhook:remove`, `webhook:set-enabled`, `stats:refresh`, `s3:backup`. Plus `snapshot:get`, handled specially in `handleCommand` because it needs the agent's `getSnapshot` context (`commandHandler.ts:49-68`).
 
 WS control messages handled: incoming `ping` → reply `pong`; incoming `pong` ignored; `handshake_ack` logged; `command` dispatched (`wsSender.ts:120-137`).
 
 ## Data Models
 
-The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key groups:
+The wire payload is `CloudSnapshot` (`types/snapshot.ts:41-88`) — a large flat object. Key groups:
 - Identity / lifecycle: `instanceId`, `instanceName`, `version`, `hostname`, `pid`, `startedAt`, `timestamp`, `sequenceId`, optional `shutdown` (set `true` only on the final flush, `cloudAgent.ts:151`).
 - Aggregates: `stats` (counts + `totalPushed/Pulled/Completed/Failed` serialized as **strings** to avoid 53-bit overflow), `throughput`, `latency` (averages + p50/p95/p99), `memory`, `collections` (internal map/heap sizes), `workers`, `storage`, `taskErrors`.
 - Per-queue arrays/maps: `queues`, `queueConfigs`, `queueThroughput`, `queueWaitTime`, `queueRetryRate`, `queueBacklogVelocity`, `queuePriorityDistribution`, `queueExtended` (dedup/groups/deps).
-- Detail lists: `recentJobs` (all queues, all states, capped at 1000 jobs per queue per state via `start: 0, end: 999`, `snapshotHelpers.ts:173`), `dlqEntries` (with `attemptHistory`, uncapped), `workerDetails`, `webhooks`, `topErrors`, `stallDetails`, `activeLocks`, `crons`, `jobResults`, `jobLogEntries`.
+- Detail lists: `recentJobs` (all queues, all states, capped at 1000 jobs per queue per state via `start: 0, end: 999`, `snapshot/jobs.ts:132-149`), `dlqEntries` (with `attemptHistory`, uncapped), `workerDetails`, `webhooks`, `topErrors`, `stallDetails`, `activeLocks`, `crons`, `jobResults`, `jobLogEntries`.
 - Optional: `events?: CloudEvent[]` (buffered job events drained into the snapshot), `mcpOperations`/`mcpSummary`, `s3Backup`, `sqliteStats`, `runtime`.
 
-`CloudEvent` (`types.ts:477`) wraps a `JobEvent` (`eventType`, `queue`, `jobId`, `error?`, `progress?`, `data?`, `prev?`, `delay?`). `CloudCommand` / `CloudCommandResult` (`commandHandler.ts:15,44`) are the WS command envelope: `{ type:'command', id, action, ...args }` → `{ type:'command_result', id, success, data?|error? }`.
+`CloudEvent` (`types/event.ts:1-14`) wraps a `JobEvent` (`eventType`, `queue`, `jobId`, `error?`, `progress?`, `data?`, `prev?`, `delay?`). `CloudCommand` / `CloudCommandResult` (`types/command.ts:5-40`) are the WS command envelope: `{ type:'command', id, action, ...args }` → `{ type:'command_result', id, success, data?|error? }`.
 
-`CloudConfig` (`types.ts:7`) is the parsed env config. Note its JSDoc defaults are stale relative to `config.ts` — see [Configuration](#configuration). For full domain shapes (Job, DLQ entry, lock) see [data-model](../data-model.md).
+`CloudConfig` (`types/config.ts:1-18`) is the parsed environment configuration; see [Configuration](#configuration) for its runtime defaults. For full domain shapes (Job, DLQ entry, lock) see [data-model](../data-model.md).
 
 ## Business Logic / Control Flow
 
@@ -80,12 +80,12 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 2. If `useWebSocket`, a `WsSender` is constructed. When `remoteCommands` is on, a command handler is registered that calls `handleCommand(...)` and pushes the result back via `wsSender.sendRaw` (`cloudAgent.ts:91-108`). Then `wsSender.connect()` opens the socket.
 3. `subscribeToEvents()` registers a `QueueManager.subscribe` callback (`cloudAgent.ts:210`).
 
-### Snapshot push (`cloudAgent.ts:184` → `snapshotCollector.ts:148`)
+### Snapshot push (`cloudAgent.ts:188-212` → `snapshotCollector.ts:44-210`)
 1. `collectSnapshot` gathers "light" data (`getStats`, memory, throughput, latency, storage, per-queue counts) then the full detail set on every call. Queue counts are requested once with `getAllQueueJobCounts(queueNames)` and reused across queue configs, statistics, and analytics instead of rescanning global collections per queue.
-2. `collectLiveJobs` iterates every queue × every state in `ALL_STATES` (up to 1000 jobs per queue per state) and maps each domain job to snapshot shape; `paused` is collected so a paused queue's ready jobs still appear instead of vanishing (`snapshotHelpers.ts:30-44,161`).
-3. `enrichFailedJobDurations` back-fills `duration`/`completedAt`/`totalDuration` for failed jobs using the last DLQ attempt-history entry (`snapshotCollector.ts:93`).
-4. Throughput/backlog analytics are **delta-based**: module-level `prevQueueTotals` / `prevQueueWaiting` maps hold the previous snapshot's totals; rates require >0.5s (throughput) / >0.1min (backlog) elapsed to emit (`snapshotHelpers.ts:20-26,343,459`).
-5. Buffered events are spliced into `snapshot.events` (`cloudAgent.ts:199`), then `httpSender.send(snapshot)`.
+2. `collectLiveJobs` iterates every queue × every state in `ALL_STATES` (up to 1000 jobs per queue per state) and maps each domain job to snapshot shape; `paused` is collected so a paused queue's ready jobs still appear instead of vanishing (`snapshot/jobs.ts:6-15`, `snapshot/jobs.ts:132-149`).
+3. `enrichFailedJobDurations` back-fills `duration`/`completedAt`/`totalDuration` for failed jobs using the last DLQ attempt-history entry (`snapshot/collector.ts:45-68`).
+4. Throughput/backlog analytics are **delta-based**: module-level `previousQueueTotals` / `previousQueueWaiting` maps hold the previous snapshot's totals; rates require >0.5s (throughput) / >0.1min (backlog) elapsed to emit (`snapshot/analytics.ts:4-8`, `snapshot/analytics.ts:18-29`, `snapshot/analytics.ts:124-137`).
+5. Buffered events are spliced into `snapshot.events` (`cloudAgent.ts:203-208`), then `httpSender.send(snapshot)`.
 
 ### HTTP send (`httpSender.ts:30`)
 1. Flush any buffered snapshots first (`flushBuffer`, FIFO, one at a time, stops on first failure, `httpSender.ts:56`).
@@ -93,10 +93,10 @@ The wire payload is `CloudSnapshot` (`types.ts:43`) — a large flat object. Key
 3. `post()` packs to MessagePack, zstd-compresses at level 6, records `lastCompressedKB`, sets auth + timestamp headers, optionally adds `X-Signature` = hex HMAC-SHA256 of the compressed bytes, and `fetch`es with a 10s `AbortSignal.timeout` (`httpSender.ts:77-116`).
 4. On success → `circuitBreaker.onSuccess()`; on throw → `onFailure()` + buffer the snapshot. `401`/`403` are logged at error level (visible auth/plan failures) before re-throwing (`httpSender.ts:118-131`).
 
-### Adaptive interval (`cloudAgent.ts:163`)
-`computeInterval()` chooses the next delay purely from `lastCompressedKB`: `<50KB → 5s`, `<200KB → 10s`, `<500KB → 20s`, else `30s`. `scheduleNext()` re-arms a `setTimeout` after each push (`cloudAgent.ts:172`). The configured `intervalMs` is logged at startup but is **not** used for scheduling.
+### Adaptive interval (`cloudAgent.ts:167-186`)
+`computeInterval()` chooses the next delay purely from `lastCompressedKB`: `<50KB → 5s`, `<200KB → 10s`, `<500KB → 20s`, else `30s`. `scheduleNext()` re-arms a `setTimeout` after each push (`cloudAgent.ts:176-186`). The configured `intervalMs` is logged at startup but is **not** used for scheduling.
 
-### Remote command path (`wsSender.ts:116` → `commandHandler.ts:85`)
+### Remote command path (`wsSender.ts:115-171` → `commandHandler.ts:44-100`)
 1. Incoming binary frame is auto-detected as zstd (magic `28 b5 2f fd`) or plain msgpack, or JSON text, then unpacked (`wsSender.ts:146-171`).
 2. A `command` is forwarded only if `remoteCommands` is set and `action`+`id` are present (`wsSender.ts:129`).
 3. `handleCommand` looks up the action in `COMMANDS`; unknown actions return `success:false` with `Unknown command:`. The handler receives both `QueueManager` and `CommandContext`, the raw result is `camelKeys`-normalized (PascalCase→camelCase, skipping user-data keys), and wrapped in a `command_result`.
@@ -109,8 +109,8 @@ a rejected backup therefore returns an explicit `command_result` with
 `success:false`; it cannot report a false successful no-op. Resolving the handle
 at command time is required because `start()` precedes `setServerHandles()`.
 
-### Shutdown (`cloudAgent.ts:119`)
-Idempotent (`stopped` flag). Clears timers, unsubscribes events, collects one final snapshot with `shutdown=true`, and races `httpSender.send` against a 2s `Bun.sleep` (best-effort), then stops the WS sender (`cloudAgent.ts:138-159`). Wired into `bootstrap.ts:183` after active jobs drain.
+### Shutdown (`cloudAgent.ts:123-165`)
+Idempotent (`stopped` flag). Clears timers, unsubscribes events, collects one final snapshot with `shutdown=true`, and races `httpSender.send` against a 2s `Bun.sleep` (best-effort), then stops the WS sender (`cloudAgent.ts:138-164`). Wired into `bootstrap.ts:229-232` after active jobs drain.
 
 ## Concurrency & Locking
 
@@ -127,20 +127,20 @@ No queue locks are taken by this module; it is a read-mostly observer that calls
 - **Circuit breaker:** after `threshold` (default 5) consecutive failures it OPENs; while open, `canExecute()` returns `false` and snapshots are buffered without a network call. After `resetMs` (default 60s) it transitions HALF_OPEN and allows one probe; a single failure in HALF_OPEN re-opens immediately (`circuitBreaker.ts:44`).
 - **Event ring buffer:** `eventBuffer` is capped at `EVENT_BUFFER_MAX = 1000`; oldest events are dropped when full (`cloudAgent.ts:23,236`). Events filtered by `eventFilter` are discarded before buffering. Buffered events are only delivered embedded in the next HTTP snapshot, so with `useHttp:false` events are collected but never sent.
 - **Redaction is shallow:** `redactData` replaces only **top-level** keys named in `redactFields` with `'[REDACTED]'`; nested fields are not traversed (`redact.ts:11`). With `includeJobData:false`, job data is omitted entirely from `recentJobs`/`dlqEntries`/events.
-- **Defensive collection:** every per-queue/per-state collector wraps work in `try/catch` and skips on error, so one bad queue cannot abort a snapshot (`snapshotHelpers.ts:177,225,266`). `collectStallDetails` caps at 20 jobs (`snapshotHelpers.ts:489`).
+- **Defensive collection:** per-queue/per-state job, DLQ, config, webhook, error, and stall collectors wrap fallible work in `try/catch` and skip on error, so one bad queue cannot abort a snapshot (`snapshot/jobs.ts:139-147`, `snapshot/jobs.ts:159-191`, `snapshot/config.ts:10-37`, `snapshot/stalls.ts:5-34`). `collectStallDetails` caps at 20 jobs (`snapshot/stalls.ts:14-30`).
 - **Command safety:** only whitelisted actions execute; arguments are taken from optional fields with `?? ''`/defaults, so a missing `queue`/`jobId` becomes an empty-string call rather than a crash (`commands.ts`). Command handler errors are caught and returned as `success:false` rather than tearing down the socket.
 - **WS best-effort send:** `sendRaw` no-ops if not connected and swallows send errors — a command result can be silently dropped if the socket flaps between receipt and reply (`wsSender.ts:93`).
-- **Big-int safety:** lifetime counters are sent as strings in `CloudSnapshot.stats` to survive msgpack/JSON without precision loss (`snapshotCollector.ts:286-289`).
+- **Big-int safety:** lifetime counters are sent as strings in `CloudSnapshot.stats` to survive msgpack/JSON without precision loss (`snapshotCollector.ts:124-138`).
 
 ### Known stale / unwired code (verify before relying on)
-- `CollectSnapshotParams.includeHeavy` is declared and always passed `true`, but `collectSnapshot` never reads it — the "light every 15s / heavy every 90s" file-header comment is aspirational; **every snapshot is full** (`snapshotCollector.ts:3-6,85`, callers `cloudAgent.ts:147,193,261`).
+- `CollectSnapshotParams.includeHeavy` is declared and always passed `true`, but `collectSnapshot` never reads it — the "light every 15s / heavy every 90s" file-header comment is aspirational; **every snapshot is full** (`snapshotCollector.ts:2-6`, `types/collector.ts:38-49`, callers `cloudAgent.ts:145-155`, `cloudAgent.ts:191-201`, `cloudAgent.ts:259-269`).
 - `statsUpdateTimer` is declared and cleared in `stop()` but **never assigned** — there is no live 15s `stats_update` WS push (`cloudAgent.ts:32,128`).
-- `buildStatsRefresh` (`statsRefresh.ts`) and `buildStatsUpdate` (`statsUpdate.ts`) are exported but not referenced anywhere in `src`; the `stats:refresh` command instead calls `qm.getStats()` directly (`commands.ts:356`). Treat both files as legacy/unwired.
+- `buildStatsRefresh` (`statsRefresh.ts`) and `buildStatsUpdate` (`statsUpdate.ts`) are exported but not referenced anywhere in `src`; the `stats:refresh` command instead calls `queueManager.getStats()` directly (`commands/queues.ts:130`). Treat both files as legacy/unwired.
 - Post-command immediate-snapshot trigger is commented out — the dashboard is expected to refresh via WS command results, not via an HTTP re-push (`cloudAgent.ts:100-103`).
 
 ## Configuration
 
-All via `Bun.env`, parsed once in `loadCloudConfig` (`config.ts`). **Defaults below are the actual code defaults**, which differ from the `CloudConfig` JSDoc and the project CLAUDE.md in three places (flagged).
+All via `Bun.env`, parsed once in `loadCloudConfig` (`config.ts`). **Defaults below are the actual code defaults.**
 
 | Env var | Default | Notes |
 | --- | --- | --- |
@@ -149,8 +149,8 @@ All via `Bun.env`, parsed once in `loadCloudConfig` (`config.ts`). **Defaults be
 | `BUNQUEUE_CLOUD_INSTANCE_ID` | — (required) | Missing → error + disabled. |
 | `BUNQUEUE_CLOUD_SIGNING_SECRET` | `null` | Enables `X-Signature` HMAC-SHA256 over the compressed body. |
 | `BUNQUEUE_CLOUD_INSTANCE_NAME` | `os.hostname()` | Human-readable label. |
-| `BUNQUEUE_CLOUD_INTERVAL_MS` | `15000` | **Parsed but unused** — actual cadence is adaptive (5–30s) via `computeInterval`. JSDoc/CLAUDE.md say 5000. |
-| `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA` | `true` (`!== 'false'`) | **JSDoc/CLAUDE.md say false.** Set to `false` to omit job data. |
+| `BUNQUEUE_CLOUD_INTERVAL_MS` | `15000` | **Parsed but unused** — actual cadence is adaptive (5–30s) via `computeInterval`. |
+| `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA` | `true` (`!== 'false'`) | Set to `false` to omit job data. |
 | `BUNQUEUE_CLOUD_REDACT_FIELDS` | `[]` | Comma-separated top-level keys → `'[REDACTED]'`. |
 | `BUNQUEUE_CLOUD_EVENTS` | `[]` (all) | Comma-separated `eventType` allowlist. |
 | `BUNQUEUE_CLOUD_BUFFER_SIZE` | `720` | Offline snapshot ring-buffer cap. |
@@ -158,7 +158,7 @@ All via `Bun.env`, parsed once in `loadCloudConfig` (`config.ts`). **Defaults be
 | `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_RESET_MS` | `60000` | OPEN→HALF_OPEN delay. |
 | `BUNQUEUE_CLOUD_USE_WEBSOCKET` | `true` (`!== 'false'`) | Command channel. |
 | `BUNQUEUE_CLOUD_USE_HTTP` | `true` (`!== 'false'`) | Snapshot upload channel. |
-| `BUNQUEUE_CLOUD_REMOTE_COMMANDS` | `true` (`!== 'false'`) | **JSDoc/CLAUDE.md say false.** Allows the dashboard to mutate this instance; set `false` for read-only. |
+| `BUNQUEUE_CLOUD_REMOTE_COMMANDS` | `true` (`!== 'false'`) | Allows the dashboard to mutate this instance; set `false` for read-only. |
 
 `dataPath` is not an env var here — it is threaded in from the caller (`CloudAgent.create(qm, dataPath)`).
 

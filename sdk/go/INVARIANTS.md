@@ -26,7 +26,12 @@ commands are summarized in [CLAUDE.md](CLAUDE.md).
   the same int64/uint64 conversion, non-string-key rejection, and cycle guard.
 - `time.Time` becomes JavaScript-safe Unix milliseconds. Incoming msgpackr
   extension type 0 is normalized recursively to `nil`.
-- Job names are encoded as `data.name`; `Job.Data()` hides that internal field.
+- `PUSH` and `PUSHB` encode job names in top-level `name` and preserve `data`
+  unchanged, including a user-owned `data.name`, scalar, slice, or nil.
+  `Job.Data()` therefore returns `any`; legacy envelopes alone lose their
+  string `name` marker during decoding.
+- Scheduler identity uses `name`, spawned jobs use `jobName`, and scheduler
+  `data` remains user-owned.
 - `optionsToWire` rejects unknown keys and performs exact mappings such as
   `attempts` to `maxAttempts`, custom IDs, deduplication, and debounce.
   Meaningful zero and false values cannot be compacted away.
@@ -59,6 +64,10 @@ commands are summarized in [CLAUDE.md](CLAUDE.md).
 - Processor panics become failures with the real stack and do not kill the
   worker. “completed” is emitted only after successful ACK; unrecoverable
   errors skip retries.
+- Successful transport does not imply that a terminal transition applied.
+  `{applied:false, reason:"already-finalized"}` is an authoritative no-op:
+  release the held lease without incrementing counters or emitting
+  `completed`/`failed`. Malformed terminal evidence emits `error`.
 
 ## FlowProducer and atomic PUSHF
 

@@ -23,7 +23,12 @@ export async function routeJobAdvanced(
     const body = await parseJsonBody(request, cors);
     if (body instanceof Response) return body;
     const result = await handleCommand(
-      { cmd: 'MoveToDelayed', id: moveDelayedMatch[1], delay: body['delay'] as number },
+      {
+        cmd: 'MoveToDelayed',
+        id: moveDelayedMatch[1],
+        delay: body['delay'] as number,
+        token: body['token'] as string | undefined,
+      },
       context
     );
     return jsonResponse(result, result.ok ? 200 : 400, cors);
@@ -115,7 +120,16 @@ export async function routeJobAdvanced(
 
   const moveToWaitMatch = path.match(RE_JOB_MOVE_TO_WAIT);
   if (moveToWaitMatch && method === 'POST') {
-    const result = await handleCommand({ cmd: 'MoveToWait', id: moveToWaitMatch[1] }, context);
+    const body = await parseJsonBody(request, cors);
+    if (body instanceof Response) return body;
+    const result = await handleCommand(
+      {
+        cmd: 'MoveToWait',
+        id: moveToWaitMatch[1],
+        token: body['token'] as string | undefined,
+      },
+      context
+    );
     return jsonResponse(result, result.ok ? 200 : 400, cors);
   }
   return null;

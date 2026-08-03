@@ -21,6 +21,8 @@ formatted exclusively by rustfmt.
   sides of the frame.
 - `JobOptions` is static by design. Adding an option requires its public field,
   exact wire mapping, option test, protocol evidence, and README/change note.
+- Keep ordinary and scheduler job names in top-level `name`/`jobName`; preserve
+  the complete user `data` value and decode only the legacy name envelope.
 - Worker jobs own their snapshot and token. Every spawned processor and
   heartbeat thread must be joined even if another thread already failed.
   Never detach work merely to make stop return sooner.

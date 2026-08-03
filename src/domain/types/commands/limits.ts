@@ -22,6 +22,7 @@ export interface RemoveJobDeduplicationKeyCommand extends BaseCommand {
 export interface MoveToWaitingChildrenCommand extends BaseCommand {
   readonly cmd: 'MoveToWaitingChildren';
   readonly id: string;
+  readonly token?: string;
 }
 export interface RateLimitCommand extends BaseCommand {
   readonly cmd: 'RateLimit';

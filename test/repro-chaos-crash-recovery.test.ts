@@ -80,7 +80,10 @@ async function spawnServer(db: string, port: number): Promise<Server> {
       ...process.env,
       BUNQUEUE_EMBEDDED: '',
       TCP_PORT: String(port),
-      HTTP_PORT: String(port + 1),
+      // The HTTP endpoint is not part of this test. Let the kernel allocate it
+      // so a parallel suite cannot make the broker exit on an adjacent-port
+      // collision before the TCP recovery endpoint becomes ready.
+      HTTP_PORT: '0',
       BUNQUEUE_DATA_PATH: db,
       LOG_LEVEL: 'error',
     },

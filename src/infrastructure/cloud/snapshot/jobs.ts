@@ -65,7 +65,7 @@ function mapJobCore(
     job.completedAt && job.startedAt ? job.completedAt - job.startedAt : undefined;
   return {
     id: String(job.id),
-    name: (data?.name as string | undefined) ?? 'default',
+    name: job.name,
     queue: job.queue,
     state,
     data: safeData,

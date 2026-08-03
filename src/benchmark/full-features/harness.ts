@@ -29,7 +29,7 @@ export async function section(name: string, tests: () => Promise<void>): Promise
   await tests();
 }
 
-export function printSummary(): void {
+export function printSummary(): boolean {
   console.log(`\n${'═'.repeat(50)}`);
   console.log('📊 FINAL RESULTS');
   console.log('═'.repeat(50));
@@ -39,4 +39,5 @@ export function printSummary(): void {
   console.log('═'.repeat(50));
   if (failed === 0) console.log('\n🎉 ALL FEATURES WORKING CORRECTLY!\n');
   else console.log(`\n⚠️  ${failed} FEATURES NEED ATTENTION\n`);
+  return failed === 0;
 }

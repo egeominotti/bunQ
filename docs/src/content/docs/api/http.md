@@ -220,7 +220,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 | `maxAttempts` | `number` | `3` | Maximum retry attempts before the job moves to the DLQ. Range: 1-1000. `attempts` is accepted as an alias. |
 | `backoff` | `number` or `object` | `1000` | Base retry delay in milliseconds (exponential: `backoff * 2^attempt`, max: 1 day). Also accepts `{ "type": "fixed" \| "exponential", "delay": ms }`. |
 | `ttl` | `number` | - | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year. |
-| `timeout` | `number` | - | Processing timeout in milliseconds. If a worker doesn't ACK within this time, the job is considered stalled. Max: 1 day. |
+| `timeout` | `number` | - | Processing timeout in milliseconds. The broker fails the active attempt at its absolute deadline; a later outcome from that lease generation is ignored. Max: 1 day. |
 | `uniqueKey` | `string` | - | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored. |
 | `jobId` | `string` | - | Broker-wide custom job ID. If a live job with this ID already exists in any queue, the push is idempotent and returns the existing ID. |
 | `tags` | `string[]` | `[]` | Metadata tags for filtering and querying. |

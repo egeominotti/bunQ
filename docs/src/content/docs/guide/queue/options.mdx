@@ -143,6 +143,25 @@ names shown in the table.
 | `lifo` | `boolean` | `false` | Process newest first |
 | `parent` | `{ id, queue }` | - | Parent job reference for [flows](/guide/flow/) |
 
+At the same priority, LIFO jobs run newest-first ahead of FIFO jobs. Priority
+always remains authoritative, so a lower-priority LIFO job cannot overtake a
+higher-priority FIFO job.
+
+Processing `timeout` values are measured from the active transition and use an
+absolute next-deadline timer. Concurrent jobs retain their individual deadlines.
+The broker's timeout transition is authoritative: a processor outcome that
+arrives afterward is ignored for that exact lease generation, without emitting
+a contradictory local Worker event. A later retry uses a new lease and is not
+suppressed.
+
+`parent` creates a real dependency edge to an existing pending job. The parent
+moves to `waiting-children`, runs only after every linked child finishes, and
+exposes child results through `getChildrenValues()`. This works across queues
+and is committed atomically in both embedded and TCP modes, including
+`addBulk()`. A missing, active, completed, or failed parent rejects the child;
+the rejected child is not left in memory or SQLite. Use `FlowProducer` when the
+parent and children must all be created as one new graph.
+
 :::tip[Related Guides]
 - [Worker API](/guide/worker/), process jobs from queues
 - [Dead Letter Queue](/guide/dlq/), handle failed jobs

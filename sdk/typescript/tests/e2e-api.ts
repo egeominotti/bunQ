@@ -39,7 +39,7 @@ test('api: moveJobToFailed / moveJobToWait / moveJobToCompleted with token', asy
 
   const good = await queue.add('mc', { v: 2 });
   pulled = await pullOne(queue, 'api-moves');
-  await queue.moveJobToWait(pulled.id); // active -> waiting again
+  await queue.moveJobToWait(pulled.id, pulled.token); // active -> waiting again
   await waitFor(async () => ['waiting', 'prioritized'].includes(await queue.getJobState(good.id)));
   pulled = await pullOne(queue, 'api-moves');
   await queue.moveJobToCompleted(pulled.id, { manual: true }, pulled.token);

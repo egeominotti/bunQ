@@ -32,6 +32,7 @@ test('moving an active job to delayed releases its live lease exactly once', asy
           cmd: 'MoveToDelayed',
           delay: 60_000,
           id: pushed.id,
+          token: pulled.token,
         })
       ).ok
     ).toBe(true);

@@ -1,6 +1,6 @@
 import type { Job, JobId } from '../../../domain/types/job';
 import type { Shard } from '../../../domain/queue/shard';
-import type { AckContext } from '../../types/ack';
+import type { AckContext, CompletionOptions } from '../../types/ack';
 import {
   extractJobs,
   extractJobsWithResults,
@@ -20,11 +20,27 @@ function notifyReleasedQueues(shard: Shard, jobs: Job[]): void {
   for (const [queue, count] of releasedByQueue) shard.notifyBatch(queue, count);
 }
 
-export async function ackJobBatch(jobIds: JobId[], ctx: AckContext): Promise<void> {
-  if (jobIds.length === 0) return;
+function alignApplied(jobIds: JobId[], appliedIds: JobId[]): boolean[] {
+  const counts = new Map<JobId, number>();
+  for (const id of appliedIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return jobIds.map((id) => {
+    const remaining = counts.get(id) ?? 0;
+    if (remaining === 0) return false;
+    counts.set(id, remaining - 1);
+    return true;
+  });
+}
+
+export async function ackJobBatch(
+  jobIds: JobId[],
+  ctx: AckContext,
+  leaseTokens?: Array<string | undefined>
+): Promise<boolean[]> {
+  if (jobIds.length === 0) return [];
   if (jobIds.length <= 4) {
-    await Promise.all(jobIds.map((id) => ackJob(id, undefined, ctx)));
-    return;
+    return Promise.all(
+      jobIds.map((id, index) => ackJob(id, undefined, ctx, { leaseToken: leaseTokens?.[index] }))
+    );
   }
 
   const batchContext = {
@@ -39,16 +55,21 @@ export async function ackJobBatch(jobIds: JobId[], ctx: AckContext): Promise<voi
   await releaseResources(byQueueShard, batchContext);
   for (const [index, jobs] of byQueueShard) notifyReleasedQueues(ctx.shards[index], jobs);
   finalizeBatchAck(extractedJobs, ctx, false);
+  return alignApplied(
+    jobIds,
+    extractedJobs.map((entry) => entry.id)
+  );
 }
 
 export async function ackJobBatchWithResults(
-  items: Array<{ id: JobId; result: unknown }>,
+  items: Array<{ id: JobId; result: unknown; token?: string } & CompletionOptions>,
   ctx: AckContext
-): Promise<void> {
-  if (items.length === 0) return;
+): Promise<boolean[]> {
+  if (items.length === 0) return [];
   if (items.length <= 4) {
-    await Promise.all(items.map((item) => ackJob(item.id, item.result, ctx)));
-    return;
+    return Promise.all(
+      items.map((item) => ackJob(item.id, item.result, ctx, { ...item, leaseToken: item.token }))
+    );
   }
 
   const batchContext = {
@@ -63,4 +84,8 @@ export async function ackJobBatchWithResults(
   await releaseResources(byQueueShard, batchContext);
   for (const [index, jobs] of byQueueShard) notifyReleasedQueues(ctx.shards[index], jobs);
   finalizeBatchAck(extractedJobs, ctx, true);
+  return alignApplied(
+    items.map((item) => item.id),
+    extractedJobs.map((entry) => entry.id)
+  );
 }

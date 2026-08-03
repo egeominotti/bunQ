@@ -271,23 +271,27 @@ interface Job<T = unknown> {
   /**
    * Move job to completed state.
    * @param returnValue - The return value of the job
-   * @param token - Lock token (optional in embedded mode)
-   * @param fetchNext - Whether to fetch the next job (default: true)
-   * @returns The next job data or null
+   * @param token - Exact lock token, required when the job has a lock
+   * @param fetchNext - Accepted for BullMQ signature compatibility. bunqueue
+   * Workers fetch their next job through the polling loop, so this method does
+   * not perform a chained fetch.
+   * @returns null after the transition
    */
   moveToCompleted(returnValue: unknown, token?: string, fetchNext?: boolean): Promise<unknown>;
 
   /**
    * Move job to failed state.
    * @param error - The error that caused the failure
-   * @param token - Lock token (optional in embedded mode)
-   * @param fetchNext - Whether to fetch the next job (default: true)
+   * @param token - Exact lock token, required when the job has a lock
+   * @param fetchNext - Accepted for BullMQ signature compatibility. bunqueue
+   * Workers fetch their next job through the polling loop, so this method does
+   * not perform a chained fetch.
    */
   moveToFailed(error: Error, token?: string, fetchNext?: boolean): Promise<void>;
 
   /**
    * Move job back to waiting state.
-   * @param token - Lock token (optional in embedded mode)
+   * @param token - Exact lock token, required when the job has a lock
    * @returns true if job was moved
    */
   moveToWait(token?: string): Promise<boolean>;
@@ -295,17 +299,17 @@ interface Job<T = unknown> {
   /**
    * Move job to delayed state.
    * @param timestamp - When the job should become available
-   * @param token - Lock token (optional in embedded mode)
+   * @param token - Exact lock token, required when the job has a lock
    */
   moveToDelayed(timestamp: number, token?: string): Promise<void>;
 
   /**
    * Move job to waiting-children state.
    * Job will wait for all children to complete before processing.
-   * @param token - Lock token (optional in embedded mode)
+   * @param token - Exact lock token, required when the job has a lock
    * @param opts - Options including child reference
    * @returns true if job was moved
-   * @throws In TCP mode, no server command available. Embedded mode only.
+   * Available in both embedded and TCP mode.
    */
   moveToWaitingChildren(
     token?: string,
@@ -636,7 +640,12 @@ interface DebounceOptions {
 type Processor<T = unknown, R = unknown> = (job: Job<T & FlowJobData>) => Promise<R> | R;
 ```
 
-`FlowJobData` contains the optional flow-injected fields (`__parentId`, `__parentQueue`, `__childrenIds`, `__flowParentId`, `__flowParentIds`) that FlowProducer adds to `job.data` when a job is part of a flow.
+`FlowJobData` contains the optional flow-injected fields (`__parentId`,
+`__parentQueue`, `__childrenIds`, `__flowParentId`, `__flowParentIds`) that
+FlowProducer adds to broker-backed `job.data` when a job is part of a flow.
+They are engine-owned: flow creation rejects caller `__*` keys, and
+`updateData()` preserves the existing values rather than allowing them to be
+removed or replaced.
 
 ### JobCounts
 
@@ -881,7 +890,7 @@ class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   /** Queue name being monitored */
   readonly name: string;
 
-  constructor(name: string);
+  constructor(name: string, options?: QueueEventsOptions);
 
   /** Wait until the QueueEvents instance is ready to receive events */
   waitUntilReady(): Promise<void>;
@@ -892,7 +901,19 @@ class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   /** Disconnect from the event stream (alias for close) */
   disconnect(): Promise<void>;
 }
+
+interface QueueEventsOptions {
+  embedded?: boolean;
+  connection?: ConnectionOptions;
+  dataPath?: string;
+  prefixKey?: string;
+}
 ```
+
+Calling `new QueueEvents(name)` keeps the historical embedded default. Pass
+`{ connection }` or `{ embedded: false, connection }` to subscribe to a remote
+broker. The TCP subscription uses a dedicated authenticated connection and
+automatically re-subscribes after reconnect.
 
 ### QueueEvents Event Payloads
 
@@ -970,7 +991,9 @@ interface DrainedEvent {
 ### QueueEvents Usage
 
 ```typescript
-const events = new QueueEvents('my-queue');
+const events = new QueueEvents('my-queue', {
+  connection: { host: '127.0.0.1', port: 6789, token: process.env.BUNQUEUE_TOKEN },
+});
 
 events.on('waiting', ({ jobId }) => { /* ... */ });
 events.on('active', ({ jobId }) => { /* ... */ });
@@ -1016,8 +1039,22 @@ interface FlowProducerOptions {
 ```
 
 :::note
-FlowProducer extends `EventEmitter` (BullMQ v5 compatible). You can listen for events using `.on()`, `.once()`, etc. The `close()` method returns `Promise<void>` and the `closing` property tracks shutdown state.
+FlowProducer extends `EventEmitter` (BullMQ v5 compatible). You can listen for
+events using `.on()`, `.once()`, etc. The `close()` method returns
+`Promise<void>`. `closing` is `null` while live and becomes that one stable
+Promise when `close()` or `disconnect()` first starts shutdown.
 :::
+
+Result helpers are transport-aware:
+
+```typescript
+getParentResult<R>(id: string): R | undefined | Promise<R | undefined>;
+getParentResults<R>(ids: string[]): Map<string, R> | Promise<Map<string, R>>;
+```
+
+Always `await` them in portable code. Embedded mode preserves its synchronous
+return; TCP mode performs broker `GetResult` calls. Missing is `undefined`,
+whereas a persisted `null` is retained as a real completed result.
 
 ### FlowOpts
 

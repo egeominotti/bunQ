@@ -75,10 +75,11 @@ func (q *Queue) UpsertJobScheduler(schedulerID string, repeat SchedulerRepeat, t
 		name = schedulerID
 	}
 	command := map[string]any{
-		"cmd":   "Cron",
-		"name":  schedulerID,
-		"queue": q.Name,
-		"data":  jobPayload(name, template.Data),
+		"cmd":     "Cron",
+		"name":    schedulerID,
+		"jobName": name,
+		"queue":   q.Name,
+		"data":    template.Data,
 	}
 	if repeat.Pattern != "" {
 		command["schedule"] = repeat.Pattern

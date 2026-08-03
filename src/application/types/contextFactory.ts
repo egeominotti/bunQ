@@ -13,6 +13,8 @@ import type { MonitoringState } from '../monitoringChecks';
 import type { WebhookManager } from '../webhookManager';
 import type { WorkerManager } from '../workerManager';
 import type { DEFAULT_CONFIG } from './config';
+import type { JobTimeoutScheduler } from '../background/timeouts';
+import type { RetiredTimeoutGeneration } from './background';
 
 export interface ContextDependencies {
   config: typeof DEFAULT_CONFIG & { dataPath?: string };
@@ -26,7 +28,10 @@ export interface ContextDependencies {
   completedJobs: BoundedSet<JobId>;
   completedJobsData: BoundedMap<JobId, Job>;
   depCompletions?: DependencyCompletionTracker;
-  timedOutJobs?: BoundedSet<JobId>;
+  timedOutJobs: BoundedMap<JobId, RetiredTimeoutGeneration>;
+  retiredTimeoutLeaseTokens: BoundedMap<string, RetiredTimeoutGeneration>;
+  retiredCronLeaseTokens: BoundedMap<JobId, string>;
+  timeoutScheduler: JobTimeoutScheduler;
   jobResults: LRUMap<JobId, unknown>;
   dependencyResults: DependencyResultTracker;
   customIdMap: LRUMap<string, JobId>;

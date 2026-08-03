@@ -38,7 +38,9 @@ import type { BackgroundContext } from '../src/application/types';
 import { jobId, type JobId } from '../src/domain/types/job';
 
 function bgCtx(qm: QueueManager): BackgroundContext {
-  return (qm as unknown as { contextFactory: { getBackgroundContext(): BackgroundContext } }).contextFactory.getBackgroundContext();
+  return (
+    qm as unknown as { contextFactory: { getBackgroundContext(): BackgroundContext } }
+  ).contextFactory.getBackgroundContext();
 }
 
 describe('Stability: stale ACK after timeout must not phantom-complete a retrying job', () => {
@@ -70,9 +72,7 @@ describe('Stability: stale ACK after timeout must not phantom-complete a retryin
     await Bun.sleep(80);
 
     // Timeout sweep fires: marks the job timed-out + ctx.fail -> requeue for retry.
-    checkJobTimeouts(bgCtx(qm));
-    // ctx.fail inside the sweep is async (fire-and-forget) — let it settle.
-    await Bun.sleep(50);
+    await checkJobTimeouts(bgCtx(qm));
 
     // The job must now be requeued for retry (delayed by backoff / waiting),
     // NOT completed.
@@ -98,11 +98,18 @@ describe('Stability: stale ACK after timeout must not phantom-complete a retryin
     // removes; clearing rides the existing custom-id reuse scrub in push.ts).
     const QUEUE = 'timeout-reuse-q';
     const CID = 'idemp-key-1';
-    const timedOut = (qm as unknown as { timedOutJobs: { has(k: JobId): boolean; add(k: JobId): void } }).timedOutJobs;
+    const timedOut = (
+      qm as unknown as {
+        timedOutJobs: {
+          has(k: JobId): boolean;
+          set(k: JobId, value: { jobId: JobId; startedAt: number; token?: string }): void;
+        };
+      }
+    ).timedOutJobs;
 
     // Simulate the stale marker left behind by a prior job (with this custom id)
     // that timed out and reached a terminal state.
-    timedOut.add(jobId(CID));
+    timedOut.set(jobId(CID), { jobId: jobId(CID), startedAt: Date.now() });
     expect(timedOut.has(jobId(CID))).toBe(true);
 
     // Push a job that recycles the custom id — this goes through the reuse path

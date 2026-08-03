@@ -2,7 +2,7 @@ import { jobId, type Job as InternalJob } from '../../../domain/types/job';
 import { removeJobDeduplicationKey } from '../../jobDeduplication';
 import { getSharedManager } from '../../manager';
 import type { JobDependencies, JobDependenciesCount } from '../../types';
-import type { TcpConnection } from '../types';
+import type { PendingTransitionSettlement, TcpConnection } from '../types';
 
 export function createWaitUntilFinishedHandler(
   embedded: boolean,
@@ -29,15 +29,40 @@ export function createWaitUntilFinishedHandler(
 
 export function createDiscardHandler(
   embedded: boolean,
-  tcp: TcpConnection | null
+  tcp: TcpConnection | null,
+  options: {
+    token?: string;
+    onPending?: (pending: Promise<PendingTransitionSettlement>) => void;
+  } = {}
 ): (id: string) => void {
+  let pending: Promise<PendingTransitionSettlement> | null = null;
   return (id: string) => {
-    if (embedded) {
-      void getSharedManager().discard(jobId(id));
-      return;
-    }
-    if (!tcp) return;
-    void tcp.send({ cmd: 'Discard', id });
+    if (pending) return;
+    const operation = (async (): Promise<PendingTransitionSettlement> => {
+      try {
+        if (embedded) {
+          const applied = await getSharedManager().discard(jobId(id), options.token);
+          return { status: applied ? 'applied' : 'ignored' };
+        }
+        if (!tcp) return { status: 'failed', error: new Error('Discard: no connection') };
+        const response = await tcp.send({
+          cmd: 'Discard',
+          id,
+          ...(options.token === undefined ? {} : { token: options.token }),
+        });
+        if (response.ok === true) return { status: 'applied' };
+        const message = typeof response.error === 'string' ? response.error : 'Discard failed';
+        if (/not found|not active|not in processing/i.test(message)) return { status: 'ignored' };
+        return { status: 'failed', error: new Error(message) };
+      } catch (error) {
+        return {
+          status: 'failed',
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+    })();
+    pending = operation;
+    options.onPending?.(operation);
   };
 }
 

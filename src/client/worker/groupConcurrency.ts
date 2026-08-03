@@ -14,6 +14,9 @@ export class GroupConcurrencyLimiter {
   private readonly activeByGroup = new Map<string, number>();
 
   constructor(groupKey: string, max: number) {
+    if (!Number.isInteger(max) || max <= 0) {
+      throw new RangeError('Worker group limiter max must be a positive integer');
+    }
     this.groupKey = groupKey;
     this.maxPerGroup = max;
   }

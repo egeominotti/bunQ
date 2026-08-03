@@ -4,7 +4,9 @@ import type { Job } from '../../../domain/types/job';
 import { storageLog } from '../../../shared/logger';
 import { BatchInsertManager, WriteBuffer } from '../sqliteBatch';
 import { DependencyCompletionStore } from '../dependencyCompletionStore';
-import { MIGRATIONS, MIGRATION_TABLE, PRAGMA_SETTINGS, SCHEMA, SCHEMA_VERSION } from '../schema';
+import { migrateLegacyCronJobNames, migrateLegacyJobNames } from '../legacyNameMigration';
+import { MIGRATIONS } from '../migrations';
+import { MIGRATION_TABLE, PRAGMA_SETTINGS, SCHEMA, SCHEMA_VERSION } from '../schema';
 import { prepareStatements, type StatementName } from '../statements';
 import type { SqliteConfig, SqliteCriticalLoss, SqliteCriticalLossCallback } from '../types/sqlite';
 
@@ -12,6 +14,14 @@ function isSqliteFullError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
     error.message.includes('SQLITE_FULL') || error.message.includes('database or disk is full')
+  );
+}
+
+function isIdempotentMigrationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    /^duplicate column name: [A-Za-z_][A-Za-z0-9_]*$/i.test(error.message) ||
+    /^(?:index|table) [A-Za-z_][A-Za-z0-9_]* already exists$/i.test(error.message)
   );
 }
 
@@ -191,20 +201,28 @@ export abstract class SqliteState {
         ?.version ?? 0;
 
     if (currentVersion < SCHEMA_VERSION) {
-      this.db.run(SCHEMA);
-      for (const [version, sql] of Object.entries(MIGRATIONS)) {
-        const numericVersion = Number(version);
-        if (numericVersion > currentVersion && numericVersion > 1) {
-          try {
-            this.db.run(sql);
-          } catch {
-            // Column or index may already exist.
+      const applyMigrations = this.db.transaction(() => {
+        this.db.run(SCHEMA);
+        for (const [version, sql] of Object.entries(MIGRATIONS)) {
+          const numericVersion = Number(version);
+          if (numericVersion > currentVersion && numericVersion > 1) {
+            const statements = typeof sql === 'string' ? [sql] : sql;
+            for (const statement of statements) {
+              try {
+                this.db.run(statement);
+              } catch (error) {
+                if (!isIdempotentMigrationError(error)) throw error;
+              }
+            }
           }
         }
-      }
-      this.db
-        .prepare('INSERT INTO migrations (version, applied_at) VALUES (?, ?)')
-        .run(SCHEMA_VERSION, Date.now());
+        migrateLegacyJobNames(this.db);
+        migrateLegacyCronJobNames(this.db);
+        this.db
+          .prepare('INSERT INTO migrations (version, applied_at) VALUES (?, ?)')
+          .run(SCHEMA_VERSION, Date.now());
+      });
+      applyMigrations();
     }
   }
 }

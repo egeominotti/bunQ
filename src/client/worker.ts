@@ -4,3 +4,4 @@
  */
 
 export { Worker } from './worker/worker';
+export type { ManualJob } from './worker/types';

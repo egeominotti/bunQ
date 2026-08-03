@@ -36,7 +36,7 @@ function validateNodeShape(node: FlowJob<unknown>, depth: number): void {
       throw new Error('flow job data must be an object');
     }
     for (const key of Object.keys(node.data as object)) {
-      if (key === 'name' || key.startsWith('__')) {
+      if (key.startsWith('__')) {
         throw new Error(`flow job data key is reserved: ${key}`);
       }
     }
@@ -93,7 +93,6 @@ export function planFlows<T>(flows: FlowJob<T>[], options?: FlowOpts): FlowPlan<
     const opts = defaults ? { ...defaults, ...node.opts } : (node.opts ?? {});
     const internalData: Record<string, unknown> = {
       ...(node.data as object | undefined),
-      name: node.name,
     };
     if (parent) {
       internalData.__parentId = String(parent.id);
@@ -104,7 +103,7 @@ export function planFlows<T>(flows: FlowJob<T>[], options?: FlowOpts): FlowPlan<
     jobs.push({
       id,
       queue: node.queueName,
-      input: flowJobInput(internalData, opts, {
+      input: flowJobInput(node.name, internalData, opts, {
         parentId: parent?.id,
         dependsOn: childIds.length > 0 ? childIds : undefined,
         childrenIds: childIds.length > 0 ? childIds : undefined,

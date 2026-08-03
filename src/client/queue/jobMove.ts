@@ -29,18 +29,34 @@ interface JobMoveContext {
   ) => Promise<{ processed: Record<string, unknown>; unprocessed: string[] }>;
 }
 
+function responseError(response: Record<string, unknown>, fallback: string): Error {
+  return new Error(typeof response.error === 'string' ? response.error : fallback);
+}
+
+function throwTokenResponse(response: Record<string, unknown>): void {
+  if (response.ok === false && /token/i.test(String(response.error))) {
+    throw responseError(response, 'Invalid lock token');
+  }
+}
+
 /** Move job to completed state */
 export async function moveJobToCompleted(
   ctx: JobMoveContext,
   id: string,
   returnValue: unknown,
-  _token?: string
+  token?: string
 ): Promise<unknown> {
   if (ctx.embedded) {
-    await getSharedManager().ack(jobId(id), returnValue);
+    await getSharedManager().ack(jobId(id), returnValue, token);
     return null;
   }
-  await ctx.tcp!.send({ cmd: 'ACK', id, result: returnValue });
+  const response = await ctx.tcp!.send({
+    cmd: 'ACK',
+    id,
+    result: returnValue,
+    ...(token === undefined ? {} : { token }),
+  });
+  if (response.ok !== true) throw responseError(response, 'Failed to complete job');
   return null;
 }
 
@@ -58,7 +74,8 @@ export async function moveJobToFailed(
   if (ctx.embedded) {
     await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error, token));
   } else {
-    await ctx.tcp!.send(buildFailCommand(id, error, token));
+    const response = await ctx.tcp!.send(buildFailCommand(id, error, token));
+    if (response.ok !== true) throw responseError(response, 'Failed to fail job');
   }
 }
 
@@ -66,7 +83,7 @@ export async function moveJobToFailed(
 export async function moveJobToWait(
   ctx: JobMoveContext,
   id: string,
-  _token?: string
+  token?: string
 ): Promise<boolean> {
   if (ctx.embedded) {
     const manager = getSharedManager();
@@ -82,7 +99,7 @@ export async function moveJobToWait(
 
     if (state === 'active') {
       // Job is being processed - move back to queue
-      return manager.moveActiveToWait(jobId(id));
+      return manager.moveActiveToWait(jobId(id), token);
     }
 
     if (state === 'delayed') {
@@ -98,7 +115,12 @@ export async function moveJobToWait(
     return false;
   }
 
-  const response = await ctx.tcp!.send({ cmd: 'MoveToWait', id });
+  const response = await ctx.tcp!.send({
+    cmd: 'MoveToWait',
+    id,
+    ...(token === undefined ? {} : { token }),
+  });
+  throwTokenResponse(response);
   return response.ok === true;
 }
 
@@ -107,7 +129,7 @@ export async function moveJobToDelayed(
   ctx: JobMoveContext,
   id: string,
   timestamp: number,
-  _token?: string
+  token?: string
 ): Promise<void> {
   if (ctx.embedded) {
     const delay = Math.max(0, timestamp - Date.now());
@@ -120,14 +142,14 @@ export async function moveJobToDelayed(
       if (!job) return;
       const count = manager.retryDlq(job.queue, jobId(id));
       if (count > 0 && delay > 0) {
-        await manager.changeWaitingDelay(jobId(id), delay);
+        await manager.changeDelay(jobId(id), delay, token);
       }
     } else if (state === 'waiting' || state === 'prioritized' || state === 'delayed') {
       // Job is in queue - update its runAt directly
-      await manager.changeWaitingDelay(jobId(id), delay);
+      await manager.changeDelay(jobId(id), delay, token);
     } else {
       // Active or other state - use existing changeDelay (handles processing)
-      await manager.changeDelay(jobId(id), delay);
+      await manager.changeDelay(jobId(id), delay, token);
     }
   } else {
     // The public API takes an ABSOLUTE timestamp, but the server works in relative
@@ -137,13 +159,16 @@ export async function moveJobToDelayed(
     // was re-queued as `waiting` with the delay dropped) or a silent no-op (a
     // waiting job). Convert to relative delay here so the wire field matches.
     const delay = Math.max(0, timestamp - Date.now());
-    const response = await ctx.tcp!.send({ cmd: 'MoveToDelayed', id, delay });
+    const response = await ctx.tcp!.send({
+      cmd: 'MoveToDelayed',
+      id,
+      delay,
+      ...(token === undefined ? {} : { token }),
+    });
     // Surface server-side failures instead of silently ignoring the response
     // (e.g. the job was completed/removed before the command arrived).
     if (response.ok === false) {
-      throw new Error(
-        typeof response.error === 'string' ? response.error : 'Failed to move job to delayed'
-      );
+      throw responseError(response, 'Failed to move job to delayed');
     }
   }
 }
@@ -152,15 +177,20 @@ export async function moveJobToDelayed(
 export async function moveJobToWaitingChildren(
   ctx: JobMoveContext,
   id: string,
-  _token?: string,
+  token?: string,
   _opts?: { child?: { id: string; queue: string } }
 ): Promise<boolean> {
   if (ctx.embedded) {
     const manager = getSharedManager();
-    return manager.moveToWaitingChildren(jobId(id));
+    return manager.moveToWaitingChildren(jobId(id), token);
   }
   if (!ctx.tcp) return false;
-  const response = await ctx.tcp.send({ cmd: 'MoveToWaitingChildren', id });
+  const response = await ctx.tcp.send({
+    cmd: 'MoveToWaitingChildren',
+    id,
+    ...(token === undefined ? {} : { token }),
+  });
+  throwTokenResponse(response);
   if (!response.ok) return false;
   return (response.data as { moved?: boolean } | undefined)?.moved ?? true;
 }
@@ -173,8 +203,11 @@ export async function waitJobUntilFinished(
   ttl?: number
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const timeout = ttl
       ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
           cleanup();
           reject(new Error(`Job ${id} timed out after ${ttl}ms`));
         }, ttl)
@@ -192,14 +225,16 @@ export async function waitJobUntilFinished(
     };
 
     const completedHandler = (data: { jobId: string; returnvalue?: unknown }) => {
-      if (data.jobId === id) {
+      if (data.jobId === id && !settled) {
+        settled = true;
         cleanup();
         resolve(data.returnvalue);
       }
     };
 
     const failedHandler = (data: { jobId: string; failedReason?: string }) => {
-      if (data.jobId === id) {
+      if (data.jobId === id && !settled) {
+        settled = true;
         cleanup();
         reject(new Error(data.failedReason ?? 'Job failed'));
       }
@@ -214,20 +249,39 @@ export async function waitJobUntilFinished(
     events.on('completed', completedHandler);
     events.on('failed', failedHandler);
 
-    // Check if job is already finished
-    void ctx.getJobState(id).then((state) => {
+    const checkFinishedState = async (): Promise<void> => {
+      const state = await ctx.getJobState(id);
+      if (settled) return;
       if (state === 'completed') {
-        cleanup();
+        let result: unknown;
         if (ctx.embedded) {
-          const result = getSharedManager().getResult(jobId(id));
-          resolve(result);
+          result = getSharedManager().getResult(jobId(id));
         } else {
-          resolve(undefined);
+          if (!ctx.tcp) throw new Error('Queue TCP connection is unavailable');
+          const response = await ctx.tcp.send({ cmd: 'GetResult', id });
+          if (response.ok !== true) {
+            throw new Error(
+              typeof response.error === 'string' ? response.error : 'Failed to read job result'
+            );
+          }
+          result = response.result;
         }
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
       } else if (state === 'failed') {
+        settled = true;
         cleanup();
         reject(new Error('Job already failed'));
       }
+    };
+
+    void checkFinishedState().catch((error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
     });
   });
 }

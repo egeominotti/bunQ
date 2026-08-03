@@ -10,7 +10,8 @@ export class TcpJobBackend extends TcpBackendBase {
     const response = await this.send({
       cmd: 'PUSH',
       queue,
-      data: { name, ...(data as object) },
+      name,
+      data,
       priority: opts?.priority,
       delay: opts?.delay,
       maxAttempts: opts?.attempts,
@@ -26,7 +27,8 @@ export class TcpJobBackend extends TcpBackendBase {
       cmd: 'PUSHB',
       queue,
       jobs: jobs.map((job) => ({
-        data: { name: job.name, ...(job.data as object) },
+        name: job.name,
+        data: job.data,
         priority: job.priority,
         delay: job.delay,
       })),

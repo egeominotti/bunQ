@@ -22,6 +22,13 @@ stdin/stdout as JSON lines, and verifies the results **twice**: once through
 your driver's answers and once through its own independent wire connection.
 A client cannot pass by misreading the protocol consistently.
 
+The implementation keeps those trust boundaries separate: `runner.ts` owns
+only CLI orchestration and reporting, `harness.ts` owns server and driver
+processes, `wire.ts` is the independent protocol client, the two `checks-*.ts`
+modules contain C01-C16, and `check-support.ts` contains shared check utilities.
+No module is an SDK implementation, and the runner's public command and output
+format remain unchanged.
+
 ## Running it
 
 ```bash
@@ -66,13 +73,13 @@ it: `{"id": 1, "ok": true, ...result}` or `{"id": 1, "ok": false, "error": "..."
 | `pause` / `resume` | `queue` | — |
 | `drain` | `queue` | `count` |
 | `promote` | `jobId` | — |
-| `upsertScheduler` | `queue`, `schedulerId`, `repeat` (`{pattern?/every?, limit?, tz?}`) | — |
+| `upsertScheduler` | `queue`, `schedulerId`, `repeat` (`{pattern?/every?, limit?, tz?}`), `template?` (`{name?, data?, opts?}`) | — |
 | `getScheduler` | `schedulerId` | `scheduler` or `null` |
 | `removeScheduler` | `schedulerId` | — |
 | `waitForJob` | `jobId`, `timeoutMs` | `result` |
 | `getDlqCount` | `queue` | `count` |
 | `retryDlq` | `queue` | `count` |
-| `hello` | — | `protocolVersion` |
+| `hello` | — | `protocolVersion`, `capabilities` |
 | `process` | `queue`, `behavior` (`ok`\|`failOnce`\|`unrecoverable`\|`deepThrow`), `result?`, `batchSize?`, `until` (`{completed?, failed?, dlq?}`), `timeoutMs` | — when the `until` condition was reached |
 | `close` | — | — (then exit 0) |
 
@@ -90,8 +97,8 @@ erroring forever).
 
 | # | What it proves | Spec section |
 |---|---|---|
-| C01 | `Hello` protocol version matches the server | §2 |
-| C02 | Job name travels inside `data` | §5 |
+| C01 | `Hello` protocol v3 and `separate-job-name` match the server | §2 |
+| C02 | PUSH/PUSHB keep top-level job names separate from untouched user data | §5 |
 | C03 | int64 guard: big ints become float64, server stays healthy | §4 |
 | C04 | `jobId` idempotency on PUSH | §6.1 |
 | C05 | PUSHB preserves custom ids (`jobId → customId`) | §6.1 |
@@ -101,7 +108,7 @@ erroring forever).
 | C09 | Retry semantics: transient failure then success | §6.3 |
 | C10 | Unrecoverable failure skips retries into the DLQ | §6.3 |
 | C11 | FAIL stack keeps the raise site within the persisted lines | §6.3 |
-| C12 | Scheduler `limit` reaches the wire as `maxLimit` | §6.6 |
+| C12 | Scheduler `jobName`, `data`, and `limit` reach distinct wire fields | §6.6 |
 | C13 | `WaitJob` timeout clamped to the server bound | §6.2/§9 |
 | C14 | Worker batch size clamped to the server max (1000) | §6.3 |
 | C15 | Pause / isPaused / resume / drain | §6.4 |

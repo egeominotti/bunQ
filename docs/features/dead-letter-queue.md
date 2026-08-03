@@ -86,7 +86,7 @@ queue.getDlqStats(): DlqStats                        // embedded snapshot
 queue.getDlqStatsAsync(): Promise<DlqStats>
 queue.retryDlq(id?: string): number
 queue.retryDlqAsync(id?: string): Promise<number>
-queue.retryDlqByFilter(filter: DlqFilter): number    // embedded snapshot
+queue.retryDlqByFilter(filter: DlqFilter): number    // TCP fire-and-forget; returns 0 remotely
 queue.retryDlqByFilterAsync(filter: DlqFilter): Promise<number>
 queue.purgeDlq(): number
 queue.purgeDlqAsync(): Promise<number>
@@ -111,13 +111,13 @@ placeholder values.
 - `RetryDlq` → `handleRetryDlq` — retries one (`jobId`), a bounded batch (`count`), or entries selected by `filter`; emits `dlq:retried` / `dlq:retry-all`.
 - `PurgeDlq` → `handlePurgeDlq` (`:41`) — clears the queue's DLQ; emits `dlq:purged`.
 - `RetryCompleted` → `handleRetryCompleted` — accepts `id?`, `count?`, and `timestamp?` and returns the applied count.
-- `GetDlqConfig` / `SetDlqConfig` → `handleGetDlqConfig` / `handleSetDlqConfig` (`src/infrastructure/server/handlers/advanced.ts:337` for GetDlqConfig, `:317` for SetDlqConfig).
+- `GetDlqConfig` / `SetDlqConfig` → `handleGetDlqConfig` / `handleSetDlqConfig` (`src/infrastructure/server/handlers/advanced/queue.ts:172` for GetDlqConfig, `:153` for SetDlqConfig).
 
-Dispatched in `src/infrastructure/server/handlerRoutes.ts:249-256` and `:316-319`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
+Dispatched in `src/infrastructure/server/handler-routes/control.ts:112-128`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
 
 ### HTTP endpoints (`src/infrastructure/server/httpRouteQueueConfig.ts`)
 
-These proxy to the TCP commands above: DLQ-stats read (`getDlqStats`), `RetryDlq`, `PurgeDlq`, `GetDlqConfig`, `SetDlqConfig`; `RetryCompleted` is in `httpRouteQueues.ts:324`. See [HTTP / REST / SSE / WebSocket API](./http-api.md).
+These expose the same manager operations and command handlers: DLQ-stats and entry reads, `RetryDlq`, `PurgeDlq`, `GetDlqConfig`, and `SetDlqConfig` (`httpRouteQueueConfig.ts:28-81`, `httpRouteQueueConfig.ts:153-172`); `RetryCompleted` is routed in `httpRouteQueues.ts:132-141`. See [HTTP / REST / SSE / WebSocket API](./http-api.md).
 
 ### Dashboard events emitted
 
@@ -195,9 +195,17 @@ round trip.
 
 `retryCompletedJobs` is a sibling, **not** a DLQ operation. It re-queues
 completed jobs from the in-memory completed-job data map, falling back to
-SQLite when needed, clears completed/result ownership, and calls
-`storage.updateForRetry`. Selection is stable and accepts an optional job id,
-non-negative `limit`, and terminal `timestamp` cutoff. This keeps
+SQLite when needed. It creates a fresh waiting-generation snapshot, resets
+attempts, progress/message, processing/completion timestamps, and the heartbeat,
+while preserving the diagnostic stacktrace and bounded timeline before appending
+the new `waiting` entry. `SqliteStorage.requeueCompletedJob` changes the durable
+state and deletes the prior `job_results` row in one synchronous transaction;
+only after that succeeds are completed/result ownership, the heap, `jobIndex`,
+and counters changed in memory. A rejected SQLite write therefore leaves the
+completed generation authoritative, and a successful retry cannot expose the
+old `returnvalue` or recover completed metadata after restart. Selection is
+stable and accepts an optional job id, non-negative `limit`, and terminal
+`timestamp` cutoff. This keeps
 `queue.retryJobs({ state: 'completed', count, timestamp })` consistent in
 memory-only, persisted embedded, and TCP deployments.
 
@@ -205,9 +213,11 @@ memory-only, persisted embedded, and TCP deployments.
 
 `DlqShard` itself is single-threaded data (Bun is single-threaded per process); its methods take no locks. Locking is the caller's job and follows the documented hierarchy (`jobIndex` → `completedJobs` → `shards[N]` → `processingShards[N]`):
 
-- `moveFailedJobToDlq` runs inside `failJob`'s `withWriteLock(shardLocks[idx])` after the processing-shard lock released the job (`ack.ts:202,228`).
+- `moveFailedJobToDlq` runs inside `failJob`'s `withWriteLock(shardLocks[idx])` after the processing-shard lock released the job (`src/application/operations/ack/failure.ts:71-75`, `:99-138`).
 - `moveParentToFailed` (`queue-manager/flow-failures.ts`) acquires the shard write lock and **re-checks `jobIndex.get(parentId)?.type === 'queue'` inside the lock** — a TOCTOU guard preventing two concurrent child-failure callbacks from creating duplicate DLQ entries for the same parent.
-- `discardJob` takes the queue or processing lock to extract the job, then a separate shard write lock to `addToDlq` (`jobManagement.ts:290-317`).
+- `discardJob` takes the queue or processing lock to extract the job, then a
+  separate shard write lock to `addToDlq`
+  (`src/application/operations/jobMoveOperations.ts:59-102`).
 - The maintenance task and `getDlq*` reads are not lock-protected, consistent with the cooperative single-thread model; auto-retry mutates entries it owns before removing them.
 
 ## Edge Cases & Failure Modes
@@ -218,8 +228,8 @@ memory-only, persisted embedded, and TCP deployments.
 - **Purge is a full terminal deletion** — clearing only `DlqShard`/the `dlq` table leaves a dangling `jobIndex` location, so `GetState` still reports `failed`. `purgeDlqJobs` and `purgeExpiredDlq` share the same cleanup path and transactionally remove durable job/result rows plus pending buffered inserts before dropping the global indexes. Repeating expiry cleanup is a no-op, and purging one queue cannot delete another queue's entries.
 - **Recovery double-count avoidance** — `recover` loads `loadDlqJobIds()` and `recoverActiveJobs` skips stale `active` rows already present in the DLQ (legacy DBs predate the failJob fix), dropping the orphan row (`background/recovery/active.ts`). `quarantineCorruptDependsOn` persists the entry and drops the row but deliberately does **not** add to in-memory DLQ — the later `restoreDlq` pass restores it exactly once (`background/recovery/shared.ts`, `restore.ts`).
 - **`job_id` is not UNIQUE in the `dlq` table** — `insertDlq` is a plain `INSERT`; `deleteDlqEntry` deletes every matching row and `loadDlq` orders by `entered_at`. Normal terminal transitions own one generation, retries remove its row before requeue, and capacity eviction removes stale matches.
-- **Choose the async remote surface** — `getDlq`, `getDlqStats`, and `retryDlqByFilter` retain synchronous embedded return types, so their TCP forms cannot return broker results. Use `getDlqAsync`, `getDlqStatsAsync`, and `retryDlqByFilterAsync`; they round-trip full entries, statistics, and filtered retry counts. `getDlqConfig` returns the client-side TCP cache or `{}`, while `getDlqConfigAsync` reads the broker.
-- **`retryDlq`/`purgeDlq` are fire-and-forget in TCP mode** — they `void tcp.send(...)` and return `0` regardless of server outcome (`dlq.ts:72-89`).
+- **Choose the async remote surface** — `getDlq` and `getDlqStats` retain synchronous embedded return types, so their TCP forms cannot return broker results. Synchronous `retryDlqByFilter` does send the filtered mutation over TCP, but returns the non-authoritative value `0`. Use `getDlqAsync`, `getDlqStatsAsync`, and `retryDlqByFilterAsync`; they round-trip full entries, statistics, and filtered retry counts. `getDlqConfig` returns the client-side TCP cache or `{}`, while `getDlqConfigAsync` reads the broker.
+- **Synchronous DLQ mutations are fire-and-forget in TCP mode** — `retryDlq`, `retryDlqByFilter`, and `purgeDlq` send the operation and return `0` regardless of the eventual server result. Their async counterparts return authoritative counts.
 - **Auto-retry default off** — `DEFAULT_DLQ_CONFIG.autoRetry = false`; entries created under it get `nextRetryAt = null` and are never auto-retried until config is changed. Changing config later does not retro-set `nextRetryAt` on existing entries.
 - **`maxAge: null`** disables expiry (`expiresAt = null`), so entries persist until manually purged or evicted by `maxEntries`.
 - **Timeline cap** — re-queue paths only push a `waiting` timeline entry while `timeline.length < MAX_TIMELINE_ENTRIES`, bounding per-job timeline growth across repeated retries.

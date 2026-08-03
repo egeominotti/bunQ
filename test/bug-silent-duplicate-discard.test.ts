@@ -5,7 +5,7 @@
  *
  * Scenario 1 (NO locks): ack after stall re-queue → BUG: no recovery path
  * Scenario 2 (WITH locks, no re-pull): ack with T1 → Issue #33 handles it
- * Scenario 3 (WITH locks + re-pull): T1 overwritten by T2 → token mismatch
+ * Scenario 3 (WITH locks + re-pull): T1 is replaced by T2 → stale outcome rejected
  * Scenario 4: stall detection confirms re-queue works
  */
 
@@ -131,15 +131,10 @@ describe('Stall re-queue ack handling', () => {
   }, 10000);
 
   /**
-   * Scenario 3: With locks + re-pull — createLock returns null (T1 still active)
-   *
-   * When stall detection re-queues a job but doesn't release the lock:
-   *   - Re-pull succeeds (job dequeued, moved to processing)
-   *   - createLock returns null (T1 still in lock manager)
-   *   - pullWithLock returns { job, token: null }
-   *   - Original T1 ack should still work (T1 is valid, job is in processing)
+   * Scenario 3: a re-pull creates a new processing generation and lease.
+   * The prior generation cannot complete or overwrite the current one.
    */
-  test('re-pull after stall: lock not recreated, T1 ack still works', async () => {
+  test('re-pull after stall: fresh T2 owns completion and stale T1 is rejected', async () => {
     manager = new QueueManager({ stallCheckMs: 150 });
     const queueName = `stall-lock-repull-${Date.now()}`;
 
@@ -172,30 +167,27 @@ describe('Stall re-queue ack handling', () => {
 
     const result2 = await manager.pullWithLock(queueName, 'worker-2', 0, 30000);
 
-    if (!result2.job) {
-      console.log('4. Second pull returned null');
-      await manager.ack(jobId, { result: 'done' }, token1);
-      return;
-    }
-
-    const sameJob = String(result2.job.id) === String(jobId);
-    console.log(`4. Pull #2: sameJob=${sameJob}, token=${result2.token ?? 'null'}`);
-
-    expect(sameJob).toBe(true);
-    // Key: createLock returns null because T1 still exists
-    expect(result2.token).toBeNull();
+    expect(result2.job).not.toBeNull();
+    expect(String(result2.job!.id)).toBe(String(jobId));
+    expect(result2.token).toBeString();
+    expect(result2.token).not.toBe(token1);
+    const token2 = result2.token!;
 
     // 5. Job is now in processing. Ack with original T1 should work.
     const locAfterRepull = (manager as any).jobIndex.get(jobId);
     console.log(`   After re-pull: type=${locAfterRepull?.type}`);
     expect(locAfterRepull?.type).toBe('processing');
 
-    await manager.ack(jobId, { result: 'done' }, token1);
-    console.log('5. ✅ Ack with T1 succeeded (lock was never overwritten)');
+    await expect(manager.ack(jobId, { generation: 1 }, token1)).rejects.toThrow(
+      /Invalid or expired lock token/
+    );
+    expect(await manager.getJobState(jobId)).toBe('active');
+
+    await manager.ack(jobId, { generation: 2 }, token2);
 
     const finalLoc = (manager as any).jobIndex.get(jobId);
-    console.log(`6. Final: type=${finalLoc?.type}`);
     expect(finalLoc?.type).toBe('completed');
+    expect(manager.getResult(jobId)).toEqual({ generation: 2 });
   }, 10000);
 
   /**

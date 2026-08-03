@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send ordinary job names through top-level `"name"`, preserve every user term
+  in `"data"`, decode legacy data envelopes, and use `"jobName"` for scheduler
+  jobs.
+- Keep broker timeouts authoritative when a processor returns or fails late:
+  `run_once/1` still reports the settled handler attempt, while an acknowledged
+  `already-finalized` ACK/FAIL no-op no longer increments worker terminal
+  counters. Reject unknown terminal response evidence as a protocol error and
+  cover both real outcomes plus malformed evidence.
 - Fix the sustained soak assertion to match the public `Queue.obliterate/1`
   return value, `:ok`.
 - Replace multi-command flow creation and best-effort rollback with a pure

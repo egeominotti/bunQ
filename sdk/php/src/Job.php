@@ -25,17 +25,28 @@ final class Job
         return (string) ($this->raw['id'] ?? '');
     }
 
-    /** The job name travels inside `data` (wire contract). */
+    /** Job name, with compatibility for pre-name-field data envelopes. */
     public function name(): string
     {
-        return (string) ($this->raw['data']['name'] ?? '');
+        if (($this->raw['name'] ?? null) !== null) {
+            return (string) $this->raw['name'];
+        }
+        $data = $this->raw['data'] ?? null;
+        return \is_array($data) && \is_string($data['name'] ?? null)
+            ? $data['name']
+            : '';
     }
 
-    /** User payload: `data` without the reserved `name` key. */
-    public function data(): array
+    /** User payload; only a pre-name-field envelope loses its legacy name key. */
+    public function data(): mixed
     {
-        $data = \is_array($this->raw['data'] ?? null) ? $this->raw['data'] : [];
-        unset($data['name']);
+        $data = $this->raw['data'] ?? null;
+        if (($this->raw['name'] ?? null) !== null || !\is_array($data)) {
+            return $data;
+        }
+        if (\is_string($data['name'] ?? null)) {
+            unset($data['name']);
+        }
         return $data;
     }
 

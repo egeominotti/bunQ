@@ -3,6 +3,7 @@ import { jobId } from '../../domain/types/job';
 import type { JobLocation } from '../../domain/types/queue';
 import { shardIndex } from '../../shared/hash';
 import type { LockGuard, RWLock } from '../../shared/lock';
+import { isParentLinkInput } from './parentLinkInput';
 
 interface PushLockContext {
   shardLocks: RWLock[];
@@ -17,13 +18,17 @@ function requiredShardIndexes(
 ): number[] {
   const indexes = new Set<number>([shardIndex(queue)]);
   for (const input of inputs) {
-    if (!input.customId) continue;
-    const location = jobIndex.get(jobId(input.customId));
-    if (location?.type === 'queue') {
-      indexes.add(location.shardIdx);
-    } else if (location?.type === 'dlq') {
-      indexes.add(shardIndex(location.queueName));
+    if (input.customId) {
+      const location = jobIndex.get(jobId(input.customId));
+      if (location?.type === 'queue') {
+        indexes.add(location.shardIdx);
+      } else if (location?.type === 'dlq') {
+        indexes.add(shardIndex(location.queueName));
+      }
     }
+    const parentLocation =
+      input.parentId && isParentLinkInput(input) ? jobIndex.get(input.parentId) : undefined;
+    if (parentLocation?.type === 'queue') indexes.add(parentLocation.shardIdx);
   }
   return [...indexes].sort((a, b) => a - b);
 }
@@ -40,7 +45,7 @@ export async function withPushWriteLocks<T>(
   fn: (lockedShardIndexes: ReadonlySet<number>) => T
 ): Promise<T> {
   while (true) {
-    const customIdGuard = inputs.some((input) => input.customId)
+    const customIdGuard = inputs.some((input) => input.customId || isParentLinkInput(input))
       ? await ctx.customIdLock.acquireWrite()
       : null;
     const guards: LockGuard[] = [];

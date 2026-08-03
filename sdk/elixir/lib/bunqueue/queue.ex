@@ -23,11 +23,12 @@ defmodule Bunqueue.Queue do
     payload = job_payload(name, data)
 
     command =
-      %{"cmd" => "PUSH", "queue" => queue.name, "data" => payload}
+      %{"cmd" => "PUSH", "queue" => queue.name}
+      |> Map.merge(payload)
       |> Map.merge(Options.job(options))
 
     with {:ok, response} <- call(queue, command) do
-      raw = %{"id" => response["id"], "queue" => queue.name, "data" => payload}
+      raw = %{"id" => response["id"], "queue" => queue.name} |> Map.merge(payload)
       {:ok, Job.from_wire(raw, queue.connection)}
     end
   end
@@ -48,7 +49,7 @@ defmodule Bunqueue.Queue do
         data = get(entry, :data, %{})
         options = get(entry, :opts, get(entry, :options, []))
 
-        %{"data" => job_payload(name, data)}
+        job_payload(name, data)
         |> Map.merge(Options.job(options, true))
       end)
 
@@ -62,8 +63,8 @@ defmodule Bunqueue.Queue do
   def hello(queue) do
     call(queue, %{
       "cmd" => "Hello",
-      "protocolVersion" => 2,
-      "capabilities" => []
+      "protocolVersion" => 3,
+      "capabilities" => ["separate-job-name"]
     })
   end
 
@@ -131,13 +132,7 @@ defmodule Bunqueue.Queue do
     do: Connection.call(queue.connection, command, timeout)
 
   @doc false
-  def job_payload(name, data) when is_map(data) do
-    normalized = Map.new(data, fn {key, value} -> {to_string(key), value} end)
-    Map.merge(%{"name" => name}, normalized)
-  end
-
-  def job_payload(name, nil), do: %{"name" => name}
-  def job_payload(name, data), do: %{"name" => name, "payload" => data}
+  def job_payload(name, data), do: %{"name" => name, "data" => data}
 
   defp fetch(map, key) do
     case Map.fetch(map, key) do

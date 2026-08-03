@@ -192,10 +192,11 @@ queue.add("notification", data, JobOptions {
 <TabItem label="Elixir">
 
 ```elixir
-# Same id within 1 hour = no new job. After the TTL, a new job is allowed.
+# The Elixir SDK currently supports idempotency through jobId.
+# TTL deduplication keys are not exposed yet.
 {:ok, _job} =
   Bunqueue.Queue.add(queue, "notification", %{user_id: "123"},
-    deduplication: %{id: "notify-123", ttl: 3_600_000}
+    jobId: "notify-123"
   )
 ```
 
@@ -308,17 +309,11 @@ queue.add("latest-data", new_data, JobOptions {
 <TabItem label="Elixir">
 
 ```elixir
-# extend: keep the existing job, reset its TTL (debouncing)
-{:ok, _} =
-  Bunqueue.Queue.add(queue, "sync-task", %{action: "sync"},
-    deduplication: %{id: "sync-task", ttl: 60_000, extend: true}
-  )
-
-# replace: remove the pending job, insert a new one with the latest data
-{:ok, _} =
-  Bunqueue.Queue.add(queue, "latest-data", %{data: new_data},
-    deduplication: %{id: "data-job", ttl: 300_000, replace: true}
-  )
+# TTL extend/replace strategies are not exposed by the Elixir SDK yet.
+# A stable jobId still collapses repeated adds while the job is unfinished.
+{:ok, first} = Bunqueue.Queue.add(queue, "sync-task", %{action: "sync"}, jobId: "sync-task")
+{:ok, duplicate} = Bunqueue.Queue.add(queue, "sync-task", %{action: "sync"}, jobId: "sync-task")
+true = first.id == duplicate.id
 ```
 
 </TabItem>
@@ -333,9 +328,32 @@ queue.add("latest-data", new_data, JobOptions {
 
 :::caution[Replace details]
 `replace: true` never touches a job that is already processing (active). If both `extend` and `replace` are set, `replace` wins.
+
+For durable jobs, replacement is committed as one persistence transition: the
+superseded pending row is removed before `add()` resolves and cannot reappear
+after a broker restart. If several same-key replacements are submitted in one
+bulk add, only the final generation remains runnable and recoverable.
+
+When the current owner is active, it keeps running under its existing lease. A
+durable replacement atomically moves persisted key ownership to the queued
+successor, so an acknowledgement or failure from the older generation cannot
+release the new generation's key, including across a restart before that
+acknowledgement. A non-durable successor retains the normal write-buffer crash
+window.
+
+Replacement is rejected if another live job depends on the owner's id. The
+broker leaves both jobs and their dependency edge unchanged instead of creating
+a permanently blocked dependent. Change or remove the dependency explicitly
+before replacing that owner.
+
+`addBulk` is ordered but is not an all-or-nothing transaction. If a later entry
+fails, any earlier accepted prefix remains persisted, counted and runnable;
+entries after the failure are not evaluated. Use the flow API when the complete
+graph must commit atomically.
 :::
 
-Managing keys directly:
+Managing keys directly in Bun, or retaining an explicit custom job ID in the
+network SDKs when later lookup is required:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -352,22 +370,26 @@ const removed = await job?.removeDeduplicationKey(); // only if this generation 
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const jobId = await queue.getDeduplicationJobId('my-unique-key'); // look up
+const job = await queue.add('notification', data, { jobId: 'my-custom-job-id' });
+const sameJob = await queue.getJobByCustomId('my-custom-job-id');
+console.log(job.id === sameJob?.id); // true
 ```
 
 </TabItem>
 <TabItem label="Python">
 
 ```python
-job_id = queue.get_deduplication_job_id("my-unique-key")  # look up
+job = queue.add("notification", data, job_id="my-custom-job-id")
+same_job = queue.get_job_by_custom_id("my-custom-job-id")
+assert same_job is not None and job.id == same_job.id
 ```
 
 </TabItem>
 <TabItem label="PHP">
 
 ```php
-// Deduplication ids are stored as custom ids on the broker.
-$job = $queue->getJobByCustomId('my-unique-key');
+// Explicit custom job ids can be looked up; TTL deduplication keys cannot.
+$job = $queue->getJobByCustomId('my-custom-job-id');
 $jobId = $job?->id();
 ```
 
@@ -375,8 +397,8 @@ $jobId = $job?->id();
 <TabItem label="Go">
 
 ```go
-// Deduplication ids are stored as custom ids on the broker.
-job, err := queue.GetJobByCustomID("my-unique-key")
+// Explicit custom job ids can be looked up; TTL deduplication keys cannot.
+job, err := queue.GetJobByCustomID("my-custom-job-id")
 if err != nil {
     return err
 }
@@ -386,8 +408,8 @@ if err != nil {
 <TabItem label="Rust">
 
 ```rust
-// Deduplication ids are stored as custom ids on the broker.
-let job = queue.get_job_by_custom_id("my-unique-key")?;
+// Explicit custom job ids can be looked up; TTL deduplication keys cannot.
+let job = queue.get_job_by_custom_id("my-custom-job-id")?;
 let job_id = job.map(|job| job.id());
 ```
 
@@ -395,8 +417,8 @@ let job_id = job.map(|job| job.id());
 <TabItem label="Elixir">
 
 ```elixir
-# Deduplication ids are stored as custom ids on the broker.
-{:ok, job} = Bunqueue.Queue.get_job_by_custom_id(queue, "my-unique-key")
+# Explicit custom job ids can be looked up; TTL deduplication keys cannot.
+{:ok, job} = Bunqueue.Queue.get_job_by_custom_id(queue, "my-custom-job-id")
 job_id = if job, do: job.id, else: nil
 ```
 
@@ -405,8 +427,9 @@ job_id = if job, do: job.id, else: nil
 
 *The Bun queue lookup/removal methods work in embedded and TCP modes. Job-level
 removal is generation-safe: a stale job cannot clear a key already transferred
-to a replacement job. The network SDKs shown above can look up the owner through
-the equivalent custom-id query; explicit key removal is currently Bun-only.*
+to a replacement job. Direct TTL deduplication-key lookup and removal are
+currently Bun-only. A custom `jobId` is a separate value: network SDKs can look
+it up, but that query never resolves `deduplication.id`.*
 
 ## Where to go next
 

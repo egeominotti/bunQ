@@ -119,8 +119,8 @@ describe('Queue dependency methods are not sentinels', () => {
   });
 });
 
-describe('intentionally unsupported compatibility methods are explicit', () => {
-  test('trimEvents remains a stable no-op while bunqueue has no retained event stream', async () => {
+describe('queue event journal compatibility methods are live', () => {
+  test('trimEvents removes this queue journal and is idempotent', async () => {
     await fc.assert(
       fc.asyncProperty(fc.integer({ min: 1, max: 6 }), async (jobCount) => {
         const queue = new Queue(queueName('trim-events'), { embedded: true });
@@ -128,6 +128,7 @@ describe('intentionally unsupported compatibility methods are explicit', () => {
           for (let index = 0; index < jobCount; index++) {
             await queue.add('task', { index });
           }
+          expect(await queue.trimEvents(0)).toBe(jobCount);
           expect(await queue.trimEvents(0)).toBe(0);
         } finally {
           await queue.close();

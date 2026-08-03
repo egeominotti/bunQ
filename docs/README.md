@@ -18,8 +18,10 @@ bunqueue is a high-performance, zero-external-dependency job queue for [Bun](htt
 | [Documented Feature Verification](./features/documented-feature-verification.md) | Section-by-section Queue, Worker, Cron, and DLQ traceability to real TCP and embedded functional contracts, including the symmetric parity gate. |
 | [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) | Compiler-discovered, fail-closed coverage of every Queue, Worker, Job, Cron, DLQ, Flow, Workflow, and related facade method against embedded and real TCP SQLite runtimes. |
 | [Benchmarking and Performance Evidence](./features/benchmarks.md) | Evidence levels, native measurement contract, persistence/topology labels, maintained runner catalogue, Workflow Engine harness, environment controls, and publication checklist. |
+| [Documentation Tooling](./features/documentation-tooling.md) | Astro content validation, generated API metadata, and the split Open Graph cover-data/rendering pipeline. |
 | [Model-Based Queue Verification](./features/model-based-testing.md) | `fast-check` lifecycle and cross-queue/shard state machines against a real TCP broker and SQLite, with shrinking, seed replay, aggregate invariants, cache-boundary checks, and actual `SIGKILL` recovery. |
 | [Production Readiness End-to-End Test](./features/production-readiness-testing.md) | Company-style durable mixed workload over real TCP and SQLite, with concurrent workers, retry/DLQ/idempotency, health/metrics, and two broker restarts. |
+| [Native Engineering Benchmark (2026-08-02)](./benchmarks/native-engineering-2026-08-02.md) | Apple M1 Max v2.8.56 release-candidate campaign: repeated Workflow distributions, queue/transport diagnostics, exact integrity gates, default protocol-limit evidence, and benchmark-runner regressions found during measurement. |
 | [Native Engineering Benchmark (2026-07-30)](./benchmarks/native-engineering-2026-07-30.md) | Native Ryzen 9 queue and Workflow Engine campaign: repeated Embedded/TCP throughput and latency, durable writes, tuning sweeps, default protocol cap, horizontal scaling, resource sampling, and integrity totals. |
 | [Core Fix Impact Benchmark (2026-07-16)](./benchmarks/fix-impact-2026-07-16.md) | Reproducible before/after correctness and performance evidence for recovery, job queries, FIFO groups, statistics, temporal indexes, waiters, and delayed-heap retention. |
 | [Generated API Reference](./generated-api-reference.md) | How `bun run docs:api` turns the source into the per-version TypeDoc reference at `/reference/<version>/`, which entry points it covers, and the two collisions its layout avoids. |
@@ -44,7 +46,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
-| [Job Lifecycle](./features/job-lifecycle.md) | The four primitive pure-logic operations (push, pull, ack, fail) that move a job through its state machine beneath the TCP/HTTP servers and embedded SDK. |
+| [Job Lifecycle](./features/job-lifecycle.md) | The push/pull/ack/fail state machine, including focused single/batch admission modules and the persistence-before-RAM publication boundary shared by TCP and embedded runtimes. |
 | [Job Queries & Queue Control](./features/job-queries-and-control.md) | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean). |
 | [Dead Letter Queue](./features/dead-letter-queue.md) | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge. |
 | [Deduplication & Unique Jobs](./features/deduplication-and-unique.md) | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock. |
@@ -81,7 +83,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document | Purpose |
 | --- | --- |
-| [Persistence](./features/persistence.md) | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, and queue control-state and serves batched recovery reads on restart. |
+| [Persistence](./features/persistence.md) | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer), including atomic admission metadata for terminal-ID retirement and dependency pins, plus batched recovery reads. |
 | [S3 Backup](./features/backup-s3.md) | Periodic gzip-compressed, SHA-256-checksummed SQLite snapshots to S3-compatible storage with retention pruning and validate-before-replace restore. |
 | [Configuration & Entrypoint](./features/configuration.md) | Config layer and process entrypoint: resolves config-file/env/default precedence into typed config, dispatches the executable, and provides the Logger, VERSION, and Bun-only runtime guards. |
 
@@ -137,8 +139,17 @@ Isolation](./testing.md), the *Performance Characteristics* and *Reliability &
 Battle-Testing* sections of [Architecture](./architecture.md), and the
 reproducible reports under `benchmarks/`.
 
+Documentation build tooling lives under `docs/scripts/`. The Open Graph
+generator keeps static cover definitions in `og-covers.ts` and rendering in
+`generate-og.ts`; see [Documentation Tooling](./features/documentation-tooling.md).
+
 The Queue query split (`operations/query.ts`, `queryStates.ts`, and
 `queryTcpPages.ts`) is documented in [Client SDK: Queue](./features/client-queue-sdk.md).
+The job-admission split (`operations/push.ts`, `pushBatch.ts`,
+`pushAdmission.ts`, `customId.ts`, `pushDeduplication.ts`, and `parentLink.ts`)
+is documented in [Job Lifecycle](./features/job-lifecycle.md), with its
+`persistence/sqlite/admission.ts` transaction contract documented in
+[Persistence](./features/persistence.md).
 
 ---
 

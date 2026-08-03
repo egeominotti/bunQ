@@ -26,6 +26,7 @@ export { defineConfig } from '../config';
 export type { BunqueueConfig } from '../config';
 export { Queue } from './queue';
 export { Worker } from './worker';
+export type { ManualJob } from './worker/types';
 export { Bunqueue } from './bunqueue';
 export type {
   BunqueueOptions,
@@ -46,6 +47,21 @@ export { SandboxedWorker } from './sandboxedWorker';
 export { Forwarder } from './forwarder';
 export type { ForwardOptions, ForwardedInfo } from './forwarder';
 export { QueueEvents } from './events';
+export type {
+  ActiveEvent,
+  CompletedEvent,
+  DelayedEvent,
+  DrainedEvent,
+  DuplicatedEvent,
+  FailedEvent,
+  ProgressEvent,
+  QueueEventsOptions,
+  RemovedEvent,
+  RetriedEvent,
+  StalledEvent,
+  WaitingChildrenEvent,
+  WaitingEvent,
+} from './types/events';
 export { QueueGroup } from './queueGroup';
 export { FlowProducer } from './flow';
 export { UnrecoverableError, DelayedError } from './errors';
@@ -75,6 +91,9 @@ export type {
   GetDependenciesOpts,
   JobDependencies,
   JobDependenciesCount,
+  QueueMetrics,
+  QueueMetricsMeta,
+  QueueMetricType,
 } from './types';
 export type { FlowStep, FlowResult, FlowJob, JobNode, FlowProducerOptions, FlowOpts } from './flow';
 export type { RepeatOpts, JobTemplate, SchedulerInfo } from './queue/scheduler';

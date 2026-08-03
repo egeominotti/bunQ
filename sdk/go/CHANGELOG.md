@@ -9,11 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send ordinary job names through top-level `name`, preserve arbitrary user
+  `data`, decode legacy data envelopes, and use `jobName` for scheduler jobs.
+  `Job.Data()` now returns `any` so slices, scalars, and nil remain intact.
 - Replace multi-command flow creation and rollback with a preallocated,
   reciprocal graph committed by one atomic `PUSHF`.
 - Require exact ID and queue agreement in authoritative commit snapshots.
 - Reject invalid queue names, reserved markers, user-owned topology options,
   and repeat/deduplication/debounce before transport.
+
+### Fixed
+
+- Suppress local `completed`/`failed` events and worker counters when the
+  broker reports a late `ACK`/`FAIL` as
+  `{applied:false, reason:"already-finalized"}`. Malformed outcome evidence is
+  surfaced as a Worker `error` instead of fabricating a terminal transition.
 
 ### Added
 

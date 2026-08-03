@@ -49,9 +49,11 @@ both are mandatory for every change here. The correctness checklist is
   `verify_peer`/`verify_peer_name` tied together and opt-out explicit.
 - PHP traces lead with the throw site: FAIL sends the FIRST lines
   (message line prepended), capped at the per-job `stackTraceLimit` or 10.
-- An empty PHP array packs as msgpack **array**, not map: `jobPayload`
-  always merges `name` in, so job data is never empty — keep it that way.
+- An empty PHP array packs as a msgpack array. Keep job `name` top-level and
+  pass `data` through unchanged; do not rebuild the retired name envelope.
 - `FAIL`/`Progress` require an ACTIVE job (pull first, keep the token).
+- A successful ACK/FAIL can carry `applied:false` after a broker timeout wins;
+  release the local lease without emitting a terminal or error event.
 - Test cleanup: a scheduler that reached its `limit` is removed server-side
   (`removeJobScheduler` then answers "not found").
 - A flow must be fully valid before the connection closure is invoked. Do not

@@ -12,6 +12,31 @@ backup outcomes. It feeds the Prometheus endpoint, HTTP health probes, TCP/CLI
 diagnostics, the bundled Grafana dashboard and the bundled
 Prometheus/Alertmanager rules.
 
+## Queue metric journal
+
+The Bun `Queue` API exposes durable, queue-scoped terminal metrics independently
+of the process-wide HTTP/Prometheus surfaces:
+
+```ts
+queue.getMetrics('completed' | 'failed', start = 0, end = -1)
+queue.trimEvents(maxLength)
+```
+
+`QueueTelemetryJournal` records every lifecycle event in a per-queue journal
+and updates completed/failed counters only for terminal outcomes; a failed
+attempt that will retry is not counted as a terminal failure. Metric data is a
+continuous sequence of one-minute buckets in newest-first order, including the
+current minute and zero-filled gaps. `start`/`end` are inclusive list indexes;
+`end=-1` selects through the oldest retained bucket. `meta.count` is cumulative,
+while top-level `count` is the pre-pagination bucket count.
+
+With SQLite, `queue_events`, `queue_metrics_meta`, and
+`queue_metric_buckets` survive restart. Defaults retain 10,000 journal entries
+per queue and 20,160 minute points per queue/type. `trimEvents` removes old
+journal entries without changing metrics; `obliterate` removes both. The TCP
+`Metrics` queue form and `TrimEvents` command invoke the same manager methods as
+embedded mode.
+
 ## Endpoint Contracts
 
 | Endpoint | Authentication | Healthy response | Degraded response |

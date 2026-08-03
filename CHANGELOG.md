@@ -2,6 +2,192 @@
 
 All notable changes to bunqueue are documented here.
 
+## [2.8.56] - 2026-08-03
+
+This release is the result of a method-by-method core audit across Embedded and
+real TCP+SQLite runtimes. The complete release notes, including the executable
+documentation matrix and SDK details, are maintained in
+[`docs/src/content/docs/changelog.md`](./docs/src/content/docs/changelog.md).
+
+### Engine correctness and durability
+
+- Made durable job acceptance fail closed across Embedded and real TCP+SQLite
+  paths. A synchronous storage rejection, including real `SQLITE_FULL`, can no
+  longer return an error while leaving the rejected single or batch candidate
+  executable in RAM. Admission now inspects custom IDs, dedup owners,
+  dependency-completion pins, and parent topology without destructive
+  mutation; commits terminal cleanup, pins, replacement/key transfer, the job
+  row, and any parent update in the required SQLite transaction; then publishes
+  heap/wait-set membership, `jobIndex`, counters, and ownership maps. Rejected
+  completed/DLQ ID reuse preserves the previous generation and result across
+  restart, rejected parent links leave both sides unchanged, and ordered batch
+  accepted-prefix semantics remain intact. Added deterministic rejection
+  injection plus real 16 MiB tmpfs regressions for single, batch, restart,
+  reuse, and recovery in both transports.
+- Made deduplication replacement atomic across the heap, `jobIndex`, counters,
+  temporal indexes, unique-key ownership, write buffering, and SQLite. A
+  replaced durable job can no longer remain queryable or resurrect after a
+  broker restart.
+- Moved Worker limiter admission to the exact job-start boundary. Concurrent
+  and batched Workers acquire rate and group-concurrency capacity before
+  processor fan-out and release it exactly once.
+- Separated `Job.name` from arbitrary user `Job.data` in the domain model,
+  persistence schema, protocol v3, MCP, Flow, DLQ, Worker, and every official
+  SDK. Existing databases and older protocol peers retain bounded legacy
+  decoding.
+- Made `parent: { id, queue }` create the same durable dependency edge used by
+  FlowProducer, including bulk creation, cross-queue linkage, rollback, restart
+  recovery, detach, and child-failure policies.
+- Enforced lease tokens consistently for ACK, FAIL, batch outcomes, manual
+  processing, and every active-state Job transition. Unlocked administrative
+  transitions remain available, while stale generations cannot publish an
+  outcome or clear a newer lease.
+- Made processor-owned Job mutations consume exactly one delivery generation.
+  Confirmed retry/delay/wait/waiting-children transitions suppress the later
+  automatic ACK/FAIL, and synchronous `discard()` is tracked to broker
+  settlement during normal execution and graceful close. Duplicate discards
+  send once, real failures emit once, and `Discard` now carries the Worker
+  lease token so an old processor cannot dead-letter a newer generation.
+- Made processing-timeout outcomes generation-authoritative. The timeout claim
+  records the exact start and lease while holding the processing lock; late
+  ACK, FAIL, manual failure, and sandbox outcomes return explicit ignored
+  evidence instead of retrying, unregistering a live delivery, or emitting a
+  false local `completed`/`failed`/`error` event. Batch evidence is positional
+  and remains correct with duplicate IDs; current retry leases and invalid
+  tokens keep their normal semantics.
+- Replaced the five-second timeout sweep with an ordered next-deadline
+  scheduler. Short timeouts now fire near their actual deadline, stale entries
+  are generation-safe, and delays beyond the signed 32-bit timer ceiling are
+  chunked without changing the persisted deadline.
+- Made mixed FIFO/LIFO ordering total and deterministic at equal priority.
+- Replaced placeholder metrics and event trimming with a bounded per-queue
+  minute-series and lifecycle journal that survives SQLite restart, honours
+  pagination/windows, and returns exact trim counts.
+- Fixed completion-chained cron repeat scheduling, offsets, windows, limits,
+  immediate execution, update propagation, and restart continuation. Advanced
+  repeat policy is persisted in schema v34.
+- Made expired-lock recovery linearizable across overlapping sweeps. One lease
+  generation can no longer consume attempts/stalls twice, emit duplicate
+  terminal events, or exist in both a waiting heap and the DLQ.
+- Fixed Workflow compensation recovery around a live or force-closed Engine.
+  Recovery by the current owner no longer waits on its own unwind, while a
+  replacement owner waits for the exact local claim, reloads durable state, and
+  retries only while compensation remains owed.
+- Unified public Job lifecycle metadata, return values, falsy/null results,
+  failure reasons, retention flags, DLQ statistics, scheduler results, and MCP
+  cron errors across direct/list reads and Embedded/TCP modes.
+- Made completed-job retry a durable generation transition. It now atomically
+  resets execution timestamps, heartbeat, attempts, progress/message, and
+  removes the prior result before publishing the waiting state. The old
+  `returnvalue` and progress can no longer remain visible or reappear after a
+  restart; stacktrace and timeline history remain diagnostic evidence.
+- Made `getJobSchedulers(start, end, asc)` honor its public range and ordering
+  contract in both modes: indexes are inclusive, `end: -1` reads the remainder,
+  `asc` defaults to descending, and equal deadlines use scheduler IDs as a
+  deterministic tie-breaker.
+
+### TCP and Embedded parity
+
+- Added authenticated queue-scoped QueueEvents streaming to the binary TCP
+  protocol, including unsubscribe, bounded writes, reconnect/resubscribe, and
+  Worker `stalled` delivery.
+- Added authoritative TCP Flow parent-result reads and exact
+  `waitJobUntilFinished()` results for both completed and in-flight jobs.
+- Added authoritative asynchronous Bunqueue facade methods for queue control,
+  DLQ operations, and global rate limits while retaining documented legacy
+  synchronous compatibility boundaries.
+- Fixed client TCP short writes under backpressure with a bounded ordered queue
+  per physical socket. Partial frames now resume on `drain`; later commands
+  cannot overtake an unwritten frame tail.
+- Fixed store-and-forward teardown after a forced pool close and removed
+  protocol-maintenance handles that could keep a stopped process alive.
+
+### Official SDKs and protocol v3
+
+- Upgraded TypeScript/Node.js-Deno, Python, PHP, Go, Rust, and Elixir SDKs to
+  negotiate protocol v3 and advertise the `separate-job-name` capability.
+- Preserved first-class job names and arbitrary scalar/object user payloads in
+  producers, schedulers, workers, Job objects, Flow snapshots, and native SDK
+  serialization.
+- Expanded shared conformance with name/data round trips, legacy envelopes,
+  scheduler names, active mutation tokens, and authoritative Queue/Admin
+  results; every SDK also carries a native regression.
+- Made late Worker outcomes broker-authoritative in every official SDK.
+  TypeScript, Python, PHP, Go, and Elixir no longer emit or count a false local
+  terminal outcome after an exact timeout/retired lease wins; Rust's handler
+  attempt remains settled without synthesizing terminal state. TypeScript and
+  Python ACK batching require positional `ignoredIndices`, including duplicate
+  job IDs, and reject ambiguous or malformed evidence.
+
+### Architecture
+
+- Kept QueueManager, Queue, Worker, SandboxedWorker, transport, persistence,
+  Flow, Workflow, MCP, scheduler, and server implementation files at or below
+  300 lines by splitting state, types, conversion, journal, migration,
+  subscription, and outcome responsibilities into focused modules.
+- Moved contracts into dedicated domain/application/client/Worker `types/`
+  modules without changing queue hot-path lock boundaries or the documented
+  lock hierarchy.
+- Added explicit SQLite migrations for first-class job names, advanced repeat
+  policy, and queue telemetry.
+- Made schema upgrades fail closed. All pending DDL, legacy backfills, and the
+  final version record now share one synchronous transaction; only exact
+  duplicate schema-object errors are idempotent. Disk-full, I/O, corruption,
+  syntax, and constraint failures roll back without advancing the version and
+  are retried on reopen. Explicit migration-6 statement boundaries also repair
+  a historical partially applied cron dedup upgrade.
+
+### Verification and documentation
+
+- Turned all 37 Queue, Worker, Cron, DLQ, and Flow guide pages into 40
+  executable real-broker files, covering every applicable claim in Embedded
+  and TCP modes with no expected-failure pins.
+- Added a fail-closed public API compiler and E2E matrix that discovers every
+  callable Queue, Worker, Job, Cron, DLQ, Flow, Workflow, transport, and facade
+  method and requires a real operation for every applicable runtime cell.
+- Added shared TCP/Embedded script contracts for QueueEvents, stalled delivery,
+  runtime results, Flow values, queue isolation, and subscription cleanup.
+- Added repository-wide English-only contributor instructions and shared
+  `skeptic` reviewer profiles for Codex CLI and Claude Code.
+- Added disposable OrbStack Machine release gates on the Mac's native
+  architecture: Ubuntu 24.04 is the canonical local Linux gate and Debian 13 is
+  the distribution-compatibility gate, both without host mounts, credentials,
+  or reusable state. GitHub Actions supplies independent native `amd64`
+  coverage; translated Rosetta runs are diagnostic only.
+- Closed the embedded manager before deleting its temporary SQLite directory
+  in the cross-runtime documentation fixture, removing a real WAL-checkpoint
+  cleanup warning instead of hiding it from the release output.
+- Hardened the crash-recovery subprocess harness for parallel isolation by
+  assigning its unused HTTP listener through the kernel instead of assuming
+  the port adjacent to TCP is free. The expired-lock regression now also
+  asserts the explicit broker-authoritative `already-finalized` outcome.
+- Gave the publish-build regression a 40-second test-harness budget while
+  retaining its 30-second child-process deadline, preventing fresh Linux
+  builds from being killed by Bun's unrelated five-second default timeout.
+- Passed the final release gates with 8,120 unit tests, 489 TCP checks, 332
+  Embedded checks, 83,939 model assertions, and 611 isolated SDK/conformance
+  tests. The complete documentation contract adds 711 executable tests and
+  2,083 assertions across 42 files.
+
+### Native benchmark campaign
+
+- Re-ran the complete native queue, transport, Workflow, comparison,
+  dependency, event, stress, and million-job benchmark inventory on the final
+  candidate runtime.
+- Hardened benchmark acceptance around exact accepted/invoked IDs,
+  authoritative terminal counts, duplicate detection, Worker errors, dynamic
+  endpoints, explicit protocol limits, deterministic cleanup, and import-safe
+  natural process shutdown.
+- Fixed four runner defects found by the final campaign: truncated 100,000-job
+  completion retention, cross-scale Embedded retention contamination, an
+  undersized fixed SQLite deadline, and a leaked Embedded singleton after the
+  push/bulk report.
+- Removed a false-green path from the TCP concurrency sweep: its self-hosted
+  integrity test now resolves and validates the broker's assigned dynamic port
+  instead of accidentally falling back to an unrelated service on `:6789`.
+- Published the final dated engineering report at
+  [`docs/benchmarks/native-engineering-2026-08-03.md`](./docs/benchmarks/native-engineering-2026-08-03.md), covering the complete maintained benchmark inventory with topology labels, exact integrity results, rejected-sample evidence, raw-artifact locations, and explicit diagnostic caveats.
+
 ## [2.8.32] - 2026-07-11
 
 ### Fixed — permanent concurrency-slot leak in moveJobToDelayed/discardJob
@@ -846,7 +1032,7 @@ Happy-path behaviour was already solid; these harden bunqueue under failure, str
 ## [2.7.13] - 2026-05-15
 
 ### Fixed
-- **WriteBuffer silent data loss when retries exhausted** — `SqliteStorage` previously constructed `WriteBuffer` without an `onCriticalError` callback, so jobs dropped after `maxRetries` (10) hit at `sqliteBatch.ts:209-223` vanished with no recovery path. `SqliteStorage` now wires a default handler that logs every lost job (id/queue/customId/priority/data preview), retains the last 100 critical-loss records in memory, and forwards to an optional user `onCriticalLoss` config callback. New API: `storage.getCriticalLosses()` / `storage.clearCriticalLosses()`.
+- **WriteBuffer silent data loss when retries exhausted** — `SqliteStorage` previously constructed `WriteBuffer` without an `onCriticalError` callback, so jobs dropped after `maxRetries` (10) vanished with no recovery path (the retry-exhaustion branch now lives at `writeBuffer.ts:95-105`). `SqliteStorage` now wires a default handler that logs every lost job (id/queue/customId/priority/data preview), retains the last 100 critical-loss records in memory, and forwards to an optional user `onCriticalLoss` config callback. New API: `storage.getCriticalLosses()` / `storage.clearCriticalLosses()`.
 - **`AsyncLock`/`RWLock` double-release broke mutual exclusion** — `guard.release()` had no idempotency check; a stale double-release could clobber the next owner's `locked=true` flag and let two acquirers run concurrently in the critical section, violating the documented lock hierarchy (jobIndex → completedJobs → shards[N] → processingShards[N]). All three guards (`AsyncLock`, `RWLock` read, `RWLock` write) now track a per-guard `released` flag and short-circuit subsequent calls.
 - **State-transition writes raced with buffered INSERTs** — `markActive`/`markCompleted`/`markFailed` ran synchronously while the corresponding `insertJob` was still in the 10ms-batched `WriteBuffer`. The `UPDATE` matched 0 rows silently, then the buffered `INSERT` later wrote with the stale insert-time state (`waiting`/`delayed`), clobbering intent. Added `WriteBuffer.hasPending(jobId)` and a private `SqliteStorage.flushIfBuffered(jobId)` helper invoked at the top of every state-mutating method so the row exists on disk before the `UPDATE` runs. If flush fails, in-memory state stays authoritative and the new critical-loss callback records the dropped jobs for log-based recovery.
 - **TCP close handler orphaned jobs and leaked `clientJobs` Map entries on retry exhaustion** — `tcp.ts` close handler called `releaseClientJobsWithRetry` (3 attempts with exponential backoff); on persistent lock contention only logged, leaving (a) the `clientJobs` Map entry uncleared (leaks across flapping reconnects) and (b) jobs stuck in `active` state until the full stall timeout (~30s). `clientTracking.releaseClientJobs` now wraps the locked release block in `try/finally` so the Map entry is always deleted. New `forceReleaseClientJobs(clientId)` performs a lock-free best-effort cleanup: clears `clientJobs`, drops orphaned `jobLocks` tokens, and expires both `lastHeartbeat=0` and `startedAt=0` so the stall detector recovers within ~2 ticks (~10s with defaults). `tcp.ts` close handler invokes it in the catch branch as a last-resort fallback.

@@ -106,6 +106,7 @@ function buildPush(args: string[]): Record<string, unknown> {
   const cmd: Record<string, unknown> = {
     cmd: 'PUSH',
     queue,
+    name: 'default',
     data,
   };
 

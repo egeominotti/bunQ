@@ -1,6 +1,7 @@
 import { jobId } from '../../../domain/types/job';
 import { getSharedManager } from '../../manager';
 import { WorkerManual } from './manual';
+import type { WorkerDelivery } from './state';
 
 export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerManual<T, R> {
   // biome-ignore lint/suspicious/useAwait: preserves the public async close contract
@@ -60,7 +61,7 @@ export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerMa
       this.stalledUnsubscribe = null;
     }
 
-    this.activeJobIds.clear();
+    this.clearDeliveries();
     this.pulledJobIds.clear();
     this.jobTokens.clear();
     this.cancelledJobs.clear();
@@ -78,24 +79,36 @@ export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerMa
     const buffered = this.pendingJobs.slice(this.pendingJobsHead);
     this.pendingJobs = [];
     this.pendingJobsHead = 0;
-    if (buffered.length === 0) return;
 
-    for (const { job, token } of buffered) {
-      const id = String(job.id);
-      try {
-        if (this.embedded) {
-          const manager = getSharedManager();
-          await manager.moveActiveToWait(jobId(id));
-          if (this.opts.useLocks) manager.releaseLock(jobId(id), token ?? undefined);
-        } else if (this.tcp) {
-          await this.tcp.send({ cmd: 'MoveToWait', id });
-        }
-      } catch {
-        // Lock expiration recovers anything that could not be released.
-      } finally {
-        this.pulledJobIds.delete(id);
-        this.jobTokens.delete(id);
+    for (const delivery of buffered) {
+      if (this.isCurrentDelivery(delivery)) await this.releasePulledJob(delivery);
+    }
+
+    for (const id of [...this.pulledJobIds]) {
+      if (this.hasActiveDelivery(id)) continue;
+      const delivery = this.currentDelivery(id);
+      if (delivery) await this.releasePulledJob(delivery);
+    }
+  }
+
+  private async releasePulledJob(delivery: WorkerDelivery): Promise<void> {
+    const id = String(delivery.job.id);
+    const { token } = delivery;
+    try {
+      if (this.embedded) {
+        const manager = getSharedManager();
+        await manager.moveActiveToWait(jobId(id), token ?? undefined);
+      } else if (this.tcp) {
+        await this.tcp.send({
+          cmd: 'MoveToWait',
+          id,
+          ...(token ? { token } : {}),
+        });
       }
+    } catch {
+      // Lock expiration recovers anything that could not be released.
+    } finally {
+      this.forgetDelivery(delivery);
     }
   }
 }

@@ -23,6 +23,7 @@ export function resolveWorkerOptions(
     maxStalledCount: options.maxStalledCount ?? 1,
     removeOnComplete: options.removeOnComplete,
     removeOnFail: options.removeOnFail,
+    connection: options.connection,
   };
 }
 

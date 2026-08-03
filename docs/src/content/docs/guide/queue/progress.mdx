@@ -38,7 +38,11 @@ const processed = await queue.getDependencies('parent-id', 'processed', 0, 10);
 
 // Wait for a job to finish (requires a QueueEvents instance)
 import { QueueEvents } from 'bunqueue/client';
-const queueEvents = new QueueEvents('my-queue');
+const queueEvents = new QueueEvents('my-queue', {
+  embedded: false,
+  connection: { host: '127.0.0.1', port: 6789 },
+});
+await queueEvents.waitUntilReady();
 const result = await queue.waitJobUntilFinished('job-id', queueEvents, 30000);
 ```
 
@@ -139,9 +143,16 @@ let result = queue.wait_for_job("job-id", 30_000)?;
 </TabItem>
 </Tabs>
 
-*`getJobDependencies`, `getDependencies`, and `QueueEvents` are available in the Bun `bunqueue` package only; over TCP, `waitForJob` covers the common wait-for-result case.*
+*`getJobDependencies`, `getDependencies`, and `QueueEvents` are available in the
+Bun `bunqueue` package. Bun QueueEvents supports both embedded and TCP brokers;
+use the same connection and `prefixKey` as the Queue. External SDKs expose
+`waitForJob` for the common wait-for-result case and can use SSE/WebSocket for
+live queue events.*
 
-Manual state transitions (BullMQ-compatible, `token` is the worker's lock token):
+Manual state transitions are BullMQ-compatible. Whenever the active job has a
+lock, `token` is mandatory and must be that job's current worker token in both
+embedded and TCP mode. Jobs processed without locks remain administratively
+movable without one:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">

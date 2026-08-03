@@ -45,6 +45,7 @@ export async function routeResourceRoutes(
       {
         cmd: 'Cron',
         name: body['name'] as string,
+        jobName: typeof body['jobName'] === 'string' ? body['jobName'] : 'default',
         queue: body['queue'] as string,
         data: body['data'],
         schedule: body['schedule'] as string | undefined,

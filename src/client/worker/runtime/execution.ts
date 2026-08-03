@@ -1,24 +1,21 @@
 import { hostname } from 'os';
-import type { Job as InternalJob } from '../../../domain/types/job';
 import { getSharedManager } from '../../manager';
 import { processJob } from '../processor';
 import type { HeartbeatDeps } from '../workerHeartbeat';
 import type { PullConfig } from '../workerPull';
 import { WorkerPolling } from './polling';
+import type { WorkerDelivery } from './state';
 
 export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, R> {
-  protected startJob(job: InternalJob, token: string | null): void {
-    const jobIdStr = String(job.id);
-    if (this.activeJobIds.has(jobIdStr)) return;
+  protected startJob(delivery: WorkerDelivery): boolean {
+    const { job, token } = delivery;
+    if (this.isActiveDelivery(delivery)) return true;
+    if (this.groupLimiter && !this.groupLimiter.canProcess(job)) return false;
+    if (!this.rateLimiter.tryAcquire()) return false;
 
     this.activeJobs++;
-    this.activeJobIds.add(jobIdStr);
-    this.applyRemoveDefaults(job);
+    this.beginDelivery(delivery);
     if (this.groupLimiter) this.groupLimiter.increment(job);
-    if (this.opts.useLocks && token && !this.jobTokens.has(jobIdStr)) {
-      this.jobTokens.set(jobIdStr, token);
-    }
-    this.pulledJobIds.add(jobIdStr);
 
     const tokenForProcess = this.opts.useLocks ? token : undefined;
     void processJob(job, {
@@ -29,18 +26,17 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
       ackBatcher: this.ackBatcher,
       emitter: this,
       token: tokenForProcess,
+      removeOnComplete: this.opts.removeOnComplete === true ? true : undefined,
+      removeOnFail: this.opts.removeOnFail === true ? true : undefined,
+      shouldAbandonOutcome: () => this._forceClose || !this.isCurrentDelivery(delivery),
       onOutcome: (ok) => {
         if (ok) this.processedCount++;
         else this.failedCount++;
       },
     }).finally(() => {
       this.activeJobs--;
-      this.activeJobIds.delete(jobIdStr);
-      this.pulledJobIds.delete(jobIdStr);
-      this.cancelledJobs.delete(jobIdStr);
-      if (this.opts.useLocks) this.jobTokens.delete(jobIdStr);
+      this.finishDelivery(delivery);
       if (this.groupLimiter) this.groupLimiter.decrement(job);
-      this.rateLimiter.recordJobForLimiter();
       if (this.running && !this._closing) this.poll();
     });
 
@@ -51,6 +47,7 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
         void this.tryProcess();
       });
     }
+    return true;
   }
 
   protected registerWithServer(): void {
@@ -121,16 +118,5 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
       pollTimeout: this.opts.pollTimeout,
       lockDuration: this.opts.lockDuration,
     };
-  }
-
-  protected applyRemoveDefaults(job: InternalJob): void {
-    if (this.opts.removeOnComplete !== undefined && !job.removeOnComplete) {
-      const value = this.opts.removeOnComplete;
-      (job as { removeOnComplete: boolean }).removeOnComplete = value === true;
-    }
-    if (this.opts.removeOnFail !== undefined && !job.removeOnFail) {
-      const value = this.opts.removeOnFail;
-      (job as { removeOnFail: boolean }).removeOnFail = value === true;
-    }
   }
 }

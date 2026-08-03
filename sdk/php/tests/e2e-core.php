@@ -8,15 +8,15 @@ use Bunqueue\Queue;
 
 /** E2E: producing, query, control, schedulers, webhooks, monitoring. */
 
-test('core: add + getJob roundtrip (name inside data, data() strips it)', function (Server $server): void {
+test('core: add + getJob roundtrip keeps name and data separate', function (Server $server): void {
     $queue = new Queue(uniqueName('rt'), ['port' => $server->port]);
     try {
         $job = $queue->add('send-email', ['to' => 'user@example.com', 'n' => 7]);
         assertTrue($job->id() !== '', 'PUSH returns an id');
         assertTrue(waitUntil(fn () => $queue->getJob($job->id()) !== null), 'job readable after flush');
         $fetched = $queue->getJob($job->id());
-        assertSame('send-email', $fetched->name(), 'name travels inside data');
-        assertSame(['to' => 'user@example.com', 'n' => 7], $fetched->data(), 'data() returns user payload only');
+        assertSame('send-email', $fetched->name(), 'top-level name survives');
+        assertSame(['to' => 'user@example.com', 'n' => 7], $fetched->data(), 'data() returns user payload');
         assertSame(null, $queue->getJob('does-not-exist'), 'not found maps to null');
     } finally {
         $queue->obliterate();

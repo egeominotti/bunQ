@@ -5,7 +5,7 @@
 import { getSharedManager } from '../../manager';
 import type { TcpConnectionPool } from '../../tcpPool';
 import { jobId } from '../../../domain/types/job';
-
+import { assertFlowTcpOk } from '../../flowJobTypes';
 interface ManagementContext {
   name: string;
   embedded: boolean;
@@ -255,7 +255,7 @@ export async function updateJobData(
     await getSharedManager().updateJobData(jobId(id), data);
     return;
   }
-  await ctx.tcp!.send({ cmd: 'Update', id, data });
+  assertFlowTcpOk(await ctx.tcp!.send({ cmd: 'Update', id, data }), 'Update');
 }
 
 /** Change job delay */

@@ -43,6 +43,10 @@ export class DependencyResultTracker {
     return this.protectedResults.get(dependencyId);
   }
 
+  hasConsumers(dependencyId: JobId): boolean {
+    return (this.consumersByDependency.get(dependencyId)?.size ?? 0) > 0;
+  }
+
   releaseConsumer(consumerId: JobId): void {
     const dependencies = this.dependenciesByConsumer.get(consumerId);
     if (!dependencies) return;

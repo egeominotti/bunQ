@@ -58,8 +58,9 @@ trait QueueAdmin
         $this->call([
             'cmd' => 'Cron',
             'name' => $schedulerId,
+            'jobName' => $template['name'] ?? $schedulerId,
             'queue' => $this->name,
-            'data' => Protocol::jobPayload($template['name'] ?? $schedulerId, $template['data'] ?? null),
+            'data' => $template['data'] ?? null,
             'schedule' => $repeat['pattern'] ?? null,
             'repeatEvery' => $repeat['every'] ?? null,
             'priority' => $opts['priority'] ?? null,

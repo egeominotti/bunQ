@@ -33,16 +33,15 @@
  *     a durable write succeeds (safeWrite clears the flag on success —
  *     src/infrastructure/persistence/sqlite.ts).
  *
- * Known behavior observed while writing this suite (NOT asserted, reported):
- * a durable push that fails on disk still inserted the job in MEMORY first
- * (push.ts inserts to shard before ctx.storage.insertJob), so the client gets
- * an error while the job may still run from memory — at-least-once
- * overdelivery on retry, not loss.
+ * Rejected durable writes must never remain visible in memory. Otherwise the
+ * client can safely retry an explicit rejection while the rejected generation
+ * is still executable, producing an avoidable duplicate delivery.
  */
 
 import { afterAll, afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { QueueManager } from '../src/application/queueManager';
 import { TcpClient } from '../src/client/tcp/client';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +218,7 @@ interface Server {
 
 let active: Server | null = null;
 let activeClient: TcpClient | null = null;
+let activeManager: QueueManager | null = null;
 
 function randomPort(): number {
   return 20000 + Math.floor(Math.random() * 20000);
@@ -229,7 +229,15 @@ function getFreePort(): number {
   for (let i = 0; i < 50; i++) {
     const port = randomPort();
     try {
-      const l = Bun.listen({ hostname: '127.0.0.1', port, socket: { data() {} } });
+      const l = Bun.listen({
+        hostname: '127.0.0.1',
+        port,
+        socket: {
+          data() {
+            // Probe listener: no payload is expected.
+          },
+        },
+      });
       l.stop();
       return port;
     } catch {
@@ -244,7 +252,15 @@ async function waitPort(port: number, timeoutMs = 60000): Promise<void> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
-      const s = await Bun.connect({ hostname: '127.0.0.1', port, socket: { data() {} } });
+      const s = await Bun.connect({
+        hostname: '127.0.0.1',
+        port,
+        socket: {
+          data() {
+            // Readiness probe: receiving data is irrelevant.
+          },
+        },
+      });
       s.end();
       return;
     } catch {
@@ -319,6 +335,10 @@ async function stopServer(): Promise<void> {
 
 afterEach(async () => {
   await stopServer();
+  if (activeManager) {
+    activeManager.shutdown();
+    activeManager = null;
+  }
   cleanVolume();
 }, 30000);
 
@@ -398,6 +418,12 @@ describe('DISK-FULL — real ENOSPC/SQLITE_FULL against the real server', () => 
         `[DF1] wall hit: ${okIds.length} pushes acknowledged ok, ${failures} rejected, error="${lastError}"`
       );
 
+      // A rejected durable write is not accepted in any form: it must not be
+      // visible or executable from the in-memory queue after SQLite rejected
+      // it. This also makes a client retry unambiguous.
+      const countsAfterRejection = await c.send({ cmd: 'GetJobCounts', queue: QUEUE });
+      expect((countsAfterRejection.counts as { waiting: number }).waiting).toBe(okIds.length);
+
       // (1) the server did NOT crash — process alive AND responsive to Ping on
       // a FRESH connection (not just the already-open socket).
       expect(s.proc.exitCode).toBeNull();
@@ -448,6 +474,321 @@ describe('DISK-FULL — real ENOSPC/SQLITE_FULL against the real server', () => 
         const st = await c.send({ cmd: 'GetState', queue: QUEUE, id });
         expect(String(st.state)).not.toBe('unknown');
       }
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF3: embedded durable rejections never remain visible or executable in memory',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const queue = 'df3-embedded';
+      const manager = new QueueManager({ dataPath: join(dir, 'bunq-df3.db') });
+      activeManager = manager;
+
+      const acceptedIds: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const job = await manager.push(queue, { data: { i, pre: true }, durable: true });
+        acceptedIds.push(job.id);
+      }
+
+      fillVolume(dir);
+      expect(fillers.length).toBeGreaterThan(0);
+
+      const payload = 'z'.repeat(64 * 1024);
+      let failures = 0;
+      for (let i = 0; i < 3; i++) {
+        try {
+          const job = await manager.push(queue, { data: { i, payload }, durable: true });
+          acceptedIds.push(job.id);
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          failures++;
+        }
+      }
+
+      expect(failures).toBe(3);
+      expect(manager.getQueueJobCounts(queue).waiting).toBe(acceptedIds.length);
+
+      freeFillers();
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF4: a rejected durable TCP batch remains absent from memory',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const port = getFreePort();
+      const tcpQueue = 'df4-tcp';
+      await spawnServer(join(dir, 'bunq-df4-tcp.db'), port);
+      const client = await connect(port);
+      fillVolume(dir);
+
+      const payload = 'b'.repeat(64 * 1024);
+      const tcpResult = await client.send({
+        cmd: 'PUSHB',
+        queue: tcpQueue,
+        jobs: Array.from({ length: 3 }, (_, i) => ({ data: { i, payload }, durable: true })),
+      });
+      expect(tcpResult.ok).toBe(false);
+      const tcpCounts = await client.send({ cmd: 'GetJobCounts', queue: tcpQueue });
+      expect((tcpCounts.counts as { waiting: number }).waiting).toBe(0);
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF5: a rejected durable embedded batch remains absent from memory',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const embeddedQueue = 'df5-embedded';
+      const manager = new QueueManager({ dataPath: join(dir, 'bunq-df5-embedded.db') });
+      activeManager = manager;
+      fillVolume(dir);
+
+      const payload = 'e'.repeat(64 * 1024);
+      await expect(
+        manager.pushBatch(
+          embeddedQueue,
+          Array.from({ length: 3 }, (_, i) => ({ data: { i, payload }, durable: true }))
+        )
+      ).rejects.toThrow();
+      expect(manager.getQueueJobCounts(embeddedQueue).waiting).toBe(0);
+
+      freeFillers();
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF6: rejected TCP reuse preserves the previous DLQ generation across restart',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const db = join(dir, 'bunq-df6.db');
+      const port = getFreePort();
+      const queue = 'df6-tcp-dlq';
+      const customId = 'df6-terminal-id';
+      await spawnServer(db, port);
+      let client = await connect(port);
+
+      const first = await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 1 },
+        durable: true,
+      });
+      const pull = await client.send({ cmd: 'PULL', queue, owner: 'df6-worker' });
+      expect(
+        await client.send({
+          cmd: 'FAIL',
+          id: String(first.id),
+          token: pull.token as string,
+          error: 'terminal generation',
+          unrecoverable: true,
+        })
+      ).toMatchObject({ ok: true });
+
+      fillVolume(dir);
+      const rejected = await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(rejected.ok).toBe(false);
+      const failedCounts = await client.send({ cmd: 'GetJobCounts', queue });
+      expect((failedCounts.counts as { failed: number; waiting: number }).failed).toBe(1);
+      expect((failedCounts.counts as { failed: number; waiting: number }).waiting).toBe(0);
+      const oldDlq = await client.send({ cmd: 'Dlq', queue, count: 10 });
+      expect(
+        (oldDlq.jobs as Array<{ id: string; data: unknown }>).find((job) => job.id === customId)
+          ?.data
+      ).toEqual({ generation: 1 });
+
+      freeFillers();
+      await stopServer();
+      await spawnServer(db, port);
+      client = await connect(port);
+      const recoveredDlq = await client.send({ cmd: 'Dlq', queue, count: 10 });
+      expect(
+        (recoveredDlq.jobs as Array<{ id: string; data: unknown }>).find(
+          (job) => job.id === customId
+        )?.data
+      ).toEqual({ generation: 1 });
+
+      const replacement = await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(replacement.ok).toBe(true);
+      const replacedCounts = await client.send({ cmd: 'GetJobCounts', queue });
+      expect((replacedCounts.counts as { failed: number; waiting: number }).failed).toBe(0);
+      expect((replacedCounts.counts as { failed: number; waiting: number }).waiting).toBe(1);
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF7: rejected embedded reuse preserves the previous DLQ generation across restart',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const db = join(dir, 'bunq-df7.db');
+      const queue = 'df7-embedded-dlq';
+      const customId = 'df7-terminal-id';
+      let manager = new QueueManager({ dataPath: db });
+      activeManager = manager;
+      const first = await manager.push(queue, {
+        customId,
+        data: { generation: 1 },
+        durable: true,
+      });
+      expect(await manager.discard(first.id)).toBe(true);
+
+      fillVolume(dir);
+      await expect(
+        manager.push(queue, { customId, data: { generation: 2 }, durable: true })
+      ).rejects.toThrow();
+      expect(manager.getQueueJobCounts(queue).failed).toBe(1);
+      expect(manager.getQueueJobCounts(queue).waiting).toBe(0);
+      expect(manager.getDlq(queue)[0]?.data).toEqual({ generation: 1 });
+
+      freeFillers();
+      manager.shutdown();
+      activeManager = null;
+      manager = new QueueManager({ dataPath: db });
+      activeManager = manager;
+      expect(manager.getDlq(queue)[0]?.data).toEqual({ generation: 1 });
+
+      const replacement = await manager.push(queue, {
+        customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(replacement.data).toEqual({ generation: 2 });
+      expect(manager.getQueueJobCounts(queue).failed).toBe(0);
+      expect(manager.getQueueJobCounts(queue).waiting).toBe(1);
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF8: rejected TCP reuse preserves completed data and result across restart',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const db = join(dir, 'bunq-df8.db');
+      const port = getFreePort();
+      const queue = 'df8-tcp-completed';
+      const customId = 'df8-completed-id';
+      await spawnServer(db, port);
+      let client = await connect(port);
+
+      await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 1 },
+        durable: true,
+      });
+      const pull = await client.send({ cmd: 'PULL', queue, owner: 'df8-worker' });
+      expect(
+        await client.send({
+          cmd: 'ACK',
+          id: customId,
+          token: pull.token as string,
+          result: { generation: 1, result: true },
+        })
+      ).toMatchObject({ ok: true });
+
+      fillVolume(dir);
+      const rejected = await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(rejected.ok).toBe(false);
+      expect((await client.send({ cmd: 'GetState', queue, id: customId })).state).toBe('completed');
+      expect((await client.send({ cmd: 'GetResult', id: customId })).result).toEqual({
+        generation: 1,
+        result: true,
+      });
+
+      freeFillers();
+      await stopServer();
+      await spawnServer(db, port);
+      client = await connect(port);
+      expect((await client.send({ cmd: 'GetState', queue, id: customId })).state).toBe('completed');
+      expect((await client.send({ cmd: 'GetResult', id: customId })).result).toEqual({
+        generation: 1,
+        result: true,
+      });
+
+      const replacement = await client.send({
+        cmd: 'PUSH',
+        queue,
+        jobId: customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(replacement.ok).toBe(true);
+      expect((await client.send({ cmd: 'GetState', queue, id: customId })).state).toBe('waiting');
+      expect((await client.send({ cmd: 'GetResult', id: customId })).result).toBeUndefined();
+    },
+    120000
+  );
+
+  it.skipIf(!capable)(
+    'DF9: rejected embedded reuse preserves completed data and result across restart',
+    async () => {
+      const dir = (tiny as TinyFs).dir;
+      cleanVolume();
+      const db = join(dir, 'bunq-df9.db');
+      const queue = 'df9-embedded-completed';
+      const customId = 'df9-completed-id';
+      let manager = new QueueManager({ dataPath: db });
+      activeManager = manager;
+      await manager.push(queue, { customId, data: { generation: 1 }, durable: true });
+      const pulled = await manager.pull(queue);
+      expect(pulled?.id).toBe(customId);
+      await manager.ack(customId, { generation: 1, result: true });
+
+      fillVolume(dir);
+      await expect(
+        manager.push(queue, { customId, data: { generation: 2 }, durable: true })
+      ).rejects.toThrow();
+      expect(await manager.getJobState(customId)).toBe('completed');
+      expect(manager.getResult(customId)).toEqual({ generation: 1, result: true });
+      expect((await manager.getJob(customId))?.data).toEqual({ generation: 1 });
+
+      freeFillers();
+      manager.shutdown();
+      activeManager = null;
+      manager = new QueueManager({ dataPath: db });
+      activeManager = manager;
+      expect(await manager.getJobState(customId)).toBe('completed');
+      expect(manager.getResult(customId)).toEqual({ generation: 1, result: true });
+
+      const replacement = await manager.push(queue, {
+        customId,
+        data: { generation: 2 },
+        durable: true,
+      });
+      expect(replacement.data).toEqual({ generation: 2 });
+      expect(await manager.getJobState(customId)).toBe('waiting');
+      expect(manager.getResult(customId)).toBeUndefined();
     },
     120000
   );

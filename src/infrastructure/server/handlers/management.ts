@@ -10,6 +10,7 @@ import { jobId } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 import { throughputTracker } from '../../../application/throughputTracker';
 import { latencyTracker } from '../../../application/latencyTracker';
+import { validateQueueName } from '../protocol/validation';
 
 /** Handle Cancel command */
 export async function handleCancel(
@@ -142,4 +143,44 @@ export function handleMetrics(ctx: HandlerContext, reqId?: string): Response {
     },
     reqId
   );
+}
+
+/** Handle the queue-scoped Metrics form. */
+export function handleQueueMetrics(
+  cmd: Extract<Command, { cmd: 'Metrics' }>,
+  ctx: HandlerContext,
+  reqId?: string
+): Response {
+  if (typeof cmd.queue !== 'string') return resp.error('Metrics queue is required', reqId);
+  const queueError = validateQueueName(cmd.queue);
+  if (queueError) return resp.error(queueError, reqId);
+  if (cmd.type !== 'completed' && cmd.type !== 'failed') {
+    return resp.error("Metrics type must be 'completed' or 'failed'", reqId);
+  }
+  try {
+    return resp.data(
+      ctx.queueManager.getQueueMetrics(cmd.queue, cmd.type, cmd.start ?? 0, cmd.end ?? -1),
+      reqId
+    );
+  } catch (error) {
+    return resp.error(error instanceof Error ? error.message : String(error), reqId);
+  }
+}
+
+/** Trim one queue's durable lifecycle-event journal. */
+export function handleTrimEvents(
+  cmd: Extract<Command, { cmd: 'TrimEvents' }>,
+  ctx: HandlerContext,
+  reqId?: string
+): Response {
+  const queueError = validateQueueName(cmd.queue);
+  if (queueError) return resp.error(queueError, reqId);
+  try {
+    return resp.data(
+      { removed: ctx.queueManager.trimQueueEvents(cmd.queue, cmd.maxLength) },
+      reqId
+    );
+  } catch (error) {
+    return resp.error(error instanceof Error ? error.message : String(error), reqId);
+  }
 }

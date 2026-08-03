@@ -2,7 +2,8 @@ export interface PendingAck {
   id: string;
   result: unknown;
   token?: string;
-  resolve: () => void;
+  removeOnComplete?: boolean;
+  resolve: (applied: boolean) => void;
   reject: (error: Error) => void;
 }
 

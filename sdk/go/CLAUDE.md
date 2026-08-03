@@ -39,7 +39,7 @@ The cross-module correctness checklist is [`INVARIANTS.md`](INVARIANTS.md).
 | `job.go` | Job wrapper: accessors + per-id operations (progress, log, extend lock) |
 | `queue.go` | Queue core: `Add`, `AddBulk` (jobId→customId rename) |
 | `queue_query.go` / `queue_control.go` / `queue_admin.go` | Query / control / admin areas (not-found→nil, unwrap contracts, scheduler booleans and unique key, webhook `id` vs `webhookId`, rate duration/TTL) |
-| `worker.go` / `worker_process.go` | Concurrent worker with independent pull, command and heartbeat sockets; bounded goroutine pool, optional heartbeats, panic stacks, ACK-gated completion and generation-safe registration |
+| `worker.go` / `worker_process.go` / `worker_outcome.go` | Concurrent worker with independent pull, command and heartbeat sockets; bounded goroutine pool, optional heartbeats, panic stacks, broker-authoritative terminal outcomes and generation-safe registration |
 | `flow_planner.go` / `flow_id.go` | Pure atomic graph planning, validation and secure preallocated IDs |
 | `flow_snapshots.go` / `flow_commit.go` | Pure authoritative snapshot validation plus the single `PUSHF` transport boundary |
 | `flow.go` | Public `FlowProducer`, result-tree construction, flat chains and `GetFlow` |
@@ -48,13 +48,17 @@ The cross-module correctness checklist is [`INVARIANTS.md`](INVARIANTS.md).
 ## Wire gotchas (mirror of ../python/CLAUDE.md — all apply)
 
 - Frame = u32 BE length + standard msgpack map; Auth is the first command.
-- Job name INSIDE `data`; `Data()` strips it.
+- Job `name` is top-level beside untouched `data`; `Data()` returns `any` and
+  strips a name only while decoding a legacy envelope.
 - Wrapped in `data`: GetLogs→logs, ListWorkers→workers, GetChildrenValues→values,
   AddWebhook→webhookId, ListWebhooks→webhooks, Ping→pong. Top-level: IsPaused→paused,
   CronGet→cron, GetProgress→progress/message, PULLB→jobs+tokens, PUSH→id, Count→count.
 - FAIL requires an ACTIVE job (pull first, pass the token); supports
   `unrecoverable` and `stack` (server keeps the FIRST `stackTraceLimit` lines,
   default 10 — lead with the message).
+- ACK/FAIL may return `data.applied:false` with reason `already-finalized` when
+  the broker timeout or a retired cron generation won. Release the local lease
+  without emitting a terminal event or incrementing Worker counters.
 - A scheduler that reached its execution limit is REMOVED server-side
   (CronGet → not found).
 - `GetJobs` reads from SQLite (10ms write buffer): tests must `waitUntil`.

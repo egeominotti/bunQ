@@ -120,7 +120,11 @@ Every SDK must:
 8. plan every flow completely before I/O and submit it with one atomic `PUSHF`,
    so validation or transport failure creates no partial graph;
 9. expose typed connection, timeout, command, authentication, protocol, and
-   unrecoverable-processing errors.
+   unrecoverable-processing errors;
+10. treat the broker's terminal transition response as authoritative: an exact
+    `already-finalized` lease generation must not emit a contradictory local
+    terminal event or increment a terminal counter, and ACK batches must use
+    `ignoredIndices` rather than infer positions from duplicate-capable IDs.
 
 ## Atomic flow contract
 
@@ -156,7 +160,10 @@ classification, timeout/reconnect behavior, authentication, TLS verification,
 worker concurrency/lease behavior, atomic flow rejection, and telemetry
 isolation.
 The shared conformance suite then validates 17 public protocol behaviors
-against a fresh broker through each SDK's real driver.
+against a fresh broker through each SDK's real driver. Its thin CLI runner,
+server/driver harness, independent wire verifier, shared check support, and two
+check groups are separate TypeScript modules so process orchestration cannot
+silently become part of the verification oracle.
 
 Each native suite also exercises realistic broker-backed business flows. The
 common invoice-reconciliation scenario bulk-enqueues distinct payloads, drains

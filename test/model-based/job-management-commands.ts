@@ -3,7 +3,7 @@ import type { AsyncCommand, Arbitrary } from 'fast-check';
 import fc from 'fast-check';
 import { MODEL_JOB_IDS } from './model-ids';
 import { QueueCommand } from './queue-command';
-import type { QueueModel } from './queue-model-harness';
+import type { ModelState, QueueModel } from './queue-model-harness';
 import { isReady, readyState, terminalGeneration, type RealQueue } from './queue-model-harness';
 
 class ChangePriorityCommand extends QueueCommand {
@@ -34,7 +34,7 @@ class ChangePriorityCommand extends QueueCommand {
   }
 }
 
-class MoveToDelayedCommand extends QueueCommand {
+export class MoveToDelayedCommand extends QueueCommand {
   constructor(
     private readonly slot: number,
     private readonly change: boolean
@@ -49,10 +49,12 @@ class MoveToDelayedCommand extends QueueCommand {
 
   async run(model: QueueModel, real: RealQueue): Promise<void> {
     const id = MODEL_JOB_IDS[this.slot]!;
+    const previousState = model.jobs.get(id)!.state;
     const response = await real.send({
       cmd: this.change ? 'ChangeDelay' : 'MoveToDelayed',
       delay: 60000,
       id,
+      ...activeLease(previousState, real, id),
     });
     expect(response.ok).toBe(true);
     const job = model.jobs.get(id)!;
@@ -67,7 +69,7 @@ class MoveToDelayedCommand extends QueueCommand {
   }
 }
 
-class MoveToWaitCommand extends QueueCommand {
+export class MoveToWaitCommand extends QueueCommand {
   constructor(private readonly slot: number) {
     super();
   }
@@ -80,7 +82,11 @@ class MoveToWaitCommand extends QueueCommand {
   async run(model: QueueModel, real: RealQueue): Promise<void> {
     const id = MODEL_JOB_IDS[this.slot]!;
     const previousState = model.jobs.get(id)!.state;
-    const response = await real.send({ cmd: 'MoveToWait', id });
+    const response = await real.send({
+      cmd: 'MoveToWait',
+      id,
+      ...activeLease(previousState, real, id),
+    });
     expect(response.ok).toBe(true);
     const job = model.jobs.get(id)!;
     job.state = readyState(job.priority);
@@ -97,6 +103,13 @@ class MoveToWaitCommand extends QueueCommand {
   toString(): string {
     return `moveToWait(${MODEL_JOB_IDS[this.slot]})`;
   }
+}
+
+function activeLease(state: ModelState, real: RealQueue, id: string): { token?: string } {
+  if (state !== 'active') return {};
+  const token = real.tokens.get(id);
+  if (!token) throw new Error(`active model job "${id}" has no lease token`);
+  return { token };
 }
 
 class UpdateDataCommand extends QueueCommand {

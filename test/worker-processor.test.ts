@@ -18,18 +18,20 @@ import type { TcpConnection } from '../src/client/worker/types';
 
 /** Create a minimal internal job for testing */
 function makeJob(
-  overrides: Partial<{ queue: string; data: unknown; priority: number }> = {},
+  overrides: Partial<{ queue: string; name: string; data: unknown; priority: number }> = {}
 ): InternalJob {
   return createJob(generateJobId(), overrides.queue ?? 'test-q', {
+    name: overrides.name,
     data: overrides.data ?? { name: 'send', email: 'test@test.com' },
     priority: overrides.priority ?? 0,
   });
 }
 
 /** Mock TCP connection that records sent commands */
-function mockTcp(
-  handler?: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>,
-): { tcp: TcpConnection; sent: Record<string, unknown>[] } {
+function mockTcp(handler?: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>): {
+  tcp: TcpConnection;
+  sent: Record<string, unknown>[];
+} {
   const sent: Record<string, unknown>[] = [];
   const tcp: TcpConnection = {
     send: async (cmd) => {
@@ -47,7 +49,7 @@ function mockTcp(
  */
 function makeConfig<T = unknown, R = unknown>(
   processor: Processor<T, R>,
-  overrides: Partial<ProcessorConfig<T, R>> = {},
+  overrides: Partial<ProcessorConfig<T, R>> = {}
 ): ProcessorConfig<T, R> {
   const { tcp } = mockTcp();
   const ackBatcher = new AckBatcher({
@@ -148,22 +150,26 @@ describe('processJob', () => {
     expect(receivedJob).toBeDefined();
     expect(receivedJob!.id).toBe(String(internal.id));
     expect(receivedJob!.queueName).toBe('test-q');
-    // The job data should have the user data (with 'name' stripped by extractUserData)
+    expect(receivedJob!.data).toEqual({ name: 'send', email: 'hello@world.com' });
     expect((receivedJob!.data as { email: string }).email).toBe('hello@world.com');
   });
 
-  test('should use job data name as the public job name', async () => {
+  test('should use the authoritative job name without consuming data.name', async () => {
     let receivedJob: Job | undefined;
     const processor: Processor<unknown, void> = async (job) => {
       receivedJob = job as unknown as Job;
     };
 
-    const internal = makeJob({ data: { name: 'my-task', payload: 1 } });
+    const internal = makeJob({
+      name: 'my-task',
+      data: { name: 'user-visible-name', payload: 1 },
+    });
     const config = makeConfig(processor);
 
     await processJob(internal, config);
 
     expect(receivedJob!.name).toBe('my-task');
+    expect(receivedJob!.data).toEqual({ name: 'user-visible-name', payload: 1 });
   });
 
   test('should default job name to "default" when data has no name', async () => {
@@ -526,7 +532,7 @@ describe('AckBatcher', () => {
   // Helper to create a batcher for TCP mode with a mock tcp connection
   function makeTcpBatcher(
     opts: Partial<AckBatcherConfig> = {},
-    tcpSend?: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    tcpSend?: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>
   ): AckBatcher {
     const batcher = new AckBatcher({
       batchSize: opts.batchSize ?? 5,
@@ -666,10 +672,7 @@ describe('AckBatcher', () => {
   // hasPending
   // ------------------------------------------------------------------
   test('hasPending should reflect queued items', async () => {
-    const batcher = makeTcpBatcher(
-      { batchSize: 100, interval: 5000 },
-      async () => ({ ok: true }),
-    );
+    const batcher = makeTcpBatcher({ batchSize: 100, interval: 5000 }, async () => ({ ok: true }));
 
     expect(batcher.hasPending()).toBe(false);
 
@@ -691,10 +694,7 @@ describe('AckBatcher', () => {
   // Stop/cleanup
   // ------------------------------------------------------------------
   test('stop should clear pending acks and timer', async () => {
-    const batcher = makeTcpBatcher(
-      { batchSize: 100, interval: 5000 },
-      async () => ({ ok: true }),
-    );
+    const batcher = makeTcpBatcher({ batchSize: 100, interval: 5000 }, async () => ({ ok: true }));
 
     // Queue items without awaiting (they won't flush due to large batchSize/interval)
     void batcher.queue('j1', 'r1');
@@ -709,14 +709,11 @@ describe('AckBatcher', () => {
 
   test('stop should reject in-flight retries', async () => {
     let attempt = 0;
-    const batcher = makeTcpBatcher(
-      { batchSize: 1, maxRetries: 5, retryDelayMs: 50 },
-      async () => {
-        attempt++;
-        if (attempt <= 5) throw new Error('fail');
-        return { ok: true };
-      },
-    );
+    const batcher = makeTcpBatcher({ batchSize: 1, maxRetries: 5, retryDelayMs: 50 }, async () => {
+      attempt++;
+      if (attempt <= 5) throw new Error('fail');
+      return { ok: true };
+    });
 
     const p = batcher.queue('j1', 'r1');
 
@@ -733,14 +730,11 @@ describe('AckBatcher', () => {
   // ------------------------------------------------------------------
   test('should retry on failure and succeed on later attempt', async () => {
     let attempts = 0;
-    const batcher = makeTcpBatcher(
-      { batchSize: 1, maxRetries: 3, retryDelayMs: 10 },
-      async () => {
-        attempts++;
-        if (attempts < 3) throw new Error('transient');
-        return { ok: true };
-      },
-    );
+    const batcher = makeTcpBatcher({ batchSize: 1, maxRetries: 3, retryDelayMs: 10 }, async () => {
+      attempts++;
+      if (attempts < 3) throw new Error('transient');
+      return { ok: true };
+    });
 
     await batcher.queue('j1', 'r1');
 
@@ -750,12 +744,9 @@ describe('AckBatcher', () => {
   });
 
   test('should reject all items in batch after exhausting retries', async () => {
-    const batcher = makeTcpBatcher(
-      { batchSize: 2, maxRetries: 1, retryDelayMs: 10 },
-      async () => {
-        throw new Error('persistent');
-      },
-    );
+    const batcher = makeTcpBatcher({ batchSize: 2, maxRetries: 1, retryDelayMs: 10 }, async () => {
+      throw new Error('persistent');
+    });
 
     const p1 = batcher.queue('j1', 'r1');
     const p2 = batcher.queue('j2', 'r2');

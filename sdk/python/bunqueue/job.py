@@ -38,15 +38,29 @@ class Job:
 
     @property
     def data(self) -> Any:
-        return self.raw.get("data")
+        data = self.raw.get("data")
+        if self._top_level_name() is not None:
+            return data
+        if isinstance(data, dict) and isinstance(data.get("name"), str):
+            user_data = dict(data)
+            user_data.pop("name", None)
+            return user_data
+        return data
 
     @property
     def name(self) -> Optional[str]:
-        """Job name (stored inside ``data.name``, mirroring the JS SDK)."""
+        """Job name, with compatibility for pre-name-field data envelopes."""
+        modern = self._top_level_name()
+        if modern is not None:
+            return modern
         data = self.raw.get("data")
-        if isinstance(data, dict) and data.get("name") is not None:
-            return str(data["name"])
+        if isinstance(data, dict) and isinstance(data.get("name"), str):
+            return data["name"]
         return None
+
+    def _top_level_name(self) -> Optional[str]:
+        value = self.raw.get("name")
+        return str(value) if value is not None else None
 
     @property
     def priority(self) -> int:
@@ -154,14 +168,14 @@ class Job:
         self._call({"cmd": "Cancel", "id": self.id})
 
     def discard(self) -> None:
-        self._call({"cmd": "Discard", "id": self.id})
+        self._call({"cmd": "Discard", "id": self.id, "token": self.token})
 
     def promote(self) -> None:
         self._call({"cmd": "Promote", "id": self.id})
 
     def retry(self) -> None:
-        """failed -> waiting (BullMQ contract; MoveToWait over TCP)."""
-        self._call({"cmd": "MoveToWait", "id": self.id})
+        """Move the job to waiting, forwarding a Worker lease when present."""
+        self._call({"cmd": "MoveToWait", "id": self.id, "token": self.token})
 
     def update_data(self, data: Any) -> None:
         self._call({"cmd": "Update", "id": self.id, "data": data})
@@ -170,10 +184,14 @@ class Job:
         self._call({"cmd": "ChangePriority", "id": self.id, "priority": priority, "lifo": lifo})
 
     def change_delay(self, delay_ms: int) -> None:
-        self._call({"cmd": "ChangeDelay", "id": self.id, "delay": delay_ms})
+        self._call(
+            {"cmd": "ChangeDelay", "id": self.id, "delay": delay_ms, "token": self.token}
+        )
 
     def move_to_delayed(self, delay_ms: int) -> None:
-        self._call({"cmd": "MoveToDelayed", "id": self.id, "delay": delay_ms})
+        self._call(
+            {"cmd": "MoveToDelayed", "id": self.id, "delay": delay_ms, "token": self.token}
+        )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Job(id={self.id!r}, queue={self.queue!r}, name={self.name!r})"

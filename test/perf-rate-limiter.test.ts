@@ -179,4 +179,33 @@ describe('WorkerRateLimiter performance', () => {
     expect(rl.isRateLimited()).toBe(true);
     expect(rl.canProcessWithinLimit()).toBe(false);
   });
+
+  test('correctness: tryAcquire reserves each start exactly once', () => {
+    const rl = new WorkerRateLimiter({ max: 2, duration: 60_000 });
+
+    expect(rl.getAvailableSlots()).toBe(2);
+    expect(rl.tryAcquire()).toBe(true);
+    expect(rl.getAvailableSlots()).toBe(1);
+    expect(rl.tryAcquire()).toBe(true);
+    expect(rl.tryAcquire()).toBe(false);
+    expect(rl.getRateLimiterInfo()?.current).toBe(2);
+  });
+
+  test('correctness: a temporary override blocks even without a configured window', async () => {
+    const rl = new WorkerRateLimiter(null);
+
+    rl.rateLimit(50);
+    expect(rl.canProcessWithinLimit()).toBe(false);
+    expect(rl.tryAcquire()).toBe(false);
+    expect(rl.getTimeUntilNextSlot()).toBeGreaterThan(0);
+
+    await Bun.sleep(60);
+    expect(rl.tryAcquire()).toBe(true);
+  });
+
+  test('correctness: invalid limiter bounds fail at construction', () => {
+    expect(() => new WorkerRateLimiter({ max: 0, duration: 100 })).toThrow(/positive/);
+    expect(() => new WorkerRateLimiter({ max: 1, duration: 0 })).toThrow(/positive/);
+    expect(() => new WorkerRateLimiter({ max: 1.5, duration: 100 })).toThrow(/positive/);
+  });
 });

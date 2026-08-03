@@ -356,7 +356,7 @@ describe('Lock Manager & Lock Operations', () => {
 
     test('renewing one lock does not affect another', async () => {
       const { job: jobA, token: tokenA } = await pushAndPullWithLock('renew-indep-a');
-      const { job: jobB, token: tokenB } = await pushAndPullWithLock('renew-indep-b');
+      const { job: jobB } = await pushAndPullWithLock('renew-indep-b');
 
       const infoBBefore = qm.getLockInfo(jobB!.id);
 
@@ -454,14 +454,14 @@ describe('Lock Manager & Lock Operations', () => {
       expect(qm.getLockInfo(job!.id)).toBeNull();
     });
 
-    test('ack without token on a locked job still succeeds', async () => {
+    test('ack without token on a locked job is rejected without changing ownership', async () => {
       const { job } = await pushAndPullWithLock('ack-notoken');
 
-      // Ack without providing a token should not throw
-      await qm.ack(job!.id, { result: 'ok' });
+      await expect(qm.ack(job!.id, { result: 'ok' })).rejects.toThrow(/token/i);
 
       const state = await qm.getJobState(job!.id);
-      expect(state).toBe('completed');
+      expect(state).toBe('active');
+      expect(qm.getLockInfo(job!.id)).not.toBeNull();
     });
   });
 
@@ -513,7 +513,7 @@ describe('Lock Manager & Lock Operations', () => {
 
     test('lock info fields have correct types and values', async () => {
       const beforePull = Date.now();
-      const { job, token } = await pushAndPullWithLock('info-types');
+      const { job } = await pushAndPullWithLock('info-types');
       const afterPull = Date.now();
 
       const info = qm.getLockInfo(job!.id)!;

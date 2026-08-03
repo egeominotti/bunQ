@@ -98,6 +98,7 @@ func handle(req map[string]any) (map[string]any, error) {
 		return map[string]any{}, lookup().Promote(str(req["jobId"]))
 	case "upsertScheduler":
 		repeat := mapOf(req["repeat"])
+		template := mapOf(req["template"])
 		return map[string]any{}, queueFor(str(req["queue"])).UpsertJobScheduler(
 			str(req["schedulerId"]),
 			bunqueue.SchedulerRepeat{
@@ -106,7 +107,11 @@ func handle(req map[string]any) (map[string]any, error) {
 				Limit:    int(num(repeat["limit"], 0)),
 				Timezone: str(repeat["tz"]),
 			},
-			bunqueue.SchedulerTemplate{},
+			bunqueue.SchedulerTemplate{
+				Name: str(template["name"]),
+				Data: template["data"],
+				Opts: toOpts(mapOf(template["opts"])),
+			},
 		)
 	case "getScheduler":
 		scheduler, err := lookup().GetJobScheduler(str(req["schedulerId"]))
@@ -142,7 +147,10 @@ func handle(req map[string]any) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"protocolVersion": hello["protocolVersion"]}, nil
+		return map[string]any{
+			"protocolVersion": hello["protocolVersion"],
+			"capabilities":    hello["capabilities"],
+		}, nil
 	case "process":
 		if err := processUntil(req); err != nil {
 			return nil, err

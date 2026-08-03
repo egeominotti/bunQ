@@ -29,6 +29,8 @@ mod flow_plan_boundary_tests;
 #[cfg(test)]
 mod flow_plan_tests;
 #[cfg(test)]
+mod name_data_tests;
+#[cfg(test)]
 mod options_tests;
 #[cfg(test)]
 mod telemetry_tests;

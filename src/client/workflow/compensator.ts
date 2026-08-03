@@ -8,6 +8,8 @@
 
 import { unwind } from './compensationPass';
 import { AbandonedCompensationError } from './compensationChild';
+import { acquireCompensationClaim } from './compensationClaim';
+import type { LostCompensationClaim } from './compensationClaim';
 import { settle, unwindSet } from './compensationSupport';
 import type { WorkflowEmitter } from './emitter';
 import type { WorkflowStore } from './store';
@@ -25,15 +27,11 @@ export class WaitForSignalError extends Error {
 }
 
 /**
- * Executions with an unwind in flight in this process.
- *
  * This is not a distributed lock. It prevents two local recovery/operator paths from
- * reading the same unsettled snapshot and issuing the same reversal twice.
+ * reading the same unsettled snapshot and issuing the same reversal twice. A losing
+ * recovery path receives the current owner's completion latch and can retry safely.
  */
-const inFlight = new Set<string>();
-
-/** `claim-lost` means another local driver owns the unwind and this call did nothing. */
-export type UnwindOutcome = 'ran' | 'claim-lost';
+export type UnwindOutcome = 'ran' | LostCompensationClaim;
 
 /** Run compensation handlers in reverse start order for every eligible step. */
 // biome-ignore lint/complexity/useMaxParams: registry and operator retry are independent inputs
@@ -60,8 +58,8 @@ export async function runCompensation(
     return 'ran';
   }
 
-  if (inFlight.has(exec.id)) return 'claim-lost';
-  inFlight.add(exec.id);
+  const claim = acquireCompensationClaim(exec.id, store);
+  if (claim.kind === 'claim-lost') return claim;
   try {
     await unwind(
       { exec, wf, store, emitter, eligible, workflows, ...opts },
@@ -69,7 +67,7 @@ export async function runCompensation(
         runCompensation(exec, workflow, store, emitter, workflows, { retryFailed })
     );
   } finally {
-    inFlight.delete(exec.id);
+    claim.release();
   }
   return 'ran';
 }

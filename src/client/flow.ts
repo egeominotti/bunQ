@@ -25,6 +25,11 @@ import { assertFlowTcpOk } from './flowJobTypes';
 import { planFlows, type PlannedFlowNode } from './flowPlan';
 import { planBulkThen, planChain, planTree } from './flowLegacyPlan';
 import { readFlow } from './flowReader';
+import {
+  getParentResult as readParentResult,
+  getParentResults as readParentResults,
+  type RuntimeResult,
+} from './flowResults';
 
 // Re-export types for backwards compatibility
 export type {
@@ -64,11 +69,10 @@ const FORCE_EMBEDDED = Bun.env.BUNQUEUE_EMBEDDED === '1';
  * ```
  */
 export class FlowProducer extends EventEmitter {
-  closing: Promise<void> = Promise.resolve();
+  closing: Promise<void> | null = null;
   private readonly embedded: boolean;
   private readonly tcp: TcpConnectionPool | null;
   private readonly useSharedPool: boolean;
-  private closed = false;
 
   constructor(opts: FlowProducerOptions = {}) {
     super();
@@ -119,14 +123,11 @@ export class FlowProducer extends EventEmitter {
 
   /** Close the connection pool (only if using dedicated pool) */
   close(): Promise<void> {
-    if (this.closed) return this.closing;
-    this.closed = true;
-    if (this.tcp && !this.useSharedPool) {
-      this.tcp.close();
-    } else if (this.tcp && this.useSharedPool) {
-      releaseSharedPool(this.tcp);
-    }
-    this.closing = Promise.resolve();
+    if (this.closing) return this.closing;
+    this.closing = Promise.resolve().then(() => {
+      if (this.tcp && !this.useSharedPool) this.tcp.close();
+      else if (this.tcp) releaseSharedPool(this.tcp);
+    });
     return this.closing;
   }
 
@@ -161,6 +162,7 @@ export class FlowProducer extends EventEmitter {
   }
 
   /** Get a flow tree starting from a job (BullMQ v5 compatible). */
+  // biome-ignore lint/suspicious/useAwait: preserves the public Promise return contract.
   async getFlow<T = unknown>(opts: GetFlowOpts): Promise<JobNode<T> | null> {
     return readFlow<T>(
       {
@@ -204,29 +206,15 @@ export class FlowProducer extends EventEmitter {
     return { jobIds: plan.ids.map(String) };
   }
 
-  /**
-   * Get the result of a completed parent job (embedded only).
-   * @template R - Type of the job result
-   */
+  /** Get the result of a completed parent job in embedded or TCP mode. */
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
-  getParentResult<R = unknown>(parentId: string): R | undefined {
-    if (!this.embedded) throw new Error('getParentResult is only available in embedded mode');
-    return getSharedManager().getResult(jobId(parentId)) as R | undefined;
+  getParentResult<R = unknown>(parentId: string): RuntimeResult<R | undefined> {
+    return readParentResult<R>({ embedded: this.embedded, tcp: this.tcp }, parentId);
   }
 
-  /**
-   * Get results from multiple parent jobs (embedded only).
-   * @template R - Type of the job results
-   */
-  getParentResults<R = unknown>(parentIds: string[]): Map<string, R> {
-    if (!this.embedded) throw new Error('getParentResults is only available in embedded mode');
-    const manager = getSharedManager();
-    const results = new Map<string, R>();
-    for (const id of parentIds) {
-      const result = manager.getResult(jobId(id));
-      if (result !== undefined) results.set(id, result as R);
-    }
-    return results;
+  /** Get results from multiple parent jobs in input order in either runtime. */
+  getParentResults<R = unknown>(parentIds: string[]): RuntimeResult<Map<string, R>> {
+    return readParentResults<R>({ embedded: this.embedded, tcp: this.tcp }, parentIds);
   }
 
   // ============================================================================
@@ -257,7 +245,7 @@ export class FlowProducer extends EventEmitter {
       embedded: true,
       updateData: (id, data) => managementOps.updateJobData(ctx, id, data),
       updateProgress: (id, progress) => managementOps.updateJobProgress(ctx, id, progress),
-      log: (id, msg) => managementOps.addJobLog(ctx, id, msg).then(() => {}),
+      log: (id, msg) => managementOps.addJobLog(ctx, id, msg).then(() => undefined),
       promote: (id) => managementOps.promoteJob(ctx, id),
       remove: (id) => managementOps.removeAsync(ctx, id),
       changePriority: (id, opts) => managementOps.changeJobPriority(ctx, id, opts),

@@ -6,6 +6,7 @@
 import type { Command } from '../../../domain/types/command';
 import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
+import { normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 
 /** Handle Cron command - add cron job */
@@ -15,11 +16,13 @@ export function handleCron(
   reqId?: string
 ): Response {
   try {
+    const payload = normalizeLegacyJobPayload({ name: cmd.jobName, data: cmd.data });
     const existing = ctx.queueManager.getCron(cmd.name);
     const cron = ctx.queueManager.addCron({
       name: cmd.name,
+      jobName: payload.name,
       queue: cmd.queue,
-      data: cmd.data,
+      data: payload.data,
       schedule: cmd.schedule,
       repeatEvery: cmd.repeatEvery,
       priority: cmd.priority,
@@ -44,6 +47,7 @@ export function handleCron(
       ok: true,
       cron: {
         name: cron.name,
+        jobName: cron.jobName,
         queue: cron.queue,
         schedule: cron.schedule,
         repeatEvery: cron.repeatEvery,
@@ -74,6 +78,7 @@ export function handleCronGet(
     ok: true,
     cron: {
       name: cron.name,
+      jobName: cron.jobName,
       queue: cron.queue,
       schedule: cron.schedule,
       repeatEvery: cron.repeatEvery,
@@ -108,6 +113,7 @@ export function handleCronList(
     ok: true,
     crons: crons.map((c) => ({
       name: c.name,
+      jobName: c.jobName,
       queue: c.queue,
       schedule: c.schedule,
       repeatEvery: c.repeatEvery,

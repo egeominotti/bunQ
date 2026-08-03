@@ -3,14 +3,11 @@
  * Handles job execution and result reporting
  */
 
-import type { EventEmitter } from 'events';
 import type { Job, FlowJobData } from '../types';
 import { createPublicJob } from '../types';
 import type { Job as InternalJob } from '../../domain/types/job';
 import { getSharedManager } from '../manager';
-import { UnrecoverableError } from '../errors';
-import { DelayedError } from '../errors';
-import type { FailureContext, ProcessorConfig } from './types';
+import type { ProcessorConfig } from './types';
 import {
   createProgressHandler,
   createLogHandler,
@@ -38,8 +35,9 @@ import {
   createGetDependenciesHandler,
   createGetDependenciesCountHandler,
   createRemoveDeduplicationKeyHandler,
-  computeStackLines,
 } from './processorHandlers';
+import { handleJobFailure, handleManualMove, isJobNotFoundError } from './processorOutcome';
+import type { ManualMove } from './types';
 
 export type { ProcessorConfig } from './types';
 
@@ -51,39 +49,47 @@ export async function processJob<T, R>(
   config: ProcessorConfig<T, R>
 ): Promise<void> {
   const { processor, embedded, tcp, ackBatcher, emitter, token } = config;
-  const jobData = internalJob.data as { name?: string } | null;
-  const jobName = jobData?.name ?? 'default';
+  const jobName = internalJob.name;
   const jobIdStr = String(internalJob.id);
 
   // Use a holder to break the circular reference between job and progress handler
   type JobData = T & FlowJobData;
   const jobHolder: { current: Job<JobData> | null } = { current: null };
 
-  // Track whether moveToFailed/moveToCompleted was explicitly called (Issue #82)
-  // Use a mutable holder so TS doesn't narrow to `never` after closure mutation
-  const manualMove: {
-    result: { type: 'completed' | 'failed'; value?: unknown; error?: Error } | null;
-  } = { result: null };
+  // Track whether the processor explicitly consumed this delivery generation.
+  // Use a mutable holder so TS does not narrow through callback mutation.
+  const manualMove: ManualMove = { result: null };
+  const onTransitionApplied = () => {
+    manualMove.result = { type: 'transitioned' };
+  };
 
-  const moveToFailedHandler = createMoveToFailedHandler(
+  const moveToFailedHandler = createMoveToFailedHandler({
     embedded,
     tcp,
     internalJob,
     token,
-    (error: Error) => {
+    removeOnFail: config.removeOnFail,
+    onCalled: (error: Error) => {
       manualMove.result = { type: 'failed', error };
-    }
-  );
+    },
+    onIgnored: () => {
+      manualMove.result = { type: 'ignored' };
+    },
+  });
 
-  const moveToCompletedHandler = createMoveToCompletedHandler(
+  const moveToCompletedHandler = createMoveToCompletedHandler({
     embedded,
     ackBatcher,
     internalJob,
     token,
-    (value: unknown) => {
+    removeOnComplete: config.removeOnComplete,
+    onCalled: (value: unknown) => {
       manualMove.result = { type: 'completed', value };
-    }
-  );
+    },
+    onIgnored: () => {
+      manualMove.result = { type: 'ignored' };
+    },
+  });
 
   const job = createPublicJob<JobData>({
     job: internalJob,
@@ -101,18 +107,28 @@ export async function processJob<T, R>(
     // Issue #82 follow-up: wire all remaining mutation/query methods so they
     // no longer silently no-op inside the Worker processor.
     remove: createRemoveHandler(embedded, tcp),
-    retry: createRetryHandler(embedded, tcp, internalJob),
+    retry: createRetryHandler(embedded, tcp, {
+      internalJob,
+      token: token ?? undefined,
+      onTransitionApplied,
+    }),
     updateData: createUpdateDataHandler(embedded, tcp),
     promote: createPromoteHandler(embedded, tcp),
-    changeDelay: createChangeDelayHandler(embedded, tcp),
+    changeDelay: createChangeDelayHandler(embedded, tcp, token ?? undefined, onTransitionApplied),
     changePriority: createChangePriorityHandler(embedded, tcp),
     extendLock: createExtendLockHandler(embedded, tcp),
     clearLogs: createClearLogsHandler(embedded, tcp),
-    moveToWait: createMoveToWaitHandler(embedded, tcp),
-    moveToDelayed: createMoveToDelayedHandler(embedded, tcp),
-    moveToWaitingChildren: createMoveToWaitingChildrenHandler(embedded, tcp),
+    moveToWait: createMoveToWaitHandler(embedded, tcp, onTransitionApplied),
+    moveToDelayed: createMoveToDelayedHandler(embedded, tcp, onTransitionApplied),
+    moveToWaitingChildren: createMoveToWaitingChildrenHandler(embedded, tcp, onTransitionApplied),
     waitUntilFinished: createWaitUntilFinishedHandler(embedded, tcp),
-    discard: createDiscardHandler(embedded, tcp),
+    discard: createDiscardHandler(embedded, tcp, {
+      token: token ?? undefined,
+      onPending: (pending) => {
+        if (manualMove.result !== null) return;
+        manualMove.result = { type: 'pending-transition', context: 'discard', pending };
+      },
+    }),
     getDependencies: createGetDependenciesHandler(embedded, tcp, internalJob),
     getDependenciesCount: createGetDependenciesCountHandler(embedded, tcp, internalJob),
     removeDeduplicationKey: createRemoveDeduplicationKeyHandler(embedded, tcp),
@@ -125,21 +141,33 @@ export async function processJob<T, R>(
 
   try {
     const result = await processor(job);
+    if (config.shouldAbandonOutcome?.()) return;
 
-    // Issue #82: If moveToFailed/moveToCompleted was called, skip auto-ACK
-    if (handleManualMove(manualMove, job, config, internalJob)) return;
+    // An explicit broker disposition owns the generation, so skip auto-ACK.
+    if (await handleManualMove(manualMove, job, config, internalJob)) return;
 
     // Normal path: auto-ACK
     try {
+      let applied = true;
       if (embedded) {
         const manager = getSharedManager();
         // Pass token for lock verification
-        await manager.ack(internalJob.id, result, token ?? undefined);
+        const outcome = await manager.ack(internalJob.id, result, token ?? undefined, {
+          removeOnComplete: config.removeOnComplete,
+        });
+        applied = outcome?.applied !== false;
       } else {
         // Queue with token for batch ACK
-        await ackBatcher.queue(jobIdStr, result, token ?? undefined);
+        applied = await ackBatcher.queue(
+          jobIdStr,
+          result,
+          token ?? undefined,
+          config.removeOnComplete
+        );
       }
+      if (!applied) return;
     } catch (ackErr) {
+      if (config.shouldAbandonOutcome?.()) return;
       // If stall detection already removed the job from processing,
       // the ACK will fail with "Job not found". This is expected
       // behavior (Issue #33) - emit error event but don't re-throw.
@@ -155,136 +183,9 @@ export async function processJob<T, R>(
     config.onOutcome?.(true);
     emitter.emit('completed', job, result);
   } catch (error) {
-    // Issue #82: If moveToFailed was already called, skip normal failure handling
-    if (handleManualMove(manualMove, job, config, internalJob)) return;
+    if (config.shouldAbandonOutcome?.()) return;
+    // An explicit broker disposition also suppresses catch-path auto-FAIL.
+    if (await handleManualMove(manualMove, job, config, internalJob)) return;
     await handleJobFailure(internalJob, error, config, { job, jobIdStr, token });
   }
-}
-
-/** Issue #82: Handle explicit moveToFailed/moveToCompleted called inside processor */
-function handleManualMove<T extends FlowJobData>(
-  manualMove: { result: { type: 'completed' | 'failed'; value?: unknown; error?: Error } | null },
-  job: Job<T>,
-  config: { onOutcome?: (succeeded: boolean) => void; emitter: EventEmitter },
-  internalJob: InternalJob
-): boolean {
-  if (manualMove.result?.type === 'failed') {
-    const err = manualMove.result.error ?? new Error('Job manually moved to failed');
-    (job as { failedReason?: string }).failedReason = err.message;
-    // Bug #74 follow-up: populate stacktrace on the local `failed` event for the
-    // explicit moveToFailed() path too, mirroring handleJobFailure. The stack is
-    // persisted server-side by createMoveToFailedHandler's FAIL/manager.fail call.
-    if (err.stack) {
-      const { stackLines } = computeStackLines(err);
-      (job as { stacktrace: string[] | null }).stacktrace = stackLines.slice(
-        0,
-        internalJob.stackTraceLimit
-      );
-    }
-    config.onOutcome?.(false);
-    config.emitter.emit('failed', job, err);
-    return true;
-  }
-  if (manualMove.result?.type === 'completed') {
-    (job as { returnvalue?: unknown }).returnvalue = manualMove.result.value;
-    config.onOutcome?.(true);
-    config.emitter.emit('completed', job, manualMove.result.value);
-    return true;
-  }
-  return false;
-}
-
-/** Check if error is a "job not found" error from stale ACK/FAIL (Issue #33) */
-function isJobNotFoundError(err: Error): boolean {
-  return err.message.includes('not found') || err.message.includes('not in processing');
-}
-
-/** Handle DelayedError: move job back to delayed state without counting as failure */
-async function handleDelayedError<T, R>(
-  internalJob: InternalJob,
-  config: ProcessorConfig<T, R>,
-  context: { jobIdStr: string; token?: string | null }
-): Promise<void> {
-  const { embedded, tcp, emitter } = config;
-  try {
-    if (embedded) {
-      const manager = getSharedManager();
-      await manager.moveToDelayed(internalJob.id, internalJob.backoff || 1000);
-    } else if (tcp) {
-      await tcp.send({
-        cmd: 'MoveToDelayed',
-        id: internalJob.id,
-        delay: internalJob.backoff || 1000,
-        ...(context.token ? { token: context.token } : {}),
-      });
-    }
-  } catch (delayError) {
-    const wrappedError = delayError instanceof Error ? delayError : new Error(String(delayError));
-    if (!isJobNotFoundError(wrappedError)) {
-      emitter.emit(
-        'error',
-        Object.assign(wrappedError, { context: 'delay', jobId: context.jobIdStr })
-      );
-    }
-  }
-}
-
-async function handleJobFailure<T, R>(
-  internalJob: InternalJob,
-  error: unknown,
-  config: ProcessorConfig<T, R>,
-  context: FailureContext<T & FlowJobData>
-): Promise<void> {
-  const { embedded, tcp, emitter } = config;
-  const { job, jobIdStr, token } = context;
-  const err = error instanceof Error ? error : new Error(String(error));
-
-  if (err instanceof DelayedError) {
-    await handleDelayedError(internalJob, config, { jobIdStr, token });
-    return;
-  }
-
-  // UnrecoverableError: force skip all retries
-  if (err instanceof UnrecoverableError) {
-    (internalJob as { maxAttempts: number }).maxAttempts = 1;
-    (internalJob as { attempts: number }).attempts = 0;
-  }
-
-  // Bug #74: stack lines computed BEFORE the send so the server can persist
-  // them. The wire copy is capped at 50 lines as a bandwidth guard; the
-  // authoritative cap (job.stackTraceLimit) is applied server-side in failJob.
-  const { stackLines, wireStack } = computeStackLines(err);
-
-  try {
-    if (embedded) {
-      const manager = getSharedManager();
-      await manager.fail(internalJob.id, err.message, token ?? undefined, undefined, wireStack);
-    } else if (tcp) {
-      await tcp.send({
-        cmd: 'FAIL',
-        id: internalJob.id,
-        error: err.message,
-        ...(wireStack ? { stack: wireStack } : {}),
-        ...(token ? { token } : {}),
-        ...(err instanceof UnrecoverableError ? { unrecoverable: true } : {}),
-      });
-    }
-  } catch (failError) {
-    const wrappedError = failError instanceof Error ? failError : new Error(String(failError));
-    if (isJobNotFoundError(wrappedError)) {
-      return;
-    }
-    emitter.emit('error', Object.assign(wrappedError, { context: 'fail', jobId: jobIdStr }));
-  }
-
-  (job as { failedReason?: string }).failedReason = err.message;
-
-  // Bug #74: populate stacktrace on the local `failed` event object
-  if (err.stack) {
-    const limit = internalJob.stackTraceLimit;
-    (job as { stacktrace: string[] | null }).stacktrace = stackLines.slice(0, limit);
-  }
-
-  config.onOutcome?.(false);
-  emitter.emit('failed', job, err);
 }

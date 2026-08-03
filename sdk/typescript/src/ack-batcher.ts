@@ -10,13 +10,14 @@
 
 import type { Connection } from './connection.js';
 import { compact } from './frame.js';
+import { ignoredAckIndices } from './terminal-outcome.js';
 
 export interface AckItem {
   id: string;
   token: string;
   result: unknown;
-  /** Called once the batch settles: `err` set on failure, undefined on ack. */
-  onSettled: (err?: unknown) => void;
+  /** `applied` is defined only after a successful, authoritative response. */
+  onSettled: (err?: unknown, applied?: boolean) => void;
 }
 
 export class AckBatcher {
@@ -52,8 +53,9 @@ export class AckBatcher {
     // a throwing callback can neither be re-invoked with an error (double
     // settle) nor starve the remaining items of their callback.
     let error: unknown;
+    let ignoredIndices: ReadonlySet<number> = new Set();
     try {
-      await this.connection.call(
+      const response = await this.connection.call(
         compact({
           cmd: 'ACKB',
           ids: batch.map((b) => b.id),
@@ -61,12 +63,13 @@ export class AckBatcher {
           results: batch.map((b) => b.result),
         }) as { cmd: string }
       );
+      ignoredIndices = ignoredAckIndices(response.data, batch);
     } catch (err) {
       error = err ?? new Error('ACKB failed');
     }
-    for (const item of batch) {
+    for (let index = 0; index < batch.length; index++) {
       try {
-        item.onSettled(error);
+        batch[index].onSettled(error, error === undefined ? !ignoredIndices.has(index) : undefined);
       } catch {
         // A callback error (e.g. an unhandled 'error' emit in the worker)
         // must never prevent the other items from settling.

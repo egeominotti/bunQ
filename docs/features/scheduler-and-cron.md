@@ -1,6 +1,6 @@
 # Scheduler & Cron
 
-> **Category:** Scheduling · **Source:** `src/infrastructure/scheduler/cronScheduler.ts`, `src/infrastructure/scheduler/cronParser.ts`, `src/domain/types/cron.ts`, `src/client/queue/scheduler.ts`
+> **Category:** Scheduling · **Source:** `src/infrastructure/scheduler/cron/`, `src/infrastructure/scheduler/cronParser.ts`, `src/domain/types/cron.ts`, `src/client/queue/scheduler.ts`, `src/client/queue/schedulerPagination.ts`
 
 ## Purpose
 
@@ -9,11 +9,18 @@ The scheduler is the server-side engine that owns recurring/repeatable jobs ("cr
 ## Responsibilities & Scope
 
 Owns:
-- In-memory cron registry keyed by name, ordered by `nextRun` via a min-heap for `O(k log n)` ticks (`cronScheduler.ts:49-51`).
+- In-memory cron registry keyed by name, ordered by `nextRun` via a min-heap for
+  `O(k log n)` ticks (`infrastructure/scheduler/cron/runtime.ts:22-25`).
 - Cron expression validation, shortcut expansion, and next-run computation (delegated to `cronParser.ts`, which wraps the `croner` library).
-- Firing due crons: limit checks, overlap/`skipIfNoWorker`/`preventOverlap` gating, and the push callback that creates each spawned job (`cronScheduler.ts:296-447`).
-- Persisting cron state before pushing (executions + nextRun) to guarantee at-most-once-per-slot on crash/retry (`cronScheduler.ts:344-369`).
-- Restart recovery: recalculating past `nextRun` values forward and (optionally) skipping missed runs (`cronScheduler.ts:230-256`).
+- Firing due crons: limit checks, overlap/`skipIfNoWorker`/`preventOverlap`
+  gating, and the push callback that creates each spawned job
+  (`infrastructure/scheduler/cron/execution.ts:9-140`).
+- Persisting cron state before pushing (executions + nextRun) to guarantee
+  at-most-once-per-slot on crash/retry
+  (`infrastructure/scheduler/cron/execution.ts:69-90`).
+- Restart recovery: recalculating past `nextRun` values forward and
+  (optionally) skipping missed runs
+  (`infrastructure/scheduler/cron/runtime.ts:126-144`).
 - The client-side scheduler operations and name-prefixing for namespaced queues (`scheduler.ts`).
 
 Does NOT own (delegated elsewhere):
@@ -34,6 +41,8 @@ Internal:
   `application/queue-manager/state.ts`; dashboard wiring and the public cron
   methods live in `application/queue-manager/services.ts`.
 - `src/client/manager.ts` (`getSharedManager`) and `src/client/tcpPool.ts` for the embedded vs TCP split in `scheduler.ts`.
+- `src/client/queue/schedulerPagination.ts` provides the shared deterministic
+  ordering and inclusive range operation for embedded and TCP listings.
 
 External / runtime:
 - **`croner`** — the only external runtime dependency in this module; all cron-expression parsing and next-run math runs through `new Cron(expression, { timezone })` (`cronParser.ts:6,16,35`).
@@ -42,7 +51,12 @@ External / runtime:
 
 ## Public Interface
 
-### Server-side class — `CronScheduler` (`cronScheduler.ts:47`)
+### Server-side class — `CronScheduler` (`cronScheduler.ts:10`)
+
+`CronScheduler` is the public façade over `CronExecution` and `CronRuntime`;
+the callbacks and registry methods below live in `cron/runtime.ts`, while
+`tick`, `fireCronJob`, and `getStats` live in `cron/execution.ts`. Callback
+types are isolated in `types/cronScheduler.ts`.
 
 ```typescript
 class CronScheduler {
@@ -90,9 +104,15 @@ Queue.getJobSchedulers(start?, end?, asc?): Promise<SchedulerInfo[]>;
 Queue.getJobSchedulersCount(): Promise<number>;
 ```
 
-`RepeatOpts` (`scheduler.ts:39-55`): `pattern?`, `every?`, `limit?`, `immediately?`, `count?`, `prevMillis?`, `offset?`, `jobId?`, `timezone?`, `skipMissedOnRestart?`, `skipIfNoWorker?`, `preventOverlap?`. `limit` is forwarded to the cron definition as `maxLimit` (the run cap; see #111) and echoed back on `SchedulerInfo.limit`. (`count`, `prevMillis`, `offset`, `jobId` are still accepted for BullMQ shape compatibility but have no cron-side equivalent, so they are not forwarded.)
+`RepeatOpts` (`scheduler.ts:40-55`): `pattern?`, `every?`, `limit?`, `immediately?`, `count?`, `prevMillis?`, `offset?`, `jobId?`, `timezone?`, `skipMissedOnRestart?`, `skipIfNoWorker?`, `preventOverlap?`. `limit` is forwarded to the cron definition as `maxLimit` (the run cap; see #111) and echoed back on `SchedulerInfo.limit`. (`count`, `prevMillis`, `offset`, `jobId` are still accepted for BullMQ shape compatibility but have no cron-side equivalent, so they are not forwarded.)
 
-### Simple-mode helpers (`src/client/bunqueue.ts:231-262`)
+`getJobSchedulers` orders definitions by their next execution time. `start` and
+`end` are zero-based inclusive offsets (`end: -1` means the end of the list),
+and `asc` defaults to `false`, matching BullMQ. Equal execution times use the
+scheduler ID as a deterministic tie-breaker in the requested direction. The
+same client-side range operation is applied to embedded and TCP results.
+
+### Simple-mode helpers (`src/client/bunqueue.ts:58-90`)
 
 ```typescript
 Bunqueue.cron(id, pattern, data?, opts?: { timezone?; limit?; jobOpts? }): Promise<SchedulerInfo | null>;
@@ -102,55 +122,104 @@ Bunqueue.removeCron(id); Bunqueue.listCrons();
 
 Both delegate to `Queue.upsertJobScheduler` — `cron` sets `pattern`, `every` sets the `every` interval.
 
+### Completion-chained repeats (`Queue.add`)
+
+`Queue.add(..., { repeat })` creates a completion-chained repeat rather than a
+named `CronJob`. The directly added generation runs normally; after each
+successful completion, `repeatJobs.ts` calculates one future deadline with the
+same `croner` parser and shortcut expansion used by `CronScheduler`. Pattern
+chains respect `tz`, `startDate`, `endDate`, `offset`, `prevMillis`, `limit`,
+`immediately`, and `repeat.jobId`. Interval chains skip elapsed slots instead of
+creating a catch-up loop. `limit: N` retains the established contract of the
+initial generation plus at most N successors.
+
+`offset` shifts the cron tick itself: the parser is queried from
+`now - offset` (and `prevMillis - offset` for later generations), so a positive
+offset does not skip a base tick whose shifted deadline is still future and a
+negative offset cannot turn the next deadline into an immediate/past run.
+Interval repeats apply the offset to the first successor only, advance by whole
+`every` slots when that deadline has elapsed, and then remain anchored to
+`prevMillis`; `immediately` never makes every successor immediate.
+
+The successor copies retry, timeout, retention, stall, logging, size, priority,
+group, failure-policy, deduplication, debounce, and durable-write settings while
+resetting execution-owned fields such as attempts, progress, timeline, and the
+generation timestamp. `updateData()` on a completed generation follows the
+repeat-chain link to the pending successor. Parent/dependency relationships and
+outer `JobOptions.jobId` are rejected before insertion because reusing those
+identities across independent generations is ambiguous; `repeat.jobId` remains
+the compatible repeat metadata field.
+
+SQLite `jobs.extended_options` persists the repeat definition, object backoff,
+advanced options, dedup/debounce policy, and durable flag. A delayed successor
+therefore recovers with the same policy and can continue the chain after a
+broker restart.
+
 ### TCP commands handled
 
-- `Cron` — create/upsert a cron (`handlers/cron.ts:12`, routed at `handlerRoutes.ts:291`).
-- `CronGet` — fetch one cron by name (`handlers/cron.ts:62`).
-- `CronDelete` — remove a cron (`handlers/cron.ts:88`).
-- `CronList` — list all crons (`handlers/cron.ts:99`).
+- `Cron` — create/upsert a cron (`handlers/cron.ts:13-65`, routed at `handler-routes/control.ts:93-106`).
+- `CronGet` — fetch one cron by name (`handlers/cron.ts:68-92`).
+- `CronDelete` — remove a cron (`handlers/cron.ts:95-103`).
+- `CronList` — list all crons (`handlers/cron.ts:106-127`).
 
-Command shapes in `src/domain/types/command.ts:341-378` (`CronGet` at `:481`).
+Command shapes in `src/domain/types/commands/cron.ts:4-33`.
 
 ### HTTP / CLI / MCP
 
-- HTTP cron routes proxy to the same handlers (`httpRouteResources.ts:31-82`: `CronList`, `Cron`, `CronGet`, `CronDelete`).
+- HTTP cron routes proxy to the same handlers (`httpRouteResources.ts:31-82`:
+  `CronList`, `Cron`, `CronGet`, `CronDelete`).
 - CLI: `bunqueue cron list | add | delete` (`cli/commands/cron.ts`). `add` requires `--queue` + `--data` and one of `--schedule`/`--every`; rejects `--every <= 0` and `--max-limit < 0` (`cron.ts:55-89`).
-- MCP tools `bunqueue_add_cron` / `bunqueue_list_crons` / `bunqueue_delete_cron` (`mcp/tools/cronTools.ts`).
+- MCP tools `bunqueue_add_cron` / `bunqueue_list_crons` /
+  `bunqueue_get_cron` / `bunqueue_delete_cron` (`mcp/tools/cronTools.ts`).
 
 ### Dashboard events emitted (via `setDashboardEmit`)
 
-`cron:created`, `cron:updated`, `cron:deleted` (from the TCP handler), `cron:fired`, `cron:skipped` (reason `no-worker` or `overlap`), `cron:missed` (persist or push failure) — `cronScheduler.ts:354,380,408,420,446` and `handlers/cron.ts:36,94`.
+`cron:created`, `cron:updated`, `cron:deleted` (from the TCP handler),
+`cron:fired`, `cron:skipped` (reason `no-worker` or `overlap`), and
+`cron:missed` (persist or push failure) —
+`infrastructure/scheduler/cron/execution.ts:47-101,120-140` and
+`handlers/cron.ts:39-45,95-102`.
 
 ## Data Models
 
-Canonical definition is `CronJob` (`src/domain/types/cron.ts:28-52`). See [data-model](../data-model.md) for the full schema. Most relevant fields:
+Canonical definition is `CronJob` (`src/domain/types/cron.ts:29-55`). See [data-model](../data-model.md) for the full schema. Most relevant fields:
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `name` | `string` | PRIMARY KEY in `cron_jobs`; global, so multi-prefix queues must namespace (see Concurrency). |
+| `jobName` | `string` | Name assigned to every spawned Job; stored separately from user `data`. |
 | `queue` | `string` | target queue for spawned jobs. |
 | `schedule` | `string \| null` | cron expression (mutually fills with `repeatEvery`). |
 | `repeatEvery` | `number \| null` | fixed interval in ms. |
 | `priority` | `number` | spawned-job priority (default `0`). |
 | `timezone` | `string \| null` | IANA tz for `schedule`. |
 | `nextRun` / `executions` | `number` | mutable runtime state, persisted. |
-| `maxLimit` | `number \| null` | `null`/0/negative ⇒ unlimited (`cron.ts:99`). |
+| `maxLimit` | `number \| null` | `null`/0/negative ⇒ unlimited (`cron.ts:104-106`). |
 | `uniqueKey` / `dedup` | dedup config for spawned jobs. |
-| `skipMissedOnRestart` | `boolean` | **default `true`** in `createCronJob` (`cron.ts:102`). |
+| `skipMissedOnRestart` | `boolean` | **default `true`** in `createCronJob` (`cron.ts:109`). |
 | `skipIfNoWorker` | `boolean` | default `false`. |
 | `preventOverlap` | `boolean` | default `true`. |
 | `jobOptions` | `CronJobOptions \| null` | per-cron retry/cleanup policy (issue #86). |
 
-`CronJobOptions` (`cron.ts:17-25`): `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo` (`scheduler.ts:63-71`): `{ id, name, next, pattern?, every?, limit? }` (`limit` = the persisted `maxLimit` run cap, `undefined` when unlimited; #111). The `cron_jobs` SQLite table is defined at `schema.ts:103-120` (migrations 6, 8-10, and 12 added the dedup/skip/overlap/jobOptions columns).
+`CronJobOptions` (`cron.ts:19-27`): `maxAttempts`, `backoff`, `timeout`, `delay`,
+`stallTimeout`, `removeOnComplete`, `removeOnFail`. `SchedulerInfo`
+(`scheduler.ts:64-72`): `{ id, name, next, pattern?, every?, limit? }`
+(`limit` = the persisted `maxLimit` run cap, `undefined` when unlimited; #111).
+The `cron_jobs` SQLite table is defined at `schema.ts:125-144`; migrations 6,
+8-10, 12, and 32 added deduplication, skip/overlap policy, job options, and the
+first-class spawned-job name.
 
 ## Business Logic / Control Flow
 
-### Add / upsert (`add`, `cronScheduler.ts:136-189`)
+### Add / upsert (`add`, `cron/runtime.ts:79-107`)
 1. Reject if neither `schedule` nor `repeatEvery` is set.
 2. If `schedule`, expand shortcut then `validateCronExpression`; throw on invalid.
 3. Compute `nextRun` via `getNextCronRun` (cron) or `getNextIntervalRun` (interval) from `now`.
-4. `createCronJob` builds the immutable record. If a cron with the same name exists, **preserve its `executions`** and clear `lastFiredAt` for that name (`cronScheduler.ts:165-171`, fixes H10).
-5. `immediately` sets `nextRun = now` **only on first creation**, never on upsert (so it doesn't clobber restart-skip logic) (`cronScheduler.ts:175-177`).
+4. `createCronJob` builds the immutable record. If a cron with the same name
+   exists, **preserve its `executions`** and clear `lastFiredAt` for that name
+   (`cron/runtime.ts:94-99`, fixes H10).
+5. `immediately` sets `nextRun = now` **only on first creation**, never on
+   upsert (so it doesn't clobber restart-skip logic) (`cron/runtime.ts:100`).
 6. Assign a fresh `generation`, store in map + heap, then `scheduleNext()`.
 
 At the manager layer, `addCron` first removes an orphaned queued job when
@@ -167,7 +236,7 @@ from the unchanged absolute `nextRun`; it does not persist, increment, or push.
 This prevents Bun from coercing a far-future timer to `1ms` and hot-looping.
 The timer is rearmed after every mutation (add/remove/load/tick).
 
-### Tick / fire (`tick`, `cronScheduler.ts:296-440`)
+### Tick / fire (`tick`, `cron/execution.ts:9-108`)
 1. Drain heap entries whose `nextRun <= now` (`O(k log n)`).
 2. Skip stale entries (generation mismatch from a removed/updated cron).
 3. If `isAtLimit`, mark for removal from the map and drop.
@@ -177,12 +246,12 @@ The timer is rearmed after every mutation (add/remove/load/tick).
 7. Update in-memory `executions`/`nextRun`, then `fireCronJob`. If the push throws: state was already persisted, the job for this slot is lost, emit `cron:missed`, re-insert to continue (no duplicate on retry).
 8. Re-insert processed entries, delete limit-reached names, `scheduleNext()`.
 
-### Fire (`fireCronJob`, `cronScheduler.ts`)
+### Fire (`fireCronJob`, `cron/execution.ts:120-140`)
 - Skip decisions live in `getSkipReason` (see tick step 5), not here: by the time `fireCronJob` runs the push is committed.
 - **`preventOverlap`**: when no explicit `uniqueKey`, auto-derives `cron:<name>` so the dedup layer blocks a new push while the prior job is still active.
 - Push with `data`, `priority`, `uniqueKey`, `dedup`, and the `jobOptions` subset; record `lastFiredAt`; emit `cron:fired`.
 
-### Restart recovery (`load`, `cronScheduler.ts:230-256`)
+### Restart recovery (`load`, `cron/runtime.ts:126-144`)
 For each loaded cron, if (`skipMissedOnRestart || skipIfNoWorker`) and `nextRun < now`, recompute `nextRun` forward and persist it (fixes #73). Since `skipMissedOnRestart` defaults to `true`, missed runs are skipped by default. Heap is rebuilt with `buildFrom` in `O(n)`.
 
 ### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts`)
@@ -196,8 +265,14 @@ schedules as 60-second intervals.
 ## Concurrency & Locking
 
 - The scheduler holds **no shard/jobIndex locks**; it runs on the single JS event loop and mutates only its own `Map`/`MinHeap`. Concurrency safety comes from the single-threaded tick.
-- **Lazy deletion via generation numbers**: `remove`/upsert just bumps the map; stale heap entries are detected by generation mismatch and skipped/popped in `scheduleNext`/`tick`, giving `O(1)` removal without heap rebuilds (`cronScheduler.ts:179-211, 277-280, 311-316`).
-- **Persist-before-push ordering** is the cross-process invariant: persisting `nextRun`/`executions` before enqueuing means a crash between the two yields at most a lost job for that slot, never a duplicate (`cronScheduler.ts:344-369`).
+- **Lazy deletion via generation numbers**: `remove`/upsert just bumps the map;
+  stale heap entries are detected by generation mismatch and skipped/popped in
+  `scheduleNext`/`tick`, giving `O(1)` removal without heap rebuilds
+  (`cron/runtime.ts:95-115,146-168`, `cron/execution.ts:16-22`).
+- **Persist-before-push ordering** is the cross-process invariant: persisting
+  `nextRun`/`executions` before enqueuing means a crash between the two yields
+  at most a lost job for that slot, never a duplicate
+  (`cron/execution.ts:69-90`).
 - Cron names are a **global PRIMARY KEY** (`schema.ts:104`). The client prefixes scheduler ids with `prefixKey` so two queues with different prefixes cannot collide (`scheduler.ts:21-37`).
 - `preventOverlap`/overlap-window guard against concurrent in-flight runs of the same cron across workers; enforcement is via uniqueKey dedup in the push path.
 
@@ -206,7 +281,8 @@ schedules as 60-second intervals.
 - **Persist failure** → job not pushed, `cron:missed` emitted, retried next tick (no duplicate).
 - **Push failure** → state already persisted, slot's job lost, `cron:missed` emitted, scheduling continues.
 - **`maxLimit` exhaustion** → cron removed from the in-memory map on the tick that would exceed it (`isAtLimit`); `0`/negative limits are normalized to "unlimited" everywhere (`cron.ts:97-99`, `cli/commands/cron.ts:81-89`).
-- **Timer drift / missed `setTimeout`** → the 60s `SAFETY_FALLBACK_MS` interval re-runs `tick` as a backstop (`cronScheduler.ts:25-26,110-112`).
+- **Timer drift / missed `setTimeout`** → the 60s `SAFETY_FALLBACK_MS` interval
+  re-runs `tick` as a backstop (`cron/runtime.ts:17-18,58-65`).
 - **Far-future timer** → delays above the runtime's signed 32-bit timer ceiling
   are chunked without changing the persisted absolute `nextRun`; no early
   execution or 1ms hot loop occurs.
@@ -215,16 +291,21 @@ schedules as 60-second intervals.
 - **Restart with past `nextRun`** → recalculated forward; missed runs skipped by default (`skipMissedOnRestart` default `true`).
 - **Upsert preserves `executions`** and resets `lastFiredAt` (H10) so a redefined cron isn't blocked by the prior definition's last fire.
 - **#103 (fixed 2.8.14)**: with `skipIfNoWorker: true`, after a TCP reconnect the cron silently stops firing if the worker is not re-registered — `fireCronJob` sees no worker and emits `cron:skipped` instead of pushing. The fix re-registers workers on reconnect; `Worker.resume()` alone does not recover it. Upgrade clients to ≥ 2.8.14.
-- **No-storage mode**: with no `storage` wired, `persistCron` is null and crons are purely in-memory (lost on restart) — persist guard is skipped (`cronScheduler.ts:345`).
+- **No-storage mode**: with no `storage` wired, `persistCron` is null and crons
+  are purely in-memory (lost on restart) — the persist guard is skipped
+  (`cron/execution.ts:69-85`).
 
 ## Configuration
 
-- `CronSchedulerConfig.checkIntervalMs` — **deprecated/no-op**; the scheduler uses precise `setTimeout` (`cronScheduler.ts:19-23,68-71`).
+- `CronSchedulerConfig.checkIntervalMs` — **deprecated/no-op**; the scheduler
+  uses precise `setTimeout` (`types/cronScheduler.ts:4-7`,
+  `cron/runtime.ts:38-40,146-168`).
 - `SAFETY_FALLBACK_MS = 60_000` — internal constant, not env-configurable.
 - `MAX_TIMER_DELAY_MS = 2_147_483_647` — internal timer-chunk ceiling, not
   env-configurable; it does not cap cron intervals or persisted timestamps.
 - Per-cron knobs (via `CronJobInput`/`RepeatOpts`): `schedule`/`repeatEvery`, `timezone` (embedded default `'UTC'`), `priority`, `maxLimit`, `uniqueKey`/`dedup`, `skipMissedOnRestart` (default `true`), `skipIfNoWorker` (default `false`), `preventOverlap` (default `true`), `immediately`, and `jobOptions` (`maxAttempts`/`backoff`/`timeout`/`delay`/`stallTimeout`/`removeOnComplete`/`removeOnFail`).
-- Queue-level `defaultJobOptions` feed `buildCronJobOptions` as the base, overridden by the per-scheduler template `opts` (`scheduler.ts:87-101`).
+- Queue-level `defaultJobOptions` feed `buildCronJobOptions` as the base,
+  overridden by the per-scheduler template `opts` (`scheduler.ts:85-99`).
 - Data path / persistence env vars (`BUNQUEUE_DATA_PATH`, etc.) are owned by [Configuration & Entrypoint](./configuration.md) and [Persistence](./persistence.md); this module has no dedicated env vars.
 
 ## Related Docs

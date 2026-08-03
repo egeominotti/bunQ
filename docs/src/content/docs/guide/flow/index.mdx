@@ -258,8 +258,8 @@ visible to workers, but a process crash cannot recover it.
   or retained flow ID—including SQLite/DLQ rows, completion/timeout tombstones,
   retained results, and IDs still referenced by a waiting parent—rejects the
   whole request.
-- User data keys named `name` or beginning with `__` are reserved for flow
-  metadata.
+- `name` inside user data is preserved independently from the job's own name.
+  Keys beginning with `__` are reserved for engine-owned flow metadata.
 - `repeat`, `deduplication`, `debounce`, and `opts.parent` are rejected inside
   an atomic flow because their independent lifetime/ownership semantics cannot
   participate safely in the graph transaction.
@@ -288,4 +288,3 @@ a broker restart.
 | [Flow Patterns](/guide/flow/patterns/) | Chains, fan-in, trees, reading child results, options |
 | [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
 | [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field |
-

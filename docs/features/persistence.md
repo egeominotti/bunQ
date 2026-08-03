@@ -1,6 +1,6 @@
 # Persistence (SQLite, WriteBuffer, ReadThrough)
 
-> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/`, `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts`, `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
+> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/`, `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts` (compatibility facade), `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/migrations.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
 
 ## Purpose
 
@@ -11,18 +11,22 @@ The persistence layer is the durable store behind the sharded queues. The ten-li
 Owns:
 - The SQLite `Database` handle, PRAGMA tuning, schema creation, and incremental
   migrations (`persistence/sqlite/state.ts`, `schema.ts`).
-- Buffered and durable (immediate) job inserts, single and bulk (`insertJob`, `insertJobImmediate`, `insertJobsBatch`).
+- Buffered and durable (immediate) job inserts, single and bulk (`insertJob`,
+  `insertJobImmediate`, `insertJobsBatch`), plus two-phase admission metadata
+  that makes persistence-sensitive queue publication fail closed.
 - State-mutating writes: `markActive`, `markWaitingChildren`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `clearJobUniqueKey`, `deleteJob`.
 - Results, DLQ rows, cron rows, queue control-state rows, the durable
   flow-failure outbox, and `removeOnComplete` dependency evidence with bounded
   recent retention plus live-edge pin ownership.
+- A bounded per-queue lifecycle journal, cumulative terminal metric metadata,
+  and bounded one-minute completed/failed buckets (`SqliteTelemetry`).
 - Paginated recovery reads (`loadPendingJobs`, `loadActiveJobs`, `loadCompletedJobs`, `loadDlq`, plus the id-set loaders).
 - Disk-full detection, write-retry/backoff, and critical-loss accounting.
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
 
 Does NOT own (delegated elsewhere):
 - The recovery orchestration / re-enqueue logic — `recover()` in
-  `application/background/recovery.ts` consumes these read APIs and decides
+  `application/background/recovery/index.ts` consumes these read APIs and decides
   what to enqueue, retry, or quarantine. See
   [Background Tasks](./background-tasks.md).
 - Data-path resolution from env/file-config — [Configuration & Entrypoint](./configuration.md) (`config/resolve.ts:44-49`).
@@ -36,9 +40,9 @@ Does NOT own (delegated elsewhere):
 Internal:
 - `domain/types/job` (`Job`, `JobId`, `JobTimelineEntry`), `domain/types/cron` (`CronJob`), `domain/types/dlq` (`DlqEntry`, `FailureReason`, `createDlqEntry`).
 - `shared/logger` (`storageLog`).
-- Sibling modules in this folder: `schema.ts`, `statements.ts`,
-  `sqliteSerializer.ts`, `sqliteBatch.ts`, `dependencyCompletionSchema.ts`, and
-  `dependencyCompletionStore.ts`.
+- Sibling modules in this folder: `schema.ts`, `migrations.ts`, `statements.ts`,
+  `sqliteSerializer.ts`, `batchInsert.ts`, `writeBuffer.ts`,
+  `dependencyCompletionSchema.ts`, and `dependencyCompletionStore.ts`.
 
 External/runtime:
 - `bun:sqlite` `Database` (native SQLite).
@@ -68,7 +72,14 @@ applies the effective defaults `writeBufferSize=100` and
 `writeBufferFlushMs=10`.
 
 Key methods (real signatures):
-- Inserts: `insertJob(job: Job, durable?: boolean): void`, `insertJobImmediate(job: Job): void`, `insertJobsBatch(jobs: Job[], durable?: boolean): void`.
+- Inserts:
+  `insertJob(job: Job, durable?: boolean, admission?: DurableAdmissionMetadata): void`,
+  `insertJobImmediate(job: Job, admission?: DurableAdmissionMetadata): void`,
+  `insertJobsBatch(jobs: Job[], durable?: boolean): void`.
+- Admission-sensitive replacement/linking:
+  `replaceJob(oldJobId, newJob, durable?, admission?)`,
+  `transferActiveDedupJob(oldJobId, newJob, durable?, admission?)`, and
+  `commitFlowLink(child, parent, parentState, mode, admission?)`.
 - State: `markActive(jobId, startedAt, timeline?)`, `markWaitingChildren(jobId, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `clearJobUniqueKey(jobId)`, `deleteJob(jobId)`.
 - Flow transactions: `commitFailedJob(jobId, dlqEntry, flowFailure)`,
   `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
@@ -84,13 +95,19 @@ Key methods (real signatures):
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
 - Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(): Set<JobId>`, `countPendingJobs()`, `countActiveJobs()`.
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
-- Queue control-state (#100): `saveQueueState(name, paused, rateLimit, concurrencyLimit)`, `loadQueueState()`, `deleteQueueState(name)`.
+- Queue control-state (#100): `saveQueueState(name, { paused, rateLimit, concurrencyLimit, rateLimitDuration?, rateLimitExpiresAt?, stallConfig?, dlqConfig? })`, `loadQueueState()`, `deleteQueueState(name)` (`persistence/sqlite/control.ts:93-150`).
+- Queue telemetry: `recordQueueEvent(event,maxEvents,maxMetricDataPoints)`,
+  `getQueueMetrics(queue,type,maxMetricDataPoints)`,
+  `trimQueueEvents(queue,maxLength)`, `countQueueEvents(queue)`, and
+  `clearQueueTelemetry(queue)`.
 - Health/ops: `flushWriteBuffer(): number`, `get diskFull`,
   `getDiskFullStatus()`, `getCriticalLosses()`, `clearCriticalLosses()`,
   `getSize()`, `close()`. `flushWriteBuffer` throws if a flush attempt leaves
   any row pending; S3 backup uses that fail-closed boundary before snapshotting.
 
-`sqliteBatch.ts` exports:
+`sqliteBatch.ts` is the stable compatibility facade. It re-exports
+`BatchInsertManager` from `batchInsert.ts`, `WriteBuffer` from `writeBuffer.ts`,
+and the batch callback/result types from `types/batch.ts`:
 - `class BatchInsertManager` — `insertJobsBatch(jobs: Job[]): BatchInsertResult` (never throws).
 - `class WriteBuffer` — `add`, `addBatch`, `flush(): number`, `hasPending(id)`, `removePending(id)`, `pendingCount`, `stop()`, `stopGracefully(timeoutMs=5000): Promise<number>`, `getRetryState()`.
 - Types: `BatchInsertResult { transient: Job[]; conflicts: Job[]; error?: Error }`, `WriteBufferErrorCallback`, `CriticalErrorCallback`.
@@ -101,16 +118,31 @@ Key methods (real signatures):
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
 `schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`,
-`SCHEMA_VERSION = 30`, `MIGRATIONS`.
+`SCHEMA_VERSION = 34`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
 
+`DurableAdmissionMetadata` (`persistence/types/admission.ts`) carries only the
+extra persisted ownership needed before a candidate may become visible:
+
+```ts
+interface DurableAdmissionMetadata {
+  readonly retireGenerationId?: JobId;
+  readonly completionPins?: readonly JobId[];
+}
+```
+
+The type contains IDs, not mutable application objects. Heap membership,
+`jobIndex`, counters, custom-ID ownership, dedup ownership, and dependency
+indexes remain application-layer state and are published only after the
+matching storage call returns successfully.
+
 ## Data Models
 
-DB-row types are defined in `statements.ts` and converted to/from domain types in `sqliteSerializer.ts`. See [data-model](../data-model.md) for full domain shapes. Tables (`schema.ts:17-129`):
+DB-row types are defined in `statements.ts` and converted to/from domain types in `sqliteSerializer.ts`. See [data-model](../data-model.md) for full domain shapes. Tables (`schema.ts:17-199`):
 
-- `jobs` — `id TEXT PK`, `queue`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, the four child-failure flags, `stall_timeout`, `last_heartbeat`, `stall_count`, `timeline BLOB`, `stacktrace BLOB`, `dlq_retry_state BLOB`.
+- `jobs` — `id TEXT PK`, `queue`, `name`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, the four child-failure flags, `stall_timeout`, `last_heartbeat`, `stall_count`, `timeline BLOB`, `stacktrace BLOB`, `dlq_retry_state BLOB`, `extended_options BLOB`.
 - `flow_failures` — `(parent_id, child_id)` primary key plus child queue,
   failure mode/error and creation time. It is both the durable propagation
   outbox and the live store for ignored/continued child errors.
@@ -125,6 +157,13 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   `concurrency_limit`, rate-window fields, nullable `stall_enabled` /
   `stall_interval` / `max_stalls` / `stall_grace_period`, and nullable
   `dlq_config BLOB` for the effective per-queue DLQ policy.
+- `queue_events` — autoincrement sequence, queue, event type, job id,
+  occurrence timestamp, and MessagePack payload. Append and per-queue bound
+  enforcement run in one SQLite transaction.
+- `queue_metrics_meta` — `(queue,type)` cumulative terminal count and current
+  bucket metadata. `queue_metric_buckets` — `(queue,type,minute)` counts,
+  pruned to the configured minute window without resetting the cumulative
+  total.
 - `migrations` — `version PK`, `applied_at`.
 
 All blob columns store MessagePack. Encoding and decoding use the canonical
@@ -153,6 +192,28 @@ Durable write (`durable: true`): bypasses the buffer entirely.
 under `safeWrite`; `insertJobsBatch(jobs, true)` in
 `persistence/sqlite/records.ts` runs the whole batch inside one explicit
 transaction so a mid-batch failure rolls back all rows.
+
+Persistence-sensitive job admission is a two-phase operation coordinated by
+`application/operations/pushAdmission.ts` and
+`persistence/sqlite/admission.ts`:
+
+1. The application inspects custom-ID, deduplication, dependency-completion and
+   parent state without performing destructive RAM mutations.
+2. SQLite runs the requested retirement and completion pins in the same
+   immediate transaction as a durable insert, dedup replacement, active-key
+   transfer, or parent-link insert/update.
+3. A terminal retirement deletes the exact old generation from `jobs`,
+   `job_results`, `dlq`, `dependency_completions`, and both sides of
+   `flow_failures`. Duplicate completion-pin IDs are coalesced.
+4. Only after the transaction commits does the application publish the new
+   heap/wait-set membership, indexes, counters and ownership maps.
+
+For a buffered successor, any retirement/pin metadata still commits
+synchronously before the successor enters the normal `WriteBuffer`. A durable
+successor commits metadata and its row atomically. Dedup replacement and
+parent-link methods follow the same split. A synchronous storage error cannot
+therefore leave an executable RAM-only durable job, remove the previous
+completed/DLQ generation, leak a completion pin, or expose half a parent edge.
 
 `PUSHF` always selects that immediate batch path when storage exists, regardless
 of individual node `durable` flags. The jobs transaction completes before the
@@ -213,7 +274,7 @@ all use this operation. A parent accepted after the child completed pins any
 recent proof before registering its wait edges. `obliterate(queue)` removes
 the source queue's hidden proofs; parent removal releases pin ownership.
 
-Recovery (consumer side, `application/background/recovery.ts`): `recover()` first loads all
+Recovery (consumer side, `application/background/recovery/index.ts`): `recover()` first loads all
 `dependency_completions` into temporary classification state without pruning.
 It rebuilds pending parents and their reverse indexes, checkpoints ready
 parents, then reconciles `pinned` from the authoritative indexes, prunes only
@@ -236,10 +297,24 @@ collection even when it was moved there manually and has no unresolved
 `depends_on` entries. It is never inserted into the runnable priority heap as a
 side effect of restart.
 
+Standalone `Queue.add({ parent })` uses `commitFlowLink`: after flushing any
+buffered parent generation, one immediate SQLite transaction inserts (or
+dedup-replaces) the child and updates the parent's `children_ids`, `depends_on`,
+data, timeline, and `state='waiting-children'`. The transaction verifies that
+the parent row still exists before commit. In-memory heap/index changes happen
+only afterward while the same child/parent shard locks remain held, so restart
+cannot recover an orphaned child or a runnable parent with an unpersisted edge.
+
 Migrations (`persistence/sqlite/state.ts`, `persistence/schema.ts`): on
 construct, the storage ensures the `migrations` table,
-reads `MAX(version)`; if below `SCHEMA_VERSION` (30) it runs the idempotent base
-schema and applies later migrations. Migration 17 adds `jobs.stall_count`;
+reads `MAX(version)`; if below `SCHEMA_VERSION` (34) it runs the idempotent base
+schema and applies later migrations in one synchronous transaction. Only exact
+duplicate-column/table/index errors are treated as an already-applied schema
+operation; disk-full, I/O, corruption, syntax, constraint, and other failures
+abort and roll back the upgrade without advancing the version. Reopening then
+retries the same migration. Multi-statement migration 6 retains explicit
+statement boundaries so a historically partial upgrade can skip its existing
+column and still add the missing one. Migration 17 adds `jobs.stall_count`;
 migrations 18–21 persist the four `StallConfig` fields; migration 22 adds the
 atomic MessagePack `queue_state.dlq_config` policy blob; migrations 23–26 add
 the four flow failure-policy flags; migration 27 creates `flow_failures`, and
@@ -248,7 +323,10 @@ participate in recovery, plus the outbox parent index. Migration 28 creates the
 `dependency_completions` table and its queue-cleanup index; migration 29 adds
 the conservative `pinned` ownership bit. Migration 30 adds the MessagePack
 `jobs.dlq_retry_state` used to retain one bounded automatic-DLQ-retry generation
-while its job is waiting or active.
+while its job is waiting or active. Migrations 31–32 separate job names from
+user data, migration 33 creates the event/metrics journal tables, and migration
+34 adds `jobs.extended_options` so repeat-chain and advanced job policies survive
+recovery.
 
 Close (`persistence/sqlite/lifecycle.ts`): stop the buffer timer, perform a
 final flush, run `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on
@@ -277,6 +355,13 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
   each job to the DLQ, then invokes the guarded user callback.
 - **Disk full.** `isSqliteFullError`, `setDiskFull`, and `safeWrite` live in
   `persistence/sqlite/state.ts`; a successful write clears the health flag.
+  Immediate durable admission is fail closed: a rejected single or batch job
+  is absent from the heap, wait sets, `jobIndex`, custom-ID/dedup maps, queries,
+  and worker delivery in Embedded and TCP modes. Rejected reuse preserves the
+  previous completed/DLQ generation and result across restart. Buffered jobs
+  retain their documented acknowledgement-before-flush contract; a later
+  asynchronous flush failure is surfaced through storage health, retries and
+  critical-loss reporting.
 - **PRAGMA failure is non-fatal.** `SqliteState` catches and logs transient
   PRAGMA errors instead of letting construction tear down the process.
 - **Corrupt `depends_on` blob.** A failed msgpack decode of `depends_on` is NOT collapsed to `[]` (which recovery would treat as "ready, no deps" → out-of-order execution). `decodeDependsOn` returns `corrupt: true` and `rowToJob` stamps the job with the non-enumerable `CORRUPT_DEPENDS_ON` symbol; recovery (`isCorruptDependsOn`) routes it to the DLQ instead (`sqliteSerializer.ts:42-68`, `sqliteSerializer.ts:138-148`).

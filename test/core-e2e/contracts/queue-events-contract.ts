@@ -8,7 +8,7 @@ export async function runQueueEventsContract(mode: CoreE2eMode): Promise<Coverag
 
   try {
     const queue = harness.queue<{ value: number }>('events');
-    const events = new QueueEvents(queue.name);
+    const events = new QueueEvents(queue.name, harness.queueOptions());
     harness.addCleanup(() => events.close());
     let observedErrors = 0;
     tracker.call('QueueEvents', 'on', () =>
@@ -28,21 +28,35 @@ export async function runQueueEventsContract(mode: CoreE2eMode): Promise<Coverag
     );
     ensure(observedErrors === 2, 'QueueEvents on/once listeners did not both receive emitError');
 
-    if (mode === 'embedded') {
-      let waitingId = '';
-      events.once('waiting', ({ jobId }) => {
-        waitingId = jobId;
-      });
-      const added = await queue.add('event', { value: 1 }, { durable: true });
-      await eventually(
-        () => waitingId,
-        (id) => id === added.id,
-        'embedded queue event was not emitted'
-      );
-    }
+    let waitingId = '';
+    events.once('waiting', ({ jobId }) => {
+      waitingId = jobId;
+    });
+    let completedEvent: { jobId: string; returnvalue: number } | null = null;
+    events.once('completed', (event) => {
+      completedEvent = event;
+    });
+    const worker = harness.worker(queue.name, async (job) => job.data.value * 2);
+    const added = await queue.add('event', { value: 21 }, { durable: true });
+    await eventually(
+      () => waitingId,
+      (id) => id === added.id,
+      `${mode} waiting event was not delivered`
+    );
+    await eventually(
+      () => completedEvent,
+      (event) => event !== null,
+      `${mode} completed event was not delivered`
+    );
+    ensure(
+      completedEvent?.jobId === added.id && completedEvent.returnvalue === 42,
+      `${mode} completed event payload mismatch`
+    );
+    await worker.close();
 
     tracker.call('QueueEvents', 'close', () => events.close());
-    const disconnecting = new QueueEvents(harness.unique('disconnect'));
+    const disconnecting = new QueueEvents(harness.unique('disconnect'), harness.queueOptions());
+    await disconnecting.waitUntilReady();
     await tracker.invoke('QueueEvents', 'disconnect', () => disconnecting.disconnect());
   } finally {
     await harness.close();

@@ -14,6 +14,7 @@ from harness import Server
 import e2e_query  # noqa: F401
 import e2e_control  # noqa: F401
 import e2e_worker  # noqa: F401
+import e2e_worker_ack_batch  # noqa: F401
 import e2e_flow  # noqa: F401
 import e2e_admin  # noqa: F401
 import e2e_simple  # noqa: F401

@@ -25,6 +25,8 @@ the public entry points are listed in [`README.md`](README.md).
 
 - Outgoing map keys are UTF-8 strings. Outgoing MessagePack extensions are
   rejected. Incoming extension type 0 is normalized recursively to `Nil`.
+- `value_to_json` preserves valid MessagePack UTF-8 strings without display
+  quoting; invalid UTF-8 values become JSON null rather than panicking.
 - Integers outside signed int32 are recursively converted to `f64` for
   JavaScript interoperability. Numeric identifiers beyond `2^53` must be
   strings.
@@ -33,8 +35,11 @@ the public entry points are listed in [`README.md`](README.md).
   silently.
 - `job_id` maps to `jobId` for `PUSH` and to `customId` inside bulk/flow input.
   Scheduler templates use only the documented scheduler-safe subset.
-- Job data always reaches the broker as a map containing `name`. Scalar input
-  is retained under `payload`.
+- `PUSH` and `PUSHB` send the job name in top-level `name` and preserve the
+  complete `Value` in `data`, including a user-owned map `name`, scalar, array,
+  or `Nil`. `Job` unwraps only legacy maps with a string name inside `data`.
+- Scheduler identity uses `name`, spawned jobs use `jobName`, and scheduler
+  `data` remains user-owned.
 
 ## Queue and idempotency
 
@@ -57,8 +62,9 @@ the public entry points are listed in [`README.md`](README.md).
   pull is bounded by concurrency. A lease must not wait outside the processor
   pool without heartbeat ownership.
 - Each pulled job and lease token travel together into an owned worker thread.
-  ACK/FAIL uses that exact token; success is counted only after ACK/FAIL
-  succeeds.
+  ACK/FAIL uses that exact token. `run_once` counts settled handler attempts;
+  an acknowledged `already-finalized` no-op cannot replace the broker's
+  terminal state or result.
 - A positive heartbeat interval creates a dedicated connection and thread for
   that active job. The heartbeat thread is signalled, joined, and its
   connection closed before processing returns.

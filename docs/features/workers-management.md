@@ -36,7 +36,7 @@ Does NOT own (delegated elsewhere):
 
 - Job-level stall detection / lock renewal — `JobHeartbeat` / `JobHeartbeatB`
   go to `QueueManager.jobHeartbeat` / `renewJobLock`, **not** to `WorkerManager`
-  (`handlers/monitoring.ts:81-112`). See [Background Tasks](./background-tasks.md)
+  (`src/infrastructure/server/handlers/monitoring/health.ts:76-102`). See [Background Tasks](./background-tasks.md)
   and [Concurrency & Locking](./concurrency-and-locking.md).
 - Job leasing, concurrency enforcement, and pull/ack/fail — see
   [Job Lifecycle](./job-lifecycle.md) and
@@ -112,17 +112,17 @@ filtered live view.
 
 ### TCP commands handled (via `QueueManager` / `handlers/monitoring.ts`)
 
-- `RegisterWorker` → `handleRegisterWorker` (`handlers/monitoring.ts:134`); fields:
+- `RegisterWorker` → `handleRegisterWorker` (`src/infrastructure/server/handlers/monitoring/workers.ts:16-51`); fields:
   `name`, `queues`, `concurrency?`, `workerId?`, `hostname?`, `pid?`, `startedAt?`
-  (`command.ts:425`). `clientId` is injected server-side from the connection
-  (`handlers/monitoring.ts:144`).
-- `UnregisterWorker` → `handleUnregisterWorker` (`handlers/monitoring.ts:166`); field `workerId`.
-- `ListWorkers` → `handleListWorkers` (`handlers/monitoring.ts:186`).
-- `Heartbeat` (worker-level) → `handleHeartbeat` (`handlers/monitoring.ts:62`); fields:
-  `id`, `activeJobs?`, `processed?`, `failed?` (`command.ts:397`). This is the
+  (`src/domain/types/commands/workers.ts:24-33`). `clientId` is injected server-side from the connection
+  (`src/infrastructure/server/handlers/monitoring/workers.ts:21-31`).
+- `UnregisterWorker` → `handleUnregisterWorker` (`src/infrastructure/server/handlers/monitoring/workers.ts:53-61`); field `workerId`.
+- `ListWorkers` → `handleListWorkers` (`src/infrastructure/server/handlers/monitoring/workers.ts:63-92`).
+- `Heartbeat` (worker-level) → `handleHeartbeat` (`src/infrastructure/server/handlers/monitoring/health.ts:53-74`); fields:
+  `id`, `activeJobs?`, `processed?`, `failed?` (`src/domain/types/commands/workers.ts:3-9`). This is the
   only worker command that touches `WorkerManager`.
 - `JobHeartbeat` / `JobHeartbeatB` → routed to `QueueManager` job-lock subsystem,
-  **not** `WorkerManager` (`handlers/monitoring.ts:81,103`).
+  **not** `WorkerManager` (`src/infrastructure/server/handlers/monitoring/health.ts:76-102`).
 
 ### HTTP endpoints (`httpRouteResources.ts`, `httpRouteQueues.ts`)
 
@@ -130,7 +130,7 @@ filtered live view.
 - `POST /workers` → `RegisterWorker` (`httpRouteResources.ts:150`)
 - `DELETE /workers/:id` → `UnregisterWorker` (`httpRouteResources.ts:175`)
 - `POST /workers/:id/heartbeat` → `Heartbeat` (`httpRouteResources.ts:187`)
-- `GET /queues/:queue/workers` → `workerManager.getForQueue(queue)` (`httpRouteQueues.ts:191`)
+- `GET /queues/:queue/workers` → `workerManager.getForQueue(queue)` (`httpRouteQueues.ts:36-55`)
 - Worker fleet is also embedded in the dashboard overview endpoint
   (`httpEndpoints.ts:205`).
 
@@ -149,7 +149,7 @@ wrappers in `queue-manager/services.ts`. `WorkerManager` itself emits:
 - `worker:idle` — when a worker's `activeJobs` reaches 0 (`workerManager.ts:148,166`)
 - `worker:error` — at cumulative failure thresholds 5/10/25/50/100 (`workerManager.ts:178`)
 - `worker:removed-stale` — when the cleanup loop reaps a dead worker (`workerManager.ts:225`)
-- `worker:heartbeat` — emitted by `handleHeartbeat` on success (`handlers/monitoring.ts:73`)
+- `worker:heartbeat` — emitted by `handleHeartbeat` on success (`src/infrastructure/server/handlers/monitoring/health.ts:68-73`)
 
 ## Data Models
 
@@ -177,9 +177,9 @@ interface Worker {
 
 The `ListWorkers` response adds derived fields not stored on `Worker`:
 `status: 'active' | 'stale'` (computed from `lastSeen`,
-`handlers/monitoring.ts:182`) and `uptime: now - registeredAt`
-(`handlers/monitoring.ts:209`). The `RegisterWorker` response includes a
-hardcoded `status: 'active'` and no `uptime` (`handlers/monitoring.ts:152`).
+`src/infrastructure/server/handlers/monitoring/workers.ts:12-13`) and `uptime: now - registeredAt`
+(`src/infrastructure/server/handlers/monitoring/workers.ts:79-86`). The `RegisterWorker` response includes a
+hardcoded `status: 'active'` and no `uptime` (`src/infrastructure/server/handlers/monitoring/workers.ts:33-50`).
 
 ## Business Logic / Control Flow
 
@@ -195,12 +195,12 @@ hardcoded `status: 'active'` and no `uptime` (`handlers/monitoring.ts:152`).
 
 `QueueManager.registerWorker` wraps this and emits `worker:connected`; the TCP
 handler injects the connection's `clientId` so disconnect cleanup can find it
-(`handlers/monitoring.ts:139-145`).
+(`src/infrastructure/server/handlers/monitoring/workers.ts:21-31`).
 
 ### Heartbeat (`heartbeat`, `workerManager.ts:95`)
 
 1. Returns `false` if the worker is unknown (`handleHeartbeat` then replies
-   `Worker not found`, `handlers/monitoring.ts:76`).
+   `Worker not found`, `src/infrastructure/server/handlers/monitoring/health.ts:68-73`).
 2. Refreshes `lastSeen = Date.now()`.
 3. If `stats` are provided, each of `activeJobs` / `processed` / `failed` is
    treated as an **absolute** value: the manager subtracts the old per-worker
@@ -229,7 +229,7 @@ handler injects the connection's `clientId` so disconnect cleanup can find it
 
 - A worker is "active" when `now - lastSeen < WORKER_TIMEOUT_MS` (default 30s).
   `listActive`, `getForQueue`, `getStats.active`, and `computeWorkerStatus` all
-  use this window (`workerManager.ts:197,204,245`; `handlers/monitoring.ts:182`).
+  use this window (`workerManager.ts:197,204,245`; `src/infrastructure/server/handlers/monitoring/workers.ts:10-13`).
 - The cleanup interval runs every `WORKER_CLEANUP_INTERVAL_MS` (default 60s,
   `workerManager.ts:210`) and removes workers whose `lastSeen` is older than
   `WORKER_TIMEOUT_MS * 3` (90s by default, `workerManager.ts:218`) — i.e. a
@@ -249,7 +249,8 @@ this.cronScheduler.setWorkerCheckCallback((queue) =>
 
 When a cron with `skipIfNoWorker: true` fires, `fireCronJob` calls this
 callback and, if no active worker serves the queue, skips the run and emits
-`cron:skipped` with `reason: 'no-worker'` (`cronScheduler.ts:407-413`). Because
+`cron:skipped` with `reason: 'no-worker'`
+(`src/infrastructure/scheduler/cron/execution.ts:110-117`). Because
 `getForQueue` filters on the `WORKER_TIMEOUT_MS` window, a worker that stopped
 heartbeating is treated as absent even before it is reaped. See
 [Scheduler & Cron](./scheduler-and-cron.md).
@@ -263,8 +264,8 @@ before releasing the runtime/transport, including the embedded path.
 ### Disconnect cleanup
 
 The TCP and HTTP servers call `QueueManager.unregisterWorkersByClientId` when a
-connection closes (`server/tcp.ts:314`, `server/http.ts:236`,
-`server/sseHandler.ts:346`), which delegates to
+connection closes (`src/infrastructure/server/tcp/connections.ts:87-103`, `server/http.ts:237-243`,
+`server/sseHandler.ts:255-260`), which delegates to
 `unregisterByClientId(clientId)` — removing every worker registered over that
 connection and emitting `worker:disconnected` per removal
 (`workerManager.ts:76-87`). Because pooled clients get a fresh server-side
@@ -286,7 +287,7 @@ renewal live in the job subsystem (`renewJobLock`), reached via `JobHeartbeat`.
   place and preserves counters; an unknown/absent `workerId` creates a new
   record (`workerManager.ts:49-62`).
 - **Heartbeat on unknown worker:** returns `false`; the `Heartbeat` handler then
-  responds `Worker not found` (`handlers/monitoring.ts:76`). A client that was
+  responds `Worker not found` (`src/infrastructure/server/handlers/monitoring/health.ts:68-73`). A client that was
   reaped must re-register.
 - **Counter underflow guard:** `jobCompleted`/`jobFailed` only decrement
   `activeJobs` when `> 0` (`workerManager.ts:139,157`). However, the aggregate
@@ -312,7 +313,7 @@ renewal live in the job subsystem (`renewJobLock`), reached via `JobHeartbeat`.
 
 | Env var | Default | Effect |
 | --- | --- | --- |
-| `WORKER_TIMEOUT_MS` | `30000` | Liveness window: a worker is "active"/"stale" relative to `lastSeen` (`workerManager.ts:14`). Also re-read in `handlers/monitoring.ts:179`. |
+| `WORKER_TIMEOUT_MS` | `30000` | Liveness window: a worker is "active"/"stale" relative to `lastSeen` (`workerManager.ts:14`). Also re-read in `src/infrastructure/server/handlers/monitoring/workers.ts:10`. |
 | `WORKER_CLEANUP_INTERVAL_MS` | `60000` | How often `cleanupStale` runs (`workerManager.ts:17`). |
 
 The stale-removal threshold is derived, not configurable directly:

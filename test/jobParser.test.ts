@@ -16,7 +16,8 @@ import { jobId } from '../src/domain/types/job';
 function makeFullResponse(): Record<string, unknown> {
   return {
     id: 'job-abc-123',
-    data: { email: 'user@test.com', count: 5 },
+    name: 'send-email',
+    data: { name: 'user-visible-name', email: 'user@test.com', count: 5 },
     priority: 10,
     createdAt: 1700000000000,
     runAt: 1700000001000,
@@ -62,7 +63,16 @@ describe('parseJobFromResponse', () => {
 
     test('should pass data through as-is', () => {
       const result = parseJobFromResponse(makeFullResponse(), 'q');
-      expect(result.data).toEqual({ email: 'user@test.com', count: 5 });
+      expect(result.data).toEqual({
+        name: 'user-visible-name',
+        email: 'user@test.com',
+        count: 5,
+      });
+    });
+
+    test('should parse the top-level name independently from data.name', () => {
+      const result = parseJobFromResponse(makeFullResponse(), 'q');
+      expect(result.name).toBe('send-email');
     });
 
     test('should parse numeric fields from response', () => {
@@ -326,6 +336,24 @@ describe('parseJobFromResponse', () => {
   // --------------------------------------------------------------------------
 
   describe('edge cases', () => {
+    test('a legacy response derives name only when the top-level field is absent', () => {
+      const result = parseJobFromResponse(
+        { id: 'legacy', data: { name: 'legacy-task', value: 1 } },
+        'q'
+      );
+      expect(result.name).toBe('legacy-task');
+      expect(result.data).toEqual({ value: 1 });
+    });
+
+    test('a modern response preserves primitive and undefined data', () => {
+      const primitive = parseJobFromResponse({ id: 'primitive', name: 'task', data: 42 }, 'q');
+      const missing = parseJobFromResponse({ id: 'missing', name: 'task' }, 'q');
+      expect(primitive.name).toBe('task');
+      expect(primitive.data).toBe(42);
+      expect(missing.name).toBe('task');
+      expect(missing.data).toBeUndefined();
+    });
+
     test('empty response object produces a job with undefined id', () => {
       const result = parseJobFromResponse({} as Record<string, unknown>, 'q');
       // jobId(undefined as string) yields undefined
@@ -406,7 +434,12 @@ describe('parseJobFromResponse', () => {
       // From response
       expect(result.id).toBe(jobId('job-abc-123'));
       expect(result.queue).toBe('test-queue');
-      expect(result.data).toEqual({ email: 'user@test.com', count: 5 });
+      expect(result.name).toBe('send-email');
+      expect(result.data).toEqual({
+        name: 'user-visible-name',
+        email: 'user@test.com',
+        count: 5,
+      });
       expect(result.priority).toBe(10);
       expect(result.createdAt).toBe(1700000000000);
       expect(result.runAt).toBe(1700000001000);

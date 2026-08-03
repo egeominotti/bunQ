@@ -4,7 +4,7 @@
  */
 
 import type { Job as InternalJob } from '../../domain/types/job';
-import { jobId } from '../../domain/types/job';
+import { jobId, normalizeLegacyJobPayload } from '../../domain/types/job';
 
 /**
  * Parse job from TCP response data
@@ -14,10 +14,12 @@ export function parseJobFromResponse(
   jobData: Record<string, unknown>,
   queueName: string
 ): InternalJob {
+  const payload = normalizeLegacyJobPayload({ name: jobData.name, data: jobData.data });
   return {
     id: jobId(jobData.id as string),
     queue: queueName,
-    data: jobData.data,
+    name: payload.name,
+    data: payload.data,
     priority: (jobData.priority as number | undefined) ?? 0,
     createdAt: (jobData.createdAt as number | undefined) ?? Date.now(),
     runAt: (jobData.runAt as number | undefined) ?? Date.now(),

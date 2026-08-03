@@ -13,7 +13,7 @@ func TestWorkerProcessesJobResultAndEvents(t *testing.T) {
 	queue := testQueue(t, "wk")
 	var completed, active, drained atomic.Int64
 	worker := NewWorker(queue.Name, func(job *Job) (any, error) {
-		return map[string]any{"doubled": asInt(job.Data()["v"]) * 2}, nil
+		return map[string]any{"doubled": asInt(asMap(job.Data())["v"]) * 2}, nil
 	}, WorkerOptions{Port: shared.port, PollTimeoutMs: 300})
 	worker.On("active", func(...any) { active.Add(1) })
 	worker.On("completed", func(...any) { completed.Add(1) })
@@ -161,6 +161,51 @@ func TestWorkerConcurrencyRespected(t *testing.T) {
 	defer mu.Unlock()
 	if peak > 3 {
 		t.Fatalf("concurrency exceeded: peak %d > 3", peak)
+	}
+}
+
+func TestWorkerBrokerTimeoutSuppressesLateOutcomeEvents(t *testing.T) {
+	queue := testQueue(t, "timeout-authority")
+	var completed, failed, workerErrors atomic.Int64
+	worker := NewWorker(queue.Name, func(job *Job) (any, error) {
+		time.Sleep(500 * time.Millisecond)
+		if asBool(asMap(job.Data())["fail"]) {
+			return nil, errors.New("late processor failure")
+		}
+		return "late processor result", nil
+	}, WorkerOptions{
+		Port: shared.port, PollTimeoutMs: 300, Concurrency: 2, HeartbeatIntervalS: 0.05,
+	})
+	worker.On("completed", func(...any) { completed.Add(1) })
+	worker.On("failed", func(...any) { failed.Add(1) })
+	worker.On("error", func(...any) { workerErrors.Add(1) })
+	startWorker(t, worker)
+
+	success, err := queue.Add("late-success", map[string]any{"fail": false}, JobOptions{
+		"attempts": 1, "timeout": 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure, err := queue.Add("late-failure", map[string]any{"fail": true}, JobOptions{
+		"attempts": 1, "timeout": 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitUntil(t, 15*time.Second, func() bool {
+		successState, _ := queue.GetState(success.ID())
+		failureState, _ := queue.GetState(failure.ID())
+		return successState == "failed" && failureState == "failed"
+	}) {
+		t.Fatal("broker timeouts did not finalize both generations")
+	}
+	time.Sleep(700 * time.Millisecond)
+	if completed.Load() != 0 || failed.Load() != 0 || workerErrors.Load() != 0 {
+		t.Fatalf(
+			"late outcomes leaked events: completed=%d failed=%d error=%d",
+			completed.Load(), failed.Load(), workerErrors.Load(),
+		)
 	}
 }
 

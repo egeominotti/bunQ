@@ -32,7 +32,12 @@ must preserve the wire contract and lifecycle semantics.
   arithmetic-breaking `BigInt` values.
 - `_compact` removes `None`, never meaningful `False` or `0`. Explicit empty
   collections are preserved when the public contract distinguishes them.
-- The job name travels in `data["name"]`.
+- `PUSH` and `PUSHB` send the job name in top-level `name` and preserve `data`
+  unchanged, including a user-owned `data["name"]`, scalar, list, or `None`.
+  Job readers prefer top-level `name` and unwrap only legacy envelopes with a
+  string name inside `data`.
+- Cron scheduler identity uses `name`, spawned jobs use `jobName`, and their
+  user `data` remains separate.
 - `job_options` is the canonical snake_case-to-wire mapping:
   `attempts -> maxAttempts`, `job_id -> jobId`, and corresponding camelCase
   names for retention, lease, dependency, and failure-policy fields.
@@ -54,14 +59,23 @@ must preserve the wire contract and lifecycle semantics.
 
 ## Worker leases, heartbeat, ACK, and FAIL
 
-- Each delivery has one lock token. ACK, FAIL, heartbeat, and lock extension
-  use that token and cannot be applied to a different delivery.
+- Each delivery has one lock token. ACK, FAIL, heartbeat, lock extension, and
+  Worker-owned discard use that token and cannot be applied to a different
+  delivery.
 - Heartbeats remain active until processing and any ACK batch settle, then stop
   on every terminal path.
 - A worker concurrency slot is released exactly once after success, processor
   failure, transport failure, cancellation, or callback failure.
-- `completed` events and processed counters occur only after successful ACK.
-  ACK/ACKB failure emits `error` and cannot report false completion.
+- `completed` events and processed counters occur only after an ACK the broker
+  applied. If an exact timeout generation already finalized, successful
+  `ACK`/`FAIL` with `applied: false` releases the local slot but emits no
+  terminal event, increments no counter, and is not a Worker error.
+- ACKB treats positional `ignoredIndices` as authoritative and never replaces
+  them with inference from job IDs. Historical responses without `data` mean
+  every position applied, but structured `ignoredIds` evidence without exact
+  `ignoredIndices` is rejected as ambiguous. This remains correct with
+  duplicate IDs. Transport failures and malformed ACK evidence emit `error`
+  and cannot report false completion.
 - Processor exceptions send FAIL with a capped traceback.
   `UnrecoverableError` bypasses retries; ordinary exceptions retain retry
   semantics.

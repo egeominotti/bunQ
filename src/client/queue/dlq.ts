@@ -5,7 +5,7 @@
 
 import { getSharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
-import type { Job, DlqConfig, DlqEntry, DlqStats, DlqFilter, FailureReason } from '../types';
+import type { Job, DlqConfig, DlqEntry, DlqStats, DlqFilter } from '../types';
 import type { Job as InternalJob } from '../../domain/types/job';
 import type { DlqEntry as InternalDlqEntry } from '../../domain/types/dlq';
 import { jobId } from '../../domain/types/job';
@@ -13,6 +13,8 @@ import { createSimpleJob } from './jobProxy';
 import * as dlqOps from './dlqOps';
 import { toDlqEntry } from '../jobConversion';
 import { createDlqJobMethods, type DlqJobContext } from './dlqJobMethods';
+import { resolvePublicJobPayload } from '../jobHelpers';
+import { toPublicDlqStats } from './dlqStats';
 
 interface DlqContext {
   name: string;
@@ -119,8 +121,8 @@ export async function getDlqJobsAsync<T>(ctx: DlqQueryContext, count?: number): 
   }
 
   return raw.map((job) => {
-    const name = (job.data as { name?: string } | null)?.name ?? 'unknown';
-    return createSimpleJob<T>(String(job.id), name, job.data as T, job.createdAt ?? Date.now(), {
+    const { name, data } = resolvePublicJobPayload(job);
+    return createSimpleJob<T>(String(job.id), name, data as T, job.createdAt ?? Date.now(), {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -135,14 +137,7 @@ export async function getDlqJobsAsync<T>(ctx: DlqQueryContext, count?: number): 
 /** Get DLQ stats */
 export function getDlqStats(ctx: DlqContext): DlqStats {
   if (!ctx.embedded) {
-    return {
-      total: 0,
-      byReason: {} as Record<FailureReason, number>,
-      pendingRetry: 0,
-      expired: 0,
-      oldestEntry: null,
-      newestEntry: null,
-    };
+    return toPublicDlqStats(undefined);
   }
   return dlqOps.getDlqStatsEmbedded(ctx.name);
 }
@@ -153,7 +148,7 @@ export async function getDlqStatsAsync(ctx: DlqContext): Promise<DlqStats> {
   if (!ctx.tcp) return getDlqStats(ctx);
   const response = await ctx.tcp.send({ cmd: 'GetDlqStats', queue: ctx.name });
   if (!response.ok) return getDlqStats(ctx);
-  return (response.data as { stats: DlqStats }).stats;
+  return toPublicDlqStats((response.data as { stats: DlqStats }).stats);
 }
 
 /** Retry DLQ entries */
@@ -178,8 +173,11 @@ export async function retryDlqAsync(ctx: DlqContext, id?: string): Promise<numbe
 
 /** Retry DLQ entries by filter */
 export function retryDlqByFilter(ctx: DlqContext, filter: DlqFilter): number {
-  if (!ctx.embedded) return 0;
-  return dlqOps.retryDlqByFilterEmbedded(ctx.name, filter);
+  if (ctx.embedded) return dlqOps.retryDlqByFilterEmbedded(ctx.name, filter);
+  if (ctx.tcp) {
+    void ctx.tcp.send({ cmd: 'RetryDlq', queue: ctx.name, filter }).catch(() => undefined);
+  }
+  return 0;
 }
 
 /** Retry matching DLQ entries and return the applied count. */

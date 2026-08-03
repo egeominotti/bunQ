@@ -8,13 +8,18 @@ import type {
   PingCommand,
 } from '../../../../domain/types/command';
 import { jobId } from '../../../../domain/types/job';
+import {
+  PROTOCOL_CAPABILITIES,
+  PROTOCOL_VERSION,
+  type ProtocolCapability,
+} from '../../../../domain/types/protocol';
 import type { Response } from '../../../../domain/types/response';
 import * as response from '../../../../domain/types/response';
 import { VERSION } from '../../../../shared/version';
 import type { HandlerContext } from '../../types';
 
-export const PROTOCOL_VERSION = 2;
-export const SUPPORTED_CAPABILITIES: 'pipelining'[] = ['pipelining'];
+export { PROTOCOL_VERSION };
+export const SUPPORTED_CAPABILITIES: ProtocolCapability[] = [...PROTOCOL_CAPABILITIES];
 
 export function handleAddLog(
   command: AddLogCommand,

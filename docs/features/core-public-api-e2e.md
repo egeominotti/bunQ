@@ -20,12 +20,12 @@ maintenance methods that are easy to omit from representative tests.
 
 ## Audited surface
 
-At version 2.8.55 the compiler discovers **298 methods**:
+At version 2.8.56 the compiler discovers **308 methods**:
 
 | Surface | Methods |
 | --- | ---: |
 | `Queue` | 116 |
-| `Bunqueue` | 37 |
+| `Bunqueue` | 47 |
 | `Job` | 34 |
 | `Worker` | 22 |
 | `TcpConnectionPool` | 13 |
@@ -37,7 +37,7 @@ At version 2.8.55 the compiler discovers **298 methods**:
 | `QueueEvents` | 6 |
 | `SandboxedWorker` | 6 |
 | `Forwarder` | 2 |
-| **Total** | **298** |
+| **Total** | **308** |
 
 `support/public-surface.ts` uses the TypeScript checker rather than a maintained
 class or method list. It scans the client and workflow entrypoints, resolves
@@ -45,11 +45,13 @@ their exported classes plus the `Job` interface, keeps public callable
 declarations owned by `src/client/`, removes inherited Node `EventEmitter`
 methods, and emits stable `Class.method` keys. The final assertion requires
 exact equality between the applicable set and successfully exercised methods.
-The runner registers **583 applicable method-mode checks** at this version. The
-13 `TcpConnectionPool` methods are correctly marked TCP-only, so their embedded
-cells are explicit `N/A` rather than false passes; the other 285 methods run in
-both modes. Including inventory and hygiene assertions, the focused suite has
-587 tests.
+The runner registers **580 applicable method-mode checks** at this version. The
+13 `TcpConnectionPool` methods are TCP-only. Another 23 legacy synchronous
+snapshot methods have authoritative async companions and are embedded-only by
+signature because they cannot await a TCP round trip. Those 37 non-dual cells
+are explicit `N/A`, not fabricated sentinel passes. The remaining 272 methods
+run in both modes. Including inventory and hygiene assertions, the focused
+suite has 584 tests.
 
 ## Runtime contract
 
@@ -67,11 +69,12 @@ the embedded column.
 There are no mocks, spies, or stubbed broker responses. A source scan in the
 suite rejects test-double calls under `test/core-e2e/{contracts,support,fixtures}`.
 The tracker records a method only after its operation and state assertions have
-completed. Expected rejections count only for documented capability boundaries,
-such as `FlowProducer.getParentResult(s)` being embedded-only.
+completed. It has no expected-rejection or sentinel-success category:
+capability boundaries are explicit `N/A` cells, and every `PASS` is a successful
+real operation.
 
 Each successful operation records its mode, contract, operation kind, duration,
-and exact source location. The suite writes the complete 298-row matrix to:
+and exact source location. The suite writes the complete 308-row matrix to:
 
 - `artifacts/core-e2e/public-api-matrix.md` for human review;
 - `artifacts/core-e2e/public-api-matrix.json` for automation.
@@ -85,17 +88,20 @@ The TCP harness always sets `embedded: false` explicitly. This matters because
 the repository test preload sets `BUNQUEUE_EMBEDDED=1`; relying on implicit mode
 selection would silently exercise the local manager instead of the broker.
 
-Documented synchronous snapshots retain their documented scope:
+Documented runtime boundaries retain their exact scope:
 
-- `QueueEvents` subscribes to the in-process manager and has no TCP event
-  transport; its local lifecycle methods are tested in both passes, while real
-  remote lifecycle delivery is proved through TCP `Worker` events.
+- `QueueEvents`, `Worker.stalled`, `Queue.waitJobUntilFinished`, and
+  `FlowProducer.getParentResult(s)` execute authoritatively through embedded
+  and TCP transports. Event contracts assert real broker payloads, queue
+  filtering, authentication, unsubscribe, reconnect/resubscribe, and cleanup.
 - synchronous `QueueGroup` bulk operations target the embedded manager;
   `*Async` methods are the authoritative TCP operations and are asserted against
   the remote broker.
-- synchronous TCP DLQ/query compatibility methods are checked for their
-  documented snapshot/fire-and-forget behavior; their async counterparts prove
-  the authoritative remote result.
+- synchronous Queue/Bunqueue query and DLQ snapshots are embedded-only cells;
+  their async counterparts prove the authoritative result in both runtimes.
+- fire-and-forget mutations execute in both modes, while their contracts observe
+  the eventual state through authoritative queries. Async mutation companions
+  are used whenever acknowledgement or a returned count is part of the API.
 
 ## Contract layout
 
@@ -109,6 +115,8 @@ Documented synchronous snapshots retain their documented scope:
   completion methods;
 - FlowProducer graphs, QueueGroup namespaces, and the all-in-one `Bunqueue`
   facade;
+- shared QueueEvents, worker-stall, wait-result, and Flow-result contracts that
+  run unchanged through embedded and fresh-broker TCP wrappers;
 - every public `TcpConnectionPool` connection, command, health, lifecycle and
   reference-management method against a real broker;
 - Workflow DSL nodes, execution/recovery/signals/compensation/archival, and the

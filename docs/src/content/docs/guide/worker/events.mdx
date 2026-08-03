@@ -152,6 +152,29 @@ All Bun client events are fully typed. The complete list (external SDK event set
 | `log` | `(job: Job<T>, message: string)` | Log written via `job.log()` |
 | `closed` | `()` | Worker shut down |
 
+For Bun Workers, `completed` and `failed` are broker-authoritative. The Worker
+emits the local terminal event only after the broker accepts that exact lease
+generation. If the broker's processing timeout already failed or requeued the
+job while a processor was still returning, its late ACK/FAIL is an idempotent
+no-op and no contradictory local terminal event or Worker error is emitted.
+This rule is identical for Embedded, TCP, manual `job.moveToFailed()`, and
+`SandboxedWorker` execution.
+
+The same ownership rule covers nonterminal processor mutations. After the
+broker accepts `retry()`, `changeDelay()`, `moveToWait()`, `moveToDelayed()`,
+`moveToWaitingChildren()`, or `discard()`, the Worker emits no local
+`completed`/`failed` event for the retired generation and sends no automatic
+ACK/FAIL. A real asynchronous `discard()` rejection emits exactly one Worker
+`error`; an authoritative already-absent result is silent.
+
+For the Bun client, `stalled` is queue-scoped in both embedded and TCP mode.
+TCP workers receive it through a dedicated authenticated event connection that
+automatically re-subscribes after reconnect. `skipStalledCheck: true` disables
+only that listener, never broker-side stall recovery. The event is also emitted
+when an expired lock exhausts the queue's retry or stall budget; in that case
+the broker records `stalled` before the terminal `failed` queue event and DLQ
+transition.
+
 Remove a listener with `worker.off('completed', handler)`.
 
 ## Where to go next

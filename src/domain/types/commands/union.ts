@@ -73,6 +73,7 @@ export type Command =
   | Monitoring.ListWebhooksCommand
   | Monitoring.StatsCommand
   | Monitoring.MetricsCommand
+  | Monitoring.TrimEventsCommand
   | Monitoring.PrometheusCommand
   | Monitoring.StorageStatusCommand
   | Workers.HeartbeatCommand
@@ -99,6 +100,8 @@ export type Command =
   | Dashboard.DashboardQueuesCommand
   | Dashboard.DashboardQueueCommand
   | Protocol.AuthCommand
-  | Protocol.HelloCommand;
+  | Protocol.HelloCommand
+  | Protocol.SubscribeEventsCommand
+  | Protocol.UnsubscribeEventsCommand;
 
 export type CommandType = Command['cmd'];

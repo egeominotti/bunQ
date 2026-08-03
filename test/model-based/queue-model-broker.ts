@@ -17,7 +17,7 @@ export async function startModelBroker(
   dbPath: string,
   initialPort?: number
 ): Promise<StartedModelBroker> {
-  const bindFailures: string[] = [];
+  const startupRetries: string[] = [];
   let port = initialPort !== undefined && claimPortPair(initialPort) ? initialPort : freePortPair();
 
   for (let attempt = 1; attempt <= STARTUP_ATTEMPTS; attempt++) {
@@ -42,10 +42,10 @@ export async function startModelBroker(
       const detail = await stopProcess(process, stderr);
       releasePortPair(port);
       if (readiness === 'exited' && isBindCollision(detail) && attempt < STARTUP_ATTEMPTS) {
-        bindFailures.push(detail.trim());
+        startupRetries.push(detail.trim());
         continue;
       }
-      throw startupError(port, readiness, detail, bindFailures);
+      throw startupError(port, readiness, detail, startupRetries);
     }
 
     const client = new TcpClient({
@@ -68,16 +68,17 @@ export async function startModelBroker(
       client.close();
       const detail = await stopProcess(process, stderr);
       releasePortPair(port);
-      if (isBindCollision(detail) && attempt < STARTUP_ATTEMPTS) {
-        bindFailures.push(detail.trim());
+      const message = error instanceof Error ? error.message : String(error);
+      const handshakeDetail = `${message}\n${detail}`.trim();
+      if (attempt < STARTUP_ATTEMPTS) {
+        startupRetries.push(handshakeDetail);
         continue;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      throw startupError(port, 'handshake', `${message}\n${detail}`, bindFailures);
+      throw startupError(port, 'handshake', handshakeDetail, startupRetries);
     }
   }
 
-  throw startupError(port, 'exited', 'bind retry budget exhausted', bindFailures);
+  throw startupError(port, 'exited', 'startup retry budget exhausted', startupRetries);
 }
 
 export async function stopModelBroker(broker: StartedModelBroker): Promise<void> {
@@ -169,14 +170,14 @@ function startupError(
   port: number,
   phase: 'exited' | 'handshake' | 'timeout',
   detail: string,
-  bindFailures: readonly string[]
+  startupRetries: readonly string[]
 ): Error {
   const diagnostics = [
     `model-test broker startup ${phase} on TCP ${port} / HTTP ${port + 1}`,
     detail.trim() || 'broker produced no stderr',
   ];
-  if (bindFailures.length > 0) {
-    diagnostics.push(`prior bind collisions retried: ${bindFailures.length}`);
+  if (startupRetries.length > 0) {
+    diagnostics.push(`prior startup failures retried: ${startupRetries.length}`);
   }
   return new Error(diagnostics.join('\n'));
 }

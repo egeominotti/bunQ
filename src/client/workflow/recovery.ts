@@ -76,13 +76,43 @@ export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResul
       // recoverable until runCompensation writes an explicit rollbackStatus.
       // A lost claim means another driver owns this unwind, so nothing happened here
       // and counting it as a recovery would overstate what recover() did.
-      const outcome = await runCompensation(exec, wf, store, deps.emitter, deps.workflows);
-      if (outcome === 'ran') result.compensating++;
+      if (await recoverCompensation(exec.id, wf, deps)) result.compensating++;
     }
   }
 
   result.total = result.running + result.waiting + result.compensating;
   return result;
+}
+
+async function recoverCompensation(
+  executionId: string,
+  wf: Workflow,
+  deps: RecoverDeps
+): Promise<boolean> {
+  while (true) {
+    const exec = deps.store.get(executionId);
+    if (
+      !exec ||
+      (exec.state !== 'compensating' &&
+        !(exec.state === 'failed' && exec.rollbackStatus === undefined))
+    ) {
+      return false;
+    }
+    bindExecutionDefinition(exec, wf, (value) => deps.store.update(value));
+    const outcome = await runCompensation(exec, wf, deps.store, deps.emitter, deps.workflows);
+    if (outcome === 'ran') return true;
+
+    // A live unwind owned by this executor's store is not orphaned. Waiting here
+    // would deadlock callers that deliberately hold the handler open until recover()
+    // returns, and it would make a health-time recovery call wait for user code.
+    if (outcome.sameOwner) return false;
+
+    // A force-closed Engine can leave its JavaScript compensation handler alive
+    // briefly after its store is closed. A replacement Engine has a different store
+    // identity, so it waits for that owner, then re-reads the durable row: it may have
+    // finished, or this engine must resume the owed unwind.
+    await outcome.settled;
+  }
 }
 
 async function enqueueExecution(exec: Execution, queue: Queue): Promise<void> {

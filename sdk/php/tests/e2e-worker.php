@@ -133,6 +133,40 @@ test('worker: runOnce drains a batch in one call (request-scoped mode)', functio
     }
 });
 
+test('worker: broker timeout suppresses late completion and failure events', function (Server $server): void {
+    $queue = new Queue(uniqueName('timeout-authority'), ['port' => $server->port]);
+    $events = ['completed' => 0, 'failed' => 0, 'error' => 0];
+    $worker = new Worker($queue->name, function (Job $job): string {
+        usleep(500_000);
+        if (($job->data()['fail'] ?? false) === true) {
+            throw new \RuntimeException('late processor failure');
+        }
+        return 'late processor result';
+    }, [
+        'port' => $server->port,
+        'pollTimeoutMs' => 300,
+        'batchSize' => 2,
+        'heartbeatIntervalS' => 0.05,
+    ]);
+    $worker->on('completed', function () use (&$events): void { $events['completed']++; });
+    $worker->on('failed', function () use (&$events): void { $events['failed']++; });
+    $worker->on('error', function () use (&$events): void { $events['error']++; });
+    try {
+        $success = $queue->add('late-success', ['fail' => false], ['attempts' => 1, 'timeout' => 100]);
+        $failure = $queue->add('late-failure', ['fail' => true], ['attempts' => 1, 'timeout' => 100]);
+        assertSame(2, $worker->runOnce(), 'both timed generations were handled');
+        assertSame('failed', $queue->getState($success->id()), 'broker timeout won success generation');
+        assertSame('failed', $queue->getState($failure->id()), 'broker timeout won failure generation');
+        assertSame(0, $events['completed'], 'late result must not emit completed');
+        assertSame(0, $events['failed'], 'late throw must not emit failed');
+        assertSame(0, $events['error'], 'authoritative ignored outcomes are not Worker errors');
+    } finally {
+        $worker->close();
+        $queue->obliterate();
+        $queue->close();
+    }
+});
+
 test('worker: registered and visible in ListWorkers (int64 safety)', function (Server $server): void {
     $queue = new Queue(uniqueName('reg'), ['port' => $server->port]);
     $worker = new Worker($queue->name, fn () => 'ok', [

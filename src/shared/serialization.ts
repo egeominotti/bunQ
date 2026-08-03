@@ -13,6 +13,7 @@ export function serializeJob(job: Job): Record<string, unknown> {
   return {
     id: job.id.toString(),
     queue: job.queue,
+    name: job.name,
     data: job.data,
     priority: job.priority,
     createdAt: job.createdAt,

@@ -6,6 +6,7 @@
 import type { PendingAck, TcpConnection } from './types';
 import { getSharedManager } from '../manager';
 import { jobId } from '../../domain/types/job';
+import { ignoredAckIndices } from './ackOutcome';
 
 /** ACK batcher configuration */
 export interface AckBatcherConfig {
@@ -42,7 +43,12 @@ export class AckBatcher {
   }
 
   /** Queue ACK for batch processing (with optional lock token) */
-  async queue(id: string, result: unknown, token?: string): Promise<void> {
+  async queue(
+    id: string,
+    result: unknown,
+    token?: string,
+    removeOnComplete?: boolean
+  ): Promise<boolean> {
     // Backpressure: never silently drop accepted ACKs. When the buffer is at/over
     // capacity, force a flush of the pending ACKs (sending them to the server)
     // before accepting more. If a flush is already in-flight, await it first to
@@ -62,11 +68,12 @@ export class AckBatcher {
       }
     }
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<boolean>((resolve, reject) => {
       this.pendingAcks.push({
         id,
         result,
         token,
+        removeOnComplete,
         resolve,
         reject,
       });
@@ -118,28 +125,38 @@ export class AckBatcher {
       }
 
       try {
+        let ignoredIndices: ReadonlySet<number> = new Set();
         if (this.config.embedded) {
           const manager = getSharedManager();
           // Include tokens for lock verification
-          const items = batch.map((a) => ({ id: jobId(a.id), result: a.result, token: a.token }));
-          await manager.ackBatchWithResults(items);
+          const items = batch.map((a) => ({
+            id: jobId(a.id),
+            result: a.result,
+            token: a.token,
+            removeOnComplete: a.removeOnComplete,
+          }));
+          const outcome = await manager.ackBatchWithResults(items);
+          ignoredIndices = ignoredAckIndices(outcome, batch);
         } else if (this.tcp) {
           // Include tokens for lock verification
+          const removeOnCompletes = batch.map((a) => a.removeOnComplete ?? null);
           const response = await this.tcp.send({
             cmd: 'ACKB',
             ids: batch.map((a) => a.id),
             results: batch.map((a) => a.result),
             tokens: batch.map((a) => a.token ?? ''),
+            ...(removeOnCompletes.some((value) => value === true) ? { removeOnCompletes } : {}),
           });
 
           if (!response.ok) {
             throw new Error((response.error as string | undefined) ?? 'Batch ACK failed');
           }
+          ignoredIndices = ignoredAckIndices(response.data, batch);
         }
 
         // Success
-        for (const ack of batch) {
-          ack.resolve();
+        for (let index = 0; index < batch.length; index++) {
+          batch[index].resolve(!ignoredIndices.has(index));
         }
         return;
       } catch (err) {

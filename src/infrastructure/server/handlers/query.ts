@@ -7,8 +7,25 @@ import type { Command } from '../../../domain/types/command';
 import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { jobId } from '../../../domain/types/job';
+import type { Job } from '../../../domain/types/job';
+import { lastFailedReason } from '../../../domain/job/terminal';
 import { pausedView } from '../../../shared/pausedView';
 import type { HandlerContext } from '../types';
+
+interface JobView extends Job {
+  state?: string;
+  returnvalue?: unknown;
+  failedReason?: string;
+}
+
+function jobView(ctx: HandlerContext, job: Job, state?: string): JobView {
+  return {
+    ...job,
+    ...(state === undefined ? {} : { state }),
+    returnvalue: ctx.queueManager.getResult(job.id),
+    failedReason: lastFailedReason(job),
+  };
+}
 
 /** Handle GetJob command */
 export async function handleGetJob(
@@ -20,7 +37,7 @@ export async function handleGetJob(
   const job = await ctx.queueManager.getJob(jid);
   if (!job) return resp.error('Job not found', reqId);
   const state = await ctx.queueManager.getJobState(jid);
-  return { ok: true, job: { ...job, state }, reqId } as Response;
+  return { ok: true, job: jobView(ctx, job, state), reqId } as Response;
 }
 
 /** Handle GetState command */
@@ -87,7 +104,7 @@ export function handleGetJobByCustomId(
   reqId?: string
 ): Response {
   const job = ctx.queueManager.getJobByCustomId(cmd.customId);
-  return job ? resp.job(job, reqId) : resp.error('Job not found', reqId);
+  return job ? resp.job(jobView(ctx, job), reqId) : resp.error('Job not found', reqId);
 }
 
 /** Handle GetJobs command - list jobs with filtering and pagination */
@@ -110,7 +127,7 @@ export async function handleGetJobs(
   const jobsWithState = await Promise.all(
     jobs.map(async (job) => {
       const state = singleState ?? (await ctx.queueManager.getJobState(job.id));
-      return { ...job, state };
+      return jobView(ctx, job, state);
     })
   );
 

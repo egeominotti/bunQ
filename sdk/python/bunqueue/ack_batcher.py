@@ -3,9 +3,9 @@
 Opt-in (see the Worker ``ack_batch`` option; mirrors the TypeScript SDK's
 AckBatcher). Items flush when the buffer reaches ``max_size`` or after
 ``max_delay_ms``, whichever comes first; :meth:`flush` drains the rest on
-shutdown. Each item's ``on_settled`` fires after the batch is acked (or
-errored), so the worker keeps a job "active", and its lock renewed, until
-the server has confirmed the ack.
+shutdown. Each item's ``on_settled`` fires after the batch is applied, ignored,
+or errored, so the worker keeps a job "active", and its lock renewed, until
+the server has returned authoritative positional evidence.
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ import logging
 import threading
 from typing import Any, Callable, List, Optional
 
+from .ack_outcome import ignored_ack_indices
 from .wire import _compact
 
 logger = logging.getLogger("bunqueue")
 
-# Called once the batch settles: the error on failure, None on ack.
-SettleCallback = Callable[[Optional[BaseException]], None]
+# Called once the batch settles: transport/protocol error and applied outcome.
+SettleCallback = Callable[[Optional[BaseException], bool], None]
 
 
 class AckItem:
@@ -71,8 +72,9 @@ class AckBatcher:
         # so a throwing callback can neither be re-invoked with an error
         # (double settle) nor starve the remaining items of their callback.
         error: Optional[BaseException] = None
+        ignored_indices = set()
         try:
-            self._connection.call(
+            response = self._connection.call(
                 _compact(
                     {
                         "cmd": "ACKB",
@@ -82,11 +84,12 @@ class AckBatcher:
                     }
                 )
             )
+            ignored_indices = ignored_ack_indices(response, [item.id for item in batch])
         except BaseException as exc:  # noqa: BLE001 - settle every item, always
             error = exc
-        for item in batch:
+        for index, item in enumerate(batch):
             try:
-                item.on_settled(error)
+                item.on_settled(error, error is None and index not in ignored_indices)
             except Exception:  # noqa: BLE001
                 # A callback error (e.g. a raising listener in the worker) must
                 # never prevent the other items from settling.

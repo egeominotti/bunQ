@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { FlowProducer } from '../src/client';
 
 describe('FlowProducer EventEmitter (BullMQ v5 compat)', () => {
-  it('should support on/off/once/emit', () => {
+  it('should support on/off/once/emit', async () => {
     const flow = new FlowProducer({ embedded: true });
 
     // Should have EventEmitter methods
@@ -11,10 +11,10 @@ describe('FlowProducer EventEmitter (BullMQ v5 compat)', () => {
     expect(typeof flow.once).toBe('function');
     expect(typeof flow.emit).toBe('function');
 
-    flow.close();
+    await flow.close();
   });
 
-  it('should emit error events', () => {
+  it('should emit error events', async () => {
     const flow = new FlowProducer({ embedded: true });
     const errors: Error[] = [];
 
@@ -26,25 +26,29 @@ describe('FlowProducer EventEmitter (BullMQ v5 compat)', () => {
     expect(errors.length).toBe(1);
     expect(errors[0].message).toBe('test error');
 
-    flow.close();
+    await flow.close();
   });
 
-  it('should support once', () => {
+  it('should support once', async () => {
     const flow = new FlowProducer({ embedded: true });
     let count = 0;
 
-    flow.once('test', () => { count++; });
+    flow.once('test', () => {
+      count++;
+    });
     flow.emit('test', 'e1');
     flow.emit('test', 'e2');
 
     expect(count).toBe(1);
-    flow.close();
+    await flow.close();
   });
 
-  it('should support off to remove listeners', () => {
+  it('should support off to remove listeners', async () => {
     const flow = new FlowProducer({ embedded: true });
     let count = 0;
-    const listener = () => { count++; };
+    const listener = () => {
+      count++;
+    };
 
     flow.on('test', listener);
     flow.emit('test', 'e1');
@@ -52,7 +56,7 @@ describe('FlowProducer EventEmitter (BullMQ v5 compat)', () => {
     flow.emit('test', 'e2');
 
     expect(count).toBe(1);
-    flow.close();
+    await flow.close();
   });
 
   it('close should return Promise<void>', async () => {
@@ -62,9 +66,11 @@ describe('FlowProducer EventEmitter (BullMQ v5 compat)', () => {
     await result;
   });
 
-  it('should have closing property', () => {
+  it('should expose closing only after shutdown starts', async () => {
     const flow = new FlowProducer({ embedded: true });
-    expect(flow.closing).toBeDefined();
-    flow.close();
+    expect(flow.closing).toBeNull();
+    const closing = flow.close();
+    expect(flow.closing).toBe(closing);
+    await closing;
   });
 });

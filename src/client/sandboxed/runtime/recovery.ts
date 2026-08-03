@@ -34,7 +34,7 @@ import { SandboxedDispatch } from './dispatch';
 import { log } from './log';
 
 export class SandboxedRecovery<T = unknown> extends SandboxedDispatch<T> {
-  protected handleCrash(worker: WorkerProcess, index: number): void {
+  protected handleCrash(worker: WorkerProcess, index: number, reportError = true): void {
     if (worker.currentJob) {
       const token = worker.currentToken ?? undefined;
       this.ops.fail(worker.currentJob.id, 'Worker crashed', token).catch((error: unknown) => {
@@ -45,12 +45,14 @@ export class SandboxedRecovery<T = unknown> extends SandboxedDispatch<T> {
       });
     }
 
-    this.safeEmitError(
-      Object.assign(new Error('Worker crashed'), {
-        workerIndex: index,
-        context: 'crash' as const,
-      })
-    );
+    if (reportError) {
+      this.safeEmitError(
+        Object.assign(new Error('Worker crashed'), {
+          workerIndex: index,
+          context: 'crash' as const,
+        })
+      );
+    }
     this.resetWorkerState(worker);
     worker.restarts++;
 
@@ -97,16 +99,25 @@ export class SandboxedRecovery<T = unknown> extends SandboxedDispatch<T> {
   }
 
   protected createEventJob(domainJob: DomainJob): Job {
-    const data = domainJob.data as { name?: string } | null;
     const embedded = !this.tcp;
     const tcp = this.tcp;
     const moveToCompleted = async (
       id: string,
       returnValue: unknown,
-      _token?: string
+      token?: string
     ): Promise<unknown> => {
-      if (embedded) await getSharedManager().ack(jobId(id), returnValue);
-      else if (tcp) await tcp.send({ cmd: 'ACK', id, result: returnValue });
+      if (embedded) await getSharedManager().ack(jobId(id), returnValue, token);
+      else if (tcp) {
+        const response = await tcp.send({
+          cmd: 'ACK',
+          id,
+          result: returnValue,
+          ...(token === undefined ? {} : { token }),
+        });
+        if (response.ok !== true) {
+          throw new Error(typeof response.error === 'string' ? response.error : 'ACK failed');
+        }
+      }
       return null;
     };
     const moveToFailed = async (id: string, error: Error, token?: string): Promise<void> => {
@@ -115,7 +126,7 @@ export class SandboxedRecovery<T = unknown> extends SandboxedDispatch<T> {
     };
     return createPublicJob({
       job: domainJob,
-      name: data?.name ?? 'default',
+      name: domainJob.name,
       updateProgress: createProgressHandler(embedded, tcp, this, { current: null }),
       log: createLogHandler(embedded, tcp, this, { current: null }),
       getState: createGetStateHandler(embedded, tcp),
@@ -125,7 +136,7 @@ export class SandboxedRecovery<T = unknown> extends SandboxedDispatch<T> {
       removeChildDependency: createRemoveChildDependencyHandler(embedded, tcp),
       removeUnprocessedChildren: createRemoveUnprocessedChildrenHandler(embedded, tcp),
       remove: createRemoveHandler(embedded, tcp),
-      retry: createRetryHandler(embedded, tcp, domainJob),
+      retry: createRetryHandler(embedded, tcp, { internalJob: domainJob }),
       updateData: createUpdateDataHandler(embedded, tcp),
       promote: createPromoteHandler(embedded, tcp),
       changeDelay: createChangeDelayHandler(embedded, tcp),

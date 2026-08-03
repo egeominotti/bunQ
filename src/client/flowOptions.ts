@@ -17,6 +17,7 @@ export function assertAtomicFlowOptions(opts: JobOptions): void {
 
 /** Convert public JobOptions into the domain input used by the atomic broker command. */
 export function flowJobInput(
+  name: string,
   data: unknown,
   opts: JobOptions,
   links: {
@@ -27,6 +28,7 @@ export function flowJobInput(
 ): JobInput {
   assertAtomicFlowOptions(opts);
   return {
+    name,
     data,
     priority: opts.priority,
     delay: opts.delay,

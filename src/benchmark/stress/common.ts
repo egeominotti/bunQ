@@ -5,3 +5,7 @@ export function formatCount(value: number): string {
 export function heapMegabytes(): number {
   return process.memoryUsage().heapUsed / 1024 / 1024;
 }
+
+export function megabytesPerSecond(megabytes: number, milliseconds: number): number {
+  return (megabytes / milliseconds) * 1000;
+}

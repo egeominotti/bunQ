@@ -16,37 +16,13 @@ import { shardIndex, processingShardIndex, SHARD_COUNT } from '../src/shared/has
 import type { Job, JobId } from '../src/domain/types/job';
 import type { BackgroundContext } from '../src/application/types';
 
-/**
- * Helper to build a BackgroundContext from a QueueManager's private fields.
- * We access privates via (qm as any) since there is no public API for this.
- */
+/** Use the exact complete background context wired by QueueManager. */
 function getBackgroundContext(qm: QueueManager): BackgroundContext {
-  const raw = qm as any;
-  return {
-    config: raw.config,
-    storage: raw.storage,
-    shards: raw.shards,
-    shardLocks: raw.shardLocks,
-    processingShards: raw.processingShards,
-    processingLocks: raw.processingLocks,
-    jobIndex: raw.jobIndex,
-    completedJobs: raw.completedJobs,
-    jobResults: raw.jobResults,
-    customIdMap: raw.customIdMap,
-    jobLogs: raw.jobLogs,
-    jobLocks: raw.jobLocks,
-    clientJobs: raw.clientJobs,
-    stalledCandidates: raw.stalledCandidates,
-    pendingDepChecks: raw.pendingDepChecks,
-    queueNamesCache: raw.queueNamesCache,
-    eventsManager: raw.eventsManager,
-    webhookManager: raw.webhookManager,
-    metrics: raw.metrics,
-    startTime: raw.startTime,
-    fail: raw.fail?.bind(qm) ?? (async () => {}),
-    registerQueueName: raw.registerQueueName?.bind(qm) ?? (() => {}),
-    unregisterQueueName: raw.unregisterQueueName?.bind(qm) ?? (() => {}),
-  };
+  return (
+    qm as unknown as {
+      contextFactory: { getBackgroundContext(): BackgroundContext };
+    }
+  ).contextFactory.getBackgroundContext();
 }
 
 /**
@@ -62,7 +38,10 @@ function getProcessingJob(qm: QueueManager, jobId: JobId): Job | undefined {
  * Simulate time passage by manipulating a job's lastHeartbeat and startedAt.
  * Makes the job appear as if it has been processing for a long time with no heartbeat.
  */
-function makeJobStalled(job: Job, stallConfig: { stallInterval: number; gracePeriod: number }): void {
+function makeJobStalled(
+  job: Job,
+  stallConfig: { stallInterval: number; gracePeriod: number }
+): void {
   const now = Date.now();
   // Ensure started long ago (past grace period)
   job.startedAt = now - stallConfig.gracePeriod - stallConfig.stallInterval - 5000;
@@ -109,7 +88,7 @@ describe('Two-Phase Stall Detection (checkStalledJobs)', () => {
   async function pushAndPull(data: unknown = { test: true }): Promise<Job> {
     const pushed = await qm.push(QUEUE, { data });
     const pulled = await qm.pull(QUEUE, 0);
-    expect(pulled).not.toBeNull();
+    expect(pulled?.id).toBe(pushed.id);
     return pulled!;
   }
 
@@ -325,7 +304,7 @@ describe('Two-Phase Stall Detection (checkStalledJobs)', () => {
 
     const pushed = await qm.push(DISABLED_QUEUE, { data: { test: true } });
     const pulled = await qm.pull(DISABLED_QUEUE, 0);
-    expect(pulled).not.toBeNull();
+    expect(pulled?.id).toBe(pushed.id);
 
     makeJobStalled(pulled!, { stallInterval: 1000, gracePeriod: 100 });
 
@@ -353,7 +332,7 @@ describe('Two-Phase Stall Detection (checkStalledJobs)', () => {
 
     const pushed = await qm.push(SHORT_QUEUE, { data: { test: true } });
     const pulled = await qm.pull(SHORT_QUEUE, 0);
-    expect(pulled).not.toBeNull();
+    expect(pulled?.id).toBe(pushed.id);
     const job = pulled!;
 
     // Make heartbeat older than 200ms interval (but not 1000ms default)
@@ -378,7 +357,7 @@ describe('Two-Phase Stall Detection (checkStalledJobs)', () => {
 
     const pushed = await qm.push(CUSTOM_QUEUE, { data: { test: true } });
     const pulled = await qm.pull(CUSTOM_QUEUE, 0);
-    expect(pulled).not.toBeNull();
+    expect(pulled?.id).toBe(pushed.id);
     const job = pulled!;
 
     // stallCount=1, maxStalls=2. Next stall (newStallCount=2) >= maxStalls => DLQ
@@ -413,7 +392,7 @@ describe('Two-Phase Stall Detection (checkStalledJobs)', () => {
 
     const pushed = await qm.push(GRACE_QUEUE, { data: { test: true } });
     const pulled = await qm.pull(GRACE_QUEUE, 0);
-    expect(pulled).not.toBeNull();
+    expect(pulled?.id).toBe(pushed.id);
     const job = pulled!;
 
     // Job was just started (within grace period), even with old heartbeat

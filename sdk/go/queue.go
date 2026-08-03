@@ -34,7 +34,10 @@ func (q *Queue) Add(name string, data any, opts JobOptions) (*Job, error) {
 		return nil, err
 	}
 	payload := jobPayload(name, data)
-	command := map[string]any{"cmd": "PUSH", "queue": q.Name, "data": payload}
+	command := map[string]any{"cmd": "PUSH", "queue": q.Name}
+	for key, value := range payload {
+		command[key] = value
+	}
 	for key, value := range wire {
 		command[key] = value
 	}
@@ -42,7 +45,10 @@ func (q *Queue) Add(name string, data any, opts JobOptions) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw := map[string]any{"id": toIDString(response["id"]), "queue": q.Name, "data": payload}
+	raw := map[string]any{"id": toIDString(response["id"]), "queue": q.Name}
+	for key, value := range payload {
+		raw[key] = value
+	}
 	return newJob(raw, q.Connection, ""), nil
 }
 
@@ -60,7 +66,7 @@ func (q *Queue) AddBulk(entries []BulkEntry) ([]string, error) {
 			wire["customId"] = id
 			delete(wire, "jobId")
 		}
-		input := map[string]any{"data": jobPayload(entry.Name, entry.Data)}
+		input := jobPayload(entry.Name, entry.Data)
 		for key, value := range wire {
 			input[key] = value
 		}

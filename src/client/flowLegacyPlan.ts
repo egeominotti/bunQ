@@ -24,7 +24,7 @@ function validateStep<T>(step: FlowStep<T>, depth = 0): void {
     throw new Error('flow job data must be an object');
   }
   for (const key of Object.keys(step.data as object)) {
-    if (key === 'name' || key.startsWith('__')) {
+    if (key.startsWith('__')) {
       throw new Error(`flow job data key is reserved: ${key}`);
     }
   }
@@ -52,7 +52,7 @@ function allocate<T>(step: FlowStep<T>, ids: Set<string>): JobId {
 }
 
 function dataFor<T>(step: FlowStep<T>, internal: Record<string, unknown>): unknown {
-  return { ...(step.data as object), name: step.name, ...internal };
+  return { ...(step.data as object), ...internal };
 }
 
 export function planChain<T>(steps: FlowStep<T>[]): {
@@ -64,11 +64,22 @@ export function planChain<T>(steps: FlowStep<T>[]): {
   const ids = steps.map((step) => allocate(step, seen));
   const jobs = steps.map((step, index): AtomicFlowJobInput => {
     const dependency = index > 0 ? ids[index - 1] : undefined;
+    const dependencyQueue = index > 0 ? steps[index - 1].queueName : undefined;
     return {
       id: ids[index],
       queue: step.queueName,
       input: flowJobInput(
-        dataFor(step, { __flowParentId: dependency ? String(dependency) : null }),
+        step.name,
+        dataFor(
+          step,
+          dependency && dependencyQueue
+            ? {
+                __flowParentId: String(dependency),
+                __parentId: String(dependency),
+                __parentQueue: dependencyQueue,
+              }
+            : { __flowParentId: null }
+        ),
         step.opts ?? {},
         { dependsOn: dependency ? [dependency] : undefined }
       ),
@@ -90,6 +101,7 @@ export function planBulkThen<T>(
       id: parallelIds[index],
       queue: step.queueName,
       input: flowJobInput(
+        step.name,
         dataFor(step, {
           __parentId: String(finalId),
           __parentQueue: final.queueName,
@@ -103,6 +115,7 @@ export function planBulkThen<T>(
     id: finalId,
     queue: final.queueName,
     input: flowJobInput(
+      final.name,
       dataFor(final, {
         __flowParentIds: parallelIds.map(String),
         __childrenIds: parallelIds.map(String),
@@ -126,7 +139,7 @@ export function planTree<T>(root: FlowStep<T>): {
   const allocated = new Set<string>();
   const seen = new WeakSet<object>();
 
-  const visit = (step: FlowStep<T>, dependency?: JobId, depth = 0): void => {
+  const visit = (step: FlowStep<T>, dependency?: { id: JobId; queue: string }, depth = 0): void => {
     validateStep(step, depth);
     if (seen.has(step as object)) throw new Error('flow contains a cycle or shared node');
     seen.add(step as object);
@@ -139,12 +152,24 @@ export function planTree<T>(root: FlowStep<T>): {
       id,
       queue: step.queueName,
       input: flowJobInput(
-        dataFor(step, { __flowParentId: dependency ? String(dependency) : null }),
+        step.name,
+        dataFor(
+          step,
+          dependency
+            ? {
+                __flowParentId: String(dependency.id),
+                __parentId: String(dependency.id),
+                __parentQueue: dependency.queue,
+              }
+            : { __flowParentId: null }
+        ),
         step.opts ?? {},
-        { dependsOn: dependency ? [dependency] : undefined }
+        { dependsOn: dependency ? [dependency.id] : undefined }
       ),
     });
-    for (const child of step.children ?? []) visit(child, id, depth + 1);
+    for (const child of step.children ?? []) {
+      visit(child, { id, queue: step.queueName }, depth + 1);
+    }
   };
 
   visit(root);

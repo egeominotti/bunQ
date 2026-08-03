@@ -47,7 +47,7 @@ describe('moveToWait dispatches by state', () => {
         await held;
         return { done: true };
       },
-      { concurrency: 1, embedded: true }
+      { concurrency: 1, embedded: true, useLocks: false }
     );
 
     const job = await queue.add('a', { v: 2 });

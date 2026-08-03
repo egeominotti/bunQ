@@ -32,7 +32,11 @@ function serializeTcpCron(value: unknown): SerializedCron {
 
 export class TcpServiceBackend extends TcpQueueBackend {
   async addCron(input: CronJobInput): Promise<SerializedCron> {
-    const response = await this.send({ cmd: 'Cron', ...input });
+    const response = await this.send({
+      cmd: 'Cron',
+      ...input,
+      jobName: input.jobName ?? 'default',
+    });
     if (response.ok !== true) {
       throw new Error(typeof response.error === 'string' ? response.error : 'Failed to add cron');
     }

@@ -709,11 +709,47 @@ describe('TcpClient', () => {
     });
   });
 
+  describe('Hello', () => {
+    it('should advertise the current Bun client protocol contract', async () => {
+      const client = new TcpClient({ autoReconnect: false, pingInterval: 0 });
+      const commands: Record<string, unknown>[] = [];
+      client.send = async (command) => {
+        commands.push(command);
+        return {
+          ok: true,
+          protocolVersion: 3,
+          capabilities: ['pipelining', 'separate-job-name'],
+          server: 'bunqueue',
+          version: 'test',
+        };
+      };
+
+      const response = await client.hello();
+
+      expect(commands).toEqual([
+        {
+          cmd: 'Hello',
+          protocolVersion: 3,
+          capabilities: ['pipelining', 'separate-job-name'],
+        },
+      ]);
+      expect(response.protocolVersion).toBe(3);
+      expect(response.capabilities).toContain('separate-job-name');
+      client.close();
+    });
+
+    it('should surface a rejected Hello response', async () => {
+      const client = new TcpClient({ autoReconnect: false, pingInterval: 0 });
+      client.send = async () => ({ ok: false, error: 'Unsupported protocol' });
+
+      await expect(client.hello()).rejects.toThrow('Unsupported protocol');
+      client.close();
+    });
+  });
+
   describe('multiple concurrent commands', () => {
     it('should handle many parallel commands', async () => {
-      const promises = Array.from({ length: 50 }, (_, i) =>
-        queue.add(`concurrent-${i}`, { i })
-      );
+      const promises = Array.from({ length: 50 }, (_, i) => queue.add(`concurrent-${i}`, { i }));
       const results = await Promise.all(promises);
       expect(results).toHaveLength(50);
       const ids = new Set(results.map((r) => r.id));
@@ -835,9 +871,7 @@ describe('TcpClient', () => {
     it('should wrap reqId counter to avoid overflow', async () => {
       // This tests the internal counter modulo behavior
       // We can verify through successful multiple sends
-      const promises = Array.from({ length: 20 }, (_, i) =>
-        queue.add(`reqid-test-${i}`, { i })
-      );
+      const promises = Array.from({ length: 20 }, (_, i) => queue.add(`reqid-test-${i}`, { i }));
       const results = await Promise.all(promises);
       expect(results).toHaveLength(20);
       // All unique IDs
@@ -906,9 +940,9 @@ describe('TcpConnectionPool', () => {
     it('should reject parallel sends after close', async () => {
       const pool = new TcpConnectionPool({ poolSize: 2 });
       pool.close();
-      await expect(
-        pool.sendParallel([{ cmd: 'Ping' }])
-      ).rejects.toThrow('Connection pool is closed');
+      await expect(pool.sendParallel([{ cmd: 'Ping' }])).rejects.toThrow(
+        'Connection pool is closed'
+      );
     });
 
     it('should report 0 pool size after close', () => {
@@ -1020,15 +1054,11 @@ describe('createConnection', () => {
   it('should fail to connect to invalid port', async () => {
     const { createConnection } = await import('../src/client/tcp/connection');
     await expect(
-      createConnection(
-        { host: 'localhost', port: 1 },
-        500,
-        {
-          onData: () => {},
-          onClose: () => {},
-          onError: () => {},
-        }
-      )
+      createConnection({ host: 'localhost', port: 1 }, 500, {
+        onData: () => {},
+        onClose: () => {},
+        onError: () => {},
+      })
     ).rejects.toThrow();
   });
 

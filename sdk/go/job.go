@@ -17,14 +17,23 @@ func (j *Job) ID() string {
 	return toIDString(j.Raw["id"])
 }
 
-// Name returns the job name (which travels inside `data`, wire contract).
+// Name returns the top-level name, with legacy data-envelope compatibility.
 func (j *Job) Name() string {
+	if name, ok := j.Raw["name"].(string); ok {
+		return name
+	}
 	return asString(asMap(j.Raw["data"])["name"])
 }
 
-// Data returns the user payload: `data` without the reserved `name` key.
-func (j *Job) Data() map[string]any {
+// Data preserves modern user data and unwraps only a legacy name envelope.
+func (j *Job) Data() any {
+	if _, ok := j.Raw["name"].(string); ok {
+		return j.Raw["data"]
+	}
 	data := asMap(j.Raw["data"])
+	if _, ok := data["name"].(string); !ok {
+		return j.Raw["data"]
+	}
 	out := make(map[string]any, len(data))
 	for key, value := range data {
 		if key != "name" {

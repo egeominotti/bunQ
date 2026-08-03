@@ -11,7 +11,10 @@ export interface ProcessorConfig<T, R> {
   ackBatcher: AckBatcher;
   emitter: EventEmitter;
   token?: string | null;
+  removeOnComplete?: boolean;
+  removeOnFail?: boolean;
   onOutcome?: (succeeded: boolean) => void;
+  shouldAbandonOutcome?: () => boolean;
 }
 
 export interface FailureContext<T extends FlowJobData> {

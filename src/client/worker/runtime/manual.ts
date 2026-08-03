@@ -1,11 +1,25 @@
 import type { Job as InternalJob } from '../../../domain/types/job';
+import { resolvePublicJobPayload } from '../../jobHelpers';
 import { getSharedManager } from '../../manager';
 import { parseJobFromResponse } from '../jobParser';
 import { processJob } from '../processor';
+import type { ManualJob } from '../types';
 import { WorkerControl } from './control';
 
 export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerControl<T, R> {
-  async getNextJob(token?: string, _opts?: { block?: boolean }): Promise<InternalJob | undefined> {
+  private registerManualJob(job: InternalJob, token: string | null): ManualJob<T> {
+    const payload = resolvePublicJobPayload(job);
+    const manualJob: ManualJob<T> = {
+      ...job,
+      name: payload.name,
+      data: payload.data as T,
+      ...(token ? { token } : {}),
+    };
+    this.trackDelivery({ job: manualJob, token });
+    return manualJob;
+  }
+
+  async getNextJob(token?: string, _opts?: { block?: boolean }): Promise<ManualJob<T> | undefined> {
     if (this.closed) return undefined;
 
     if (this.embedded) {
@@ -17,16 +31,10 @@ export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerContr
           0,
           this.opts.lockDuration
         );
-        if (job && lockToken) {
-          const jobIdStr = String(job.id);
-          this.pulledJobIds.add(jobIdStr);
-          this.jobTokens.set(jobIdStr, lockToken);
-        }
-        return job ?? undefined;
+        return job ? this.registerManualJob(job, lockToken) : undefined;
       }
       const job = await manager.pull(this.queueKey, 0);
-      if (job) this.pulledJobIds.add(String(job.id));
-      return job ?? undefined;
+      return job ? this.registerManualJob(job, null) : undefined;
     }
 
     if (!this.tcp) return undefined;
@@ -44,45 +52,65 @@ export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerContr
     const response = await this.tcp.send(command);
     if (!response.ok || !response.job) return undefined;
     const job = parseJobFromResponse(response.job as Record<string, unknown>, this.queueKey);
-    const jobIdStr = String(job.id);
-    this.pulledJobIds.add(jobIdStr);
-    if (this.opts.useLocks && response.token) {
-      this.jobTokens.set(jobIdStr, response.token as string);
-    }
-    return job;
+    const lockToken = this.opts.useLocks ? ((response.token as string | undefined) ?? null) : null;
+    return this.registerManualJob(job, lockToken);
   }
 
   async processJobManually(
-    job: InternalJob,
+    job: ManualJob<T>,
     token?: string,
-    fetchNextCallback?: () => Promise<InternalJob | undefined>
-  ): Promise<InternalJob | undefined> {
+    fetchNextCallback?: () => Promise<ManualJob<T> | undefined>
+  ): Promise<ManualJob<T> | undefined> {
     if (this.closed) return undefined;
 
     const jobIdStr = String(job.id);
+    let delivery = this.currentDelivery(jobIdStr);
+    const expectedToken = this.opts.useLocks ? (token ?? job.token ?? null) : null;
+    if (delivery) {
+      if (token !== undefined && token !== delivery.token) {
+        throw new Error(`Invalid or expired lock token for job ${jobIdStr}`);
+      }
+      if (delivery.job !== job && expectedToken !== delivery.token) return undefined;
+    } else {
+      if (this.opts.useLocks && expectedToken === null) {
+        throw new Error(`Lock token required for manually processed job ${jobIdStr}`);
+      }
+      delivery = this.trackDelivery({ job, token: expectedToken });
+    }
+    const processingJob = delivery.job;
+    while (!this.closed && !this._closing) {
+      if (!this.isCurrentDelivery(delivery)) return undefined;
+      if (this.isActiveDelivery(delivery)) return undefined;
+      const concurrencyBlocked = this.activeJobs >= this.opts.concurrency;
+      const groupBlocked =
+        this.groupLimiter !== null && !this.groupLimiter.canProcess(processingJob);
+      if (!concurrencyBlocked && !groupBlocked && this.rateLimiter.tryAcquire()) break;
+      const waitTime =
+        concurrencyBlocked || groupBlocked ? 10 : this.rateLimiter.getTimeUntilNextSlot();
+      await Bun.sleep(Math.min(Math.max(waitTime, 10), 100));
+    }
+    if (this.closed || this._closing || !this.isCurrentDelivery(delivery)) return undefined;
+
+    if (this.groupLimiter) this.groupLimiter.increment(processingJob);
     this.activeJobs++;
-    this.activeJobIds.add(jobIdStr);
-    this.pulledJobIds.add(jobIdStr);
-    if (this.opts.useLocks && token) this.jobTokens.set(jobIdStr, token);
+    this.beginDelivery(delivery);
 
     try {
-      await processJob(job, {
+      await processJob(processingJob, {
         name: this.queueKey,
         processor: this.processor,
         embedded: this.embedded,
         tcp: this.tcp,
         ackBatcher: this.ackBatcher,
         emitter: this,
-        token: this.opts.useLocks ? token : undefined,
+        token: this.opts.useLocks ? delivery.token : undefined,
+        shouldAbandonOutcome: () => this._forceClose || !this.isCurrentDelivery(delivery),
       });
       if (fetchNextCallback) return await fetchNextCallback();
     } finally {
       this.activeJobs--;
-      this.activeJobIds.delete(jobIdStr);
-      this.pulledJobIds.delete(jobIdStr);
-      this.cancelledJobs.delete(jobIdStr);
-      if (this.opts.useLocks) this.jobTokens.delete(jobIdStr);
-      this.rateLimiter.recordJobForLimiter();
+      this.finishDelivery(delivery);
+      if (this.groupLimiter) this.groupLimiter.decrement(processingJob);
     }
   }
 

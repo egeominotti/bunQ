@@ -17,6 +17,7 @@ export interface AckContext {
   processingLocks: RWLock[];
   completedJobs: SetLike<JobId>;
   completedJobsData: MapLike<JobId, Job>;
+  retiredCronLeaseTokens?: MapLike<JobId, string>;
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
   jobResults: MapLike<JobId, unknown>;
@@ -34,6 +35,7 @@ export interface AckContext {
     data?: unknown;
     error?: string;
     prev?: string;
+    terminal?: boolean;
   }) => void;
   onJobCompleted: (jobId: JobId) => void;
   onJobFailed?: (jobId: JobId) => void;
@@ -50,7 +52,30 @@ export interface ExtractedJob<T = unknown> {
   id: JobId;
   job: Job;
   result?: T;
+  removeOnComplete?: boolean;
 }
+
+export interface CompletionOptions {
+  removeOnComplete?: boolean;
+  /** Internal lease identity used only to match a retired cron generation. */
+  leaseToken?: string;
+}
+
+export interface AckAlreadyFinalized {
+  readonly applied: false;
+  readonly reason: 'already-finalized';
+}
+
+/** Normal ACKs preserve the historical undefined return value. */
+export type AckOutcome = undefined | AckAlreadyFinalized;
+
+export interface AckBatchIgnored {
+  readonly ignoredIds: JobId[];
+  /** Input positions preserve generation identity when a job ID is repeated. */
+  readonly ignoredIndices: number[];
+}
+
+export type AckBatchOutcome = undefined | AckBatchIgnored;
 
 export interface BatchContext {
   processingShards: Map<JobId, Job>[];
@@ -100,4 +125,7 @@ export interface FailJobOptions {
   unrecoverable?: boolean;
   stack?: string[];
   failureReason?: FailureReason;
+  removeOnFail?: boolean;
+  /** Runs synchronously while the exact processing generation is claimed. */
+  onClaim?: (job: Job) => void;
 }

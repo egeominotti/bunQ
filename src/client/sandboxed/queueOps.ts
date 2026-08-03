@@ -8,6 +8,7 @@ import { jobId } from '../../domain/types/job';
 import type { SharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
 import { parseJobFromResponse } from '../worker/jobParser';
+import { outcomeWasApplied } from '../worker/ackOutcome';
 
 /** Unified queue operations interface */
 export interface QueueOps {
@@ -16,8 +17,8 @@ export interface QueueOps {
     workerId: string,
     timeout: number
   ): Promise<{ job: DomainJob | null; token: string | null }>;
-  ack(id: JobId, result: unknown, token?: string): Promise<void>;
-  fail(id: JobId, error: string, token?: string): Promise<void>;
+  ack(id: JobId, result: unknown, token?: string): Promise<boolean>;
+  fail(id: JobId, error: string, token?: string): Promise<boolean>;
   updateProgress(id: JobId, progress: number): Promise<void>;
   addLog(id: JobId, message: string): void;
   sendHeartbeat(ids: string[], tokens: string[]): Promise<void>;
@@ -28,8 +29,14 @@ export interface QueueOps {
 export function createEmbeddedOps(manager: SharedManager): QueueOps {
   return {
     pull: (queue, workerId, timeout) => manager.pullWithLock(queue, workerId, timeout),
-    ack: (id, result, token) => manager.ack(id, result, token),
-    fail: (id, error, token) => manager.fail(id, error, token),
+    ack: async (id, result, token) => {
+      const outcome = await manager.ack(id, result, token);
+      return outcome?.applied !== false;
+    },
+    fail: async (id, error, token) => {
+      const outcome = await manager.fail(id, error, token);
+      return outcome?.applied !== false;
+    },
     updateProgress: async (id, progress) => {
       await manager.updateProgress(id, progress);
     },
@@ -61,16 +68,36 @@ export function createTcpOps(tcp: TcpConnectionPool): QueueOps {
       };
     },
     async ack(id, result, token) {
-      await tcp.send({ cmd: 'ACK', id: String(id), result, token: token ?? undefined });
+      const response = await tcp.send({
+        cmd: 'ACK',
+        id: String(id),
+        result,
+        token: token ?? undefined,
+      });
+      if (response.ok !== true) {
+        throw new Error(typeof response.error === 'string' ? response.error : 'ACK failed');
+      }
+      return outcomeWasApplied(response.data);
     },
     async fail(id, error, token) {
-      await tcp.send({ cmd: 'FAIL', id: String(id), error, token: token ?? undefined });
+      const response = await tcp.send({
+        cmd: 'FAIL',
+        id: String(id),
+        error,
+        token: token ?? undefined,
+      });
+      if (response.ok !== true) {
+        throw new Error(typeof response.error === 'string' ? response.error : 'FAIL failed');
+      }
+      return outcomeWasApplied(response.data);
     },
     async updateProgress(id, progress) {
       await tcp.send({ cmd: 'Progress', id: String(id), progress });
     },
     addLog(id, message) {
-      tcp.send({ cmd: 'AddLog', id: String(id), message }).catch(() => {});
+      tcp.send({ cmd: 'AddLog', id: String(id), message }).catch(() => {
+        // Logging is intentionally best-effort and must not fail job processing.
+      });
     },
     async sendHeartbeat(ids, tokens) {
       if (ids.length === 0) return;

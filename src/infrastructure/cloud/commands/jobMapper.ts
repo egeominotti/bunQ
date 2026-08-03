@@ -20,7 +20,7 @@ export function mapCloudCommandJob(job: Job) {
     job.completedAt && job.startedAt ? job.completedAt - job.startedAt : undefined;
   return {
     id: String(job.id),
-    name: (data?.name as string | undefined) ?? 'default',
+    name: job.name,
     queueName: job.queue,
     _queue: job.queue,
     state,

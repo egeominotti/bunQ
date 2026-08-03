@@ -4,13 +4,13 @@
  *
  * Tests real-world ETL pipeline scenarios using flow chains, fan-out/fan-in,
  * multi-record processing, validation, cascading steps, parallel pipelines,
- * and retry logic. TCP mode cannot use getParentResult (embedded-only),
- * so tests verify execution order and completion rather than data passing.
+ * and retry logic. These tests verify execution order and completion;
+ * the shared runtime-results contract covers direct FlowProducer result reads.
  */
 
 import { Queue, Worker, FlowProducer } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -49,12 +49,16 @@ async function main() {
 
     const executionOrder: string[] = [];
 
-    const worker = new Worker('tcp-etl-simple', async (job) => {
-      const data = job.data as { stage: string };
-      executionOrder.push(data.stage);
-      await Bun.sleep(30);
-      return { stage: data.stage };
-    }, { concurrency: 1, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-simple',
+      async (job) => {
+        const data = job.data as { stage: string };
+        executionOrder.push(data.stage);
+        await Bun.sleep(30);
+        return { stage: data.stage };
+      },
+      { concurrency: 1, connection: connOpts, useLocks: false }
+    );
 
     await flow.addChain([
       { name: 'extract', queueName: 'tcp-etl-simple', data: { stage: 'extract' } },
@@ -92,12 +96,16 @@ async function main() {
 
     const executionOrder: string[] = [];
 
-    const worker = new Worker('tcp-etl-fanout', async (job) => {
-      const data = job.data as { task: string };
-      executionOrder.push(data.task);
-      await Bun.sleep(30);
-      return { task: data.task };
-    }, { concurrency: 5, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-fanout',
+      async (job) => {
+        const data = job.data as { task: string };
+        executionOrder.push(data.task);
+        await Bun.sleep(30);
+        return { task: data.task };
+      },
+      { concurrency: 5, connection: connOpts, useLocks: false }
+    );
 
     const result = await flow.addBulkThen(
       [
@@ -141,13 +149,17 @@ async function main() {
     const RECORD_COUNT = 20;
     const completedRecords = new Set<number>();
 
-    const worker = new Worker('tcp-etl-multi', async (job) => {
-      const data = job.data as { recordId: number; stage: string };
-      if (data.stage === 'store') {
-        completedRecords.add(data.recordId);
-      }
-      return { recordId: data.recordId, stage: data.stage };
-    }, { concurrency: 10, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-multi',
+      async (job) => {
+        const data = job.data as { recordId: number; stage: string };
+        if (data.stage === 'store') {
+          completedRecords.add(data.recordId);
+        }
+        return { recordId: data.recordId, stage: data.stage };
+      },
+      { concurrency: 10, connection: connOpts, useLocks: false }
+    );
 
     for (let i = 0; i < RECORD_COUNT; i++) {
       await flow.addChain([
@@ -183,13 +195,17 @@ async function main() {
     const completedIds: number[] = [];
     const failedIds: number[] = [];
 
-    const worker = new Worker('tcp-etl-validate', async (job) => {
-      const data = job.data as { recordId: number; value: number };
-      if (data.value < 0) {
-        throw new Error(`Validation failed: record ${data.recordId}`);
-      }
-      return { recordId: data.recordId, result: data.value * 10 };
-    }, { concurrency: 1, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-validate',
+      async (job) => {
+        const data = job.data as { recordId: number; value: number };
+        if (data.value < 0) {
+          throw new Error(`Validation failed: record ${data.recordId}`);
+        }
+        return { recordId: data.recordId, result: data.value * 10 };
+      },
+      { concurrency: 1, connection: connOpts, useLocks: false }
+    );
 
     worker.on('completed', (job) => completedIds.push((job.data as any).recordId));
     worker.on('failed', (job) => failedIds.push((job.data as any).recordId));
@@ -236,12 +252,16 @@ async function main() {
 
     const executionOrder: string[] = [];
 
-    const worker = new Worker('tcp-etl-cascade', async (job) => {
-      const data = job.data as { stage: string };
-      executionOrder.push(data.stage);
-      await Bun.sleep(20);
-      return { stage: data.stage };
-    }, { concurrency: 1, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-cascade',
+      async (job) => {
+        const data = job.data as { stage: string };
+        executionOrder.push(data.stage);
+        await Bun.sleep(20);
+        return { stage: data.stage };
+      },
+      { concurrency: 1, connection: connOpts, useLocks: false }
+    );
 
     await flow.addChain([
       { name: 'ingest', queueName: 'tcp-etl-cascade', data: { stage: 'ingest' } },
@@ -285,21 +305,37 @@ async function main() {
     const pipelineResults = new Map<number, string[]>();
     let completedPipelines = 0;
 
-    const worker = new Worker('tcp-etl-parallel', async (job) => {
-      const data = job.data as { pipelineId: number; stage: string };
-      if (!pipelineResults.has(data.pipelineId)) pipelineResults.set(data.pipelineId, []);
-      pipelineResults.get(data.pipelineId)!.push(data.stage);
-      if (data.stage === 'load') completedPipelines++;
-      await Bun.sleep(20);
-      return { ok: true };
-    }, { concurrency: 10, connection: connOpts, useLocks: false });
+    const worker = new Worker(
+      'tcp-etl-parallel',
+      async (job) => {
+        const data = job.data as { pipelineId: number; stage: string };
+        if (!pipelineResults.has(data.pipelineId)) pipelineResults.set(data.pipelineId, []);
+        pipelineResults.get(data.pipelineId)!.push(data.stage);
+        if (data.stage === 'load') completedPipelines++;
+        await Bun.sleep(20);
+        return { ok: true };
+      },
+      { concurrency: 10, connection: connOpts, useLocks: false }
+    );
 
     await Promise.all(
       Array.from({ length: PIPELINE_COUNT }, (_, i) =>
         flow.addChain([
-          { name: `extract-${i}`, queueName: 'tcp-etl-parallel', data: { pipelineId: i, stage: 'extract' } },
-          { name: `transform-${i}`, queueName: 'tcp-etl-parallel', data: { pipelineId: i, stage: 'transform' } },
-          { name: `load-${i}`, queueName: 'tcp-etl-parallel', data: { pipelineId: i, stage: 'load' } },
+          {
+            name: `extract-${i}`,
+            queueName: 'tcp-etl-parallel',
+            data: { pipelineId: i, stage: 'extract' },
+          },
+          {
+            name: `transform-${i}`,
+            queueName: 'tcp-etl-parallel',
+            data: { pipelineId: i, stage: 'transform' },
+          },
+          {
+            name: `load-${i}`,
+            queueName: 'tcp-etl-parallel',
+            data: { pipelineId: i, stage: 'load' },
+          },
         ])
       )
     );
@@ -330,22 +366,31 @@ async function main() {
     let transformAttempts = 0;
     const executionOrder: string[] = [];
 
-    const worker = new Worker('tcp-etl-retry', async (job) => {
-      const data = job.data as { stage: string };
-      executionOrder.push(data.stage);
+    const worker = new Worker(
+      'tcp-etl-retry',
+      async (job) => {
+        const data = job.data as { stage: string };
+        executionOrder.push(data.stage);
 
-      if (data.stage === 'transform') {
-        transformAttempts++;
-        if (transformAttempts < 2) {
-          throw new Error(`Transient error attempt ${transformAttempts}`);
+        if (data.stage === 'transform') {
+          transformAttempts++;
+          if (transformAttempts < 2) {
+            throw new Error(`Transient error attempt ${transformAttempts}`);
+          }
         }
-      }
-      return { stage: data.stage };
-    }, { concurrency: 1, connection: connOpts, useLocks: false });
+        return { stage: data.stage };
+      },
+      { concurrency: 1, connection: connOpts, useLocks: false }
+    );
 
     await flow.addChain([
       { name: 'extract', queueName: 'tcp-etl-retry', data: { stage: 'extract' } },
-      { name: 'transform', queueName: 'tcp-etl-retry', data: { stage: 'transform' }, opts: { attempts: 3, backoff: 100 } },
+      {
+        name: 'transform',
+        queueName: 'tcp-etl-retry',
+        data: { stage: 'transform' },
+        opts: { attempts: 3, backoff: 100 },
+      },
       { name: 'load', queueName: 'tcp-etl-retry', data: { stage: 'load' } },
     ]);
 
@@ -355,7 +400,9 @@ async function main() {
     }
 
     if (transformAttempts >= 2 && executionOrder.includes('load')) {
-      ok(`Transform retried ${transformAttempts} times, chain completed: ${executionOrder.join(' -> ')}`);
+      ok(
+        `Transform retried ${transformAttempts} times, chain completed: ${executionOrder.join(' -> ')}`
+      );
     } else {
       fail(`Transform attempts: ${transformAttempts}, order: [${executionOrder.join(', ')}]`);
     }
@@ -364,8 +411,11 @@ async function main() {
   }
 
   // ─── Cleanup ───
-  flow.close();
-  for (const q of queues) { q.obliterate(); q.close(); }
+  await flow.close();
+  for (const q of queues) {
+    q.obliterate();
+    q.close();
+  }
 
   console.log('\n=== Summary ===');
   console.log(`Passed: ${passed}`);

@@ -57,8 +57,10 @@ export async function runBunqueueContract(mode: CoreE2eMode): Promise<CoverageTr
       ])
     );
     ensure(bulk.length === 2, 'Bunqueue.addBulk did not add both jobs');
-    const syncCount = tracker.call('Bunqueue', 'count', () => app.count());
-    ensure(Number.isInteger(syncCount), 'Bunqueue.count did not return an integer');
+    if (mode === 'embedded') {
+      const syncCount = tracker.call('Bunqueue', 'count', () => app.count());
+      ensure(syncCount === 3, `Bunqueue.count returned ${syncCount}`);
+    }
     ensure(
       (await tracker.invoke('Bunqueue', 'countAsync', () => app.countAsync())) === 3,
       'bad count'
@@ -89,6 +91,10 @@ export async function runBunqueueContract(mode: CoreE2eMode): Promise<CoverageTr
       'Bunqueue.pause failed'
     );
     tracker.call('Bunqueue', 'resume', () => app.resume());
+    await tracker.invoke('Bunqueue', 'pauseAsync', () => app.pauseAsync());
+    ensure(await app.queue.isPausedAsync(), 'Bunqueue.pauseAsync did not pause its queue');
+    await tracker.invoke('Bunqueue', 'resumeAsync', () => app.resumeAsync());
+    ensure(!(await app.queue.isPausedAsync()), 'Bunqueue.resumeAsync did not resume its queue');
     await eventually(
       () => processed,
       (count) => Number(count) >= 4,
@@ -136,6 +142,20 @@ export async function runBunqueueContract(mode: CoreE2eMode): Promise<CoverageTr
       (value) => value === null,
       'Bunqueue.removeGlobalRateLimit was not applied'
     );
+    await tracker.invoke('Bunqueue', 'setGlobalRateLimitAsync', () =>
+      app.setGlobalRateLimitAsync(7, 3_000)
+    );
+    ensure(
+      (await app.queue.getGlobalRateLimit())?.max === 7,
+      'Bunqueue.setGlobalRateLimitAsync was not authoritative'
+    );
+    await tracker.invoke('Bunqueue', 'removeGlobalRateLimitAsync', () =>
+      app.removeGlobalRateLimitAsync()
+    );
+    ensure(
+      (await app.queue.getGlobalRateLimit()) === null,
+      'Bunqueue.removeGlobalRateLimitAsync was not authoritative'
+    );
 
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
@@ -178,19 +198,47 @@ export async function runBunqueueContract(mode: CoreE2eMode): Promise<CoverageTr
       (config) => (config as { maxEntries?: number }).maxEntries === 20,
       'Bunqueue.setDlqConfig was not applied'
     );
-    ensure(
-      tracker.call('Bunqueue', 'getDlqConfig', () => dlq.getDlqConfig()).maxEntries === 20,
-      'Bunqueue.getDlqConfig cache mismatch'
+    await tracker.invoke('Bunqueue', 'setDlqConfigAsync', () =>
+      dlq.setDlqConfigAsync({ maxAutoRetries: 3 })
     );
+    const authoritativeConfig = await tracker.invoke('Bunqueue', 'getDlqConfigAsync', () =>
+      dlq.getDlqConfigAsync()
+    );
+    ensure(
+      authoritativeConfig.maxEntries === 20 && authoritativeConfig.maxAutoRetries === 3,
+      'Bunqueue async DLQ config mismatch'
+    );
+    if (mode === 'embedded') {
+      ensure(
+        tracker.call('Bunqueue', 'getDlqConfig', () => dlq.getDlqConfig()).maxEntries === 20,
+        'Bunqueue.getDlqConfig mismatch'
+      );
+    }
     const doomed = await dlq.add('doomed', { value: 1 }, { attempts: 1, durable: true });
     const pulled = await harness.brokerManager().pull(dlq.name);
     ensure(String(pulled?.id) === doomed.id, 'DLQ fixture was not pulled');
     if (!pulled) throw new Error('DLQ fixture missing');
     await harness.brokerManager().fail(pulled.id, 'simple DLQ failure');
-    const syncDlq = tracker.call('Bunqueue', 'getDlq', () => dlq.getDlq());
-    ensure(Array.isArray(syncDlq), 'Bunqueue.getDlq did not return an array');
-    const stats = tracker.call('Bunqueue', 'getDlqStats', () => dlq.getDlqStats());
-    ensure(typeof stats.total === 'number', 'Bunqueue.getDlqStats did not return stats');
+    if (mode === 'embedded') {
+      const syncDlq = tracker.call('Bunqueue', 'getDlq', () => dlq.getDlq());
+      ensure(
+        syncDlq.some((entry) => entry.job.id === doomed.id),
+        'Bunqueue.getDlq missed job'
+      );
+      const stats = tracker.call('Bunqueue', 'getDlqStats', () => dlq.getDlqStats());
+      ensure(stats.total === 1, `Bunqueue.getDlqStats returned ${stats.total}`);
+    }
+    const authoritativeEntries = await tracker.invoke('Bunqueue', 'getDlqAsync', () =>
+      dlq.getDlqAsync()
+    );
+    ensure(
+      authoritativeEntries.some((entry) => entry.job.id === doomed.id),
+      'Bunqueue.getDlqAsync missed failed job'
+    );
+    const authoritativeStats = await tracker.invoke('Bunqueue', 'getDlqStatsAsync', () =>
+      dlq.getDlqStatsAsync()
+    );
+    ensure(authoritativeStats.total === 1, 'Bunqueue.getDlqStatsAsync total mismatch');
     tracker.call('Bunqueue', 'retryDlq', () => dlq.retryDlq(doomed.id));
     await eventually(
       () => dlq.queue.getJobState(doomed.id),
@@ -201,12 +249,36 @@ export async function runBunqueueContract(mode: CoreE2eMode): Promise<CoverageTr
     ensure(String(pulledAgain?.id) === doomed.id, 'retried DLQ fixture was not pulled');
     if (!pulledAgain) throw new Error('retried DLQ fixture missing');
     await harness.brokerManager().fail(pulledAgain.id, 'simple DLQ failure again');
+    const retriedCount = await tracker.invoke('Bunqueue', 'retryDlqAsync', () =>
+      dlq.retryDlqAsync(doomed.id)
+    );
+    ensure(retriedCount === 1, `Bunqueue.retryDlqAsync returned ${retriedCount}`);
+    const pulledThird = await harness.brokerManager().pull(dlq.name);
+    ensure(String(pulledThird?.id) === doomed.id, 'async-retried DLQ fixture was not pulled');
+    if (!pulledThird) throw new Error('async-retried DLQ fixture missing');
+    await harness.brokerManager().fail(pulledThird.id, 'simple DLQ failure third time');
     tracker.call('Bunqueue', 'purgeDlq', () => dlq.purgeDlq());
     await eventually(
       () => dlq.queue.getDlqAsync(),
       (entries) => Array.isArray(entries) && entries.length === 0,
       'Bunqueue.purgeDlq did not purge the server DLQ'
     );
+    const purgeCandidate = await dlq.add(
+      'purge-async',
+      { value: 2 },
+      { attempts: 1, durable: true }
+    );
+    const pulledForPurge = await harness.brokerManager().pull(dlq.name);
+    ensure(
+      String(pulledForPurge?.id) === purgeCandidate.id,
+      'async purge DLQ fixture was not pulled'
+    );
+    if (!pulledForPurge) throw new Error('async purge DLQ fixture missing');
+    await harness.brokerManager().fail(pulledForPurge.id, 'async purge failure');
+    const purgedCount = await tracker.invoke('Bunqueue', 'purgeDlqAsync', () =>
+      dlq.purgeDlqAsync()
+    );
+    ensure(purgedCount === 1, `Bunqueue.purgeDlqAsync returned ${purgedCount}`);
 
     await tracker.invoke('Bunqueue', 'close', () => app.close());
     ensure(

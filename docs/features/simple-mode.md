@@ -1,6 +1,6 @@
 # Simple Mode (Bunqueue all-in-one)
 
-> **Category:** Client SDK · **Source:** `src/client/bunqueue.ts`, `src/client/bunqueue/types.ts`, `src/client/bunqueue/circuitBreaker.ts`, `src/client/bunqueue/batch.ts`, `src/client/bunqueue/retry.ts`, `src/client/bunqueue/aging.ts`, `src/client/bunqueue/cancellation.ts`, `src/client/bunqueue/triggers.ts`, `src/client/bunqueue/ttl.ts`, `src/client/bunqueue/dlqRateLimit.ts`, `src/client/bunqueue/dedupDebounce.ts`
+> **Category:** Client SDK · **Source:** `src/client/bunqueue.ts`, `src/client/bunqueue/runtime.ts`, `src/client/bunqueue/types.ts`, `src/client/bunqueue/circuitBreaker.ts`, `src/client/bunqueue/batch.ts`, `src/client/bunqueue/retry.ts`, `src/client/bunqueue/aging.ts`, `src/client/bunqueue/cancellation.ts`, `src/client/bunqueue/triggers.ts`, `src/client/bunqueue/ttl.ts`, `src/client/bunqueue/dlqRateLimit.ts`, `src/client/bunqueue/dedupDebounce.ts`
 
 ## Purpose
 
@@ -10,9 +10,9 @@
 
 Owns:
 
-- Construction and lifecycle of a paired `Queue` + `Worker` (`src/client/bunqueue.ts:93-94`).
-- Mode selection: exactly one of `processor`, `routes`, or `batch` (`src/client/bunqueue.ts:71-87`).
-- The per-job processing pipeline: circuit-breaker gate → TTL gate → cancellation registration → optional retry wrapper → middleware onion → base processor (`src/client/bunqueue.ts:148-192`).
+- Construction and lifecycle of a paired `Queue` + `Worker` (`src/client/bunqueue/runtime.ts:32-66`, shutdown in `src/client/bunqueue.ts:234-240`).
+- Mode selection: exactly one of `processor`, `routes`, or `batch` (`src/client/bunqueue/runtime.ts:33-50`).
+- The per-job processing pipeline: circuit-breaker gate → TTL gate → cancellation registration → optional retry wrapper → middleware onion → base processor (`src/client/bunqueue/runtime.ts:105-145`).
 - In-process subsystems: `WorkerCircuitBreaker`, `BatchAccumulator`, `PriorityAger`, `CancellationManager`, `TtlChecker`, `TriggerManager`, `DedupDebounceMerger`, `DlqRateLimitManager`.
 - Re-exposing `add`/`addBulk`/`getJob`/counts, cron helpers, pause/resume, and event subscription as a flat API.
 
@@ -32,7 +32,7 @@ Internal:
 - `Queue.upsertJobScheduler` / `getJobSchedulers` / `removeJobScheduler` for cron ([Scheduler & Cron](./scheduler-and-cron.md)).
 - `Queue.changeJobPriority`, `Queue.getWaitingAsync`, `Queue.getJobsAsync({ state: 'prioritized' })` for priority aging (`src/client/bunqueue/aging.ts:33-46`).
 - `Queue.setDlqConfig/getDlq/retryDlq/purgeDlq` and `setGlobalRateLimit/removeGlobalRateLimit` via `DlqRateLimitManager`.
-- Types from `src/client/types.ts` (`Job`, `JobOptions`, `Processor`, `DeduplicationOptions`, `DebounceOptions`, DLQ types).
+- Types from the focused modules under `src/client/types/` (`job.ts`, `options.ts`, `worker.ts`, and `dlq.ts`; re-exported by `index.ts`).
 
 External/runtime:
 
@@ -41,7 +41,7 @@ External/runtime:
 
 ## Public Interface
 
-Exported class (`src/client/bunqueue.ts:54`):
+Exported class (`src/client/bunqueue.ts:24`):
 
 ```typescript
 class Bunqueue<T = unknown, R = unknown> {
@@ -72,15 +72,23 @@ class Bunqueue<T = unknown, R = unknown> {
 
   setDefaultTtl(ttlMs: number): void; setNameTtl(name: string, ttlMs: number): void;
 
-  setDlqConfig(config: Partial<DlqConfig>): void; getDlqConfig(): DlqConfig;
-  getDlq(filter?: DlqFilter): DlqEntry<T>[]; getDlqStats(): DlqStats;
-  retryDlq(id?: string); purgeDlq();
+  setDlqConfig(config: Partial<DlqConfig>): void;
+  setDlqConfigAsync(config: Partial<DlqConfig>): Promise<void>;
+  getDlqConfig(): DlqConfig; getDlqConfigAsync(): Promise<DlqConfig>;
+  getDlq(filter?: DlqFilter): DlqEntry<T>[];
+  getDlqAsync(filter?: DlqFilter): Promise<DlqEntry<T>[]>;
+  getDlqStats(): DlqStats; getDlqStatsAsync(): Promise<DlqStats>;
+  retryDlq(id?: string); retryDlqAsync(id?: string): Promise<number>;
+  purgeDlq(); purgeDlqAsync(): Promise<number>;
 
-  setGlobalRateLimit(max: number, duration?: number): void; removeGlobalRateLimit(): void;
+  setGlobalRateLimit(max: number, duration?: number): void;
+  setGlobalRateLimitAsync(max: number, duration?: number): Promise<void>;
+  removeGlobalRateLimit(): void; removeGlobalRateLimitAsync(): Promise<void>;
 
   on(event, listener): this; once(event, listener): this; off(event, listener): this;
 
-  pause(): void; resume(): void;
+  pause(): void; pauseAsync(): Promise<void>;
+  resume(): void; resumeAsync(): Promise<void>;
   close(force?: boolean): Promise<void>;
   isRunning(): boolean; isPaused(): boolean; isClosed(): boolean;
 }
@@ -92,7 +100,13 @@ Middleware type (`src/client/bunqueue/types.ts:16-19`):
 type BunqueueMiddleware<T, R> = (job: Job<T>, next: () => Promise<R>) => Promise<R>;
 ```
 
-Events (forwarded to `Worker`, `src/client/bunqueue.ts:334-358`): `ready`, `drained`, `closed`, `active`, `completed`, `failed`, `progress`, `stalled`, `error`. `once` is typed for `ready`/`drained`/`closed`/`completed`/`failed`.
+Events (forwarded to `Worker`, `src/client/bunqueue.ts:189-206`): `ready`, `drained`, `closed`, `active`, `completed`, `failed`, `progress`, `stalled`, `error`. `once` is typed for `ready`/`drained`/`closed`/`completed`/`failed`.
+
+The synchronous DLQ query methods are embedded snapshots. Over TCP, use their
+`Async` companions for authoritative values. Likewise, the async DLQ/rate-limit
+mutations and `pauseAsync`/`resumeAsync` resolve only after broker
+acknowledgement and return server counts where applicable; the legacy mutation
+forms remain fire-and-forget compatible.
 
 No TCP commands, HTTP endpoints, or CLI commands are defined here — those belong to [TCP Server Handlers](./tcp-server-handlers.md), [HTTP API](./http-api.md), and the [CLI](./cli.md). `add`/`cron`/etc. translate to the same `Queue` calls those layers expose.
 
@@ -125,23 +139,23 @@ All option shapes live in `src/client/bunqueue/types.ts`. See [data-model](../da
 
 ## Business Logic / Control Flow
 
-**Construction** (`src/client/bunqueue.ts:70-107`):
+**Construction** (`src/client/bunqueue/runtime.ts:32-66`):
 
-1. Validate mode count: error if zero or more than one of `processor`/`routes`/`batch` is set (`:71-73`).
-2. Build `baseProcessor`: if `batch`, create a `BatchAccumulator` and use its buffering processor; else use `routes`-derived dispatcher or the raw `processor` (`:81-87`). The route dispatcher looks up `routeMap[job.name]` and throws `No route for job "<name>" in queue "<queue.name>"` if missing (`:109-116`).
-3. Wrap the base processor so the `Worker` always calls `processJob(job)` (`:91`).
-4. Construct `Queue` (`buildQueueOpts`, `:118-127`) and `Worker` (`buildWorkerOpts`, `:129-144`) for `name`.
-5. Instantiate `DlqRateLimitManager` (apply `opts.dlq` if present), `WorkerCircuitBreaker` (only if `opts.circuitBreaker`), `TriggerManager`, and `PriorityAger` (started immediately if `opts.priorityAging`) (`:96-106`).
+1. Validate mode count: error if zero or more than one of `processor`/`routes`/`batch` is set (`:33-35`).
+2. Build `baseProcessor`: if `batch`, create a `BatchAccumulator` and use its buffering processor; else use the `routes`-derived dispatcher or the raw `processor` (`:42-50`). The route dispatcher looks up `routeMap[job.name]` and throws `No route for job "<name>" in queue "<queue.name>"` if missing (`:68-74`).
+3. Wrap the base processor so the `Worker` always calls `processJob(job)` (`:52`).
+4. Construct `Queue` and `Worker` for `name` (`:53-54`), using the focused option builders at `:77-103`.
+5. Instantiate `DlqRateLimitManager` (apply `options.dlq` if present), `WorkerCircuitBreaker` (only if `options.circuitBreaker`), `TriggerManager`, and `PriorityAger` (started immediately if `options.priorityAging`) (`:55-65`).
 
-**Per-job pipeline** (`processJob`, `src/client/bunqueue.ts:148-174`), in order:
+**Per-job pipeline** (`processJob`, `src/client/bunqueue/runtime.ts:105-125`), in order:
 
-1. If circuit breaker `isOpen()` → reject with `Circuit breaker is open` (`:150-152`).
-2. If `TtlChecker.isExpired(job.name, job.timestamp)` → reject with `Job expired (age: …ms)` (`:154-156`). Expiry compares `Date.now() - jobTimestamp > ttl` (`ttl.ts:21-25`); creation timestamp is used, so the gate fires only when the job is actually pulled, not proactively.
-3. Register an `AbortController` for `job.id` (`:158`, `cancellation.ts:10-14`).
-4. Build `runChain = () => runMiddlewareChain(job, ac)`. If `retryConfig` is set, wrap in `executeWithRetry`; otherwise call `runChain()` once (`:159-160`).
-5. On resolve → `cb.onSuccess()`, unregister cancellation, return result. On reject → `cb.onFailure()`, unregister cancellation, rethrow (`:162-173`).
+1. If circuit breaker `isOpen()` → reject with `Circuit breaker is open` (`:106`).
+2. If `TtlChecker.isExpired(job.name, job.timestamp)` → reject with `Job expired (age: …ms)` (`:107-109`). Expiry compares `Date.now() - jobTimestamp > ttl` (`ttl.ts:21-25`); creation timestamp is used, so the gate fires only when the job is actually pulled, not proactively.
+3. Register an `AbortController` for `job.id` (`:111`, `cancellation.ts:10-14`).
+4. Build `runChain = () => runMiddlewareChain(job, abortController)`. If `retryConfig` is set, wrap in `executeWithRetry`; otherwise call `runChain()` once (`:112-113`).
+5. On resolve → `cb.onSuccess()`, unregister cancellation, return result. On reject → `cb.onFailure()`, unregister cancellation, rethrow (`:114-125`).
 
-**Middleware onion** (`runMiddlewareChain`, `src/client/bunqueue.ts:176-192`): with zero middlewares, the base processor runs directly. Otherwise `next()` walks `middlewares[0..n)` then the base processor, forming `mw1 → mw2 → … → base → … → mw2 → mw1`. Before each step `next()` checks `ac.signal.aborted` and rejects with `Job cancelled` (`:186`).
+**Middleware onion** (`runMiddlewareChain`, `src/client/bunqueue/runtime.ts:128-145`): with zero middlewares, the base processor runs directly. Otherwise `next()` walks `middlewares[0..n)` then the base processor, forming `mw1 → mw2 → … → base → … → mw2 → mw1`. Before each step `next()` checks `abortController.signal.aborted` and rejects with `Job cancelled` (`:139`).
 
 **In-process retry** (`executeWithRetry`, `retry.ts:50-71`): re-invokes the chain up to `maxAttempts`. On failure, if `retryIf` returns false it rethrows immediately; otherwise it sleeps `calculateBackoff(...)` and retries. Backoff strategies (`retry.ts:7-47`): `fixed`, `exponential` (`base·2^(n-1)`), `jitter` (`exp·(0.5+random)`, factor 0.5-1.5), `fibonacci` (base times the sequence 1, 2, 3, 5, 8, … for attempts 1, 2, 3, …), `custom` (`customBackoff(attempt, error)`, falls back to base if absent).
 
@@ -155,7 +169,7 @@ All option shapes live in `src/client/bunqueue/types.ts`. See [data-model](../da
 
 **Dedup/debounce merge** (`dedupDebounce.ts`): on every `add`/`addBulk`, if configured and the caller did not already set `deduplication`/`debounce`, inject `deduplication.id = \`${name}:${JSON.stringify(data)}\`` (ttl default 3600000) and/or `debounce = { id: name, ttl }` (`:21-40`).
 
-**Shutdown** (`close`, `src/client/bunqueue.ts:371-378`): destroy ager (clears interval), circuit breaker (clears timer), batch accumulator (`destroy()` flushes any remaining buffered jobs, `batch.ts:67-76`), abort all pending cancellations, then `worker.close(force)` and `queue.close()`.
+**Shutdown** (`close`, `src/client/bunqueue.ts:234-240`): destroy the priority ager (clears its interval), circuit breaker (clears its timer), batch accumulator (`destroy()` flushes any remaining buffered jobs, `batch.ts:67-76`), abort all pending cancellations, then `worker.close(force)` and `queue.close()`.
 
 ## Concurrency & Locking
 
@@ -168,15 +182,19 @@ This module holds no shard locks; all locking happens inside `Queue`/`Worker`/`Q
 ## Edge Cases & Failure Modes
 
 - **Two independent retry layers.** `RetryConfig` retries the processor **in-process** (same pull, same job, no requeue) and is entirely separate from the queue-level `JobOptions.attempts`/`backoff`. A job can be retried `maxAttempts` times inside one `processJob`, and only if it still throws does the `Worker` mark it failed (which may then trigger queue-level retry/DLQ). Total attempts multiply.
-- **Cancellation is cooperative and middleware-bound.** `ac.signal.aborted` is only checked at `next()` boundaries (`bunqueue.ts:186`). With zero middlewares the base processor runs to completion regardless of `cancel()`; to honor cancellation a processor must read `getSignal(jobId)` itself. The controller is registered immediately before processor execution, so callers that must cancel a newly added job should wait for the Worker's `active` event; a fixed delay after `add()` races the polling interval. `cancel()` on an unknown, not-yet-active, or finished job id is a no-op (`cancellation.ts:23-25`).
+- **Cancellation is cooperative and middleware-bound.** `abortController.signal.aborted` is only checked at `next()` boundaries (`runtime.ts:139`). With zero middlewares the base processor runs to completion regardless of `cancel()`; to honor cancellation a processor must read `getSignal(jobId)` itself. The controller is registered immediately before processor execution, so callers that must cancel a newly added job should wait for the Worker's `active` event; a fixed delay after `add()` races the polling interval. `cancel()` on an unknown, not-yet-active, or finished job id is a no-op (`cancellation.ts:23-25`).
 - **TTL rejects, it does not delete.** An expired job is rejected at processing time and flows through normal `Worker` failure handling (retry/DLQ); it is not silently dropped, and a job that is never pulled is never expired.
 - **Circuit open pauses the whole worker.** While open, no jobs of any name are processed until `resetTimeout` elapses. A single failure during `half-open` re-opens immediately.
-- **Route miss throws.** Unrouted job names throw synchronously inside the processor and become job failures, not silent drops (`bunqueue.ts:113`).
+- **Route miss throws.** Unrouted job names throw synchronously inside the processor and become job failures, not silent drops (`runtime.ts:68-74`).
 - **Batch result alignment is positional.** If the batch `processor` returns fewer results than jobs (or reorders), jobs receive the wrong/`undefined` result; a thrown error rejects every job in the batch. Buffered-but-not-flushed jobs are flushed on `close()`, but jobs still in the worker's poll loop are not part of `BatchAccumulator`.
 - **Dedup default key uses `JSON.stringify(data)`.** Non-deterministic key ordering or unstringifiable data affects the dedup id. The injected debounce id is just the job `name`, but note that `debounce` is currently metadata-only: the server stores `debounceId`/`debounceTtl` on the job and returns them in job views, with no suppression logic attached.
 - **Trigger errors are unobserved.** `fire()` calls `void this.queue.add(...)` with no catch; a failed trigger enqueue is dropped silently. Triggers also only attach after the first `trigger()` call.
 - **Priority aging is best-effort.** `changeJobPriority` failures are swallowed; aging only scans the first `maxScan` waiting + prioritized jobs per tick, so deep backlogs age slowly.
-- **`pause()`/`resume()` act on both** the queue and the worker (`bunqueue.ts:362-369`); the circuit breaker also calls `worker.pause()/resume()` directly, so an externally-paused worker can be resumed by a circuit half-open transition.
+- **Pause/resume act on both** the queue and the worker. `pauseAsync()` and
+  `resumeAsync()` await the queue-side transition before changing the local
+  worker; the synchronous forms retain fire-and-forget TCP behavior. The
+  circuit breaker calls `worker.pause()/resume()` directly, so an
+  externally-paused worker can be resumed by a circuit half-open transition.
 
 ## Configuration
 

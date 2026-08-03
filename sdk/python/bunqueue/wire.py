@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 
 from .errors import SerializationError
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 MAX_FRAME_SIZE = 64 * 1024 * 1024  # mirror server-side limit
 
 TlsOption = Union[bool, ssl.SSLContext, Dict[str, Any], None]

@@ -27,6 +27,7 @@ export class ContextFactory {
     return {
       jobIndex: this.deps.jobIndex,
       jobLocks: this.deps.jobLocks,
+      retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       clientJobs: this.deps.clientJobs,
       processingShards: this.deps.processingShards,
       processingLocks: this.deps.processingLocks,
@@ -34,6 +35,7 @@ export class ContextFactory {
       shardLocks: this.deps.shardLocks,
       eventsManager: this.deps.eventsManager,
       storage: this.deps.storage,
+      timeoutScheduler: this.deps.timeoutScheduler,
     };
   }
 
@@ -50,11 +52,14 @@ export class ContextFactory {
       depCompletions: this.deps.depCompletions,
       maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       timedOutJobs: this.deps.timedOutJobs,
+      retiredTimeoutLeaseTokens: this.deps.retiredTimeoutLeaseTokens,
+      timeoutScheduler: this.deps.timeoutScheduler,
       jobResults: this.deps.jobResults,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
       jobLocks: this.deps.jobLocks,
+      retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       clientJobs: this.deps.clientJobs,
       stalledCandidates: this.deps.stalledCandidates,
       pendingDepChecks: this.deps.pendingDepChecks,
@@ -104,6 +109,8 @@ export class ContextFactory {
       depCompletions: this.deps.depCompletions,
       maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       timedOutJobs: this.deps.timedOutJobs,
+      retiredTimeoutLeaseTokens: this.deps.retiredTimeoutLeaseTokens,
+      retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       jobResults: this.deps.jobResults,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
@@ -138,6 +145,7 @@ export class ContextFactory {
       processingLocks: this.deps.processingLocks,
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
+      retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       depCompletions: this.deps.depCompletions,
       maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       jobResults: this.deps.jobResults,

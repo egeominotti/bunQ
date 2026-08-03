@@ -7,7 +7,11 @@ import { QueueManagerConfiguration } from './configuration';
 
 export class QueueManagerJobManagement extends QueueManagerConfiguration {
   async cancel(jobId: JobId): Promise<boolean> {
-    return jobMgmt.cancelJob(jobId, this.contextFactory.getJobMgmtContext());
+    try {
+      return await jobMgmt.cancelJob(jobId, this.contextFactory.getJobMgmtContext());
+    } finally {
+      this.syncJobTimeout(jobId);
+    }
   }
 
   async updateProgress(jobId: JobId, progress: number, message?: string): Promise<boolean> {
@@ -40,29 +44,61 @@ export class QueueManagerJobManagement extends QueueManagerConfiguration {
     return jobPromotion.promoteJobs(queue, count, this.contextFactory.getJobMgmtContext());
   }
 
-  async moveToDelayed(jobId: JobId, delay: number): Promise<boolean> {
-    return this.changeDelay(jobId, delay);
+  async moveToDelayed(jobId: JobId, delay: number, token?: string): Promise<boolean> {
+    return this.changeDelay(jobId, delay, token);
   }
 
-  async changeDelay(jobId: JobId, delay: number): Promise<boolean> {
-    const context = this.contextFactory.getJobMgmtContext();
-    const location = context.jobIndex.get(jobId);
-    if (location?.type === 'queue') {
-      return jobTransitions.changeWaitingDelay(jobId, delay, context);
+  async changeDelay(jobId: JobId, delay: number, token?: string): Promise<boolean> {
+    try {
+      const lockContext = this.contextFactory.getLockContext();
+      this.assertLeaseToken(jobId, token, lockContext);
+      const context = this.contextFactory.getJobMgmtContext();
+      const location = context.jobIndex.get(jobId);
+      let moved: boolean;
+      if (location?.type === 'queue') {
+        moved = await jobTransitions.changeWaitingDelay(jobId, delay, context);
+      } else {
+        moved = await jobMgmt.moveJobToDelayed(jobId, delay, context);
+      }
+      if (moved) lockMgr.releaseLock(jobId, lockContext, token);
+      return moved;
+    } finally {
+      this.syncJobTimeout(jobId);
     }
-    return jobMgmt.moveJobToDelayed(jobId, delay, context);
   }
 
-  async moveActiveToWait(jobId: JobId): Promise<boolean> {
-    return jobTransitions.moveActiveToWait(jobId, this.contextFactory.getJobMgmtContext());
+  async moveActiveToWait(jobId: JobId, token?: string): Promise<boolean> {
+    try {
+      const lockContext = this.contextFactory.getLockContext();
+      this.assertLeaseToken(jobId, token, lockContext);
+      const moved = await jobTransitions.moveActiveToWait(
+        jobId,
+        this.contextFactory.getJobMgmtContext()
+      );
+      if (moved) lockMgr.releaseLock(jobId, lockContext, token);
+      return moved;
+    } finally {
+      this.syncJobTimeout(jobId);
+    }
   }
 
   async changeWaitingDelay(jobId: JobId, delay: number): Promise<boolean> {
     return jobTransitions.changeWaitingDelay(jobId, delay, this.contextFactory.getJobMgmtContext());
   }
 
-  async moveToWaitingChildren(jobId: JobId): Promise<boolean> {
-    return jobTransitions.moveToWaitingChildren(jobId, this.contextFactory.getJobMgmtContext());
+  async moveToWaitingChildren(jobId: JobId, token?: string): Promise<boolean> {
+    try {
+      const lockContext = this.contextFactory.getLockContext();
+      this.assertLeaseToken(jobId, token, lockContext);
+      const moved = await jobTransitions.moveToWaitingChildren(
+        jobId,
+        this.contextFactory.getJobMgmtContext()
+      );
+      if (moved) lockMgr.releaseLock(jobId, lockContext, token);
+      return moved;
+    } finally {
+      this.syncJobTimeout(jobId);
+    }
   }
 
   async extendLock(
@@ -77,7 +113,12 @@ export class QueueManagerJobManagement extends QueueManagerConfiguration {
     return lock ? lockMgr.renewJobLock(targetId, lock.token, context, duration) : false;
   }
 
-  async discard(jobId: JobId): Promise<boolean> {
-    return jobMgmt.discardJob(jobId, this.contextFactory.getJobMgmtContext());
+  async discard(jobId: JobId, token?: string): Promise<boolean> {
+    try {
+      this.assertLeaseToken(jobId, token, this.contextFactory.getLockContext());
+      return await jobMgmt.discardJob(jobId, this.contextFactory.getJobMgmtContext());
+    } finally {
+      this.syncJobTimeout(jobId);
+    }
   }
 }

@@ -145,10 +145,8 @@ export class WriteBuffer {
   }
 
   removePending(jobId: string): void {
-    const activeIndex = this.activeBuffer.findIndex((job) => job.id === jobId);
-    if (activeIndex !== -1) this.activeBuffer.splice(activeIndex, 1);
-    const flushIndex = this.flushBuffer.findIndex((job) => job.id === jobId);
-    if (flushIndex !== -1) this.flushBuffer.splice(flushIndex, 1);
+    this.activeBuffer = this.activeBuffer.filter((job) => job.id !== jobId);
+    this.flushBuffer = this.flushBuffer.filter((job) => job.id !== jobId);
   }
 
   hasPending(jobId: string): boolean {

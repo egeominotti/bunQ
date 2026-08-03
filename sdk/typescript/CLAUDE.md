@@ -42,6 +42,7 @@ serialization, Queue, Worker, FlowProducer, query, or admin code.
 | `src/queue.ts` | Queue core (add/addBulk/lifecycle) + prototype-mixin merge |
 | `src/queue-query.ts` / `src/queue-control.ts` / `src/queue-admin.ts` | Queue area modules merged onto the prototype |
 | `src/worker-base.ts` / `src/worker.ts` / `src/worker-types.ts` | Worker: lifecycle+cancel base, PULLB loop, heartbeats, events, options |
+| `src/ack-batcher.ts` / `src/terminal-outcome.ts` | ACKB buffering and strict broker-authoritative ACK/FAIL outcome parsing |
 | `src/flow.ts` / `src/flow-types.ts` | FlowProducer public creation/read API and types |
 | `src/flow-plan.ts` / `src/flow-plan-legacy.ts` | Pure ID allocation and closed tree/chain/fan-in graph planning |
 | `src/flow-commit.ts` | One `PUSHF` call plus exact snapshot ID/queue validation |
@@ -55,7 +56,8 @@ serialization, Queue, Worker, FlowProducer, query, or admin code.
 - Frame = 4-byte big-endian u32 length + standard msgpack map. Request
   `{cmd, reqId, ...}`; response `{ok, reqId, ...}`; `ok:false` → `error`
   field. Max frame 64MB. Auth = first command `{cmd:'Auth', token}`.
-- The **job name travels inside `data`**: `data = {name, ...userData}`.
+- `PUSH`/`PUSHB` carry protocol-owned `name` beside untouched user `data`.
+  Job readers prefer top-level `name` and retain legacy `data.name` fallback.
 - Omit `undefined` keys from payloads (compact frames, parity with the
   official client).
 - Responses **wrapped in `data`**: `GetLogs→data.logs`,

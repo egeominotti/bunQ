@@ -148,7 +148,7 @@ func (c *Connection) Hello() (map[string]any, error) {
 	return c.Call(map[string]any{
 		"cmd":             "Hello",
 		"protocolVersion": ProtocolVersion,
-		"capabilities":    []string{"pipelining"},
+		"capabilities":    []string{"pipelining", "separate-job-name"},
 	})
 }
 

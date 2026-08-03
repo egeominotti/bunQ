@@ -126,32 +126,64 @@ export class Bunqueue<T = unknown, R = unknown> extends BunqueueRuntime<T, R> {
     this.dlqrl.setDlqConfig(config);
   }
 
+  setDlqConfigAsync(config: Partial<DlqConfig>): Promise<void> {
+    return this.dlqrl.setDlqConfigAsync(config);
+  }
+
   getDlqConfig(): DlqConfig {
     return this.dlqrl.getDlqConfig();
+  }
+
+  getDlqConfigAsync(): Promise<DlqConfig> {
+    return this.dlqrl.getDlqConfigAsync();
   }
 
   getDlq(filter?: DlqFilter): DlqEntry<T>[] {
     return this.dlqrl.getDlq(filter);
   }
 
+  getDlqAsync(filter?: DlqFilter): Promise<DlqEntry<T>[]> {
+    return this.dlqrl.getDlqAsync(filter);
+  }
+
   getDlqStats(): DlqStats {
     return this.dlqrl.getDlqStats();
+  }
+
+  getDlqStatsAsync(): Promise<DlqStats> {
+    return this.dlqrl.getDlqStatsAsync();
   }
 
   retryDlq(id?: string) {
     return this.dlqrl.retryDlq(id);
   }
 
+  retryDlqAsync(id?: string): Promise<number> {
+    return this.dlqrl.retryDlqAsync(id);
+  }
+
   purgeDlq() {
     return this.dlqrl.purgeDlq();
+  }
+
+  purgeDlqAsync(): Promise<number> {
+    return this.dlqrl.purgeDlqAsync();
   }
 
   setGlobalRateLimit(max: number, duration?: number): void {
     this.dlqrl.setGlobalRateLimit(max, duration);
   }
 
+  setGlobalRateLimitAsync(max: number, duration?: number): Promise<void> {
+    return this.dlqrl.setGlobalRateLimitAsync(max, duration);
+  }
+
   removeGlobalRateLimit(): void {
     this.dlqrl.removeGlobalRateLimit();
+  }
+
+  removeGlobalRateLimitAsync(): Promise<void> {
+    return this.dlqrl.removeGlobalRateLimitAsync();
   }
 
   on(event: 'ready' | 'drained' | 'closed', listener: () => void): this;
@@ -186,6 +218,16 @@ export class Bunqueue<T = unknown, R = unknown> extends BunqueueRuntime<T, R> {
 
   resume(): void {
     this.queue.resume();
+    this.worker.resume();
+  }
+
+  async pauseAsync(): Promise<void> {
+    await this.queue.pauseAsync();
+    this.worker.pause();
+  }
+
+  async resumeAsync(): Promise<void> {
+    await this.queue.resumeAsync();
     this.worker.resume();
   }
 

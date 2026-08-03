@@ -1,6 +1,6 @@
 # bunqueue Wire Protocol Specification
 
-**Protocol version: 2** · Status: stable · Last updated: 2026-07-14
+**Protocol version: 3** · Status: stable · Last updated: 2026-08-03
 
 This is the normative specification for writing a bunqueue client in any
 language. A client that satisfies every **MUST** in this document and passes
@@ -46,6 +46,12 @@ The words MUST / MUST NOT / SHOULD are used as in RFC 2119.
   responses. Responses carry the request's `reqId` back (section 3), and MAY
   arrive out of order when pipelined. A strictly sequential client can rely
   on ordering but SHOULD still match `reqId`.
+- A client MUST preserve every byte and frame boundary under socket
+  backpressure. If the socket write primitive accepts only a prefix, the
+  client MUST retain the unwritten tail, queue later frames behind it, and
+  resume from the exact offset when the socket becomes writable. It MUST NOT
+  replay an old connection's buffered bytes after reconnect; the corresponding
+  command may already have been applied by the server.
 
 ## 2. Session establishment
 
@@ -55,11 +61,11 @@ The words MUST / MUST NOT / SHOULD are used as in RFC 2119.
    unauthenticated connection fails. A failed `Auth` (`ok: false`) means the
    session is unusable; the client SHOULD close and surface an
    authentication error, distinct from generic command errors.
-3. `Hello` is optional protocol negotiation:
-   request `{"cmd": "Hello", "protocolVersion": 2, "capabilities": ["pipelining"]}`,
+3. `Hello` is optional protocol discovery:
+   request `{"cmd": "Hello", "protocolVersion": 3, "capabilities": ["pipelining", "separate-job-name"]}`,
    response `{ok, protocolVersion, capabilities, server, version}`. The
    server currently ignores the client's declared version and always answers
-   with its own (`protocolVersion: 2`). Clients SHOULD expose it so version
+   with its own (`protocolVersion: 3`). Clients SHOULD expose it so version
    drift is observable.
 
 ## 3. Message envelope
@@ -110,16 +116,19 @@ is applied recursively to every outgoing frame.
 
 ## 5. The job payload contract
 
-- The job **name travels inside `data`**: the wire `data` field is
-  `{"name": <job name>, ...user data}`. There is no top-level name field on
-  PUSH.
-- Consequently `data` MUST be a msgpack map. If the user payload is not a
-  map (scalar, list), the client MUST wrap it, conventionally as
-  `{"name": ..., "payload": <value>}`.
-- Collision rule: when the user payload itself contains a `name` key, the
-  **user value wins** (the reference client builds `{name, ...data}`, so the
-  spread overrides). Clients MUST implement the same precedence — silently
-  clobbering a user field is a parity bug.
+- Protocol v3 carries the job name in the top-level `name` field on `PUSH`
+  and in each `PUSHB`/`PUSHF` job input. The `data` field is the untouched
+  user payload; it may be a map, scalar, list, or `null`.
+- Returned `Job` values follow the same envelope: `job.name` is scheduling
+  metadata and `job.data` is exactly the user payload. A user-owned `name`
+  key inside `data` is never promoted, removed, or overwritten by a v3
+  producer.
+- For compatibility, the server accepts a legacy input with no top-level
+  `name`. At that transport boundary only, an object-shaped `data` value with
+  a string `name` is decoded as the old envelope and that key is removed from
+  user data. If no legacy name is present, the server uses the default job
+  name. Modern clients MUST always send the top-level field so arbitrary user
+  data remains unambiguous.
 - Reserved data keys used by flows: `__parentId`, `__parentQueue`,
   `__childrenIds`, `__flowParentId`, `__flowParentIds`. Clients MUST NOT
   strip them and SHOULD NOT let user payloads collide with them.
@@ -134,8 +143,8 @@ the shapes and the rules a client MUST get right. All commands below answer
 
 | Command | Key request fields | Response |
 |---|---|---|
-| `PUSH` | `queue`, `data`, plus job options (below) | `{id}` |
-| `PUSHB` | `queue`, `jobs: [{data, ...JobInput}]` | `{ids: []}` |
+| `PUSH` | `queue`, `name`, `data`, plus job options (below) | `{id}` |
+| `PUSHB` | `queue`, `jobs: [{name, data, ...JobInput}]` | `{ids: []}` |
 
 Job options on `PUSH` (all optional, exact names): `priority`, `delay`,
 `maxAttempts`, `backoff` (ms or `{type, delay, maxDelay}`), `ttl`, `timeout`,
@@ -175,6 +184,11 @@ Client MUSTs:
 | `GetLogs` | `id`, `start?`, `end?` | `{data: {logs: []}}` — **wrapped** |
 | `GetChildrenValues` | `id` | `{data: {values: {}}}` — **wrapped** |
 
+`GetResult` distinguishes a completed persisted `null` from an ID with no
+result: the former returns `result: null`, while the latter has an undefined /
+absent result field. Multi-result clients MUST test for absence, not truthiness,
+so `0`, `false`, `""`, and `null` are retained.
+
 Client MUSTs:
 
 - `GetJob`, `GetJobByCustomId`, `CronGet` (and flow reads built on them)
@@ -192,15 +206,33 @@ Client MUSTs:
 - `GetJobs` reads from SQLite behind a ~10 ms write buffer: results are
   eventually consistent with respect to a just-issued `PUSH`.
 
+#### Queue event stream
+
+| Command | Request | Response |
+|---|---|---|
+| `SubscribeEvents` | `queue` | `{}` |
+| `UnsubscribeEvents` | none | `{}` |
+
+One TCP connection can subscribe to one queue at a time. A new subscription
+replaces the previous queue; unsubscribe leaves the connection usable for
+normal commands. Matching lifecycle events are server-initiated frames:
+
+```text
+{ type: "event", event: JobEvent }
+```
+
+They carry no `reqId`. A pipelined client MUST recognize this envelope before
+request correlation and MUST NOT resolve an in-flight command with it.
+
 ### 6.3 Consuming (the worker loop)
 
 | Command | Request | Response |
 |---|---|---|
 | `PULL` | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?` | `{job, token}` — top-level, both `null`-ish when empty |
 | `PULLB` | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?` | `{jobs: [], tokens: []}` |
-| `ACK` | `id`, `token`, `result?` | `{}` |
-| `ACKB` | `ids: []`, `tokens: []`, `results?` | `{}` — success is top-level `ok: true` |
-| `FAIL` | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool` | `{}` |
+| `ACK` | `id`, `token`, `result?` | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
+| `ACKB` | `ids: []`, `tokens: []`, `results?` | `{}` or `{data: {ignoredIds, ignoredIndices}}` |
+| `FAIL` | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool` | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
 | `Heartbeat` | `id` (= workerId), `activeJobs`, `processed`, `failed` | `{data: {pong}}` |
 | `JobHeartbeatB` | `ids: []`, `tokens: []` | `{data: {ok, count}}` — renews the jobs' locks |
 | `RegisterWorker` | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}` |
@@ -234,14 +266,28 @@ Semantics a client MUST implement:
 - Completion callbacks/events MUST be gated on the `ACK`/`FAIL` actually
   reaching the server. If the send fails, the lock expiry retries the job:
   claiming completion would be a lie.
+- A broker timeout or retired cron generation can win while the processor is
+  still returning. In that case `ACK`/`FAIL` succeeds with
+  `{applied:false, reason:"already-finalized"}` and the client MUST suppress
+  its local terminal event. `ACKB` reports the same condition positionally in
+  `ignoredIndices`; clients MUST NOT infer it from `ignoredIds` because a batch
+  may contain the same job ID more than once. Wrong/missing lease tokens and
+  unrelated missing jobs remain errors.
 
 ### 6.4 Control
 
 `Pause`/`Resume`/`IsPaused` (`{paused}` top-level), `Drain` (`{count}`),
 `Clean` (`grace`, `limit`, `state` → `{ids}`), `Obliterate`, `Cancel` (by
-`id`), `Discard`, `Promote`, `PromoteJobs`, `MoveToWait` (= "retry job"),
+`id`), `Discard` (`id`, `token?`), `Promote`, `PromoteJobs`, `MoveToWait` (= "retry job"),
 `MoveToDelayed`, `ChangePriority`, `ChangeDelay`, `Update` (job data),
 `UpdateParent` (`childId`, `parentId`).
+
+`MoveToWait`, `MoveToDelayed`, `MoveToWaitingChildren`, `ChangeDelay`, and
+`Discard` accept `token?: string`. When the target is active and has a broker
+lease, the exact current token is required; unlocked jobs retain the
+administrative form. Worker processor Job objects bind that token automatically
+for the tokenless public `retry()`, `changeDelay(delay)`, and synchronous
+`discard()` methods.
 
 ### 6.5 DLQ
 
@@ -254,13 +300,16 @@ entries.
 
 | Command | Request | Response |
 |---|---|---|
-| `Cron` | `name`, `queue`, `data`, `schedule?` (cron pattern), `repeatEvery?` (ms), `timezone?`, `immediately?`, **`maxLimit?`**, `uniqueKey?`, `dedup?`, `skipIfNoWorker?`, `skipMissedOnRestart?`, `preventOverlap?`, `priority?`, `jobOptions?` | `{}` |
+| `Cron` | `name`, `jobName?`, `queue`, `data`, `schedule?` (cron pattern), `repeatEvery?` (ms), `timezone?`, `immediately?`, **`maxLimit?`**, `uniqueKey?`, `dedup?`, `skipIfNoWorker?`, `skipMissedOnRestart?`, `preventOverlap?`, `priority?`, `jobOptions?` | `{cron}` — authoritative normalized definition |
 | `CronGet` | `name` | `{cron}` — top-level; not-found → error |
 | `CronList` | — | `{crons: []}` |
 | `CronDelete` | `name` | `{}` |
 
 - An SDK "limit" option MUST map to wire **`maxLimit`** (#111). `maxLimit`
   `<= 0` means unlimited.
+- `name` identifies the globally registered schedule. `jobName` is the
+  first-class name assigned to jobs spawned by that schedule; legacy peers may
+  omit it and use the bounded legacy payload-envelope fallback.
 - `jobOptions` accepts only the `CronJobOptions` subset (`maxAttempts`,
   `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`,
   `removeOnFail`) — anything else there is silently ignored by the server,
@@ -285,8 +334,11 @@ entries.
   window, permanent) instead of failing the command. Older servers ignore
   both fields. `RateLimitClear` clears the limit.
   `SetConcurrency`/`ClearConcurrency` use `limit`.
-- `ListWorkers` → `{data: {workers}}`; `Stats` → `{stats}`; `Metrics` →
-  `{metrics}`; `ListQueues` → `{queues}` (names as strings); `Ping` →
+- `ListWorkers` → `{data: {workers}}`; `Stats` → `{stats}`; legacy broker-wide
+  `Metrics` → `{metrics}`. Queue-scoped
+  `Metrics(queue,type,start,end)` → `{data:{meta,data,count}}`, and
+  `TrimEvents(queue,maxLength)` → `{data:{removed}}`. `ListQueues` → `{queues}`
+  (names as strings); `Ping` →
   `{data: {pong}}`.
 
 ### 6.8 Response wrapping summary
@@ -314,8 +366,8 @@ send:
 { cmd: "PUSHF", jobs: [{ id, queue, input }, ...] }
 ```
 
-Every `input` carries the ordinary `PUSH` options plus fully resolved
-`parentId`, `childrenIds`, `dependsOn`, and canonical metadata in `data`. The
+Every `input` carries a top-level `name`, untouched user `data`, the ordinary
+`PUSH` options, and fully resolved `parentId`, `childrenIds`, and `dependsOn`. The
 broker revalidates unique IDs, limits, acyclicity, existing ownership, and
 reciprocal edges before mutation. It returns
 `{data: {jobs: Job[]}}` with one authoritative snapshot per input. With SQLite,
@@ -375,7 +427,7 @@ release.
 ## 12. Versioning
 
 - The protocol version is a single integer advertised by `Hello`
-  (currently **2**). Additive changes (new commands, new optional fields)
+  (currently **3**). Additive changes (new commands, new optional fields)
   do not bump it; breaking changes to framing, envelope, or existing field
   semantics do.
 - This document is versioned with the repository; changes to the wire MUST

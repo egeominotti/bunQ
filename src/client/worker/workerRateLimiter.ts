@@ -14,7 +14,17 @@ export class WorkerRateLimiter {
   private head = 0;
   private rateLimitExpiration = 0;
 
-  constructor(private readonly limiter: RateLimiterOptions | null) {}
+  constructor(private readonly limiter: RateLimiterOptions | null) {
+    if (
+      limiter &&
+      (!Number.isInteger(limiter.max) ||
+        limiter.max <= 0 ||
+        !Number.isFinite(limiter.duration) ||
+        limiter.duration <= 0)
+    ) {
+      throw new RangeError('Worker limiter max and duration must be positive finite values');
+    }
+  }
 
   /**
    * Check if rate limiter allows processing another job.
@@ -22,18 +32,37 @@ export class WorkerRateLimiter {
    * O(1) amortized — advances head pointer past expired tokens.
    */
   canProcessWithinLimit(): boolean {
-    if (!this.limiter) return true;
-
-    const windowStart = Date.now() - this.limiter.duration;
-    this.evictExpired(windowStart);
-
-    return this.activeCount() < this.limiter.max;
+    return this.getAvailableSlots() > 0;
   }
 
-  /** Record a job completion for rate limiting. */
+  /** Atomically reserve one start in the current window. */
+  tryAcquire(): boolean {
+    const now = Date.now();
+    if (now < this.rateLimitExpiration) return false;
+    if (!this.limiter) return true;
+
+    const windowStart = now - this.limiter.duration;
+    this.evictExpired(windowStart);
+    if (this.activeCount() >= this.limiter.max) return false;
+
+    this.limiterTokens.push(now);
+    return true;
+  }
+
+  /** Record a synthetic start, retained for diagnostics and focused unit tests. */
   recordJobForLimiter(): void {
     if (!this.limiter) return;
     this.limiterTokens.push(Date.now());
+  }
+
+  /** Number of starts that can be admitted without waiting. */
+  getAvailableSlots(): number {
+    const now = Date.now();
+    if (now < this.rateLimitExpiration) return 0;
+    if (!this.limiter) return Number.POSITIVE_INFINITY;
+
+    this.evictExpired(now - this.limiter.duration);
+    return Math.max(0, this.limiter.max - this.activeCount());
   }
 
   /**
@@ -42,19 +71,16 @@ export class WorkerRateLimiter {
    * O(1) — oldest active token is at this.limiterTokens[this.head].
    */
   getTimeUntilNextSlot(): number {
-    if (!this.limiter) return 0;
-
     const now = Date.now();
-    const windowStart = now - this.limiter.duration;
-    this.evictExpired(windowStart);
+    const overrideWait = Math.max(0, this.rateLimitExpiration - now);
+    if (!this.limiter) return overrideWait;
 
-    if (this.activeCount() < this.limiter.max) {
-      return 0;
-    }
+    this.evictExpired(now - this.limiter.duration);
+    if (this.activeCount() < this.limiter.max) return overrideWait;
 
-    // Oldest active token is at head — no need for Math.min(...spread)
     const oldestToken = this.limiterTokens[this.head];
-    return oldestToken + this.limiter.duration - now;
+    const windowWait = Math.max(0, oldestToken + this.limiter.duration - now);
+    return Math.max(overrideWait, windowWait);
   }
 
   /** Get rate limiter info (for debugging/monitoring). */
@@ -76,16 +102,9 @@ export class WorkerRateLimiter {
    * The worker will not process jobs until the rate limit expires.
    */
   rateLimit(expireTimeMs: number): void {
-    if (expireTimeMs <= 0) return;
+    if (!Number.isFinite(expireTimeMs) || expireTimeMs <= 0) return;
 
-    if (this.limiter) {
-      const now = Date.now();
-      for (let i = 0; i < this.limiter.max; i++) {
-        this.limiterTokens.push(now + expireTimeMs - this.limiter.duration);
-      }
-    }
-
-    this.rateLimitExpiration = Date.now() + expireTimeMs;
+    this.rateLimitExpiration = Math.max(this.rateLimitExpiration, Date.now() + expireTimeMs);
   }
 
   /** Check if worker is currently rate limited. */

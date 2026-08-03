@@ -9,6 +9,7 @@ import { FrameSizeError } from './protocol';
 import { getRateLimiter } from './rateLimiter';
 import { TcpConnectionRegistry } from './tcp/connections';
 import { MAX_WRITE_QUEUE_BYTES, TCP_IDLE_TIMEOUT_MS } from './tcp/constants';
+import { handleEventSubscription } from './tcp/eventSubscriptions';
 import { serializeTcpResponse, tcpErrorResponse } from './tcp/responses';
 import { loadTlsOptions } from './tls';
 import type { TcpConnectionData, TcpServerConfig } from './types/tcpServer';
@@ -83,7 +84,10 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
 
         await withSemaphore(semaphore, async () => {
           try {
-            const response = await handleCommand(command, ctx);
+            const response =
+              command.cmd === 'SubscribeEvents' || command.cmd === 'UnsubscribeEvents'
+                ? handleEventSubscription(command, socket, registry)
+                : await handleCommand(command, ctx);
             writeQueue.write(socket, serializeTcpResponse(response));
             registry.dropForWriteOverflow(socket);
           } catch (error) {
@@ -109,7 +113,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
 
     drain(socket: Socket<TcpConnectionData>) {
       if (!socket.data) return;
-      socket.data.writeQueue.flush(socket);
+      if (!socket.data.writeQueue.flush(socket)) socket.terminate();
     },
   };
 
@@ -135,8 +139,8 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
     },
 
     stop(): void {
-      server.stop();
       registry.closeAll();
+      server.stop(true);
     },
   };
 }

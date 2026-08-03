@@ -60,6 +60,19 @@ $worker->installSignalHandlers();   // SIGTERM/SIGINT -> graceful stop
 $worker->run();                     // blocking loop
 ```
 
+Job names are protocol metadata, separate from user payloads. `Job::name()`
+reads top-level `name`; `Job::data()` returns the submitted mixed value
+unchanged, including an associative `name`, list, scalar, or null. Legacy
+`data.name` envelopes remain readable. Scheduler templates likewise send the
+spawned name through `jobName` and keep `data` untouched.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
+Worker terminal events follow broker authority. If a timeout finalizes the
+lease while the processor is still running, the broker returns a successful
+`applied: false` ACK/FAIL outcome. The Worker releases the held lease without
+emitting `completed`/`failed`, incrementing its terminal counters, or turning
+that expected no-op into an `error` event.
+
 ### Request-scoped consumption (FPM, cron)
 
 PHP often cannot run a blocking daemon. `runOnce()` pulls and processes one

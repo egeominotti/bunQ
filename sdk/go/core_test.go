@@ -25,9 +25,9 @@ func TestAddGetJobRoundtrip(t *testing.T) {
 		t.Fatal("getJob failed:", err)
 	}
 	if fetched.Name() != "send-email" {
-		t.Fatalf("name must travel inside data, got %q", fetched.Name())
+		t.Fatalf("name must survive the roundtrip, got %q", fetched.Name())
 	}
-	data := fetched.Data()
+	data := asMap(fetched.Data())
 	if data["to"] != "user@example.com" || asInt(data["n"]) != 7 {
 		t.Fatalf("Data() must return the user payload, got %v", data)
 	}

@@ -16,6 +16,7 @@ export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     queue TEXT NOT NULL,
+    name TEXT,
     data BLOB NOT NULL,
     priority INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     stall_count INTEGER NOT NULL DEFAULT 0,
     timeline BLOB,
     stacktrace BLOB,
-    dlq_retry_state BLOB
+    dlq_retry_state BLOB,
+    extended_options BLOB
 );
 
 -- Indexes for common queries
@@ -124,6 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
 CREATE TABLE IF NOT EXISTS cron_jobs (
     name TEXT PRIMARY KEY,
     queue TEXT NOT NULL,
+    job_name TEXT,
     data BLOB NOT NULL,
     schedule TEXT,
     repeat_every INTEGER,
@@ -154,6 +157,39 @@ CREATE TABLE IF NOT EXISTS queue_state (
     stall_grace_period INTEGER,
     dlq_config BLOB
 );
+
+-- Per-queue lifecycle event journal. Entries are kept newest-first by id and
+-- bounded by QueueManagerConfig.maxQueueEvents when they are appended.
+CREATE TABLE IF NOT EXISTS queue_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    queue TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    payload BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_queue_events_queue_id
+    ON queue_events(queue, id DESC);
+
+-- Cumulative terminal counters are separate from bounded minute buckets so
+-- pruning old data points never resets meta.count.
+CREATE TABLE IF NOT EXISTS queue_metrics_meta (
+    queue TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('completed', 'failed')),
+    total_count INTEGER NOT NULL DEFAULT 0,
+    prev_ts INTEGER NOT NULL DEFAULT 0,
+    prev_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (queue, type)
+);
+CREATE TABLE IF NOT EXISTS queue_metric_buckets (
+    queue TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('completed', 'failed')),
+    minute INTEGER NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (queue, type, minute)
+);
+CREATE INDEX IF NOT EXISTS idx_queue_metric_buckets_window
+    ON queue_metric_buckets(queue, type, minute DESC);
 `;
 /** Migration version table */
 export const MIGRATION_TABLE = `
@@ -163,136 +199,4 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 `;
 /** Current schema version */
-export const SCHEMA_VERSION = 30;
-/** All migrations in order */
-export const MIGRATIONS: Record<number, string> = {
-  1: SCHEMA,
-  // Migration 5: Add performance indexes for high-throughput operations
-  5: `
--- DLQ expiration cleanup: O(log n) instead of O(n) table scan
-CREATE INDEX IF NOT EXISTS idx_dlq_entered_at ON dlq(entered_at);
-
--- Stall detection: runs every 5s, needs fast lookup of active jobs
-CREATE INDEX IF NOT EXISTS idx_jobs_state_started
-    ON jobs(state, started_at) WHERE state = 'active';
-
--- Group operations: fast lookup by group_id
-CREATE INDEX IF NOT EXISTS idx_jobs_group_id
-    ON jobs(group_id) WHERE group_id IS NOT NULL;
-
--- Pending jobs: compound index for priority-ordered retrieval
-CREATE INDEX IF NOT EXISTS idx_jobs_pending_priority
-    ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'delayed');
-`,
-  // Migration 6: Add deduplication fields to cron_jobs
-  6: `
-ALTER TABLE cron_jobs ADD COLUMN unique_key TEXT;
-ALTER TABLE cron_jobs ADD COLUMN dedup BLOB;
-`,
-  // Migration 7: Add timeline blob to jobs
-  7: `
-ALTER TABLE jobs ADD COLUMN timeline BLOB;
-`,
-  // Migration 8: Add skipMissedOnRestart to cron_jobs
-  8: `
-ALTER TABLE cron_jobs ADD COLUMN skip_missed_on_restart INTEGER NOT NULL DEFAULT 0;
-`,
-  // Migration 9: Add skipIfNoWorker to cron_jobs
-  9: `
-ALTER TABLE cron_jobs ADD COLUMN skip_if_no_worker INTEGER NOT NULL DEFAULT 0;
-`,
-  // Migration 10: Add preventOverlap to cron_jobs (default 1 = enabled)
-  10: `
-ALTER TABLE cron_jobs ADD COLUMN prevent_overlap INTEGER NOT NULL DEFAULT 1;
-`,
-  // Migration 11: Index for completed-job recovery ordering (issue #84)
-  11: `
-CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
-    ON jobs(completed_at DESC) WHERE state = 'completed';
-`,
-  // Migration 12: Add per-cron job options (retry/cleanup policy, issue #86)
-  12: `
-ALTER TABLE cron_jobs ADD COLUMN job_options BLOB;
-`,
-  // Migration 13: Persist the last failure's stacktrace on jobs (issue #74)
-  13: `
-ALTER TABLE jobs ADD COLUMN stacktrace BLOB;
-`,
-  // Migration 14: Stable, index-backed getJobs ordering and pagination
-  14: `
-CREATE INDEX IF NOT EXISTS idx_jobs_queue_created
-    ON jobs(queue, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_jobs_queue_state_created
-    ON jobs(queue, state, created_at, id);
-`,
-  // Migrations 15-16: Rate-limit window (duration) + TTL auto-expiry on
-  // queue_state. One ALTER per migration ON PURPOSE: each runs in its own
-  // db.run with its own error-swallow, so a crash between the two leaves a
-  // retryable state (a two-ALTER string would abort at the first "duplicate
-  // column" on re-run and never execute the second statement).
-  15: `
-ALTER TABLE queue_state ADD COLUMN rate_limit_duration INTEGER;
-`,
-  16: `
-ALTER TABLE queue_state ADD COLUMN rate_limit_expires_at INTEGER;
-`,
-  // Migration 17: preserve the cumulative stall bound across restarts.
-  17: `
-ALTER TABLE jobs ADD COLUMN stall_count INTEGER NOT NULL DEFAULT 0;
-`,
-  // Migrations 18-21: persist the complete per-queue stall policy. One ALTER
-  // per version keeps interrupted upgrades retryable (same rule as 15-16).
-  18: `
-ALTER TABLE queue_state ADD COLUMN stall_enabled INTEGER;
-`,
-  19: `
-ALTER TABLE queue_state ADD COLUMN stall_interval INTEGER;
-`,
-  20: `
-ALTER TABLE queue_state ADD COLUMN max_stalls INTEGER;
-`,
-  21: `
-ALTER TABLE queue_state ADD COLUMN stall_grace_period INTEGER;
-`,
-  // Migration 22: Persist the complete per-queue DLQ policy atomically.
-  22: `
-ALTER TABLE queue_state ADD COLUMN dlq_config BLOB;
-`,
-  // Migrations 23-26: flow failure policy must survive active-job recovery.
-  23: `
-ALTER TABLE jobs ADD COLUMN fail_parent_on_failure INTEGER NOT NULL DEFAULT 0;
-`,
-  24: `
-ALTER TABLE jobs ADD COLUMN remove_dependency_on_failure INTEGER NOT NULL DEFAULT 0;
-`,
-  25: `
-ALTER TABLE jobs ADD COLUMN continue_parent_on_failure INTEGER NOT NULL DEFAULT 0;
-`,
-  26: `
-ALTER TABLE jobs ADD COLUMN ignore_dependency_on_failure INTEGER NOT NULL DEFAULT 0;
-`,
-  27: `
-CREATE TABLE IF NOT EXISTS flow_failures (
-    parent_id TEXT NOT NULL,
-    child_id TEXT NOT NULL,
-    child_queue TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    error TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    PRIMARY KEY (parent_id, child_id)
-);
-CREATE INDEX IF NOT EXISTS idx_flow_failures_parent ON flow_failures(parent_id);
-
-DROP INDEX IF EXISTS idx_jobs_run_at;
-CREATE INDEX idx_jobs_run_at
-    ON jobs(run_at) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
-
-DROP INDEX IF EXISTS idx_jobs_pending_priority;
-CREATE INDEX idx_jobs_pending_priority
-    ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting', 'prioritized', 'waiting-children', 'delayed');
-`,
-  28: DEPENDENCY_COMPLETION_SCHEMA,
-  29: 'ALTER TABLE dependency_completions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;',
-  // Preserve bounded DLQ auto-retry metadata while the job is live.
-  30: 'ALTER TABLE jobs ADD COLUMN dlq_retry_state BLOB;',
-};
+export const SCHEMA_VERSION = 34;

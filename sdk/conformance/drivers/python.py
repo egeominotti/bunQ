@@ -87,9 +87,12 @@ def snake_opts(opts: dict | None) -> dict:
 
 
 def job_view(job) -> dict:
-    data = dict(job.data or {})
-    name = data.pop("name", None)
-    return {"id": job.id, "name": name, "data": data, "stacktrace": job.stacktrace}
+    return {
+        "id": job.id,
+        "name": job.name,
+        "data": job.data,
+        "stacktrace": job.stacktrace,
+    }
 
 
 def handle(req: dict) -> dict:
@@ -136,7 +139,8 @@ def handle(req: dict) -> dict:
         return {}
     if op == "upsertScheduler":
         repeat = req.get("repeat") or {}
-        queue_for(req["queue"]).upsert_job_scheduler(req["schedulerId"], repeat, {})
+        template = req.get("template") or {}
+        queue_for(req["queue"]).upsert_job_scheduler(req["schedulerId"], repeat, template)
         return {}
     if op == "getScheduler":
         return {"scheduler": queue_for("conf-lookup").get_job_scheduler(req["schedulerId"])}
@@ -150,7 +154,11 @@ def handle(req: dict) -> dict:
     if op == "retryDlq":
         return {"count": queue_for(req["queue"]).retry_dlq()}
     if op == "hello":
-        return {"protocolVersion": queue_for("conf-lookup").connection.hello().get("protocolVersion")}
+        hello = queue_for("conf-lookup").connection.hello()
+        return {
+            "protocolVersion": hello.get("protocolVersion"),
+            "capabilities": hello.get("capabilities"),
+        }
     if op == "process":
         process_until(req)
         return {}

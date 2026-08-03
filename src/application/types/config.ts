@@ -8,7 +8,12 @@ export interface QueueManagerConfig {
   maxWaitingDeps?: number;
   /** Maximum queue label values emitted in one Prometheus scrape; zero disables them. */
   maxPrometheusQueues?: number;
+  /** Maximum retained lifecycle events per queue. */
+  maxQueueEvents?: number;
+  /** Maximum retained one-minute metric buckets per queue and terminal state. */
+  maxMetricDataPoints?: number;
   cleanupIntervalMs?: number;
+  /** Retry delay after a processing-timeout transition fails. */
   jobTimeoutCheckMs?: number;
   dependencyCheckMs?: number;
   stallCheckMs?: number;
@@ -23,6 +28,8 @@ export const DEFAULT_CONFIG = {
   maxCustomIds: 50_000,
   maxWaitingDeps: 10_000,
   maxPrometheusQueues: 100,
+  maxQueueEvents: 10_000,
+  maxMetricDataPoints: 20_160,
   cleanupIntervalMs: 10_000,
   jobTimeoutCheckMs: 5_000,
   dependencyCheckMs: 30_000,

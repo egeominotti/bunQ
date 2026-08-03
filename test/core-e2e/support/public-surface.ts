@@ -4,6 +4,31 @@ import type { CoreSurface, CoverageMode } from './tracker';
 const ROOT = `${import.meta.dir}/../../..`;
 const API_MODULES = ['src/client/index.ts', 'src/client/workflow/index.ts'] as const;
 const TCP_ONLY_SURFACES = new Set<CoreSurface>(['TcpConnectionPool']);
+const EMBEDDED_SYNC_BOUNDARIES = new Set([
+  'Bunqueue.count',
+  'Bunqueue.getDlq',
+  'Bunqueue.getDlqConfig',
+  'Bunqueue.getDlqStats',
+  'Queue.clean',
+  'Queue.count',
+  'Queue.getActive',
+  'Queue.getCompleted',
+  'Queue.getCountsPerPriority',
+  'Queue.getDelayed',
+  'Queue.getDlq',
+  'Queue.getDlqConfig',
+  'Queue.getDlqStats',
+  'Queue.getFailed',
+  'Queue.getJobs',
+  'Queue.getStallConfig',
+  'Queue.getWaiting',
+  'Queue.isPaused',
+  'QueueGroup.drainAll',
+  'QueueGroup.listQueues',
+  'QueueGroup.obliterateAll',
+  'QueueGroup.pauseAll',
+  'QueueGroup.resumeAll',
+]);
 
 function isPublicDeclaration(declaration: ts.Declaration): boolean {
   if (!ts.canHaveModifiers(declaration)) return true;
@@ -71,7 +96,8 @@ export function discoverPublicSurface(): Map<CoreSurface, string[]> {
 export function isCoverageModeApplicable(key: string, mode: CoverageMode): boolean {
   const separator = key.indexOf('.');
   const surface = separator >= 0 ? key.slice(0, separator) : key;
-  return mode === 'tcp' || !TCP_ONLY_SURFACES.has(surface);
+  if (mode === 'embedded') return !TCP_ONLY_SURFACES.has(surface);
+  return !EMBEDDED_SYNC_BOUNDARIES.has(key);
 }
 
 export function expectedCoverageKeys(mode?: CoverageMode): string[] {

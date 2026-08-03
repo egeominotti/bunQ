@@ -1,9 +1,10 @@
 import type { Database } from 'bun:sqlite';
 import type { Job } from '../../domain/types/job';
+import { encodeJobOptions } from './jobOptionsBlob';
 import { pack, persistedInitialState, persistedStallCount } from './sqliteSerializer';
 import type { BatchInsertResult } from './types/batch';
 
-const COLUMNS_PER_ROW = 29;
+const COLUMNS_PER_ROW = 31;
 const MAX_ROWS_PER_INSERT = Math.floor(999 / COLUMNS_PER_ROW);
 
 function isConstraintError(error: Error): boolean {
@@ -57,18 +58,18 @@ export class BatchInsertManager {
     let statement = this.cache.get(size);
     if (!statement) {
       const rowPlaceholder =
-        '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       const placeholders = Array(size).fill(rowPlaceholder).join(', ');
       const sql = `INSERT INTO jobs (
-        id, queue, data, priority, created_at, run_at, attempts, max_attempts,
+        id, queue, name, data, priority, created_at, run_at, attempts, max_attempts,
         backoff, ttl, timeout, unique_key, custom_id, depends_on, parent_id,
         children_ids, tags, state, lifo, group_id, remove_on_complete, remove_on_fail,
         fail_parent_on_failure, remove_dependency_on_failure,
         continue_parent_on_failure, ignore_dependency_on_failure,
-        stall_timeout, stall_count, timeline
+        stall_timeout, stall_count, timeline, extended_options
       ) VALUES ${placeholders}
       ON CONFLICT(id) DO UPDATE SET
-        queue=excluded.queue, data=excluded.data, priority=excluded.priority,
+        queue=excluded.queue, name=excluded.name, data=excluded.data, priority=excluded.priority,
         created_at=excluded.created_at, run_at=excluded.run_at, attempts=excluded.attempts,
         max_attempts=excluded.max_attempts, backoff=excluded.backoff, ttl=excluded.ttl,
         timeout=excluded.timeout, unique_key=excluded.unique_key, custom_id=excluded.custom_id,
@@ -81,6 +82,7 @@ export class BatchInsertManager {
         ignore_dependency_on_failure=excluded.ignore_dependency_on_failure,
         stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
         timeline=excluded.timeline, dlq_retry_state=excluded.dlq_retry_state,
+        extended_options=excluded.extended_options,
         started_at=excluded.started_at, completed_at=excluded.completed_at,
         progress=excluded.progress, progress_msg=excluded.progress_msg,
         last_heartbeat=excluded.last_heartbeat, stacktrace=excluded.stacktrace`;
@@ -97,6 +99,7 @@ export class BatchInsertManager {
       values.push(
         job.id,
         job.queue,
+        job.name,
         pack(job.data),
         job.priority,
         job.createdAt,
@@ -123,7 +126,8 @@ export class BatchInsertManager {
         job.ignoreDependencyOnFailure ? 1 : 0,
         job.stallTimeout,
         persistedStallCount(job),
-        job.timeline.length > 0 ? pack(job.timeline) : null
+        job.timeline.length > 0 ? pack(job.timeline) : null,
+        encodeJobOptions(job)
       );
     }
     statement.run(...(values as (string | number | bigint | null | Uint8Array)[]));

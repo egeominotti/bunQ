@@ -32,12 +32,12 @@ defmodule Bunqueue.Job do
 
   @spec from_wire(map(), GenServer.server(), String.t() | nil) :: t()
   def from_wire(raw, connection, token \\ nil) do
-    data = Map.get(raw, "data") || %{}
+    {name, data} = name_and_data(raw)
 
     %__MODULE__{
       id: to_string(Map.get(raw, "id", "")),
       queue: to_string(Map.get(raw, "queue", "")),
-      name: if(is_map(data), do: Map.get(data, "name")),
+      name: name,
       data: data,
       state: Map.get(raw, "state"),
       attempts_made: Map.get(raw, "attemptsMade", 0),
@@ -46,6 +46,19 @@ defmodule Bunqueue.Job do
       connection: connection,
       raw: raw
     }
+  end
+
+  defp name_and_data(%{"name" => name} = raw) when is_binary(name),
+    do: {name, Map.get(raw, "data")}
+
+  defp name_and_data(raw) do
+    data = Map.get(raw, "data")
+
+    if is_map(data) and is_binary(Map.get(data, "name")) do
+      {Map.get(data, "name"), Map.delete(data, "name")}
+    else
+      {nil, data}
+    end
   end
 
   @spec update_progress(t(), number(), String.t() | nil) ::

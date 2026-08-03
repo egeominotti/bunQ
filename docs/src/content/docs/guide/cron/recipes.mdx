@@ -311,7 +311,17 @@ queue.add("sync",
 </TabItem>
 </Tabs>
 
-Note: `repeat.pattern` on `queue.add` is not evaluated. Cron patterns require `upsertJobScheduler` or the CLI.
+`repeat.pattern` on `queue.add` uses the same cron parser as named schedulers.
+The directly added generation runs first; every successful completion creates
+the next generation at the calculated cron deadline. `tz`, `startDate`,
+`endDate`, `offset`, `limit`, and `immediately` stay attached to the chain, and
+the chain survives a SQLite-backed broker restart.
+
+An `offset` shifts each cron tick without skipping a tick whose shifted deadline
+is still in the future. Negative offsets advance to the next future shifted
+tick instead of creating a zero-delay loop. For interval repeats, the offset
+sets the first successor phase and later generations continue on `every`
+cadence; `immediately` applies only to the directly added generation.
 
 ## Where to go next
 

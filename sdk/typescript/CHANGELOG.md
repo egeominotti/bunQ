@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Treat broker-authoritative late `ACK`/`FAIL` outcomes as ignored rather than
+  locally completed or failed. Batched ACKs now use `ignoredIndices`, so
+  duplicate job IDs are settled by input position without false events or
+  counter increments.
+- Forward a Worker-owned Job's lease token through `retry()`, `changeDelay()`,
+  `moveToDelayed()`, and `discard()`, and accept the token on the matching Queue
+  mutation methods. Active transitions now satisfy broker ownership instead
+  of failing, silently leaving the job active, or allowing an old delivery to
+  discard a newer generation.
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send `PUSH`/`PUSHB` names through top-level `name`, preserve user `data`
+  without wrapping or reserving `data.name`, decode legacy envelopes on read,
+  and send scheduler job names through `jobName`.
 - Forward the optional `duration` from `setGlobalRateLimit(max, duration)` to
   the broker instead of silently applying the one-second default.
 - Let the operating system allocate an independent HTTP port for every E2E

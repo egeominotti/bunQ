@@ -1,340 +1,298 @@
-/**
- * Comprehensive Benchmark: Embedded vs TCP Mode
- *
- * Tests both modes with identical workloads at different scales
- * Run: bun run bench/comprehensive.ts
- */
+import { Queue as EmbeddedQueue, Worker as EmbeddedWorker } from '../src/client';
+import { Queue as TcpQueue, Worker as TcpWorker } from '../src/client';
+import { shutdownManager } from '../src/client/manager';
+import { type BenchResult, printComparison, printResults } from './comprehensive-report';
+import {
+  assertExactCompletion,
+  assertExactDeliveries,
+  closeAll,
+  positiveInteger,
+  waitForAuthoritativeCompletion,
+} from './native-benchmark-integrity';
 
-// Suppress console.log during benchmark
 const originalLog = console.log;
 const originalInfo = console.info;
 let suppressLogs = false;
-
-console.log = (...args: unknown[]) => {
-  if (!suppressLogs) originalLog(...args);
-};
-console.info = (...args: unknown[]) => {
-  if (!suppressLogs) originalInfo(...args);
-};
-
-import { Queue as EmbeddedQueue, Worker as EmbeddedWorker } from '../src/client';
-import { Queue as TcpQueue, Worker as TcpWorker } from '../src/client';
-
 const SCALES = [1000, 5000, 10000, 50000];
 const BULK_SIZE = 100;
 const CONCURRENCY = 10;
 const PAYLOAD = { data: 'x'.repeat(100) };
-
-interface BenchResult {
-  scale: number;
-  pushOps: number;
-  bulkPushOps: number;
-  processOps: number;
+const BENCH_HOST = process.env.BENCH_HOST ?? 'localhost';
+const BENCH_PORT = Number.parseInt(process.env.BENCH_PORT ?? '6789', 10);
+const PROCESS_TIMEOUT_MS = positiveInteger('BENCH_TIMEOUT_MS', 600_000);
+if (!Number.isInteger(BENCH_PORT) || BENCH_PORT < 1 || BENCH_PORT > 65_535) {
+  throw new Error(
+    `BENCH_PORT must be an integer from 1 to 65535, received ${process.env.BENCH_PORT}`
+  );
 }
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function log(msg: string) {
-  originalLog(msg);
-}
-
-// ============ EMBEDDED MODE BENCHMARKS ============
-
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const log = (message: string): void => originalLog(message);
+const connection = (poolSize = 32) => ({
+  host: BENCH_HOST,
+  port: BENCH_PORT,
+  poolSize,
+  pingInterval: 0,
+  commandTimeout: 60_000,
+});
 async function runEmbeddedBenchmarks(): Promise<BenchResult[]> {
-  log('\n📦 EMBEDDED MODE (Direct SQLite)\n');
+  log('\n📦 EMBEDDED MODE (In-memory)\n');
   log('═'.repeat(50));
-
   const results: BenchResult[] = [];
   suppressLogs = true;
+  try {
+    for (const scale of SCALES) {
+      log(`\n🔄 Testing ${scale.toLocaleString()} jobs...`);
+      const processQueueName = `emb-proc-${scale}-${Date.now()}`;
+      let pushQueue: EmbeddedQueue | undefined;
+      let bulkQueue: EmbeddedQueue | undefined;
+      let processQueue: EmbeddedQueue | undefined;
+      let worker: EmbeddedWorker | undefined;
 
-  for (const scale of SCALES) {
-    log(`\n🔄 Testing ${scale.toLocaleString()} jobs...`);
+      try {
+        pushQueue = new EmbeddedQueue(`emb-push-${scale}-${Date.now()}`, { embedded: true });
+        bulkQueue = new EmbeddedQueue(`emb-bulk-${scale}-${Date.now()}`, { embedded: true });
+        processQueue = new EmbeddedQueue(processQueueName, { embedded: true });
+        await sleep(50);
+        const pushStart = performance.now();
+        for (let index = 0; index < scale; index++) await pushQueue.add('job', PAYLOAD);
+        const pushMs = performance.now() - pushStart;
+        const pushOps = Math.round((scale / pushMs) * 1000);
+        log(`  Push: ${pushOps.toLocaleString()} ops/sec`);
 
-    // 1. Push benchmark
-    const pushQueue = new EmbeddedQueue(`emb-push-${scale}-${Date.now()}`, { embedded: true });
-    await sleep(50);
+        const jobs = Array.from({ length: BULK_SIZE }, (_, index) => ({
+          name: 'bulk-job',
+          data: { ...PAYLOAD, i: index },
+        }));
+        const bulkIterations = Math.floor(scale / BULK_SIZE);
+        const bulkStart = performance.now();
+        for (let index = 0; index < bulkIterations; index++) await bulkQueue.addBulk(jobs);
+        const bulkMs = performance.now() - bulkStart;
+        const bulkPushOps = Math.round(((bulkIterations * BULK_SIZE) / bulkMs) * 1000);
+        log(`  Bulk Push: ${bulkPushOps.toLocaleString()} ops/sec`);
 
-    const pushStart = performance.now();
-    for (let i = 0; i < scale; i++) {
-      await pushQueue.add('job', PAYLOAD);
-    }
-    const pushMs = performance.now() - pushStart;
-    const pushOps = Math.round((scale / pushMs) * 1000);
-    log(`  Push: ${pushOps.toLocaleString()} ops/sec`);
-
-    // 2. Bulk Push benchmark
-    const bulkQueue = new EmbeddedQueue(`emb-bulk-${scale}-${Date.now()}`, { embedded: true });
-    const jobs = Array.from({ length: BULK_SIZE }, (_, i) => ({
-      name: 'bulk-job',
-      data: { ...PAYLOAD, i },
-    }));
-
-    const bulkIterations = Math.floor(scale / BULK_SIZE);
-    const bulkStart = performance.now();
-    for (let i = 0; i < bulkIterations; i++) {
-      await bulkQueue.addBulk(jobs);
-    }
-    const bulkMs = performance.now() - bulkStart;
-    const bulkPushOps = Math.round(((bulkIterations * BULK_SIZE) / bulkMs) * 1000);
-    log(`  Bulk Push: ${bulkPushOps.toLocaleString()} ops/sec`);
-
-    // 3. Process benchmark
-    const embProcQueueName = `emb-proc-${scale}-${Date.now()}`;
-    const processQueue = new EmbeddedQueue(embProcQueueName, { embedded: true });
-    let processed = 0;
-
-    const worker = new EmbeddedWorker(
-      embProcQueueName,
-      async () => {
-        processed++;
-        return { ok: true };
-      },
-      { embedded: true, concurrency: CONCURRENCY }
-    );
-
-    await sleep(50);
-    const processStart = performance.now();
-
-    // Push in batches
-    for (let i = 0; i < scale; i += 500) {
-      const batch = Math.min(500, scale - i);
-      const promises = [];
-      for (let j = 0; j < batch; j++) {
-        promises.push(processQueue.add('job', PAYLOAD));
+        const acceptedIds = new Set<string>();
+        const invokedIds = new Set<string>();
+        let invocations = 0;
+        let workerError: unknown;
+        worker = new EmbeddedWorker(
+          processQueueName,
+          (job) => {
+            invocations++;
+            invokedIds.add(job.id);
+            return { ok: true };
+          },
+          { embedded: true, concurrency: CONCURRENCY }
+        );
+        worker.on('error', (error) => {
+          workerError = error;
+        });
+        await sleep(50);
+        const processStart = performance.now();
+        const deadline = Date.now() + PROCESS_TIMEOUT_MS;
+        for (let index = 0; index < scale; index += 500) {
+          const batch = Math.min(500, scale - index);
+          const added = await Promise.all(
+            Array.from({ length: batch }, () => processQueue.add('job', PAYLOAD))
+          );
+          for (const job of added) acceptedIds.add(job.id);
+        }
+        assertExactCompletion(`Embedded accepted ${scale}`, scale, acceptedIds.size, deadline);
+        await waitForAuthoritativeCompletion({
+          label: `Embedded process ${scale}`,
+          expected: scale,
+          deadline,
+          getJobCounts: () => processQueue.getJobCounts(),
+          getWorkerError: () => workerError,
+        });
+        assertExactCompletion(`Embedded invocations ${scale}`, scale, invocations, deadline);
+        assertExactDeliveries(
+          `Embedded process ${scale}`,
+          acceptedIds,
+          invokedIds,
+          invocations,
+          scale
+        );
+        const processMs = performance.now() - processStart;
+        const processOps = Math.round((scale / processMs) * 1000);
+        log(`  Process: ${processOps.toLocaleString()} ops/sec`);
+        results.push({ scale, pushOps, bulkPushOps, processOps });
+      } finally {
+        await closeAll([worker, processQueue, bulkQueue, pushQueue]);
+        shutdownManager();
       }
-      await Promise.all(promises);
     }
-
-    while (processed < scale) {
-      await sleep(5);
-    }
-
-    const processMs = performance.now() - processStart;
-    const processOps = Math.round((scale / processMs) * 1000);
-    log(`  Process: ${processOps.toLocaleString()} ops/sec`);
-
-    await worker.close();
-
-    results.push({ scale, pushOps, bulkPushOps, processOps });
+    return results;
+  } finally {
+    suppressLogs = false;
+    shutdownManager();
   }
-
-  suppressLogs = false;
-  return results;
 }
-
-// ============ TCP MODE BENCHMARKS ============
 
 async function runTcpBenchmarks(): Promise<BenchResult[]> {
-  log('\n\n🌐 TCP MODE (Network + SQLite)\n');
+  log('\n\n🌐 TCP MODE (Network + broker persistence)\n');
   log('═'.repeat(50));
-
   const results: BenchResult[] = [];
   suppressLogs = true;
 
-  for (const scale of SCALES) {
-    log(`\n🔄 Testing ${scale.toLocaleString()} jobs...`);
+  try {
+    for (const scale of SCALES) {
+      log(`\n🔄 Testing ${scale.toLocaleString()} jobs...`);
+      const processQueueName = `tcp-proc-${scale}-${Date.now()}`;
+      let pushQueue: TcpQueue | undefined;
+      let bulkQueue: TcpQueue | undefined;
+      let processQueue: TcpQueue | undefined;
+      let worker: TcpWorker | undefined;
 
-    // 1. Push benchmark
-    const pushQueue = new TcpQueue(`tcp-push-${scale}-${Date.now()}`, {
-      connection: { host: 'localhost', port: 6789, poolSize: 32 },
-    });
-    await sleep(200);
+      try {
+        pushQueue = new TcpQueue(`tcp-push-${scale}-${Date.now()}`, {
+          embedded: false,
+          connection: connection(),
+        });
+        bulkQueue = new TcpQueue(`tcp-bulk-${scale}-${Date.now()}`, {
+          embedded: false,
+          connection: connection(),
+        });
+        processQueue = new TcpQueue(processQueueName, {
+          embedded: false,
+          connection: connection(),
+        });
+        await sleep(200);
+        const pushStart = performance.now();
+        for (let index = 0; index < scale; index += 100) {
+          const batch = Math.min(100, scale - index);
+          await Promise.all(Array.from({ length: batch }, () => pushQueue.add('job', PAYLOAD)));
+        }
+        const pushMs = performance.now() - pushStart;
+        const pushOps = Math.round((scale / pushMs) * 1000);
+        log(`  Push: ${pushOps.toLocaleString()} ops/sec`);
 
-    const pushStart = performance.now();
-    for (let i = 0; i < scale; i += 100) {
-      const batch = Math.min(100, scale - i);
-      const promises = [];
-      for (let j = 0; j < batch; j++) {
-        promises.push(pushQueue.add('job', PAYLOAD));
+        const jobs = Array.from({ length: BULK_SIZE }, (_, index) => ({
+          name: 'bulk-job',
+          data: { ...PAYLOAD, i: index },
+        }));
+        const bulkIterations = Math.floor(scale / BULK_SIZE);
+        const bulkStart = performance.now();
+        for (let index = 0; index < bulkIterations; index++) await bulkQueue.addBulk(jobs);
+        const bulkMs = performance.now() - bulkStart;
+        const bulkPushOps = Math.round(((bulkIterations * BULK_SIZE) / bulkMs) * 1000);
+        log(`  Bulk Push: ${bulkPushOps.toLocaleString()} ops/sec`);
+
+        const acceptedIds = new Set<string>();
+        const invokedIds = new Set<string>();
+        let invocations = 0;
+        let workerError: unknown;
+        worker = new TcpWorker(
+          processQueueName,
+          (job) => {
+            invocations++;
+            invokedIds.add(job.id);
+            return { ok: true };
+          },
+          {
+            embedded: false,
+            connection: connection(),
+            concurrency: CONCURRENCY,
+            heartbeatInterval: 5000,
+            batchSize: 20,
+          }
+        );
+        worker.on('error', (error) => {
+          workerError = error;
+        });
+        await sleep(300);
+        const processStart = performance.now();
+        const deadline = Date.now() + PROCESS_TIMEOUT_MS;
+        for (let index = 0; index < scale; index += 500) {
+          const batch = Math.min(500, scale - index);
+          const added = await Promise.all(
+            Array.from({ length: batch }, () => processQueue.add('job', PAYLOAD))
+          );
+          for (const job of added) acceptedIds.add(job.id);
+        }
+        assertExactCompletion(`TCP accepted ${scale}`, scale, acceptedIds.size, deadline);
+        await waitForAuthoritativeCompletion({
+          label: `TCP process ${scale}`,
+          expected: scale,
+          deadline,
+          getJobCounts: () => processQueue.getJobCounts(),
+          getWorkerError: () => workerError,
+        });
+        assertExactCompletion(`TCP invocations ${scale}`, scale, invocations, deadline);
+        assertExactDeliveries(`TCP process ${scale}`, acceptedIds, invokedIds, invocations, scale);
+        const processMs = performance.now() - processStart;
+        const processOps = Math.round((scale / processMs) * 1000);
+        log(`  Process: ${processOps.toLocaleString()} ops/sec`);
+        results.push({ scale, pushOps, bulkPushOps, processOps });
+      } finally {
+        await closeAll([worker, processQueue, bulkQueue, pushQueue]);
       }
-      await Promise.all(promises);
     }
-    const pushMs = performance.now() - pushStart;
-    const pushOps = Math.round((scale / pushMs) * 1000);
-    log(`  Push: ${pushOps.toLocaleString()} ops/sec`);
-
-    await sleep(50);
-    await pushQueue.close();
-
-    // 2. Bulk Push benchmark
-    const bulkQueue = new TcpQueue(`tcp-bulk-${scale}-${Date.now()}`, {
-      connection: { host: 'localhost', port: 6789, poolSize: 32 },
-    });
-    await sleep(200);
-
-    const jobs = Array.from({ length: BULK_SIZE }, (_, i) => ({
-      name: 'bulk-job',
-      data: { ...PAYLOAD, i },
-    }));
-
-    const bulkIterations = Math.floor(scale / BULK_SIZE);
-    const bulkStart = performance.now();
-    for (let i = 0; i < bulkIterations; i++) {
-      await bulkQueue.addBulk(jobs);
-    }
-    const bulkMs = performance.now() - bulkStart;
-    const bulkPushOps = Math.round(((bulkIterations * BULK_SIZE) / bulkMs) * 1000);
-    log(`  Bulk Push: ${bulkPushOps.toLocaleString()} ops/sec`);
-
-    await sleep(50);
-    await bulkQueue.close();
-
-    // 3. Process benchmark
-    let processed = 0;
-    const processQueueName = `tcp-proc-${scale}-${Date.now()}`;
-
-    const worker = new TcpWorker(
-      processQueueName,
-      async () => {
-        processed++;
-        return { ok: true };
-      },
-      {
-        connection: {
-          host: 'localhost',
-          port: 6789,
-          poolSize: 32,
-          pingInterval: 0,
-          commandTimeout: 60000,
-        },
-        concurrency: CONCURRENCY,
-        heartbeatInterval: 0,
-        batchSize: 20,
-      }
-    );
-
-    const processQueue = new TcpQueue(processQueueName, {
-      connection: {
-        host: 'localhost',
-        port: 6789,
-        poolSize: 32,
-        pingInterval: 0,
-        commandTimeout: 60000,
-      },
-    });
-
-    await sleep(300);
-    const processStart = performance.now();
-
-    // Push in batches
-    for (let i = 0; i < scale; i += 500) {
-      const batch = Math.min(500, scale - i);
-      const promises = [];
-      for (let j = 0; j < batch; j++) {
-        promises.push(processQueue.add('job', PAYLOAD));
-      }
-      await Promise.all(promises);
-    }
-
-    while (processed < scale) {
-      await sleep(5);
-    }
-
-    const processMs = performance.now() - processStart;
-    const processOps = Math.round((scale / processMs) * 1000);
-    log(`  Process: ${processOps.toLocaleString()} ops/sec`);
-
-    await worker.close();
-    await sleep(50);
-    await processQueue.close();
-
-    results.push({ scale, pushOps, bulkPushOps, processOps });
+    return results;
+  } finally {
+    suppressLogs = false;
   }
-
-  suppressLogs = false;
-  return results;
 }
 
-// ============ MAIN ============
+async function tcpIsAvailable(): Promise<boolean> {
+  const queue = new TcpQueue(`bench-connect-${Date.now()}`, {
+    embedded: false,
+    connection: { ...connection(1), commandTimeout: 2000 },
+  });
+  try {
+    await queue.getJobCounts();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await closeAll([queue]);
+  }
+}
 
-async function main() {
+async function main(): Promise<void> {
   log('═══════════════════════════════════════════════════════════════');
   log('         bunqueue Comprehensive Benchmark');
   log('         Embedded vs TCP Mode');
   log('═══════════════════════════════════════════════════════════════');
-  log(`\nScales: ${SCALES.map((s) => s.toLocaleString()).join(', ')} jobs`);
+  log(`\nScales: ${SCALES.map((scale) => scale.toLocaleString()).join(', ')} jobs`);
   log(`Bulk size: ${BULK_SIZE}`);
   log(`Concurrency: ${CONCURRENCY}`);
   log(`Payload: ${JSON.stringify(PAYLOAD).length} bytes`);
+  log(`Process timeout: ${PROCESS_TIMEOUT_MS} ms`);
 
-  // Check TCP server
-  let tcpAvailable = false;
-  try {
-    suppressLogs = true;
-    const testQueue = new TcpQueue('test-conn', {
-      connection: { host: 'localhost', port: 6789 },
-    });
-    await sleep(500);
-    await testQueue.close();
-    suppressLogs = false;
-    tcpAvailable = true;
-    log('\n✓ TCP server connected (port 6789)');
-  } catch {
-    suppressLogs = false;
-    log('\n✗ TCP server not available. Start with: bun run start');
-    log('Running EMBEDDED mode only...');
-  }
-
+  const tcpAvailable = await tcpIsAvailable();
+  log(
+    tcpAvailable
+      ? `\n✓ TCP server connected (${BENCH_HOST}:${BENCH_PORT})`
+      : `\n✗ TCP server unavailable at ${BENCH_HOST}:${BENCH_PORT}; running Embedded only`
+  );
   const embeddedResults = await runEmbeddedBenchmarks();
+  const tcpResults = tcpAvailable ? await runTcpBenchmarks() : [];
 
-  let tcpResults: BenchResult[] = [];
-  if (tcpAvailable) {
-    tcpResults = await runTcpBenchmarks();
-  }
-
-  // Print summary
-  log('\n\n');
-  log('═══════════════════════════════════════════════════════════════');
+  log('\n\n═══════════════════════════════════════════════════════════════');
   log('                         RESULTS');
   log('═══════════════════════════════════════════════════════════════');
-
-  printResults('EMBEDDED', embeddedResults);
+  printResults(log, 'EMBEDDED', embeddedResults);
   if (tcpResults.length > 0) {
-    printResults('TCP', tcpResults);
-    printComparison(embeddedResults, tcpResults);
+    printResults(log, 'TCP', tcpResults);
+    printComparison(log, embeddedResults, tcpResults);
   }
-
-  process.exit(0);
 }
 
-function printResults(mode: string, results: BenchResult[]) {
-  log(`\n📊 ${mode} MODE RESULTS\n`);
-  log('┌──────────┬────────────────┬────────────────┬────────────────┐');
-  log('│ Scale    │ Push (ops/s)   │ Bulk (ops/s)   │ Process (ops/s)│');
-  log('├──────────┼────────────────┼────────────────┼────────────────┤');
-
-  for (const r of results) {
-    const scale = r.scale.toLocaleString().padStart(8);
-    const push = r.pushOps.toLocaleString().padStart(12);
-    const bulk = r.bulkPushOps.toLocaleString().padStart(12);
-    const proc = r.processOps.toLocaleString().padStart(12);
-    log(`│ ${scale} │ ${push}   │ ${bulk}   │ ${proc}   │`);
-  }
-
-  log('└──────────┴────────────────┴────────────────┴────────────────┘');
+if (import.meta.main) {
+  console.log = (...args: unknown[]) => {
+    if (!suppressLogs) originalLog(...args);
+  };
+  console.info = (...args: unknown[]) => {
+    if (!suppressLogs) originalInfo(...args);
+  };
+  main()
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      suppressLogs = false;
+      console.log = originalLog;
+      console.info = originalInfo;
+    });
 }
-
-function printComparison(embedded: BenchResult[], tcp: BenchResult[]) {
-  log('\n📈 EMBEDDED vs TCP (Embedded is X times faster)\n');
-  log('┌──────────┬────────────────┬────────────────┬────────────────┐');
-  log('│ Scale    │ Push           │ Bulk           │ Process        │');
-  log('├──────────┼────────────────┼────────────────┼────────────────┤');
-
-  for (let i = 0; i < embedded.length; i++) {
-    const e = embedded[i];
-    const t = tcp[i];
-    const scale = e.scale.toLocaleString().padStart(8);
-    const pushRatio = (e.pushOps / t.pushOps).toFixed(1) + 'x';
-    const bulkRatio = (e.bulkPushOps / t.bulkPushOps).toFixed(1) + 'x';
-    const procRatio = (e.processOps / t.processOps).toFixed(1) + 'x';
-    log(
-      `│ ${scale} │ ${pushRatio.padStart(12)}   │ ${bulkRatio.padStart(12)}   │ ${procRatio.padStart(12)}   │`
-    );
-  }
-
-  log('└──────────┴────────────────┴────────────────┴────────────────┘');
-}
-
-main().catch(console.error);

@@ -65,6 +65,7 @@ export class QueueManagerControl extends QueueManagerQueries {
       if (location?.type === 'processing') {
         this.processingShards[location.shardIdx]?.delete(jobId);
       }
+      this.timeoutScheduler.cancel(jobId);
       this.jobIndex.delete(jobId);
       this.completedJobs.delete(jobId);
       this.completedJobsData.delete(jobId);
@@ -103,6 +104,7 @@ export class QueueManagerControl extends QueueManagerQueries {
 
   protected purgeQueueMetadata(queue: string): void {
     this.perQueueMetrics.delete(queue);
+    this.telemetryJournal.clearQueue(queue);
     this.storage?.deleteQueueState(queue);
   }
 

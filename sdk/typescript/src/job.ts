@@ -33,17 +33,33 @@ export class Job<T = unknown> {
   }
 
   get data(): T {
-    return this.raw.data as T;
+    const data = this.raw.data;
+    if (this.topLevelName() !== undefined) return data as T;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const record = data as Record<string, unknown>;
+      if (typeof record.name === 'string') {
+        const { name: _legacyName, ...userData } = record;
+        return userData as T;
+      }
+    }
+    return data as T;
   }
 
-  /** Job name (stored inside `data.name`, mirroring the official client). */
+  /** Job name, with compatibility for pre-name-field data envelopes. */
   get name(): string | undefined {
+    const modern = this.topLevelName();
+    if (modern !== undefined) return modern;
     const data = this.raw.data;
-    if (data && typeof data === 'object' && 'name' in data) {
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'name' in data) {
       const name = (data as Record<string, unknown>).name;
-      return name === undefined || name === null ? undefined : String(name);
+      return typeof name === 'string' ? name : undefined;
     }
     return undefined;
+  }
+
+  private topLevelName(): string | undefined {
+    const name = this.raw.name;
+    return name === undefined || name === null ? undefined : String(name);
   }
 
   get priority(): number {
@@ -164,16 +180,24 @@ export class Job<T = unknown> {
   }
 
   async discard(): Promise<void> {
-    await this.call({ cmd: 'Discard', id: this.id });
+    await this.call({
+      cmd: 'Discard',
+      id: this.id,
+      ...(this.token === undefined ? {} : { token: this.token }),
+    });
   }
 
   async promote(): Promise<void> {
     await this.call({ cmd: 'Promote', id: this.id });
   }
 
-  /** failed → waiting (BullMQ contract; MoveToWait over TCP). */
+  /** Move the job back to waiting, forwarding a Worker-owned lease when present. */
   async retry(): Promise<void> {
-    await this.call({ cmd: 'MoveToWait', id: this.id });
+    await this.call({
+      cmd: 'MoveToWait',
+      id: this.id,
+      ...(this.token === undefined ? {} : { token: this.token }),
+    });
   }
 
   async updateData(data: unknown): Promise<void> {
@@ -190,10 +214,20 @@ export class Job<T = unknown> {
   }
 
   async changeDelay(delayMs: number): Promise<void> {
-    await this.call({ cmd: 'ChangeDelay', id: this.id, delay: delayMs });
+    await this.call({
+      cmd: 'ChangeDelay',
+      id: this.id,
+      delay: delayMs,
+      ...(this.token === undefined ? {} : { token: this.token }),
+    });
   }
 
   async moveToDelayed(delayMs: number): Promise<void> {
-    await this.call({ cmd: 'MoveToDelayed', id: this.id, delay: delayMs });
+    await this.call({
+      cmd: 'MoveToDelayed',
+      id: this.id,
+      delay: delayMs,
+      ...(this.token === undefined ? {} : { token: this.token }),
+    });
   }
 }

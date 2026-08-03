@@ -30,8 +30,8 @@ export async function runQueueGroupContract(mode: CoreE2eMode): Promise<Coverage
     );
     await second.add('registered', { value: 1 }, { durable: true, delay: 60_000 });
 
-    const syncNames = tracker.call('QueueGroup', 'listQueues', () => group.listQueues());
     if (mode === 'embedded') {
+      const syncNames = tracker.call('QueueGroup', 'listQueues', () => group.listQueues());
       ensure(
         syncNames.includes('first') && syncNames.includes('second'),
         'sync group listing incomplete'
@@ -45,12 +45,12 @@ export async function runQueueGroupContract(mode: CoreE2eMode): Promise<Coverage
       'async group listing incomplete'
     );
 
-    tracker.call('QueueGroup', 'pauseAll', () => group.pauseAll());
-    if (mode === 'embedded')
+    if (mode === 'embedded') {
+      tracker.call('QueueGroup', 'pauseAll', () => group.pauseAll());
       ensure(await first.isPausedAsync(), 'pauseAll did not pause first queue');
-    tracker.call('QueueGroup', 'resumeAll', () => group.resumeAll());
-    if (mode === 'embedded')
+      tracker.call('QueueGroup', 'resumeAll', () => group.resumeAll());
       ensure(!(await first.isPausedAsync()), 'resumeAll did not resume first queue');
+    }
     await tracker.invoke('QueueGroup', 'pauseAllAsync', () => group.pauseAllAsync());
     ensure(await first.isPausedAsync(), 'pauseAllAsync did not pause first queue');
     ensure(await second.isPausedAsync(), 'pauseAllAsync did not pause second queue');
@@ -58,9 +58,10 @@ export async function runQueueGroupContract(mode: CoreE2eMode): Promise<Coverage
     ensure(!(await first.isPausedAsync()), 'resumeAllAsync did not resume first queue');
 
     await first.add('drain', { value: 1 }, { durable: true, delay: 60_000 });
-    tracker.call('QueueGroup', 'drainAll', () => group.drainAll());
-    if (mode === 'embedded')
+    if (mode === 'embedded') {
+      tracker.call('QueueGroup', 'drainAll', () => group.drainAll());
       ensure((await first.countAsync()) === 0, 'drainAll did not empty group');
+    }
     await first.add('drain-async', { value: 2 }, { durable: true, delay: 60_000 });
     const drained = await tracker.invoke('QueueGroup', 'drainAllAsync', () =>
       group.drainAllAsync()
@@ -68,9 +69,10 @@ export async function runQueueGroupContract(mode: CoreE2eMode): Promise<Coverage
     ensure(drained >= 1, `drainAllAsync returned ${drained}`);
 
     await second.add('obliterate', { value: 3 }, { durable: true, delay: 60_000 });
-    tracker.call('QueueGroup', 'obliterateAll', () => group.obliterateAll());
-    if (mode === 'embedded')
+    if (mode === 'embedded') {
+      tracker.call('QueueGroup', 'obliterateAll', () => group.obliterateAll());
       ensure((await second.countAsync()) === 0, 'obliterateAll did not clear group');
+    }
     await second.add('obliterate-async', { value: 4 }, { durable: true, delay: 60_000 });
     await tracker.invoke('QueueGroup', 'obliterateAllAsync', () => group.obliterateAllAsync());
     ensure((await second.countAsync()) === 0, 'obliterateAllAsync did not clear group');

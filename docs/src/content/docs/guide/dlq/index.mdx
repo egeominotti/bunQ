@@ -171,14 +171,15 @@ bunqueue dlq purge emails
 ```
 
 :::note[Embedded vs TCP]
-The synchronous query API on this page (`getDlq()`, `getDlqStats()`,
-`retryDlqByFilter()`) reads in-process state and therefore remains embedded-only;
-the synchronous TCP mutation forms are fire-and-forget. The `Async` variants
-work in both modes: `getDlqAsync(filter?)` returns full metadata and operational
-Job objects, `getDlqStatsAsync()` returns authoritative statistics,
-`retryDlqByFilterAsync(filter)` applies server-side filtering, and the existing
-retry/purge/config async forms wait for the real result. `getDlqJobsAsync(count?)`
-remains the compact jobs-only view.
+The synchronous query API on this page (`getDlq()` and `getDlqStats()`) reads
+in-process state and therefore remains embedded-only. Synchronous TCP mutations,
+including `retryDlqByFilter()`, are fire-and-forget and return `0`; the filtered
+retry still reaches the broker. The `Async` variants work in both modes:
+`getDlqAsync(filter?)` returns full metadata and operational Job objects,
+`getDlqStatsAsync()` returns authoritative statistics,
+`retryDlqByFilterAsync(filter)` applies server-side filtering and returns the
+applied count, and the existing retry/purge/config async forms wait for the real
+result. `getDlqJobsAsync(count?)` remains the compact jobs-only view.
 :::
 
 ## Where to go next

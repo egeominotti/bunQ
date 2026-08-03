@@ -75,6 +75,7 @@ self.onmessage = async (event) => {
   try {
     const result = await processor({
       id: job.id,
+      name: job.name,
       data: job.data,
       queue: job.queue,
       attempts: job.attempts,

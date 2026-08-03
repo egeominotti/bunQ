@@ -436,8 +436,9 @@ describe('Monitoring Handlers', () => {
       });
 
       expect(res.ok).toBe(true);
-      expect((res as any).protocolVersion).toBe(2);
+      expect((res as any).protocolVersion).toBe(3);
       expect((res as any).capabilities).toContain('pipelining');
+      expect((res as any).capabilities).toContain('separate-job-name');
       expect((res as any).server).toBe('bunqueue');
       expect((res as any).version).toBeDefined();
     });

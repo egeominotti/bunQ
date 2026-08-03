@@ -1,37 +1,74 @@
 import type { DlqEntry } from '../../../domain/types/dlq';
 import type { FlowFailureMode, FlowFailureRecord } from '../../../domain/types/flow';
 import type { Job, JobId } from '../../../domain/types/job';
+import type { DurableAdmissionMetadata } from '../types/admission';
 import { pack, unpack } from '../sqliteSerializer';
 import { SqliteMutations } from './mutations';
+
+export type FlowLinkWriteMode =
+  | { readonly type: 'update' }
+  | { readonly type: 'insert' }
+  | { readonly type: 'replace'; readonly previousJobId: JobId }
+  | { readonly type: 'transfer-active'; readonly previousJobId: JobId };
 
 /** Atomic persistence for parent/child relationships and failure outbox rows. */
 export abstract class SqliteFlows extends SqliteMutations {
   updateFlowLink(
-    child: Pick<Job, 'id' | 'parentId' | 'data'>,
-    parent: Pick<Job, 'id' | 'childrenIds' | 'dependsOn' | 'data'>,
+    child: Job,
+    parent: Job,
     parentState: 'waiting-children' | 'waiting' | 'prioritized' | 'delayed'
   ): void {
-    this.flushIfBuffered(child.id);
+    this.commitFlowLink(child, parent, parentState, { type: 'update' });
+  }
+
+  commitFlowLink(
+    child: Job,
+    parent: Job,
+    parentState: 'waiting-children' | 'waiting' | 'prioritized' | 'delayed',
+    mode: FlowLinkWriteMode,
+    admission?: DurableAdmissionMetadata
+  ): void {
+    if (mode.type === 'update' && admission !== undefined) {
+      throw new Error('Durable admission metadata requires an inserting flow-link mode');
+    }
+    if (mode.type === 'update') this.flushIfBuffered(child.id);
+    if (mode.type === 'replace') this.flushIfBuffered(mode.previousJobId);
     this.flushIfBuffered(parent.id);
     this.safeWrite(() => {
       const transaction = this.db.transaction(() => {
-        this.db
-          .prepare('UPDATE jobs SET parent_id = ?, data = ? WHERE id = ?')
-          .run(child.parentId, pack(child.data), child.id);
-        this.db
+        this.runAdmissionMetadata(admission);
+        if (mode.type === 'update') {
+          this.db
+            .prepare('UPDATE jobs SET parent_id = ?, data = ? WHERE id = ?')
+            .run(child.parentId, pack(child.data), child.id);
+        } else {
+          if (mode.type === 'replace') this.runDeleteJobRows(mode.previousJobId);
+          if (mode.type === 'transfer-active') {
+            this.runClearActiveDedupKey(mode.previousJobId);
+          }
+          this.runInsertJobStmt(child);
+        }
+        const parentUpdate = this.db
           .prepare(
-            'UPDATE jobs SET children_ids = ?, depends_on = ?, data = ?, state = ? WHERE id = ?'
+            `UPDATE jobs
+             SET children_ids = ?, depends_on = ?, data = ?, state = ?, timeline = ?
+             WHERE id = ?`
           )
           .run(
             parent.childrenIds.length > 0 ? pack(parent.childrenIds) : null,
             parent.dependsOn.length > 0 ? pack(parent.dependsOn) : null,
             pack(parent.data),
             parentState,
+            parent.timeline.length > 0 ? pack(parent.timeline) : null,
             parent.id
           );
+        if (parentUpdate.changes !== 1) {
+          throw new Error(`Flow parent is no longer persisted: ${String(parent.id)}`);
+        }
       });
       transaction();
     });
+    this.finalizeAdmissionMetadata(admission);
   }
 
   backpatchFlowChild(

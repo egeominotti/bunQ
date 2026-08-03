@@ -21,6 +21,7 @@ export interface ChangeDelayCommand extends BaseCommand {
   readonly cmd: 'ChangeDelay';
   readonly id: string;
   readonly delay: number;
+  readonly token?: string;
 }
 export interface SetWebhookEnabledCommand extends BaseCommand {
   readonly cmd: 'SetWebhookEnabled';
@@ -54,6 +55,7 @@ export interface RemoveUnprocessedChildrenCommand extends BaseCommand {
 export interface MoveToWaitCommand extends BaseCommand {
   readonly cmd: 'MoveToWait';
   readonly id: string;
+  readonly token?: string;
 }
 export interface PromoteJobsCommand extends BaseCommand {
   readonly cmd: 'PromoteJobs';

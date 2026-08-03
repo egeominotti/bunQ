@@ -32,8 +32,12 @@ is shown in [`README.md`](README.md).
   keys raise `ArgumentError`; accepted keys must never be silently discarded.
 - `jobId` becomes `customId` only inside bulk/flow job input. Scheduler `limit`
   and `tz` become `maxLimit` and `timezone`.
-- Job payloads always contain a string `"name"` key. Scalar data is retained
-  under `"payload"`.
+- `PUSH` and `PUSHB` send the job name in top-level `"name"` and preserve the
+  complete term in `"data"`, including a user-owned map name, scalar, list, or
+  `nil`. `Job.from_wire/3` unwraps only legacy maps with a string name inside
+  data.
+- Scheduler identity uses `"name"`, spawned jobs use `"jobName"`, and scheduler
+  data remains user-owned.
 
 ## Queue and idempotency
 
@@ -66,7 +70,11 @@ is shown in [`README.md`](README.md).
   owning handler PID, preventing one handler's mailbox traffic from stopping
   another job's heartbeat.
 - ACK/FAIL uses the exact lease token. A handler is counted successful or
-  failed only after that command succeeds; ACK/FAIL errors are surfaced.
+  failed only after the broker applies that transition; ACK/FAIL errors are
+  surfaced. An acknowledged `already-finalized` response settles the
+  `run_once/1` handler attempt without advancing either terminal counter.
+  Any other defined terminal response data is a `ProtocolError`, never an
+  inferred application.
 - Exceptions, throws, and exits are isolated into failure payloads with bounded
   stack traces. `UnrecoverableError` is the only client signal that skips
   retries.

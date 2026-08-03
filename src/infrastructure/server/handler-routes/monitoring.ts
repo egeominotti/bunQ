@@ -5,7 +5,13 @@ import {
   handleDashboardQueue,
   handleDashboardQueues,
 } from '../handlers/dashboard';
-import { handleMetrics, handleStats, handleStorageStatus } from '../handlers/management';
+import {
+  handleMetrics,
+  handleQueueMetrics,
+  handleStats,
+  handleStorageStatus,
+  handleTrimEvents,
+} from '../handlers/management';
 import {
   handleAddLog,
   handleAddWebhook,
@@ -36,7 +42,11 @@ export function routeMonitoringCommand(
     case 'Stats':
       return handleStats(context, requestId);
     case 'Metrics':
-      return handleMetrics(context, requestId);
+      return command.queue !== undefined || command.type !== undefined
+        ? handleQueueMetrics(command, context, requestId)
+        : handleMetrics(context, requestId);
+    case 'TrimEvents':
+      return handleTrimEvents(command, context, requestId);
     case 'Prometheus':
       return handlePrometheus(command, context, requestId);
     case 'AddLog':

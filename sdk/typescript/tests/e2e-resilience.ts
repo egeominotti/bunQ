@@ -12,6 +12,27 @@ import {
   waitFor,
 } from './harness.ts';
 
+interface AckBatcherProbe {
+  add(item: {
+    id: string;
+    token: string;
+    result: unknown;
+    onSettled: (err?: unknown, applied?: boolean) => void;
+  }): void;
+  flush(): Promise<void>;
+}
+
+async function makeAckBatcher(connection: { call: (command: unknown) => Promise<unknown> }) {
+  const { AckBatcher } = (await import('../dist/ack-batcher.js')) as {
+    AckBatcher: new (
+      conn: { call: (command: unknown) => Promise<unknown> },
+      maxSize: number,
+      maxDelayMs: number
+    ) => AckBatcherProbe;
+  };
+  return new AckBatcher(connection, 100, 1000);
+}
+
 test('resilience: maxInFlight applies backpressure and still delivers every command', async () => {
   const events: TelemetryEvent[] = [];
   const queue = new Queue(qname('bp'), {
@@ -76,23 +97,8 @@ test('resilience: ackBatch failed ACKB settles every item exactly once and frees
   // Unit-level: a stub connection whose ACKB always rejects. Every item's
   // onSettled must fire exactly once with the error — a throwing callback
   // (unhandled 'error' emit) must not starve the remaining items.
-  const { AckBatcher } = (await import('../dist/ack-batcher.js')) as {
-    AckBatcher: new (
-      conn: { call: (c: unknown) => Promise<unknown> },
-      maxSize: number,
-      maxDelayMs: number
-    ) => {
-      add(item: {
-        id: string;
-        token: string;
-        result: unknown;
-        onSettled: (err?: unknown) => void;
-      }): void;
-      flush(): Promise<void>;
-    };
-  };
   const failing = { call: () => Promise.reject(new Error('ACKB down')) };
-  const batcher = new AckBatcher(failing, 100, 1000);
+  const batcher = await makeAckBatcher(failing);
   const settled: Record<string, number> = { a: 0, b: 0, c: 0 };
   const errs: unknown[] = [];
   batcher.add({
@@ -130,6 +136,60 @@ test('resilience: ackBatch failed ACKB settles every item exactly once and frees
   assert(
     errs.every((e) => e instanceof Error),
     'every callback received the ACKB error'
+  );
+});
+
+test('resilience: ACKB ignoredIndices settle duplicate IDs by position', async () => {
+  const batcher = await makeAckBatcher({
+    call: async () => ({
+      ok: true,
+      data: { ignoredIds: ['same'], ignoredIndices: [1] },
+    }),
+  });
+  const outcomes: Array<{ error: unknown; applied: boolean | undefined }> = [];
+  for (const id of ['same', 'same', 'other']) {
+    batcher.add({
+      id,
+      token: `token-${outcomes.length}`,
+      result: null,
+      onSettled: (error, applied) => outcomes.push({ error, applied }),
+    });
+  }
+  await batcher.flush();
+  assertEq(outcomes.length, 3, 'every ACKB position settled');
+  assert(
+    outcomes.every(({ error }) => error === undefined),
+    'ignored ACKs are not errors'
+  );
+  assertEq(
+    JSON.stringify(outcomes.map(({ applied }) => applied)),
+    JSON.stringify([true, false, true]),
+    'ignoredIndices selects the second duplicate ID only'
+  );
+});
+
+test('resilience: ACKB never infers duplicate positions from ignoredIds alone', async () => {
+  const batcher = await makeAckBatcher({
+    call: async () => ({ ok: true, data: { ignoredIds: ['same'] } }),
+  });
+  const outcomes: Array<{ error: unknown; applied: boolean | undefined }> = [];
+  for (const token of ['first', 'second']) {
+    batcher.add({
+      id: 'same',
+      token,
+      result: null,
+      onSettled: (error, applied) => outcomes.push({ error, applied }),
+    });
+  }
+  await batcher.flush();
+  assertEq(outcomes.length, 2, 'every ambiguous ACKB position settled');
+  assert(
+    outcomes.every(({ error }) => error instanceof Error),
+    'ambiguity is observable'
+  );
+  assert(
+    outcomes.every(({ applied }) => applied === undefined),
+    'no position was fabricated'
   );
 });
 

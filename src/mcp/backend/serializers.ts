@@ -6,6 +6,7 @@ import type { FlowNodeResult, SerializedCron, SerializedJob } from '../types/ada
 export function serializeMcpJob(job: Job): SerializedJob {
   return {
     id: String(job.id),
+    name: job.name,
     queue: job.queue,
     data: job.data,
     priority: job.priority,

@@ -98,6 +98,8 @@ export async function runStallDetectionContract(mode: Mode): Promise<ContractRes
       options(0)
     );
     terminalWorker.on('error', () => undefined);
+    const stalledEvents: Array<{ jobId: string; reason: string }> = [];
+    terminalWorker.on('stalled', (jobId, reason) => stalledEvents.push({ jobId, reason }));
     const activeState = await eventually(
       () => queue.getJobState(terminalJob.id),
       (state) => state === 'active'
@@ -118,6 +120,10 @@ export async function runStallDetectionContract(mode: Mode): Promise<ContractRes
       `entries=${stalledEntries.length}, state=${terminalState}`
     );
     check(stats.byReason.stalled === 1, 'DLQ statistics classify the stall');
+    check(
+      stalledEvents.some((event) => event.jobId === terminalJob.id && event.reason === 'active'),
+      'Worker emits the broker stall notification with the exact job id'
+    );
     await terminalWorker.close(true);
 
     console.log('\n3. A recoverable stall is redelivered to another worker...');

@@ -191,7 +191,7 @@ src/application/
     <div class="bq-diag-cell">Lock expire <i>every 5s</i></div>
     <div class="bq-diag-cell">Cron <i>precise setTimeout, 60s safety fallback</i></div>
   </div>
-  <p class="bq-diag-note">A job-timeout sweep also runs every 5s, failing active jobs whose processing timeout elapsed. Circuit breaker: after 5 consecutive failures, log a CRITICAL warning but continue retrying.</p>
+  <p class="bq-diag-note">Processing timeouts use one next-deadline timer keyed by each active job's <code>startedAt + timeout</code>. Far-future timers are safely chunked at the runtime ceiling; failed timeout transitions are logged and retried.</p>
 </div>
 
 ### Stall Detection (Two-Phase)

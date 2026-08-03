@@ -122,6 +122,7 @@ export class CronExecution extends CronRuntime {
       cron.uniqueKey ?? (cron.preventOverlap ? `cron:${cron.name}` : undefined);
     const options = cron.jobOptions;
     await (this.pushJob as PushJobCallback)(cron.queue, {
+      name: cron.jobName,
       data: cron.data,
       priority: cron.priority,
       uniqueKey: effectiveUniqueKey,

@@ -11,11 +11,18 @@ export interface JobProxyContext {
 }
 
 export interface JobReflectionMeta {
+  attemptsMade?: number;
+  attemptsStarted?: number;
+  progress?: number;
+  stalledCounter?: number;
   priority?: number;
   delay?: number;
+  processedOn?: number;
+  finishedOn?: number;
   opts?: JobOptions;
   timestamp?: number;
   stacktrace?: string[] | null;
+  returnvalue?: unknown;
   failedReason?: string;
 }
 
@@ -28,6 +35,7 @@ export interface ReflectedFields {
   parent: { id: string; queueQualifiedName: string } | undefined;
   repeatJobKey: string | undefined;
   stacktrace: string[] | null;
+  returnvalue: unknown;
   failedReason: string | undefined;
 }
 

@@ -116,6 +116,13 @@ processing { name: 'world' }
 completed 019f40a5-... { greeted: 'world' }
 ```
 
+The operation name and user payload are independent: this job has
+`job.name === 'greet'` while `job.data.name === 'world'`. Objects, arrays,
+scalars, and null are sent as `data` without wrapping; readers still decode
+jobs written by clients that used the legacy `data.name` envelope. Scheduler
+templates follow the same rule through their distinct `jobName` field.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
 Defaults are `host: 'localhost'` and `port: 6789`, so constructors need no options on a local setup.
 
 ### Step 4. Split producer and worker
@@ -377,6 +384,14 @@ const worker = new Worker('emails', process, {
   ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },
 });
 ```
+
+Worker terminal events are broker-authoritative. If a timeout or retired cron
+generation finalizes a lease while the processor is still returning, the
+broker accepts the late `ACK` or `FAIL` as an ignored outcome and the Worker
+emits neither `completed` nor `failed`. Batched ACKs apply that decision by
+input position, including batches that contain the same job ID more than once.
+Worker-owned `job.discard()` sends the same delivery token as ACK/FAIL, so an
+older processor cannot discard a newer active generation.
 
 Always attach a `worker.on('error', …)` listener: per Node `EventEmitter` semantics an unhandled `error` event throws. The worker frees each job's concurrency slot before emitting, so even a throwing listener cannot degrade throughput — but the error itself is yours to observe.
 

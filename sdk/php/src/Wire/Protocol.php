@@ -15,7 +15,7 @@ use MessagePack\Type\Ext;
 final class Protocol
 {
     /** Matches the server's advertised version (handlers/monitoring.ts). */
-    public const PROTOCOL_VERSION = 2;
+    public const PROTOCOL_VERSION = 3;
 
     /** Mirror of the server-side frame cap. */
     public const MAX_FRAME_SIZE = 64 * 1024 * 1024;
@@ -102,17 +102,10 @@ final class Protocol
         return $length >= 0 && $length <= self::MAX_FRAME_SIZE;
     }
 
-    /** Mirror the JS SDK: the job name travels INSIDE `data`. */
+    /** Build protocol-owned name and data fields without changing user data. */
     public static function jobPayload(string $name, mixed $data): array
     {
-        if ($data === null) {
-            return ['name' => $name];
-        }
-        if (\is_array($data) && !array_is_list($data)) {
-            return ['name' => $name, ...$data];
-        }
-        // Primitives and list-arrays are wrapped so the payload stays a map.
-        return ['name' => $name, 'payload' => $data];
+        return ['name' => $name, 'data' => $data];
     }
 
     /** Current time in ms as a float (already js-safe, never an int64). */

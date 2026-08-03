@@ -10,6 +10,7 @@ import {
   flowChildFailureError,
   isDeclaredFlowChild,
 } from '../flowParentBackpatch';
+import { commitParentLink, parentLinkState, prepareParentLink } from '../operations/parentLink';
 import { QueueManagerLocks } from './locks';
 
 export class QueueManagerQueries extends QueueManagerLocks {
@@ -85,48 +86,12 @@ export class QueueManagerQueries extends QueueManagerLocks {
           throw new Error(`Parent job ${String(parentJobId)} changed state while linking`);
         }
 
-        const childData = {
-          ...(childJob.data as Record<string, unknown>),
-          __parentId: String(parentJobId),
-          __parentQueue: parentJob.queue,
-        };
-        const childrenIds = [...parentJob.childrenIds, childJobId];
-        const dependsOn = parentJob.dependsOn.includes(childJobId)
-          ? [...parentJob.dependsOn]
-          : [...parentJob.dependsOn, childJobId];
-        const parentData = {
-          ...(parentJob.data as Record<string, unknown>),
-          __childrenIds: childrenIds.map(String),
-        };
-        const linkedChild = { ...childJob, data: childData, parentId: parentJobId };
-        const linkedParent = { ...parentJob, data: parentData, childrenIds, dependsOn };
         const childFinished =
           this.completedJobs.has(childJobId) || this.depCompletions.has(childJobId);
-        const parentState = childFinished
-          ? parentJob.runAt > Date.now()
-            ? 'delayed'
-            : parentJob.priority > 0
-              ? 'prioritized'
-              : 'waiting'
-          : 'waiting-children';
-        this.storage?.updateFlowLink(linkedChild, linkedParent, parentState);
-
-        (childJob as { parentId: JobId | null }).parentId = parentJobId;
-        (childJob as { data: unknown }).data = childData;
-        parentJob.childrenIds = childrenIds;
-        (parentJob as { dependsOn: JobId[] }).dependsOn = dependsOn;
-        (parentJob as { data: unknown }).data = parentData;
-
-        if (!childFinished) {
-          const shard = this.shards[shardIndex(parentJob.queue)];
-          if (!shard.waitingDeps.has(parentJobId)) {
-            const removed = shard.getQueue(parentJob.queue).remove(parentJobId);
-            if (removed) shard.decrementQueued(parentJobId);
-            shard.waitingDeps.set(parentJobId, parentJob);
-          }
-          shard.registerDependencies(parentJobId, [childJobId]);
-          this.dependencyResults.registerConsumer(parentJobId, dependsOn);
-        }
+        const pushContext = this.contextFactory.getPushContext();
+        const plan = prepareParentLink(childJob, pushContext, childFinished, parentJobId);
+        this.storage?.updateFlowLink(plan.linkedChild, plan.linkedParent, parentLinkState(plan));
+        commitParentLink(plan, pushContext);
       } finally {
         for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
       }

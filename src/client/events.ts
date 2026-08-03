@@ -5,73 +5,38 @@
 import { EventEmitter } from 'events';
 import { getSharedManager } from './manager';
 import { EventType, type JobEvent } from '../domain/types/queue';
+import { TcpEventSubscription } from './queue-events/tcpSubscription';
+import type {
+  ActiveEvent,
+  CompletedEvent,
+  DelayedEvent,
+  DrainedEvent,
+  DuplicatedEvent,
+  FailedEvent,
+  ProgressEvent,
+  QueueEventsOptions,
+  RemovedEvent,
+  RetriedEvent,
+  StalledEvent,
+  WaitingChildrenEvent,
+  WaitingEvent,
+} from './types/events';
 
-/** Event payload for 'waiting' event */
-export interface WaitingEvent {
-  jobId: string;
-}
-
-/** Event payload for 'active' event */
-export interface ActiveEvent {
-  jobId: string;
-}
-
-/** Event payload for 'completed' event */
-export interface CompletedEvent<R = unknown> {
-  jobId: string;
-  returnvalue: R;
-}
-
-/** Event payload for 'failed' event */
-export interface FailedEvent {
-  jobId: string;
-  failedReason: string;
-  data?: unknown;
-}
-
-/** Event payload for 'progress' event */
-export interface ProgressEvent<P = unknown> {
-  jobId: string;
-  data: P;
-}
-
-/** Event payload for 'stalled' event */
-export interface StalledEvent {
-  jobId: string;
-}
-
-/** Event payload for 'removed' event */
-export interface RemovedEvent {
-  jobId: string;
-  prev: string;
-}
-
-/** Event payload for 'delayed' event */
-export interface DelayedEvent {
-  jobId: string;
-  delay: number;
-}
-
-/** Event payload for 'duplicated' event */
-export interface DuplicatedEvent {
-  jobId: string;
-}
-
-/** Event payload for 'retried' event */
-export interface RetriedEvent {
-  jobId: string;
-  prev: string;
-}
-
-/** Event payload for 'waiting-children' event */
-export interface WaitingChildrenEvent {
-  jobId: string;
-}
-
-/** Event payload for 'drained' event */
-export interface DrainedEvent {
-  id: string;
-}
+export type {
+  ActiveEvent,
+  CompletedEvent,
+  DelayedEvent,
+  DrainedEvent,
+  DuplicatedEvent,
+  FailedEvent,
+  ProgressEvent,
+  QueueEventsOptions,
+  RemovedEvent,
+  RetriedEvent,
+  StalledEvent,
+  WaitingChildrenEvent,
+  WaitingEvent,
+} from './types/events';
 
 /**
  * QueueEvents class for listening to queue events
@@ -99,11 +64,16 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   readonly name: string;
   private running = false;
   private unsubscribe: (() => void) | null = null;
+  private subscription: TcpEventSubscription | null = null;
   private ready = false;
+  private readonly queueKey: string;
+  private readonly options: QueueEventsOptions;
 
-  constructor(name: string) {
+  constructor(name: string, options: QueueEventsOptions = {}) {
     super();
     this.name = name;
+    this.options = options;
+    this.queueKey = (options.prefixKey ?? '') + name;
     this.start();
   }
 
@@ -123,7 +93,7 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   on(event: 'drained', listener: (data: DrainedEvent) => void): this;
   on(event: 'paused' | 'resumed', listener: (data: Record<string, never>) => void): this;
   on(event: 'error', listener: (error: Error, event?: JobEvent) => void): this;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback overload requires any[].
   on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -142,7 +112,7 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   once(event: 'drained', listener: (data: DrainedEvent) => void): this;
   once(event: 'paused' | 'resumed', listener: (data: Record<string, never>) => void): this;
   once(event: 'error', listener: (error: Error, event?: JobEvent) => void): this;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback overload requires any[].
   once(event: string, listener: (...args: any[]) => void): this {
     return super.once(event, listener);
   }
@@ -164,12 +134,12 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
           failedReason: event.error ?? 'Job failed',
           data: event.data,
         });
-        if (event.error) {
+        if (event.error && this.listenerCount('error') > 0) {
           this.emit('error', new Error(event.error), event);
         }
         break;
       case EventType.Progress:
-        this.emit('progress', { jobId: event.jobId, data: event.data });
+        this.emit('progress', { jobId: event.jobId, data: event.progress ?? event.data });
         break;
       case EventType.Stalled:
         this.emit('stalled', { jobId: event.jobId });
@@ -202,21 +172,35 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
   }
 
   private start(): void {
-    if (this.running || this.unsubscribe) return;
+    if (this.running || this.unsubscribe || this.subscription) return;
     this.running = true;
 
-    const manager = getSharedManager();
     const handler = (event: JobEvent) => {
       try {
-        if (event.queue !== this.name) return;
+        if (event.queue !== this.queueKey) return;
         this.dispatchEvent(event);
       } catch (err) {
-        this.emit('error', err instanceof Error ? err : new Error(String(err)));
+        this.emitTransportError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 
-    this.unsubscribe = manager.subscribe(handler);
-    this.ready = true;
+    const embedded = this.options.embedded ?? this.options.connection === undefined;
+    if (embedded) {
+      this.unsubscribe = getSharedManager(this.options.dataPath).subscribe(handler);
+      this.ready = true;
+      return;
+    }
+
+    this.subscription = new TcpEventSubscription({
+      connection: this.options.connection,
+      queue: this.queueKey,
+      onEvent: handler,
+      onError: (error) => this.emitTransportError(error),
+    });
+  }
+
+  private emitTransportError(error: Error): void {
+    if (this.listenerCount('error') > 0) this.emit('error', error);
   }
 
   /** Emit an error event (can be called externally) */
@@ -230,10 +214,12 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
    * BullMQ v5 compatible.
    */
   async waitUntilReady(): Promise<void> {
-    // In embedded mode, we're always ready after construction
-    if (this.ready) return;
-    // Wait a tick for the subscription to complete
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (this.subscription) {
+      await this.subscription.waitUntilReady();
+      this.ready = true;
+      return;
+    }
+    if (!this.ready) throw new Error('QueueEvents is closed');
   }
 
   /**
@@ -253,6 +239,8 @@ export class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
       this.unsubscribe();
       this.unsubscribe = null;
     }
+    this.subscription?.close();
+    this.subscription = null;
     this.removeAllListeners();
   }
 }

@@ -7,12 +7,12 @@ import { checkStalledJobs } from '../stallDetection';
 import { handleTaskError, handleTaskSuccess } from '../taskErrorTracking';
 import type { BackgroundContext, BackgroundTaskHandles, LockContext } from '../types';
 import { performDlqMaintenance } from './dlq';
-import { checkJobTimeouts } from './timeouts';
 
 function getLockContext(ctx: BackgroundContext): LockContext {
   return {
     jobIndex: ctx.jobIndex,
     jobLocks: ctx.jobLocks,
+    retiredCronLeaseTokens: ctx.retiredCronLeaseTokens,
     clientJobs: ctx.clientJobs,
     processingShards: ctx.processingShards,
     processingLocks: ctx.processingLocks,
@@ -21,6 +21,7 @@ function getLockContext(ctx: BackgroundContext): LockContext {
     eventsManager: ctx.eventsManager,
     dashboardEmit: ctx.dashboardEmit,
     storage: ctx.storage,
+    timeoutScheduler: ctx.timeoutScheduler,
   };
 }
 
@@ -47,9 +48,8 @@ export function startBackgroundTasks(
       });
   }, ctx.config.cleanupIntervalMs);
 
-  const timeoutInterval = setInterval(() => {
-    checkJobTimeouts(ctx);
-  }, ctx.config.jobTimeoutCheckMs);
+  const timeoutScheduler = ctx.timeoutScheduler;
+  timeoutScheduler.start(ctx);
 
   const depCheckInterval = setInterval(() => {
     if (ctx.pendingDepChecks.size === 0) return;
@@ -83,7 +83,7 @@ export function startBackgroundTasks(
   cronScheduler.start();
   return {
     cleanupInterval,
-    timeoutInterval,
+    timeoutScheduler,
     depCheckInterval,
     stallCheckInterval,
     dlqMaintenanceInterval,
@@ -94,7 +94,7 @@ export function startBackgroundTasks(
 
 export function stopBackgroundTasks(handles: BackgroundTaskHandles): void {
   clearInterval(handles.cleanupInterval);
-  clearInterval(handles.timeoutInterval);
+  handles.timeoutScheduler.stop();
   clearInterval(handles.depCheckInterval);
   clearInterval(handles.stallCheckInterval);
   clearInterval(handles.dlqMaintenanceInterval);

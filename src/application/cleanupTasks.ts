@@ -63,6 +63,7 @@ async function cleanOrphanedProcessingEntries(
         const job = ctx.processingShards[i].get(jobId);
         if (job) {
           ctx.processingShards[i].delete(jobId);
+          ctx.timeoutScheduler.cancel(jobId);
           ctx.jobIndex.delete(jobId);
           removed++;
         }

@@ -7,14 +7,20 @@ state. Performance benchmarks use a different isolation model; see
 
 ## Validation layers
 
-Development uses two layers so feedback remains fast without weakening the
-release gate:
+Development uses complementary layers so feedback remains fast without
+weakening the release gate:
 
-1. Run the narrowest relevant test natively while iterating.
-2. Before a commit, run `bun run test:sandbox`. It builds the current worktree
+1. Run the narrowest relevant test in an isolated OrbStack development Machine
+   on the Mac's native architecture while iterating. A macOS-host run is
+   diagnostic only.
+2. For the final candidate, run the product suites directly in a fresh Ubuntu
+   24.04 Machine and, for a release, repeat them in a fresh Debian 13 Machine.
+   Both use the Mac's native architecture; GitHub Actions supplies native
+   `amd64` coverage when development occurs on Apple Silicon.
+3. Before a commit, run `bun run test:sandbox`. It builds the current worktree
    into one test image and runs the required unit, TCP, and embedded suites in
    three independent disposable containers in parallel.
-3. When an external SDK changes, also run `bun run test:sandbox:sdk`. It builds
+4. When an external SDK changes, also run `bun run test:sandbox:sdk`. It builds
    dedicated TypeScript, Python, PHP, Go, Rust, and Elixir images, then runs
    each SDK's native tests and shared protocol conformance checks in parallel.
 
@@ -25,6 +31,95 @@ bun test
 bun scripts/tcp/run-all-tests.ts
 bun scripts/embedded/run-all-tests.ts
 ```
+
+### OrbStack Machine isolation
+
+The canonical local Machine is Ubuntu 24.04 on the Mac's native architecture,
+with 4 CPUs, a requested 16 GiB of memory, and at least 32 GiB of disk. The
+release compatibility Machine uses Debian 13 on the same architecture. On
+Apple Silicon both are `arm64`; GitHub Actions `ubuntu-latest` supplies the
+independent native `amd64` gate. Both Machines are disposable and must be
+created for one final candidate only:
+
+```bash
+machine_run_id="$(date -u +%Y%m%dT%H%M%SZ)"
+case "$(uname -m)" in
+  arm64) machine_arch=arm64 ;;
+  x86_64) machine_arch=amd64 ;;
+  *) echo "Unsupported host architecture" >&2; exit 1 ;;
+esac
+orb create --isolated --isolate-network --arch "${machine_arch}" \
+  --cpus 4 --memory 16G --disk 32G ubuntu:24.04 \
+  "bunqueue-ci-${machine_run_id}"
+orb create --isolated --isolate-network --arch "${machine_arch}" \
+  --cpus 4 --memory 16G --disk 32G debian:13 \
+  "bunqueue-debian-${machine_run_id}"
+```
+
+Do not count a translated `amd64` Machine on Apple Silicon as release evidence.
+It is a useful diagnostic target, but Rosetta can change process-heavy Bun
+behavior; repeat the complete result on `arm64`. Record both requested resources
+and effective cgroup CPU/memory limits because OrbStack can clamp a Machine to
+its global resource ceiling.
+
+Do not add `--mount` or `--forward-ssh-agent`. A Machine must never receive the
+macOS home directory, repository mount, Docker socket, `.git`, SSH agent,
+credentials, registry tokens, `.env` files, ignored files, `node_modules`,
+artifacts, SQLite databases, or generated test output. A tracked
+placeholder-only template such as `.env.example` is allowed only after its
+contents have been reviewed. Build an explicit
+sanitized snapshot containing every tracked and intended untracked change,
+then transfer that snapshot through OrbStack's built-in SSH endpoint. The
+`orb push` command cannot write an isolated Machine's host-exposed read-only
+filesystem;
+install `rsync` in the Machine and use `rsync -e ssh ... MACHINE@orb:...`
+instead. The SSH private key remains on macOS and is not forwarded into the
+Machine. This avoids both testing stale committed code and leaking unrelated
+host state.
+
+Install the exact Bun version pinned in `.github/workflows/ci.yml` and use
+`bun install --frozen-lockfile --ignore-scripts`. Directly inside each Machine,
+run the unit, TCP, and embedded commands above plus:
+
+```bash
+bun run typecheck
+bun run check:biome
+```
+
+The Machine gate also supplies a real bounded filesystem for SQLite admission
+tests. Create it inside the disposable Machine, never on a host mount:
+
+```bash
+sudo mkdir -p /mnt/bunqueue-tinyfs
+sudo mount -t tmpfs -o size=16m tmpfs /mnt/bunqueue-tinyfs
+sudo chown "$(id -u):$(id -g)" /mnt/bunqueue-tinyfs
+BUNQUEUE_TINYFS=/mnt/bunqueue-tinyfs bun test test/repro-disk-full.test.ts
+sudo umount /mnt/bunqueue-tinyfs
+```
+
+This is a required Machine check, not published benchmark evidence. The normal
+unit suite always runs the deterministic storage-rejection injections in
+`test/repro-durable-persistence-rejection.test.ts`; the tmpfs run adds real
+`SQLITE_FULL` coverage for single and batch admission in Embedded and TCP mode,
+terminal custom-ID reuse across restart, preserved completed results/DLQ rows,
+and buffered storage-health recovery.
+
+Run `git diff --check` on the macOS host before building the snapshot. The
+Machine cannot run Git worktree checks because `.git` is deliberately excluded.
+
+Each run records its distro/version, architecture, kernel, Bun version and
+revision, frozen-lockfile installation result, commands, exit codes, durations,
+and exact test totals. Copy the manifest and logs back under `artifacts/`, then
+delete the Machine. A reused Machine, host-only run, or run against a mounted
+worktree is diagnostic evidence only.
+
+`--isolated` removes macOS filesystem and integration access;
+`--isolate-network` also blocks direct access to the host and other Machines.
+It does not create an independent kernel: OrbStack Machines and containers
+share OrbStack's underlying Linux kernel. The Machine layer therefore catches
+clean-host, architecture, distribution, and hidden-state problems, while the
+container sandbox remains the authoritative offline per-suite containment
+layer. Neither is a physical-machine security boundary.
 
 Queue, Worker, Cron, and DLQ guide coverage is tracked explicitly in
 [Documented Feature Verification](./features/documented-feature-verification.md).
@@ -120,6 +215,14 @@ precondition is valid; after each command the test compares API state, aggregate
 counts, lock ownership, SQLite rows, DLQ rows, payloads, priorities, and
 persisted queue controls.
 
+The queue model owns the same lease tokens as a real worker. `PULL` and `PULLB`
+store the token returned for every active job; active acknowledgements,
+heartbeats, failures, `MoveToWait`, `MoveToDelayed`, and `ChangeDelay` must send
+that exact token. The same transition commands omit `token` when they act on a
+delayed, failed, waiting, or prioritized job with no live lease. Deterministic
+command-serialization tests protect this distinction so a model expectation
+cannot accidentally bypass the engine's lease enforcement.
+
 The default campaign uses 150 runs and at most 80 generated commands. It is part
 of plain `bun test`, so the mandatory `test:sandbox` unit container executes it
 without a separate container. For deeper native investigation:
@@ -214,6 +317,15 @@ durable work survives broker SIGKILL, reconnect succeeds, and the job remains
 queryable exactly once. Delivery remains at-least-once; processors must be
 idempotent because a crash after side effects but before ACK can re-run a job.
 
+Disk-full admission assertions are fail closed: when an immediate durable
+write is rejected, the candidate must be absent from SQLite, queue heaps,
+dependency wait sets, `jobIndex`, counters, custom-ID/dedup ownership, queries,
+and Worker delivery. A rejected terminal-ID reuse must preserve the old
+completed/DLQ generation and result before and after restart. Buffered writes
+have a different documented contract: they may be acknowledged before their
+10 ms flush and must surface later failure through storage health, retry, and
+critical-loss reporting.
+
 Weekly dependency audits require live advisory databases and therefore run in
 CI, not inside the deliberately offline sandbox. Performance-regression
 thresholds likewise use fresh native processes; Docker/VM measurements are
@@ -241,6 +353,13 @@ set `backoff: 0`, so randomized production retry jitter cannot turn an incomplet
 observation into a misleading downstream assertion. Migration regressions always
 verify the current schema version; schema 30 also has a direct 29-to-30 upgrade
 test for the durable `jobs.dlq_retry_state` column.
+
+Wall-clock backoff tests assert the lower bound of each retry's own jitter
+window. They never require adjacent exponential delays to be monotonic: the
+documented ±50% windows overlap, so a valid second delay can be shorter than a
+valid first delay. Unit tests cover the exact random-factor bounds and cap,
+while TCP and embedded runners prove that real retry admission respects the
+per-attempt floors.
 
 The environment is reproducible:
 
@@ -359,16 +478,17 @@ the same pinned Bun version and frozen lockfile as the local sandbox. A CI job i
 the isolation equivalent of one local suite container.
 
 `test-core-e2e` runs `bun run test:core-e2e` as a distinct required job. Its
-TypeScript-compiler inventory currently covers 298 public instance methods
+TypeScript-compiler inventory currently covers 308 public instance methods
 across Queue, Worker, Job, schedulers, DLQ, FlowProducer, QueueGroup, Bunqueue,
 SandboxedWorker, Forwarder, Workflow, Engine, event facades, and
 TcpConnectionPool. Exported runtime classes are discovered automatically. The
-285 dual-mode methods use a fresh embedded SQLite manager and a real
+272 dual-mode methods use a fresh embedded SQLite manager and a real
 dynamic-port TCP broker with a separate SQLite database; the 13 transport-only
-pool methods run against the broker and carry explicit embedded `N/A` cells.
+pool methods carry embedded `N/A`, and 23 synchronous snapshots with async
+counterparts carry TCP `N/A`.
 The suite scans its contracts for test doubles and compares successful coverage
-to the applicable discovered surface exactly. It exposes 583 applicable
-method-mode checks and uploads the full 298-row Markdown/JSON evidence matrix as
+to the applicable discovered surface exactly. It exposes 580 applicable
+method-mode checks and uploads the full 308-row Markdown/JSON evidence matrix as
 a CI artifact. See
 [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md).
 

@@ -6,7 +6,7 @@
 import { CommandError } from './errors.js';
 import { compact } from './frame.js';
 import type { Queue } from './queue.js';
-import { type JobOptions, jobPayload, wireJobOptions } from './types.js';
+import { type JobOptions, wireJobOptions } from './types.js';
 
 type Ctx = Queue<unknown>;
 type Raw = Record<string, unknown>;
@@ -103,8 +103,9 @@ export const adminMethods = {
       compact({
         cmd: 'Cron',
         name: schedulerId,
+        jobName: template.name ?? schedulerId,
         queue: this.name,
-        data: jobPayload(template.name ?? schedulerId, template.data ?? {}),
+        data: 'data' in template ? template.data : {},
         schedule: repeat.pattern,
         repeatEvery: repeat.every,
         priority: template.opts?.priority,

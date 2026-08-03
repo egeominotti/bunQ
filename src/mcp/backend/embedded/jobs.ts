@@ -10,7 +10,8 @@ export class EmbeddedJobBackend extends EmbeddedBackendBase {
     opts?: { priority?: number; delay?: number; attempts?: number }
   ) {
     const job = await this.manager.push(queue, {
-      data: { name, ...(data as object) },
+      name,
+      data,
       priority: opts?.priority,
       delay: opts?.delay,
       maxAttempts: opts?.attempts,
@@ -23,7 +24,8 @@ export class EmbeddedJobBackend extends EmbeddedBackendBase {
     jobs: Array<{ name: string; data: unknown; priority?: number; delay?: number }>
   ) {
     const inputs = jobs.map((job) => ({
-      data: { name: job.name, ...(job.data as object) },
+      name: job.name,
+      data: job.data,
       priority: job.priority,
       delay: job.delay,
     }));

@@ -65,6 +65,12 @@ func main() {
 }
 ```
 
+Job names travel as top-level protocol metadata. `Job.Name()` reads that
+field, while `Job.Data()` returns `any` so maps, slices, scalars, and nil remain
+unchanged, including a user-owned map `name`. Legacy `data.name` envelopes are
+still decoded. Scheduler templates use separate `jobName` and `data` fields.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
 Return `bunqueue.NewUnrecoverableError("...")` from a processor to skip retries and send the job straight to the dead letter queue. Panics are recovered, FAILed with their real stack, and never kill the worker.
 
 ## Surface
@@ -158,6 +164,12 @@ queue := bunqueue.NewQueue("emails", bunqueue.Options{
 The callback receives `connected`, `reconnect`, `auth`, `command`, `timeout`,
 `error` and `close` events. Callback panics are isolated from command and worker
 correctness; handlers should still return quickly.
+
+`completed` and `failed` are broker-authoritative. A broker timeout or retired
+cron generation can finalize a lease before user code returns; the resulting
+late ACK/FAIL response is ignored without incrementing Worker counters or
+emitting a false terminal event. Invalid outcome evidence is emitted as
+`error`.
 
 ## Testing
 

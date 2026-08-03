@@ -84,12 +84,12 @@ socket.write(frame);
 
 ## Protocol Negotiation (Hello)
 
-Clients should send a `Hello` command after connecting to negotiate protocol version and discover server capabilities.
+Clients should send a `Hello` command after connecting to report their protocol revision and discover server capabilities.
 
 **Request:**
 
 ```typescript
-{ cmd: 'Hello', protocolVersion: 2, capabilities: ['pipelining'] }
+{ cmd: 'Hello', protocolVersion: 3, capabilities: ['pipelining', 'separate-job-name'] }
 ```
 
 **Response:**
@@ -97,14 +97,18 @@ Clients should send a `Hello` command after connecting to negotiate protocol ver
 ```typescript
 {
   ok: true,
-  protocolVersion: 2,
-  capabilities: ['pipelining'],
+  protocolVersion: 3,
+  capabilities: ['pipelining', 'separate-job-name'],
   server: 'bunqueue',
   version: 'x.y.z'  // Installed server package version
 }
 ```
 
-The current protocol version is **2**. The only supported capability is `pipelining`.
+The current protocol version is **3**. It supports `pipelining` and
+`separate-job-name`. Revision 3 places job metadata in top-level `job.name`
+and preserves `job.data` exactly as supplied. The server still accepts legacy
+inputs with no top-level `name`: at that inbound boundary only, a string
+`data.name` is decoded as the old embedded-name envelope.
 
 ## Pipelining
 
@@ -162,6 +166,27 @@ All responses include an `ok` boolean field. On success `ok` is `true` with comm
 { ok: false, error: 'Error message', reqId?: string }
 ```
 
+### Queue event frames
+
+`SubscribeEvents` selects one queue for the current connection;
+`UnsubscribeEvents` clears it without closing the socket. Both commands require
+normal authentication and return a regular `reqId`-correlated response.
+
+```typescript
+{ cmd: 'SubscribeEvents', queue: 'tasks', reqId: 'events-1' }
+{ ok: true, reqId: 'events-1' }
+
+// Later, independently of command responses:
+{ type: 'event', event: { eventType: 'completed', queue: 'tasks', jobId: '...', timestamp: 0, data: { ok: true } } }
+
+{ cmd: 'UnsubscribeEvents', reqId: 'events-2' }
+```
+
+The unsolicited event envelope has no `reqId`. Pipelined clients must recognize
+`type: 'event'` before correlating command responses. A new subscription on the
+same connection replaces the previous queue. Slow subscribers are subject to
+the normal per-connection write-buffer limit.
+
 ## Connection Lifecycle
 
 When a TCP connection closes, the server automatically releases all jobs that were being processed by that client back to their queues. This uses retry logic with exponential backoff (up to 3 attempts) to ensure jobs are not left in an inconsistent state.
@@ -192,7 +217,8 @@ Add a single job to a queue.
 {
   cmd: 'PUSH',
   queue: string,          // Queue name (required, max 256 chars, alphanumeric/underscore/dash/dot/colon)
-  data: any,              // Job payload (required, max 10 MB)
+  name: string,           // Job name metadata (required for protocol v3 clients)
+  data: any,              // Untouched user payload (required, max 10 MB)
   priority?: number,      // Higher = processed sooner (default: 0, range: -1000000 to 1000000)
   delay?: number,         // Delay in ms before processing (default: 0, max: 1 year)
   maxAttempts?: number,   // Max retry attempts (default: 3, range: 1-1000)
@@ -258,6 +284,7 @@ Batch push multiple jobs to a queue.
   cmd: 'PUSHB',
   queue: string,
   jobs: Array<{
+    name: string,
     data: any,
     priority?: number,
     delay?: number,
@@ -308,7 +335,8 @@ calls.
     id: string,             // Final ID; non-empty, no colon
     queue: string,
     input: {
-      data: Record<string, unknown>, // includes canonical name/link metadata
+      name: string,
+      data: unknown,        // untouched user payload
       dependsOn?: string[],
       parentId?: string,
       childrenIds?: string[],
@@ -424,6 +452,14 @@ Acknowledge a job as completed.
 { ok: true }
 ```
 
+If an exact timeout or retired cron generation already finalized before the
+ACK claimed it, the response is a successful no-op rather than a retryable
+transport error:
+
+```typescript
+{ ok: true, data: { applied: false, reason: 'already-finalized' } }
+```
+
 ---
 
 #### ACKB
@@ -437,15 +473,35 @@ Batch acknowledge multiple jobs.
   cmd: 'ACKB',
   ids: string[],          // Job IDs
   results?: any[],        // Optional results (same order as ids; if provided, length must match ids)
-  tokens?: string[]       // Lock tokens (same order as ids)
+  tokens?: string[]       // Lock tokens (same order/length as ids; required for leased jobs)
 }
 ```
+
+The broker validates every token before completing any item. A missing or
+incorrect token rejects the whole batch and leaves all jobs, locks, and results
+unchanged.
 
 **Response:**
 
 ```typescript
 { ok: true }
 ```
+
+A timeout may win after the batch's lease preflight. Live positions still
+apply and the broker reports the exact ignored input positions in order:
+
+```typescript
+{
+  ok: true,
+  data: {
+    ignoredIds: ['job-id'],
+    ignoredIndices: [2]
+  }
+}
+```
+
+Clients must use `ignoredIndices` when IDs repeat. Wrong/missing tokens and
+ordinary missing/completed jobs remain errors.
 
 ---
 
@@ -472,6 +528,12 @@ The optional `stack` is stored on the job and surfaced by `GetJob` and on DLQ en
 
 ```typescript
 { ok: true }
+```
+
+An exact late generation uses the same successful no-op envelope as `ACK`:
+
+```typescript
+{ ok: true, data: { applied: false, reason: 'already-finalized' } }
 ```
 
 ---
@@ -808,7 +870,8 @@ Move an active job back to the delayed state.
 {
   cmd: 'MoveToDelayed',
   id: string,
-  delay: number          // Delay in ms from now
+  delay: number,         // Delay in ms from now
+  token?: string         // Required when the active job has a lock
 }
 ```
 
@@ -827,8 +890,12 @@ Discard a job by moving it to the dead-letter queue.
 **Request:**
 
 ```typescript
-{ cmd: 'Discard', id: string }
+{ cmd: 'Discard', id: string, token?: string }
 ```
+
+When the job has an active lease, `token` must match the current delivery
+token. For waiting or otherwise unlocked jobs, the field may be omitted for an
+administrative discard.
 
 **Response:**
 
@@ -1117,6 +1184,7 @@ Create or update a cron/repeating job schedule.
 {
   cmd: 'Cron',
   name: string,             // Unique cron job name
+  jobName?: string,         // First-class name assigned to spawned jobs
   queue: string,            // Target queue
   data: any,                // Job data payload
   schedule?: string,        // Cron expression (e.g., '*/5 * * * *')
@@ -1149,6 +1217,7 @@ Create or update a cron/repeating job schedule.
   ok: true,
   cron: {
     name: string,
+    jobName: string,
     queue: string,
     schedule: string | null,
     repeatEvery: number | null,
@@ -1198,6 +1267,7 @@ List all registered cron job schedules.
   ok: true,
   crons: Array<{
     name: string,
+    jobName: string,
     queue: string,
     schedule: string | null,
     repeatEvery: number | null,
@@ -1228,6 +1298,7 @@ Get a single cron job by name.
   ok: true,
   cron: {
     name: string,
+    jobName: string,
     queue: string,
     schedule: string | null,
     repeatEvery: number | null,
@@ -1273,7 +1344,7 @@ Protocol version negotiation and server capability discovery. See the [Protocol 
 {
   cmd: 'Hello',
   protocolVersion: number,
-  capabilities?: ['pipelining']
+  capabilities?: Array<'pipelining' | 'separate-job-name'>
 }
 ```
 
@@ -1283,7 +1354,7 @@ Protocol version negotiation and server capability discovery. See the [Protocol 
 {
   ok: true,
   protocolVersion: number,
-  capabilities: ['pipelining'],
+  capabilities: Array<'pipelining' | 'separate-job-name'>,
   server: 'bunqueue',
   version: string
 }
@@ -1324,7 +1395,8 @@ Get high-level server statistics.
 
 #### Metrics
 
-Get detailed server metrics.
+Get detailed server metrics. The request without queue fields retains the
+legacy broker-wide response shown below.
 
 **Request:**
 
@@ -1349,6 +1421,42 @@ Get detailed server metrics.
     activeConnections: number
   }
 }
+```
+
+For durable queue-scoped minute metrics, send:
+
+```typescript
+{
+  cmd: 'Metrics',
+  queue: 'emails',
+  type: 'completed', // or 'failed'
+  start: 0,          // newest bucket index
+  end: -1            // through the oldest retained bucket
+}
+```
+
+```typescript
+{
+  ok: true,
+  data: {
+    meta: { count: number, prevTS: number, prevCount: number },
+    data: number[], // one-minute buckets, newest first
+    count: number   // bucket count before pagination
+  }
+}
+```
+
+#### TrimEvents
+
+Keep only the newest lifecycle events for one queue. The response reports the
+exact removed count, so repeating the request at the same length returns zero.
+
+```typescript
+{ cmd: 'TrimEvents', queue: 'emails', maxLength: 1000 }
+```
+
+```typescript
+{ ok: true, data: { removed: number } }
 ```
 
 ---
@@ -1786,12 +1894,12 @@ registered owner.
 #### MoveToWaitingChildren
 
 ```typescript
-{ cmd: 'MoveToWaitingChildren', id: string }
+{ cmd: 'MoveToWaitingChildren', id: string, token?: string }
 // -> { ok: true, data: { moved: true } }
 ```
 
 The job must be active. The transition releases its active resources and
-persists the parked state.
+persists the parked state. If the job has a lock, `token` must match it.
 
 ---
 
@@ -1880,7 +1988,11 @@ Batch variant of `ExtendLock` (positional arrays, same order).
 
 Change the delay of a delayed job (recomputes `runAt`).
 
-**Request:** `{ cmd: 'ChangeDelay', id: string, delay: number }`
+**Request:** `{ cmd: 'ChangeDelay', id: string, delay: number, token?: string }`
+
+`token` is required when the job is active and currently leased. Worker
+processor Job objects forward their current delivery token automatically;
+unlocked administrative transitions may omit it.
 
 **Response:** `{ ok: true }`
 
@@ -1890,9 +2002,12 @@ Change the delay of a delayed job (recomputes `runAt`).
 
 Move a job back to `waiting`, dispatching by current state: `active` is released back to the queue, `delayed` is promoted, `failed` is retried from the DLQ, `waiting`/`prioritized` is a no-op success.
 
-**Request:** `{ cmd: 'MoveToWait', id: string }`
+**Request:** `{ cmd: 'MoveToWait', id: string, token?: string }`
 
 **Response:** `{ ok: true }`
+
+For an active locked job, `token` is required and must match the current lease.
+An active job without a lock can still be moved administratively.
 
 ---
 
@@ -2105,6 +2220,7 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `Hello` | Protocol negotiation |
 | | `Stats` | Server statistics |
 | | `Metrics` | Detailed metrics |
+| | `TrimEvents` | Trim one queue's lifecycle journal |
 | | `Prometheus` | Prometheus-format metrics |
 | | `StorageStatus` | Get storage/disk health status |
 | | `Heartbeat` | Worker heartbeat |

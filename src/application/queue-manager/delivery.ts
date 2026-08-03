@@ -28,7 +28,9 @@ export class QueueManagerDelivery extends QueueManagerState {
   }
 
   async pull(queue: string, timeoutMs = 0, signal?: AbortSignal): Promise<Job | null> {
-    return pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
+    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
+    if (job) this.scheduleJobTimeout(job);
+    return job;
   }
 
   async pullWithLock(
@@ -38,9 +40,10 @@ export class QueueManagerDelivery extends QueueManagerState {
     lockTtl = DEFAULT_LOCK_TTL,
     signal?: AbortSignal
   ): Promise<{ job: Job | null; token: string | null }> {
-    const job = await this.pull(queue, timeoutMs, signal);
+    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
     if (!job) return { job: null, token: null };
     const token = lockMgr.createLock(job.id, owner, this.contextFactory.getLockContext(), lockTtl);
+    this.scheduleJobTimeout(job);
     return { job, token };
   }
 
@@ -50,7 +53,15 @@ export class QueueManagerDelivery extends QueueManagerState {
     timeoutMs = 0,
     signal?: AbortSignal
   ): Promise<Job[]> {
-    return pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext(), signal);
+    const jobs = await pullJobBatch(
+      queue,
+      count,
+      timeoutMs,
+      this.contextFactory.getPullContext(),
+      signal
+    );
+    for (const job of jobs) this.scheduleJobTimeout(job);
+    return jobs;
   }
 
   // biome-ignore lint/complexity/useMaxParams: public API includes cancellation and lock policy
@@ -62,11 +73,18 @@ export class QueueManagerDelivery extends QueueManagerState {
     lockTtl = DEFAULT_LOCK_TTL,
     signal?: AbortSignal
   ): Promise<{ jobs: Job[]; tokens: string[] }> {
-    const jobs = await this.pullBatch(queue, count, timeoutMs, signal);
+    const jobs = await pullJobBatch(
+      queue,
+      count,
+      timeoutMs,
+      this.contextFactory.getPullContext(),
+      signal
+    );
     const tokens = jobs.map(
       (job) =>
         lockMgr.createLock(job.id, owner, this.contextFactory.getLockContext(), lockTtl) ?? ''
     );
+    for (const job of jobs) this.scheduleJobTimeout(job);
     return { jobs, tokens };
   }
 
@@ -76,6 +94,25 @@ export class QueueManagerDelivery extends QueueManagerState {
   ): void {
     const location = this.jobIndex.get(jobId);
     if (location?.type === 'processing' && lockCtx.jobLocks.has(jobId)) {
+      throw new Error(`Invalid or expired lock token for job ${jobId}`);
+    }
+  }
+
+  /** Require the exact current lease token whenever a lock record exists. */
+  protected assertLeaseToken(
+    jobId: JobId,
+    token: string | undefined,
+    lockCtx: { jobLocks: Map<JobId, JobLock> }
+  ): void {
+    const lock = lockCtx.jobLocks.get(jobId);
+    if (!lock) return;
+    if (!token) throw new Error(`Lock token required for job ${jobId}`);
+    if (lock.token !== token) throw new Error(`Invalid or expired lock token for job ${jobId}`);
+
+    const location = this.jobIndex.get(jobId);
+    if (location?.type !== 'processing') return;
+    const job = this.processingShards[location.shardIdx].get(jobId);
+    if (!job || (job.startedAt !== null && job.startedAt > lock.createdAt)) {
       throw new Error(`Invalid or expired lock token for job ${jobId}`);
     }
   }
@@ -100,7 +137,20 @@ export class QueueManagerDelivery extends QueueManagerState {
     return job !== null && job.attempts > 0;
   }
 
-  protected async completeStallRetriedJob(jobId: JobId, result: unknown): Promise<boolean> {
+  /** Match a late outcome to the exact cron lease retired by lock expiry. */
+  protected isRetiredCronOutcome(jobId: JobId, token: string | undefined): boolean {
+    return (
+      token !== undefined &&
+      !this.jobIndex.has(jobId) &&
+      this.retiredCronLeaseTokens.get(jobId) === token
+    );
+  }
+
+  protected async completeStallRetriedJob(
+    jobId: JobId,
+    result: unknown,
+    removeOnComplete?: boolean
+  ): Promise<boolean> {
     const location = this.jobIndex.get(jobId);
     if (location?.type !== 'queue') return false;
     const shard = this.shards[location.shardIdx];
@@ -117,7 +167,7 @@ export class QueueManagerDelivery extends QueueManagerState {
     const completedJob = job as Job;
     setDlqRetryState(completedJob, null);
     const ctx = this.contextFactory.getAckContext();
-    if (!completedJob.removeOnComplete) {
+    if (!(completedJob.removeOnComplete || removeOnComplete === true)) {
       ctx.completedJobs.add(jobId);
       ctx.completedJobsData.set(jobId, completedJob);
       if (result !== undefined) {

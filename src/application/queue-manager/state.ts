@@ -18,6 +18,9 @@ import { ContextFactory } from '../contextFactory';
 import { DependencyResultTracker } from '../dependencyResultTracker';
 import { recoverFlowFailures } from '../flowFailureRecovery';
 import { DependencyCompletionTracker } from '../dependencyCompletions';
+import { JobTimeoutScheduler } from '../background/timeouts';
+import type { RetiredTimeoutGeneration } from '../types/background';
+import { QueueTelemetryJournal } from '../queueTelemetryJournal';
 import { createContextCallbacks, createContextDependencies, managerRuntime } from './context';
 
 export type { QueueManagerConfig };
@@ -34,7 +37,10 @@ export abstract class QueueManagerState {
   protected readonly completedJobs: BoundedSet<JobId>;
   protected readonly completedJobsData: BoundedMap<JobId, Job>;
   protected readonly depCompletions: DependencyCompletionTracker;
-  protected readonly timedOutJobs: BoundedSet<JobId>;
+  protected readonly timedOutJobs: BoundedMap<JobId, RetiredTimeoutGeneration>;
+  protected readonly retiredTimeoutLeaseTokens: BoundedMap<string, RetiredTimeoutGeneration>;
+  protected readonly retiredCronLeaseTokens: BoundedMap<JobId, string>;
+  protected readonly timeoutScheduler = new JobTimeoutScheduler();
   protected readonly jobResults: LRUMap<JobId, unknown>;
   protected readonly dependencyResults = new DependencyResultTracker();
   protected readonly customIdMap: LRUMap<string, JobId>;
@@ -66,15 +72,35 @@ export abstract class QueueManagerState {
     string,
     { totalCompleted: bigint; totalFailed: bigint }
   >;
+  protected readonly telemetryJournal: QueueTelemetryJournal;
   protected readonly startTime = Date.now();
   protected readonly backgroundTaskHandles: bgTasks.BackgroundTaskHandles | null;
   protected readonly queueNamesCache = new Set<string>();
   protected readonly monitoringState: MonitoringState = createMonitoringState();
   protected readonly contextFactory: ContextFactory;
 
+  protected scheduleJobTimeout(job: Job): void {
+    this.timeoutScheduler.schedule(job);
+  }
+
+  protected syncJobTimeout(jobId: JobId): void {
+    const location = this.jobIndex.get(jobId);
+    const job =
+      location?.type === 'processing'
+        ? (this.processingShards[location.shardIdx].get(jobId) ?? null)
+        : null;
+    if (job) this.timeoutScheduler.schedule(job);
+    else this.timeoutScheduler.cancel(jobId);
+  }
+
   constructor(config: QueueManagerConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.storage = config.dataPath ? new SqliteStorage({ path: config.dataPath }) : null;
+    this.telemetryJournal = new QueueTelemetryJournal(
+      this.storage,
+      this.config.maxQueueEvents,
+      this.config.maxMetricDataPoints
+    );
     this.completedJobsData = new BoundedMap(this.config.maxCompletedJobs);
     this.completedJobs = new BoundedSet(this.config.maxCompletedJobs, (id) => {
       this.jobIndex.delete(id);
@@ -83,7 +109,9 @@ export abstract class QueueManagerState {
     this.depCompletions = new DependencyCompletionTracker(this.config.maxCompletedJobs, (id) => {
       this.storage?.deleteDependencyCompletion(id);
     });
-    this.timedOutJobs = new BoundedSet(this.config.maxCompletedJobs);
+    this.timedOutJobs = new BoundedMap(this.config.maxCompletedJobs);
+    this.retiredTimeoutLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
+    this.retiredCronLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
     this.perQueueMetrics = new LRUMap(this.config.maxCustomIds);
     this.jobResults = new LRUMap(this.config.maxJobResults);
     this.customIdMap = new LRUMap(this.config.maxCustomIds);
@@ -114,6 +142,7 @@ export abstract class QueueManagerState {
       (queue) => this.workerManager.getForQueue(queue).length > 0
     );
     this.eventsManager = new EventsManager(this.webhookManager);
+    this.eventsManager.subscribe((event) => this.telemetryJournal.record(event));
     this.contextFactory = new ContextFactory(
       createContextDependencies(managerRuntime(this)),
       createContextCallbacks(runtime)

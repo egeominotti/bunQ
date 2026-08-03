@@ -1,10 +1,14 @@
 import { FlowProducer, Queue, Worker } from '../../client';
 import { EMBEDDED, fail, pass, sleep } from './harness';
 
+export function createFeatureTestFlowProducer(): FlowProducer {
+  return new FlowProducer(EMBEDDED);
+}
+
 export async function testFlowProducer(): Promise<void> {
   console.log('\n🔗 TEST 5: FlowProducer');
   console.log('─'.repeat(50));
-  const flow = new FlowProducer();
+  const flow = createFeatureTestFlowProducer();
   try {
     const chain = await flow.addChain([
       { name: 'step1', queueName: 'flow-test', data: { step: 1 } },
@@ -54,6 +58,8 @@ export async function testFlowProducer(): Promise<void> {
     for (const queue of queues) queue.close();
   } catch (error) {
     fail('FlowProducer', error);
+  } finally {
+    await flow.close();
   }
 }
 

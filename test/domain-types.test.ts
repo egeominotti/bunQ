@@ -51,11 +51,7 @@ import {
 } from '../src/domain/types/response';
 
 // ============ queue.ts imports ============
-import {
-  createQueueState,
-  RateLimiter,
-  ConcurrencyLimiter,
-} from '../src/domain/types/queue';
+import { createQueueState, RateLimiter, ConcurrencyLimiter } from '../src/domain/types/queue';
 
 // ============ cron.ts imports ============
 import { createCronJob, isAtLimit, isDue } from '../src/domain/types/cron';
@@ -305,12 +301,7 @@ describe('job.ts', () => {
     });
 
     test('should default repeat count to 0 when not provided', () => {
-      const j = createJob(
-        jobId('j16'),
-        'q',
-        minimalInput({ repeat: { every: 1000 } }),
-        0
-      );
+      const j = createJob(jobId('j16'), 'q', minimalInput({ repeat: { every: 1000 } }), 0);
       expect(j.repeat!.count).toBe(0);
     });
 
@@ -922,12 +913,12 @@ describe('response.ts', () => {
 
   describe('hello', () => {
     test('should create HelloResponse', () => {
-      const r = hello(1, ['pipelining'], 'bunqueue', '2.1.0');
+      const r = hello(3, ['pipelining', 'separate-job-name'], 'bunqueue', '2.8.56');
       expect(r.ok).toBe(true);
-      expect(r.protocolVersion).toBe(1);
-      expect(r.capabilities).toEqual(['pipelining']);
+      expect(r.protocolVersion).toBe(3);
+      expect(r.capabilities).toEqual(['pipelining', 'separate-job-name']);
       expect(r.server).toBe('bunqueue');
-      expect(r.version).toBe('2.1.0');
+      expect(r.version).toBe('2.8.56');
     });
 
     test('should handle empty capabilities', () => {
@@ -1274,21 +1265,15 @@ describe('cron.ts', () => {
     });
 
     test('should throw when neither schedule nor repeatEvery is provided', () => {
-      expect(() =>
-        createCronJob(
-          { name: 'bad', queue: 'q', data: null },
-          0
-        )
-      ).toThrow('Cron job must have either schedule or repeatEvery');
+      expect(() => createCronJob({ name: 'bad', queue: 'q', data: null }, 0)).toThrow(
+        'Cron job must have either schedule or repeatEvery'
+      );
     });
   });
 
   describe('isAtLimit', () => {
     test('should return false when maxLimit is null', () => {
-      const cron = createCronJob(
-        { name: 'c', queue: 'q', data: null, schedule: '* * * * *' },
-        0
-      );
+      const cron = createCronJob({ name: 'c', queue: 'q', data: null, schedule: '* * * * *' }, 0);
       cron.executions = 999999;
       expect(isAtLimit(cron)).toBe(false);
     });

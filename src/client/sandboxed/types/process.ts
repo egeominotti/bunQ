@@ -15,6 +15,7 @@ export interface IPCRequest {
   type: 'job';
   job: {
     id: string;
+    name: string;
     data: unknown;
     queue: string;
     attempts: number;

@@ -6,7 +6,7 @@
 > `subWorkflowRunner.ts`, `waitFor.ts` and `workflowDecisions.ts`; durability is
 > split across `store*.ts`, `definitionGuard.ts` and `workflowDefinition.ts`;
 > rollback is split across `compensator.ts`, `compensation*.ts`,
-> `unwindPlan.ts` and `rollbackControl.ts`.
+> `compensationClaim.ts`, `unwindPlan.ts` and `rollbackControl.ts`.
 
 ## Purpose
 
@@ -161,7 +161,8 @@ See [data-model](../data-model.md) for full definitions. Key shapes (`types.ts`)
 - `WorkflowNode` discriminated union (`stepTypes.ts`): `step | branch |
   waitFor | parallel | subWorkflow | doUntil | doWhile | forEach | map |
   pivot`.
-- `StepJobData` (`types.ts:255-259`): `{ executionId, workflowName, nodeIndex }` — the on-the-wire job payload.
+- `StepJobData` (`executionTypes.ts:109-114`):
+  `{ executionId, workflowName, nodeIndex }` — the on-the-wire job payload.
 
 SQLite table `workflow_executions` (id PK, workflow_name, state,
 input/steps/resolved_steps/signals/meta BLOBs, current_node_index, created_at,
@@ -239,7 +240,7 @@ Eligibility: user steps only (no `__` bookkeeping), status `completed` **or `fai
   undo but before that outcome write can replay, so compensations remain
   idempotent at the provider boundary.
 - **Park, do not plough on.** A handler that throws settles as `compensation-failed` and the loop **breaks**. The remaining steps are left *without* an outcome on purpose — the run is parked (`compensation-stuck`, `rollbackStatus: 'stuck'`), not finished, and pre-marking them skipped would make a later resume believe they were handled.
-- **Bounded like the forward path, and bounded even when the forward path is not.** The bound comes from `decideUnwindAction` (`unwindPlan.ts`) as `def.timeout > 0 ? def.timeout : DEFAULT_COMPENSATE_TIMEOUT_MS`, so the 30 s default from `workflow.ts:121` applies to a reversal too, and a timeout settles as `compensation-failed` (`error: 'Step timed out after Nms'`) exactly like a throw. `timeout: 0` disables the bound on the forward path only: an unbounded reversal would hold the process-global `inFlight` claim forever, locking the run out of `recover()`, `resumeCompensation` and `abandonCompensation` and leaving it `compensating` rather than parked. An unbounded handler that wedges — a hung HTTP call to a provider that is down, which is precisely when rollbacks run — would leave the run in `compensating`, not `compensation-stuck`: no parked run for an operator to resume or abandon, and every later `recover()` finding the claim still held and returning without having done anything.
+- **Bounded like the forward path, and bounded even when the forward path is not.** The bound comes from `decideUnwindAction` (`unwindPlan.ts`) as `def.timeout > 0 ? def.timeout : DEFAULT_COMPENSATE_TIMEOUT_MS`, so the 30 s default from `workflow.ts:121` applies to a reversal too, and a timeout settles as `compensation-failed` (`error: 'Step timed out after Nms'`) exactly like a throw. `timeout: 0` disables the bound on the forward path only: an unbounded reversal would hold the process-global compensation claim forever, locking operator control and, after force-close, preventing a replacement Engine from recovering the run. A hung HTTP call to a provider that is down — precisely when rollbacks run — must instead settle as a failed reversal and park the run in `compensation-stuck`, where an operator can resume or abandon it.
 - **Nested sagas.** A `sub:<name>` record is compensated by running the CHILD's `runCompensation` (`unwindChild`). A child that parks makes the parent's sub-step throw, so the parent parks too rather than reporting a clean rollback over a half-undone child. Resuming an ancestor may retry a child that is still `compensation-stuck`; it may not reopen a child explicitly abandoned to the terminal `failed` + `rollbackStatus: 'stuck'` pair.
 - **Operator exits** (`rollbackControl.ts`): `resumeCompensation` asks for the retry with a FLAG (`retryFailed`) rather than clearing the failed outcome, so the operator's record survives until a real outcome replaces it. Clearing was worse than it looked: it persisted the wipe before running anything, so a resume that met a failing store left a durable row with the diagnostic gone and the run marked `compensating`, re-driven at every startup, and guarding that needed a deep snapshot, a restore path and a second write that could mask the original error. `abandonCompensation` records every outstanding eligible step as `compensation-skipped` and makes the run terminal — this is where "exactly one outcome" is discharged. That terminal decision is monotonic: a later parent retry parks on the abandoned child instead of dispatching its reversal again.
 
@@ -249,7 +250,14 @@ Triggered from the generic `processStep` catch, the `waitFor` timeout path, and 
 failed rows whose unwind never began. Running work is re-enqueued; waiting
 timeouts retain their original start time; a delivered signal resumes
 immediately; failed-before-unwind rows enter compensation. Compensation is
-idempotent at the persisted outcome level. Definitions are rebound only when a
+idempotent at the persisted outcome level. A recovery call on the same live
+Engine skips an unwind already owned by that Engine and reports no recovered
+work; it never waits for user compensation code. If a force-closed Engine leaves
+its JavaScript compensation handler alive briefly, a replacement Engine in the
+same process waits on that exact claim owner's completion latch, reloads the
+durable row through its own store, and retries only when compensation is still
+owed. This prevents both a self-deadlock and a lost wake-up without treating the
+process-local claim as a distributed lock. Definitions are rebound only when a
 legacy row has no hash; a hashed row with a different registered graph fails
 closed.
 
@@ -267,6 +275,17 @@ There is no cross-process workflow lock. Inside one executor,
 running. Together with state and cursor admission checks, this rejects
 overlapping duplicate deliveries without using a queue deduplication ID that
 could suppress a legitimate later re-enqueue.
+
+Compensation uses a process-global `Map<executionId, claim>` because a forced
+Engine close can overlap a replacement Engine using the same durable store.
+Claim acquisition is atomic in the JavaScript process. The owner releases an
+identity-checked, non-rejecting completion latch in `finally`; a recovery path
+that loses the claim compares the owning `WorkflowStore` identity. The same
+Engine returns without waiting or counting work; a replacement Engine waits for
+the latch, reloads the row, and either stops on the persisted outcome or resumes
+the still-owed unwind. This is local coordination only: compensations must
+remain idempotent at the external provider boundary for crash and multi-process
+safety.
 
 Within a single execution, nodes are serialized because each `advance()` enqueues exactly one successor job, and a single in-flight job mutates the in-memory `Execution` object then persists it via `WorkflowStore.update` (`store.ts:122-133`, a single `UPDATE` statement). A `parallel` node is the only intra-node concurrency, fanning out via `Promise.allSettled` inside one job.
 
@@ -298,7 +317,12 @@ closing the worker and queue.
 
 - **In-memory store when `dataPath` is omitted.** `WorkflowStore` opens `dataPath ?? ':memory:'` (`store.ts:67`). In TCP/`connection` mode (no `dataPath`) execution state is in-memory only — it is lost on restart and `recover()` finds nothing. Persistence requires passing `dataPath` (typically with `embedded: true`).
 - **Retry vs. compensation.** A step failing all `retry` attempts throws out of `processStep`, which sets `failed`, persists, emits `workflow:failed`, runs compensation, then re-throws — failing the underlying `wf:step` job. If the queue retries that job, `processStep` short-circuits because the execution is now `failed`, so compensation does not double-run via that path.
-- **Crash mid-compensation** leaves state `compensating`; `recover()` re-enters the unwind, but per-step outcomes are checkpointed, so only the steps that had not settled are attempted again.
+- **Crash or force-close mid-compensation** leaves state `compensating`;
+  `recover()` re-enters the unwind, but per-step outcomes are checkpointed, so
+  only steps without a settled outcome are attempted again. When an old Engine's
+  JavaScript handler is still alive in the same process, its replacement waits
+  for the exact claim to settle before re-reading and deciding whether a retry is
+  owed; recovery on the same live Engine skips its own in-flight unwind.
 - **Parallel partial failure** rejects the whole node with `AggregateError`; already-completed sibling steps remain `completed` and become candidates for compensation.
 - **Loop guards.** `doUntil`/`doWhile` throw on `maxIterations` (default `100`), which fails the run and triggers the unwind; `forEach` throws if `items` is not an array, and then if `items.length` exceeds `maxIterations` (default `1000`) — both *before* running any iteration. `Array.isArray` is the predicate deliberately: the old `.length` duck-test accepted a number (zero iterations, run still `completed`) and a string (one iteration per character). Proxied and cross-realm arrays still pass, since `Array.isArray` tests the internal slot; typed arrays and other array-likes no longer do.
 - **Loop iterations are the unwind set, not the mirror.** Every iteration is recorded under `name:iteration` *and* mirrored under the bare `name` so the loop condition and downstream steps can read the last result. On rollback the **indexed records are compensated** — `findStepDef` resolves `turn:0` in a second, iteration-only pass — and `unwindSet` excludes the bare mirror so the final iteration is not compensated twice.

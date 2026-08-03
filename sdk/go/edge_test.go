@@ -25,7 +25,7 @@ func TestEdgeUnicodePayload(t *testing.T) {
 		t.Fatal("job not readable")
 	}
 	fetched, _ := queue.GetJob(job.ID())
-	data := fetched.Data()
+	data := asMap(fetched.Data())
 	for _, key := range []string{"emoji", "cjk", "rtl"} {
 		if data[key] != payload[key] {
 			t.Fatalf("%s corrupted by the msgpack roundtrip: %v", key, data[key])
@@ -51,7 +51,7 @@ func TestEdgeOneMBPayload(t *testing.T) {
 		t.Fatal("job not readable")
 	}
 	fetched, _ := queue.GetJob(job.ID())
-	if fetched.Data()["blob"] != blob {
+	if asMap(fetched.Data())["blob"] != blob {
 		t.Fatal("1MB payload must survive the roundtrip")
 	}
 }
@@ -71,7 +71,7 @@ func TestEdgeInt64PayloadIsJsSafe(t *testing.T) {
 		t.Fatal("server unhealthy after int64 traffic")
 	}
 	fetched, _ := queue.GetJob(job.ID())
-	data := fetched.Data()
+	data := asMap(fetched.Data())
 	if got := int64(asInt(data["epochMs"])); got != 9_999_999_999_999 {
 		t.Fatalf("epochMs = %d, want exact value (float64 exact <= 2^53)", got)
 	}

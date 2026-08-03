@@ -5,7 +5,7 @@
  * existence gate handlePush enforces (core.ts).
  */
 
-import type { JobInput } from '../../../domain/types/job';
+import { normalizeLegacyJobPayload, type JobInput } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 import { validateJobData, validateJobOptions } from '../protocol';
 
@@ -40,6 +40,12 @@ export function validatePushBatchJobs(jobs: JobInput[], ctx: HandlerContext): st
 
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i];
+
+    try {
+      normalizeLegacyJobPayload(job);
+    } catch (error) {
+      return `jobs[${i}]: ${error instanceof Error ? error.message : String(error)}`;
+    }
 
     const dataError = validateJobData(job.data);
     if (dataError) return `jobs[${i}]: ${dataError}`;

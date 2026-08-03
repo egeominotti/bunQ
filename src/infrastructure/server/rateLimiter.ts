@@ -123,6 +123,7 @@ export class ProtocolRateLimiter {
       this.cleanupInterval = setInterval(() => {
         this.cleanup();
       }, this.config.cleanupIntervalMs);
+      this.cleanupInterval.unref();
     }
   }
 

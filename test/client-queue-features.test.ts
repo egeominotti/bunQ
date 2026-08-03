@@ -8,6 +8,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { Queue, shutdownManager } from '../src/client';
 import { getSharedManager } from '../src/client/manager';
+import {
+  FORCE_EMBEDDED,
+  getDlqContext,
+  getShard,
+  toDomainDlqConfig,
+  toDomainFilter,
+} from '../src/client/queue/helpers';
 
 /**
  * Helper: add a job, pull it to make it active, then return the pulled job's ID.
@@ -206,9 +213,7 @@ describe('Job Move Operations', () => {
       };
 
       const result = await queue.waitJobUntilFinished(id, mockEvents, 5000);
-      // In embedded mode, the result comes from getResult
-      // Just verify it resolves without throwing or timing out
-      expect(true).toBe(true);
+      expect(result).toEqual({ done: true });
     });
 
     it('should reject immediately if job is already failed', async () => {
@@ -630,7 +635,7 @@ describe('Scheduler Operations', () => {
       const scheduler = await queue.getJobScheduler('findable');
       expect(scheduler).not.toBeNull();
       expect(scheduler!.id).toBe('findable');
-      expect(scheduler!.name).toBe('findable');
+      expect(scheduler!.name).toBe('check');
       expect(scheduler!.pattern).toBe('*/5 * * * *');
     });
 
@@ -785,19 +790,19 @@ describe('Worker Query Operations', () => {
       expect(metrics).toBeDefined();
     });
 
-    it('should return empty data array', async () => {
+    it('should return an empty series when the queue has no terminal events', async () => {
       const metrics = await queue.getMetrics('completed');
       expect(metrics.data).toEqual([]);
     });
   });
 
   describe('trimEvents()', () => {
-    it('should return 0 (no-op in bunqueue)', async () => {
+    it('should return 0 when the event journal is empty', async () => {
       const result = await queue.trimEvents(1000);
       expect(result).toBe(0);
     });
 
-    it('should return 0 regardless of the maxLength value', async () => {
+    it('should not fabricate removals for a shorter empty journal', async () => {
       const result = await queue.trimEvents(1);
       expect(result).toBe(0);
     });
@@ -969,7 +974,6 @@ describe('Queue Helpers', () => {
 
   describe('FORCE_EMBEDDED', () => {
     it('should be true when BUNQUEUE_EMBEDDED=1 is set', () => {
-      const { FORCE_EMBEDDED } = require('../src/client/queue/helpers');
       if (Bun.env.BUNQUEUE_EMBEDDED === '1') {
         expect(FORCE_EMBEDDED).toBe(true);
       } else {
@@ -997,12 +1001,10 @@ describe('Queue Helpers', () => {
 
   describe('toDomainFilter()', () => {
     it('should return undefined for undefined input', () => {
-      const { toDomainFilter } = require('../src/client/queue/helpers');
       expect(toDomainFilter(undefined)).toBeUndefined();
     });
 
     it('should pass through a filter object', () => {
-      const { toDomainFilter } = require('../src/client/queue/helpers');
       const filter = { reason: 'timeout', limit: 10 };
       const result = toDomainFilter(filter);
       expect(result).toBeDefined();
@@ -1011,7 +1013,6 @@ describe('Queue Helpers', () => {
     });
 
     it('should pass through filter with all fields', () => {
-      const { toDomainFilter } = require('../src/client/queue/helpers');
       const filter = {
         reason: 'stalled',
         olderThan: 1000,
@@ -1031,7 +1032,6 @@ describe('Queue Helpers', () => {
 
   describe('toDomainDlqConfig()', () => {
     it('should convert a config object', () => {
-      const { toDomainDlqConfig } = require('../src/client/queue/helpers');
       const config = { autoRetry: true, maxAge: 86400000 };
       const result = toDomainDlqConfig(config);
       expect(result).toBeDefined();
@@ -1040,13 +1040,11 @@ describe('Queue Helpers', () => {
     });
 
     it('should handle empty config', () => {
-      const { toDomainDlqConfig } = require('../src/client/queue/helpers');
       const result = toDomainDlqConfig({});
       expect(result).toBeDefined();
     });
 
     it('should pass through all DLQ config fields', () => {
-      const { toDomainDlqConfig } = require('../src/client/queue/helpers');
       const config = {
         autoRetry: false,
         autoRetryInterval: 7200000,
@@ -1065,16 +1063,12 @@ describe('Queue Helpers', () => {
 
   describe('getShard()', () => {
     it('should return a shard from the manager', () => {
-      const { getShard } = require('../src/client/queue/helpers');
-      const { getSharedManager } = require('../src/client/manager');
       const manager = getSharedManager();
       const shard = getShard(manager, 'test-queue');
       expect(shard).toBeDefined();
     });
 
     it('should return a shard for different queue names', () => {
-      const { getShard } = require('../src/client/queue/helpers');
-      const { getSharedManager } = require('../src/client/manager');
       const manager = getSharedManager();
       const shard1 = getShard(manager, 'queue-a');
       const shard2 = getShard(manager, 'queue-b');
@@ -1086,8 +1080,6 @@ describe('Queue Helpers', () => {
 
   describe('getDlqContext()', () => {
     it('should return a context with shards and jobIndex', () => {
-      const { getDlqContext } = require('../src/client/queue/helpers');
-      const { getSharedManager } = require('../src/client/manager');
       const manager = getSharedManager();
       const ctx = getDlqContext(manager);
       expect(ctx).toBeDefined();
@@ -1097,16 +1089,12 @@ describe('Queue Helpers', () => {
     });
 
     it('should return shards array with length > 0', () => {
-      const { getDlqContext } = require('../src/client/queue/helpers');
-      const { getSharedManager } = require('../src/client/manager');
       const manager = getSharedManager();
       const ctx = getDlqContext(manager);
       expect(ctx.shards.length).toBeGreaterThan(0);
     });
 
     it('should return a Map for jobIndex', () => {
-      const { getDlqContext } = require('../src/client/queue/helpers');
-      const { getSharedManager } = require('../src/client/manager');
       const manager = getSharedManager();
       const ctx = getDlqContext(manager);
       expect(ctx.jobIndex instanceof Map).toBe(true);

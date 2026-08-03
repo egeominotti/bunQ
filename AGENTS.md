@@ -75,7 +75,9 @@ clients may run in other runtimes through the network protocol.
 
 ## Validation
 
-Run the narrowest relevant tests while iterating:
+Run repository tests in an isolated OrbStack Machine by default. A macOS host
+run is diagnostic only and does not count as final validation evidence. Run the
+narrowest relevant tests while iterating:
 
 ```bash
 BUNQUEUE_EMBEDDED=1 bun test test/path-to-test.test.ts
@@ -100,6 +102,56 @@ recovery, and DLQ exactly-once. When it fails, record the printed seed,
 counterexample, and replay path. Distinguish a model error from an engine
 divergence; for a confirmed engine bug, preserve the minimized sequence as a
 deterministic `test/repro-model-*.test.ts` regression before fixing it.
+
+### OrbStack Machine gate
+
+Final Linux validation must run in a fresh, disposable OrbStack Machine. The
+canonical local environment is Ubuntu 24.04 on the Mac's native architecture;
+on Apple Silicon this means `arm64`. Allocate 4 CPUs, request 16 GiB of memory,
+and at least 32 GiB of disk, then record the effective cgroup limits because
+OrbStack may clamp them to its global limits. GitHub Actions `ubuntu-latest`
+provides the independent native `amd64` gate. Every release must also run the
+same native product suites in a fresh Debian 13 Machine using the Mac's native
+architecture.
+
+Do not use a translated `amd64` Machine on Apple Silicon as final evidence.
+Rosetta is useful for diagnostics, but process-heavy Bun tests can behave
+differently under translation. Record such a run as diagnostic and repeat it
+on a native-architecture Machine.
+
+Create Machines with both `--isolated` and `--isolate-network`. Do not use
+`--mount` or `--forward-ssh-agent`. Never expose the macOS repository, home
+directory, Docker socket, credentials, SSH agent, package-manager tokens, or
+real environment files to a Machine. A tracked placeholder-only template such
+as `.env.example` is allowed only after its contents have been reviewed.
+Transfer an explicit sanitized worktree snapshot over OrbStack's built-in SSH
+transport; it must contain all tracked and intended untracked
+changes while excluding `.git`, ignored files, `node_modules`, `artifacts`,
+SQLite databases, generated test output, secrets, and credentials.
+
+Provision the exact Bun version pinned by CI and install from the frozen
+lockfile. Then run, directly in each Machine:
+
+```bash
+bun test
+bun scripts/tcp/run-all-tests.ts
+bun scripts/embedded/run-all-tests.ts
+bun run typecheck
+bun run check:biome
+```
+
+Use a unique Machine name for every final candidate and delete it after its
+logs and environment manifest have been copied to `artifacts/`. Record the
+distro, version, architecture, kernel, Bun version/revision, command, exit code,
+duration, and exact test totals. A reused Machine or a host-only run is not
+release evidence. OrbStack Machines and containers share OrbStack's underlying
+Linux kernel, so this is strong filesystem/process/network separation but not a
+separate-kernel or physical-machine security boundary.
+
+The Machine gate supplements rather than replaces the container gates below.
+Run `git diff --check` on the host before creating the sanitized snapshot,
+because the Machine deliberately receives no `.git` directory.
+Run benchmarks only on native macOS, never in an OrbStack Machine or container.
 
 **MANDATORY: After ANY code modification, run the isolated validation before
 committing:**
@@ -142,8 +194,10 @@ and assert both the returned result and any affected counters/state.
 
 ## Test hygiene
 
-- Prefer targeted native tests during iteration; use the sandbox for the final
-  full gate. Never run one container per individual unit test.
+- Prefer targeted tests in the current isolated development Machine during
+  iteration; use fresh disposable Machines and the sandbox for the final full
+  gates. A host-native run is diagnostic only. Never run one container per
+  individual unit test.
 - Model campaigns can be deepened without editing source:
   `BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150
   BUNQUEUE_MODEL_SEED=<signed-seed> bun run test:model`. Preserve the sign

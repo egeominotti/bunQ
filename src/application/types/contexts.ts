@@ -13,6 +13,8 @@ import type { MonitoringState } from '../monitoringChecks';
 import type { WebhookManager } from '../webhookManager';
 import type { WorkerManager } from '../workerManager';
 import type { DEFAULT_CONFIG } from './config';
+import type { JobTimeoutScheduler } from '../background/timeouts';
+import type { RetiredTimeoutGeneration } from './background';
 
 export interface QueueManagerState {
   readonly config: typeof DEFAULT_CONFIG & { dataPath?: string };
@@ -28,6 +30,10 @@ export interface QueueManagerState {
   readonly customIdMap: LRUMap<string, JobId>;
   readonly jobLogs: LRUMap<JobId, JobLogEntry[]>;
   readonly jobLocks: Map<JobId, JobLock>;
+  readonly timedOutJobs: MapLike<JobId, RetiredTimeoutGeneration>;
+  readonly retiredTimeoutLeaseTokens: MapLike<string, RetiredTimeoutGeneration>;
+  readonly retiredCronLeaseTokens: MapLike<JobId, string>;
+  readonly timeoutScheduler: JobTimeoutScheduler;
   readonly clientJobs: Map<string, Set<JobId>>;
   readonly stalledCandidates: Set<JobId>;
   readonly pendingDepChecks: Set<JobId>;
@@ -49,6 +55,7 @@ export interface QueueManagerMetrics {
 export interface LockContext {
   jobIndex: Map<JobId, JobLocation>;
   jobLocks: Map<JobId, JobLock>;
+  retiredCronLeaseTokens: MapLike<JobId, string>;
   clientJobs: Map<string, Set<JobId>>;
   processingShards: Map<JobId, Job>[];
   processingLocks: RWLock[];
@@ -57,6 +64,7 @@ export interface LockContext {
   eventsManager: EventsManager;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
   storage: SqliteStorage | null;
+  timeoutScheduler: JobTimeoutScheduler;
 }
 
 export interface BackgroundContext extends QueueManagerState {
@@ -69,7 +77,8 @@ export interface BackgroundContext extends QueueManagerState {
   completedJobsData: BoundedMap<JobId, Job>;
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
-  timedOutJobs?: BoundedSet<JobId>;
+  timedOutJobs: BoundedMap<JobId, RetiredTimeoutGeneration>;
+  retiredTimeoutLeaseTokens: BoundedMap<string, RetiredTimeoutGeneration>;
 }
 
 export interface StatsContext {

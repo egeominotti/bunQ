@@ -1,7 +1,7 @@
-import type { Job as InternalJob } from '../../../domain/types/job';
 import { WORKER_CONSTANTS } from '../constants';
 import { pullEmbedded, pullTcp, type PullConfig } from '../workerPull';
 import { WorkerBuffer } from './buffer';
+import type { PulledJob, WorkerDelivery } from './state';
 
 export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuffer<T, R> {
   protected poll(): void {
@@ -15,13 +15,7 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     }
 
     if (!this.rateLimiter.canProcessWithinLimit()) {
-      const waitTime = this.rateLimiter.getTimeUntilNextSlot();
-      this.pollTimer = setTimeout(
-        () => {
-          this.poll();
-        },
-        Math.max(waitTime, 10)
-      );
+      this.scheduleRateLimitPoll();
       return;
     }
 
@@ -34,10 +28,14 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     try {
       let item = this.getNextEligibleJob();
       if (!item) {
-        const items = await this.doPullBatch();
+        if (!this.rateLimiter.canProcessWithinLimit()) {
+          this.scheduleRateLimitPoll();
+          return;
+        }
+        const pulledItems = await this.doPullBatch();
         if (!this.running || this._closing) return;
-        if (items.length > 0) {
-          this.registerPulledJobs(items);
+        if (pulledItems.length > 0) {
+          const items = this.registerPulledJobs(pulledItems);
           if (this.pendingJobsHead >= this.pendingJobs.length) {
             this.pendingJobs = items;
             this.pendingJobsHead = 0;
@@ -58,7 +56,10 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
           return;
         }
         this.consecutiveErrors = 0;
-        this.startJob(item.job, item.token);
+        if (!this.startJob(item)) {
+          this.requeueItem(item);
+          this.scheduleRateLimitPoll();
+        }
       } else {
         const hasBuffered = this.pendingJobsHead < this.pendingJobs.length;
         if (hasBuffered && this.groupLimiter) {
@@ -83,12 +84,13 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     }
   }
 
-  protected async doPullBatch(): Promise<Array<{ job: InternalJob; token: string | null }>> {
+  protected async doPullBatch(): Promise<PulledJob[]> {
     const groupBlockedBuffer =
       this.groupLimiter !== null && this.pendingJobsHead < this.pendingJobs.length;
     const leased = groupBlockedBuffer ? this.activeJobs : this.pulledJobIds.size;
     const slots = this.opts.concurrency - leased - this.pendingPull;
-    const batchSize = Math.min(this.opts.batchSize, slots, 1000);
+    const rateSlots = this.rateLimiter.getAvailableSlots() - this.pendingPull;
+    const batchSize = Math.min(this.opts.batchSize, slots, rateSlots, 1000);
     if (batchSize <= 0) return [];
 
     const config = this.getPullConfig();
@@ -100,6 +102,16 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     } finally {
       this.pendingPull -= batchSize;
     }
+  }
+
+  private scheduleRateLimitPoll(): void {
+    const waitTime = this.rateLimiter.getTimeUntilNextSlot();
+    this.pollTimer = setTimeout(
+      () => {
+        this.poll();
+      },
+      Math.max(waitTime, 10)
+    );
   }
 
   protected handlePullError(errorValue: unknown): void {
@@ -122,6 +134,6 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     }, backoffMs);
   }
 
-  protected abstract startJob(job: InternalJob, token: string | null): void;
+  protected abstract startJob(delivery: WorkerDelivery): boolean;
   protected abstract getPullConfig(): PullConfig;
 }

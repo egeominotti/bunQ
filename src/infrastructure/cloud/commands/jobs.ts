@@ -13,6 +13,7 @@ export const JOB_COMMANDS: Partial<Record<string, CloudCommandHandler>> = {
   },
   'job:push': async (queueManager, command) => {
     const job = await queueManager.push(command.queue ?? '', {
+      name: command.name ?? 'default',
       data: command.data ?? {},
       priority: command.priority,
       delay: command.delay,

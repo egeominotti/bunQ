@@ -69,37 +69,42 @@ export async function runFlowProducerContract(mode: CoreE2eMode): Promise<Covera
     );
     ensure(legacyTree.jobIds.length === 2, 'addTree did not create root and child');
 
-    const resultQueue = harness.queue<{ value: number }>('results');
-    const resultWorker = harness.worker(resultQueue.name, async (job) => job.data.value * 2);
-    const resultJob = await resultQueue.add('result', { value: 21 }, { durable: true });
-    await eventually(
-      () => resultQueue.getJobState(resultJob.id),
-      (state) => state === 'completed',
-      'result fixture did not complete'
+    const resultQueue = harness.queue<{ result: unknown }>('results');
+    const resultWorker = harness.worker(resultQueue.name, async (job) => job.data.result);
+    const resultValues = [42, 0, false, '', null] as const;
+    const resultJobs = await Promise.all(
+      resultValues.map((result, index) =>
+        resultQueue.add(`result-${index}`, { result }, { durable: true })
+      )
     );
-    if (mode === 'embedded') {
-      const one = tracker.call('FlowProducer', 'getParentResult', () =>
-        producer.getParentResult<number>(resultJob.id)
-      );
-      ensure(one === 42, `getParentResult returned ${one}`);
-      const many = tracker.call('FlowProducer', 'getParentResults', () =>
-        producer.getParentResults<number>([resultJob.id])
-      );
-      ensure(many.get(resultJob.id) === 42, 'getParentResults missed result');
-    } else {
-      await tracker.rejects(
-        'FlowProducer',
-        'getParentResult',
-        () => producer.getParentResult(resultJob.id),
-        /only available in embedded mode/
-      );
-      await tracker.rejects(
-        'FlowProducer',
-        'getParentResults',
-        () => producer.getParentResults([resultJob.id]),
-        /only available in embedded mode/
+    for (const resultJob of resultJobs) {
+      await eventually(
+        () => resultQueue.getJobState(resultJob.id),
+        (state) => state === 'completed',
+        'result fixture did not complete'
       );
     }
+    const resultJob = resultJobs[0];
+    const one = await tracker.invoke(
+      'FlowProducer',
+      'getParentResult',
+      async () => await producer.getParentResult<number>(resultJob.id)
+    );
+    ensure(one === 42, `getParentResult returned ${one}`);
+    const many = await tracker.invoke(
+      'FlowProducer',
+      'getParentResults',
+      async () =>
+        await producer.getParentResults<unknown>([
+          ...resultJobs.map((job) => job.id),
+          'missing-result-id',
+        ])
+    );
+    ensure(
+      resultJobs.every((job, index) => many.get(job.id) === resultValues[index]) &&
+        !many.has('missing-result-id'),
+      `getParentResults lost a falsy result, changed order, or retained a missing id: ${JSON.stringify([...many.entries()])}`
+    );
     await resultWorker.close();
 
     const closeProducer = harness.flow();

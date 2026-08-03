@@ -89,10 +89,9 @@ test('hardening/property: generated portable payloads preserve all invariants', 
     for (let index = 0; index < jobs.length; index++) {
       const fetched = await queue.getJob(jobs[index].id);
       assert(fetched !== null, `generated job ${index} remains queryable`);
-      const { name, ...userPayload } = fetched.data as Record<string, unknown>;
-      assertEq(name, `generated-${index % 7}`, `generated job ${index} keeps its name`);
+      assertEq(fetched.name, `generated-${index % 7}`, `generated job ${index} keeps its name`);
       assertEq(
-        JSON.stringify(userPayload),
+        JSON.stringify(fetched.data),
         JSON.stringify(payloads[index]),
         `generated payload ${index} round-trips exactly`
       );

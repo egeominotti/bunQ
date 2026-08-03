@@ -256,6 +256,13 @@ queue.retry_job("job-id")?;
 
 *Bulk `retryJobs`, `retryCompleted`, and counted `promoteJobs` are available in TypeScript and Python; PHP, Go, Rust, and Elixir act per job (`promote`, `retryJob`).*
 
+Retrying a completed job starts a new waiting execution. Its previous
+`returnvalue`, progress/message, `processedOn`, and `finishedOn` are cleared;
+attempts restart at zero, while the diagnostic stacktrace and timeline history
+remain available. For persisted queues, that reset and removal of the old
+result are one atomic SQLite transaction and remain cleared after broker
+restart.
+
 ## Where to go next
 
 | | |

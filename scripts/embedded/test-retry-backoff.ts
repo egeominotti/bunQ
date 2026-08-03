@@ -39,7 +39,7 @@ async function main() {
 
     await queue.add('fixed-job', { attempt: 0 }, {
       attempts: 3,
-      backoff: 100, // Fixed delay of 100ms
+      backoff: { type: 'fixed', delay: 100 },
     });
 
     const attempts: number[] = [];
@@ -60,8 +60,13 @@ async function main() {
     if (attempts.length === 3) {
       const delay1 = timestamps[1] - timestamps[0];
       const delay2 = timestamps[2] - timestamps[1];
-      console.log(`   ✅ Fixed backoff: ${attempts.length} attempts, delays: ~${delay1}ms, ~${delay2}ms`);
-      passed++;
+      if (delay1 >= 72 && delay2 >= 72) {
+        console.log(`   ✅ Fixed backoff: ${attempts.length} attempts, delays: ~${delay1}ms, ~${delay2}ms`);
+        passed++;
+      } else {
+        console.log(`   ❌ Fixed backoff below its jitter floor: ${delay1}ms, ${delay2}ms`);
+        failed++;
+      }
     } else {
       console.log(`   ❌ Expected 3 attempts, got ${attempts.length}`);
       failed++;
@@ -81,7 +86,7 @@ async function main() {
 
     await queue.add('exp-job', { attempt: 0 }, {
       attempts: 4,
-      backoff: 50, // Base backoff, will be multiplied by attempt number
+      backoff: 50,
     });
 
     const timestamps: number[] = [];
@@ -97,17 +102,16 @@ async function main() {
     await waitFor(() => timestamps.length >= 4);
     await worker.close();
 
-    if (timestamps.length >= 3) {
+    if (timestamps.length >= 4) {
       const delays = timestamps.slice(1).map((t, i) => t - timestamps[i]);
-      console.log(`   ✅ Exponential backoff delays: ${delays.map(d => `~${d}ms`).join(', ')}`);
-
-      // Check that delays are increasing
-      const isExponential = delays.length >= 2 && delays[1] > delays[0];
-      if (isExponential) {
+      const floors = [45, 90, 180];
+      const respectsWindows = floors.every((floor, i) => delays[i] >= floor);
+      if (respectsWindows) {
+        console.log(`   ✅ Exponential backoff delays: ${delays.map(d => `~${d}ms`).join(', ')}`);
         passed++;
       } else {
-        console.log('   ⚠️ Delays may not be strictly exponential');
-        passed++; // Still pass as timing can vary
+        console.log(`   ❌ Backoff below its exponential floor: ${delays.join(', ')}ms`);
+        failed++;
       }
     } else {
       console.log(`   ❌ Expected 4 attempts, got ${timestamps.length}`);
@@ -120,16 +124,15 @@ async function main() {
     failed++;
   }
 
-  // Test 3: Custom backoff function
-  console.log('\n3. Testing CUSTOM BACKOFF...');
+  // Test 3: Numeric shorthand
+  console.log('\n3. Testing NUMERIC BACKOFF SHORTHAND...');
   try {
     const queue = new Queue<{ attempt: number }>(QUEUE_NAME, { embedded: true });
     queue.obliterate();
 
-    // Custom backoff: 100ms * attempt number
     await queue.add('custom-job', { attempt: 0 }, {
       attempts: 3,
-      backoff: 200, // Simple fixed delay
+      backoff: 200,
     });
 
     let attemptCount = 0;
@@ -146,7 +149,7 @@ async function main() {
     await worker.close();
 
     if (attemptCount === 3) {
-      console.log(`   ✅ Custom backoff: ${attemptCount} attempts completed`);
+      console.log(`   ✅ Numeric backoff: ${attemptCount} attempts completed`);
       passed++;
     } else {
       console.log(`   ❌ Expected 3 attempts, got ${attemptCount}`);
@@ -155,7 +158,7 @@ async function main() {
 
     queue.obliterate();
   } catch (e) {
-    console.log(`   ❌ Custom backoff test failed: ${e}`);
+    console.log(`   ❌ Numeric backoff test failed: ${e}`);
     failed++;
   }
 

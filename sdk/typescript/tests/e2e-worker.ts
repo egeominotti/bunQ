@@ -195,6 +195,43 @@ test('worker: job longer than lockTtl survives via heartbeat renewal', async () 
   }
 });
 
+test('worker: broker timeout suppresses late completion and failure events', async () => {
+  const queue = makeQueue<{ fail: boolean }>('timeout-authority');
+  const completed: string[] = [];
+  const failed: string[] = [];
+  const errors: Error[] = [];
+  const worker = makeWorker<{ fail: boolean }, string>(
+    queue.name,
+    async (job) => {
+      await sleep(500);
+      if (job.data.fail) throw new Error('late processor failure');
+      return 'late processor result';
+    },
+    { concurrency: 2, heartbeatIntervalS: 0.05 }
+  );
+  worker.on('completed', (job: Job) => completed.push(job.id));
+  worker.on('failed', (job: Job) => failed.push(job.id));
+  worker.on('error', (error: Error) => errors.push(error));
+  try {
+    const success = await queue.add('late-success', { fail: false }, { attempts: 1, timeout: 100 });
+    const failure = await queue.add('late-failure', { fail: true }, { attempts: 1, timeout: 100 });
+    await waitFor(async () => {
+      const states = await Promise.all([
+        queue.getJobState(success.id),
+        queue.getJobState(failure.id),
+      ]);
+      return states.every((state) => state === 'failed');
+    });
+    await sleep(700);
+    assertEq(completed.length, 0, 'late result must not emit completed');
+    assertEq(failed.length, 0, 'late throw must not emit failed');
+    assertEq(errors.length, 0, 'authoritative ignored outcomes are not Worker errors');
+  } finally {
+    await worker.close();
+    queue.close();
+  }
+});
+
 test('worker: registration visible in getWorkers', async () => {
   const queue = makeQueue('reg');
   const worker = makeWorker(queue.name, async () => 'ok', { name: 'e2e-ts-worker' });

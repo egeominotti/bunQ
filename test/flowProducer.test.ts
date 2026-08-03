@@ -8,6 +8,33 @@ import { Queue, Worker, FlowProducer } from '../src/client';
 import type { FlowJob, JobNode } from '../src/client';
 import { shutdownManager } from '../src/client';
 
+describe('FlowProducer shutdown', () => {
+  test('a teardown failure is captured once by the stable closing promise', async () => {
+    const flow = new FlowProducer({ embedded: true });
+    let closeCalls = 0;
+    const internals = flow as unknown as {
+      tcp: { close(): void } | null;
+      useSharedPool: boolean;
+      closing: Promise<void> | null;
+    };
+    internals.tcp = {
+      close() {
+        closeCalls++;
+        throw new Error('synthetic teardown failure');
+      },
+    };
+    internals.useSharedPool = false;
+
+    const first = flow.close();
+    const second = flow.disconnect();
+
+    expect(second).toBe(first);
+    expect(internals.closing).toBe(first);
+    await expect(first).rejects.toThrow('synthetic teardown failure');
+    expect(closeCalls).toBe(1);
+  });
+});
+
 describe('FlowProducer - BullMQ v5 API', () => {
   let flowProducer: FlowProducer;
   let queue: Queue<{ value: number }>;
@@ -24,7 +51,7 @@ describe('FlowProducer - BullMQ v5 API', () => {
       await worker.close();
       worker = null;
     }
-    flowProducer.close();
+    await flowProducer.close();
     queue.close();
     shutdownManager();
   });
@@ -182,16 +209,20 @@ describe('FlowProducer - BullMQ v5 API', () => {
       expect(childJob.id).toBeDefined();
     });
 
-    test('should store parent info in job data', async () => {
+    test('should link multiple children to the same parent', async () => {
       const parentJob = await queue.add('parent', { value: 100 });
 
       await queue.add('child', { value: 50 }, { parent: { id: parentJob.id, queue: 'flow-test' } });
 
-      // Verify we can add multiple children to same parent
-      await queue.add('child2', { value: 25 }, { parent: { id: parentJob.id, queue: 'flow-test' } });
+      await queue.add(
+        'child2',
+        { value: 25 },
+        { parent: { id: parentJob.id, queue: 'flow-test' } }
+      );
 
       const counts = await queue.getJobCountsAsync();
-      expect(counts.waiting).toBe(3); // parent + 2 children
+      expect(counts.waiting).toBe(2);
+      expect(counts['waiting-children']).toBe(1);
     });
   });
 
@@ -273,8 +304,8 @@ describe('FlowProducer - Legacy API', () => {
     queue.obliterate();
   });
 
-  afterEach(() => {
-    flowProducer.close();
+  afterEach(async () => {
+    await flowProducer.close();
     queue.close();
     shutdownManager();
   });
@@ -373,7 +404,7 @@ describe('getChildrenValues - Integration', () => {
     const initialValues = await result.job.getChildrenValues();
     expect(initialValues).toEqual({});
 
-    flowProducer.close();
+    await flowProducer.close();
   });
 
   test('Queue.getChildrenValues should work', async () => {

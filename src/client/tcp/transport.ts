@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import type { Socket } from 'bun';
 import { FrameParser, FrameSizeError } from '../../infrastructure/server/protocol';
+import { SocketWriteQueue } from '../../infrastructure/server/socketWriteQueue';
 import type { ClientTlsOptions, SocketWrapper } from './types';
+
+const CLIENT_MAX_WRITE_QUEUE_BYTES = 64 * 1024 * 1024;
 
 export interface ConnectionEvents {
   onData: (frame: Uint8Array) => void;
@@ -37,15 +40,16 @@ export function tlsRequiresVerification(tls: boolean | ClientTlsOptions | undefi
   return tls.rejectUnauthorized !== false;
 }
 
-export async function createConnection(
+export function createConnection(
   target: ConnectionTarget,
   connectTimeout: number,
   events: ConnectionEvents
 ): Promise<ConnectionResult> {
   return new Promise((resolve, reject) => {
+    const writeQueue = new SocketWriteQueue(CLIENT_MAX_WRITE_QUEUE_BYTES);
     const socketData: SocketWrapper = {
-      write: () => {},
-      end: () => {},
+      write: () => undefined,
+      end: () => undefined,
       frameParser: new FrameParser(),
     };
 
@@ -98,8 +102,17 @@ export async function createConnection(
         } catch {
           // Keepalive is best-effort.
         }
-        socketData.write = (data: Uint8Array | string) => socket.write(data);
-        socketData.end = () => socket.end();
+        socketData.write = (data: Uint8Array | string) => {
+          const bytes = typeof data === 'string' ? Buffer.from(data) : data;
+          if (!writeQueue.write(socket, bytes) || writeQueue.isOverBudget) {
+            writeQueue.clear();
+            socket.terminate();
+          }
+        };
+        socketData.end = () => {
+          writeQueue.clear();
+          socket.end();
+        };
         opened = true;
         maybeResolveOpen();
       },
@@ -122,12 +135,19 @@ export async function createConnection(
         maybeResolveOpen();
       },
       close() {
+        writeQueue.clear();
         if (!connectionResolved) {
           connectionResolved = true;
           cleanup();
           reject(new Error('Connection closed'));
         }
         events.onClose();
+      },
+      drain(socket: Socket<unknown>) {
+        if (!writeQueue.flush(socket)) {
+          writeQueue.clear();
+          socket.terminate();
+        }
       },
       error(_socket: Socket<unknown>, error: Error) {
         if (!connectionResolved) {

@@ -1,10 +1,25 @@
 import { FrameParser } from '../../../infrastructure/server/protocol';
+import { PROTOCOL_CAPABILITIES, PROTOCOL_VERSION } from '../../../domain/types/protocol';
+import type { HelloResponse } from '../../../domain/types/response';
 import { encodeMessagePack } from '../../../shared/msgpack';
 import type { PendingCommand } from '../types';
 import { TcpClientHealth } from './health';
 
 /** Command framing, queueing, pipelining, and timeout handling. */
 export abstract class TcpClientCommands extends TcpClientHealth {
+  async hello(): Promise<HelloResponse> {
+    const response = await this.send({
+      cmd: 'Hello',
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: [...PROTOCOL_CAPABILITIES],
+    });
+    if (response.ok !== true) {
+      const message = typeof response.error === 'string' ? response.error : 'Hello failed';
+      throw new Error(message);
+    }
+    return response as unknown as HelloResponse;
+  }
+
   protected sendDirect(command: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.socket) return Promise.reject(new Error('Not connected'));
 

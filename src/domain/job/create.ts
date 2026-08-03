@@ -1,5 +1,6 @@
 import type { BackoffConfig, Job, JobId, JobInput, RepeatConfig } from '../types/jobs/model';
 import { JOB_DEFAULTS } from './constants';
+import { normalizeJobPayload } from './payload';
 
 function parseBackoff(
   input: number | { type: 'fixed' | 'exponential'; delay: number } | undefined
@@ -84,11 +85,13 @@ export function createJob(
   const optionalFields = parseOptionalFields(input);
   const v5Opts = parseBullMQV5Options(input);
   const createdAt = input.timestamp ?? now;
+  const payload = normalizeJobPayload(input);
 
   return {
     id,
     queue,
-    data: input.data,
+    name: payload.name,
+    data: payload.data,
     createdAt,
     runAt: createdAt + (input.delay ?? 0),
     startedAt: null,
@@ -104,6 +107,7 @@ export function createJob(
     progressMessage: null,
     stacktrace: null,
     repeat: parseRepeatConfig(input.repeat),
+    durable: input.durable ?? false,
     lastHeartbeat: createdAt,
     stallCount: 0,
     ...coreOpts,

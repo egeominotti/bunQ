@@ -46,7 +46,11 @@ import { Aside } from '@astrojs/starlight/components';
 
   The guarantee is **at-least-once**: a job is never lost, but it can run more than once. No queue on any backend can promise better, because your side effect and the acknowledgment are two separate systems and a crash can always land between them. What bunqueue does guarantee around the edges:
 
-  - A late ACK from a worker whose lease already expired is still accepted, but only if the job was not re-leased to someone else in the meantime. Two workers can never both complete the same job.
+  - A late ACK after ordinary lease expiry is accepted only while that exact
+    generation still owns the processing slot and the job was not re-leased.
+    If the job's processing `timeout` already finalized that generation, the
+    ACK/FAIL is instead an explicit idempotent no-op. Two generations can never
+    both complete the same job.
   - Re-adding a job with the same custom `jobId` is a no-op, even under heavy concurrency. Producers that retry on timeout should always set one.
   - Duplicate ACKs are harmless.
 

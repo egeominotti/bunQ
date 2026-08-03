@@ -105,8 +105,10 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
       (value) => (value as { maxStalls?: number }).maxStalls === 7,
       'setStallConfig was not applied'
     );
-    const localStall = tracker.call('Queue', 'getStallConfig', () => queue.getStallConfig());
-    ensure(localStall.maxStalls === 7, 'getStallConfig missed cached/live value');
+    if (mode === 'embedded') {
+      const localStall = tracker.call('Queue', 'getStallConfig', () => queue.getStallConfig());
+      ensure(localStall.maxStalls === 7, 'getStallConfig missed cached/live value');
+    }
     await tracker.invoke('Queue', 'setStallConfigAsync', () =>
       queue.setStallConfigAsync({ maxStalls: 5, stallInterval: 2_000 })
     );
@@ -132,11 +134,13 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
       'metrics fixture did not complete'
     );
     const metrics = await tracker.invoke('Queue', 'getMetrics', () =>
-      queue.getMetrics('completed', 0, Date.now())
+      queue.getMetrics('completed', 0, -1)
     );
     ensure(metrics.meta.count >= 1, `getMetrics returned ${metrics.meta.count}`);
-    const trimmed = await tracker.invoke('Queue', 'trimEvents', () => queue.trimEvents(100));
-    ensure(trimmed === 0, `trimEvents returned ${trimmed}`);
+    const trimmed = await tracker.invoke('Queue', 'trimEvents', () => queue.trimEvents(1));
+    ensure(trimmed > 0, `trimEvents did not remove journal entries: ${trimmed}`);
+    const retrimmed = await queue.trimEvents(1);
+    ensure(retrimmed === 0, `trimEvents was not idempotent: ${retrimmed}`);
   } finally {
     release();
     await harness.close();

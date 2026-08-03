@@ -96,7 +96,7 @@ This module exposes no TCP commands, HTTP endpoints, CLI commands, or events dir
 
 ## Data Models
 
-`Job` (`src/domain/types/job.ts:81`) is the payload stored in `IndexedPriorityQueue`; the ordering reads `priority` (`:85`), `lifo` (`:87`), `runAt` (`:90`), and `id` (`JobId`, a branded `string`, `:7`). Full definition in [data-model](../data-model.md).
+`Job` (`src/domain/types/jobs/model.ts:41`) is the payload stored in `IndexedPriorityQueue`; the ordering reads `priority` (`:46`), `lifo` (`:48`), `runAt` (`:49`), and `id` (`JobId`, a branded `string`, `:1`). Full definition in [data-model](../data-model.md).
 
 Internal shapes:
 - `HeapEntry { jobId, priority, runAt, lifo, generation: bigint }` — lightweight metadata held in the heap array; the full `Job` lives only in the index map.
@@ -107,15 +107,21 @@ Internal shapes:
 
 ### Priority ordering (`compareEntries`, `priorityQueue.ts:27`)
 1. Higher `priority` first (`b.priority - a.priority`).
-2. Tie-break by mode: if both `lifo`, newer job first via descending `jobId` string compare (`:35`-`:41`) — valid because default IDs are UUIDv7 (lexicographically time-ordered). For FIFO/mixed, earlier `runAt` first (`:44`), then older `jobId` ascending (`:50`). Direct string comparison is used instead of `localeCompare` (UUIDv7 is ASCII).
+2. At equal priority, `lifo` entries form a deterministic partition ahead of
+   FIFO entries. LIFO entries use descending `jobId` order (default IDs are
+   time-ordered UUIDv7); FIFO entries use earlier `runAt` and then ascending
+   `jobId`. This makes mixed FIFO/LIFO comparisons total and transitive.
 
 ### Lazy invalidation via generations (`priorityQueue.ts`)
 Each `push`/`updatePriority`/`updateRunAt` assigns a monotonically increasing `bigint` generation and stores it in both the index entry and a new heap entry. `pop`/`peek` (`:99`, `:119`) compare the top heap entry's generation against the index entry; on mismatch (`:105`) the entry is dropped via `removeTop()` and the scan continues. Consequences:
 - `remove` (`:146`) and updates do **not** touch the heap — they only mutate the index, so the heap accumulates stale entries.
-- `compact()` (`:244`) filters out stale entries and rebuilds via O(n) `heapify` (`:262`); `needsCompaction(threshold)` returns `getStaleRatio() > threshold`. Background tasks trigger this: `cleanupTasks.ts:27` uses threshold `0.2`, `statsManager.ts:309` uses `0.1`.
+- `compact()` (`:244`) filters out stale entries and rebuilds via O(n) `heapify` (`:262`); `needsCompaction(threshold)` returns `getStaleRatio() > threshold`. Background tasks trigger this: `cleanupTasks.ts:28` uses threshold `0.2`, `statsManager.ts:160` uses `0.1`.
 - `generation` is `bigint`, deliberately overflow-proof at extreme throughput.
 
-One `IndexedPriorityQueue` is created lazily per queue name inside a shard (`shard.ts:97`-`:100`); `push`/`pop`/`find`/`remove` are driven by `src/application/operations/*` (e.g. `push.ts:208`, `ack.ts:235`).
+One `IndexedPriorityQueue` is created lazily per queue name inside a shard
+(`src/domain/queue/shard/state.ts:71-78`); `push`/`pop`/`find`/`remove` are driven
+by `src/application/operations/*` (for example `push.ts:193-216` and completion
+resource release at `ack/completion.ts:38-45`).
 
 ### Temporal index & delayed refresh
 - `TemporalIndex` owns a `SkipList<TemporalEntry>` per queue, ordered by the total key `createdAt → jobId`. A reverse `Map<JobId, TemporalEntry[]>` locates removals without scanning unrelated queues. `getOldJobs` starts directly in the requested queue's list and stops at the age threshold, preserving O(log q + k) multi-queue cleanup.
@@ -123,7 +129,7 @@ One `IndexedPriorityQueue` is created lazily per queue name inside a shard (`sha
 - Delayed removal remains lazy, but `maybeCompactDelayedHeap` bounds retained stale entries. It clears immediately when no delayed jobs remain; otherwise, once at least 256 entries are stale and stale entries are at least as numerous as live entries, it rebuilds in O(n) with `MinHeap.buildFrom()`.
 
 ### Heaps
-`MinHeap` and `IndexedPriorityQueue` are both 4-ary (`D = 4`): parent at `floor((idx-1)/4)`, children at `4*idx+1 .. 4*idx+4`. 4-ary is chosen for cache locality (children contiguous, fewer levels). `bubbleDown` scans up to 4 children sequentially picking the smallest (`minHeap.ts:114`). `MinHeap` backs `TemporalManager.delayedHeap`, `TTLMap.expiryHeap` (`ttlMap.ts:42`), and `CronScheduler.cronHeap` (`cronScheduler.ts:51`).
+`MinHeap` and `IndexedPriorityQueue` are both 4-ary (`D = 4`): parent at `floor((idx-1)/4)`, children at `4*idx+1 .. 4*idx+4`. 4-ary is chosen for cache locality (children contiguous, fewer levels). `bubbleDown` scans up to 4 children sequentially picking the smallest (`minHeap.ts:114`). `MinHeap` backs `TemporalManager.delayedHeap`, `TTLMap.expiryHeap` (`ttlMap.ts:42`), and `CronScheduler.cronHeap` (`src/infrastructure/scheduler/cron/runtime.ts:22-25`).
 
 ### Skip list
 Probabilistic levels via `randomLevel()` (`skipList.ts:74`), `maxLevel = 16`, `probability = 0.5`. `insert` (`:89`) finds position per level, and when an `equals` fn is supplied scans the run of compare-equal nodes for a true duplicate (`:107`-`:116`), returning `false` if found. `delete` (`:156`) unlinks at each level then lowers `level`. Range/scan helpers (`rangeUntil`, `takeWhile`, `values`) walk level-0 forward pointers.
@@ -150,7 +156,8 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
 - **`TTLMap` interval leak:** the cleanup `setInterval` keeps the instance alive; failing to call `stop()` leaks memory (documented invariant at the top of `ttlMap.ts`).
 - **Memory bounds** are enforced by capacity-constructed containers in
   `QueueManager`: `completedJobsData` (`BoundedMap`),
-  `completedJobs`/`timedOutJobs` (`BoundedSet`), `depCompletions`
+  `completedJobs` (`BoundedSet`), `timedOutJobs` and
+  `retiredTimeoutLeaseTokens` (`BoundedMap`), `depCompletions`
   (`DependencyCompletionTracker`), and
   `jobResults`/`customIdMap`/`jobLogs`/`perQueueMetrics` (`LRUMap`). The
   completion tracker uses exact one-at-a-time FIFO eviction for recent IDs and
@@ -165,7 +172,7 @@ These structures take sizes as constructor arguments; defaults that bind them co
 
 | Collection (consumer) | Container | Default cap | Source |
 | --- | --- | --- | --- |
-| `completedJobs`, `completedJobsData`, `timedOutJobs` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `application/types/config.ts` |
+| `completedJobs`, `completedJobsData`, `timedOutJobs`, `retiredTimeoutLeaseTokens`, `retiredCronLeaseTokens` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `application/types/config.ts` |
 | `depCompletions` recent tier | `DependencyCompletionTracker` | `maxCompletedJobs = 50_000` | `dependencyCompletions.ts` |
 | `depCompletions` pinned tier | `Set` | Live completed IDs referenced by `waitingDeps` | `dependencyCompletions.ts` |
 | `jobResults` | `LRUMap` | `maxJobResults = 10_000` | `application/types/config.ts` |
@@ -173,8 +180,6 @@ These structures take sizes as constructor arguments; defaults that bind them co
 | `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `application/types/config.ts` |
 
 Other tunables: `SkipList` `maxLevel = 16`, `probability = 0.5`; `MinHeap`/`IndexedPriorityQueue` branching `D = 4`; delayed-heap compaction minimum `256` stale entries with `stale >= live`; `TTLMap` `cleanupIntervalMs = 60_000`, compaction `threshold = 0.5` / `minSize = 100`; priority-queue compaction thresholds `0.2` (cleanup) and `0.1` (stats); `Histogram` `DEFAULT_BUCKETS` `[0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms. No environment variables affect this module directly.
-
-> Note: the memory-bounds table in the project README lists `jobResults` at 5,000; the code default is `10,000` (`types.ts:35`). The code value is authoritative.
 
 ## Related Docs
 

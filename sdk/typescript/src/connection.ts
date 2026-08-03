@@ -222,7 +222,7 @@ export class Connection extends EventEmitter {
     return this.call({
       cmd: 'Hello',
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: ['pipelining'],
+      capabilities: ['pipelining', 'separate-job-name'],
     });
   }
 

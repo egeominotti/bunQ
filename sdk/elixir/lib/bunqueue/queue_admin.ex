@@ -30,11 +30,17 @@ defmodule Bunqueue.QueueAdmin do
   def upsert_scheduler(queue, id, repeat, template \\ %{}) do
     repeat_fields = Options.scheduler(repeat)
     name = get(template, :name, id)
-    data = Queue.job_payload(name, get(template, :data, %{}))
+    payload = Queue.job_payload(name, get(template, :data, %{}))
     job_options = Options.scheduler_job(get(template, :options, []))
 
     command =
-      %{"cmd" => "Cron", "name" => id, "queue" => queue.name, "data" => data}
+      %{
+        "cmd" => "Cron",
+        "name" => id,
+        "jobName" => payload["name"],
+        "queue" => queue.name,
+        "data" => payload["data"]
+      }
       |> Map.merge(repeat_fields)
       |> maybe_put("jobOptions", job_options)
 

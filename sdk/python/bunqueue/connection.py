@@ -176,7 +176,11 @@ class Connection(ConnectionLifecycle):
     def hello(self) -> Dict[str, Any]:
         """Protocol negotiation; returns server name/version/protocolVersion."""
         return self.call(
-            {"cmd": "Hello", "protocolVersion": PROTOCOL_VERSION, "capabilities": ["pipelining"]}
+            {
+                "cmd": "Hello",
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": ["pipelining", "separate-job-name"],
+            }
         )
 
     # ------------------------------------------------------------- internals

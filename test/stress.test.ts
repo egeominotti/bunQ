@@ -29,7 +29,9 @@ describe('Stress Tests', () => {
 
       const stats = manager.getStats();
       expect(stats.waiting).toBe(1000);
-      console.log(`1000 sequential pushes: ${duration.toFixed(2)}ms (${(1000 / (duration / 1000)).toFixed(0)} ops/sec)`);
+      console.log(
+        `1000 sequential pushes: ${duration.toFixed(2)}ms (${(1000 / (duration / 1000)).toFixed(0)} ops/sec)`
+      );
 
       manager.shutdown();
       await cleanup();
@@ -48,7 +50,9 @@ describe('Stress Tests', () => {
 
       const stats = manager.getStats();
       expect(stats.waiting).toBe(500);
-      console.log(`500 parallel pushes: ${duration.toFixed(2)}ms (${(500 / (duration / 1000)).toFixed(0)} ops/sec)`);
+      console.log(
+        `500 parallel pushes: ${duration.toFixed(2)}ms (${(500 / (duration / 1000)).toFixed(0)} ops/sec)`
+      );
 
       manager.shutdown();
       await cleanup();
@@ -83,7 +87,9 @@ describe('Stress Tests', () => {
       expect(stats.completed).toBe(500);
       expect(stats.waiting).toBe(0);
       expect(stats.active).toBe(0);
-      console.log(`500 jobs processed: ${duration.toFixed(2)}ms (${(500 / (duration / 1000)).toFixed(0)} ops/sec)`);
+      console.log(
+        `500 jobs processed: ${duration.toFixed(2)}ms (${(500 / (duration / 1000)).toFixed(0)} ops/sec)`
+      );
 
       manager.shutdown();
       await cleanup();
@@ -268,7 +274,7 @@ describe('Stress Tests', () => {
 
       // Push mix of immediate and delayed jobs
       for (let i = 0; i < 100; i++) {
-        const delay = i % 2 === 0 ? 0 : 100; // Every other job is delayed
+        const delay = i % 2 === 0 ? 0 : 60_000; // Every other job is delayed
         await manager.push('delayed-stress-queue', {
           data: { index: i, delayed: delay > 0 },
           delay,
@@ -289,8 +295,9 @@ describe('Stress Tests', () => {
       }
       expect(processed).toBe(50);
 
-      // Wait for delayed jobs to become ready
-      await Bun.sleep(150);
+      // Promote the delayed half deterministically; processing speed must not
+      // decide whether they leak into the first phase under CI load.
+      expect(await manager.promoteJobs('delayed-stress-queue', 50)).toBe(50);
 
       // Now process delayed jobs
       while (true) {
@@ -378,7 +385,12 @@ describe('Stress Tests', () => {
     });
 
     test('handles special characters in queue names', async () => {
-      const specialNames = ['queue-with-dash', 'queue_with_underscore', 'queue.with.dot', 'queue:with:colon'];
+      const specialNames = [
+        'queue-with-dash',
+        'queue_with_underscore',
+        'queue.with.dot',
+        'queue:with:colon',
+      ];
 
       for (const name of specialNames) {
         const job = await manager.push(name, { data: { queue: name } });
@@ -392,7 +404,9 @@ describe('Stress Tests', () => {
 
     test('handles null and undefined in job data', async () => {
       const job1 = await manager.push('null-queue', { data: null });
-      const job2 = await manager.push('null-queue', { data: { value: null, nested: { deep: null } } });
+      const job2 = await manager.push('null-queue', {
+        data: { value: null, nested: { deep: null } },
+      });
 
       expect(job1).toBeDefined();
       expect(job2).toBeDefined();
@@ -410,6 +424,7 @@ describe('Stress Tests', () => {
       });
 
       const pulled = await manager.pull('empty-string-queue', 100);
+      expect(pulled?.id).toBe(job.id);
       expect((pulled!.data as any).name).toBe('');
     });
 
@@ -423,11 +438,12 @@ describe('Stress Tests', () => {
 
       const job = await manager.push('deep-queue', { data: deepObject });
       const pulled = await manager.pull('deep-queue', 100);
+      expect(pulled?.id).toBe(job.id);
 
       // Verify depth
       let depth = 0;
       let obj = pulled!.data as any;
-      while (obj && obj.nested) {
+      while (obj?.nested) {
         depth++;
         obj = obj.nested;
       }

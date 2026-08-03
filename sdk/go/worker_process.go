@@ -18,12 +18,20 @@ func (w *Worker) runJob(raw map[string]any, token string) {
 		w.failJob(job, token, procErr, raw)
 		return
 	}
-	_, err := w.commandConnection.Call(compact(map[string]any{
+	response, err := w.commandConnection.Call(compact(map[string]any{
 		"cmd": "ACK", "id": job.ID(), "token": token, "result": result,
 	}))
 	w.finishJob(job.ID())
 	if err != nil {
 		w.emit("error", err)
+		return
+	}
+	applied, outcomeErr := terminalOutcomeApplied(response)
+	if outcomeErr != nil {
+		w.emit("error", outcomeErr)
+		return
+	}
+	if !applied {
 		return
 	}
 	w.mu.Lock()
@@ -74,13 +82,21 @@ func (w *Worker) failJob(job *Job, token string, procErr error, raw map[string]a
 	if len(stack) > cap {
 		stack = stack[:cap]
 	}
-	_, err := w.commandConnection.Call(compact(map[string]any{
+	response, err := w.commandConnection.Call(compact(map[string]any{
 		"cmd": "FAIL", "id": job.ID(), "token": token, "error": message,
 		"stack": stack, "unrecoverable": unrecoverable,
 	}))
 	w.finishJob(job.ID())
 	if err != nil {
 		w.emit("error", err)
+		return
+	}
+	applied, outcomeErr := terminalOutcomeApplied(response)
+	if outcomeErr != nil {
+		w.emit("error", outcomeErr)
+		return
+	}
+	if !applied {
 		return
 	}
 	w.mu.Lock()

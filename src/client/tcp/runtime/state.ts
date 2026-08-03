@@ -4,6 +4,7 @@ import { HealthTracker } from '../health';
 import { ReconnectManager } from '../reconnect';
 import type { ConnectionOptions, SocketWrapper } from '../types';
 import { DEFAULT_CONNECTION } from '../types';
+import type { JobEvent } from '../../../domain/types/queue';
 
 /** Shared TCP client state and event contract. */
 export class TcpClientState extends EventEmitter {
@@ -14,6 +15,7 @@ export class TcpClientState extends EventEmitter {
   on(event: 'reconnecting', listener: (data: { attempt: number; delay: number }) => void): this;
   on(event: 'error', listener: (error: Error) => void): this;
   on(event: 'warning', listener: (data: { type: string; reqId?: string }) => void): this;
+  on(event: 'queueEvent', listener: (event: JobEvent) => void): this;
   on(
     event: 'health',
     listener: (data: { type: string; latency?: number; reason?: string }) => void
@@ -30,6 +32,7 @@ export class TcpClientState extends EventEmitter {
   once(event: 'reconnecting', listener: (data: { attempt: number; delay: number }) => void): this;
   once(event: 'error', listener: (error: Error) => void): this;
   once(event: 'warning', listener: (data: { type: string; reqId?: string }) => void): this;
+  once(event: 'queueEvent', listener: (event: JobEvent) => void): this;
   once(
     event: 'health',
     listener: (data: { type: string; latency?: number; reason?: string }) => void

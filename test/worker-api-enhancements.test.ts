@@ -5,7 +5,6 @@
  */
 import { describe, it, expect, afterEach } from 'bun:test';
 import { Worker } from '../src/client/worker/worker';
-import { QueueManager } from '../src/application/queueManager';
 import { getSharedManager, shutdownManager } from '../src/client/manager';
 import { unlinkSync } from 'fs';
 
@@ -13,18 +12,22 @@ const DB_PATH = '/tmp/test-worker-api-enhancements.db';
 
 function cleanup() {
   for (const f of [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
-    try { unlinkSync(f); } catch {}
+    try {
+      unlinkSync(f);
+    } catch {}
   }
 }
 
 describe('Worker API enhancements', () => {
   let worker: Worker;
-  let manager: QueueManager;
 
   afterEach(async () => {
-    try { await worker?.close(true); } catch {}
-    try { shutdownManager(); } catch {}
-    try { manager?.shutdown(); } catch {}
+    try {
+      await worker?.close(true);
+    } catch {}
+    try {
+      shutdownManager();
+    } catch {}
     cleanup();
   });
 
@@ -32,7 +35,6 @@ describe('Worker API enhancements', () => {
 
   it('name is publicly accessible', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -44,7 +46,6 @@ describe('Worker API enhancements', () => {
 
   it('opts is publicly accessible with resolved defaults', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -63,7 +64,6 @@ describe('Worker API enhancements', () => {
 
   it('concurrency getter returns current value', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -76,7 +76,6 @@ describe('Worker API enhancements', () => {
 
   it('concurrency setter changes value at runtime', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -92,7 +91,6 @@ describe('Worker API enhancements', () => {
 
   it('concurrency setter clamps to minimum 1', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -113,16 +111,20 @@ describe('Worker API enhancements', () => {
     const processed: string[] = [];
 
     // Create worker first — this initializes the shared manager
-    worker = new Worker(queue, async (job) => {
-      processed.push(job.name);
-      await Bun.sleep(50);
-      return 'done';
-    }, {
-      embedded: true,
-      dataPath: DB_PATH,
-      autorun: false,
-      concurrency: 1,
-    });
+    worker = new Worker(
+      queue,
+      async (job) => {
+        processed.push(job.name);
+        await Bun.sleep(50);
+        return 'done';
+      },
+      {
+        embedded: true,
+        dataPath: DB_PATH,
+        autorun: false,
+        concurrency: 1,
+      }
+    );
 
     // Push jobs via the same shared manager
     const mgr = getSharedManager(DB_PATH);
@@ -147,7 +149,6 @@ describe('Worker API enhancements', () => {
 
   it('closing is null when worker is not closing', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -159,7 +160,6 @@ describe('Worker API enhancements', () => {
 
   it('closing returns a Promise during close()', async () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -179,7 +179,6 @@ describe('Worker API enhancements', () => {
 
   it('multiple close() calls return the same promise', async () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -201,7 +200,6 @@ describe('Worker API enhancements', () => {
 
   it('off() removes event listener', async () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -209,7 +207,9 @@ describe('Worker API enhancements', () => {
     });
 
     let callCount = 0;
-    const listener = () => { callCount++; };
+    const listener = () => {
+      callCount++;
+    };
 
     worker.on('drained', listener);
     worker.emit('drained');
@@ -222,7 +222,6 @@ describe('Worker API enhancements', () => {
 
   it('off() works with typed events', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -230,7 +229,9 @@ describe('Worker API enhancements', () => {
     });
 
     let called = false;
-    const listener = () => { called = true; };
+    const listener = () => {
+      called = true;
+    };
 
     worker.on('closed', listener);
     worker.off('closed', listener);
@@ -242,7 +243,6 @@ describe('Worker API enhancements', () => {
 
   it('skipLockRenewal disables heartbeat timer', async () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -262,7 +262,6 @@ describe('Worker API enhancements', () => {
 
   it('skipStalledCheck disables stalled event subscription', async () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -280,7 +279,6 @@ describe('Worker API enhancements', () => {
 
   it('drainDelay is stored in opts', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -293,7 +291,6 @@ describe('Worker API enhancements', () => {
 
   it('drainDelay defaults to 50', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -307,7 +304,6 @@ describe('Worker API enhancements', () => {
 
   it('lockDuration and maxStalledCount stored with defaults', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -320,7 +316,6 @@ describe('Worker API enhancements', () => {
 
   it('lockDuration and maxStalledCount accept custom values', () => {
     cleanup();
-    manager = new QueueManager({ dataPath: DB_PATH });
     worker = new Worker('test-queue', async () => 'ok', {
       embedded: true,
       dataPath: DB_PATH,
@@ -359,14 +354,18 @@ describe('Worker API enhancements', () => {
   it('removeOnFail applies worker default to jobs', async () => {
     cleanup();
 
-    worker = new Worker('remove-fail-test', async () => {
-      throw new Error('intentional failure');
-    }, {
-      embedded: true,
-      dataPath: DB_PATH,
-      autorun: false,
-      removeOnFail: true,
-    });
+    worker = new Worker(
+      'remove-fail-test',
+      async () => {
+        throw new Error('intentional failure');
+      },
+      {
+        embedded: true,
+        dataPath: DB_PATH,
+        autorun: false,
+        removeOnFail: true,
+      }
+    );
 
     // Suppress error events from crashing the test
     worker.on('error', () => {});

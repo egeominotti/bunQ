@@ -41,6 +41,7 @@ export interface JobTimelineEntry {
 export interface Job {
   readonly id: JobId;
   readonly queue: string;
+  readonly name: string;
   readonly data: unknown;
   readonly priority: number;
   readonly createdAt: number;
@@ -83,10 +84,13 @@ export interface Job {
   readonly deduplicationReplace: boolean;
   readonly debounceId: string | null;
   readonly debounceTtl: number | null;
+  /** Whether each generation bypasses the persistence write buffer. */
+  readonly durable?: boolean;
   timeline: JobTimelineEntry[];
 }
 
 export interface JobInput {
+  name?: string;
   data: unknown;
   priority?: number;
   delay?: number;

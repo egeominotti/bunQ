@@ -61,7 +61,9 @@ export async function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | nul
 export function getJobResult(jobId: JobId, ctx: QueryContext): unknown {
   if (ctx.jobResults.has(jobId)) return ctx.jobResults.get(jobId);
   if (ctx.dependencyResults.has(jobId)) return ctx.dependencyResults.get(jobId);
-  return ctx.storage?.getResult(jobId);
+  const stored = ctx.storage?.getResult(jobId);
+  if (stored !== null) return stored;
+  return ctx.storage?.hasResult(jobId) ? null : undefined;
 }
 
 export function getJobByCustomId(customId: string, ctx: QueryContext): Job | null {

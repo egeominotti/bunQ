@@ -6,6 +6,7 @@
 import type { Job, JobId, JobLock } from '../domain/types/job';
 import { isLockExpired } from '../domain/types/job';
 import { FailureReason, recordJobFailureAttempt } from '../domain/types/dlq';
+import { StallAction } from '../domain/types/stall';
 import { EventType } from '../domain/types/queue';
 import type { IndexedPriorityQueue } from '../domain/queue/priorityQueue';
 import { shardIndex, processingShardIndex } from '../shared/hash';
@@ -89,6 +90,15 @@ export async function checkExpiredLocks(ctx: LockContext): Promise<void> {
       for (const [procIdx, items] of procMap) {
         await withWriteLock(ctx.processingLocks[procIdx], async () => {
           for (const { jobId, lock, job } of items) {
+            const currentJob = ctx.processingShards[procIdx].get(jobId);
+            const currentLock = ctx.jobLocks.get(jobId);
+            if (
+              currentJob !== job ||
+              currentLock !== lock ||
+              !isLockExpired(currentLock, Date.now())
+            ) {
+              continue;
+            }
             processExpiredLockInner(jobId, lock, job, shardIdx, procIdx, ctx, now);
           }
         });
@@ -116,12 +126,14 @@ function processExpiredLockInner(
 
   // Remove from processing
   ctx.processingShards[procIdx].delete(jobId);
+  ctx.timeoutScheduler.cancel(jobId);
 
   // Discard cron jobs with preventOverlap instead of re-queuing (#75).
   // During graceful shutdown, heartbeats stop and the lock expires before
   // the job finishes. Re-queuing would cause "starts right away on reconnect".
   // The cron scheduler will re-create the job at the next scheduled tick.
   if (job.uniqueKey?.startsWith('cron:')) {
+    ctx.retiredCronLeaseTokens.set(jobId, lock.token);
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     ctx.jobIndex.delete(jobId);
     ctx.storage?.deleteJob(jobId);
@@ -197,6 +209,13 @@ function handleRecoveryBoundExceeded(opts: RecoveryBoundOptions): void {
   ctx.storage?.saveDlqEntry(entry);
   ctx.storage?.deleteJob(jobId);
 
+  ctx.eventsManager.broadcast({
+    eventType: EventType.Stalled,
+    jobId,
+    queue: job.queue,
+    timestamp: now,
+    data: { stallCount: job.stallCount, action: StallAction.MoveToDlq },
+  });
   ctx.eventsManager.broadcast({
     eventType: EventType.Failed,
     jobId,

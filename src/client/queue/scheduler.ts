@@ -7,6 +7,7 @@ import { getSharedManager } from '../manager';
 import type { TcpConnectionPool } from '../tcpPool';
 import type { JobOptions } from '../types';
 import type { CronJobOptions } from '../../domain/types/cron';
+import { paginateSchedulers } from './schedulerPagination';
 
 interface SchedulerContext {
   /** Server-side queue key (already prefixed with `prefixKey` if set). */
@@ -46,7 +47,7 @@ export interface RepeatOpts {
   offset?: number;
   jobId?: string;
   timezone?: string;
-  /** Skip missed runs on restart instead of executing them (default: false) */
+  /** Skip missed runs on restart instead of executing them (default: true) */
   skipMissedOnRestart?: boolean;
   /** Skip job push if no worker is registered for the queue (default: false) */
   skipIfNoWorker?: boolean;
@@ -72,10 +73,7 @@ export interface SchedulerInfo {
 
 /** Build cron job data from template */
 function buildCronData(jobTemplate?: JobTemplate): unknown {
-  if (!jobTemplate) return {};
-  return jobTemplate.name
-    ? { name: jobTemplate.name, ...(jobTemplate.data ?? {}) }
-    : (jobTemplate.data ?? {});
+  return jobTemplate?.data ?? {};
 }
 
 /**
@@ -131,6 +129,7 @@ export async function upsertJobScheduler(
     const manager = getSharedManager();
     const cron = manager.addCron({
       name: cronName,
+      jobName: jobTemplate?.name ?? 'default',
       queue: ctx.name,
       data,
       schedule: cronPattern,
@@ -148,7 +147,7 @@ export async function upsertJobScheduler(
     });
     return {
       id: schedulerId,
-      name: jobTemplate?.name ?? 'default',
+      name: cron.jobName,
       next: cron.nextRun,
       pattern: cron.schedule ?? undefined,
       every: cron.repeatEvery ?? undefined,
@@ -159,6 +158,7 @@ export async function upsertJobScheduler(
   const response = await ctx.tcp!.send({
     cmd: 'Cron',
     name: cronName,
+    jobName: jobTemplate?.name ?? 'default',
     queue: ctx.name,
     data,
     schedule: cronPattern,
@@ -175,10 +175,10 @@ export async function upsertJobScheduler(
     ...dedupFields,
   });
   if (!response.ok) return null;
-  const returnedCron = (response as { cron?: { nextRun?: number } }).cron;
+  const returnedCron = (response as { cron?: { nextRun?: number; jobName?: string } }).cron;
   return {
     id: schedulerId,
-    name: jobTemplate?.name ?? 'default',
+    name: returnedCron?.jobName ?? jobTemplate?.name ?? 'default',
     next: returnedCron?.nextRun ?? Date.now(),
     pattern: cronPattern,
     every: repeatEvery,
@@ -186,7 +186,6 @@ export async function upsertJobScheduler(
   };
 }
 
-/** Remove a job scheduler */
 export async function removeJobScheduler(
   ctx: SchedulerContext,
   schedulerId: string
@@ -212,7 +211,7 @@ export async function getJobScheduler(
     if (!cron) return null;
     return {
       id: fromCronName(ctx, cron.name),
-      name: fromCronName(ctx, cron.name),
+      name: cron.jobName,
       next: cron.nextRun,
       pattern: cron.schedule ?? undefined,
       every: cron.repeatEvery ?? undefined,
@@ -225,6 +224,7 @@ export async function getJobScheduler(
 
   type CronEntry = {
     name: string;
+    jobName?: string;
     queue?: string;
     nextRun: number;
     schedule?: string;
@@ -239,7 +239,7 @@ export async function getJobScheduler(
 
   return {
     id: fromCronName(ctx, cron.name),
-    name: fromCronName(ctx, cron.name),
+    name: cron.jobName ?? fromCronName(ctx, cron.name),
     next: cron.nextRun,
     pattern: cron.schedule ?? undefined,
     every: cron.repeatEvery ?? undefined,
@@ -247,25 +247,25 @@ export async function getJobScheduler(
   };
 }
 
-/** Get all job schedulers for this queue */
 export async function getJobSchedulers(
   ctx: SchedulerContext,
-  _start = 0,
-  _end = -1,
-  _asc = true
+  start = 0,
+  end = -1,
+  asc = false
 ): Promise<SchedulerInfo[]> {
   if (ctx.embedded) {
-    return getSharedManager()
+    const schedulers = getSharedManager()
       .listCrons()
       .filter((c) => c.queue === ctx.name)
       .map((c) => ({
         id: fromCronName(ctx, c.name),
-        name: fromCronName(ctx, c.name),
+        name: c.jobName,
         next: c.nextRun,
         pattern: c.schedule ?? undefined,
         every: c.repeatEvery ?? undefined,
         limit: c.maxLimit ?? undefined,
       }));
+    return paginateSchedulers(schedulers, start, end, asc);
   }
 
   const response = await ctx.tcp!.send({ cmd: 'CronList' });
@@ -273,6 +273,7 @@ export async function getJobSchedulers(
 
   type CronEntry = {
     name: string;
+    jobName?: string;
     queue: string;
     nextRun: number;
     schedule?: string;
@@ -281,20 +282,19 @@ export async function getJobSchedulers(
   };
   const crons = (response as { crons?: CronEntry[] }).crons ?? [];
 
-  return crons
+  const schedulers = crons
     .filter((c) => c.queue === ctx.name)
     .map((c) => ({
       id: fromCronName(ctx, c.name),
-      name: fromCronName(ctx, c.name),
+      name: c.jobName ?? fromCronName(ctx, c.name),
       next: c.nextRun,
       pattern: c.schedule ?? undefined,
       every: c.repeatEvery ?? undefined,
       limit: c.maxLimit ?? undefined,
     }));
+  return paginateSchedulers(schedulers, start, end, asc);
 }
 
-/** Get count of job schedulers */
 export async function getJobSchedulersCount(ctx: SchedulerContext): Promise<number> {
-  const schedulers = await getJobSchedulers(ctx);
-  return schedulers.length;
+  return (await getJobSchedulers(ctx)).length;
 }

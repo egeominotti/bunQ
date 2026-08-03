@@ -117,13 +117,13 @@ describe('createFlowJobObject (embedded): wired methods', () => {
     queue.obliterate();
   });
 
-  afterEach(() => {
-    producer.close();
+  afterEach(async () => {
+    await producer.close();
     queue.close();
     shutdownManager();
   });
 
-  test('updateData mutates the flow parent job data', async () => {
+  test('updateData mutates user data without erasing flow topology', async () => {
     const node = await producer.add({
       name: 'parent',
       queueName: 'wired-flow',
@@ -131,11 +131,17 @@ describe('createFlowJobObject (embedded): wired methods', () => {
       children: [{ name: 'child', queueName: 'wired-flow', data: { step: 1 } }],
     });
     const parent = node.job as unknown as { id: string; updateData: (d: unknown) => Promise<void> };
+    const childId = node.children?.[0]?.job.id;
+    expect(childId).toBeDefined();
+
+    // FlowProducer's immediate result retains the caller payload shape. Jobs
+    // read from Queue/Worker expose the durable engine-owned FlowJobData fields.
+    expect(node.job.data).toEqual({ kind: 'original' });
 
     await parent.updateData({ kind: 'mutated' });
 
     const refetched = await queue.getJob(parent.id);
-    expect(refetched?.data).toEqual({ kind: 'mutated' });
+    expect(refetched?.data).toEqual({ kind: 'mutated', __childrenIds: [childId] });
   });
 
   test('removeDeduplicationKey returns false when a flow job has no key', async () => {

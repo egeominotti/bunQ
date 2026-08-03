@@ -22,4 +22,6 @@ export interface TcpConnectionData {
   semaphore: Semaphore;
   writeQueue: SocketWriteQueue;
   stallTimer: ReturnType<typeof setTimeout> | null;
+  /** A dedicated event connection may own exactly one queue subscription. */
+  eventQueue: string | null;
 }

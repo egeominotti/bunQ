@@ -21,6 +21,9 @@ export type StatementName =
   | 'deleteDlqEntry'
   | 'deleteDlqEntryForQueue'
   | 'clearDlqQueue'
+  | 'deleteDependencyCompletionForAdmission'
+  | 'deleteFlowFailuresForAdmission'
+  | 'pinDependencyCompletionForAdmission'
   | 'insertCron'
   | 'updateCron'
   | 'upsertQueueState'
@@ -37,21 +40,21 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
   // no cascade side effects (unlike REPLACE = DELETE+INSERT).
   insertJob: `
     INSERT INTO jobs (
-      id, queue, data, priority, created_at, run_at, attempts,
+      id, queue, name, data, priority, created_at, run_at, attempts,
       max_attempts, backoff, ttl, timeout, unique_key, custom_id,
       depends_on, parent_id, children_ids, tags, state, lifo, group_id,
       remove_on_complete, remove_on_fail, fail_parent_on_failure,
       remove_dependency_on_failure, continue_parent_on_failure,
       ignore_dependency_on_failure, stall_timeout, stall_count, timeline,
-      dlq_retry_state
+      dlq_retry_state, extended_options
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
-      queue=excluded.queue, data=excluded.data, priority=excluded.priority,
+      queue=excluded.queue, name=excluded.name, data=excluded.data, priority=excluded.priority,
       created_at=excluded.created_at, run_at=excluded.run_at, attempts=excluded.attempts,
       max_attempts=excluded.max_attempts, backoff=excluded.backoff, ttl=excluded.ttl,
       timeout=excluded.timeout, unique_key=excluded.unique_key, custom_id=excluded.custom_id,
@@ -64,6 +67,7 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       ignore_dependency_on_failure=excluded.ignore_dependency_on_failure,
       stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
       timeline=excluded.timeline, dlq_retry_state=excluded.dlq_retry_state,
+      extended_options=excluded.extended_options,
       -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
       -- resolves to each column's DEFAULT (NULL / 0) — i.e. the fresh-job value. Reset
       -- them too, otherwise an upsert over an ORPHAN row would leave a brand-new job
@@ -102,10 +106,17 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
 
   clearDlqQueue: 'DELETE FROM dlq WHERE queue = ?',
 
+  deleteDependencyCompletionForAdmission: 'DELETE FROM dependency_completions WHERE job_id = ?',
+
+  deleteFlowFailuresForAdmission: 'DELETE FROM flow_failures WHERE parent_id = ? OR child_id = ?',
+
+  pinDependencyCompletionForAdmission:
+    'UPDATE dependency_completions SET pinned = 1 WHERE job_id = ?',
+
   insertCron: `
     INSERT OR REPLACE INTO cron_jobs
-    (name, queue, data, schedule, repeat_every, priority, next_run, executions, max_limit, timezone, unique_key, dedup, skip_missed_on_restart, skip_if_no_worker, prevent_overlap, job_options)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, queue, job_name, data, schedule, repeat_every, priority, next_run, executions, max_limit, timezone, unique_key, dedup, skip_missed_on_restart, skip_if_no_worker, prevent_overlap, job_options)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   updateCron: 'UPDATE cron_jobs SET executions = ?, next_run = ? WHERE name = ?',
@@ -137,6 +148,7 @@ export function prepareStatements(
 export interface DbJob {
   id: string;
   queue: string;
+  name: string | null;
   data: Uint8Array; // MessagePack BLOB
   priority: number;
   created_at: number;
@@ -171,12 +183,14 @@ export interface DbJob {
   timeline: Uint8Array | null;
   stacktrace: Uint8Array | null; // MessagePack BLOB (#74)
   dlq_retry_state: Uint8Array | null;
+  extended_options: Uint8Array | null;
 }
 
 /** Database row type for cron jobs */
 export interface DbCron {
   name: string;
   queue: string;
+  job_name: string | null;
   data: Uint8Array; // MessagePack BLOB
   schedule: string | null;
   repeat_every: number | null;

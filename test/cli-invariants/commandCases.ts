@@ -41,6 +41,7 @@ export const CLI_COMMAND_CASES: CliCommandCase[] = [
     expected: {
       cmd: 'PUSH',
       queue: 'q',
+      name: 'default',
       data: { x: 1 },
       priority: 5,
       delay: 10,

@@ -5,7 +5,7 @@
 
 import { ConnectionClosedError, SerializationError } from './errors.js';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const MAX_FRAME_SIZE = 64 * 1024 * 1024; // mirror server-side limit
 
 /** Drop undefined-valued keys so the msgpack frame stays minimal. */

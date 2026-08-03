@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send ordinary job names through top-level `name`, preserve every user `Value`
+  in `data`, decode legacy data envelopes, and use `jobName` for scheduler jobs.
+- Preserve UTF-8 strings exactly in `value_to_json` instead of rendering them
+  with an extra pair of display quotes.
+- Add real-broker worker regressions proving that late processor success and
+  failure settle `run_once()` without overriding an authoritative broker
+  timeout, result, or queue counters.
 - Replace multi-command flow creation and best-effort rollback with a pure
   tree/chain planner and one broker-atomic `PUSHF` commit.
 - Preallocate secure colon-free IDs, forward explicit job IDs as `customId`,

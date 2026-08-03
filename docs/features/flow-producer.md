@@ -6,6 +6,7 @@
 > `src/application/operations/flowValidation.ts`,
 > `src/application/operations/flowTopologyValidation.ts`,
 > `src/client/flowReader.ts`,
+> `src/client/flowResults.ts`,
 > `src/application/flowFailureRecovery.ts`
 
 ## Purpose and contract
@@ -36,6 +37,14 @@ external SDKs plan the complete graph locally and submit that single command.
 that composed flows from multiple `PUSH` calls, but it cannot turn those
 already-observable calls into an atomic batch retroactively.
 
+Standalone `Queue.add()` and `Queue.addBulk()` also accept `parent: { id,
+queue }` for linking children to an existing pending parent. This uses the same
+dependency representation and SQLite flow-link transaction as FlowProducer:
+the broker locks both shards, appends the child to `childrenIds`/`dependsOn`,
+parks the parent in `waiting-children`, and then publishes the child. Cross-queue
+and concurrent sibling links are supported. Parents that are missing or no
+longer pending are rejected; use `FlowProducer` when all graph nodes are new.
+
 ## Public API
 
 ```typescript
@@ -50,16 +59,25 @@ addBulkThen<T>(parallel: FlowStep<T>[], final: FlowStep<T>):
   Promise<{ parallelIds: string[]; finalId: string }>
 addTree<T>(root: FlowStep<T>): Promise<{ jobIds: string[] }>
 
-getParentResult<R>(id: string): R | undefined
-getParentResults<R>(ids: string[]): Map<string, R>
+getParentResult<R>(id: string): R | undefined | Promise<R | undefined>
+getParentResults<R>(ids: string[]): Map<string, R> | Promise<Map<string, R>>
 waitUntilReady(): Promise<void>
+closing: Promise<void> | null
 close(): Promise<void>
 disconnect(): Promise<void>
 ```
 
-`getParentResult` and `getParentResults` are embedded-only legacy helpers.
+`getParentResult` and `getParentResults` are authoritative in both runtimes.
+They remain synchronous in embedded mode for backwards compatibility and return
+a Promise in TCP mode; portable code should always `await` them. The multi-read
+preserves input order and all completed values, including `0`, `false`, `''`,
+and persisted `null`, while omitting IDs that have no result. A single missing
+ID resolves to `undefined`, which remains distinct from persisted `null`.
 `FlowProducer` extends `EventEmitter`; queue lifecycle events still originate
 from the broker rather than from this object.
+`closing` is `null` while the producer is live. The first `close()` or
+`disconnect()` call installs and returns the one shutdown promise; every later
+call returns that same promise, including when connection teardown rejects.
 
 The ordinary `Queue` and returned `Job` surfaces expose graph introspection in
 both runtimes:
@@ -89,9 +107,10 @@ collections (and zero counts) in both embedded and TCP modes.
 - rejects `jobId` in `FlowOpts.queuesOptions` because queue defaults cannot
   assign a per-job identity, then merges the remaining queue defaults below
   node-specific options;
-- injects `name`, `__parentId`, `__parentQueue`, and `__childrenIds`;
+- stores `name` separately from user data and injects `__parentId`,
+  `__parentQueue`, and `__childrenIds` where the graph owns those links;
 - emits symmetric `parentId`/`childrenIds` and `dependsOn` edges;
-- rejects cycles, shared node objects, duplicate IDs, reserved data keys, a
+- rejects cycles, shared node objects, duplicate IDs, reserved `__*` data keys, a
   depth greater than 100 edges below a root (the root is depth 0), or more than
   10,000 jobs;
 - validates the legacy planners to the same bounds; nested `children` are
@@ -100,7 +119,11 @@ collections (and zero counts) in both embedded and TCP modes.
 The legacy planners compile their ordering into the same
 `AtomicFlowBatchInput`. `addChain` records predecessor dependencies;
 `addBulkThen` records every parallel job as a child/dependency of the final
-job; `addTree` records parent-first dependencies.
+job; `addTree` records parent-first dependencies. Every non-root chain/tree
+step carries both the legacy `__flowParentId` and the exact
+BullMQ-compatible `__parentId` / `__parentQueue`; roots keep the historical
+`__flowParentId: null`. Cross-queue parent metadata names the predecessor's
+actual queue.
 
 Atomic flows intentionally reject `repeat`, deduplication, debounce, and an
 explicit `opts.parent`. Those options require independent ownership/lifetime
@@ -261,12 +284,22 @@ terminal children are left untouched.
 - missing children or non-not-found TCP errors are not silently truncated.
 
 Dependency keys use each child's actual queue (`queueName:jobId`), including
-cross-queue graphs. Returned `job.data`, `toJSON().data`, and `asJSON().data`
-exclude internal flow metadata consistently. Every TCP-backed Job mutation and
+cross-queue graphs. Broker-backed Worker and Queue jobs expose the documented
+engine-owned `FlowJobData` fields in `job.data`; caller-supplied keys beginning
+with `__` are rejected when a flow is planned. `updateData(userData)` preserves
+all existing topology fields atomically and rejects attempts to forge reserved
+fields in both runtimes. Ordinary non-flow jobs may continue to use unrelated
+keys such as `__custom`. FlowProducer's immediate and `getFlow()` node results
+retain the caller payload shape while parent topology remains available through
+the Job properties and graph structure. Reading that node back through
+`Queue.getJob()` after `updateData()` returns the new caller fields plus the
+preserved engine-owned topology fields; this is intentional and identical in
+embedded and TCP runtimes. Every TCP-backed Job mutation and
 `waitUntilReady()` checks `{ ok: false }` and throws the broker error; object
 progress is carried as numeric progress plus a JSON message, matching the queue
-client. `close()`/`disconnect()` are idempotent, including shared-pool reference
-release, and connection TLS/timeout settings are forwarded.
+client. `close()`/`disconnect()` share one stable, failure-preserving shutdown
+promise, release a shared-pool reference at most once, and forward connection
+TLS/timeout settings.
 
 ## Persistence and wire model
 

@@ -17,32 +17,11 @@ import type { Shard } from '../src/domain/queue/shard';
  * used in other test files (e.g., stall-embedded-bug.test.ts).
  */
 function getBackgroundContext(qm: QueueManager): BackgroundContext {
-  const internal = qm as any;
-  return {
-    config: internal.config,
-    storage: internal.storage,
-    shards: internal.shards,
-    shardLocks: internal.shardLocks,
-    processingShards: internal.processingShards,
-    processingLocks: internal.processingLocks,
-    jobIndex: internal.jobIndex,
-    completedJobs: internal.completedJobs,
-    jobResults: internal.jobResults,
-    customIdMap: internal.customIdMap,
-    jobLogs: internal.jobLogs,
-    jobLocks: internal.jobLocks,
-    clientJobs: internal.clientJobs,
-    stalledCandidates: internal.stalledCandidates,
-    pendingDepChecks: internal.pendingDepChecks,
-    queueNamesCache: internal.queueNamesCache,
-    eventsManager: internal.eventsManager,
-    webhookManager: internal.webhookManager,
-    metrics: internal.metrics,
-    startTime: internal.startTime,
-    fail: internal.fail.bind(qm),
-    registerQueueName: internal.registerQueueName.bind(qm),
-    unregisterQueueName: internal.unregisterQueueName.bind(qm),
-  };
+  return (
+    qm as unknown as {
+      contextFactory: { getBackgroundContext(): BackgroundContext };
+    }
+  ).contextFactory.getBackgroundContext();
 }
 
 function makeJob(id: string, queue = 'test', overrides: Partial<Job> = {}): Job {
@@ -93,7 +72,7 @@ describe('CleanupTasks', () => {
       // Push and pull a job to move it to processing
       const pushed = await qm.push('test-queue', { data: { msg: 'stuck' } });
       const pulled = await qm.pull('test-queue');
-      expect(pulled).not.toBeNull();
+      expect(pulled?.id).toBe(pushed.id);
 
       // Verify the job is in processing
       const statsBefore = qm.getStats();
@@ -115,7 +94,7 @@ describe('CleanupTasks', () => {
     test('should not remove recently started processing jobs', async () => {
       const pushed = await qm.push('test-queue', { data: { msg: 'recent' } });
       const pulled = await qm.pull('test-queue');
-      expect(pulled).not.toBeNull();
+      expect(pulled?.id).toBe(pushed.id);
 
       // Job was just pulled, startedAt is recent
       await cleanup(ctx);
@@ -406,6 +385,7 @@ describe('CleanupTasks', () => {
       // Create a queue by pushing and acking a job
       const pushed = await qm.push('ephemeral-queue', { data: { msg: 'temp' } });
       const pulled = await qm.pull('ephemeral-queue');
+      expect(pulled?.id).toBe(pushed.id);
       await qm.ack(pulled!.id, { done: true });
 
       // The queue should still exist in some shard but be empty
@@ -488,6 +468,9 @@ describe('CleanupTasks', () => {
       const pulled2 = await qm.pull('mixed-queue');
       const pulled3 = await qm.pull('mixed-queue');
       const pulled4 = await qm.pull('mixed-queue');
+
+      expect(pulled3).not.toBeNull();
+      expect(pulled4).not.toBeNull();
 
       await qm.ack(pulled1!.id, { done: true });
       await qm.ack(pulled2!.id, { done: true });

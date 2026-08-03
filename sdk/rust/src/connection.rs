@@ -136,7 +136,10 @@ impl Connection {
             "Hello",
             map([
                 ("protocolVersion", Value::from(PROTOCOL_VERSION)),
-                ("capabilities", Value::Array(Vec::new())),
+                (
+                    "capabilities",
+                    Value::Array(vec![Value::from("separate-job-name")]),
+                ),
             ]),
         ))
     }
@@ -146,6 +149,20 @@ impl Connection {
         Ok(get(&response, "protocolVersion")
             .and_then(Value::as_i64)
             .unwrap_or(0))
+    }
+
+    pub fn capabilities(&self) -> Result<Vec<String>> {
+        let response = self.hello()?;
+        Ok(get(&response, "capabilities")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     pub fn ping(&self) -> Result<bool> {

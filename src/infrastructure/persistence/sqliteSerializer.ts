@@ -6,7 +6,9 @@
 
 import { type Job, type JobId, type JobTimelineEntry, jobId } from '../../domain/types/job';
 import { type DlqEntry, type DlqRetryState, setDlqRetryState } from '../../domain/types/dlq';
+import { normalizeLegacyJobPayload } from '../../domain/job/payload';
 import type { DbJob } from './statements';
+import { decodeJobOptions } from './jobOptionsBlob';
 import { storageLog } from '../../shared/logger';
 import {
   decodeMessagePack as msgpackDecode,
@@ -27,6 +29,18 @@ export function unpack<T>(buffer: Uint8Array | null, fallback: T, context: strin
     storageLog.error('MessagePack decode error', { context, error: String(err) });
     return fallback;
   }
+}
+
+/** Decode a modern named payload or a pre-v31 name-in-data envelope. */
+export function decodeStoredNamedPayload(
+  name: string | null | undefined,
+  buffer: Uint8Array,
+  context: string
+): { name: string; data: unknown } {
+  const data = unpack(buffer, {}, context);
+  if (name !== null && name !== undefined) return { name, data };
+  const legacy = normalizeLegacyJobPayload({ data });
+  return { name: legacy.name, data: legacy.data };
 }
 
 /**
@@ -111,6 +125,7 @@ function decodeDependsOn(
 /** Convert database row to Job object */
 export function rowToJob(row: DbJob): Job {
   const jobContext = `rowToJob:${row.id}`;
+  const payload = decodeStoredNamedPayload(row.name, row.data, `${jobContext}:data`);
   // A corrupt depends_on blob must NOT be silently swallowed into [] (which the
   // recovery path treats as "ready, no deps" -> out-of-order execution).
   // decodeDependsOn() surfaces the corruption via a `corrupt` flag; we then
@@ -122,11 +137,13 @@ export function rowToJob(row: DbJob): Job {
     ? unpack<string[]>(row.children_ids, [], `${jobContext}:childrenIds`)
     : [];
   const tags: string[] = row.tags ? unpack<string[]>(row.tags, [], `${jobContext}:tags`) : [];
+  const extended = decodeJobOptions(row.extended_options, `${jobContext}:extendedOptions`);
 
   const job: Job = {
     id: jobId(row.id),
     queue: row.queue,
-    data: unpack(row.data, {}, `${jobContext}:data`),
+    name: payload.name,
+    data: payload.data,
     priority: row.priority,
     createdAt: row.created_at,
     runAt: row.run_at,
@@ -135,7 +152,7 @@ export function rowToJob(row: DbJob): Job {
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
     backoff: row.backoff,
-    backoffConfig: null, // BullMQ v5: not persisted in DB, use default
+    backoffConfig: extended.backoffConfig,
     ttl: row.ttl,
     timeout: row.timeout,
     uniqueKey: row.unique_key,
@@ -151,23 +168,24 @@ export function rowToJob(row: DbJob): Job {
     progressMessage: row.progress_msg,
     removeOnComplete: row.remove_on_complete === 1,
     removeOnFail: row.remove_on_fail === 1,
-    repeat: null,
+    repeat: extended.repeat,
     lastHeartbeat: row.last_heartbeat ?? row.created_at,
     stallTimeout: row.stall_timeout,
     stallCount: row.stall_count ?? 0,
     // BullMQ v5 additional fields
-    stackTraceLimit: 10,
-    keepLogs: null,
-    sizeLimit: null,
+    stackTraceLimit: extended.stackTraceLimit,
+    keepLogs: extended.keepLogs,
+    sizeLimit: extended.sizeLimit,
     failParentOnFailure: row.fail_parent_on_failure === 1,
     removeDependencyOnFailure: row.remove_dependency_on_failure === 1,
     continueParentOnFailure: row.continue_parent_on_failure === 1,
     ignoreDependencyOnFailure: row.ignore_dependency_on_failure === 1,
-    deduplicationTtl: null,
-    deduplicationExtend: false,
-    deduplicationReplace: false,
-    debounceId: null,
-    debounceTtl: null,
+    deduplicationTtl: extended.deduplicationTtl,
+    deduplicationExtend: extended.deduplicationExtend,
+    deduplicationReplace: extended.deduplicationReplace,
+    debounceId: extended.debounceId,
+    debounceTtl: extended.debounceTtl,
+    durable: extended.durable,
     timeline: row.timeline
       ? unpack<JobTimelineEntry[]>(row.timeline, [], `${jobContext}:timeline`)
       : [],
@@ -215,10 +233,13 @@ function brandId(id: unknown): JobId {
 
 /** Reconstruct DlqEntry from MessagePack-decoded data */
 export function reconstructDlqEntry(entry: DlqEntry): DlqEntry {
+  const payload = normalizeLegacyJobPayload(entry.job);
   return {
     ...entry,
     job: {
       ...entry.job,
+      name: payload.name,
+      data: payload.data,
       id: brandId(entry.job.id),
       dependsOn: entry.job.dependsOn.map((id) => brandId(id)),
       parentId: entry.job.parentId !== null ? brandId(entry.job.parentId) : null,

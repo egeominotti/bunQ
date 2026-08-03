@@ -61,8 +61,23 @@ worker.on("completed", lambda job, result: print(job.id, result))
 worker.run()  # blocking; or worker.start() for a background thread
 ```
 
+Job names are protocol metadata, not part of the user payload. `job.name`
+comes from top-level `name`, while `job.data` preserves the submitted object,
+list, scalar, or `None`, including a user-owned `"name"` key. Readers retain a
+legacy `data["name"]` fallback, and scheduler templates use distinct
+`jobName` and `data` fields.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
 All queue semantics (retry, backoff, DLQ, priorities, stall detection, cron)
 run **server-side** — the worker only pulls, heartbeats, and acks.
+If a broker timeout finalizes a lease before its processor returns, the
+successful `applied: false` ACK/FAIL outcome is authoritative: the Worker
+releases its local slot but emits no false `completed`/`failed` event and does
+not increment the matching counter. ACK batching applies the same rule by
+exact `ignoredIndices`, so duplicate job IDs cannot confuse lease generations;
+structured `ignoredIds` without positional indices is rejected as ambiguous.
+Worker-owned `job.discard()` sends the same delivery token as ACK/FAIL, so an
+older processor cannot discard a newer active generation.
 
 ## Feature surface
 
@@ -87,7 +102,8 @@ run **server-side** — the worker only pulls, heartbeats, and acks.
   context manager), automatic lock heartbeats (jobs longer than the lock TTL
   survive), `UnrecoverableError` to skip retries, opt-in ACK batching
   (`ack_batch={"max_size": 50, "max_delay_ms": 5}`: successful ACKs flush as
-  one `ACKB` on size/delay/close; a job stays active until its batch settles)
+  one `ACKB` on size/delay/close; a job stays active until its batch settles;
+  broker-ignored positions do not emit completion events)
 - **FlowProducer**: `add` (parent/child trees), `add_bulk`, `add_chain`
   (sequential), `add_bulk_then` (fan-in), `get_flow`, atomic broker commit
 - **Simple Mode** (`Bunqueue`): Queue + Worker in one object — routes,

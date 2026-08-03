@@ -311,6 +311,46 @@ describe('createSimpleJob', () => {
 });
 
 describe('edge cases', () => {
+  test('query proxies reflect lifecycle metadata in properties and serialization', () => {
+    const { ctx } = createMockCtx({ queueName: 'metadata' });
+    const meta = {
+      attemptsMade: 2,
+      attemptsStarted: 2,
+      progress: 45,
+      stalledCounter: 1,
+      processedOn: 1_700_000_000_100,
+      finishedOn: 1_700_000_000_200,
+    };
+    const jobs = [
+      createJobProxy('tcp-meta', 'task', {}, ctx, meta),
+      createSimpleJob('simple-meta', 'task', {}, 1_700_000_000_000, {
+        ...createSimpleCtx({ queueName: 'metadata' }),
+        meta,
+      }),
+    ];
+
+    for (const job of jobs) {
+      expect(job.attemptsMade).toBe(2);
+      expect(job.attemptsStarted).toBe(2);
+      expect(job.progress).toBe(45);
+      expect(job.stalledCounter).toBe(1);
+      expect(job.processedOn).toBe(1_700_000_000_100);
+      expect(job.finishedOn).toBe(1_700_000_000_200);
+      expect(job.toJSON()).toMatchObject({
+        attemptsMade: 2,
+        progress: 45,
+        processedOn: 1_700_000_000_100,
+        finishedOn: 1_700_000_000_200,
+      });
+      expect(job.asJSON()).toMatchObject({
+        attemptsMade: '2',
+        progress: '45',
+        processedOn: '1700000000100',
+        finishedOn: '1700000000200',
+      });
+    }
+  });
+
   test('null data, undefined fields, nested data, empty id, zero timestamp', () => {
     const { ctx } = createMockCtx();
     const nullJob = createJobProxy('e1', 'test', null, ctx);

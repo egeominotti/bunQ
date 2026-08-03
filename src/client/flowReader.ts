@@ -1,6 +1,6 @@
 import type { Job as DomainJob } from '../domain/types/job';
 import { jobId } from '../domain/types/job';
-import { createFlowJobObject, extractUserDataFromInternal } from './flowJobFactory';
+import { createFlowJobObject, extractFlowJobPayload } from './flowJobFactory';
 import type { FlowJobCallbacks } from './flowJobTypes';
 import type { GetFlowOpts, JobNode } from './flowTypes';
 import { getSharedManager } from './manager';
@@ -77,9 +77,9 @@ async function buildEmbeddedNode<T>(
   const nextAncestors = assertNoCycle(id, ancestors);
   const data = job.data as Record<string, unknown>;
   assertParentLink(id, job.parentId, data, expectedParent);
-  const name = typeof data.name === 'string' ? data.name : 'default';
+  const payload = extractFlowJobPayload(job);
   const node: JobNode<T> = {
-    job: createFlowJobObject(id, name, extractUserDataFromInternal(data) as T, job.queue, {
+    job: createFlowJobObject(id, payload.name, payload.data as T, job.queue, {
       callbacks: context.buildCallbacks(job.queue),
       snapshot: job,
     }),
@@ -137,9 +137,9 @@ async function buildTcpNode<T>(
   const data =
     typeof job.data === 'object' && job.data !== null ? (job.data as Record<string, unknown>) : {};
   assertParentLink(id, job.parentId, data, expectedParent);
-  const name = typeof data.name === 'string' ? data.name : 'default';
+  const payload = extractFlowJobPayload(job);
   const node: JobNode<T> = {
-    job: createFlowJobObject(id, name, extractUserDataFromInternal(data) as T, queueName, {
+    job: createFlowJobObject(id, payload.name, payload.data as T, queueName, {
       callbacks: context.buildCallbacks(queueName),
       snapshot: job as unknown as DomainJob,
     }),

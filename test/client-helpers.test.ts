@@ -34,6 +34,7 @@ function makeInternalJob(overrides: Partial<InternalJob> = {}): InternalJob {
   return {
     id: jobId('test-job-1'),
     queue: 'test-queue',
+    name: 'test-task',
     data: { name: 'test-task', key: 'value' },
     priority: 0,
     createdAt: now,
@@ -403,11 +404,26 @@ describe('jobHelpers', () => {
 
     test('should include deduplication options', () => {
       const job = makeInternalJob({
-        customId: 'dedup-key',
+        uniqueKey: 'dedup-key',
         deduplicationTtl: 60000,
       });
       const opts = buildJobOpts(job);
-      expect(opts.deduplication).toEqual({ id: 'dedup-key', ttl: 60000 });
+      expect(opts.deduplication).toEqual({
+        id: 'dedup-key',
+        ttl: 60000,
+        extend: false,
+        replace: false,
+      });
+    });
+
+    test('should not reinterpret a custom job id as a deduplication key', () => {
+      const job = makeInternalJob({
+        customId: 'custom-job-id',
+        deduplicationTtl: 60000,
+      });
+      const opts = buildJobOpts(job);
+      expect(opts.jobId).toBe('custom-job-id');
+      expect(opts.deduplication).toBeUndefined();
     });
 
     test('should omit deduplication when ttl is null', () => {
@@ -552,7 +568,7 @@ describe('jobConversion', () => {
 
       expect(publicJob.id).toBe('job-abc');
       expect(publicJob.name).toBe('send-email');
-      expect(publicJob.data).toEqual({ to: 'user@example.com' });
+      expect(publicJob.data).toEqual({ name: 'send-email', to: 'user@example.com' });
       expect(publicJob.queueName).toBe('my-queue');
       expect(publicJob.attemptsMade).toBe(2);
       expect(publicJob.timestamp).toBe(now - 1000);
@@ -985,7 +1001,7 @@ describe('jobConversion', () => {
       const json = publicJob.toJSON();
       expect(json.id).toBe('json-job');
       expect(json.name).toBe('task');
-      expect(json.data).toEqual({ foo: 'bar' });
+      expect(json.data).toEqual({ name: 'task', foo: 'bar' });
       expect(json.delay).toBe(2000);
       expect(json.timestamp).toBe(now);
       expect(json.attemptsMade).toBe(1);
@@ -1019,7 +1035,7 @@ describe('jobConversion', () => {
       const raw = publicJob.asJSON();
       expect(raw.id).toBe('raw-job');
       expect(raw.name).toBe('task');
-      expect(raw.data).toBe(JSON.stringify({ foo: 'bar' }));
+      expect(raw.data).toBe(JSON.stringify({ name: 'task', foo: 'bar' }));
       expect(typeof raw.opts).toBe('string');
       expect(raw.progress).toBe(JSON.stringify(0));
       expect(raw.delay).toBe('0');
@@ -1367,7 +1383,7 @@ describe('jobConversion', () => {
 
       expect(publicJob.id).toBe('simple-job');
       expect(publicJob.name).toBe('task');
-      expect(publicJob.data).toEqual({ value: 42 });
+      expect(publicJob.data).toEqual({ name: 'task', value: 42 });
       expect(publicJob.queueName).toBe('simple-queue');
       expect(publicJob.priority).toBe(2);
     });
@@ -1482,7 +1498,8 @@ describe('jobConversion', () => {
       const internalJob = makeInternalJob({
         id: jobId('dlq-job'),
         queue: 'failed-queue',
-        data: { name: 'failed-task', payload: 'data' },
+        name: 'failed-task',
+        data: { name: 'user-visible-name', payload: 'data' },
       });
 
       const internalEntry: InternalDlqEntry = {
@@ -1518,7 +1535,7 @@ describe('jobConversion', () => {
 
       expect(dlqEntry.job.id).toBe('dlq-job');
       expect(dlqEntry.job.name).toBe('failed-task');
-      expect(dlqEntry.job.data).toEqual({ payload: 'data' });
+      expect(dlqEntry.job.data).toEqual({ name: 'user-visible-name', payload: 'data' });
       expect(dlqEntry.enteredAt).toBe(now);
       expect(dlqEntry.reason).toBe('max_attempts_exceeded');
       expect(dlqEntry.error).toBe('Too many attempts');
@@ -1533,8 +1550,9 @@ describe('jobConversion', () => {
       expect(dlqEntry.expiresAt).toBe(now + 86400000);
     });
 
-    test('should use "default" name when job data has no name', () => {
+    test('should use the authoritative default name independently of job data', () => {
       const internalJob = makeInternalJob({
+        name: 'default',
         data: { foo: 'bar' },
       });
 
@@ -1554,8 +1572,8 @@ describe('jobConversion', () => {
       expect(dlqEntry.job.name).toBe('default');
     });
 
-    test('should handle null data in DLQ entry job', () => {
-      const internalJob = makeInternalJob({ data: null });
+    test('should handle null data in a default-named DLQ entry job', () => {
+      const internalJob = makeInternalJob({ name: 'default', data: null });
 
       const internalEntry: InternalDlqEntry = {
         job: internalJob,

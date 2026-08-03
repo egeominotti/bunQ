@@ -1,6 +1,6 @@
 # Native MCP Server
 
-> **Category:** Integration · **Source:** `src/mcp/index.ts`, `src/mcp/server.ts`, `src/mcp/adapter.ts`, `src/mcp/httpHandler.ts`, `src/mcp/prompts.ts`, `src/mcp/resources.ts`, `src/mcp/tools/mcpTracker.ts`, `src/mcp/tools/withErrorHandler.ts`, `src/mcp/tools/*.ts`
+> **Category:** Integration · **Source:** `src/mcp/index.ts`, `src/mcp/server.ts`, `src/mcp/adapter.ts`, `src/mcp/backend/**/*.ts`, `src/mcp/types/adapter.ts`, `src/mcp/httpHandler.ts`, `src/mcp/prompts.ts`, `src/mcp/resources.ts`, `src/mcp/tools/*.ts`
 
 ## Purpose
 
@@ -11,7 +11,7 @@ The native MCP (Model Context Protocol) server exposes bunqueue to AI agents (Cl
 Owns:
 - The `bunqueue-mcp` bin entrypoint and lazy SDK loading (`src/mcp/index.ts`).
 - Tool/resource/prompt registration on an `McpServer` over `StdioServerTransport` (`src/mcp/server.ts`).
-- The `McpBackend` abstraction with two implementations, `EmbeddedBackend` and `TcpBackend`, that adapt MCP calls to either `QueueManager` method calls or TCP wire commands (`src/mcp/adapter.ts`).
+- The `McpBackend` abstraction and public adapter facade (`src/mcp/types/adapter.ts`, `src/mcp/adapter.ts`), with split embedded and TCP implementations under `src/mcp/backend/`.
 - The `HttpHandlerRegistry`, which spawns embedded `Worker`s that auto-process jobs by issuing HTTP requests (`src/mcp/httpHandler.ts`).
 - Per-invocation error handling + telemetry recording (`withErrorHandler`, `mcpTracker`).
 
@@ -24,12 +24,12 @@ Does NOT own (delegated):
 ## Dependencies
 
 Internal:
-- `getSharedManager` / `shutdownManager` from `../client/manager` (embedded `QueueManager`).
-- `FlowProducer` from `../client/flow` and `JobNode` from `../client/flowTypes`.
-- `TcpConnectionPool` from `../client/tcpPool` (TCP mode).
-- `Worker` from `../client/worker/worker` (HTTP handlers).
-- `CloudAgent` from `../infrastructure/cloud/cloudAgent` (embedded telemetry).
-- `WEBHOOK_EVENTS` from `../../domain/types/webhook` (webhook tool schema), `VERSION` from `../shared/version`.
+- `getSharedManager` / `shutdownManager` from `src/client/manager.ts` (embedded `QueueManager`).
+- `FlowProducer` from `src/client/flow.ts` and `JobNode` from `src/client/flowTypes.ts`.
+- `TcpConnectionPool` from `src/client/tcpPool.ts` (TCP mode).
+- `Worker` from `src/client/worker/worker.ts` (HTTP handlers).
+- `CloudAgent` from `src/infrastructure/cloud/cloudAgent.ts` (embedded telemetry).
+- `WEBHOOK_EVENTS` from `src/domain/types/webhook.ts` (webhook tool schema), `VERSION` from `src/shared/version.ts`.
 
 External / runtime:
 - `@modelcontextprotocol/sdk` — `McpServer`, `StdioServerTransport` (optional peer dep, `^1.26.0`).
@@ -42,13 +42,13 @@ External / runtime:
 
 **Exported functions / classes:**
 - `run(): Promise<void>` — `src/mcp/server.ts:39`. The server entrypoint; builds the `McpServer`, registers everything, wires shutdown, connects stdio.
-- `createBackend(): Promise<McpBackend>` — `src/mcp/adapter.ts:1176`. Returns `TcpBackend` (connected) when `BUNQUEUE_MODE === 'tcp'`, else `EmbeddedBackend`.
-- `EmbeddedBackend`, `TcpBackend` (both `implements McpBackend`) — `src/mcp/adapter.ts:257` / `:660`.
+- `createBackend(): Promise<McpBackend>` — `src/mcp/adapter.ts:21-32`. Returns `TcpBackend` (connected) when `BUNQUEUE_MODE === 'tcp'`, else `EmbeddedBackend`.
+- `EmbeddedBackend`, `TcpBackend` (both `implements McpBackend`) — `src/mcp/backend/embedded/index.ts:6` / `src/mcp/backend/tcp/index.ts:5`.
 - `HttpHandlerRegistry` with `register(queue, handler)`, `unregister(queue): boolean`, `list()`, `shutdown()` — `src/mcp/httpHandler.ts:22`.
 - `withErrorHandler<T>(toolName, fn)` — `src/mcp/tools/withErrorHandler.ts:31`.
 - `mcpTracker` (singleton `McpOperationTracker`) with `record`, `drain`, `peek`, `getSummary`, `count` — `src/mcp/tools/mcpTracker.ts:105`.
 - Registration functions: `registerJobTools`, `registerJobMgmtTools`, `registerConsumptionTools`, `registerQueueTools`, `registerDlqTools`, `registerCronTools`, `registerRateLimitTools`, `registerWebhookTools`, `registerWorkerMgmtTools`, `registerMonitoringTools`, `registerFlowTools`, `registerHandlerTools`, `registerResources`, `registerPrompts`.
-- Exported types: `McpBackend`, `JobCounts`, `SerializedJob`, `SerializedCron`, `WebhookInfo`, `WorkerInfo`, `FlowJobInput`, `FlowStepInput`, `FlowNodeResult` (`src/mcp/adapter.ts`); `HttpHandler` (`src/mcp/httpHandler.ts`); `McpOperation`, `McpSummary` (`src/mcp/tools/mcpTracker.ts`).
+- Exported types: `McpBackend`, `JobCounts`, `SerializedJob`, `SerializedCron`, `WebhookInfo`, `WorkerInfo`, `FlowJobInput`, `FlowStepInput`, `FlowNodeResult` are defined in `src/mcp/types/adapter.ts:4-174` and re-exported by `src/mcp/adapter.ts:9-19`; `HttpHandler` (`src/mcp/httpHandler.ts:9-15`); `McpOperation`, `McpSummary` (`src/mcp/tools/mcpTracker.ts`).
 
 **MCP transport:** stdio only (`StdioServerTransport`, `src/mcp/server.ts:104`). No HTTP/SSE listener is opened by the MCP server itself.
 
@@ -79,7 +79,7 @@ External / runtime:
 
 All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], isError? }`. The principal serialized shapes (see [data-model](../data-model.md) for the underlying `Job`/cron/webhook types):
 
-- `SerializedJob` — `{ id, queue, data, priority, state?, progress, attempts, maxAttempts, createdAt (ISO), startedAt? (ISO) }`. Built by `serializeJob` (embedded, `adapter.ts:209`) or `parseJob` (TCP, `adapter.ts:694`); both stringify the numeric `id`/timestamps.
+- `SerializedJob` — `{ id, name, queue, data, priority, state?, progress, attempts, maxAttempts, createdAt (ISO), startedAt? (ISO) }`. Built by `serializeMcpJob` (embedded, `backend/serializers.ts:6-19`) or `parseJob` (TCP, `backend/tcp/base.ts:46-61`); both stringify the numeric `id` and timestamps. TCP parsing accepts legacy payloads where the name was stored inside `data`, but always returns `name` and clean user `data` separately.
 - `JobCounts` — `{ waiting, prioritized, delayed, active, completed, failed, paused }`.
 - `SerializedCron` — `{ name, queue, schedule?, repeatEvery?, nextRun (ISO|null), executions }`.
   The embedded serializer accepts the normalized domain `CronJob`, where the
@@ -90,7 +90,7 @@ All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], 
   including its ISO `nextRun` and preserved execution count.
 - `WebhookInfo` — `{ id, url, events[], queue?, enabled }`.
 - `WorkerInfo` — `{ id, name, queues[], active, processed, failed, lastHeartbeat }`.
-- `FlowNodeResult` — recursive `{ jobId, name, queueName, children? }` (`toFlowNodeResult`, `adapter.ts:248`).
+- `FlowNodeResult` — recursive `{ jobId, name, queueName, children? }` (`backend/serializers.ts:34-40`, `types/adapter.ts:70-75`).
 - `McpOperation` — `{ tool, queue|null, timestamp, durationMs, success, error|null }`; `McpSummary` — `{ totalInvocations, successCount, failureCount, avgDurationMs, topTools[] }`.
 - `HttpHandler` — `{ url, method: 'GET'|'POST'|'PUT'|'DELETE', headers?, body?, timeoutMs? }`.
 
@@ -106,11 +106,11 @@ All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], 
 **Per-tool invocation:** every handler is wrapped by `withErrorHandler(toolName, fn)` (`withErrorHandler.ts:31`). It records `start = Date.now()`, runs `fn`, and on return records an `McpOperation` to `mcpTracker` (queue extracted from `args.queue` or `args.queueName`, `:19`). Thrown errors are caught, recorded with `success: false`, and returned as `{ isError: true, content: [{ text: JSON.stringify({ error }) }] }` (`:48-62`) — so tool errors surface as MCP error results rather than transport failures.
 
 **Backend dispatch:** each tool calls one `McpBackend` method.
-- `EmbeddedBackend` calls the matching `QueueManager` method (e.g. `addJob` → `manager.push`, prefixing the job `name` into `data`, `adapter.ts:275`). Flow tools lazily instantiate a single embedded `FlowProducer` (`adapter.ts:260`).
+- `EmbeddedBackend` calls the matching `QueueManager` method. For example, `addJob` passes `name` and user `data` as separate fields to `manager.push` (`backend/embedded/jobs.ts:6-20`). Flow tools lazily instantiate one embedded `FlowProducer` (`backend/embedded/base.ts:11-18`).
 - `TcpBackend` translates to wire commands via `pool.send` (e.g. `PUSH`,
   `PUSHB`, `PUSHF`, `PULL`, `ACK`, `FAIL`, `GetJob`, `Cron`,
   `DashboardQueues`). Flow tools route through a TCP `FlowProducer`
-  (`adapter.ts:679`), so the Bun backend receives the atomic graph contract.
+  (`backend/tcp/base.ts:31-40`, `backend/tcp/index.ts:6-29`), so the Bun backend receives the atomic graph contract.
 
 **HTTP handler registration** (`register_handler` → `HttpHandlerRegistry.register`, `httpHandler.ts:25`): stops any existing handler on the same queue, then spawns an embedded `Worker(queue, processor, { embedded: true, concurrency: 1 })`. The processor opens an `AbortController` with `setTimeout(timeoutMs ?? 30_000)` (`:36`), issues `fetch(url, init)` (body = `handler.body ?? job.data` for non-GET/DELETE), parses JSON or text by `content-type`, and throws on non-2xx so the job fails and retries through normal worker semantics.
 
@@ -119,7 +119,7 @@ All tool replies are `{ content: [{ type: 'text', text: JSON.stringify(...) }], 
 The MCP server holds no locks of its own; concurrency safety is delegated to the backend ([Concurrency & Locking](./concurrency-and-locking.md) for embedded, TCP server for remote). Notable points:
 - `mcpTracker` is a single-threaded in-process singleton (no locking needed); `record` and `drain` mutate one array.
 - HTTP handlers run as real `Worker`s with `concurrency: 1` per queue, participating in normal lock-based job ownership; lease/heartbeat behavior is the Worker's, not the MCP layer's.
-- `extend_lock`/`job_heartbeat` tools forward to the lock/heartbeat machinery. In TCP mode `extendLock` sends a `JobHeartbeat` command carrying `token`/`duration` (`adapter.ts:824-828`); the embedded path calls `manager.extendLock(id, token, duration)` directly.
+- `extend_lock`/`job_heartbeat` tools forward to the lock/heartbeat machinery. In TCP mode `extendLock` sends a `JobHeartbeat` command carrying `token`/`duration` (`backend/tcp/jobs.ts:118-121`); the embedded path calls `manager.extendLock(id, token, duration)` directly (`backend/embedded/jobs.ts:128-130`).
 
 ## Edge Cases & Failure Modes
 
@@ -127,9 +127,9 @@ The MCP server holds no locks of its own; concurrency safety is delegated to the
 - **Telemetry buffer bound:** `mcpTracker` is a ring buffer capped at `MAX_BUFFER_SIZE = 200`; at capacity each `record` does `Array.shift()` (O(n) but n≤200, ~40KB max, `mcpTracker.ts:44-49`). If no `CloudAgent` consumer drains it, the buffer self-bounds by evicting oldest.
 - **Tool errors are non-fatal:** `withErrorHandler` converts thrown errors to `isError` results; `extractErrorText` truncates raw non-JSON error text to 200 chars (`withErrorHandler.ts:77`).
 - **Not-found results:** `get_job`, `get_job_by_custom_id`, `get_progress`, `get_flow`, `get_cron` return `{ isError: true, error: '...not found' }` rather than throwing.
-- **Pagination translation (issue #87):** the MCP `get_jobs` tool exposes `start`/`end`, but the TCP protocol uses `offset`/`limit`; `TcpBackend.getJobs` translates `limit = end - start` (`adapter.ts:863-876`) so pagination actually applies in TCP mode.
-- **Per-queue stats (issue #87):** `TcpBackend.getPerQueueStats` queries `DashboardQueues` (not `Metrics`) to get a real per-queue breakdown (`adapter.ts:1094-1114`).
-- **Response-envelope variance:** `TcpBackend` defensively reads nested envelopes — `GetJobCounts` under `res.counts`, `ListWorkers` under `res.data.workers` (falling back to `res.workers`), `StorageStatus` under `res.data` (`adapter.ts:878-891`, `:1040-1054`, `:1134-1141`).
+- **Pagination translation (issue #87):** the MCP `get_jobs` tool exposes `start`/`end`, but the TCP protocol uses `offset`/`limit`; `TcpBackend.getJobs` translates `limit = end - start` (`backend/tcp/queues.ts:5-18`) so pagination actually applies in TCP mode.
+- **Per-queue stats (issue #87):** `TcpBackend.getPerQueueStats` queries `DashboardQueues` (not `Metrics`) to get a real per-queue breakdown (`backend/tcp/services.ts:140-156`).
+- **Response-envelope variance:** `TcpBackend` defensively reads nested envelopes — `GetJobCounts` under `response.counts`, `ListWorkers` under `response.data.workers` (falling back to `response.workers`), and `StorageStatus` under `response.data` (`backend/tcp/queues.ts:20-31`, `backend/tcp/services.ts:111-124`, `backend/tcp/services.ts:176-182`).
 - **Cron null normalization:** the domain and TCP protocol intentionally retain
   `null` for the inactive cron scheduling field, while the MCP
   `SerializedCron` contract uses optional fields. Both backends normalize the
@@ -148,17 +148,17 @@ The MCP server holds no locks of its own; concurrency safety is delegated to the
 - **Webhook event validation:** `add_webhook` accepts only `WEBHOOK_EVENTS` (`job.pushed|started|completed|failed|progress`); `job.stalled` is accepted by stored types for backward-compat but is never emitted.
 - **Tool input bounds:** `wait_for_job` timeout 100–30000ms; `pull_job`/`pull_job_batch` timeout 0–30000ms with `count` 1–1000; `update_progress` 0–100.
 - **Graceful shutdown:** on SIGINT/SIGTERM, `run()` stops the `CloudAgent`, shuts the handler registry (closes all spawned workers), `backend.shutdown()` (closes pool/FlowProducer/manager), `server.close()`, then `process.exit(0)`; cleanup errors are swallowed (`server.ts:89-101`).
-- **Embedded `getStats` BigInt:** serialized via a `JSON.stringify` replacer that coerces `bigint`→`Number` to keep the payload JSON-safe (`adapter.ts:561-570`).
+- **Embedded `getStats` BigInt:** serialized via a `JSON.stringify` replacer that coerces `bigint`→`Number` to keep the payload JSON-safe (`backend/embedded/services.ts:91-100`).
 
 ## Configuration
 
 | Env var | Default | Effect |
 | --- | --- | --- |
-| `BUNQUEUE_MODE` | `embedded` | `tcp` selects `TcpBackend`; anything else → `EmbeddedBackend` (`adapter.ts:1177`). |
+| `BUNQUEUE_MODE` | `embedded` | `tcp` selects `TcpBackend`; anything else → `EmbeddedBackend` (`adapter.ts:21-32`). |
 | `BUNQUEUE_HOST` | `localhost` | TCP host (TCP mode). |
 | `BUNQUEUE_PORT` | `6789` | TCP port (parsed with `parseInt`, TCP mode). |
 | `BUNQUEUE_TOKEN` | — | Auth token forwarded to the TCP pool / FlowProducer. |
-| `BUNQUEUE_POOL_SIZE` | `2` | TCP connection pool size (`adapter.ts:671`). |
+| `BUNQUEUE_POOL_SIZE` | `2` | TCP connection pool size (`backend/tcp/base.ts:17-24`). |
 | `BUNQUEUE_DATA_PATH` / `BQ_DATA_PATH` / `DATA_PATH` / `SQLITE_PATH` | unset → in-memory | SQLite path for the embedded `QueueManager`, resolved by the shared manager in that precedence order (`src/client/manager.ts:13-17`). When none is set, `QueueManager` gets no `dataPath` and runs with **no persistence at all** (jobs live only in memory); the `./data/bunq.db` default belongs to the standalone server bootstrap, not to `bunqueue-mcp`. |
 | `BUNQUEUE_CLOUD_URL` | — | When set in embedded mode, enables `CloudAgent` MCP telemetry (`server.ts:70`). Other `BUNQUEUE_CLOUD_*` vars apply via the agent — see [bunqueue Cloud Dashboard Integration](./cloud-integration.md). |
 

@@ -6,6 +6,7 @@ export class QueueManagerLifecycle extends QueueManagerDependencies {
     this.cronScheduler.stop();
     this.workerManager.stop();
     this.eventsManager.clear();
+    this.telemetryJournal.clearMemory();
     if (this.backgroundTaskHandles) bgTasks.stopBackgroundTasks(this.backgroundTaskHandles);
     this.storage?.close();
 
@@ -14,6 +15,8 @@ export class QueueManagerLifecycle extends QueueManagerDependencies {
     this.completedJobsData.clear();
     this.depCompletions.clear();
     this.timedOutJobs.clear();
+    this.retiredTimeoutLeaseTokens.clear();
+    this.retiredCronLeaseTokens.clear();
     this.jobResults.clear();
     this.dependencyResults.clear();
     this.jobLogs.clear();

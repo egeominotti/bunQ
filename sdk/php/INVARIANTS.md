@@ -25,8 +25,11 @@ the implementation map is in [CLAUDE.md](CLAUDE.md).
   are encoded as float64, recursive depth is bounded, and non-string map keys
   are rejected before MessagePack encoding.
 - Incoming msgpackr extension type 0 is normalized recursively to `null`.
-- The job name lives inside `data.name`; public job data accessors remove that
-  protocol field.
+- `PUSH` and `PUSHB` send the job name in top-level `name`; `data` remains the
+  caller's exact value, including an associative `name`, a list, scalar, or
+  null. `Job` prefers top-level `name` and unwraps only legacy data envelopes.
+- Cron scheduler identity uses `name`, spawned jobs use `jobName`, and their
+  user `data` remains separate.
 - `Options::toWire()` preserves every supported option and rejects unknown
   keys. `attempts` maps to `maxAttempts`; `jobId` maps to `customId` at enqueue
   boundaries; deduplication and debounce expand to their protocol fields.
@@ -56,9 +59,13 @@ the implementation map is in [CLAUDE.md](CLAUDE.md).
   that can exceed the lock TTL must call `Job::extendLock()` itself.
 - Heartbeat intervals that are zero, negative, NaN, or infinite are disabled;
   they must never create a busy loop.
-- A completion event is emitted only after the broker accepts `ACK`. Processor
-  failures are sent through `FAIL`; unrecoverable failures skip retries and
-  retain a bounded, throw-site-first stack.
+- A completion or failure event and its counter are recorded only after the
+  broker applies `ACK` or `FAIL`. A successful `applied: false` outcome means
+  an exact timeout generation already finalized: release the held lease, emit
+  no terminal or error event, and increment no counter. Unknown evidence is a
+  protocol error, never assumed success.
+- Processor failures are sent through `FAIL`; unrecoverable failures skip
+  retries and retain a bounded, throw-site-first stack.
 - Cleanup removes processed jobs from the worker's held-token set so a later
   heartbeat cannot renew a completed lease.
 

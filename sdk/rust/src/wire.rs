@@ -4,7 +4,7 @@ use rmpv::Value;
 
 use crate::{Error, Result};
 
-pub const PROTOCOL_VERSION: i64 = 2;
+pub const PROTOCOL_VERSION: i64 = 3;
 pub const MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
 pub type Message = Vec<(Value, Value)>;
 pub(crate) type Map = Message;
@@ -143,7 +143,10 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             .unwrap_or(serde_json::Value::Null),
         Value::F32(value) => serde_json::json!(value),
         Value::F64(value) => serde_json::json!(value),
-        Value::String(value) => serde_json::Value::String(value.to_string()),
+        Value::String(value) => value
+            .as_str()
+            .map(|text| serde_json::Value::String(text.to_owned()))
+            .unwrap_or(serde_json::Value::Null),
         Value::Binary(value) => serde_json::Value::Array(
             value
                 .iter()

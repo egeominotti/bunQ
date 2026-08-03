@@ -28,7 +28,7 @@ export async function apiMoves(env: Env): Promise<Record<string, unknown>> {
 
     const good = await queue.add('mc', { v: 2 });
     pulled = await pull(queue, 'wk-api');
-    await queue.moveJobToWait(pulled.id);
+    await queue.moveJobToWait(pulled.id, pulled.token);
     pulled = await pull(queue, 'wk-api');
     await queue.moveJobToCompleted(pulled.id, { manual: true }, pulled.token);
     const completedState = await queue.getJobState(good.id);

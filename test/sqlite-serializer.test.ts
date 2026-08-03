@@ -471,6 +471,7 @@ describe('rowToJob', () => {
     return {
       id: 'test-job-id',
       queue: 'test-queue',
+      name: 'default',
       data: pack({ email: 'user@test.com' }),
       priority: 5,
       created_at: now,
@@ -859,6 +860,9 @@ describe('SQL_STATEMENTS', () => {
       'deleteDlqEntry',
       'deleteDlqEntryForQueue',
       'clearDlqQueue',
+      'deleteDependencyCompletionForAdmission',
+      'deleteFlowFailuresForAdmission',
+      'pinDependencyCompletionForAdmission',
       'insertCron',
       'updateCron',
       'upsertQueueState',
@@ -896,9 +900,9 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertJob).toContain('jobs');
     });
 
-    test('should have 30 placeholder parameters', () => {
+    test('should have 32 placeholder parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertJob.match(/\?/g) || []).length;
-      expect(paramCount).toBe(30);
+      expect(paramCount).toBe(32);
     });
 
     test('should include all required columns', () => {
@@ -906,6 +910,7 @@ describe('SQL_STATEMENTS', () => {
       const requiredColumns = [
         'id',
         'queue',
+        'name',
         'data',
         'priority',
         'created_at',
@@ -934,6 +939,7 @@ describe('SQL_STATEMENTS', () => {
         'ignore_dependency_on_failure',
         'timeline',
         'dlq_retry_state',
+        'extended_options',
       ];
       for (const col of requiredColumns) {
         expect(sql).toContain(col);
@@ -1043,9 +1049,9 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertCron.toUpperCase()).toContain('INSERT OR REPLACE');
     });
 
-    test('insertCron should have 16 parameters', () => {
+    test('insertCron should have 17 parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertCron.match(/\?/g) || []).length;
-      expect(paramCount).toBe(16);
+      expect(paramCount).toBe(17);
     });
 
     test('insertCron should reference cron_jobs table', () => {
@@ -1124,6 +1130,7 @@ describe('prepareStatements', () => {
       insertStmt.run(
         'prepared-test-1', // id
         'test-queue', // queue
+        'prepared-operation', // name
         data, // data (BLOB)
         5, // priority
         now, // created_at
@@ -1151,7 +1158,8 @@ describe('prepareStatements', () => {
         null, // stall_timeout
         0, // stall_count
         null, // timeline
-        null // dlq_retry_state
+        null, // dlq_retry_state
+        null // extended_options
       );
     }).not.toThrow();
   });
@@ -1164,6 +1172,7 @@ describe('prepareStatements', () => {
     expect(result).not.toBeNull();
     expect(result!.id).toBe('prepared-test-1');
     expect(result!.queue).toBe('test-queue');
+    expect(result!.name).toBe('prepared-operation');
     expect(result!.priority).toBe(5);
     expect(result!.state).toBe('waiting');
   });
@@ -1259,6 +1268,7 @@ describe('prepareStatements', () => {
       insertCronStmt.run(
         'test-cron', // name
         'cron-queue', // queue
+        'cleanup', // job_name
         cronData, // data
         '0 * * * *', // schedule
         null, // repeat_every
@@ -1333,6 +1343,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
     stmt.run(
       'e2e-job-1',
       'email-queue',
+      'send-email',
       pack(jobData),
       10,
       now,
@@ -1360,6 +1371,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       15000,
       2,
       null,
+      null,
       null
     );
 
@@ -1371,6 +1383,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
 
     expect(job.id).toBe(jobId('e2e-job-1'));
     expect(job.queue).toBe('email-queue');
+    expect(job.name).toBe('send-email');
     expect(job.data).toEqual(jobData);
     expect(job.priority).toBe(10);
     expect(job.createdAt).toBe(now);
@@ -1400,6 +1413,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
     stmt.run(
       'e2e-job-2',
       'minimal-queue',
+      'default',
       pack(null),
       0,
       now,
@@ -1426,6 +1440,7 @@ describe('end-to-end pack/unpack via SQLite', () => {
       0,
       null,
       0,
+      null,
       null,
       null
     );

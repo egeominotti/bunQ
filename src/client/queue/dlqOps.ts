@@ -10,6 +10,7 @@ import { toDlqEntry } from '../types';
 import type { PublicJobMethodContext } from '../jobConversionTypes';
 import { getShard, getDlqContext, toDomainFilter, toDomainDlqConfig } from './helpers';
 import * as dlqOps from '../../application/dlqManager';
+import { toPublicDlqStats } from './dlqStats';
 
 /** Set DLQ configuration (embedded only) */
 export function setDlqConfig(queue: string, config: Partial<DlqConfig>): void {
@@ -40,14 +41,7 @@ export function getDlqStatsEmbedded(queue: string): DlqStats {
   const manager = getSharedManager();
   const ctx = getDlqContext(manager);
   const stats = dlqOps.getDlqStats(queue, ctx);
-  return {
-    total: stats.total,
-    byReason: stats.byReason,
-    pendingRetry: stats.pendingRetry,
-    expired: stats.expired,
-    oldestEntry: stats.oldestEntry,
-    newestEntry: stats.newestEntry,
-  };
+  return toPublicDlqStats(stats);
 }
 
 /** Retry DLQ jobs by filter (embedded only) */

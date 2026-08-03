@@ -108,7 +108,7 @@ final class Connection
         return $this->call([
             'cmd' => 'Hello',
             'protocolVersion' => Protocol::PROTOCOL_VERSION,
-            'capabilities' => ['pipelining'],
+            'capabilities' => ['pipelining', 'separate-job-name'],
         ]);
     }
 

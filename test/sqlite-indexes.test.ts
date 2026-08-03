@@ -40,8 +40,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 30', () => {
-    expect(SCHEMA_VERSION).toBe(30);
+  test('schema version is 34', () => {
+    expect(SCHEMA_VERSION).toBe(34);
   });
 
   test('bounded dependency-completion table and queue index exist', () => {

@@ -1,11 +1,29 @@
 import { decodeMessagePack } from '../../../shared/msgpack';
+import type { JobEvent } from '../../../domain/types/queue';
 import { TcpClientConnectivity } from './connectivity';
+
+function isJobEvent(value: unknown): value is JobEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.eventType === 'string' &&
+    typeof event.queue === 'string' &&
+    typeof event.jobId === 'string' &&
+    typeof event.timestamp === 'number' &&
+    Number.isFinite(event.timestamp)
+  );
+}
 
 /** Response dispatch, health tracking, and reconnect decisions. */
 export abstract class TcpClientHealth extends TcpClientConnectivity {
   protected handleData(frame: Uint8Array): void {
     try {
       const response = decodeMessagePack<Record<string, unknown>>(frame);
+      if (response.type === 'event') {
+        if (!isJobEvent(response.event)) throw new Error('Invalid queue event frame');
+        this.emit('queueEvent', response.event);
+        return;
+      }
       const reqId = response.reqId as string | undefined;
 
       if (reqId) {

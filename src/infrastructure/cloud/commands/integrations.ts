@@ -5,6 +5,7 @@ export const INTEGRATION_COMMANDS: Partial<Record<string, CloudCommandHandler>> 
     queueManager.removeCron(command.name ?? '');
     const cron = queueManager.addCron({
       name: command.name ?? '',
+      jobName: 'default',
       queue: command.queue ?? '',
       data: command.data ?? {},
       schedule: command.schedule,

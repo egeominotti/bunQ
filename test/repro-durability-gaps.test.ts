@@ -666,7 +666,10 @@ describe('DURABILITY — damaged WAL/db at startup: clean recovery or explicit r
 
     // Survivors form a strict PREFIX of push order: durable pushes were
     // sequential (each awaited), so their WAL commits are ordered; a valid-
-    // prefix replay can never resurrect job k+1 while dropping job k.
+    // prefix replay can never resurrect job k+1 while dropping job k. SQLite
+    // may auto-checkpoint every commit before the kill; in that valid case the
+    // complete input is the surviving prefix even though the stale WAL tail is
+    // truncated.
     const states: string[] = [];
     for (const id of ids) {
       states.push(await stateOf(b, QUEUE, id));
@@ -676,14 +679,14 @@ describe('DURABILITY — damaged WAL/db at startup: clean recovery or explicit r
     }
     const firstUnknown = states.indexOf('unknown');
     expect(firstUnknown).not.toBe(0); // at least the earliest commits survive
-    expect(states[M - 1]).toBe('unknown'); // the WAL tail was chopped — the last commit is gone
-    // (states[M-1] === 'unknown' guarantees firstUnknown !== -1 here.)
-    const known = ids.slice(0, firstUnknown);
+    const known = firstUnknown === -1 ? ids : ids.slice(0, firstUnknown);
     // STRICT PREFIX: once one commit is gone, every later commit is gone too.
     // A known job AFTER the first unknown would mean SQLite (or the recovery
     // path) resurrected a commit past the valid WAL prefix — invented data.
-    for (let i = firstUnknown; i < M; i++) {
-      expect(states[i]).toBe('unknown');
+    if (firstUnknown !== -1) {
+      for (let i = firstUnknown; i < M; i++) {
+        expect(states[i]).toBe('unknown');
+      }
     }
 
     // Counts are consistent: nothing was ever acked, so pending == known.

@@ -6,7 +6,7 @@
 import { Queue, Worker } from '../../src/client';
 
 const QUEUE_NAME = 'tcp-test-retry';
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 
 async function main() {
   console.log('=== Test Retry and Backoff (TCP) ===\n');
@@ -119,7 +119,7 @@ async function main() {
     queue.obliterate();
     await Bun.sleep(100);
 
-    // Exponential backoff: 100, 200, 400...
+    // Exponential retry windows after jitter: [100, 300), [200, 600), ...
     await queue.add('exp-backoff-job', { failCount: 0 }, { attempts: 4, backoff: 100 });
 
     const attemptTimes: number[] = [];
@@ -135,12 +135,14 @@ async function main() {
     if (attemptTimes.length >= 3) {
       const delay1 = attemptTimes[1] - attemptTimes[0];
       const delay2 = attemptTimes[2] - attemptTimes[1];
-      // Exponential should increase (delay2 > delay1)
-      if (delay2 >= delay1 * 0.8) { // Some tolerance
-        console.log(`   ✅ Backoff increasing: ${delay1}ms -> ${delay2}ms`);
+      // Adjacent windows overlap because each delay has ±50% jitter, so they
+      // are not guaranteed to be monotonic. Each retry must still respect the
+      // floor implied by its own exponential window (with timer tolerance).
+      if (delay1 >= 90 && delay2 >= 180) {
+        console.log(`   ✅ Backoff windows respected: ${delay1}ms -> ${delay2}ms`);
         passed++;
       } else {
-        console.log(`   ❌ Backoff not increasing: ${delay1}ms -> ${delay2}ms`);
+        console.log(`   ❌ Backoff below its exponential floor: ${delay1}ms -> ${delay2}ms`);
         failed++;
       }
     } else {

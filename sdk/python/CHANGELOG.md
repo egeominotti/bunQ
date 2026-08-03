@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Treat broker ACK/FAIL outcomes as authoritative after a timeout race. A
+  successful `applied: false` response now suppresses false Worker terminal
+  events and counters without reporting an error. Batched ACKs honor
+  positional `ignoredIndices`, including duplicate job IDs, and reject
+  malformed or `ignoredIds`-only evidence instead of guessing which generation
+  completed. Historical ACKB responses without `data` still mean every
+  position applied.
+- Forward a Worker-owned Job's lease token through `retry()`, `change_delay()`,
+  `move_to_delayed()`, and `discard()`, and accept the token on the matching
+  Queue mutation methods. Active transitions now satisfy broker ownership
+  instead of failing, silently leaving the job active, or allowing an old
+  delivery to discard a newer generation.
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send `PUSH`/`PUSHB` names through top-level `name`, preserve user `data`
+  without wrapping or reserving `data["name"]`, decode legacy envelopes on
+  read, and send scheduler job names through `jobName`.
 - Forward `duration_ms` from `set_global_rate_limit(max_jobs, duration_ms)` as
   the broker's `duration` field instead of silently using one second.
 

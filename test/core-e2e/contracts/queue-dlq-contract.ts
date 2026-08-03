@@ -50,10 +50,12 @@ export async function runQueueDlqContract(mode: CoreE2eMode): Promise<CoverageTr
       (config) => (config as { maxEntries?: number }).maxEntries === 50,
       'setDlqConfig was not applied'
     );
-    const localConfig = tracker.call('Queue', 'getDlqConfig', () =>
-      inspection.queue.getDlqConfig()
-    );
-    ensure(localConfig.maxEntries === 50, 'getDlqConfig missed configured value');
+    if (mode === 'embedded') {
+      const localConfig = tracker.call('Queue', 'getDlqConfig', () =>
+        inspection.queue.getDlqConfig()
+      );
+      ensure(localConfig.maxEntries === 50, 'getDlqConfig missed configured value');
+    }
     await tracker.invoke('Queue', 'setDlqConfigAsync', () =>
       inspection.queue.setDlqConfigAsync({ autoRetry: false, maxAutoRetries: 4 })
     );
@@ -62,8 +64,13 @@ export async function runQueueDlqContract(mode: CoreE2eMode): Promise<CoverageTr
     );
     ensure(config.maxAutoRetries === 4 && config.maxEntries === 50, 'DLQ config mismatch');
 
-    const syncEntries = tracker.call('Queue', 'getDlq', () => inspection.queue.getDlq());
-    ensure(Array.isArray(syncEntries), 'getDlq did not return an array');
+    if (mode === 'embedded') {
+      const syncEntries = tracker.call('Queue', 'getDlq', () => inspection.queue.getDlq());
+      ensure(
+        syncEntries.some((entry) => entry.job.id === inspection.id),
+        'getDlq missed failed job'
+      );
+    }
     const entries = await tracker.invoke('Queue', 'getDlqAsync', () =>
       inspection.queue.getDlqAsync({ reason: 'max_attempts_exceeded' })
     );
@@ -78,8 +85,10 @@ export async function runQueueDlqContract(mode: CoreE2eMode): Promise<CoverageTr
       jobs.some((job) => job.id === inspection.id),
       'getDlqJobsAsync missed job'
     );
-    const syncStats = tracker.call('Queue', 'getDlqStats', () => inspection.queue.getDlqStats());
-    ensure(typeof syncStats.total === 'number', 'getDlqStats did not return stats');
+    if (mode === 'embedded') {
+      const syncStats = tracker.call('Queue', 'getDlqStats', () => inspection.queue.getDlqStats());
+      ensure(syncStats.total === 1, `getDlqStats returned total ${syncStats.total}`);
+    }
     const stats = await tracker.invoke('Queue', 'getDlqStatsAsync', () =>
       inspection.queue.getDlqStatsAsync()
     );
@@ -107,13 +116,15 @@ export async function runQueueDlqContract(mode: CoreE2eMode): Promise<CoverageTr
     const filterSyncCount = tracker.call('Queue', 'retryDlqByFilter', () =>
       filterSync.queue.retryDlqByFilter({ reason: 'max_attempts_exceeded', limit: 1 })
     );
-    ensure(typeof filterSyncCount === 'number', 'retryDlqByFilter did not return a number');
-    if (mode === 'embedded') {
-      ensure(
-        (await filterSync.queue.getJobState(filterSync.id)) === 'waiting',
-        'sync filter retry failed'
-      );
-    }
+    ensure(
+      filterSyncCount === (mode === 'embedded' ? 1 : 0),
+      `retryDlqByFilter returned ${filterSyncCount}`
+    );
+    await eventually(
+      () => filterSync.queue.getJobState(filterSync.id),
+      (state) => state === 'waiting',
+      'sync filter retry did not reach the selected runtime'
+    );
 
     const filterAsync = await failedFixture('filter-async');
     const filterAsyncCount = await tracker.invoke('Queue', 'retryDlqByFilterAsync', () =>

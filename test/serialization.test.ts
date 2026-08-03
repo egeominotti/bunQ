@@ -27,7 +27,6 @@ function makeJob(overrides: Partial<Parameters<typeof createJob>[2]> = {}): Job 
 // ---------------------------------------------------------------------------
 describe('serializeJob', () => {
   test('should serialize a job with all default fields', () => {
-    const now = Date.now();
     const job = makeJob();
     const result = serializeJob(job);
 
@@ -246,6 +245,7 @@ describe('serializeJob', () => {
     const expectedKeys = [
       'id',
       'queue',
+      'name',
       'data',
       'priority',
       'createdAt',

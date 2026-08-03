@@ -104,12 +104,9 @@ export function wireJobOptions(opts: JobOptions = {}): Record<string, unknown> {
   });
 }
 
-/** The job name travels inside `data`, mirroring the official client. */
-export function jobPayload(name: string, data: unknown): Record<string, unknown> {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    return { name, ...(data as Record<string, unknown>) };
-  }
-  return data === undefined || data === null ? { name } : { name, payload: data };
+/** Build the protocol-owned name field without changing user data. */
+export function jobPayload(name: string, data: unknown): { name: string; data: unknown } {
+  return { name, data };
 }
 
 export interface JobCounts {

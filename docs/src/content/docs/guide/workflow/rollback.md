@@ -125,7 +125,7 @@ exec?.rollbackStatus;                    // 'stuck'
 exec?.steps.charge?.compensation;        // compensation-failed, timed out after 1000ms
 ```
 
-Without that bound the run would sit in `compensating` instead, which is worse than a parked one: it is not `compensation-stuck`, so there is nothing to `resumeCompensation` or `abandonCompensation`, and every later `engine.recover()` would find the claim still held and return without having done anything.
+Without that bound the run would sit in `compensating` instead, which is worse than a parked one: it is not `compensation-stuck`, so there is nothing to `resumeCompensation` or `abandonCompensation`. A concurrent local `engine.recover()` waits for the exact claim owner and reloads the durable row before deciding whether it must retry, but it cannot make a permanently hung handler finish. The timeout is what guarantees that ownership settles and the run reaches an operator-visible state.
 
 ### A failure that was never resolved keeps the chain stopped
 
@@ -133,6 +133,13 @@ An unwind interrupted by a crash leaves the run `compensating`, and `recover()` 
 it again at the next startup. That second pass reads the outcomes the first one wrote,
 and a reversal recorded `compensation-failed` still blocks everything behind it: the
 pass stops there and the run parks again, exactly as it did the first time.
+
+A forced Engine close is a smaller version of the same race: JavaScript already
+inside a compensate handler may briefly outlive the Engine whose store was
+closed. A replacement Engine in the same process waits for that specific local
+owner, then reloads SQLite through its own store and resumes only if the unwind
+is still owed. It never assumes that losing the local claim means the durable
+work completed.
 
 It has to work that way. Treating a recorded failure as "already dealt with" would let
 the pass walk past a refund that never went through, reach the end and report

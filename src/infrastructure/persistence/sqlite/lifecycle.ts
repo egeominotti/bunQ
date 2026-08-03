@@ -1,8 +1,8 @@
 import { storageLog } from '../../../shared/logger';
-import { SqliteControl } from './control';
+import { SqliteTelemetry } from './telemetry';
 
 /** Storage shutdown and file-size inspection. */
-export class SqliteLifecycle extends SqliteControl {
+export class SqliteLifecycle extends SqliteTelemetry {
   close(): void {
     this.writeBuffer.stop();
 

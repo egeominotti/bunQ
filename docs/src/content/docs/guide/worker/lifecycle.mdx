@@ -100,6 +100,25 @@ Bunqueue.Worker.stop(worker)      # Drain, unregister and close
 </TabItem>
 </Tabs>
 
+Pausing stops new pulls; it does not interrupt processors already running or
+release jobs already buffered by the Worker. Lease-renewal and worker-registration
+heartbeats therefore continue while paused. `resume()` reuses those heartbeat
+loops, and repeated pause/resume cycles do not create additional timers.
+
+`close(true)` stops owning the active delivery immediately; it does not forcibly
+cancel JavaScript already running inside the processor. If that processor later
+returns or throws, the Worker discards the late outcome without sending `ACK` or
+`FAIL`. The broker can therefore recover the unfinished job through disconnect,
+lock-expiry, or stall handling instead of accepting a result from a closed
+worker. Use plain `close()` when the current result must be committed before
+shutdown.
+
+Processing timeouts follow the same generation rule during normal operation.
+The broker owns the deadline and claims the active generation atomically. If a
+processor returns or throws after that claim, the Worker receives an explicit
+ignored outcome and suppresses its local `completed`, `failed`, and ACK/FAIL
+error events. A retry's newer lease is independent and can complete normally.
+
 For a clean process exit, hook your runtime's shutdown signal; in the Bun client, also shut down the shared machinery:
 
 <Tabs syncKey="lang">

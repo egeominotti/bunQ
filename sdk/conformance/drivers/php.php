@@ -151,7 +151,11 @@ function handle(array $req): array
             queueFor('conf-lookup')->promote((string) $req['jobId']);
             return [];
         case 'upsertScheduler':
-            queueFor((string) $req['queue'])->upsertJobScheduler((string) $req['schedulerId'], $req['repeat'] ?? []);
+            queueFor((string) $req['queue'])->upsertJobScheduler(
+                (string) $req['schedulerId'],
+                $req['repeat'] ?? [],
+                $req['template'] ?? [],
+            );
             return [];
         case 'getScheduler':
             return ['scheduler' => queueFor('conf-lookup')->getJobScheduler((string) $req['schedulerId'])];
@@ -166,7 +170,10 @@ function handle(array $req): array
             return ['count' => queueFor((string) $req['queue'])->retryDlq()];
         case 'hello': {
             $hello = queueFor('conf-lookup')->connection->hello();
-            return ['protocolVersion' => $hello['protocolVersion'] ?? null];
+            return [
+                'protocolVersion' => $hello['protocolVersion'] ?? null,
+                'capabilities' => $hello['capabilities'] ?? null,
+            ];
         }
         case 'process':
             processUntil($req);

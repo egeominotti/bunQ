@@ -48,6 +48,6 @@ export async function handleMoveToWaitingChildren(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
-  const moved = await ctx.queueManager.moveToWaitingChildren(jobId(cmd.id));
+  const moved = await ctx.queueManager.moveToWaitingChildren(jobId(cmd.id), cmd.token);
   return moved ? resp.data({ moved: true }, reqId) : resp.error('Job is not active', reqId);
 }

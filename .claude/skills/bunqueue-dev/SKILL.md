@@ -59,13 +59,25 @@ Located in `src/client/workflow/`. Pure consumer layer on bunqueue (no core modi
 
 ## Testing (MANDATORY before any commit)
 
+Run tests in fresh isolated OrbStack Machines on the Mac's native architecture.
+The canonical gate is Ubuntu 24.04 (4 CPUs, request 16 GiB memory, 32 GiB disk);
+every release also uses Debian 13 on the same native architecture. On Apple
+Silicon use `arm64`; GitHub Actions provides the independent native `amd64`
+gate. A Rosetta-translated `amd64` Machine is diagnostic only. Create Machines
+with `--isolated --isolate-network`, never mount host paths or forward
+credentials, transfer only a sanitized worktree snapshot, pin Bun to the CI
+version, record effective cgroup limits, and delete each Machine after copying
+its logs. Direct macOS-host runs are diagnostic only. Machine runs supplement
+the mandatory Docker sandbox and never replace it.
+
 ```bash
 bun test                                # Unit tests (~5000 tests)
 bun scripts/tcp/run-all-tests.ts        # TCP integration tests (~50 suites)
 bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites)
+bun run test:sandbox                    # Additional container isolation gate
 ```
 
-All three must pass. No exceptions.
+All product suites and the sandbox must pass. No exceptions.
 
 ## Bug Fixing Process
 

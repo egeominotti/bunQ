@@ -89,7 +89,7 @@ export class SocketWriteQueue {
    * Call from the socket's `drain` handler. Stops at the first short write,
    * leaving the remainder queued for the next drain.
    */
-  flush(socket: WritableSocket): void {
+  flush(socket: WritableSocket): boolean {
     while (this.pending.length > 0) {
       const chunk = this.pending[0];
       const view = this.offset > 0 ? chunk.subarray(this.offset) : chunk;
@@ -98,19 +98,20 @@ export class SocketWriteQueue {
       try {
         written = socket.write(view);
       } catch {
-        return;
+        return false;
       }
 
-      if (written <= 0) {
-        // Socket not ready / closed; wait for the next drain.
-        return;
+      if (written < 0) return false;
+      if (written === 0) {
+        // Socket is still backpressured; wait for the next drain.
+        return true;
       }
 
       if (written < view.length) {
         // Still backpressured: advance offset within the current chunk.
         this.offset += written;
         this.queuedBytes -= written;
-        return;
+        return true;
       }
 
       // Whole chunk flushed.
@@ -118,6 +119,7 @@ export class SocketWriteQueue {
       this.pending.shift();
       this.offset = 0;
     }
+    return true;
   }
 
   /** Number of bytes still buffered awaiting drain. */

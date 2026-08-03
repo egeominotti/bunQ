@@ -89,6 +89,12 @@ dropped. Integers outside int32 are recursively encoded as float64 for
 JavaScript interoperability (exact up to 2^53; pass larger 64-bit identifiers
 as strings).
 
+Job names are top-level protocol metadata. `job.name` reads that field, while
+`job.data` preserves the submitted term, including a map with its own name,
+scalar, list, or `nil`. Legacy maps that stored the job name inside data remain
+readable. Scheduler templates use separate `"jobName"` and `"data"` fields.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
 The queue module also exposes pause/resume/drain/clean, delayed-job promotion,
 DLQ retry and purge, rate and concurrency limits, and cron schedulers.
 Scheduler `limit` and `tz` map to the wire fields `maxLimit` and `timezone`.
@@ -107,6 +113,11 @@ Scheduler `limit` and `tz` map to the wire fields `maxLimit` and `timezone`.
 - Raise `Bunqueue.UnrecoverableError` to skip remaining retries and
   dead-letter a job. ACK/FAIL failures are surfaced and never counted as
   completed processing.
+- `run_once/1` reports how many handler attempts settled. If the broker has
+  already finalized that exact lease generation (for example, by job timeout),
+  its acknowledged `already-finalized` no-op still settles the attempt but does
+  not advance either worker terminal counter or replace the broker outcome.
+  Unknown terminal response data is surfaced as a protocol error.
 
 ## Security
 

@@ -1,6 +1,6 @@
 import { QueueManager } from '../../application/queueManager';
 import { EventType } from '../../domain/types/queue';
-import { formatCount as fmt, heapMegabytes as memMB } from './common';
+import { formatCount as fmt, heapMegabytes as memMB, megabytesPerSecond } from './common';
 
 export async function testHighVolume(jobs: number): Promise<void> {
   console.log(`\n${'═'.repeat(60)}`);
@@ -137,7 +137,7 @@ export async function testLargePayloads(jobs: number, payloadKB: number): Promis
   console.log('\n📊 Results:');
   console.log(`   Data processed: ${totalDataMB.toFixed(1)}MB`);
   console.log(`   Total time:     ${fmt(totalTime)}ms`);
-  console.log(`   Throughput:     ${fmt((totalDataMB / totalTime) * 1000 * 1000)} MB/sec`);
+  console.log(`   Throughput:     ${fmt(megabytesPerSecond(totalDataMB, totalTime))} MB/sec`);
   console.log(`   Events:         ${fmt(completed)}/${fmt(jobs)}`);
   console.log(`   Memory:         ${startMemory.toFixed(1)}MB → ${endMemory.toFixed(1)}MB`);
   console.log(`   Status:         ${completed === jobs ? '✅ PASS' : '❌ FAIL'}`);

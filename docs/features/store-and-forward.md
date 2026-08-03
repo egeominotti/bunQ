@@ -8,7 +8,7 @@ This module groups two unrelated client-side concerns that share the "compatibil
 
 1. **Store-and-Forward** (`forwarder.ts`): drains jobs from a local (typically embedded SQLite) queue to a remote bunqueue server over TCP/TLS. Built for the edge/gateway pattern — a device buffers work locally while offline, then ships it to a central broker when the uplink is up. A remote failure does not lose work: the forward is modeled as a *local* job, so a failed push triggers the local retry/backoff/DLQ path. Re-forwards are idempotent thanks to a deterministic remote `jobId`.
 
-2. **BullMQ v5 compatibility shims** (`bullmqCompat.ts`): a thin adapter exposing BullMQ-named read APIs (`getPrioritized`, `getWaitingChildren`, `getJobDependencies`, …) on the [Client SDK: Queue](./client-queue-sdk.md), so code written against BullMQ can read prioritized jobs, waiting-children, and parent/child dependency views with minimal changes. Several of these are partial or embedded-only — see [Edge Cases & Failure Modes](#edge-cases--failure-modes).
+2. **BullMQ v5 compatibility shims** (`bullmqCompat.ts`): a thin adapter exposing BullMQ-named read APIs (`getPrioritized`, `getWaitingChildren`, `getJobDependencies`, …) on the [Client SDK: Queue](./client-queue-sdk.md), so code written against BullMQ can read prioritized jobs, waiting-children, and parent/child dependency views with minimal changes. The asynchronous read paths are authoritative in embedded and TCP modes; synchronous compatibility snapshots retain the explicit transport boundaries described in [Public API Completeness](./public-api-completeness.md).
 
 ## Responsibilities & Scope
 
@@ -85,7 +85,7 @@ export class Forwarder extends EventEmitter {
 }
 ```
 
-`Forwarder` and `ForwardOptions` / `ForwardedInfo` are re-exported from the client entry (`src/client/index.ts:46-47`).
+`Forwarder` and `ForwardOptions` / `ForwardedInfo` are re-exported from the client entry (`src/client/index.ts:47-48`).
 
 **Events emitted** (`forwarder.ts:71-72`):
 
@@ -94,20 +94,20 @@ export class Forwarder extends EventEmitter {
 
 ### BullMQ Compatibility (`bullmqCompat.ts`)
 
-These are free functions taking a `BullMQContext` (`bullmqCompat.ts:12`); they are surfaced as `Queue` methods (`queue.ts:526-567`):
+These are free functions taking a `CompatibilityContext` (`bullmqCompat.ts:10-40`); focused queue runtime layers surface them as `Queue` methods:
 
 ```typescript
 // src/client/queue/bullmqCompat.ts
-export function getPrioritized<T>(ctx, start = 0, end = -1): Promise<Job<T>[]>          // :38
-export async function getPrioritizedCount<T>(ctx): Promise<number>                      // :43
-export async function getWaitingChildren<T>(ctx, start = 0, end = -1): Promise<Job<T>[]> // :49
-export async function getWaitingChildrenCount<T>(ctx): Promise<number>                   // :90
-export function getDependencies(ctx, parentId, type?, start?, end?): Promise<{…}>        // :73
-export async function getJobDependencies(ctx, id, opts?): Promise<JobDependencies>       // :112
-export async function getJobDependenciesCount(ctx, id, opts?): Promise<JobDependenciesCount> // :143
+export function getPrioritized<T>(ctx, start = 0, end = -1): Promise<Job<T>[]>          // :43
+export async function getPrioritizedCount<T>(ctx): Promise<number>                      // :52
+export async function getWaitingChildren<T>(ctx, start = 0, end = -1): Promise<Job<T>[]> // :57
+export async function getWaitingChildrenCount<T>(ctx): Promise<number>                   // :71
+export function getDependencies(ctx, parentId, type?, start?, end?): Promise<{…}>        // :76
+export async function getJobDependencies(ctx, id, opts?): Promise<JobDependencies>       // :103
+export async function getJobDependenciesCount(ctx, id, opts?): Promise<JobDependenciesCount> // :128
 ```
 
-Public `Queue` methods wiring to them: `getJobDependencies` / `getJobDependenciesCount` / `getDependencies` (`queue.ts:526-539`), `getPrioritized` / `getPrioritizedCount` (`queue.ts:542-561`), `getWaitingChildren` / `getWaitingChildrenCount` (`queue.ts:562-567`).
+Public `Queue` methods wire through `src/client/queue/runtime/scheduling.ts:76-81` for job dependency queries and `src/client/queue/runtime/compatibility.ts:7-34` for prioritized/waiting-children queries.
 
 No HTTP endpoints or CLI commands are defined by this module. The forwarder
 reuses the standard `PULL`/`ACK`/`PUSH` path through its `Worker` and remote
@@ -119,13 +119,13 @@ state transition uses `MoveToWaitingChildren`.
 See [data-model](../data-model.md) for full definitions. Most relevant shapes:
 
 ```typescript
-// src/client/types.ts:61
+// src/client/types/job.ts:53
 interface GetDependenciesOpts {
   processed?: { cursor?: number; count?: number };
   unprocessed?: { cursor?: number; count?: number };
 }
 
-// src/client/types.ts:67
+// src/client/types/job.ts:58
 interface JobDependencies {
   processed: Record<string, unknown>;   // keyed `${queue}:${childId}` → child result
   unprocessed: string[];                // child ids without a result yet
@@ -133,17 +133,17 @@ interface JobDependencies {
   nextUnprocessedCursor?: number;
 }
 
-// src/client/types.ts:75
+// src/client/types/job.ts:65
 interface JobDependenciesCount { processed: number; unprocessed: number; }
 
-// src/client/types.ts:403 — relevant fields for forward({ to })
+// src/client/types/connection.ts:6 — relevant fields for forward({ to })
 interface ConnectionOptions {
   host?: string; port?: number; socketPath?: string;
   tls?: boolean | ClientTlsOptions; token?: string; poolSize?: number; /* … */
 }
 ```
 
-The deterministic remote id is plain string-formatted: `` `fwd:${source.queueKey}:${job.id}` `` (`forwarder.ts:94`). `queueKey` is `prefixKey + name` (`queue.ts:67`), so the remote id is namespaced by the source queue's full key.
+The deterministic remote id is plain string-formatted: `` `fwd:${source.queueKey}:${job.id}` `` (`forwarder.ts:94`). `queueKey` is `prefixKey + name` (`src/client/queue/runtime/state.ts:26-30`), so the remote id is namespaced by the source queue's full key.
 
 ## Business Logic / Control Flow
 
@@ -194,7 +194,13 @@ This module is configured per call, not via env vars.
 | `concurrency` | `ForwardOptions` | `4` |
 | `durable` | `ForwardOptions` | `false` (omitted → remote uses buffered write) |
 
-The source side inherits its mode (`embedded`, `dataPath`, `connection`, `prefixKey`) from the originating `Queue` via `ForwardSource` (`queue.ts:593-600`). The remote side is always `embedded: false` with `autoBatch` disabled (`forwarder.ts:85-89`). Standard server env vars (`TCP_PORT`, `TLS_CERT_FILE`, `AUTH_TOKENS`, …) apply to whatever bunqueue server `to` points at — see [Configuration](./configuration.md). The BullMQ shims take no configuration.
+The source side inherits its mode (`embedded`, `dataPath`, `connection`,
+`prefixKey`) from the originating `Queue` via `ForwardSource`
+(`src/client/forwarder.ts:31-41`). The remote side is always `embedded: false`
+with `autoBatch` disabled (`forwarder.ts:85-89`). Standard server env vars
+(`TCP_PORT`, `TLS_CERT_FILE`, `AUTH_TOKENS`, …) apply to whatever bunqueue
+server `to` points at — see [Configuration](./configuration.md). The BullMQ
+shims take no configuration.
 
 ## Related Docs
 

@@ -14,12 +14,13 @@ Owns:
 - The global indexes: `jobIndex` (Map), `completedJobs` (BoundedSet),
   `completedJobsData` (BoundedMap), `depCompletions`
   (`DependencyCompletionTracker`: exact recent FIFO plus live pins),
-  `timedOutJobs` (BoundedSet), and
+  `timedOutJobs` / `retiredTimeoutLeaseTokens` (BoundedMap generation proofs),
+  `retiredCronLeaseTokens` (BoundedMap), and
   `jobResults`/`customIdMap`/`jobLogs` (LRUMap).
 - Lock ownership and flow state in `queue-manager/state.ts`; ACK/lease recovery in `queue-manager/ack.ts`, `delivery.ts` and `locks.ts`; flow propagation in `flow-failures.ts`, `flow-options.ts` and `dependency-runtime.ts`.
 - Shard selection and routing of every operation to the owning shard.
 - Lifecycle: recovery from storage at construction, background-task startup, and `shutdown()` teardown of all collections.
-- `Shard` owns per-shard queue containers (`IndexedPriorityQueue` per queue name), unique-key dedup, DLQ, rate/concurrency limiters, dependency tracking, temporal index, waiter notifications, and O(1) running counters (`shard.ts:41-79`).
+- `Shard` owns per-shard queue containers (`IndexedPriorityQueue` per queue name), unique-key dedup, DLQ, rate/concurrency limiters, dependency tracking, temporal index, waiter notifications, and O(1) running counters. The façade is `src/domain/queue/shard.ts`; the focused capability chain lives under `src/domain/queue/shard/`, starting with `state.ts:13-100`.
 
 Does NOT own (delegated):
 
@@ -59,8 +60,9 @@ Core operations:
 - `push(queue: string, input: JobInput): Promise<Job>` / `pushBatch(...)`
 - `pull(queue: string, timeoutMs?: number): Promise<Job | null>` / `pullBatch(...)`
 - `pullWithLock(...)` / `pullBatchWithLock(...)`
-- `ack(...)` / `ackBatch(...)` / `ackBatchWithResults(...)`
-- `fail(jobId, error?, token?, unrecoverable?, stack?): Promise<void>`
+- `ack(...): Promise<AckOutcome>` / `ackBatch(...): Promise<AckBatchOutcome>` /
+  `ackBatchWithResults(...): Promise<AckBatchOutcome>`
+- `fail(jobId, error?, token?, unrecoverable?, stack?): Promise<AckOutcome>`
 - `jobHeartbeat(jobId, token?): boolean` / `jobHeartbeatBatch(...)`
 
 Locks: `createLock`, `verifyLock`, `renewJobLock`, `renewJobLockBatch`,
@@ -104,11 +106,17 @@ Hashing functions (`src/shared/hash.ts`):
 - `processingShardIndex(jobId: string): number` → `fnv1a(jobId) & SHARD_MASK` (`hash.ts:54`).
 - `SHARD_COUNT` / `SHARD_MASK` (`hash.ts:44-45`), `uuid()` → `Bun.randomUUIDv7()` (`hash.ts:62`), `constantTimeEqual(a, b)` (`hash.ts:70`).
 
-`Shard` (exported class, `shard.ts:41`) — selected methods: `getQueue(name)`, `getState`/`isPaused`/`pause`/`resume`, unique-key methods including owner-aware release, FIFO group methods, `releaseJobResources(queue, uniqueKey, groupId, ownerId?)`, queue-scoped `notify`/`notifyBatch`/`waitForJob`, DLQ delegates, counters, `drain(queue)`, and `obliterate(queue)`.
+`Shard` (exported façade, `src/domain/queue/shard.ts:8`) — selected methods:
+`getQueue(name)`, `getState`/`isPaused`/`pause`/`resume`, unique-key methods
+including owner-aware release, FIFO group methods,
+`releaseJobResources(queue, uniqueKey, groupId, ownerId?)`, queue-scoped
+`notify`/`notifyBatch`/`waitForJob`, DLQ delegates, counters, `drain(queue)`, and
+`obliterate(queue)`. Their implementations are split by responsibility under
+`src/domain/queue/shard/`.
 
 `ShardCounters` (exported, `shardCounters.ts:19`) + `ShardStats` interface (`shardCounters.ts:10`).
 
-`ContextFactory` (exported, `contextFactory.ts:80`) with `ContextDependencies` / `ContextCallbacks` interfaces.
+`ContextFactory` (exported, `src/application/contextFactory.ts:20`) with `ContextDependencies` / `ContextCallbacks` interfaces in `src/application/types/contextFactory.ts`.
 
 ## Data Models
 
@@ -119,7 +127,7 @@ See [data-model](../data-model.md) for full definitions. Most relevant here:
   - `{ type: 'processing'; shardIdx: number }`
   - `{ type: 'completed'; queueName: string }`
   - `{ type: 'dlq'; queueName: string }`
-- `QueueState` (`src/domain/types/queue.ts`) — `{ name; paused; rateLimit; concurrencyLimit; activeCount }`, per-queue control state held in the shard's `LimiterManager`.
+- `QueueState` (`src/domain/types/queue.ts:7-17`) — `{ name; paused; rateLimit; rateLimitDuration; rateLimitExpiresAt; concurrencyLimit; activeCount }`, per-queue control state held in the shard's `LimiterManager`.
 - `ShardStats` (`shardCounters.ts:10-17`) — `{ queuedJobs; delayedJobs; dlqJobs }`, O(1) running counters.
 - `QueueManagerConfig` / `DEFAULT_CONFIG` (`src/application/types/config.ts`) — see [Configuration](#configuration).
 - `EventType` enum and `JobEvent` (`src/domain/types/queue.ts`) — events broadcast via `EventsManager` on push/pull/complete/fail/pause/resume/etc.
@@ -151,14 +159,19 @@ and calls a stateless operation, or owns one cohesive orchestration concern.
 Context contracts are isolated in `application/types/`, so operation modules do
 not close over the concrete manager.
 
-**ACK with lock & recovery paths (`queue-manager/ack.ts`,
+**ACK/FAIL with lock & recovery paths (`queue-manager/ack.ts`,
 `queue-manager/delivery.ts`):** If a token is supplied and `verifyLock` fails,
 the manager checks `isExpiredButOwned` (#101 grace) and
-`throwIfOwnershipConflict`. It then handles three recovery cases against
-`jobIndex`: still `processing` → proceed to `ackJob`; requeued to `queue` and
-not in `timedOutJobs` → `completeStallRetriedJob` to prevent duplicate execution
-(Issue #33); in `timedOutJobs` → discard so the retry wins. A "not found" error
-from `ackJob` triggers the same stall-retry recovery.
+`throwIfOwnershipConflict`. Timeout failure claims record the exact
+`{ jobId, startedAt, token }` while holding the processing lock. A later ACK or
+FAIL for that retired generation becomes the explicit successful no-op
+`{ applied: false, reason: 'already-finalized' }`; a current retry token still
+applies and a wrong or missing token still fails. Batch ACKs report exact
+`ignoredIndices` (plus diagnostic `ignoredIds`), so duplicate IDs remain
+positionally unambiguous. A requeued non-timeout stall generation can still use
+`completeStallRetriedJob` to prevent duplicate execution (Issue #33). The
+retired-generation check is repeated after the processing claim to close the
+validation-to-claim race.
 
 **Dependency flush (`queue-manager/dependency-runtime.ts`):** On job completion,
 IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces
@@ -200,8 +213,9 @@ newer `startedAt`, so a stale token is rejected). See
 
 ## Edge Cases & Failure Modes
 
-- **Memory bounds / eviction.** `completedJobs`, `completedJobsData`, and
-  `timedOutJobs` use `BoundedSet`/`BoundedMap` sized at
+- **Memory bounds / eviction.** `completedJobs`, `completedJobsData`,
+  `timedOutJobs`, `retiredTimeoutLeaseTokens`, and
+  `retiredCronLeaseTokens` use `BoundedSet`/`BoundedMap` sized at
   `maxCompletedJobs` (50k); `BoundedSet` evicts a **10% batch** when full.
   `depCompletions` instead holds exactly that many recent bare IDs plus proofs
   pinned by live reverse dependency edges. ACK prunes only unpinned SQLite
@@ -213,8 +227,12 @@ newer `startedAt`, so a stale token is rejected). See
   `completedJobsData` entries.
 - **Stale-token / duplicate execution.** Issue #33 (lock removed but job still
   present), #75 (lock expired + requeued), and #101 (expired-but-owned grace)
-  are handled in `queue-manager/ack.ts` and `delivery.ts`. Jobs in
-  `timedOutJobs` are never completed by a late ACK so the retry proceeds.
+  are handled in `queue-manager/ack.ts` and `delivery.ts`. Exact retired
+  timeout generations reject neither the transport nor the Worker loop: their
+  late ACK/FAIL receives authoritative ignored evidence, while the retry
+  proceeds and emits no false local terminal event.
+  Deleted `cron:` generations accept repeat delivery of only their own retired
+  lease outcome; the marker is cleared before a custom ID is admitted again.
 - **`removeOnComplete`.** Completed jobs with `removeOnComplete` are dropped
   from normal indexes; their bare ID is kept as recent evidence, or pinned
   while a waiting parent owns it. Recovery reconstructs ownership before
@@ -248,16 +266,16 @@ newer `startedAt`, so a stale token is rejected). See
 | `maxJobLogs` | `10_000` | Size of `jobLogs` LRU |
 | `maxCustomIds` | `50_000` | Size of `customIdMap` and `perQueueMetrics` LRU |
 | `maxWaitingDeps` | `10_000` | Compatibility setting; currently not enforced as an admission or eviction bound |
+| `maxQueueEvents` | `10_000` | Retained lifecycle journal entries per queue, in memory or SQLite |
+| `maxMetricDataPoints` | `20_160` | Retained one-minute buckets per queue and terminal state; cumulative totals are not pruned |
 | `cleanupIntervalMs` | `10_000` | Background cleanup cadence |
-| `jobTimeoutCheckMs` | `5_000` | Timeout sweep cadence |
+| `jobTimeoutCheckMs` | `5_000` | Retry delay after a timeout transition error |
 | `dependencyCheckMs` | `30_000` | Safety fallback (event-driven flush is the fast path) |
 | `stallCheckMs` | `5_000` | Stall-detection cadence |
 | `dlqMaintenanceMs` | `60_000` | DLQ auto-retry / expiry cadence |
 | `validateWebhookUrls` | _(unset)_ | Passed to `WebhookManager` |
 
 `SHARD_COUNT` is not configurable at runtime — it is derived once from `navigator.hardwareConcurrency` (power of two, capped at 64) at module load (`hash.ts:28-44`). Server-level env vars (`BUNQUEUE_DATA_PATH`, etc.) are resolved by the entrypoint and surface here as `config.dataPath`; see [Configuration & Entrypoint](./configuration.md).
-
-> Note: the CLAUDE.md memory-bounds table lists `jobResults` at 5,000; the code default (`DEFAULT_CONFIG.maxJobResults`) is `10_000`.
 
 ## Related Docs
 

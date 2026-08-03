@@ -24,6 +24,9 @@ impl Job {
     }
 
     pub fn name(&self) -> String {
+        if let Some(name) = get(&self.raw, "name").and_then(Value::as_str) {
+            return name.to_owned();
+        }
         get(&self.raw, "data")
             .and_then(Value::as_map)
             .and_then(|data| {
@@ -35,16 +38,25 @@ impl Job {
             .to_owned()
     }
 
-    /// User payload with the reserved wire `name` field removed.
+    /// Modern user payload, or a pre-name-field envelope with its name removed.
     pub fn data(&self) -> Value {
+        if get(&self.raw, "name").and_then(Value::as_str).is_some() {
+            return get(&self.raw, "data").cloned().unwrap_or(Value::Nil);
+        }
         match get(&self.raw, "data") {
-            Some(Value::Map(entries)) => Value::Map(
-                entries
-                    .iter()
-                    .filter(|(key, _)| key.as_str() != Some("name"))
-                    .cloned()
-                    .collect(),
-            ),
+            Some(Value::Map(entries))
+                if entries.iter().any(|(key, value)| {
+                    key.as_str() == Some("name") && value.as_str().is_some()
+                }) =>
+            {
+                Value::Map(
+                    entries
+                        .iter()
+                        .filter(|(key, _)| key.as_str() != Some("name"))
+                        .cloned()
+                        .collect(),
+                )
+            }
             Some(value) => value.clone(),
             None => Value::Nil,
         }

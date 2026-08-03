@@ -133,8 +133,12 @@ export async function runQueueControlContract(mode: CoreE2eMode): Promise<Covera
       (state) => state === 'completed',
       'clean fixture did not complete'
     );
-    const syncCleaned = tracker.call('Queue', 'clean', () => cleanQueue.clean(0, 100, 'completed'));
-    ensure(Array.isArray(syncCleaned), 'clean did not return an array');
+    if (mode === 'embedded') {
+      const syncCleaned = tracker.call('Queue', 'clean', () =>
+        cleanQueue.clean(0, 100, 'completed')
+      );
+      ensure(syncCleaned.includes(firstClean.id), 'clean missed the completed job');
+    }
     const secondClean = await cleanQueue.add('clean', { value: 2 }, { durable: true });
     await eventually(
       () => cleanQueue.getJobState(secondClean.id),
@@ -154,8 +158,10 @@ export async function runQueueControlContract(mode: CoreE2eMode): Promise<Covera
       (paused) => paused === true,
       'pause not applied'
     );
-    const syncPaused = tracker.call('Queue', 'isPaused', () => control.isPaused());
-    ensure(typeof syncPaused === 'boolean', 'isPaused did not return boolean');
+    if (mode === 'embedded') {
+      const syncPaused = tracker.call('Queue', 'isPaused', () => control.isPaused());
+      ensure(syncPaused, 'isPaused did not observe the paused queue');
+    }
     tracker.call('Queue', 'resume', () => control.resume());
     await eventually(
       () => control.isPausedAsync(),

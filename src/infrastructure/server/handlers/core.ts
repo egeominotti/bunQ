@@ -1,12 +1,9 @@
-/**
- * Core Command Handlers
- * Push, Pull, Ack, Fail operations
- */
+/** Core command handlers for push, pull, acknowledgement, and failure. */
 
 import type { Command } from '../../../domain/types/command';
 import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
-import { jobId } from '../../../domain/types/job';
+import { jobId, normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 import {
   validateQueueName,
@@ -58,8 +55,10 @@ export async function handlePush(
   }
 
   try {
+    const payload = normalizeLegacyJobPayload(cmd);
     const job = await ctx.queueManager.push(cmd.queue, {
-      data: cmd.data,
+      name: payload.name,
+      data: payload.data,
       priority: cmd.priority,
       delay: cmd.delay,
       maxAttempts: cmd.maxAttempts,
@@ -113,7 +112,11 @@ export async function handlePushBatch(
   const jobsError = validatePushBatchJobs(cmd.jobs, ctx);
   if (jobsError) return resp.error(jobsError, reqId);
 
-  const ids = await ctx.queueManager.pushBatch(cmd.queue, cmd.jobs);
+  const inputs = cmd.jobs.map((job) => {
+    const payload = normalizeLegacyJobPayload(job);
+    return { ...job, name: payload.name, data: payload.data };
+  });
+  const ids = await ctx.queueManager.pushBatch(cmd.queue, inputs);
   return resp.batch(ids, reqId);
 }
 
@@ -209,10 +212,11 @@ export async function handleAck(
 ): Promise<Response> {
   try {
     const jid = jobId(cmd.id);
-    await ctx.queueManager.ack(jid, cmd.result, cmd.token);
-    // Unregister job from client tracking
-    ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
-    return resp.ok(undefined, reqId);
+    const outcome = await ctx.queueManager.ack(jid, cmd.result, cmd.token, {
+      removeOnComplete: cmd.removeOnComplete,
+    });
+    if (!outcome) ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
+    return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
     return resp.error(err instanceof Error ? err.message : String(err), reqId);
   }
@@ -224,10 +228,20 @@ export async function handleAckBatch(
   ctx: HandlerContext,
   reqId?: string
 ): Promise<Response> {
+  if (cmd.tokens && cmd.tokens.length !== cmd.ids.length) {
+    return resp.error('ACKB tokens length must match ids length', reqId);
+  }
+  if (cmd.results && cmd.results.length !== cmd.ids.length) {
+    return resp.error('ACKB results length must match ids length', reqId);
+  }
+  if (cmd.removeOnCompletes && cmd.removeOnCompletes.length !== cmd.ids.length) {
+    return resp.error('ACKB removeOnCompletes length must match ids length', reqId);
+  }
   const ids = cmd.ids.map((id) => jobId(id));
 
   try {
     // If results provided, use ackBatchWithResults
+    let outcome;
     if (cmd.results?.length === cmd.ids.length) {
       const results = cmd.results;
       const tokens = cmd.tokens;
@@ -235,17 +249,18 @@ export async function handleAckBatch(
         id,
         result: results[i],
         token: tokens?.[i],
+        removeOnComplete: cmd.removeOnCompletes?.[i] === true ? true : undefined,
       }));
-      await ctx.queueManager.ackBatchWithResults(items);
+      outcome = await ctx.queueManager.ackBatchWithResults(items);
     } else {
       // Use optimized batch ack without results
-      await ctx.queueManager.ackBatch(ids, cmd.tokens);
+      outcome = await ctx.queueManager.ackBatch(ids, cmd.tokens);
     }
-    // Unregister all jobs from client tracking
+    const ignoredIds = new Set(outcome?.ignoredIds ?? []);
     for (const id of ids) {
-      ctx.queueManager.unregisterClientJob(ctx.clientId, id);
+      if (!ignoredIds.has(id)) ctx.queueManager.unregisterClientJob(ctx.clientId, id);
     }
-    return resp.ok(undefined, reqId);
+    return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
     return resp.error(err instanceof Error ? err.message : String(err), reqId);
   }
@@ -265,16 +280,16 @@ export async function handleFail(
     const stack = Array.isArray(cmd.stack)
       ? cmd.stack.filter((line): line is string => typeof line === 'string').slice(0, 100)
       : undefined;
-    await ctx.queueManager.fail(
+    const outcome = await ctx.queueManager.fail(
       jid,
       cmd.error,
       cmd.token,
       cmd.unrecoverable,
-      stack && stack.length > 0 ? stack : undefined
+      stack && stack.length > 0 ? stack : undefined,
+      cmd.removeOnFail
     );
-    // Unregister job from client tracking
-    ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
-    return resp.ok(undefined, reqId);
+    if (!outcome) ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
+    return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
     return resp.error(err instanceof Error ? err.message : String(err), reqId);
   }

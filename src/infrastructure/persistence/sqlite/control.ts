@@ -1,7 +1,7 @@
 import type { CronJob } from '../../../domain/types/cron';
 import type { DlqConfig } from '../../../domain/types/dlq';
 import type { StallConfig } from '../../../domain/types/stall';
-import { pack, unpack } from '../sqliteSerializer';
+import { decodeStoredNamedPayload, pack, unpack } from '../sqliteSerializer';
 import type { DbCron, DbQueueState } from '../statements';
 import { SqliteQueries } from './queries';
 
@@ -25,6 +25,7 @@ export abstract class SqliteControl extends SqliteQueries {
         .run(
           cron.name,
           cron.queue,
+          cron.jobName,
           pack(cron.data),
           cron.schedule,
           cron.repeatEvery,
@@ -45,28 +46,36 @@ export abstract class SqliteControl extends SqliteQueries {
 
   loadCronJobs(): CronJob[] {
     const rows = this.db.query<DbCron, []>('SELECT * FROM cron_jobs').all();
-    return rows.map((row) => ({
-      name: row.name,
-      queue: row.queue,
-      data: unpack(row.data, {}, `loadCronJobs:${row.name}`),
-      schedule: row.schedule,
-      repeatEvery: row.repeat_every,
-      priority: row.priority,
-      timezone: row.timezone,
-      nextRun: row.next_run,
-      executions: row.executions,
-      maxLimit: row.max_limit,
-      uniqueKey: row.unique_key ?? null,
-      dedup: row.dedup
-        ? (unpack(row.dedup, null, `loadCronDedup:${row.name}`) as CronJob['dedup'])
-        : null,
-      skipMissedOnRestart: row.skip_missed_on_restart === 1,
-      skipIfNoWorker: row.skip_if_no_worker === 1,
-      preventOverlap: row.prevent_overlap === 1,
-      jobOptions: row.job_options
-        ? (unpack(row.job_options, null, `loadCronJobOptions:${row.name}`) as CronJob['jobOptions'])
-        : null,
-    }));
+    return rows.map((row) => {
+      const payload = decodeStoredNamedPayload(row.job_name, row.data, `loadCronJobs:${row.name}`);
+      return {
+        name: row.name,
+        queue: row.queue,
+        jobName: payload.name,
+        data: payload.data,
+        schedule: row.schedule,
+        repeatEvery: row.repeat_every,
+        priority: row.priority,
+        timezone: row.timezone,
+        nextRun: row.next_run,
+        executions: row.executions,
+        maxLimit: row.max_limit,
+        uniqueKey: row.unique_key ?? null,
+        dedup: row.dedup
+          ? (unpack(row.dedup, null, `loadCronDedup:${row.name}`) as CronJob['dedup'])
+          : null,
+        skipMissedOnRestart: row.skip_missed_on_restart === 1,
+        skipIfNoWorker: row.skip_if_no_worker === 1,
+        preventOverlap: row.prevent_overlap === 1,
+        jobOptions: row.job_options
+          ? (unpack(
+              row.job_options,
+              null,
+              `loadCronJobOptions:${row.name}`
+            ) as CronJob['jobOptions'])
+          : null,
+      };
+    });
   }
 
   deleteCron(name: string): void {

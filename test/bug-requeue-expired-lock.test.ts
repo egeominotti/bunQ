@@ -33,12 +33,6 @@ describe('requeueExpiredJob should update shard counters and notify', () => {
     // Run expired locks check (this triggers requeueExpiredJob)
     // We import and call it through the internal background task mechanism
     const { checkExpiredLocks } = await import('../src/application/lockManager');
-    const { ContextFactory } = await import('../src/application/contextFactory');
-
-    // Access internal context via the queue manager's exposed methods
-    // The lock check is what the background task does
-    const shards = qm.getShards();
-    const jobIndex = qm.getJobIndex();
 
     // Before lock check, job should still be in processing state
     const stateBefore = await qm.getJobState(job!.id);
@@ -89,19 +83,16 @@ describe('requeueExpiredJob should update shard counters and notify', () => {
  * Helper to get internal lock context from QueueManager.
  * This accesses private fields via runtime for testing purposes.
  */
-function getInternalLockContext(qm: QueueManager): any {
-  // Access the contextFactory's getLockContext via the QueueManager's internal state
-  const qmAny = qm as any;
-  return {
-    shards: qmAny.shards,
-    shardLocks: qmAny.shardLocks,
-    processingShards: qmAny.processingShards,
-    processingLocks: qmAny.processingLocks,
-    jobIndex: qmAny.jobIndex,
-    jobLocks: qmAny.jobLocks,
-    clientJobs: qmAny.clientJobs,
-    eventsManager: qmAny.eventsManager,
-    stalledCandidates: qmAny.stalledCandidates,
-    storage: qmAny.storage,
-  };
+function getInternalLockContext(
+  qm: QueueManager
+): Parameters<typeof import('../src/application/lockManager').checkExpiredLocks>[0] {
+  return (
+    qm as unknown as {
+      contextFactory: {
+        getLockContext(): Parameters<
+          typeof import('../src/application/lockManager').checkExpiredLocks
+        >[0];
+      };
+    }
+  ).contextFactory.getLockContext();
 }

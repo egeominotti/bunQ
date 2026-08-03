@@ -1,6 +1,6 @@
 # Client SDK: Queue
 
-> **Category:** Client SDK · **Source:** `src/client/queue/queue.ts`, `src/client/queue/runtime/`, `src/client/queue/types/`, `src/client/queue/operations/`, `src/client/queue/job-proxy/`, `src/client/queue/dlq.ts`, `src/client/queue/addBatcher.ts`, `src/client/events.ts`, `src/client/jobConversion.ts`, `src/client/manager.ts`, `src/client/queueGroup.ts`
+> **Category:** Client SDK · **Source:** `src/client/queue/queue.ts`, `src/client/queue/runtime/`, `src/client/queue/types/`, `src/client/queue/operations/`, `src/client/queue/job-proxy/`, `src/client/queue/dlq.ts`, `src/client/queue/addBatcher.ts`, `src/client/events.ts`, `src/client/queue-events/`, `src/client/types/events.ts`, `src/client/jobConversion.ts`, `src/client/manager.ts`, `src/client/queueGroup.ts`
 
 ## Purpose
 
@@ -13,9 +13,10 @@ Owns:
 - The stable `Queue<T>` façade and inherited capability chain under `queue/runtime/`.
 - Constructor/state wiring in `runtime/state.ts`, transport cleanup in `runtime/connection.ts`, and per-concern contexts consumed by thin operation modules.
 - Job-add option translation: merging `defaultJobOptions`, injecting `__parentId`/`__parentQueue` into data, mapping public `JobOptions` to the embedded `manager.push` shape and to the compacted `PUSH`/`PUSHB` wire payload (`add.ts`).
-- Constructing the public `Job<T>` object via three builders — `createJobProxy` (TCP single add), `createSimpleJob` (embedded + TCP query results), and `toPublicJob`/`createPublicJob` (`jobProxy.ts`, `jobConversion.ts`).
+- Constructing the public `Job<T>` object via three builders — `createJobProxy` (TCP single add), `createSimpleJob` (embedded + TCP query results), and `toPublicJob`/`createPublicJob` (`jobProxy.ts`, `jobConversion.ts`). Conversion helpers receive grouped presentation metadata so name, data, result, failure, token, and serialization fields cannot drift between construction paths.
 - Auto-batching `add()` calls into `PUSHB` in TCP mode (`addBatcher.ts`).
-- `QueueEvents`, the read-only embedded event listener (`events.ts`).
+- `QueueEvents`, the read-only embedded/TCP lifecycle-event listener
+  (`events.ts`, `queue-events/tcpSubscription.ts`).
 - BullMQ-compatible error classes `UnrecoverableError` / `DelayedError` (`errors.ts`).
 
 Does NOT own:
@@ -126,9 +127,17 @@ the aggregate removed count.
 Connection: `disconnect()` (flushes + waits for the in-flight batcher, then
 closes) and `close()` (`queue/runtime/connection.ts`).
 
-Also exported: `QueueEvents<R, P>` (`events.ts:98`), `UnrecoverableError`, `DelayedError` (`errors.ts`).
+Also exported: `QueueEvents<R, P>`, `QueueEventsOptions`, `QueueMetrics`,
+`QueueMetricsMeta`, `QueueMetricType`,
+`UnrecoverableError`, and `DelayedError`.
 
-TCP commands emitted by this module (exact names): `PUSH`, `PUSHB`, `GetJob`, `GetState`, `GetChildrenValues`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `Count`, `Pause`, `Resume`, `Drain`, `Obliterate`, `IsPaused`, `Ping`, `Cancel`, `MoveToWait`, `MoveToWaitingChildren`, `RetryDlq`, `RetryCompleted`, `GetDlqStats`, `Clean`, `Promote`, `PromoteJobs`, `Progress`, `GetLogs`, `AddLog`, `ClearLogs`, `Update`, `ChangeDelay`, `ChangePriority`, `ExtendLock`, `ACK`, `FAIL`, `MoveToDelayed`, `WaitJob`, `SetStallConfig`, `GetStallConfig`, `GetQueueLimits`, `GetDeduplicationJobId`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `ListWorkers`, `Metrics`, `GetResult`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Discard`.
+`new QueueEvents(name, options?)` preserves the historical no-options embedded
+default. Pass `{ embedded: false, connection }` (or simply `{ connection }`) for
+broker events. TCP mode owns one dedicated authenticated subscription socket,
+re-subscribes after reconnect, filters by the prefixed queue key, and is ready
+only after the broker acknowledges `SubscribeEvents`.
+
+TCP commands emitted by this module (exact names): `PUSH`, `PUSHB`, `GetJob`, `GetState`, `GetChildrenValues`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `Count`, `Pause`, `Resume`, `Drain`, `Obliterate`, `IsPaused`, `Ping`, `Cancel`, `MoveToWait`, `MoveToWaitingChildren`, `RetryDlq`, `RetryCompleted`, `GetDlqStats`, `Clean`, `Promote`, `PromoteJobs`, `Progress`, `GetLogs`, `AddLog`, `ClearLogs`, `Update`, `ChangeDelay`, `ChangePriority`, `ExtendLock`, `ACK`, `FAIL`, `MoveToDelayed`, `WaitJob`, `SetStallConfig`, `GetStallConfig`, `GetQueueLimits`, `GetDeduplicationJobId`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `ListWorkers`, `Metrics`, `TrimEvents`, `GetResult`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Discard`, `SubscribeEvents`, `UnsubscribeEvents`.
 
 `QueueEvents` events emitted: `waiting`, `active`, `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`, `duplicated`, `retried`, `waiting-children`, `drained`, `paused`, `resumed`, `error` (`events.ts:150`).
 
@@ -145,6 +154,8 @@ by responsibility under `src/client/types/`:
   `client/types/connection.ts`.
 - `StallConfig`: `client/types/worker.ts`; DLQ types:
   `client/types/dlq.ts`; `FlowJobData`: `client/types/flow.ts`.
+- Queue metric response and state discriminator types: `client/types/metrics.ts`.
+- `QueueEventsOptions` and typed event payloads: `client/types/events.ts`.
 - Queue-internal contexts, reflection metadata, and runtime contracts:
   `client/queue/types/`.
 
@@ -161,13 +172,19 @@ four-connection case, otherwise creates a dedicated `TcpConnectionPool`. The
 per-call `opts`, injects `__parentId` / `__parentQueue` when a parent is set,
 and maps to `manager.push` in embedded mode. TCP uses `buildPushPayload` from
 `add/payload.ts`, throws on `!response.ok`, and builds a live job through the
-split proxy modules under `queue/job-proxy/`.
+split proxy modules under `queue/job-proxy/`. A `parent` option is authoritative:
+the broker locks both queue shards, persists the child and parent edge together,
+and moves the existing pending parent to `waiting-children` before the child is
+visible. A non-linkable parent rejects the add without publishing the child.
 
 **addBulk()** (`queue/operations/add/bulk.ts`): returns `[]` immediately for an
 empty input and merges defaults once per job. Embedded uses
 `manager.pushBatch`; TCP sends one `PUSHB`. A non-ok response throws so the
 batcher rejects every caller; an ok response with zero IDs is a legitimate
-empty result.
+empty result. Parent references are preflighted for the complete batch while
+all affected shards are locked, preventing an invalid later item from leaving
+an accepted prefix. Multiple children of one cross-queue parent are serialized
+under that parent's shard lock, so concurrent adds cannot overwrite an edge.
 
 **Job object construction.** `queue/job-proxy/tcp.ts` builds a TCP-backed job;
 `queue/job-proxy/simple.ts` builds the dual-mode form used by query results;
@@ -176,7 +193,15 @@ conversion lives in `client/jobConversion.ts`. Full DLQ entries use
 `queue/dlqJobMethods.ts` so broker-returned jobs keep live methods rather than
 detached placeholders.
 
-**getJob()** (`query.ts:85`): embedded uses full `toPublicJob` wiring when `ctx.updateJobData` is present (all callbacks route to the shared manager); the simple-job fallback reflects opts via `metaFromJob`. TCP sends `GetJob`, returns null on `!ok`, and copies `progress`, `processedOn` (from `startedAt`), `finishedOn` (from `completedAt`) only when numeric (`query.ts:160`, #104).
+**getJob()** (`query.ts`): embedded uses full `toPublicJob` wiring when
+`ctx.updateJobData` is present (all callbacks route to the shared manager); TCP
+sends `GetJob` and returns null on `!ok`. The single `metadataFromJob` reflection
+path now supplies `attemptsMade`, `attemptsStarted`, `stalledCounter`, progress,
+priority, `processedOn`, `finishedOn`, options, stacktrace, return value, and
+failure reason to both `getJob()` and `getJobs[Async]()`. The live properties,
+`toJSON()`, and `asJSON()` therefore describe the same broker generation in
+embedded and TCP mode instead of query proxies resetting lifecycle counters to
+zero.
 
 **getJobState() / mapState()** (`query.ts:169`): normalizes server/manager states — `processing → active`, `dlq → failed`, unknown → `unknown` (`query.ts:180`).
 
@@ -199,13 +224,30 @@ detached placeholders.
 - **Durable bypass**: `opts.durable` jobs skip the `AddBatcher` in
   `queue/runtime/queries.ts` and are sent as individual `PUSH` operations.
 - **Batcher overflow**: when `pending.length >= maxPending` (default `10000`), the oldest ~10% are spliced and rejected with `"Add buffer overflow - oldest entries dropped"` (`addBatcher.ts:69`). `stop()` rejects all remaining entries with `"AddBatcher stopped"`.
-- **Error propagation**: `add`/`addBulk` throw on `!response.ok`, ensuring the batcher rejects queued callers (e.g. auth failure) rather than resolving them with `undefined` jobs (`add.ts:168`, `add.ts:421`).
+- **Error propagation**: `add`/`addBulk` throw on `!response.ok`, ensuring the
+  batcher rejects queued callers (e.g. auth failure) rather than resolving them
+  with `undefined` jobs (`operations/add/single.ts:109-113`,
+  `operations/add/bulk.ts:130-133`).
 - **Synchronous TCP boundaries**: `getJobs`/`getWaiting`/… (sync) return `[]`, `count()` returns `0`, `getCountsPerPriority()` returns `{}`, and `isPaused()` returns `false` in TCP mode because their signatures cannot await a round trip. Use the corresponding `Async` variants for authoritative remote results. The same rule applies to synchronous DLQ reads and fire-and-forget mutation forms; use `getDlqAsync`, `getDlqStatsAsync`, `retryDlqAsync`, `retryDlqByFilterAsync`, `purgeDlqAsync`, and `retryCompletedAsync` when the result matters. Limit getters, worker discovery, dependency methods, deduplication methods, and `moveToWaitingChildren` are asynchronous and now query or mutate the selected broker runtime directly.
 - **Detached conversion helpers**: broker-returned `Job` instances always receive a complete live operation context. Low-level callers that invoke `createPublicJob` without a context receive only detached fallback behavior and must not treat that helper as a broker client.
 - **Idempotency**: `jobId`/`deduplication.id` make `add` idempotent (custom-id dedup, server-side, retention-window-bounded). `forward()` uses deterministic remote ids (`fwd:<queue>:<localId>`) so re-forwards don't duplicate (see [Store-and-Forward](./store-and-forward.md)).
+- **Metrics/event retention**: `getMetrics(type,start,end)` returns queue-scoped,
+  newest-first one-minute buckets over identical embedded/TCP paths.
+  `trimEvents(maxLength)` returns the exact number removed from that queue's
+  separate persistent event journal; repeated trims are idempotent.
 - **`retryJob` state machine** (embedded, `management.ts:40`): `failed` → `retryDlq` (throws if not in DLQ), `active` → `moveActiveToWait`, `waiting`/`prioritized`/`delayed` → no-op, anything else throws. TCP path issues `MoveToWait` and throws on `ok !== true`.
-- **`waitUntilFinished` TTL**: defaults to `30000ms`; rejects on timeout. The embedded short-circuit returns the persisted result if `job.completedAt` is already set (`jobProxy.ts:494`). The `jobMove.ts` variant additionally subscribes to a `QueueEvents` instance and races against an already-finished state check (`jobMove.ts:166`).
-- **`QueueEvents` is embedded-only**: it subscribes to the shared manager's event bus and filters by queue name; it has no TCP transport. Handler exceptions are caught and re-emitted as `error` (`events.ts:204`–`events.ts:220`).
+- **`waitUntilFinished` TTL**: defaults to `30000ms`; rejects on timeout. The
+  method subscribes before checking state so it cannot miss a completion race.
+  An already-completed TCP job is followed by an authoritative `GetResult`, and
+  a live completion resolves with the event's exact return value. Both paths
+  settle and remove listeners exactly once.
+- **`QueueEvents` transport**: embedded mode subscribes to the shared manager;
+  TCP mode uses a dedicated socket so unsolicited event frames cannot consume a
+  pooled command response. The subscription authenticates before subscribing,
+  re-subscribes after a broker reconnect, and stops delivery on `close()`. A
+  transport or handler error is emitted only when an `error` listener exists,
+  avoiding Node's unhandled `error` behavior. Progress payloads expose the
+  public progress value rather than the manager's internal event envelope.
 - **`prefixKey` isolation invariant**: every context created by
   `queue/runtime/state.ts` forwards `queueKey = prefixKey + name`, so two queues
   with the same logical name but different prefixes never collide; a consuming

@@ -7,7 +7,7 @@ import { decodeMessagePack, encodeMessagePack } from '../src/shared/msgpack';
 
 const UNICODE_TEXT = [
   ' ',
-  'coda-😀',
+  'queue-😀',
   '日本語',
   'e\u0301',
   '\u0000',
@@ -58,7 +58,7 @@ describe('CLI pure boundaries and generated inputs', () => {
         const queue = `q-${suffix}`;
         const normalized = JSON.parse(JSON.stringify(data));
         const command = await buildCommand('push', [queue, JSON.stringify(data)]);
-        expect(command).toEqual({ cmd: 'PUSH', queue, data: normalized });
+        expect(command).toEqual({ cmd: 'PUSH', queue, name: 'default', data: normalized });
         expect(decodeMessagePack(encodeMessagePack(command))).toEqual(command);
       }),
       { numRuns: 2_000 }
@@ -84,6 +84,7 @@ describe('CLI pure boundaries and generated inputs', () => {
       expect(await buildCommand('push', args)).toEqual({
         cmd: 'PUSH',
         queue: 'q',
+        name: 'default',
         data: -5e-324,
         priority: 5,
       });
@@ -91,6 +92,7 @@ describe('CLI pure boundaries and generated inputs', () => {
     expect(await buildCommand('push', ['--priority', '-5', 'q', '-1'])).toEqual({
       cmd: 'PUSH',
       queue: 'q',
+      name: 'default',
       data: -1,
       priority: -5,
     });

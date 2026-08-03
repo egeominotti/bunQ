@@ -76,7 +76,7 @@ export async function extractJobs(
  * Extract jobs with results from processing shards
  */
 export async function extractJobsWithResults<T>(
-  byProcShard: Map<number, Array<{ id: JobId; result: T }>>,
+  byProcShard: Map<number, Array<{ id: JobId; result: T; removeOnComplete?: boolean }>>,
   ctx: BatchContext
 ): Promise<Array<ExtractedJob<T>>> {
   const extractedJobs: Array<ExtractedJob<T>> = [];
@@ -88,7 +88,12 @@ export async function extractJobsWithResults<T>(
           const job = ctx.processingShards[procIdx].get(item.id);
           if (job) {
             ctx.processingShards[procIdx].delete(item.id);
-            extractedJobs.push({ id: item.id, job, result: item.result });
+            extractedJobs.push({
+              id: item.id,
+              job,
+              result: item.result,
+              removeOnComplete: item.removeOnComplete,
+            });
           }
         }
       });
@@ -181,7 +186,7 @@ export function finalizeBatchAck<T>(
       ctx.customIdMap.delete(job.customId);
     }
 
-    if (!job.removeOnComplete) {
+    if (!(job.removeOnComplete || extractedJobs[i].removeOnComplete === true)) {
       // Mark completion timestamp + timeline
       job.completedAt = now;
       if (job.timeline.length < MAX_TIMELINE_ENTRIES) {

@@ -64,43 +64,46 @@ describe('BullMQ v5 moveToWait - Active to Waiting', () => {
     shutdownManager();
   });
 
-  test(
-    'moveToWait from active state should re-queue the job',
-    async () => {
-      queue = new Queue('move-active-wait', { embedded: true });
-      queue.obliterate();
+  test('moveToWait from active state should re-queue the job', async () => {
+    queue = new Queue('move-active-wait', { embedded: true });
+    queue.obliterate();
 
-      const job = await queue.add('test', { value: 100 });
+    const job = await queue.add('test', { value: 100 });
+    let activeToken: string | undefined;
+    let markActive = (): void => undefined;
+    const active = new Promise<void>((resolve) => {
+      markActive = resolve;
+    });
+    let releaseProcessor = (): void => undefined;
+    const processorGate = new Promise<void>((resolve) => {
+      releaseProcessor = resolve;
+    });
 
-      worker = new Worker(
-        'move-active-wait',
-        async () => {
-          // Block the worker so the job stays active
-          await new Promise((r) => setTimeout(r, 60000));
-          return null;
-        },
-        { embedded: true }
-      );
+    worker = new Worker(
+      'move-active-wait',
+      async (activeJob) => {
+        activeToken = activeJob.token;
+        markActive();
+        await processorGate;
+        return null;
+      },
+      { embedded: true }
+    );
 
-      // Poll until the job becomes active
-      for (let i = 0; i < 100; i++) {
-        const state = await queue.getJobState(job.id);
-        if (state === 'active') break;
-        await Bun.sleep(100);
-      }
+    await active;
 
-      const stateBefore = await queue.getJobState(job.id);
-      expect(stateBefore).toBe('active');
+    const stateBefore = await queue.getJobState(job.id);
+    expect(stateBefore).toBe('active');
+    expect(activeToken).toBeString();
 
-      // Move active job back to wait via queue method
-      const result = await queue.moveJobToWait(job.id);
-      expect(result).toBe(true);
+    // A locked active transition requires the matching lease token.
+    const result = await queue.moveJobToWait(job.id, activeToken);
+    expect(result).toBe(true);
 
-      const stateAfter = await queue.getJobState(job.id);
-      expect(stateAfter).toBe('waiting');
-    },
-    15000
-  );
+    const stateAfter = await queue.getJobState(job.id);
+    expect(stateAfter).toBe('waiting');
+    releaseProcessor();
+  }, 15000);
 });
 
 describe('BullMQ v5 moveToDelayed - Waiting to Delayed', () => {
@@ -178,42 +181,45 @@ describe('BullMQ v5 moveToWaitingChildren (embedded)', () => {
     shutdownManager();
   });
 
-  test(
-    'moveToWaitingChildren should move active job to waiting-children',
-    async () => {
-      queue = new Queue('move-wc', { embedded: true });
-      queue.obliterate();
+  test('moveToWaitingChildren should move active job to waiting-children', async () => {
+    queue = new Queue('move-wc', { embedded: true });
+    queue.obliterate();
 
-      const job = await queue.add('parent', { value: 1 });
+    const job = await queue.add('parent', { value: 1 });
+    let activeToken: string | undefined;
+    let markActive = (): void => undefined;
+    const active = new Promise<void>((resolve) => {
+      markActive = resolve;
+    });
+    let releaseProcessor = (): void => undefined;
+    const processorGate = new Promise<void>((resolve) => {
+      releaseProcessor = resolve;
+    });
 
-      worker = new Worker(
-        'move-wc',
-        async () => {
-          // Block the worker so the job stays active
-          await new Promise((r) => setTimeout(r, 60000));
-          return null;
-        },
-        { embedded: true }
-      );
+    worker = new Worker(
+      'move-wc',
+      async (activeJob) => {
+        activeToken = activeJob.token;
+        markActive();
+        await processorGate;
+        return null;
+      },
+      { embedded: true }
+    );
 
-      // Poll until the job becomes active
-      for (let i = 0; i < 100; i++) {
-        const state = await queue.getJobState(job.id);
-        if (state === 'active') break;
-        await Bun.sleep(100);
-      }
+    await active;
 
-      const stateBefore = await queue.getJobState(job.id);
-      expect(stateBefore).toBe('active');
+    const stateBefore = await queue.getJobState(job.id);
+    expect(stateBefore).toBe('active');
+    expect(activeToken).toBeString();
 
-      // Move active job to waiting-children via queue method
-      const moveResult = await queue.moveJobToWaitingChildren(job.id);
-      expect(moveResult).toBe(true);
+    // A locked active transition requires the matching lease token.
+    const moveResult = await queue.moveJobToWaitingChildren(job.id, activeToken);
+    expect(moveResult).toBe(true);
 
-      // Verify state is now waiting-children
-      const state = await queue.getJobState(job.id);
-      expect(state).toBe('waiting-children');
-    },
-    15000
-  );
+    // Verify state is now waiting-children
+    const state = await queue.getJobState(job.id);
+    expect(state).toBe('waiting-children');
+    releaseProcessor();
+  }, 15000);
 });

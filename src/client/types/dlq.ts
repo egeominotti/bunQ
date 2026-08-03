@@ -39,6 +39,7 @@ export interface DlqEntry<T = unknown> {
 export interface DlqStats {
   total: number;
   byReason: Record<FailureReason, number>;
+  byQueue: Record<string, number>;
   pendingRetry: number;
   expired: number;
   oldestEntry: number | null;

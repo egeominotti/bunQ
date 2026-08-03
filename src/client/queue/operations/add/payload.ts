@@ -33,13 +33,15 @@ export function buildRepeatOptions(repeat: NonNullable<JobOptions['repeat']>) {
 
 export function buildPushPayload(
   queue: string,
-  jobData: Record<string, unknown>,
+  name: string,
+  data: unknown,
   options: ExtendedJobOptions
 ): Record<string, unknown> {
   return compact({
     cmd: 'PUSH',
     queue,
-    data: jobData,
+    name,
+    data,
     priority: options.priority,
     delay: options.delay,
     maxAttempts: options.attempts,
@@ -79,17 +81,13 @@ export function buildPushPayload(
   });
 }
 
-export function buildBulkData(
-  name: string,
-  data: unknown,
-  options: ExtendedJobOptions
-): Record<string, unknown> {
-  const jobData: Record<string, unknown> = { name, ...(data as object) };
-  if (options.parent) {
-    jobData.__parentId = options.parent.id;
-    jobData.__parentQueue = options.parent.queue;
-  }
-  return jobData;
+export function buildJobData(data: unknown, options: ExtendedJobOptions): unknown {
+  if (!options.parent) return data;
+  return {
+    ...(data as object),
+    __parentId: options.parent.id,
+    __parentQueue: options.parent.queue,
+  };
 }
 
 export function reflectionMeta(options: ExtendedJobOptions): {

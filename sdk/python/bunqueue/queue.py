@@ -51,8 +51,8 @@ class Queue(QueueQueryOps, QueueAdminOps):
         """Add a job; returns a Job stub carrying the assigned id."""
         payload = job_payload(name, data)
         opts = job_options(**options)
-        response = self.connection.call({"cmd": "PUSH", "queue": self.name, "data": payload, **opts})
-        return Job({"id": response.get("id"), "queue": self.name, "data": payload, **opts}, self.connection)
+        response = self.connection.call({"cmd": "PUSH", "queue": self.name, **payload, **opts})
+        return Job({"id": response.get("id"), "queue": self.name, **payload, **opts}, self.connection)
 
     def add_bulk(self, jobs: Sequence[Dict[str, Any]]) -> List[str]:
         """Add many jobs in one round-trip.
@@ -72,7 +72,7 @@ class Queue(QueueQueryOps, QueueAdminOps):
             # (idempotency/getJobByCustomId broken).
             if "jobId" in opts:
                 opts["customId"] = opts.pop("jobId")
-            inputs.append({"data": job_payload(name, data), **opts})
+            inputs.append({**job_payload(name, data), **opts})
         response = self.connection.call({"cmd": "PUSHB", "queue": self.name, "jobs": inputs})
         return [str(job_id) for job_id in response.get("ids", [])]
 
@@ -158,14 +158,24 @@ class Queue(QueueQueryOps, QueueAdminOps):
             _compact({"cmd": "ChangePriority", "id": job_id, "priority": priority, "lifo": lifo})
         )
 
-    def change_job_delay(self, job_id: str, delay_ms: int) -> None:
-        self.connection.call({"cmd": "ChangeDelay", "id": job_id, "delay": delay_ms})
+    def change_job_delay(
+        self, job_id: str, delay_ms: int, token: Optional[str] = None
+    ) -> None:
+        self.connection.call(
+            _compact({"cmd": "ChangeDelay", "id": job_id, "delay": delay_ms, "token": token})
+        )
 
-    def move_job_to_wait(self, job_id: str) -> None:
-        self.connection.call({"cmd": "MoveToWait", "id": job_id})
+    def move_job_to_wait(self, job_id: str, token: Optional[str] = None) -> None:
+        self.connection.call(_compact({"cmd": "MoveToWait", "id": job_id, "token": token}))
 
-    def move_job_to_delayed(self, job_id: str, delay_ms: int) -> None:
-        self.connection.call({"cmd": "MoveToDelayed", "id": job_id, "delay": delay_ms})
+    def move_job_to_delayed(
+        self, job_id: str, delay_ms: int, token: Optional[str] = None
+    ) -> None:
+        self.connection.call(
+            _compact(
+                {"cmd": "MoveToDelayed", "id": job_id, "delay": delay_ms, "token": token}
+            )
+        )
 
     def extend_job_lock(self, job_id: str, token: str, duration_ms: int) -> None:
         self.connection.call(

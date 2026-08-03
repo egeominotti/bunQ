@@ -13,6 +13,7 @@ export interface JobCounts {
 
 export interface SerializedJob {
   id: string;
+  name: string;
   queue: string;
   data: unknown;
   priority: number;

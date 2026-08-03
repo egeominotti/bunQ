@@ -1,22 +1,17 @@
-import type { Job as InternalJob } from '../../../domain/types/job';
 import { sendHeartbeat } from '../workerHeartbeat';
 import { WorkerLifecycle } from './lifecycle';
+import type { PulledJob, WorkerDelivery } from './state';
 
 export abstract class WorkerBuffer<T = unknown, R = unknown> extends WorkerLifecycle<T, R> {
-  protected registerPulledJobs(items: Array<{ job: InternalJob; token: string | null }>): void {
-    for (const pulledItem of items) {
-      const jobIdStr = String(pulledItem.job.id);
-      this.pulledJobIds.add(jobIdStr);
-      if (this.opts.useLocks && pulledItem.token) {
-        this.jobTokens.set(jobIdStr, pulledItem.token);
-      }
-    }
+  protected registerPulledJobs(items: PulledJob[]): WorkerDelivery[] {
+    const deliveries = items.map((item) => this.trackDelivery(item));
     if (this.opts.useLocks && items.length > 0 && this.tcpPool && this.tcpPool.getPoolSize() > 1) {
       void sendHeartbeat(this.getHeartbeatDeps());
     }
+    return deliveries;
   }
 
-  protected getBufferedJob(): { job: InternalJob; token: string | null } | null {
+  protected getBufferedJob(): WorkerDelivery | null {
     if (this.pendingJobsHead >= this.pendingJobs.length) return null;
     const item = this.pendingJobs[this.pendingJobsHead++];
     if (this.pendingJobsHead > 500 && this.pendingJobsHead >= this.pendingJobs.length / 2) {
@@ -26,7 +21,7 @@ export abstract class WorkerBuffer<T = unknown, R = unknown> extends WorkerLifec
     return item;
   }
 
-  protected requeueItem(item: { job: InternalJob; token: string | null }): void {
+  protected requeueItem(item: WorkerDelivery): void {
     if (this.pendingJobsHead > 0) {
       this.pendingJobs[--this.pendingJobsHead] = item;
     } else {
@@ -34,7 +29,7 @@ export abstract class WorkerBuffer<T = unknown, R = unknown> extends WorkerLifec
     }
   }
 
-  protected getNextEligibleJob(): { job: InternalJob; token: string | null } | null {
+  protected getNextEligibleJob(): WorkerDelivery | null {
     if (this.pendingJobsHead >= this.pendingJobs.length) return null;
     if (!this.groupLimiter) return this.getBufferedJob();
 

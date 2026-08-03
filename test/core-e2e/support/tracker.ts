@@ -2,7 +2,7 @@
 export type CoreSurface = string;
 
 export type CoverageMode = 'embedded' | 'tcp';
-export type CoverageOperation = 'async-success' | 'sync-success' | 'expected-rejection';
+export type CoverageOperation = 'async-success' | 'sync-success';
 
 export interface CoverageRecord {
   contract: string;
@@ -91,27 +91,6 @@ export class CoverageTracker {
     const result = operation();
     this.record(surface, method, 'sync-success', startedAt);
     return result;
-  }
-
-  async rejects(
-    surface: CoreSurface,
-    method: string,
-    operation: () => unknown | Promise<unknown>,
-    expected: RegExp
-  ): Promise<void> {
-    const startedAt = performance.now();
-    let failure: unknown;
-    try {
-      await operation();
-    } catch (error) {
-      failure = error;
-    }
-    ensure(failure instanceof Error, `${surface}.${method} did not reject`);
-    ensure(
-      expected.test(failure.message),
-      `${surface}.${method}: unexpected error ${failure.message}`
-    );
-    this.record(surface, method, 'expected-rejection', startedAt);
   }
 
   merge(other: CoverageTracker): void {

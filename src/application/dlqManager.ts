@@ -166,7 +166,10 @@ export function getDlqConfig(queue: string, ctx: DlqContext): DlqConfig {
 /** Extended context for retryCompleted */
 export interface RetryCompletedContext extends DlqContext {
   completedJobs: { has(id: JobId): boolean; delete(id: JobId): boolean } & Iterable<JobId>;
-  completedJobsData: { get(id: JobId): Job | undefined };
+  completedJobsData: {
+    get(id: JobId): Job | undefined;
+    delete(id: JobId): boolean;
+  };
   jobResults: { delete(id: JobId): boolean };
 }
 
@@ -206,24 +209,40 @@ export function retryCompletedJobs(
 
 /** Requeue a single completed job */
 function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
-  setDlqRetryState(job, null);
-  job.attempts = 0;
-  job.startedAt = null;
-  job.completedAt = null;
-  job.runAt = Date.now();
-  job.progress = 0;
-  if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-    job.timeline.push({ state: 'waiting', timestamp: job.runAt });
+  const now = Date.now();
+  const timeline = [...job.timeline];
+  if (timeline.length < MAX_TIMELINE_ENTRIES) {
+    timeline.push({ state: 'waiting', timestamp: now });
   }
+  const requeued: Job = {
+    ...job,
+    attempts: 0,
+    startedAt: null,
+    completedAt: null,
+    runAt: now,
+    progress: 0,
+    progressMessage: null,
+    lastHeartbeat: now,
+    timeline,
+  };
+  setDlqRetryState(requeued, null);
 
-  const idx = shardIndex(job.queue);
+  // Commit the durable transition before publishing the new in-memory state.
+  // A SQLite failure therefore leaves the completed generation authoritative.
+  ctx.storage?.requeueCompletedJob(requeued);
+
+  const idx = shardIndex(requeued.queue);
   const shard = ctx.shards[idx];
-  shard.getQueue(job.queue).push(job);
-  shard.incrementQueued(job.id, false, job.createdAt, job.queue, job.runAt);
-  ctx.jobIndex.set(job.id, { type: 'queue', shardIdx: idx, queueName: job.queue });
-  ctx.completedJobs.delete(job.id);
-  ctx.jobResults.delete(job.id);
-  ctx.storage?.updateForRetry(job);
-  shard.notify(job.queue);
+  shard.getQueue(requeued.queue).push(requeued);
+  shard.incrementQueued(requeued.id, false, requeued.createdAt, requeued.queue, requeued.runAt);
+  ctx.jobIndex.set(requeued.id, {
+    type: 'queue',
+    shardIdx: idx,
+    queueName: requeued.queue,
+  });
+  ctx.completedJobs.delete(requeued.id);
+  ctx.completedJobsData.delete(requeued.id);
+  ctx.jobResults.delete(requeued.id);
+  shard.notify(requeued.queue);
   return 1;
 }

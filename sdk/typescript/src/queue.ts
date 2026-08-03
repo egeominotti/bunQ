@@ -83,10 +83,10 @@ export class Queue<T = unknown> {
     const response = await this.call({
       cmd: 'PUSH',
       queue: this.name,
-      data: payload,
+      ...payload,
       ...wireJobOptions(opts),
     });
-    return new Job<T>({ id: response.id, queue: this.name, data: payload }, this.connection);
+    return new Job<T>({ id: response.id, queue: this.name, ...payload }, this.connection);
   }
 
   /** Add many jobs in one round-trip; returns Job stubs. */
@@ -101,12 +101,16 @@ export class Queue<T = unknown> {
         opts.customId = opts.jobId;
         delete opts.jobId;
       }
-      return { data: jobPayload(entry.name, entry.data), ...opts };
+      return { ...jobPayload(entry.name, entry.data), ...opts };
     });
     const response = await this.call({ cmd: 'PUSHB', queue: this.name, jobs: inputs });
     const ids = (response.ids ?? []) as string[];
     return ids.map(
-      (id, i) => new Job<T>({ id, queue: this.name, data: inputs[i].data }, this.connection)
+      (id, i) =>
+        new Job<T>(
+          { id, queue: this.name, name: inputs[i].name, data: inputs[i].data },
+          this.connection
+        )
     );
   }
 

@@ -1,6 +1,6 @@
 # Job Queries & Queue Control
 
-> **Category:** Jobs · **Source:** `src/application/operations/queryOperations.ts`, `src/application/operations/jobManagement.ts`, `src/application/operations/jobMoveOperations.ts`, `src/application/operations/jobClaim.ts`, `src/application/operations/queueControl.ts`, `src/shared/pausedView.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/query/`, `src/application/operations/queryOperations.ts`, `src/application/operations/jobManagement.ts`, `src/application/operations/jobMoveOperations.ts`, `src/application/operations/jobClaim.ts`, `src/application/operations/queueControl.ts`, `src/shared/pausedView.ts`
 
 ## Purpose
 
@@ -10,9 +10,12 @@ This module is the read/control surface of the `QueueManager`. It answers point 
 
 Owns:
 
-- Job lookups across every location: in-shard run queue, `waitingDeps`/`waitingChildren` maps, processing shards, completed cache, and DLQ — plus SQLite fallback after restart (`queryOperations.ts:30`).
+- Job lookups across every location: in-shard run queue, `waitingDeps`/`waitingChildren` maps, processing shards, completed cache, and DLQ — plus SQLite fallback after restart (`src/application/operations/query/jobLookup.ts:6-59`).
+- Result lookup with a stable public missing-value contract across memory and
+  SQLite: retained `null` remains a real result; an ID with no result is
+  `undefined`.
 - State resolution including BullMQ v5 distinctions (`waiting` vs `prioritized` by priority, `delayed` by `runAt`, `waiting-children`) and the paused-view derivation (`pausedView.ts`).
-- Paginated, multi-source, state-filtered list queries with offset-correct merging (`getJobs`, `queryOperations.ts:467`).
+- Paginated, multi-source, state-filtered list queries with offset-correct merging (`getJobs`, `src/application/operations/query/pagination.ts:46-138`).
 - Single-job mutations on non-terminal jobs: `cancelJob`, `updateJobProgress`, `updateJobData`, `changeJobPriority`, `promoteJob` (`jobManagement.ts`), plus `moveJobToDelayed` and `discardJob` (`jobMoveOperations.ts`).
 - Queue control: `pauseQueue`, `resumeQueue`, `isQueuePaused`, `drainQueue`, `obliterateQueue`, `cleanQueue`, `getQueueCount`, `listAllQueues` (`queueControl.ts`).
 
@@ -55,6 +58,13 @@ function getJobs(queue: string, shardIdx: number,
   ctx: GetJobsContext): Job[]
 ```
 
+`getJobResult` first uses the two in-memory result maps. On SQLite fallback,
+`getResult()` alone is intentionally nullable, so `hasResult()` disambiguates a
+stored `null` from a missing row. This normalization happens at the
+QueueManager boundary and is shared by embedded calls, TCP `GetResult`,
+`Queue.waitJobUntilFinished`, and FlowProducer result helpers. No truthiness
+check is allowed because `0`, `false`, and `''` are valid results.
+
 `jobManagement.ts`:
 
 ```typescript
@@ -89,7 +99,7 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 
 ### Context types
 
-`QueryContext`/`GetJobsContext` (`queryOperations.ts:16`, `:154`), `JobManagementContext` (`jobManagement.ts:17`, optional `repeatChain`), `QueueControlContext` (`queueControl.ts:13`). Callers pass these via `QueueManager.contextFactory.get*Context()`.
+`QueryContext`/`GetJobsContext` (`src/application/types/query.ts:9-25`), `JobManagementContext` (`src/application/operations/jobManagement.ts:59-74`, optional `repeatChain`), `QueueControlContext` (`queueControl.ts:14-26`). Callers pass these via `QueueManager.contextFactory.get*Context()`.
 
 ### TCP commands handled (via `QueueManager` wrappers)
 
@@ -97,12 +107,26 @@ function pausedView(waiting: number, prioritized: number, isPaused: boolean): Pa
 - Job management: `Cancel`, `Progress`, `Promote`, `Discard`, `Update`, `ChangePriority`, `MoveToDelayed`, `ChangeDelay` (`handlers/management.ts`, `handlers/advanced.ts`).
 - Queue control: `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `Clean`, `ListQueues` (`handlers/management.ts`, `handlers/advanced.ts`).
 
-`ChangeDelay` and `MoveToDelayed` share the manager-level dispatcher in `queue-manager/job-management.ts`: for jobs already queued (`waiting`/`prioritized`/`delayed`) it calls `changeWaitingDelay` (in-place `runAt` mutation → the job becomes/stays `delayed`); for active (`processing`) jobs it falls back to the two-phase `moveJobToDelayed`. `QueueManager.moveToDelayed` delegates to `changeDelay` there so the two stay in lock-step. Previously `moveToDelayed` only handled `processing` jobs, so a waiting job was a **silent no-op over TCP/HTTP/MCP** while the embedded SDK special-cased it; routing through `changeDelay` fixes parity for waiting **and** active jobs. Wire field: the public `moveToDelayed(id, timestamp)` API takes an **absolute** timestamp, but `MoveToDelayedCommand` carries a **relative** `delay` (ms) — the TCP client (`jobMove.ts`) converts `delay = max(0, timestamp - now)` before sending, matching the server op and the sibling `ChangeDelay` command (the HTTP route `POST /jobs/:id/move-to-delayed` already posts `{ delay }`).
+`ChangeDelay` and `MoveToDelayed` share the manager-level dispatcher in `queue-manager/job-management.ts`: for jobs already queued (`waiting`/`prioritized`/`delayed`) it calls `changeWaitingDelay` (in-place `runAt` mutation → the job becomes/stays `delayed`); for active (`processing`) jobs it falls back to the two-phase `moveJobToDelayed`. `QueueManager.moveToDelayed` delegates to `changeDelay` there so the two stay in lock-step. Previously `moveToDelayed` only handled `processing` jobs, so a waiting job was a **silent no-op over TCP/HTTP/MCP** while the embedded SDK special-cased it; routing through `changeDelay` fixes parity for waiting **and** active jobs. Wire fields: both commands carry a relative `delay` (ms), while the public `moveToDelayed(id, timestamp)` API takes an **absolute** timestamp and the TCP client (`jobMove.ts`) converts it with `delay = max(0, timestamp - now)`. Both commands also accept an optional `token`; the Worker binds its current lease automatically for `Job.changeDelay(delay)`, whose public signature has no token parameter. The HTTP route `POST /jobs/:id/move-to-delayed` sends no token, so its administrative active-job form succeeds only when the broker has no lock for that job.
+
+For an active job, `MoveToDelayed`, `ChangeDelay`, `MoveToWait`, and
+`MoveToWaitingChildren` use the same lease preflight as ACK/FAIL. A current
+lock makes its exact token mandatory; missing/wrong tokens leave the active
+job and its lock unchanged. When no lock exists, the same transitions are
+available as administrative operations. Queue, Worker, Flow, DLQ, sandboxed,
+TCP, and embedded proxies all forward the optional wire token consistently.
+Because `Job.changeDelay()`, `Job.retry()`, and `Job.discard()` do not expose a
+token parameter, processor-created Job objects capture the current Worker
+delivery token and forward it implicitly in embedded and TCP modes. `Discard`
+also accepts `token?: string` on the wire and `QueueManager.discard(id, token?)`
+performs the same lease preflight before removing the job. A stale processor
+therefore cannot dead-letter a newer generation; an active job without a lock
+retains the administrative form.
 
 ### Events emitted
 
-- `cancelJob` → `EventType.Removed` with `prev: 'waiting'` (`jobManagement.ts:75`).
-- `updateJobProgress` → `progress` event + `job.progress` webhook (`jobManagement.ts:108`).
+- `cancelJob` → `EventType.Removed` with `prev: 'waiting'` (`src/application/operations/jobManagement.ts:77-142`).
+- `updateJobProgress` → `progress` event + `job.progress` webhook (`src/application/operations/jobManagement.ts:148-192`).
 - `moveJobToDelayed` → `EventType.Delayed` (`jobMoveOperations.ts`).
 - `QueueManager.pause`/`resume` wrap `pauseQueue`/`resumeQueue` and emit `EventType.Paused`/`EventType.Resumed` plus dashboard events `queue:paused`/`queue:resumed` (`queue-manager/control.ts`).
 - Dashboard-only events from handlers: `job:priority-changed`, `job:promoted`, `job:discarded`, `job:data-updated`, `job:moved-to-delayed`, `queue:drained`, `queue:obliterated`, `queue:removed`, `queue:cleaned`.
@@ -126,32 +150,32 @@ recovery.
 
 See [data-model](../data-model.md) for full `Job` and the events shape. Most relevant here:
 
-- `JobLocation` (`domain/types/queue.ts:104`) — the discriminated union stored in `jobIndex` that drives every dispatch:
+- `JobLocation` (`src/domain/types/queue.ts:122-126`) — the discriminated union stored in `jobIndex` that drives every dispatch:
   ```typescript
   | { type: 'queue'; shardIdx: number; queueName: string }
   | { type: 'processing'; shardIdx: number }
   | { type: 'completed'; queueName: string }
   | { type: 'dlq'; queueName: string }
   ```
-- `JobState` (`domain/types/job.ts:20`): `waiting | prioritized | delayed | active | completed | failed`. `getJobState` may additionally return the literal `'waiting-children'` (jobs parked in `waitingDeps`/`waitingChildren`) and the sentinel `'unknown'`.
+- `JobState` (`src/domain/types/jobs/model.ts:4-11`): `waiting | prioritized | delayed | active | completed | failed`. `getJobState` may additionally return the literal `'waiting-children'` (jobs parked in `waitingDeps`/`waitingChildren`) and the sentinel `'unknown'`.
 - `PausedDerivedCounts` (`pausedView.ts:14`): when paused, `waiting`+`prioritized` collapse into `paused` to avoid double-counting (#92). Same shape feeds `GetJobCounts` (`handlers/query.ts:57`), the client SDK, and the dashboard.
 
 ## Business Logic / Control Flow
 
-### getJob (`queryOperations.ts:30`)
+### getJob (`src/application/operations/query/jobLookup.ts:6-59`)
 
 1. Read `jobIndex.get(jobId)`. If absent, fall back to SQLite: `storage.getJob` then `storage.getDlqEntry`, finally `completedJobsData` — this keeps `getJob` working after a restart before the index is repopulated.
 2. Otherwise dispatch on `location.type`. For `queue`, take a read lock and probe run queue → `waitingDeps` → `waitingChildren`. For `processing`, read under the processing lock. For `completed`, prefer SQLite then cache. For `dlq`, prefer the SQLite DLQ entry, then the in-memory DLQ shard.
 3. **Stale-snapshot chase (false-null fix):** the location snapshot is only valid until the first await — while the reader waits on the shard read lock (writers have priority), a concurrent pull can pop the job and move it queue -> processing (the pull flips `jobIndex` atomically with the pop, see job-lifecycle.md). On a lookup miss, `getJob` re-reads the index: if the entry object changed identity, the job MOVED and the lookup retries at the fresh location (up to 4 passes, each requiring a further transition of that very job); if unchanged, the miss is genuine and `null` is returned. This preserves the invariant that `getJob(id) === null` is permanent for never-reused uuidv7 ids (no `JOB -> null -> JOB(active)` flicker). Index entries are always replaced, never mutated, so the identity comparison is exact.
 
-### getJobState (`queryOperations.ts:176`)
+### getJobState (`src/application/operations/query/state.ts:22-57`)
 
 1. Fast path: `completedJobs.has(jobId)` → `Completed`.
-2. No index entry → `resolveStateFromStorage` (`:159`): DLQ → `Failed`; raw state `completed`/`active` map through; `waiting`/`delayed` load the row and decide `Delayed` (future `runAt`), else `Prioritized` (priority > 0) vs `Waiting`.
+2. No index entry → `resolveStateFromStorage` (`src/application/operations/query/state.ts:6-19`): DLQ → `Failed`; raw state `completed`/`active` map through; `waiting`/`delayed` load the row and decide `Delayed` (future `runAt`), else `Prioritized` (priority > 0) vs `Waiting`.
 3. `queue` location → under read lock, classify by map membership and `runAt`/`priority`; `processing` → `Active`; `dlq` → `Failed`.
 4. Same stale-snapshot chase as `getJob`: a `queue`-location miss with a changed index entry retries at the fresh location instead of reporting a false `'unknown'` mid-pull.
 
-### getJobs (`queryOperations.ts`)
+### getJobs (`src/application/operations/query/pagination.ts`)
 
 The hard part is correct pagination when results come from multiple non-offset-aware sources (SQLite jobs table + in-memory DLQ, `waiting-children` maps, and the paused view).
 
@@ -159,7 +183,7 @@ The hard part is correct pagination when results come from multiple non-offset-a
 - Storage path: SQL applies the requested logical-state predicate, stable ordering, and pagination together. `waiting`, `prioritized`, and `delayed` are translated to predicates over persisted `state`, `run_at`, and `priority`; ordering is `(created_at, id)` in the requested direction and uses the schema-v14 queue indexes.
 - If a derived source contributes (DLQ, paused jobs, or `waiting-children`), every source is gathered from index zero, deduplicated by job ID, globally sorted by `(createdAt, id)`, and sliced `[start, end)` exactly once. Pushing an offset into only one source would drop or duplicate rows across pages.
 - Dependency-gated jobs in `waitingDeps` may retain their ready-state row, while jobs explicitly moved into `waitingChildren` persist `state='waiting-children'`. In-memory membership is authoritative while running; their IDs are deduplicated against SQL before global pagination, and they appear only when that logical state is requested.
-- Paused semantics: `resolveStateNeeds` (`:341`) suppresses explicit `waiting`/`prioritized` queries on a paused queue; those jobs are returned only under `paused` (`:518`). An unfiltered query still lists them by their temporal state.
+- Paused semantics: `resolveStateNeeds` (`src/application/operations/query/collect.ts:96-109`) suppresses explicit `waiting`/`prioritized` queries on a paused queue; those jobs are returned only under `paused` (`src/application/operations/query/collect.ts:111-149`). An unfiltered query still lists them by their temporal state.
 - In-memory path (embedded, no storage): `collectJobsByState` gathers every matching source before sorting and slicing; it never truncates insertion order before applying descending order.
 
 ### cancelJob (`jobManagement.ts:30`)
@@ -190,6 +214,12 @@ recovery preserves the parked row.
 
 Removes the job from its run queue (with `decrementQueued`) or from the processing shard, then under the destination shard lock releases the job's reservations, calls `addToDlq`, sets the index to `dlq`, persists the DLQ entry, and deletes the jobs-table row. The release is branch-specific: a **processing** job returns the full set via `releaseJobResources` (concurrency slot + group + uniqueKey, matching the fail-to-DLQ paths in `failJob` and `handleMaxStallsExceeded`, which free the reservation on DLQ entry) followed by `shard.notify()`; a **queued** job only releases its `uniqueKey` (parity with `cancelJob`), because it never acquired a slot or group at pull and a full release would free a slot held by another active job.
 
+The manager wrapper authorizes the optional lease token before entering this
+two-phase claim. Worker `Job.discard()` is public `void`, so the Worker records
+and awaits the internal broker settlement: the processor's later return or
+throw cannot publish a second terminal outcome, graceful close cannot tear down
+the pool under the command, and duplicate calls share one transition.
+
 ### Queue control
 
 - `drainQueue` (`queueControl.ts:45`): `shard.drain` returns `{count, jobIds}`; the operation then deletes each `jobIndex` entry and calls `safeDeleteJob` so a buffered/on-disk add cannot resurrect a drained job.
@@ -208,12 +238,12 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 
 ## Edge Cases & Failure Modes
 
-- **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`queryOperations.ts:45`, `:159`). Without storage (pure embedded) they return `null`/`'unknown'`.
-- **Pull-transition visibility:** during a pull, the queue pop, the `processingShards` insert, and the `jobIndex` flip happen in one synchronous critical section (`pull.ts:50`), and `getJob`/`getJobState` chase a moved location on miss — a poller can no longer observe a transient `null`/`'unknown'` for a job that is being handed to a worker (repro: `test/repro-getjob-false-null-during-pull.test.ts`).
+- **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`src/application/operations/query/jobLookup.ts:9-16`, `src/application/operations/query/state.ts:6-19`). Without storage (pure embedded) they return `null`/`'unknown'`.
+- **Pull-transition visibility:** during a pull, the queue pop, the `processingShards` insert, and the `jobIndex` flip happen in one synchronous critical section (`src/application/operations/pullStateTransition.ts:115-135`), and `getJob`/`getJobState` chase a moved location on miss — a poller can no longer observe a transient `null`/`'unknown'` for a job that is being handed to a worker (repro: `test/repro-getjob-false-null-during-pull.test.ts`).
 - **Paused double-count avoidance (#92):** `pausedView` and `resolveStateNeeds` guarantee a single job is reported in exactly one bucket. Verified by the shared `pausedView` helper used across SDK/TCP/dashboard so surfaces cannot drift.
 - **Pagination correctness:** logical-state filtering happens before SQL `LIMIT/OFFSET`; derived sources are merged and deduplicated before one final slice. `(created_at, id)` is the deterministic tie-breaker for both ascending and descending pages.
-- **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:209`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.
-- **Idempotency / not-found:** all mutations return `false` (or `[]`) when the job is absent or in the wrong location; `cancelJob`/`promoteJob`/`changeJobPriority` only act on queued jobs, `updateJobProgress`/`moveJobToDelayed` only on processing jobs. `promoteJob` no-ops if `runAt <= now` (already due).
+- **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:189-216`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.
+- **Idempotency / not-found:** all mutations return `false` (or `[]`) when the job is absent or in the wrong location; `cancelJob`/`promoteJob`/`changeJobPriority` only act on queued jobs, and `updateJobProgress` plus the low-level `moveJobToDelayed` claim operation require an active job. The public manager-level `moveToDelayed`/`changeDelay` dispatcher supports both queued and active jobs as described above. `promoteJob` no-ops if `runAt <= now` (already due).
 - **Progress clamping and durability:** `updateJobProgress` clamps to `[0,100]`,
   preserves the prior message when a later update omits one, refreshes
   `lastHeartbeat`, and writes all three values through to SQLite while the
@@ -224,7 +254,7 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
   `state='waiting'`, and `startedAt=NULL` after the in-memory claim/requeue.
   Restart therefore reloads the job as ready work without charging a phantom
   crash attempt.
-- **`updateJobData` repeat-chain follow:** when the target id is completed/missing, it follows `repeatChain` to patch the successor job created by `handleRepeat` (`jobManagement.ts:170`).
+- **`updateJobData` repeat-chain follow:** when the target id is completed/missing, it follows `repeatChain` to patch the successor job created by `handleRepeat` (`src/application/operations/jobManagement.ts:231-260`).
 - **SQLite write failures swallowed:** `safeDeleteJob`/`safeDeleteDlqEntry` (`queueControl.ts:83`) catch errors (e.g. `SQLITE_FULL`); in-memory state is already cleared and the orphan row is GC'd by crash-recovery on restart.
 - **Memory-bound visibility:** completed-job queries depend on bounded LRU/Set collections — `completedJobs` (50k), `jobResults` (10k), `jobLogs` (10k), `customIdMap` (50k). Once evicted, results/custom-id lookups fall back to SQLite or return `null`. `getJobByCustomId` returns `null` if the LRU has evicted the mapping.
 - **Dependency-safe obliterate:** `shard.obliterate` removes queue-owned jobs from both `waitingDeps` and `waitingChildren`. Removing a `waitingDeps` job goes through `DependencyTracker.removeWaitingJob`, so its waiter id is also deleted from every reverse `dependencyIndex` entry. The returned id set then drives global-index and SQLite cleanup; no `waiting-children` ghost remains queryable after the operation.

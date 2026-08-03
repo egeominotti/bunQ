@@ -1,6 +1,6 @@
 # HTTP / REST / SSE / WebSocket API
 
-> **Category:** Transport · **Source:** `src/infrastructure/server/http.ts`, `src/infrastructure/server/httpEndpoints.ts`, `src/infrastructure/server/httpRouteJobs.ts`, `src/infrastructure/server/httpRouteQueues.ts`, `src/infrastructure/server/httpRouteQueueConfig.ts`, `src/infrastructure/server/httpRouteResources.ts`, `src/infrastructure/server/sseHandler.ts`, `src/infrastructure/server/wsHandler.ts`
+> **Category:** Transport · **Source:** `src/infrastructure/server/http.ts`, `src/infrastructure/server/httpRouter.ts`, `src/infrastructure/server/httpEndpoints.ts`, `src/infrastructure/server/httpDashboardEndpoints.ts`, `src/infrastructure/server/httpRouteJobs.ts`, `src/infrastructure/server/httpRouteQueues.ts`, `src/infrastructure/server/httpRouteQueueConfig.ts`, `src/infrastructure/server/httpRouteResources.ts`, `src/infrastructure/server/sseHandler.ts`, `src/infrastructure/server/wsHandler.ts`
 
 ## Purpose
 
@@ -37,7 +37,7 @@ External/runtime:
 ## Public Interface
 
 Exported symbols:
-- `createHttpServer(queueManager: QueueManager, config: HttpServerConfig)` — `http.ts:74`. Returns `{ server, wsClients, sseClients, getWsClientCount(), getSseClientCount(), stop() }`. `stop()` unsubscribes from the event bus, stops WS broadcasts, closes all SSE streams, and stops the Bun server.
+- `createHttpServer(queueManager: QueueManager, config: HttpServerConfig)` — `http.ts:65`. Returns `{ server, wsClients, sseClients, getWsClientCount(), getSseClientCount(), stop() }`. `stop()` unsubscribes from the event bus, stops WS broadcasts, closes all SSE streams, and stops the Bun server.
 - `interface HttpServerConfig` — `http.ts`: `port?`, `hostname?`,
   `socketPath?`, `authTokens?: string[]`, `corsOrigins?: string[]`,
   `requireAuthForMetrics?: boolean`,
@@ -48,7 +48,7 @@ Exported symbols:
   dispatches ordinary REST routes; `httpResponse.ts` owns shared JSON response
   construction. `http.ts` retains server lifecycle, authentication, special
   routes and WebSocket/SSE upgrades.
-- `class SseHandler` (`sseHandler.ts:62`), `class WsHandler` + `interface WsData` (`wsHandler.ts:186`/`166`).
+- `class SseHandler` (`sseHandler.ts:30`), `class WsHandler` (`wsHandler.ts:34`), and `interface WsData` (`types/ws.ts:1`).
 
 ### HTTP endpoints
 
@@ -63,13 +63,13 @@ Diagnostics / observability (handled in `fetch`/`routeRequest`, `http.ts`):
 | `POST /gc` | yes | force `Bun.gc(true)` + `compactMemory` (`http.ts:132`) |
 | `GET /heapstats` | yes | `bun:jsc` heap breakdown (`http.ts:137`) |
 | `GET /prometheus` | conditional | text exposition; auth only if `requireAuthForMetrics` (`http.ts:179`) |
-| `GET /stats` | yes | full stats + memory + per-sec rates (`http.ts:294`) |
-| `GET /metrics` | yes | JSON totals only (`http.ts:297`) |
-| `GET /dashboard` | yes | aggregated overview (`http.ts:302`) |
-| `GET /dashboard/queues?limit&offset` | yes | paginated queue list, limit clamped 1–500 (`http.ts:305`) |
-| `GET /dashboard/queues/:queue?includeJobs=true` | yes | single-queue detail (`http.ts:314`) |
+| `GET /stats` | yes | full stats + memory + per-sec rates (`httpRouter.ts:31`) |
+| `GET /metrics` | yes | JSON totals only (`httpRouter.ts:34`) |
+| `GET /dashboard` | yes | aggregated overview (`httpRouter.ts:37`) |
+| `GET /dashboard/queues?limit&offset` | yes | paginated queue list, limit clamped 1–500 (`httpRouter.ts:40-47`) |
+| `GET /dashboard/queues/:queue?includeJobs=true` | yes | single-queue detail (`httpRouter.ts:50-56`) |
 
-Jobs (`routeJobRoutes`, `httpRouteJobs.ts:242`) — batch routes matched before generic `/jobs/:id`:
+Jobs (`routeJobRoutes`, `httpRouteJobs.ts:12-117`) — batch routes matched before generic `/jobs/:id`:
 
 | Method · Path | Command |
 |---|---|
@@ -93,11 +93,11 @@ Jobs (`routeJobRoutes`, `httpRouteJobs.ts:242`) — batch routes matched before 
 | `POST /jobs/:id/extend-lock` | `ExtendLock` |
 | `POST /jobs/:id/move-to-wait` | `MoveToWait` |
 
-Queues (`routeQueueRoutes`, `httpRouteQueues.ts:168`):
+Queues (`routeQueueRoutes`, `httpRouteQueues.ts:19-143`):
 
 | Method · Path | Command / action |
 |---|---|
-| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array** of `{ name, paused, counts: { waiting, prioritized, delayed, active, completed, failed } }`, no `ok` wrapper, `httpRouteQueues.ts:182`) |
+| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array** of `{ name, paused, counts: { waiting, prioritized, delayed, active, completed, failed } }`, no `ok` wrapper, `httpRouteQueues.ts:26-30`) |
 | `POST /queues/:queue/jobs` | `PUSH` |
 | `GET /queues/:queue/jobs?timeout=` | `PULL` (long-poll) |
 | `POST /queues/:queue/jobs/bulk` | `PUSHB` |
@@ -137,36 +137,36 @@ Resources (`routeResourceRoutes`, `httpRouteResources.ts:21`):
 
 ### WebSocket protocol
 
-Frame format (server → client): `{ event, ts, data }` (`wsHandler.ts:330`). Client commands over the socket:
-- `{ cmd: "Subscribe", events: [...] }` / `{ cmd: "Unsubscribe", events: [...] }` — managed in `onMessage` before typed parsing (`wsHandler.ts:407`). Patterns validated against `VALID_PATTERNS` (`wsHandler.ts:41`): exact names, prefix wildcards (`job:*`, `queue:*`, …), or `*`.
-- Any other JSON is parsed as a normal `Command` and routed through `handleCommand`; an `Auth` command that succeeds flips `ws.data.authenticated` (`wsHandler.ts:430`).
+Frame format (server → client): `{ event, ts, data }` (`wsHandler.ts:132-143`). Client commands over the socket:
+- `{ cmd: "Subscribe", events: [...] }` / `{ cmd: "Unsubscribe", events: [...] }` — managed in `onMessage` before typed parsing (`wsHandler.ts:207-217`). Patterns validated against `VALID_WS_PATTERNS` (`ws/constants.ts:20-127`): exact names, prefix wildcards (`job:*`, `queue:*`, …), or `*`.
+- Any other JSON is parsed as a normal `Command` and routed through `handleCommand`; an `Auth` command that succeeds flips `ws.data.authenticated` (`wsHandler.ts:223-235`).
 
 ## Data Models
 
 See [data-model](../data-model.md) for full definitions. Key shapes here:
 - `HandlerContext` (`types.ts:8`): `{ queueManager, authTokens: Set<string>, authenticated: boolean, clientId? }`. For HTTP, `clientId` is intentionally absent (stateless; `http.ts:201`). For WS, `clientId = ws.data.id`.
-- `WsData` (`wsHandler.ts:166`): `{ id, authenticated, queueFilter: string | null, subscriptions: Set<string> | null }`. `subscriptions === null` = legacy mode (receives every job event in the raw `JobEvent` shape).
-- `SseClient` (`sseHandler.ts:29`): `{ id, controller, queueFilter }`. `BufferedEvent` (`sseHandler.ts:36`): `{ id, event, data, queue }` in the replay ring buffer.
-- `JobEvent` (from `domain/types/queue`) is the input to both `broadcast` methods; `EVENT_MAP` (`sseHandler.ts:44`, `wsHandler.ts:25`) renames legacy `eventType`s (`pushed`→`job:pushed`, `pulled`→`job:active`, `drained`→`queue:drained`, …), defaulting unknown types to `job:<eventType>`.
+- `WsData` (`types/ws.ts:1-6`): `{ id, authenticated, queueFilter: string | null, subscriptions: Set<string> | null }`. `subscriptions === null` = legacy mode (receives every job event in the raw `JobEvent` shape).
+- `SseClient` (`types/sse.ts:1-5`): `{ id, controller, queueFilter }`. `BufferedSseEvent` (`types/sse.ts:7-12`): `{ id, event, data, queue }` in the replay ring buffer.
+- `JobEvent` (from `domain/types/queue`) is the input to both `broadcast` methods; `WS_EVENT_MAP` (`ws/constants.ts:5-18`) renames legacy `eventType`s (`pushed`→`job:pushed`, `pulled`→`job:active`, `drained`→`queue:drained`, …), defaulting unknown types to `job:<eventType>`.
 
 ## Business Logic / Control Flow
 
-`fetch(req, server)` request pipeline (`http.ts:111`), short-circuiting in this order:
-1. `OPTIONS` → `corsResponse` preflight (`http.ts:116`).
-2. Unauthenticated liveness: `/health`, `/healthz`, `/live`, `/ready` (`http.ts:121`). These skip both auth and rate limiting.
-3. Debug endpoints `POST /gc`, `GET /heapstats` → `checkAuth` then run (`http.ts:132`).
-4. Rate limiting: `clientIp` from `x-forwarded-for[0]` / `x-real-ip` / `'unknown'`; if `getRateLimiter().isAllowed(ip)` is false → emit `ratelimit:hit`, return `429` (`http.ts:144`).
-5. `/ws*` → auth, `wsHandler.canAccept()` (else `503`), then `server.upgrade(req, { data: { id: uuid(), authenticated: true, queueFilter, subscriptions: null } })` (`http.ts:154`).
-6. `/events*` → auth, build SSE response via `sseHandler.createResponse(queueFilter, corsOrigin, lastEventId)` (`http.ts:168`).
-7. `/prometheus` → conditional auth, return `text/plain; version=0.0.4` (`http.ts:179`).
-8. General `checkAuth` for everything else; failure emits `auth:failed` (`http.ts:193`).
-9. `routeRequest` (`http.ts:285`): stats/metrics/dashboard, then cascade through `routeJobRoutes` → `routeQueueRoutes` → `routeQueueConfigRoutes` → `routeResourceRoutes`, each returning a `Response` or `null` (no match). Fallthrough → `404`. Any thrown error → `500` JSON.
+`fetch(req, server)` request pipeline (`http.ts:102-216`), short-circuiting in this order:
+1. `OPTIONS` → `corsResponse` preflight (`http.ts:106-109`).
+2. Unauthenticated liveness: `/health`, `/healthz`, `/live`, `/ready` (`http.ts:111-127`). These skip both auth and rate limiting.
+3. Debug endpoints `POST /gc`, `GET /heapstats` → `checkAuth` then run (`http.ts:129-139`).
+4. Rate limiting: `clientIp` from `x-forwarded-for[0]` / `x-real-ip` / `'unknown'`; if `getRateLimiter().isAllowed(ip)` is false → emit `ratelimit:hit`, return `429` (`http.ts:141-149`).
+5. `/ws*` → auth, `wsHandler.canAccept()` (else `503`), then `server.upgrade(req, { data: { id: uuid(), authenticated: true, queueFilter, subscriptions: null } })` (`http.ts:151-163`).
+6. `/events*` → auth, build SSE response via `sseHandler.createResponse(queueFilter, corsOrigin, lastEventId)` (`http.ts:165-174`).
+7. `/prometheus` → conditional auth, return `text/plain; version=0.0.4` (`http.ts:176-195`).
+8. General `checkAuth` for everything else; failure emits `auth:failed` (`http.ts:197-204`).
+9. `routeHttpRequest` (`httpRouter.ts:23-70`): stats/metrics/dashboard, then cascade through `routeJobRoutes` → `routeQueueRoutes` → `routeQueueConfigRoutes` → `routeResourceRoutes`, each returning a `Response` or `null` (no match). Fallthrough → `404`. Any thrown error → `500` JSON.
 
 Each REST handler reads the body (`req.json()` or `parseJsonBody`, which tolerates empty body as `{}` and returns a `400` on malformed JSON — `httpEndpoints.ts:28`), builds the matching `Command`, awaits `handleCommand`, and maps the result to a status: typically `r.ok ? 200 : 400` (or `404` for read/lookup commands, plain `200` for list/idempotent commands).
 
-Auth (`checkAuth`, `http.ts:50`): no-op when `authTokens` is empty; otherwise extracts the `Authorization: Bearer <token>` header and compares against every configured token with `constantTimeEqual` (timing-safe).
+Auth (`checkAuth`, `http.ts:39-46`): no-op when `authTokens` is empty; otherwise extracts the `Authorization: Bearer <token>` header and compares against every configured token with `constantTimeEqual` (timing-safe).
 
-Event fan-out is wired once in `createHttpServer` (`http.ts:81`): `queueManager.subscribe` forwards each `JobEvent` to both `wsHandler.broadcast` and `sseHandler.broadcast`; `setDashboardEmit` routes non-job events (worker/queue/dlq/cron/…) to both handlers' `emitEvent`. Periodic broadcasters are started for both channels.
+Event fan-out is wired once in `createHttpServer` (`http.ts:71-85`): `queueManager.subscribe` forwards each `JobEvent` to both `wsHandler.broadcast` and `sseHandler.broadcast`; `setDashboardEmit` routes non-job events (worker/queue/dlq/cron/…) to both handlers' `emitEvent`. Periodic broadcasters are started for both channels.
 
 SSE broadcast (`sseHandler.broadcast`): assigns a monotonic `id`, maps and serializes the event, buffers it in the replay ring, writes to matching clients, and schedules the affected queue for a count refresh. `QueueCountsScheduler` deduplicates queue names for 10 ms and obtains all pending counts with one batch aggregation before emitting `queue:counts`. `createResponse` registers the client, sends the retry/connected frames, and replays buffered events newer than `Last-Event-ID`. Stream cancellation deletes the client and releases its jobs/workers.
 
@@ -175,30 +175,30 @@ WS broadcast (`wsHandler.broadcast`): for each client, skips on `queueFilter` mi
 ## Concurrency & Locking
 
 The HTTP layer holds no shard locks itself; all locking happens inside `handleCommand`/`QueueManager` (see [Concurrency & Locking](./concurrency-and-locking.md)). Relevant connection-lifecycle behavior:
-- **Stateless HTTP, no job ownership**: HTTP requests carry no `clientId`, so jobs pulled over REST are not tracked to a connection; orphaned/in-flight jobs are recovered only by stall detection (`http.ts:201`, see [Background Tasks](./background-tasks.md)).
-- **WS/SSE own their pulled jobs**: on WS `close` (`http.ts:232`) and SSE stream `cancel` (`sseHandler.ts:344`), the handler calls `unregisterWorkersByClientId(clientId)` and `releaseClientJobs(clientId)` so jobs leased through that persistent connection are returned to the queue. WS additionally calls `getRateLimiter().removeClient(clientId)`.
-- **WS idle/keepalive**: Bun auto-pings with a `120s` idle timeout and `maxPayloadLength` of 1 MiB (`http.ts:217`). SSE sends a `:heartbeat` comment every 30 s and prunes clients that error on write (`sseHandler.ts:130`).
+- **Stateless HTTP, no job ownership**: HTTP requests carry no `clientId`, so jobs pulled over REST are not tracked to a connection; orphaned/in-flight jobs are recovered only by stall detection (`http.ts:206-208`, see [Background Tasks](./background-tasks.md)).
+- **WS/SSE own their pulled jobs**: on WS `close` (`http.ts:237-250`) and SSE stream `cancel` (`sseHandler.ts:255-260`), the handler calls `unregisterWorkersByClientId(clientId)` and `releaseClientJobs(clientId)` so jobs leased through that persistent connection are returned to the queue. WS additionally calls `getRateLimiter().removeClient(clientId)`.
+- **WS idle/keepalive**: Bun auto-pings with a `120s` idle timeout and `maxPayloadLength` of 1 MiB (`http.ts:218-224`). SSE sends a `:heartbeat` comment every 30 s and prunes clients that error on write (`sseHandler.ts:111-125`).
 
 ## Edge Cases & Failure Modes
 
 - **0-client early return** (perf invariant): both transport broadcast and typed-emit paths return immediately with no clients. With clients present, queue counts are batch-aggregated after a 10 ms coalescing window, so an event burst pays one shared O(total live jobs) pass rather than one queue/global scan per event.
-- **Connection limits**: SSE caps at `MAX_CLIENTS = 1000` → `503 "Too many SSE connections"` (`sseHandler.ts:320`); WS caps at `MAX_WS_CLIENTS = 1000` via `canAccept()` → `503` (`http.ts:157`). WS upgrade failure → `400`.
-- **WS backpressure**: `safeSend` (`wsHandler.ts:204`) checks `ws.getBufferedAmount()`; above `BACKPRESSURE_BYTES` (1 MiB) it increments `droppedMessages` and *skips* the message (treats the client as alive but slow, does not disconnect). A `send` throw marks the client dead and removes it.
+- **Connection limits**: SSE caps at `MAX_SSE_CLIENTS = 1000` → `503 "Too many SSE connections"` (`sseHandler.ts:230-233`, `sse/constants.ts:2`); WS caps at `MAX_WS_CLIENTS = 1000` via `canAccept()` → `503` (`wsHandler.ts:46-49`, `http.ts:151-162`). WS upgrade failure → `400`.
+- **WS backpressure**: `safeSend` (`wsHandler.ts:51-64`) checks `ws.getBufferedAmount()`; above `WS_BACKPRESSURE_BYTES` (1 MiB) it increments `droppedMessages` and *skips* the message (treats the client as alive but slow, does not disconnect). A `send` throw marks the client dead and removes it.
 - **SSE replay bounds**: ring buffer holds the last `EVENT_BUFFER_SIZE = 1000` events; reconnects requesting older IDs silently miss the gap. Heartbeat = 30 s, advertised `retry: 3000` ms.
 - **Body parsing**: routes using `parseJsonBody` treat empty body as `{}` (backward compat for optional-body routes); malformed JSON → `400 "Invalid JSON body"`. Routes using `req.json()` directly (PUSH, bulk, cron/webhook/worker create) also catch and return `400`. Worker heartbeat tolerates a missing/invalid body (`httpRouteResources.ts:189`).
-- **State-filter aliasing (#95)**: `GET /queues/:queue/jobs/list` reads `state`, `status`, and `states`, each repeatable and comma-separated; previously only `state` was honored, so `?status=failed` silently returned the whole queue (`httpRouteQueues.ts:124`).
-- **Paused-queue count consistency (#92)**: `dashboardQueueDetailEndpoint` runs `pausedView` so a paused queue reports ready jobs under `paused` (not `waiting`/`prioritized`), matching the per-state job lists (`httpEndpoints.ts:336`).
+- **State-filter aliasing (#95)**: `GET /queues/:queue/jobs/list` reads `state`, `status`, and `states`, each repeatable and comma-separated; previously only `state` was honored, so `?status=failed` silently returned the whole queue (`http-routes/queueJobs.ts:99-123`).
+- **Paused-queue count consistency (#92)**: `dashboardQueueDetailEndpoint` runs `pausedView` so a paused queue reports ready jobs under `paused` (not `waiting`/`prioritized`), matching the per-state job lists (`httpDashboardEndpoints.ts:142-156`).
 - **DLQ pagination robustness**: non-numeric `limit`/`offset` are ignored rather than producing an empty slice (`httpRouteQueueConfig.ts:44`).
-- **Dashboard truncation**: workers and crons lists are capped at 100 items with a `truncated` flag (`httpEndpoints.ts:261`/`284`).
-- **CORS injection on out-of-pipeline responses**: `withCors` (`http.ts:102`) adds `Access-Control-Allow-Origin` to health/ready/prometheus/debug responses only if not already set, never overwriting (audit #16–20).
-- **CORS default gotcha**: `HttpServerConfig.corsOrigins` defaults to `['*']` inside `createHttpServer` (`http.ts:76`), but the server entrypoint always passes the env-resolved array, which defaults to `[]` when `CORS_ALLOW_ORIGIN` is unset (`config/resolve.ts:50`). With `[]`, `getCorsOrigin()` yields an empty `Access-Control-Allow-Origin` string rather than `*`. See [Security: TLS, Auth, CORS](./security-tls-auth.md).
+- **Dashboard truncation**: workers and crons lists are capped at 100 items with a `truncated` flag (`httpDashboardEndpoints.ts:53-100`).
+- **CORS injection on out-of-pipeline responses**: `withCors` (`http.ts:87-99`) adds `Access-Control-Allow-Origin` to health/ready/prometheus/debug responses only if not already set, never overwriting (audit #16–20).
+- **CORS default gotcha**: `HttpServerConfig.corsOrigins` defaults to `['*']` inside `createHttpServer` (`http.ts:65-68`), but the server entrypoint always passes the env-resolved array, which defaults to `[]` when `CORS_ALLOW_ORIGIN` is unset (`config/resolve.ts:51`). With `[]`, `getCorsOrigin()` yields an empty `Access-Control-Allow-Origin` string rather than `*`. See [Security: TLS, Auth, CORS](./security-tls-auth.md).
 - **Metrics auth asymmetry**: `/metrics` and `/stats` always require auth (when
   tokens are set) because they run after the general `checkAuth`;
   `/prometheus` requires auth only if `requireAuthForMetrics`
   (`METRICS_AUTH=true`). When required but no token is configured it returns
   503, preventing a configuration mistake from making metrics public.
   `/health*` and `/ready` never require auth.
-- **TLS fail-fast**: `loadTlsOptions(config.tls)` runs before binding so bad cert/key paths abort startup rather than serving plaintext (`http.ts:250`).
+- **TLS fail-fast**: `loadTlsOptions(config.tls)` runs before binding so bad cert/key paths abort startup rather than serving plaintext (`http.ts:254-255`).
 
 ## Configuration
 
@@ -208,7 +208,7 @@ Resolved in `config/resolve.ts` (config file > env > default) and passed into `H
 |---|---|---|
 | `HTTP_PORT` | `port` | `6790` |
 | `HOST` | `hostname` | `0.0.0.0` |
-| `HTTP_SOCKET_PATH` | `socketPath` | unset (overrides host/port → Unix socket bind, `http.ts:252`) |
+| `HTTP_SOCKET_PATH` | `socketPath` | unset (overrides host/port → Unix socket bind, `http.ts:257-263`) |
 | `AUTH_TOKENS` (comma-sep) | `authTokens` | `[]` (auth disabled) |
 | `CORS_ALLOW_ORIGIN` (comma-sep) | `corsOrigins` | `[]` (see CORS gotcha above) |
 | `METRICS_AUTH` | `requireAuthForMetrics` | `false` |

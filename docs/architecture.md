@@ -11,14 +11,14 @@ engine**, or expose itself to AI agents over a native **MCP server**.
 The defining constraint is **zero external runtime infrastructure**: there is no
 Redis, no broker, no companion service. Persistence is a local SQLite file; the
 only npm dependencies are `croner` (cron parsing) and `msgpackr` (MessagePack)
-([`package.json:74`](../package.json)). Everything else — hashing, heaps,
+([`package.json:83`](../package.json)). Everything else — hashing, heaps,
 skip-lists, locks, the wire protocol, TLS — is built on Bun primitives.
 
 A bare `bunqueue` invocation boots the full server; any other argv goes through the
 CLI, which can itself boot the server (`start`) or act as a one-shot TCP client
 ([`src/main.ts:11`](../src/main.ts)). Both server paths funnel through one
 `bootServer()` so they cannot drift
-([`src/infrastructure/server/bootstrap.ts:73`](../src/infrastructure/server/bootstrap.ts)).
+([`src/infrastructure/server/bootstrap.ts:94`](../src/infrastructure/server/bootstrap.ts)).
 
 ```
 Producers ──add()──┐                          ┌──process()── Consumers
@@ -41,11 +41,11 @@ Producers ──add()──┐                          ┌──process()──
 
 | Choice | Where | Why |
 | --- | --- | --- |
-| **Bun runtime** (`>=1.3.9`) | [`package.json:147`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
+| **Bun runtime** (`>=1.3.9`) | [`package.json:164`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
 | **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
 | **MessagePack** (`msgpackr`) | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties. |
-| **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:66`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
-| **Zero external deps** | [`package.json:74`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
+| **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:75`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
+| **Zero external deps** | [`package.json:83`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
 | **4-ary heaps / queue-local skip-lists** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts), [`src/domain/queue/temporalIndex.ts`](../src/domain/queue/temporalIndex.ts) | 4-ary branching improves cache locality vs binary heaps; one skip-list per queue orders cleanup candidates, with a reverse job-ID index for direct deletion. A compacting 4-ary min-heap tracks delayed jobs. |
 
 ## Layered Architecture
@@ -97,14 +97,26 @@ be claimed.
   `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
   JobLogs, Stats managers, and the batch `QueueStatsAggregator`. DLQ reads/purge
   live in `dlqManager.ts`; manual and automatic retry transitions live in
-  `dlqRetry.ts`. It also owns the
+  `dlqRetry.ts`. Completion-chained repeat calculation and validation live in
+  `repeatJobs.ts`, while `queue-manager/repeat.ts` owns successor dispatch and
+  chain linking. Single-job admission lives in `operations/push.ts`, ordered
+  accepted-prefix batches in `operations/pushBatch.ts`, and the persistence-
+  before-publication boundary in `operations/pushAdmission.ts`; custom-ID,
+  deduplication, insertion and parent-link planning remain separate focused
+  modules. It also owns the
   [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) for
   live flow-result retention, and background-task wiring.
 - **`infrastructure/`** — The ten-line `SqliteStorage` façade composes focused
   lifecycle, job, query, mutation, flow, control and record capabilities under
   `persistence/sqlite/`; persistence contracts live in `persistence/types/`.
-  Server handler routing, protocol parsing, TCP connection state, HTTP routes,
-  SSE and WebSocket state are likewise split by responsibility. Cloud command
+  `sqlite/admission.ts` applies terminal-generation retirement and dependency-
+  completion pins inside the same transaction as persistence-sensitive job
+  admission; its ID-only contract lives in `types/admission.ts`.
+  `jobOptionsBlob.ts` serializes repeat and advanced generation policy that has
+  no dedicated legacy column.
+  Server handler routing, protocol parsing, TCP connection/event-subscription
+  state, HTTP routes, SSE and WebSocket state are likewise split by
+  responsibility. Cloud command
   families, snapshot collectors and contracts live under `cloud/commands/`,
   `cloud/snapshot/` and `cloud/types/`. The layer also provides `WriteBuffer`,
   `BatchInsertManager`,
@@ -116,8 +128,8 @@ be claimed.
   (response helpers). `server/bootstrap.ts` is the single composition root and
   supplies live TCP connection counts plus the pre-backup persistence flush.
 - **`client/`** — In-process SDK: `Queue`, `Worker`, `SandboxedWorker`,
-  `FlowProducer`, `QueueGroup`, `Bunqueue` (simple mode), the `Workflow`/`Engine`
-  pair, and the TCP `TcpPool`/forwarder. Queue reads are split between the
+  `QueueEvents`, `FlowProducer`, `QueueGroup`, `Bunqueue` (simple mode), the
+  `Workflow`/`Engine` pair, and the TCP `TcpPool`/forwarder. Queue reads are split between the
   generic conversion/query module, state aliases (`queryStates.ts`), and
   exhaustive TCP traversal (`queryTcpPages.ts`); see
   [Client SDK: Queue](./features/client-queue-sdk.md). Each facade transparently
@@ -126,8 +138,12 @@ be claimed.
   `SandboxedWorker` are four lines each. Runtime behavior is grouped under each
   component's `runtime/` directory, while contracts live in its `types/`
   directory.
+  QueueEvents and Worker stall notifications share a focused dedicated TCP
+  subscription adapter under `client/queue-events/`; public event payloads live
+  separately under `client/types/events.ts`.
 - **`shared/`** — Cross-cutting primitives: `fnv1a`/`uuid`/`shardIndex`
-  ([`src/shared/hash.ts`](../src/shared/hash.ts)), `RWLock`/`Semaphore`,
+  ([`src/shared/hash.ts`](../src/shared/hash.ts)), the stable lock façade
+  (`lock.ts`) with focused `asyncLock.ts`/`rwLock.ts` implementations, `Semaphore`,
   `LRUMap`/`BoundedSet`/`BoundedMap`/`TtlMap`, `MinHeap`, `SkipList`, `Histogram`,
   `Logger`, `webhookValidation`.
 - **`cli/`** — `bunqueue` executable: server boot detection + thin TCP client that
@@ -144,7 +160,7 @@ surface; it does not duplicate implementation logic.
 | --- | --- | --- |
 | `application/queueManager.ts` | `application/queue-manager/`, `application/operations/`, `application/background/` | `application/types/` |
 | `client/queue/queue.ts` | `client/queue/runtime/`, `client/queue/operations/`, job/DLQ helpers | `client/queue/types/` |
-| `client/worker/worker.ts` | `client/worker/runtime/`, processor, pull, heartbeat and ACK modules | `client/worker/types/` |
+| `client/worker/worker.ts` | `client/worker/runtime/`, `processor.ts`, `processorOutcome.ts`, pull, heartbeat and ACK modules | `client/worker/types/` |
 | `client/sandboxed/worker.ts` | `client/sandboxed/runtime/`, wrapper and queue adapters | `client/sandboxed/types/` |
 | `infrastructure/persistence/sqlite.ts` | `infrastructure/persistence/sqlite/`, buffering and schema modules | `infrastructure/persistence/types/` |
 
@@ -201,7 +217,7 @@ wrappers select the transport, preventing the two implementations from drifting.
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  WriteBuffer (10ms / 100-job double-buffer) ─► SQLite (WAL, msgpack)     │   │
 │   │  Recovery ◄─ jobs · flow_failures · dep_proofs · results · dlq · cron     │   │
-│   │              · queue_state                                                │   │
+│   │              · queue_state · queue event/metric journal                    │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
@@ -213,9 +229,19 @@ wrappers select the transport, preventing the two implementations from drifting.
 The TCP and HTTP servers are thin adapters: both decode a request into a command
 and call the shared `handleCommand` dispatcher against the single `QueueManager`
 instance created in `bootServer()`
-([`src/infrastructure/server/bootstrap.ts:98`](../src/infrastructure/server/bootstrap.ts)).
+([`src/infrastructure/server/bootstrap.ts:126`](../src/infrastructure/server/bootstrap.ts)).
 See [TCP Server Handlers](./features/tcp-server-handlers.md) and
 [HTTP / REST / SSE / WebSocket API](./features/http-api.md).
+
+Queue event subscriptions are the deliberate transport-level exception to
+ordinary request dispatch because they mutate socket-owned state. The TCP
+registry authenticates and records one queue per dedicated subscriber, owns one
+lazy QueueManager bridge for all subscribers, and sends unsolicited
+`type:'event'` envelopes through the same bounded write queues. Clients dispatch
+those envelopes before `reqId` correlation and resubscribe after reconnect.
+The command path is symmetric: each client socket owns an ordered 64 MiB write
+queue, so a partial Bun TCP write is resumed on `drain` before any later frame.
+That queue is cleared, never replayed, when the physical connection changes.
 
 ## Deployment Modes
 
@@ -256,12 +282,20 @@ IoT/edge that must tolerate intermittent connectivity. See
 3. `QueueManager.push()` registers the queue name and delegates to `pushJob()`
    ([`queue-manager/delivery.ts`](../src/application/queue-manager/delivery.ts),
    [`operations/push.ts`](../src/application/operations/push.ts)).
-4. `shardIndex(queue)` selects the shard; under its write lock the job is dedup-
-   checked (custom id / unique key) and enqueued into the `IndexedPriorityQueue`
-   (delayed jobs live there too, ordered by `runAt`, and are additionally
-   tracked in the shard's temporal delayed min-heap).
-5. The job is handed to the `WriteBuffer` (batched) — or written immediately when
-   `durable: true` — and a `job:added` event is emitted. The new `Job` is returned.
+4. `shardIndex(queue)` selects the shard. Under the required ascending write
+   locks, the application inspects custom-ID, unique-key, dependency-completion
+   and optional existing-parent state and builds a mutation plan without
+   exposing the candidate.
+5. When admission can reject synchronously, SQLite commits the candidate and
+   all prerequisite retirement/pin/link changes first. A durable insert,
+   terminal deterministic-ID reuse, dedup replacement, active-key transfer, or
+   parent link therefore fails closed: an error leaves the old durable and RAM
+   state authoritative, with no executable candidate or half-edge.
+6. After commit, the application publishes heap/wait-set membership,
+   `jobIndex`, counters and ownership maps together and emits `pushed`. A plain
+   non-durable insert without admission metadata instead uses the normal 10 ms
+   `WriteBuffer`; `pushJobBatch` applies the same sequence per item and retains
+   its ordered accepted-prefix contract.
 
 **PUSHF** (`FlowProducer`)
 
@@ -316,8 +350,10 @@ mutates both sides of the topology.
 1. Worker reports `ACK`/`ACKB` with the jobId, lock token, and optional result.
 2. Dispatch → `ackJob()` / `ackJobBatch()`
    ([`operations/ack.ts`](../src/application/operations/ack.ts)).
-3. The token is validated against `jobLocks`; a stale token (job already timed out
-   / re-leased) is discarded so a retry is not skipped (`timedOutJobs` guard).
+3. The token is validated against `jobLocks`. The operation then returns
+   extraction evidence from inside the processing lock. If a timeout won after
+   validation, only the exact retired `{ jobId, startedAt, token }` generation
+   is reported as ignored; a newer retry lease is untouched.
 4. The job is removed from `processingShards`, added to `completedJobs`, its result
    stored in the `jobResults` LRU. The completed state and result are written
    directly to SQLite (`markCompleted`/`storeResult`, after flushing any pending
@@ -329,9 +365,12 @@ mutates both sides of the topology.
 **FAIL** (error)
 1. Worker reports `FAIL` with jobId, token, and error message/stack.
 2. Dispatch → `failJob()` ([`operations/ack.ts`](../src/application/operations/ack.ts)).
-3. If `attempts < maxAttempts`, the job is re-enqueued with backoff delay (state
+3. The same post-claim generation check as ACK suppresses a processor failure
+   that arrives after an authoritative timeout. Worker and SandboxedWorker emit
+   no local terminal event for that ignored outcome.
+4. If `attempts < maxAttempts`, the job is re-enqueued with backoff delay (state
    `delayed`); otherwise it moves to the shard's **DLQ** with a `FailureReason`.
-4. State + DLQ row are persisted; `job:failed` (and `job:dead` on exhaustion) is
+5. State + DLQ row are persisted; `job:failed` (and `job:dead` on exhaustion) is
    emitted. Parent-on-child-failure flow semantics may propagate the failure.
 
 See [Job Lifecycle](./features/job-lifecycle.md) for the full state machine.
@@ -361,7 +400,8 @@ contention from the queue's own shard.
 
 bunqueue is single-process but highly concurrent (async I/O, many in-flight
 commands). Consistency comes from per-shard `RWLock`s
-([`src/shared/lock.ts`](../src/shared/lock.ts)) plus a strict acquisition order to
+([`src/shared/rwLock.ts`](../src/shared/rwLock.ts), exported by
+[`src/shared/lock.ts`](../src/shared/lock.ts)) plus a strict acquisition order to
 prevent deadlock. Locks must be acquired in this order:
 
 ```
@@ -376,12 +416,15 @@ const shard = await shards[idx].acquire();    // RWLock write guard
 try { /* mutate shard state */ } finally { shard.release(); }
 ```
 
-`RWLock` supports multiple concurrent readers or one writer, with a
-`LOCK_TIMEOUT_MS` (default 5000ms) bound so a stuck holder cannot wedge a shard
-forever. `Semaphore` bounds worker concurrency. Job **leasing** issues a token on
-pull; ACK/FAIL is rejected if the token no longer matches, which (with
-`stalledCandidates` two-phase detection and `timedOutJobs`) safely handles workers
-that die mid-job. See [Concurrency & Locking](./features/concurrency-and-locking.md).
+`RWLock` supports multiple concurrent readers or one writer. Writer ownership is
+handed off FIFO and reserved before the waiter's promise resolves, so a newly
+arriving operation cannot starve an older batched ACK. `LOCK_TIMEOUT_MS` (default
+5000ms) bounds acquisition so a stuck holder cannot wedge a shard forever.
+`Semaphore` bounds worker concurrency. Job **leasing** issues a token on pull;
+ACK/FAIL is rejected if the token no longer matches. Together with
+`stalledCandidates`, exact `RetiredTimeoutGeneration` records, and post-claim
+outcome evidence, this safely handles workers that die or finish after their
+deadline. See [Concurrency & Locking](./features/concurrency-and-locking.md).
 
 ## Persistence Model
 
@@ -410,10 +453,11 @@ proceed during the writer's flush.
 - **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, bounded
   dependency-completion proofs, results, DLQ, cron, and queue control-state
   back into memory before serving traffic
-  ([`background/recovery.ts`](../src/application/background/recovery.ts)).
+  ([`background/recovery/index.ts`](../src/application/background/recovery/index.ts)).
 
 Persisted tables: `jobs`, `flow_failures`, `dependency_completions`,
-`job_results`, `dlq`, `cron_jobs`, `queue_state` (plus the `migrations`
+`job_results`, `dlq`, `cron_jobs`, `queue_state`, `queue_events`,
+`queue_metrics_meta`, `queue_metric_buckets` (plus the `migrations`
 bookkeeping table) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
 
@@ -452,8 +496,9 @@ lines:
   `subWorkflowRunner.ts`, `waitFor.ts` and `workflowDecisions.ts` own executable
   node semantics and durable decisions.
 - `compensator.ts`, `compensationPass.ts`, `compensationChild.ts`,
-  `compensationSupport.ts`, `unwindPlan.ts` and `rollbackControl.ts` own unwind
-  policy and operator recovery.
+  `compensationSupport.ts`, `compensationClaim.ts`, `unwindPlan.ts` and
+  `rollbackControl.ts` own unwind policy, process-local claim handoff and
+  operator recovery.
 - `store.ts`, `storeListing.ts`, `storeSignals.ts`,
   `storeExecutionCodec.ts` and `storeMaintenance.ts` own SQLite state,
   deterministic listing, signal transactions and retention.
@@ -467,6 +512,13 @@ is stale. This gives at-least-once replay only to work whose external outcome
 is unknown; completed steps/maps and settled compensation outcomes are not
 dispatched again.
 
+An unwind has a separate process-global claim with a completion latch. If a
+force-closed Engine overlaps a replacement Engine, the losing recovery waits
+for the current owner, reloads the row through the replacement store, and
+retries only while durable compensation remains owed. The mechanism prevents a
+same-process lost wake-up; external effects still require stable idempotency
+keys because it is not cross-process coordination.
+
 See [Workflow Engine](./features/workflow-engine.md) and the workflow section in
 [Data Model](./data-model.md).
 
@@ -479,7 +531,7 @@ from `DEFAULT_CONFIG` ([`application/types/config.ts`](../src/application/types/
 | Task | Interval (default) | Purpose |
 | --- | --- | --- |
 | Cleanup + monitoring | `cleanupIntervalMs` = **10 s** | Enforce memory bounds, evict orphans, run monitoring checks |
-| Job timeout sweep | `jobTimeoutCheckMs` = **5 s** | Fail/requeue jobs past their `timeout` |
+| Job timeout deadline | per active `startedAt + timeout` | Fail/requeue at the earliest registered processing deadline |
 | Stall check | `stallCheckMs` = **5 s** | Two-phase detection of unresponsive workers |
 | Lock expiration | `stallCheckMs` = **5 s** | Reclaim leases whose token TTL elapsed |
 | Dependency resolution | `dependencyCheckMs` = **30 s** (safety fallback) | Resolve flow/child deps; fast path is event-driven |
@@ -606,6 +658,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 ### Engineering tooling
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
+- [Documentation Tooling](./features/documentation-tooling.md) — Astro data checks, API-reference generation, and the split Open Graph cover definitions/rendering pipeline under `docs/scripts/`.
 - [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) — Compiler-discovered exact coverage of every callable Queue/Worker/Job/Cron/DLQ/Flow/Workflow facade method in every applicable mode, plus the TCP-only connection pool, without test doubles.
 - [Benchmarking and Performance Evidence](./features/benchmarks.md) — Native measurement contract, evidence levels, runner catalogue, Workflow Engine single/scale harnesses, persistence labels, protocol-cap handling, integrity requirements, and publication checklist.
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.
@@ -623,7 +676,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Rate Limiting & Concurrency Control](./features/rate-limiting-and-concurrency.md) — Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.
 
 ### Persistence & scheduling
-- [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, and queue control-state and serves batched recovery reads on restart.
+- [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, queue control-state, and the bounded per-queue event/metric journal, and serves batched recovery reads on restart.
 - [Scheduler & Cron](./features/scheduler-and-cron.md) — Event-driven server engine that fires recurring cron/interval jobs onto queues, persisting next-run/execution state for crash-safe at-most-once-per-slot scheduling.
 - [Background Tasks](./features/background-tasks.md) — Periodic server-side maintenance: timers for timeouts, stall/lock recovery, DLQ upkeep, dependency resolution, memory-bound cleanup, monitoring, plus startup recovery from SQLite.
 

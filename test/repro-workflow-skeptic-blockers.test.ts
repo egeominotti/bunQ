@@ -129,7 +129,7 @@ describe('every eligible record carries an outcome after abandon', () => {
     const run = await engine.start('parent-svc');
     expect(await settle(engine, run.id, 'compensation-stuck')).toBe('compensation-stuck');
 
-    engine.abandonCompensation(run.id);
+    await engine.abandonCompensation(run.id);
 
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('failed');
@@ -179,8 +179,14 @@ describe('a compensation never runs twice', () => {
 
     // The engine is alive and mid-unwind. recover() lists `compensating` executions,
     // so this is a supported call that used to start a second unwind of the same run.
-    await engine.recover();
-    await Bun.sleep(200);
+    const recovered = await Promise.race([
+      engine.recover(),
+      Bun.sleep(2_000).then(() => {
+        throw new Error('recover() waited for compensation already owned by this Engine');
+      }),
+    ]);
+    expect(recovered.compensating).toBe(0);
+    expect(recovered.total).toBe(0);
 
     release?.();
     expect(await settle(engine, run.id, 'failed')).toBe('failed');
@@ -232,7 +238,10 @@ describe('a compensate handler is bounded by its step timeout', () => {
     const flow = new Workflow('wedged-undo')
       .step('a', async () => ({ ok: true }), {
         timeout: 300,
-        compensate: () => new Promise<void>(() => {}), // never settles
+        compensate: () =>
+          new Promise<void>(() => {
+            // Deliberately never settles.
+          }),
       })
       .step('b', async () => {
         throw new Error('b failed');
@@ -423,12 +432,7 @@ describe('colon-suffixed step names are not mistaken for loop iterations', () =>
     expect(await settle(engine, runInfo.id, 'failed')).toBe('failed');
 
     // Two iterations each, each undone exactly once, in reverse start order.
-    expect(calls).toEqual([
-      'undo-charge:extra',
-      'undo-charge:extra',
-      'undo-charge',
-      'undo-charge',
-    ]);
+    expect(calls).toEqual(['undo-charge:extra', 'undo-charge:extra', 'undo-charge', 'undo-charge']);
     expect(engine.getExecution(runInfo.id)?.rollbackStatus).toBe('completed');
   }, 30_000);
 });

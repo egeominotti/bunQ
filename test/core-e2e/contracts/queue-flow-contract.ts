@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { Queue } from '../../../src/client';
+import { QueueEvents, type Queue } from '../../../src/client';
 import type { Job as InternalJob } from '../../../src/domain/types/job';
 import { CoreE2eHarness, type CoreE2eMode } from '../support/harness';
 import { CoverageTracker, ensure, eventually } from '../support/tracker';
@@ -122,7 +122,10 @@ export async function runQueueFlowContract(mode: CoreE2eMode): Promise<CoverageT
     );
 
     const finishedQueue = harness.queue<{ value: number }>('wait-finished');
-    const finishedWorker = harness.worker(finishedQueue.name, async (job) => job.data.value * 2);
+    const finishedWorker = harness.worker(finishedQueue.name, async (job) => {
+      await Bun.sleep(50);
+      return job.data.value * 2;
+    });
     const finished = await finishedQueue.add('finish', { value: 21 }, { durable: true });
     await eventually(
       () => finishedQueue.getJobState(finished.id),
@@ -133,7 +136,16 @@ export async function runQueueFlowContract(mode: CoreE2eMode): Promise<CoverageT
     const result = await tracker.invoke('Queue', 'waitJobUntilFinished', () =>
       finishedQueue.waitJobUntilFinished(finished.id, emitter, 2_000)
     );
-    ensure(mode === 'tcp' ? result === undefined : result === 42, 'waitJobUntilFinished mismatch');
+    ensure(result === 42, `waitJobUntilFinished returned ${String(result)}`);
+
+    const liveEvents = new QueueEvents(finishedQueue.name, harness.queueOptions());
+    harness.addCleanup(() => liveEvents.close());
+    await liveEvents.waitUntilReady();
+    const live = await finishedQueue.add('finish-live', { value: 22 }, { durable: true });
+    const liveResult = await tracker.invoke('Queue', 'waitJobUntilFinished', () =>
+      finishedQueue.waitJobUntilFinished(live.id, liveEvents, 2_000)
+    );
+    ensure(liveResult === 44, `in-flight waitJobUntilFinished returned ${String(liveResult)}`);
     await finishedWorker.close();
   } finally {
     await harness.close();

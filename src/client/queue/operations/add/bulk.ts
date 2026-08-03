@@ -4,7 +4,7 @@ import type { Job, JobOptions } from '../../../types';
 import { jobId } from '../../../../domain/types/job';
 import { createJobProxy, createSimpleJob } from '../../jobProxy';
 import type { AddContext, ExtendedJobOptions } from '../../types/add';
-import { buildBulkData, buildRepeatOptions, compact, reflectionMeta } from './payload';
+import { buildJobData, buildRepeatOptions, compact, reflectionMeta } from './payload';
 
 export async function addBulk<T>(
   context: AddContext,
@@ -25,7 +25,8 @@ export async function addBulk<T>(
         typeof options.removeOnComplete === 'boolean' ? options.removeOnComplete : false;
       const removeOnFail = typeof options.removeOnFail === 'boolean' ? options.removeOnFail : false;
       return {
-        data: buildBulkData(name, data, options),
+        name,
+        data: buildJobData(data, options),
         priority: options.priority,
         delay: options.delay,
         maxAttempts: options.attempts,
@@ -86,7 +87,8 @@ export async function addBulk<T>(
       typeof options.removeOnComplete === 'boolean' ? options.removeOnComplete : false;
     const removeOnFail = typeof options.removeOnFail === 'boolean' ? options.removeOnFail : false;
     return compact({
-      data: buildBulkData(name, data, options),
+      name,
+      data: buildJobData(data, options),
       priority: options.priority,
       delay: options.delay,
       maxAttempts: options.attempts,

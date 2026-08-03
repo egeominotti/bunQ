@@ -126,6 +126,7 @@ export async function pushJob(
   if (ctx.embedded) {
     const manager = getSharedManager();
     const job = await manager.push(queueName, {
+      name: 'default',
       data,
       ...managerOptions(opts),
       removeOnComplete,
@@ -139,6 +140,7 @@ export async function pushJob(
   const response = await ctx.tcp.send({
     cmd: 'PUSH',
     queue: queueName,
+    name: 'default',
     data,
     ...tcpOptions(opts),
     removeOnComplete,
@@ -154,6 +156,7 @@ export async function pushJob(
 
 export interface PushWithParentOpts {
   queueName: string;
+  name?: string;
   data: unknown;
   opts: JobOptions;
   parentRef: { id: string; queue: string } | null;
@@ -165,12 +168,13 @@ export async function pushJobWithParent(
   ctx: PushContext,
   params: PushWithParentOpts
 ): Promise<string> {
-  const { queueName, data, opts, parentRef, childIds } = params;
+  const { queueName, data, opts, parentRef, childIds, name = 'default' } = params;
   const { removeOnComplete, removeOnFail } = parseRemoveOptions(opts);
   if (ctx.embedded) {
     const manager = getSharedManager();
     const childJobIds = childIds.map((id) => jobId(id));
     const job = await manager.push(queueName, {
+      name,
       data,
       ...managerOptions(opts),
       removeOnComplete,
@@ -193,6 +197,7 @@ export async function pushJobWithParent(
   const response = await ctx.tcp.send({
     cmd: 'PUSH',
     queue: queueName,
+    name,
     data,
     ...tcpOptions(opts),
     removeOnComplete,

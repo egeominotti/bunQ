@@ -4,7 +4,7 @@
  */
 
 import type { Job as DomainJob } from '../domain/types/job';
-import { jobId } from '../domain/types/job';
+import { jobId, normalizeLegacyJobPayload } from '../domain/types/job';
 import { buildJobProperties, buildSerializationMethods } from './jobConversionHelpers';
 import { buildJobOpts } from './jobHelpers';
 import { buildFlowJobCoreMethods } from './flowJobCoreMethods';
@@ -34,15 +34,17 @@ function buildStateResolver(
   id: string,
   callbacks: FlowJobCallbacks | undefined
 ): () => Promise<JobStateType> {
-  if (callbacks?.getState) {
-    return () => callbacks.getState!(id).then(stateAsType);
+  const getState = callbacks?.getState;
+  if (getState) {
+    return () => getState(id).then(stateAsType);
   }
   if (callbacks?.embedded) {
     return () => getSharedManager().getJobState(jobId(id)).then(stateAsType);
   }
-  if (callbacks?.tcp) {
+  const tcp = callbacks?.tcp;
+  if (tcp) {
     return () =>
-      callbacks.tcp!.send({ cmd: 'GetState', id }).then((response) => {
+      tcp.send({ cmd: 'GetState', id }).then((response) => {
         if (response.ok !== true) {
           throw new Error(typeof response.error === 'string' ? response.error : 'GetState failed');
         }
@@ -86,13 +88,27 @@ function defaultSerialization<T>(
   };
 }
 
-/** Extract user data while removing internal flow metadata and the stored job name. */
-export function extractUserDataFromInternal(data: Record<string, unknown>): unknown {
+function stripFlowMetadata(data: unknown): unknown {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return data;
   const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (!key.startsWith('__') && key !== 'name') result[key] = value;
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (!key.startsWith('__')) result[key] = value;
   }
   return result;
+}
+
+/** Decode historical flow envelopes for callers that only have the data field. */
+export function extractUserDataFromInternal(data: Record<string, unknown>): unknown {
+  return stripFlowMetadata(normalizeLegacyJobPayload({ data }).data);
+}
+
+/** Resolve a stored flow node while preserving a modern user `data.name` field. */
+export function extractFlowJobPayload(job: { readonly name?: unknown; readonly data?: unknown }): {
+  name: string;
+  data: unknown;
+} {
+  const payload = normalizeLegacyJobPayload({ name: job.name, data: job.data });
+  return { name: payload.name, data: stripFlowMetadata(payload.data) };
 }
 
 interface FlowJobObjectOptions {
@@ -147,7 +163,11 @@ export function createFlowJobObject<T>(
   if (!snapshot) return result;
   const options = buildJobOpts(snapshot);
   Object.assign(result, buildJobProperties<T>(snapshot, name), { data, opts: options });
-  const serialization = buildSerializationMethods<T>(snapshot, id, name, options);
+  const serialization = buildSerializationMethods<T>(snapshot, {
+    id,
+    name,
+    jobOpts: options,
+  });
   Object.assign(result, {
     toJSON: () => ({ ...serialization.toJSON(), data }),
     asJSON: () => ({ ...serialization.asJSON(), data: JSON.stringify(data) }),

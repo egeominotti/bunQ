@@ -31,6 +31,16 @@ export interface StatsCommand extends BaseCommand {
 }
 export interface MetricsCommand extends BaseCommand {
   readonly cmd: 'Metrics';
+  /** Omitted fields retain the legacy broker-wide metrics response. */
+  readonly queue?: string;
+  readonly type?: 'completed' | 'failed';
+  readonly start?: number;
+  readonly end?: number;
+}
+export interface TrimEventsCommand extends BaseCommand {
+  readonly cmd: 'TrimEvents';
+  readonly queue: string;
+  readonly maxLength: number;
 }
 export interface PrometheusCommand extends BaseCommand {
   readonly cmd: 'Prometheus';

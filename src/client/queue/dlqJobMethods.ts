@@ -93,25 +93,36 @@ export function createDlqJobMethods(ctx: DlqJobContext): PublicJobMethodContext 
       if (ctx.embedded) await manager.fail(jobId(id), ...failEmbeddedArgs(error, token));
       else await send(buildFailCommand(id, error, token), 'FAIL');
     },
-    moveToWait: async (id) => {
+    moveToWait: async (id, token) => {
       if (ctx.embedded) {
         const state = await manager.getJobState(jobId(id));
         if (state === 'failed') return manager.retryDlq(ctx.name, jobId(id)) > 0;
-        if (state === 'active') return manager.moveActiveToWait(jobId(id));
+        if (state === 'active') return manager.moveActiveToWait(jobId(id), token);
         if (state === 'delayed') return manager.promote(jobId(id));
         return state === 'waiting' || state === 'prioritized';
       }
-      const response = await send({ cmd: 'MoveToWait', id }, 'MoveToWait');
+      const response = await send(
+        { cmd: 'MoveToWait', id, ...(token === undefined ? {} : { token }) },
+        'MoveToWait'
+      );
       return response.ok === true;
     },
-    moveToDelayed: async (id, timestamp) => {
+    moveToDelayed: async (id, timestamp, token) => {
       const delay = Math.max(0, timestamp - Date.now());
-      if (ctx.embedded) await manager.moveToDelayed(jobId(id), delay);
-      else await send({ cmd: 'MoveToDelayed', id, delay }, 'MoveToDelayed');
+      if (ctx.embedded) await manager.moveToDelayed(jobId(id), delay, token);
+      else {
+        await send(
+          { cmd: 'MoveToDelayed', id, delay, ...(token === undefined ? {} : { token }) },
+          'MoveToDelayed'
+        );
+      }
     },
-    moveToWaitingChildren: async (id) => {
-      if (ctx.embedded) return manager.moveToWaitingChildren(jobId(id));
-      await send({ cmd: 'MoveToWaitingChildren', id }, 'MoveToWaitingChildren');
+    moveToWaitingChildren: async (id, token) => {
+      if (ctx.embedded) return manager.moveToWaitingChildren(jobId(id), token);
+      await send(
+        { cmd: 'MoveToWaitingChildren', id, ...(token === undefined ? {} : { token }) },
+        'MoveToWaitingChildren'
+      );
       return true;
     },
     waitUntilFinished: async (id, _events, ttl) => {

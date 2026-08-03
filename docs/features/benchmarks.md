@@ -13,10 +13,10 @@ operation under a named topology. A benchmark result is publishable only when
 the workload, persistence mode, process boundary, sample count, aggregation,
 hardware, runtime revision, correctness checks, and known limits are stated.
 
-The current native host campaign is documented in
-[Native Engineering Benchmark — 2026-07-30](../benchmarks/native-engineering-2026-07-30.md).
-It covers queue ingestion and draining, durable writes, TCP latency, horizontal
-scaling, and the Workflow Engine in Embedded and TCP modes.
+The final v2.8.56 native host campaign is documented in
+[Native Engineering Benchmark — 2026-08-03](../benchmarks/native-engineering-2026-08-03.md).
+It covers every maintained queue, transport, Workflow, Flow, dependency,
+event, stress, and million-job runner in Embedded and TCP modes.
 
 ## Evidence levels
 
@@ -152,20 +152,20 @@ separately; raising the limit is not a correction to a default-topology result.
 | `bench/workflow-engine.ts` + `workflow-engine/sample.ts` | Embedded/TCP workflow throughput, latency, signals, rollback | Publication-grade; fresh process/state and JSON |
 | `bench/workflow-engine/scale.ts` | Horizontal Workflow Engine scale curve | Publication-grade when the protocol cap and resource sampling are reported |
 | `bench/fix-impact.ts` + `fix-impact/*` | Before/after recovery, queries, scheduling, indexes, waiters, heap retention | Publication-grade cross-revision harness; correctness travels with timing |
-| `bench/tcp-bench.ts` | Pipelined push, `PUSHB`, sequential RTT | Engineering runner; fresh broker/database per operation, but callers must also verify WAL/SHM cleanup |
+| `bench/tcp-bench.ts` | Pipelined push, `PUSHB`, sequential RTT | Engineering runner; fresh broker/database per operation, derived and reported non-bottlenecking protocol cap, explicit process shutdown, and database/WAL/SHM cleanup |
 | `src/benchmark/million-jobs.bench.ts` | Internal batched push/process lifecycle with two integrity sets | Engineering runner; in-memory internal API, not public Queue or SQLite throughput |
-| `bench/comparison/run.ts` | bunqueue TCP versus BullMQ/Redis | Comparative campaign; requires fresh Redis/broker state and version capture outside the script |
+| `bench/comparison/run.ts` + `comparison/*` | bunqueue TCP/SQLite versus BullMQ/Redis | Comparative campaign; isolated endpoints and run ID; both processing samples require exact accepted/invoked ID equality, zero duplicate delivery, zero failed/nonterminal jobs, and authoritative broker completion before timing ends |
 
 ### Targeted diagnostics
 
 | Runner | Measures | Important limitation |
 | --- | --- | --- |
-| `bench/comprehensive.ts` | Legacy Embedded/TCP curves | Embedded is in-memory; TCP needs an existing server; state is accumulated by scale |
-| `bench/pushbulk-delta.ts` | Public `add`/`addBulk` before/after deltas | Existing server; three repetitions per cell; campaign state grows across scales |
-| `bench/tcp-process-sweep.ts` | Worker concurrency/batch-size knee | Fixed server/port and one sample per point |
+| `bench/comprehensive.ts` | Legacy Embedded/TCP curves | Embedded is in-memory and resets its shared manager per scale; TCP uses the `BENCH_HOST`/`BENCH_PORT` endpoint and grows broker/database state across scales; processing reconciles IDs and authoritative terminal counts before its deadline |
+| `bench/pushbulk-delta.ts` | Public `add`/`addBulk` before/after deltas | Embedded is in-memory; TCP uses the configured external endpoint; three repetitions per cell and campaign state grows across scales; always shuts down the shared manager after reporting or errors |
+| `bench/tcp-process-sweep.ts` | Worker concurrency/batch-size knee | External fresh broker; explicitly forces TCP even under the test preload; configurable host/port/scale/cases; rejects missing or invalid direct-call ports instead of falling back to `6789`; its self-hosted integrity gate resolves the actual dynamic listener port; active lease renewal, accepted/invoked ID equality, authoritative terminal counts and Worker errors fail the sample |
 | `bench/local-autobatch.ts` | Sequential/concurrent add with batching toggle | Fixed port and local server lifecycle |
 | `bench/job-list-perf.ts` | `getJobs` pages across queue sizes | In-process accumulated state; timing diagnostic |
-| `scripts/bench-tcp-batch-notify.ts` | Wakeup latency, drain, worker fairness | Self-hosted fixed port; targeted transport experiment |
+| `scripts/bench-tcp-batch-notify.ts` | Wakeup latency, drain, worker fairness | Self-hosted dynamic port; retains all 100k terminal rows needed by its largest sample; accepted/invoked ID and authoritative terminal reconciliation; deterministic cleanup |
 | `scripts/tcp/bench-flow-parallel.ts` | Flow sibling creation sequential versus parallel | Existing TCP server; small sample |
 | `src/benchmark/dependency-latency.bench.ts` | Parent ACK → child eligible latency | Internal QueueManager microbenchmark |
 | `src/benchmark/algorithm-optimizations.bench.ts` | Algorithmic hot paths | Microbenchmark; mixed operations and legacy claims |
@@ -183,6 +183,45 @@ separately; raising the limit is not a correction to a default-topology result.
 durations are not benchmark claims. `test/fix-impact-benchmark.test.ts` verifies
 the before/after harness contract; it does not establish host performance.
 
+The comparative runner defaults to bunqueue `127.0.0.1:6789` and Redis
+`127.0.0.1:6379`. Reproducible campaigns should instead launch disposable
+native services and set `BENCH_BUNQUEUE_HOST`, `BENCH_BUNQUEUE_PORT`,
+`BENCH_REDIS_HOST`, `BENCH_REDIS_PORT`, and `BENCH_RUN_ID`. The optional
+`BENCH_ITERATIONS` override changes the default 10,000-operation workload and
+must be reported with the result.
+
+The legacy comprehensive and push/bulk-delta TCP runners default to
+`localhost:6789`. Set `BENCH_HOST` and `BENCH_PORT` to target a disposable,
+isolated native broker. Both runners explicitly select TCP mode, including when
+`BUNQUEUE_EMBEDDED` is present in the environment. Their Embedded samples do
+not configure `dataPath` and therefore measure the shared in-memory manager,
+not SQLite persistence. The comprehensive and batch-notify processing samples
+fail instead of reporting throughput unless accepted and invoked IDs match
+exactly and `getJobCounts()` reports the requested completed count with zero
+failed or nonterminal jobs before the deadline. Batch-notify binds its owned
+broker to an operating-system-assigned port so concurrent native tools cannot
+collide with it. Its self-hosted `QueueManager` sets `maxCompletedJobs` to the
+largest 100,000-job scenario, preventing the default 50,000-row retention bound
+from invalidating the authoritative completion check. Comprehensive shuts down
+the shared Embedded manager after every scale, so retained completions from an
+earlier sample cannot consume the 50,000-job window of a later sample.
+Comprehensive uses a 600,000ms processing deadline by default for its durable
+50,000-job TCP sample and prints the effective value. `BENCH_TIMEOUT_MS` may
+override it with a positive safe integer; invalid, zero, negative, fractional,
+or nonnumeric values fail before the campaign starts.
+Push/bulk-delta closes every per-sample Queue and shuts down the shared Embedded
+manager in its entrypoint `finally`. It therefore exits naturally after the
+last median and performs the same teardown when a sample throws.
+
+The TCP serde runner sizes its disposable broker's protocol limit from
+`BENCH_N` and the fixed round-trip sample count so the benchmark's own default
+workload cannot trip the core's operational 10,000-request safety cap. It prints
+the effective limit and whether it was derived. An explicitly supplied
+`RATE_LIMIT_MAX_REQUESTS` is never raised silently, which keeps deliberate cap
+experiments valid. `BENCH_TMP_DIR` selects the disposable database directory;
+each broker is awaited during shutdown and its database, WAL, and SHM files are
+removed before the next sample.
+
 ## Publication checklist
 
 Before updating a number in README or the public site:
@@ -198,6 +237,8 @@ Before updating a number in README or the public site:
 
 ## Related documents
 
+- [Native Engineering Benchmark — 2026-08-03](../benchmarks/native-engineering-2026-08-03.md)
+- [Native Engineering Benchmark — 2026-08-02](../benchmarks/native-engineering-2026-08-02.md)
 - [Native Engineering Benchmark — 2026-07-30](../benchmarks/native-engineering-2026-07-30.md)
 - [Core Fix Impact Benchmark — 2026-07-16](../benchmarks/fix-impact-2026-07-16.md)
 - [Test Isolation and Reproducibility](../testing.md)

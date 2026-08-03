@@ -632,7 +632,10 @@ Server setup, auth and TLS in the [server guide](/guide/server/).
 ```typescript
 import { QueueEvents } from 'bunqueue/client';
 
-const events = new QueueEvents('tasks');
+const events = new QueueEvents('tasks', {
+  connection: { host: '127.0.0.1', port: 6789 },
+});
+await events.waitUntilReady();
 
 events.on('completed', ({ jobId, returnvalue }) => console.log('done', jobId, returnvalue));
 events.on('failed', ({ jobId, failedReason }) => console.error('failed', jobId, failedReason));

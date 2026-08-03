@@ -138,6 +138,12 @@ and Elixir record per-job outcomes in normal processor control flow and expose
 transport/retry failures through telemetry; see the
 [SDK guide](/guide/sdks/#worker-events).
 
+A processing timeout can win while user code is still running. In that race,
+the broker has already recorded the failed attempt. The Bun Worker treats the
+late processor result or exception as an acknowledged no-op: it emits neither
+a second `completed`/`failed` event nor a Worker `error`, and a newer retry lease
+remains free to finish normally.
+
 ## Where to go next
 
 | | |

@@ -1,9 +1,7 @@
 /**
  * Bug #23: job.name is always 'default' for jobs created via upsertJobScheduler
  *
- * When a cron job fires, the pushed job does not include the `name` from the
- * jobTemplate in its data. The worker then falls back to 'default' because
- * it extracts `name` from `job.data.name`.
+ * Scheduler identity, spawned-job name, and user data are stored separately.
  *
  * @see https://github.com/egeominotti/bunqueue/discussions/23
  */
@@ -23,7 +21,7 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
     await queue.close();
   });
 
-  test('cron job data should include name from jobTemplate', async () => {
+  test('cron job should store jobTemplate.name outside user data', async () => {
     const manager = getSharedManager();
 
     await queue.upsertJobScheduler(
@@ -35,13 +33,12 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
       }
     );
 
-    // Check that the cron job data includes the name
     const crons = manager.listCrons();
     const cron = crons.find((c) => c.name === 'my-scheduler');
 
     expect(cron).toBeDefined();
-    const cronData = cron!.data as Record<string, unknown>;
-    expect(cronData.name).toBe('send-email');
+    expect(cron!.jobName).toBe('send-email');
+    expect(cron!.data).toEqual({ to: 'user@test.com' });
   });
 
   test('worker should receive correct job.name from scheduled job', async () => {
@@ -77,7 +74,7 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
     expect(receivedName).toBe('send-newsletter');
   });
 
-  test('cron job data should preserve existing data fields alongside name', async () => {
+  test('cron job data should preserve every existing user field', async () => {
     const manager = getSharedManager();
 
     await queue.upsertJobScheduler(
@@ -93,10 +90,8 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
     const cron = crons.find((c) => c.name === 'data-scheduler');
 
     expect(cron).toBeDefined();
-    const cronData = cron!.data as Record<string, unknown>;
-    expect(cronData.name).toBe('process-data');
-    expect(cronData.customerId).toBe('abc123');
-    expect(cronData.priority).toBe('high');
+    expect(cron!.jobName).toBe('process-data');
+    expect(cron!.data).toEqual({ customerId: 'abc123', priority: 'high' });
   });
 
   test('job.name should default to "default" when jobTemplate has no name', async () => {
@@ -114,8 +109,7 @@ describe('Bug #23: upsertJobScheduler job.name should use jobTemplate.name', () 
     const cron = crons.find((c) => c.name === 'no-name-scheduler');
 
     expect(cron).toBeDefined();
-    const cronData = cron!.data as Record<string, unknown>;
-    // When no name is provided, it should either be undefined or 'default'
-    expect(cronData.name === undefined || cronData.name === 'default').toBe(true);
+    expect(cron!.jobName).toBe('default');
+    expect(cron!.data).toEqual({ foo: 'bar' });
   });
 });

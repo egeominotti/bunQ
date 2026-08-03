@@ -24,6 +24,8 @@ let `mix format` define layout.
   tolerated incoming MessagePack extension.
 - Public option maps are allowlisted. Add the exact wire mapping and tests with
   every new key; never accept and drop an option.
+- Keep ordinary and scheduler job names in top-level `"name"`/`"jobName"`;
+  preserve the complete user `"data"` term and decode only legacy envelopes.
 - `FlowProducer` is plan-then-commit: immutable planner, one `PUSHF`, exact
   snapshot validation, node construction. Do not restore Agents for rollback,
   placeholder parents, per-node `PUSH`, or `UpdateParent`.

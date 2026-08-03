@@ -11,40 +11,11 @@ import type {
 } from '../../types';
 import { toPublicJob } from '../../types';
 import { jobId } from '../../../domain/types/job';
-import type { Job as InternalJob } from '../../../domain/types/job';
 import { createSimpleJob } from '../jobProxy';
-import { buildJobOpts } from '../../jobHelpers';
+import { resolvePublicJobPayload } from '../../jobHelpers';
 import { removeJobDeduplicationKey } from '../../jobDeduplication';
 import { fetchTcpJobRows } from './queryTcpPages';
-
-/** Last failure's error message from the job timeline (#74) */
-function lastFailedError(timeline: InternalJob['timeline'] | undefined): string | undefined {
-  if (!timeline) return undefined;
-  for (let i = timeline.length - 1; i >= 0; i--) {
-    const entry = timeline[i];
-    if (entry.state === 'failed' && entry.error) return entry.error;
-  }
-  return undefined;
-}
-
-/** Build reflection meta (priority/delay/opts/stacktrace) from an internal job shape */
-function metaFromJob(job: InternalJob): {
-  priority: number;
-  delay: number;
-  opts: ReturnType<typeof buildJobOpts>;
-  stacktrace: string[] | null;
-  failedReason: string | undefined;
-} {
-  const opts = buildJobOpts(job);
-  return {
-    priority: job.priority ?? 0,
-    delay: opts.delay ?? 0,
-    opts,
-    // Persisted server-side on FAIL (#74); absent on pre-#74 servers
-    stacktrace: job.stacktrace ?? null,
-    failedReason: lastFailedError(job.timeline),
-  };
-}
+import { metadataFromJob, type TerminalJobView } from '../jobMetadata';
 
 export interface QueryContext {
   name: string;
@@ -82,16 +53,20 @@ export interface QueryContext {
 /** Get a single job by ID */
 export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> | null> {
   if (ctx.embedded) {
-    const job = await getSharedManager().getJob(jobId(id));
+    const manager = getSharedManager();
+    const job = await manager.getJob(jobId(id));
     if (!job) return null;
-    const name = (job.data as { name?: string })?.name ?? 'unknown';
+    const { name, data } = resolvePublicJobPayload(job);
+    const meta = metadataFromJob(job, manager.getResult(job.id));
 
     // Use toPublicJob with full wiring (all callbacks route to the shared manager)
     if (ctx.updateJobData) {
-      const mgr = getSharedManager();
+      const mgr = manager;
       return toPublicJob<T>({
         job,
         name,
+        returnvalue: meta.returnvalue,
+        failedReason: meta.failedReason,
         updateProgress: async (jid, progress, message) => {
           await mgr.updateProgress(jobId(jid), progress, message);
         },
@@ -132,7 +107,7 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
     }
 
     // Fallback to simple job — reflect priority/delay/opts from the real job (#88)
-    return createSimpleJob(String(job.id), name, job.data as T, job.createdAt, {
+    return createSimpleJob(String(job.id), name, data as T, job.createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -140,16 +115,16 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
-      meta: metaFromJob(job),
+      meta,
     });
   }
 
   const response = await ctx.tcp!.send({ cmd: 'GetJob', id });
   if (!response.ok || !response.job) return null;
 
-  const j = response.job as InternalJob & { data: T; progress?: number };
-  const name = (j.data as { name?: string })?.name ?? 'unknown';
-  const result = createSimpleJob(String(j.id), name, j.data, j.createdAt ?? Date.now(), {
+  const j = response.job as TerminalJobView & { data: T; progress?: number };
+  const { name, data } = resolvePublicJobPayload(j);
+  return createSimpleJob(String(j.id), name, data as T, j.createdAt ?? Date.now(), {
     queueName: ctx.name,
     embedded: ctx.embedded,
     tcp: ctx.tcp,
@@ -157,15 +132,8 @@ export async function getJob<T>(ctx: QueryContext, id: string): Promise<Job<T> |
     removeAsync: ctx.removeAsync,
     retryJob: ctx.retryJob,
     getChildrenValues: ctx.getChildrenValues,
-    meta: metaFromJob(j),
+    meta: metadataFromJob(j),
   });
-  if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
-  // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
-  if (typeof j.startedAt === 'number')
-    (result as { processedOn?: number }).processedOn = j.startedAt;
-  if (typeof j.completedAt === 'number')
-    (result as { finishedOn?: number }).finishedOn = j.completedAt;
-  return result;
 }
 
 /** Get job state by ID */
@@ -238,8 +206,8 @@ export function getJobs<T>(ctx: QueryContext, options: GetJobsOptions = {}): Job
   });
 
   return jobs.map((j) => {
-    const name = (j.data as { name?: string })?.name ?? 'unknown';
-    const result = createSimpleJob(String(j.id), name, j.data as T, j.createdAt, {
+    const { name, data } = resolvePublicJobPayload(j);
+    return createSimpleJob(String(j.id), name, data as T, j.createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -247,13 +215,8 @@ export function getJobs<T>(ctx: QueryContext, options: GetJobsOptions = {}): Job
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
+      meta: metadataFromJob(j, manager.getResult(j.id)),
     });
-    // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
-    if (typeof j.startedAt === 'number')
-      (result as { processedOn?: number }).processedOn = j.startedAt;
-    if (typeof j.completedAt === 'number')
-      (result as { finishedOn?: number }).finishedOn = j.completedAt;
-    return result;
   });
 }
 
@@ -270,13 +233,13 @@ export async function getJobsAsync<T>(
 
   // handleGetJobs returns the full internal job per element ({ ...job, state }),
   // so reflect the complete opts via metaFromJob instead of a slim subset (#90).
-  const jobs = rows as unknown as Array<InternalJob & { data: T; progress?: number }>;
+  const jobs = rows as unknown as Array<TerminalJobView & { data: T; progress?: number }>;
 
   const now = Date.now();
   return jobs.map((j) => {
-    const name = (j.data as { name?: string })?.name ?? 'unknown';
+    const { name, data } = resolvePublicJobPayload(j);
     const createdAt = j.createdAt ?? now;
-    const result = createSimpleJob(String(j.id), name, j.data, createdAt, {
+    return createSimpleJob(String(j.id), name, data as T, createdAt, {
       queueName: ctx.name,
       embedded: ctx.embedded,
       tcp: ctx.tcp,
@@ -284,16 +247,7 @@ export async function getJobsAsync<T>(
       removeAsync: ctx.removeAsync,
       retryJob: ctx.retryJob,
       getChildrenValues: ctx.getChildrenValues,
-      meta: metaFromJob(j),
+      meta: metadataFromJob(j),
     });
-    if (j.progress !== undefined) (result as { progress: number }).progress = j.progress;
-    if (j.priority !== undefined) (result as { priority: number }).priority = j.priority;
-    if (j.attempts !== undefined) (result as { attemptsMade: number }).attemptsMade = j.attempts;
-    // Mirror getJob/buildJobProperties: a number maps through, null → undefined (#104)
-    if (typeof j.startedAt === 'number')
-      (result as { processedOn?: number }).processedOn = j.startedAt;
-    if (typeof j.completedAt === 'number')
-      (result as { finishedOn?: number }).finishedOn = j.completedAt;
-    return result;
   });
 }

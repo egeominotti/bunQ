@@ -76,26 +76,40 @@ async function processUntil(req: Req): Promise<void> {
 async function handle(req: Req): Promise<Record<string, unknown>> {
   switch (req.op) {
     case 'connect':
-      connection = { host: String(req.host), port: Number(req.port), ...(req.token ? { token: String(req.token) } : {}) };
+      connection = {
+        host: String(req.host),
+        port: Number(req.port),
+        ...(req.token ? { token: String(req.token) } : {}),
+      };
       return {};
     case 'add': {
-      const job = await queueFor(String(req.queue)).add(String(req.name), req.data, (req.opts ?? {}) as object);
+      const job = await queueFor(String(req.queue)).add(
+        String(req.name),
+        req.data,
+        (req.opts ?? {}) as object
+      );
       // Answer field is jobId: `id` is reserved for stdio correlation.
       return { jobId: job.id };
     }
     case 'addBulk': {
-      const entries = (req.entries as Array<{ name: string; data?: unknown; opts?: object }>).map((e) => ({
-        name: e.name,
-        data: e.data,
-        opts: e.opts,
-      }));
+      const entries = (req.entries as Array<{ name: string; data?: unknown; opts?: object }>).map(
+        (e) => ({
+          name: e.name,
+          data: e.data,
+          opts: e.opts,
+        })
+      );
       const jobs = await queueFor(String(req.queue)).addBulk(entries);
       return { ids: jobs.map((j) => j.id) };
     }
     case 'getJob': {
       // Any queue handle can look a job up by id; jobs are not queue-scoped here.
       const job = await queueFor('conf-lookup').getJob(String(req.jobId));
-      return { job: job ? { id: job.id, name: job.name, data: job.data, stacktrace: job.stacktrace } : null };
+      return {
+        job: job
+          ? { id: job.id, name: job.name, data: job.data, stacktrace: job.stacktrace }
+          : null,
+      };
     }
     case 'getJobByCustomId': {
       const job = await queueFor(String(req.queue)).getJobByCustomId(String(req.customId));
@@ -121,8 +135,18 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       await queueFor('conf-lookup').promoteJob(String(req.jobId));
       return {};
     case 'upsertScheduler': {
-      const repeat = req.repeat as { pattern?: string; every?: number; limit?: number; tz?: string };
-      await queueFor(String(req.queue)).upsertJobScheduler(String(req.schedulerId), repeat, {});
+      const repeat = req.repeat as {
+        pattern?: string;
+        every?: number;
+        limit?: number;
+        tz?: string;
+      };
+      const template = (req.template ?? {}) as { name?: string; data?: unknown; opts?: object };
+      await queueFor(String(req.queue)).upsertJobScheduler(
+        String(req.schedulerId),
+        repeat,
+        template
+      );
       return {};
     }
     case 'getScheduler':
@@ -131,14 +155,19 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       await queueFor('conf-lookup').removeJobScheduler(String(req.schedulerId));
       return {};
     case 'waitForJob':
-      return { result: await queueFor('conf-lookup').waitForJob(String(req.jobId), Number(req.timeoutMs)) };
+      return {
+        result: await queueFor('conf-lookup').waitForJob(String(req.jobId), Number(req.timeoutMs)),
+      };
     case 'getDlqCount':
       return { count: (await queueFor(String(req.queue)).getDlq()).length };
     case 'retryDlq':
       return { count: await queueFor(String(req.queue)).retryDlq() };
     case 'hello': {
-      const hello = (await queueFor('conf-lookup').connection.hello()) as { protocolVersion?: number };
-      return { protocolVersion: hello.protocolVersion };
+      const hello = (await queueFor('conf-lookup').connection.hello()) as {
+        protocolVersion?: number;
+        capabilities?: string[];
+      };
+      return { protocolVersion: hello.protocolVersion, capabilities: hello.capabilities };
     }
     case 'process':
       await processUntil(req);

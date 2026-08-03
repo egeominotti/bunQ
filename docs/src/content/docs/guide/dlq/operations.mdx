@@ -125,8 +125,8 @@ the entry has retry budget remaining.
 ```typescript
 queue.retryDlq();                                          // retry everything
 queue.retryDlq('job-123');                                 // retry one job
-queue.retryDlqByFilter({ reason: 'stalled' });             // synchronous embedded form
-const filtered = await queue.retryDlqByFilterAsync({ reason: 'stalled' }); // TCP too
+queue.retryDlqByFilter({ reason: 'stalled' });             // TCP is fire-and-forget
+const filtered = await queue.retryDlqByFilterAsync({ reason: 'stalled' }); // authoritative count
 const n = await queue.retryDlqAsync();                     // retry and get the count (TCP too)
 ```
 

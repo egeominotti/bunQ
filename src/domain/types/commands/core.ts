@@ -5,6 +5,7 @@ import type { BaseCommand } from './base';
 export interface PushCommand extends BaseCommand {
   readonly cmd: 'PUSH';
   readonly queue: string;
+  readonly name?: string;
   readonly data: unknown;
   readonly priority?: number;
   readonly delay?: number;
@@ -84,6 +85,7 @@ export interface AckCommand extends BaseCommand {
   readonly id: string;
   readonly result?: unknown;
   readonly token?: string;
+  readonly removeOnComplete?: boolean;
 }
 
 export interface AckBatchCommand extends BaseCommand {
@@ -91,6 +93,7 @@ export interface AckBatchCommand extends BaseCommand {
   readonly ids: string[];
   readonly results?: unknown[];
   readonly tokens?: string[];
+  readonly removeOnCompletes?: Array<boolean | null>;
 }
 
 export interface FailCommand extends BaseCommand {
@@ -100,4 +103,5 @@ export interface FailCommand extends BaseCommand {
   readonly token?: string;
   readonly unrecoverable?: boolean;
   readonly stack?: string[];
+  readonly removeOnFail?: boolean;
 }

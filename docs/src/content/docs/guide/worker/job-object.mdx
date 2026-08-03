@@ -84,7 +84,7 @@ def process(job):
 $worker = new Worker('queue', function (Bunqueue\Job $job) {
     $job->id();            // Job ID
     $job->name();          // Job name
-    $job->data();          // Job data (without the reserved name key)
+    $job->data();          // User payload, including any user-owned name key
     $job->attemptsMade();  // Attempts consumed so far
 
     $job->updateProgress(50, 'Halfway done');  // Report progress
@@ -101,7 +101,7 @@ $worker = new Worker('queue', function (Bunqueue\Job $job) {
 worker := bunqueue.NewWorker("queue", func(job *bunqueue.Job) (any, error) {
     job.ID()           // Job ID
     job.Name()         // Job name
-    job.Data()         // Job data (without the reserved name key)
+    job.Data()         // User payload, including any user-owned name key
     job.AttemptsMade() // Attempts consumed so far
 
     job.UpdateProgress(50, "Halfway done") // Report progress
@@ -120,7 +120,7 @@ let worker = Worker::new(
     |job| {
         job.id();            // Job ID
         job.name();          // Job name
-        job.data();          // Job data (without the reserved name key)
+        job.data();          // User payload, including any user-owned name key
         job.attempts_made(); // Attempts consumed so far
 
         let _ = job.update_progress(50.0, Some("Halfway done")); // Report progress
@@ -153,6 +153,47 @@ worker =
 </TabItem>
 </Tabs>
 
+## Pull and process a job manually
+
+The Bun client can disable the automatic loop and explicitly acquire one job:
+
+```typescript
+const worker = new Worker<{ value: number }, number>(
+  'calculations',
+  async (job) => job.data.value * 2,
+  { autorun: false }
+);
+
+const job = await worker.getNextJob();
+if (job) {
+  job.name;  // the job name, separate from user data
+  job.data;  // { value: number }
+  job.token; // broker lease token when useLocks is enabled
+
+  await worker.processJobManually(job);
+}
+```
+
+`processJobManually(job)` reuses the lease tracked by `getNextJob()`, so the
+token argument can be omitted. If you pass an explicit token, it must match the
+current delivery.
+
+## Ownership-changing methods inside a processor
+
+When a Bun processor calls `retry()`, `changeDelay()`, `moveToWait()`,
+`moveToDelayed()`, or `moveToWaitingChildren()`, the confirmed broker
+transition consumes that delivery generation. Returning or throwing afterward
+does not send a second ACK or FAIL and does not emit a contradictory local
+terminal event. A rejected transition still follows normal processor failure
+handling.
+
+`job.discard()` is synchronous for API compatibility, but the Worker tracks and
+awaits its broker command internally. Graceful shutdown therefore waits for the
+discard, repeated calls send one command, and a stale processor's lease token
+cannot discard a newer active generation. An already-retired job is silent; an
+actual discard transport or engine failure emits one Worker `error` with
+`context: 'discard'` and leaves broker recovery in charge.
+
 ## Where to go next
 
 | | |
@@ -165,4 +206,3 @@ worker =
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

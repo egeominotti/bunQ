@@ -8,37 +8,62 @@ import { removeJobDeduplicationKey } from './jobDeduplication';
 export function buildFlowJobMoveMethods(runtime: FlowJobRuntime) {
   const { id, embedded, tcp } = runtime;
   return {
-    moveToCompleted: async (returnValue: unknown) => {
+    moveToCompleted: async (returnValue: unknown, token?: string) => {
       if (embedded) {
-        await getSharedManager().ack(jobId(id), returnValue);
+        await getSharedManager().ack(jobId(id), returnValue, token);
         return null;
       }
-      if (tcp) assertFlowTcpOk(await tcp.send({ cmd: 'ACK', id, result: returnValue }), 'ACK');
+      if (tcp) {
+        assertFlowTcpOk(
+          await tcp.send({
+            cmd: 'ACK',
+            id,
+            result: returnValue,
+            ...(token === undefined ? {} : { token }),
+          }),
+          'ACK'
+        );
+      }
       return null;
     },
-    moveToFailed: async (error: Error) => {
+    moveToFailed: async (error: Error, token?: string) => {
       if (embedded) {
-        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error));
+        await getSharedManager().fail(jobId(id), ...failEmbeddedArgs(error, token));
         return;
       }
-      if (tcp) assertFlowTcpOk(await tcp.send(buildFailCommand(id, error)), 'FAIL');
+      if (tcp) assertFlowTcpOk(await tcp.send(buildFailCommand(id, error, token)), 'FAIL');
     },
-    moveToWait: async () => {
-      if (embedded) return getSharedManager().moveActiveToWait(jobId(id));
+    moveToWait: async (token?: string) => {
+      if (embedded) return getSharedManager().moveActiveToWait(jobId(id), token);
       if (!tcp) return false;
-      assertFlowTcpOk(await tcp.send({ cmd: 'MoveToWait', id }), 'MoveToWait');
+      assertFlowTcpOk(
+        await tcp.send({ cmd: 'MoveToWait', id, ...(token === undefined ? {} : { token }) }),
+        'MoveToWait'
+      );
       return true;
     },
-    moveToDelayed: async (timestamp: number) => {
+    moveToDelayed: async (timestamp: number, token?: string) => {
       const delay = Math.max(0, timestamp - Date.now());
-      if (embedded) return void (await getSharedManager().moveToDelayed(jobId(id), delay));
+      if (embedded) return void (await getSharedManager().moveToDelayed(jobId(id), delay, token));
       if (!tcp) return;
-      assertFlowTcpOk(await tcp.send({ cmd: 'MoveToDelayed', id, delay }), 'MoveToDelayed');
+      assertFlowTcpOk(
+        await tcp.send({
+          cmd: 'MoveToDelayed',
+          id,
+          delay,
+          ...(token === undefined ? {} : { token }),
+        }),
+        'MoveToDelayed'
+      );
     },
-    moveToWaitingChildren: async () => {
-      if (embedded) return getSharedManager().moveToWaitingChildren(jobId(id));
+    moveToWaitingChildren: async (token?: string) => {
+      if (embedded) return getSharedManager().moveToWaitingChildren(jobId(id), token);
       if (!tcp) return false;
-      const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
+      const response = await tcp.send({
+        cmd: 'MoveToWaitingChildren',
+        id,
+        ...(token === undefined ? {} : { token }),
+      });
       assertFlowTcpOk(response, 'MoveToWaitingChildren');
       return true;
     },

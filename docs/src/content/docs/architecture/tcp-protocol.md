@@ -25,6 +25,13 @@ Each message is a **length-prefixed MessagePack frame**:
 
 **Maximum frame size:** 64 MB
 
+Both directions preserve frame ordering under socket backpressure. Bun's TCP
+write is unbuffered and may accept only a prefix, so the reference client and
+server retain the exact unwritten tail and place later frames behind it until
+`drain`. Each queue belongs to one physical socket and is discarded on close;
+commands are never blindly replayed after reconnect because the broker may
+already have applied them.
+
 ## TCP Pipelining
 
 Pipelining allows multiple commands to be sent without waiting for responses, dramatically improving throughput.
@@ -100,13 +107,16 @@ On connect, client and server negotiate protocol version:
 
 ```typescript
 // Client → Server
-{ cmd: 'Hello', protocolVersion: 2, capabilities: ['pipelining'] }
+{ cmd: 'Hello', protocolVersion: 3, capabilities: ['pipelining', 'separate-job-name'] }
 
 // Server → Client
-{ ok: true, protocolVersion: 2, capabilities: ['pipelining'], server: 'bunqueue', version: '2.x.y' }
+{ ok: true, protocolVersion: 3, capabilities: ['pipelining', 'separate-job-name'], server: 'bunqueue', version: '2.x.y' }
 ```
 
-Protocol v2 supports pipelining. Older clients without `Hello` default to v1 (sequential).
+Protocol v3 supports pipelining and a separate top-level job `name`, leaving
+the user-owned `data` value unchanged. The server accepts clients that omit
+`Hello`; legacy job input without top-level `name` is decoded only at the
+inbound protocol boundary.
 
 ## Connection Lifecycle
 
@@ -178,9 +188,9 @@ Token comparison uses constant-time algorithm to prevent timing attacks.
 | `PUSHB` | Add batch | `{ cmd, queue, jobs }` | `{ ok, ids }` |
 | `PULL` | Get single job | `{ cmd, queue, timeout? }` | `{ ok, job, token? }` |
 | `PULLB` | Get batch | `{ cmd, queue, count, timeout? }` | `{ ok, jobs, tokens? }` |
-| `ACK` | Complete job | `{ cmd, id, result?, token? }` | `{ ok }` |
-| `ACKB` | Complete batch | `{ cmd, ids, results?, tokens? }` | `{ ok }` |
-| `FAIL` | Fail job | `{ cmd, id, error?, token? }` | `{ ok }` |
+| `ACK` | Complete job | `{ cmd, id, result?, token? }` | `{ ok, data?: { applied, reason } }` |
+| `ACKB` | Complete batch | `{ cmd, ids, results?, tokens? }` | `{ ok, data?: { ignoredIds, ignoredIndices } }` |
+| `FAIL` | Fail job | `{ cmd, id, error?, token? }` | `{ ok, data?: { applied, reason } }` |
 
 ### Query Commands
 
@@ -226,6 +236,7 @@ Token comparison uses constant-time algorithm to prevent timing attacks.
 | Command | Description |
 |---------|-------------|
 | `Cron` | Add scheduled job |
+| `CronGet` | Get one scheduled job |
 | `CronDelete` | Remove scheduled job |
 | `CronList` | List all cron jobs |
 

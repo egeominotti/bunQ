@@ -4,6 +4,8 @@ import type { HeapEntry } from '../types/priorityQueue';
 export function comparePriorityEntries(a: HeapEntry, b: HeapEntry): number {
   if (a.priority !== b.priority) return b.priority - a.priority;
 
+  if (a.lifo !== b.lifo) return a.lifo ? -1 : 1;
+
   if (a.lifo && b.lifo) {
     if (b.jobId > a.jobId) return 1;
     if (b.jobId < a.jobId) return -1;

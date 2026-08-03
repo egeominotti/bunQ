@@ -66,11 +66,14 @@ export async function failJob(
   ctx: AckContext,
   options: FailJobOptions = {}
 ): Promise<void> {
-  const { unrecoverable = false, stack, failureReason } = options;
+  const { unrecoverable = false, stack, failureReason, removeOnFail } = options;
   const processingIndex = processingShardIndex(jobId);
   const job = await withWriteLock(ctx.processingLocks[processingIndex], () => {
     const job = ctx.processingShards[processingIndex].get(jobId);
-    if (job) ctx.processingShards[processingIndex].delete(jobId);
+    if (job) {
+      options.onClaim?.(job);
+      ctx.processingShards[processingIndex].delete(jobId);
+    }
     return job;
   });
 
@@ -111,7 +114,7 @@ export async function failJob(
       if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
         job.timeline.push({ state: 'waiting', timestamp: now, attempt: job.attempts + 1 });
       }
-    } else if (job.removeOnFail) {
+    } else if (job.removeOnFail || removeOnFail === true) {
       ctx.jobIndex.delete(jobId);
       ctx.storage?.commitFailedJob(jobId, null, flowFailure);
       ctx.totalFailed.value++;
@@ -144,6 +147,7 @@ export async function failJob(
     timestamp: Date.now(),
     error,
     data: job.data,
+    terminal: !wasRetried,
   });
 
   if (wasRetried) {

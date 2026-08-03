@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Treat successful `ACK`/`FAIL` responses with `applied: false` as an
+  authoritative broker timeout outcome. The Worker now releases the held lease
+  without emitting a false `completed`/`failed` event, incrementing a counter,
+  or reporting the expected no-op as an error.
+- Negotiate wire protocol v3 and advertise the `separate-job-name`
+  capability in `Hello`.
+- Send ordinary job names through top-level `name`, preserve mixed user `data`
+  values, decode legacy data envelopes, and use `jobName` for scheduler jobs.
+  `Job::data()` now returns `mixed` so lists, scalars, and null remain intact.
 - Compile flow trees and chains locally with preallocated portable IDs and
   commit the complete reciprocal topology through one atomic `PUSHF`.
 - Validate returned snapshots against the exact requested ID and queue set;

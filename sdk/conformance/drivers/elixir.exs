@@ -91,7 +91,16 @@ defmodule Bunqueue.Conformance.ElixirDriver do
 
   defp handle(%{"op" => "upsertScheduler"} = request, state) do
     {queue, state} = queue_for(state, request["queue"])
-    ok!(Queue.upsert_scheduler(queue, request["schedulerId"], request["repeat"]))
+
+    ok!(
+      Queue.upsert_scheduler(
+        queue,
+        request["schedulerId"],
+        request["repeat"],
+        request["template"] || %{}
+      )
+    )
+
     {%{}, state}
   end
 
@@ -124,7 +133,10 @@ defmodule Bunqueue.Conformance.ElixirDriver do
 
   defp handle(%{"op" => "hello"}, state) do
     {queue, state} = queue_for(state, "conf-lookup")
-    {%{"protocolVersion" => ok!(Queue.hello(queue))["protocolVersion"]}, state}
+    hello = ok!(Queue.hello(queue))
+
+    {%{"protocolVersion" => hello["protocolVersion"], "capabilities" => hello["capabilities"]},
+     state}
   end
 
   defp handle(%{"op" => "process"} = request, state) do
@@ -184,6 +196,7 @@ defmodule Bunqueue.Conformance.ElixirDriver do
   defp reached?(queue, until) do
     counts = ok!(Queue.get_job_counts(queue))
     dlq = if Map.has_key?(until, "dlq"), do: length(ok!(Queue.dlq(queue))), else: 0
+
     (counts["completed"] || 0) >= (until["completed"] || 0) and
       (counts["failed"] || 0) >= (until["failed"] || 0) and
       dlq >= (until["dlq"] || 0)
@@ -205,7 +218,9 @@ defmodule Bunqueue.Conformance.ElixirDriver do
 
   defp queue_for(state, name) do
     case Map.fetch(state.queues, name) do
-      {:ok, queue} -> {queue, state}
+      {:ok, queue} ->
+        {queue, state}
+
       :error ->
         {:ok, connection} = Bunqueue.Connection.start_link(state.connection)
         queue = Queue.new(name, connection, true)

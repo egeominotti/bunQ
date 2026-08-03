@@ -4,10 +4,8 @@ import type { JobLocation } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { shardIndex } from '../../shared/hash';
 import type { MapLike, SetLike } from '../../shared/lru';
-import {
-  type DependencyCompletionTracker,
-  releaseDependencyCompletionPins,
-} from '../dependencyCompletions';
+import type { DependencyCompletionTracker } from '../dependencyCompletions';
+import type { RetiredTimeoutGeneration } from '../types/background';
 
 export interface CustomIdContext {
   storage: SqliteStorage | null;
@@ -16,7 +14,9 @@ export interface CustomIdContext {
   completedJobsData: MapLike<JobId, Job>;
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
-  timedOutJobs?: SetLike<JobId>;
+  timedOutJobs?: MapLike<JobId, RetiredTimeoutGeneration>;
+  retiredTimeoutLeaseTokens?: MapLike<string, RetiredTimeoutGeneration>;
+  retiredCronLeaseTokens?: MapLike<JobId, string>;
   jobResults: MapLike<JobId, unknown>;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
@@ -25,12 +25,18 @@ export interface CustomIdContext {
 export type CustomIdResult =
   | { skip: true; existingJob: Job }
   | { skip: true; existingId: JobId }
-  | { skip: false; id: JobId };
+  | { skip: false; id: JobId; retirement?: CustomIdRetirement };
+
+export interface CustomIdRetirement {
+  readonly completed: boolean;
+  readonly dlqQueue?: string;
+  readonly dependencyCompletion: boolean;
+}
 
 /**
- * Enforce custom-ID idempotency while the caller holds the target shard lock.
- * Live generations are returned unchanged; terminal generations are retired
- * before the deterministic ID is admitted again.
+ * Inspect custom-ID idempotency while the caller holds the target shard lock.
+ * Terminal retirement is deliberately deferred until persistence commits, so
+ * a rejected durable generation cannot destroy the previous one.
  */
 export function handleCustomId(
   input: JobInput,
@@ -63,28 +69,19 @@ export function handleCustomId(
     }
   }
 
-  if (ctx.completedJobs.has(id)) {
-    ctx.completedJobs.delete(id);
-    ctx.completedJobsData.delete(id);
-    ctx.jobResults.delete(id);
-    ctx.jobIndex.delete(id);
-    ctx.storage?.deleteJob(id);
-  }
+  const completed = ctx.completedJobs.has(id);
 
   const terminalLocation = ctx.jobIndex.get(id);
+  let dlqQueue: string | undefined;
   if (terminalLocation?.type === 'dlq') {
     const terminalShardIdx = shardIndex(terminalLocation.queueName);
     if (!lockedShardIndexes.has(terminalShardIdx)) {
       throw new Error('Terminal custom ID shard must be locked before reuse');
     }
-    const terminalShard = ctx.shards[terminalShardIdx];
-    terminalShard.removeFromDlq(terminalLocation.queueName, id);
-    ctx.jobIndex.delete(id);
-    // deleteDlqEntry removes every persisted generation for this deterministic
-    // id. The fresh jobs row is inserted only after this retirement completes.
-    ctx.storage?.deleteDlqEntry(id);
+    dlqQueue = terminalLocation.queueName;
   }
 
+  let dependencyCompletion = false;
   if (ctx.depCompletions?.has(id)) {
     const hasUnresolvedConsumers = ctx.shards.some(
       (shard) => (shard.getJobsWaitingFor(id)?.size ?? 0) > 0
@@ -92,15 +89,40 @@ export function handleCustomId(
     if (hasUnresolvedConsumers) {
       throw new Error(`Custom ID ${String(id)} still has unresolved dependency consumers`);
     }
-    releaseDependencyCompletionPins([id], ctx);
-    ctx.storage?.deleteDependencyCompletion(id);
-    ctx.depCompletions.delete(id);
+    dependencyCompletion = true;
   }
 
-  // A durable jobs row may outlive its in-memory tracking after an interrupted
-  // cleanup. The storage insert upserts that orphan without adding a DELETE to
-  // every custom-ID push.
+  const retirement =
+    completed || dlqQueue || dependencyCompletion
+      ? { completed, dlqQueue, dependencyCompletion }
+      : undefined;
+  return { skip: false, id, retirement };
+}
+
+/** Publish custom-ID ownership after the matching storage admission succeeds. */
+export function commitCustomIdAdmission(
+  input: JobInput,
+  decision: Exclude<CustomIdResult, { skip: true }>,
+  ctx: CustomIdContext
+): void {
+  const { id, retirement } = decision;
+  if (retirement?.completed) {
+    ctx.completedJobs.delete(id);
+    ctx.completedJobsData.delete(id);
+    ctx.jobResults.delete(id);
+    ctx.jobIndex.delete(id);
+  }
+  if (retirement?.dlqQueue) {
+    const terminalShard = ctx.shards[shardIndex(retirement.dlqQueue)];
+    terminalShard.removeFromDlq(retirement.dlqQueue, id);
+    ctx.jobIndex.delete(id);
+  }
+  if (retirement?.dependencyCompletion) ctx.depCompletions?.delete(id);
+
+  // A recycled deterministic ID starts with no timeout or retired-lease state.
+  const timedOutGeneration = ctx.timedOutJobs?.get(id);
   ctx.timedOutJobs?.delete(id);
-  ctx.customIdMap.set(input.customId, id);
-  return { skip: false, id };
+  if (timedOutGeneration?.token) ctx.retiredTimeoutLeaseTokens?.delete(timedOutGeneration.token);
+  ctx.retiredCronLeaseTokens?.delete(id);
+  if (input.customId) ctx.customIdMap.set(input.customId, id);
 }

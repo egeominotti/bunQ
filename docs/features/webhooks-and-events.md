@@ -1,6 +1,6 @@
 # Webhooks, Events & Job Logs
 
-> **Category:** Observability · **Source:** `src/application/webhookManager.ts`, `src/domain/types/webhook.ts`, `src/application/eventsManager.ts`, `src/application/jobLogsManager.ts`, `src/application/clientTracking.ts`
+> **Category:** Observability · **Source:** `src/application/webhookManager.ts`, `src/domain/types/webhook.ts`, `src/application/eventsManager.ts`, `src/application/jobLogsManager.ts`, `src/application/clientTracking.ts`, `src/infrastructure/server/tcp/connections.ts`, `src/client/events.ts`
 
 ## Purpose
 
@@ -20,6 +20,13 @@ Does NOT own:
 
 - Event *emission* — the queue engine calls `eventsManager.broadcast(...)` and operations call `webhookManager.trigger(...)`; this module never decides when a job changes state. See [Job Lifecycle](./job-lifecycle.md) and [Core Queue Engine](./core-queue-engine.md).
 - Transport/fan-out plumbing — SSE/WebSocket streaming, the `/webhooks/*` HTTP routes, and the `Stats`/`Metrics` payloads live in [HTTP / REST / SSE / WebSocket API](./http-api.md) and [Stats, Metrics & Monitoring](./stats-and-monitoring.md).
+
+Every `EventsManager.broadcast` is also consumed by the manager-owned
+`QueueTelemetryJournal`. That subscriber persists a bounded per-queue
+lifecycle journal for `trimEvents`, even when no user listener or webhook is
+registered. Terminal completed/failed events update a separate minute-metrics
+store; retry-attempt failures stay in the journal but do not increment failed
+metrics.
 - Persistence — webhooks and job logs are in-memory only; nothing here is written to SQLite. See [Persistence](./persistence.md).
 - Stall recovery — `clientTracking` only *triggers* recovery (resets heartbeats); the stall detector in [Background Tasks](./background-tasks.md) reclaims orphaned jobs.
 
@@ -94,19 +101,23 @@ function forceReleaseClientJobs(clientId, ctx): number;        // lock-free fall
 | `AddLog` | `id`, `message`, `level?` | Append a job log line |
 | `GetLogs` | `id`, `start?`, `end?` | Read logs (inclusive slice) |
 | `ClearLogs` | `id`, `keepLogs?` | Clear / trim logs |
+| `SubscribeEvents` | `queue` | Select one queue's live `JobEvent` stream on this connection |
+| `UnsubscribeEvents` | — | Stop that stream without closing the connection |
 
-Command shapes: `src/domain/types/command.ts:447` (webhooks), `:382` (logs), `:499` (`ClearLogs`). Handlers: `src/infrastructure/server/handlers/monitoring.ts:37` (`AddLog`/`GetLogs`), `:219` (webhooks), `:309` (`ClearLogs`). Routing: `src/infrastructure/server/handlerRoutes.ts:339`.
+Command shapes: `src/domain/types/commands/monitoring.ts:3-28` (logs and webhooks) and `src/domain/types/commands/extended.ts:3-7` (`ClearLogs`). Handlers: `src/infrastructure/server/handlers/monitoring/health.ts:24-50` (`AddLog`/`GetLogs`), `src/infrastructure/server/handlers/monitoring/webhooks.ts:13-100`, and `src/infrastructure/server/handlers/monitoring/operations.ts:21-27` (`ClearLogs`). Routing: `src/infrastructure/server/handler-routes/monitoring.ts:45-87`.
 
 ### HTTP endpoints (thin wrappers over the TCP commands)
 
 - `GET /webhooks` · `POST /webhooks` · `DELETE /webhooks/:id` · `PUT /webhooks/:id/enabled` (`httpRouteResources.ts:85`).
-- `GET /jobs/:id/logs` · `POST /jobs/:id/logs` · `DELETE /jobs/:id/logs` (`httpRouteJobs.ts:161`).
+- `GET /jobs/:id/logs` · `POST /jobs/:id/logs` · `DELETE /jobs/:id/logs` (`http-routes/jobAdvanced.ts:54-75`).
 
 ### Events
 
 - **Webhook events** (`WEBHOOK_EVENTS`, `webhook.ts:16`): `job.pushed`, `job.started`, `job.completed`, `job.failed`, `job.progress`. `job.stalled` is a legacy member of the `WebhookEvent` type kept only for backward compatibility with stored webhooks — it is never emitted and is rejected on new webhooks (`webhook.ts:24`).
-- **Internal `EventType`** (`queue.ts:111`): `pushed`, `pulled`, `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`, `duplicated`, `retried`, `waiting-children`, `drained`, `paused`, `resumed`.
-- **Dashboard events** emitted via `setDashboardEmit`: `webhook:fired`, `webhook:failed`, `webhook:enabled`, `webhook:disabled` (from `WebhookManager`); `webhook:added` / `webhook:removed` are emitted by the handler through `queueManager.emitDashboardEvent` (`monitoring.ts:241`).
+- **Internal `EventType`** (`src/domain/types/queue.ts:129-145`): `pushed`, `pulled`, `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`, `duplicated`, `retried`, `waiting-children`, `drained`, `paused`, `resumed`.
+- **TCP event envelope**: `{ type: 'event', event: JobEvent }`, sent only to
+  authenticated connections subscribed to `event.queue`.
+- **Dashboard events** emitted via `setDashboardEmit`: `webhook:fired`, `webhook:failed`, `webhook:enabled`, `webhook:disabled` (from `WebhookManager`); `webhook:added` / `webhook:removed` are emitted by the handler through `queueManager.emitDashboardEvent` (`handlers/monitoring/webhooks.ts:31-64`).
 
 ## Data Models
 
@@ -126,15 +137,15 @@ interface WebhookPayload {           // webhook.ts:66 — the JSON POST body
   data?: unknown; error?: string; progress?: number;
 }
 
-interface JobEvent {                 // queue.ts:130 — internal broadcast shape
+interface JobEvent {                 // src/domain/types/queue.ts:148-162 — internal broadcast shape
   eventType: EventType; queue: string; jobId: string; timestamp: number;
   data?: unknown; error?: string; progress?: number; prev?: string; delay?: number;
 }
 
-interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message: string; } // worker.ts:63
+interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message: string; } // src/domain/types/worker.ts:63-67
 ```
 
-> Note: `queue.ts:144` also declares a second, unused `Webhook` interface (with `EventType[]` events). The authoritative type used by `WebhookManager` is the one in `webhook.ts`.
+> Note: `src/domain/types/queue.ts:164-170` also declares a second, unused `Webhook` interface (with `EventType[]` events). The authoritative type used by `WebhookManager` is the one in `src/domain/types/webhook.ts`.
 
 ## Business Logic / Control Flow
 
@@ -146,7 +157,13 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 4. For `Completed`, all completion waiters for that `jobId` are resolved and the map entry deleted (`eventsManager.ts:149`).
 5. If webhooks are enabled, `mapEventToWebhook` translates the `EventType` (`pushed→job.pushed`, `pulled→job.started`, `completed→job.completed`, `failed→job.failed`; everything else → `null`/no webhook) and calls `webhookManager.trigger(...)` fire-and-forget (`eventsManager.ts:164`).
 
-`job.progress` does NOT flow through `broadcast`/`mapEventToWebhook`; it is triggered directly from `updateJobProgress` via `webhookManager.trigger('job.progress', ...)` (`src/application/operations/jobManagement.ts:117`).
+The TCP registry is one of those subscribers while at least one remote queue
+subscription exists. It filters by the socket's selected queue, frames the
+event once for all matching sockets, and writes through each socket's bounded
+`SocketWriteQueue`. `QueueEvents` maps that internal shape to its typed public
+payloads; TCP Workers reuse the same dedicated subscription for `stalled`.
+
+`job.progress` is broadcast to internal subscribers, including the telemetry journal and live queue-event transports, by `updateJobProgress`. Because `mapEventToWebhook` intentionally has no progress mapping, the same operation separately calls `webhookManager.trigger('job.progress', ...)` (`src/application/operations/jobManagement.ts:170-188`).
 
 ### Webhook delivery
 
@@ -156,12 +173,12 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 
 ### Job logs
 
-`addJobLog` returns `false` if the job isn't in `jobIndex` (so logs can't be added to unknown/evicted jobs). Otherwise it appends `createLogEntry(message, level)` and trims the per-job array to the most recent `maxLogsPerJob` entries via `splice` (`jobLogsManager.ts:33`). `GetLogs` returns the full array unless `start`/`end` are supplied, in which case it slices `[start .. end]` inclusive and still reports the untrimmed `count` (`monitoring.ts:48`). `clearJobLogs` deletes the entry entirely when `keepLogs` is unset/≤0, else keeps the most recent N (`jobLogsManager.ts:46`).
+`addJobLog` returns `false` if the job isn't in `jobIndex` (so logs can't be added to unknown/evicted jobs). Otherwise it appends `createLogEntry(message, level)` and trims the per-job array to the most recent `maxLogsPerJob` entries via `splice` (`jobLogsManager.ts:19-37`). `GetLogs` returns the full array unless `start`/`end` are supplied, in which case it slices `[start .. end]` inclusive and still reports the untrimmed `count` (`handlers/monitoring/health.ts:39-50`). `clearJobLogs` deletes the entry entirely when `keepLogs` is unset/≤0, else keeps the most recent N (`jobLogsManager.ts:46-56`).
 
 ### Client tracking & disconnect release
 
 - `registerClientJob` (on PULL) and `unregisterClientJob` (on ACK/FAIL) maintain `clientJobs: Map<clientId, Set<jobId>>`, deleting the set when empty (`clientTracking.ts:14`).
-- On disconnect, the TCP server calls `releaseClientJobsWithRetry` (3 attempts, exponential backoff 100/200/400 ms) → `releaseClientJobs`; on persistent lock failure it falls back to `forceReleaseClientJobs` (`src/infrastructure/server/tcp.ts:318`). SSE disconnect calls `releaseClientJobs` directly (`sseHandler.ts:347`).
+- On disconnect, the TCP server calls `releaseClientJobsWithRetry` (3 attempts, exponential backoff 100/200/400 ms) → `releaseClientJobs`; on persistent lock failure it falls back to `forceReleaseClientJobs` (`src/infrastructure/server/tcp/connections.ts:87-111`, retry loop in `src/infrastructure/server/tcp/clientRelease.ts:4-22`). SSE disconnect calls `releaseClientJobs` directly (`sseHandler.ts:255-260`).
 - `releaseClientJobs` runs in three phases: (1) collect lock-free, skipping non-`processing` jobs and jobs whose lock has `renewalCount > 0`; (2) group by processing shard then queue shard; (3) acquire **shardLock → processingLock** and call `releaseJobToQueue` (`clientTracking.ts:47`).
 - `releaseJobToQueue` removes the job from the processing shard, deletes its lock, releases concurrency/uniqueKey/groupId resources, then either **discards** cron `preventOverlap` jobs (uniqueKey `cron:*` → deleted, not requeued, fixing the #73 "starts right away on reconnect" bug, `clientTracking.ts:222`) or re-queues it with `startedAt=null` and re-indexed as `{ type: 'queue' }`.
 
@@ -176,7 +193,7 @@ interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message
 ## Edge Cases & Failure Modes
 
 - **SSRF protection:** `validateWebhookUrl` (on by default; disabled via `validateUrls: false`) rejects non-http(s) schemes, URLs > 2048 chars, localhost variants, private IPv4 (`10.*`, `172.16–31.*`, `192.168.*`), link-local `169.254.*`, `0.*`, `127.*`, **IPv4-mapped / IPv4-compatible IPv6** whose embedded IPv4 is loopback/private (`extractMappedIpv4` unwraps the dotted `::ffff:127.0.0.1`, the URL-parser-normalized hex form `[::ffff:7f00:1]`, **and** the deprecated `::`-prefixed compatible form `[::127.0.0.1]`/`[::7f00:1]` before the octet check), **IPv6 ULA `fc00::/7` and link-local `fe80::/10`** plus the unspecified `::` (`checkBlockedIpv6`), and cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `*.internal`) (`webhookValidation.ts:42`).
-- **Dead-event rejection:** `AddWebhook` rejects events not in `WEBHOOK_EVENTS`, so a webhook can't be created against an event that would silently never fire (`monitoring.ts:230`).
+- **Dead-event rejection:** `AddWebhook` rejects events not in `WEBHOOK_EVENTS`, so a webhook can't be created against an event that would silently never fire (`handlers/monitoring/webhooks.ts:13-29`).
 - **Delivery is best-effort / fire-and-forget:** failures are logged and counted but never block job processing; there is no persistent retry queue and webhooks are not persisted to SQLite, so they are lost on restart.
 - **Fixed 10 s per-request timeout** via `AbortSignal.timeout(10000)`; linear (not exponential) inter-attempt backoff.
 - **`hasEnabledWebhooks` / `getStats` are O(1)** thanks to the `enabledCount` running counter maintained in `add`/`remove`/`setEnabled` (`webhookManager.ts:39`).

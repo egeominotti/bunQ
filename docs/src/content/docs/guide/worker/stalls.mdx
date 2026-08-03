@@ -97,8 +97,11 @@ claim that says "this worker owns this job". The lock is renewed by heartbeats
 (`lockDuration` sets its TTL) and must be presented when completing or failing
 the job. Delivery is exclusive while the lease is valid. After expiry, the
 broker may redeliver while the stale handler is still running, but its old token
-can no longer acknowledge the job. This is at-least-once processing, so handlers
-must still be idempotent.
+can no longer acknowledge the job. A redelivery gets a fresh token and a new
+local processing generation even when the same Worker instance receives it.
+Only that current generation is heartbeated and allowed to publish an automatic
+outcome; completion or cleanup from the stale handler cannot remove the new
+lease. This is at-least-once processing, so handlers must still be idempotent.
 
 Locks matter most in **server mode** with multiple workers. In embedded mode with a single process you can trade the safety for a bit of throughput:
 

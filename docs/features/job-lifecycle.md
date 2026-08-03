@@ -1,6 +1,6 @@
 # Job Lifecycle (push / pull / ack / fail)
 
-> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/application/dependencyCompletions.ts`, `src/domain/types/job.ts`, `src/domain/queue/waiterManager.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pushBatch.ts`, `src/application/operations/pushAdmission.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ack/`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/application/dependencyCompletions.ts`, `src/domain/types/jobs/model.ts`, `src/domain/job/`, `src/domain/queue/waiterManager.ts`
 
 ## Purpose
 
@@ -22,7 +22,7 @@ Does NOT own:
 
 - The priority-queue / heap data structures themselves — see [Data Structures](./data-structures.md).
 - Shard ownership, locking primitives, and `releaseJobResources` mechanics — see [Core Queue Engine](./core-queue-engine.md) and [Concurrency & Locking](./concurrency-and-locking.md).
-- Lock token creation/verification and stall/timeout sweeps — see [Worker Registry & Management](./workers-management.md) and [Background Tasks](./background-tasks.md). The `QueueManager` wraps these operations with lock verification and stall-retry recovery; the raw functions here are lock-agnostic.
+- Lock token creation/verification, stall sweeps, and timeout deadline scheduling — see [Worker Registry & Management](./workers-management.md) and [Background Tasks](./background-tasks.md). The `QueueManager` wraps these operations with lock verification and stall-retry recovery; the raw functions here are lock-agnostic.
 - DLQ storage and retry policy — see [Dead Letter Queue](./dead-letter-queue.md).
 - Dependency-graph processing after completion — see [FlowProducer & Job Dependencies](./flow-producer.md).
 - Persistence batching / WAL — see [Persistence](./persistence.md).
@@ -31,7 +31,7 @@ Does NOT own:
 
 Internal:
 
-- `src/domain/types/job.ts` — `Job`, `JobInput`, `createJob`, `calculateBackoff`, `canRetry`, `isReady`, `isExpired`, `normalizeStacktrace`, `MAX_TIMELINE_ENTRIES`, `JOB_DEFAULTS`.
+- `src/domain/types/job.ts` is the stable facade: model types live in `src/domain/types/jobs/model.ts`, while creation, ids, locks, payload normalization, state predicates/backoff, and constants are split under `src/domain/job/`.
 - `src/domain/queue/shard.ts` — per-shard `getQueue`, `incrementQueued`/`decrementQueued`, `tryAcquireConcurrency`/`tryAcquireRateLimit`, `releaseJobResources`, `addToDlq`, `waitingDeps`/`waitingChildren`, `notify`/`notifyBatch`/`waitForJob` (delegated to `WaiterManager`). See [Core Queue Engine](./core-queue-engine.md).
 - `src/domain/queue/waiterManager.ts` — long-poll notification fan-out.
 - `src/shared/lock.ts` — `withWriteLock`, `RWLock`. See [Concurrency & Locking](./concurrency-and-locking.md).
@@ -51,17 +51,19 @@ Exported operation functions (real signatures):
 ```ts
 // push.ts
 export async function pushJob(queue: string, input: JobInput, ctx: PushContext): Promise<Job>;
+
+// pushBatch.ts (re-exported by push.ts)
 export async function pushJobBatch(queue: string, inputs: JobInput[], ctx: PushContext): Promise<JobId[]>;
 
 // pull.ts
 export async function pullJob(queue: string, timeoutMs: number, ctx: PullContext): Promise<Job | null>;
 export async function pullJobBatch(queue: string, count: number, timeoutMs: number, ctx: PullContext): Promise<Job[]>;
 
-// ack.ts
-export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Promise<void>;
-export async function failJob(jobId: JobId, error: string | undefined, ctx: AckContext, unrecoverable?: boolean, stack?: string[]): Promise<void>;
-export async function ackJobBatch(jobIds: JobId[], ctx: AckContext): Promise<void>;
-export async function ackJobBatchWithResults(items: Array<{ id: JobId; result: unknown }>, ctx: AckContext): Promise<void>;
+// ack/completion.ts, ack/failure.ts, ack/batch.ts
+export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext, options?: CompletionOptions): Promise<boolean>;
+export async function failJob(jobId: JobId, error: string | undefined, ctx: AckContext, options?: FailJobOptions): Promise<void>;
+export async function ackJobBatch(jobIds: JobId[], ctx: AckContext, leaseTokens?: Array<string | undefined>): Promise<boolean[]>;
+export async function ackJobBatchWithResults(items: Array<{ id: JobId; result: unknown; token?: string } & CompletionOptions>, ctx: AckContext): Promise<boolean[]>;
 
 // jobStateTransitions.ts
 export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
@@ -69,21 +71,21 @@ export async function changeWaitingDelay(jobId: JobId, delay: number, ctx: JobMa
 export async function moveToWaitingChildren(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
 ```
 
-Exported context interfaces: `PushContext` (`push.ts`), `PullContext`
-(`pullStateTransition.ts`, re-exported by `pull.ts`), `AckContext` (`ack.ts`),
+Exported context interfaces: `PushContext` (`pushContext.ts`, re-exported by `push.ts`), `PullContext`
+(`pullStateTransition.ts`, re-exported by `pull.ts`), `AckContext` (`src/application/types/ack.ts:12-49`, re-exported by the `ack.ts` facade),
 plus the batch helpers `ExtractedJob`/`BatchContext`/`FinalizeContext` and
 `groupByProcShard`/`extractJobs`/`groupByQueueShard`/`releaseResources`/
 `finalizeBatchAck` in `ackHelpers.ts`.
 
-Job-type helpers exported from `job.ts`: `createJob`, `generateJobId`, `jobId`, `calculateBackoff`, `canRetry`, `isReady`, `isDelayed`, `isExpired`, `isTimedOut`, `normalizeStacktrace`, `createJobLock`, `renewLock`, `isLockExpired`, and the `JobState` const enum.
+Job-type helpers re-exported from the `src/domain/types/job.ts` facade: `createJob`, `generateJobId`, `jobId`, `calculateBackoff`, `canRetry`, `isReady`, `isDelayed`, `isExpired`, `isTimedOut`, `normalizeStacktrace`, `createJobLock`, `renewLock`, `isLockExpired`, and the `JobState` const enum.
 
-TCP commands handled (routed in `src/infrastructure/server/handlerRoutes.ts:105`): **`PUSH`**, **`PUSHB`**, **`PULL`**, **`PULLB`**, **`ACK`**, **`ACKB`**, **`FAIL`**. The batch commands (`PUSHB`/`PULLB`/`ACKB`) map to `pushJobBatch`/`pullJobBatch`/`ackJobBatch`(`WithResults`).
+TCP commands handled (routed in `src/infrastructure/server/handler-routes/jobs.ts:52-76`): **`PUSH`**, **`PUSHB`**, **`PULL`**, **`PULLB`**, **`ACK`**, **`ACKB`**, **`FAIL`**. The batch commands (`PUSHB`/`PULLB`/`ACKB`) map to `pushJobBatch`/`pullJobBatch`/`ackJobBatch`(`WithResults`).
 
 Events broadcast (`EventType`): `pushed`, `pulled`, `completed`, `failed`, `Retried`, `Duplicated`, plus `waiting` (from `moveActiveToWait`). Dashboard-only events: `job:waiting-children`, `job:expired`, `job:deduplicated`, `batch:pushed`, `batch:pulled`, `dlq:added`, `flow:failed`, `ratelimit:rejected`, `concurrency:rejected`.
 
 ## Data Models
 
-See [data-model](../data-model.md) for full definitions. The central shape is `Job` (`job.ts:81`). Most relevant fields for the lifecycle:
+See [data-model](../data-model.md) for full definitions. The central shape is `Job` (`src/domain/types/jobs/model.ts:41-90`). Most relevant fields for the lifecycle:
 
 - Scheduling: `runAt` (createdAt + delay; also the next-retry timestamp), `startedAt`, `completedAt`.
 - Retry: `attempts`, `maxAttempts` (default `3`), `backoff` (default `1000` ms), `backoffConfig` (`{ type: 'fixed' | 'exponential'; delay; maxDelay? }`).
@@ -91,23 +93,56 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 - Dedup / identity: `uniqueKey`, `customId`.
 - Dependencies / flow: `dependsOn`, `parentId`, `failParentOnFailure`, `removeDependencyOnFailure`, `ignoreDependencyOnFailure`, `continueParentOnFailure`.
 - Failure: `stacktrace` (capped at `stackTraceLimit`, default `10`).
-- `timeline: JobTimelineEntry[]` — in-memory only, NOT persisted, capped at `MAX_TIMELINE_ENTRIES = 20`.
+- `timeline: JobTimelineEntry[]` — capped at `MAX_TIMELINE_ENTRIES = 20` and persisted as a MessagePack BLOB on lifecycle transitions, so it survives SQLite recovery.
 
-`JobInput` (`job.ts:171`) is the wire/SDK input; `createJob` (`job.ts:370`) fills defaults from `JOB_DEFAULTS` (`job.ts:251`). Note `removeOnComplete`/`removeOnFail` are coerced via `toBoolean` because the wire boundary is not runtime-type-safe (#90, `job.ts:295`).
+`JobInput` (`src/domain/types/jobs/model.ts:92-137`) is the wire/SDK input; `createJob` (`src/domain/job/create.ts:77-118`) fills defaults from `JOB_DEFAULTS` (`src/domain/job/constants.ts:5-13`). Note `removeOnComplete`/`removeOnFail` are coerced via `toBoolean` because the wire boundary is not runtime-type-safe (#90, `src/domain/job/create.ts:34-45`).
 
-`JobState` enum values: `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed` (`job.ts:20`). The additional logical states `waiting-children` (dependency gate) and `paused` (queue-level) are represented via shard membership (`waitingDeps`) and `QueueState.paused`, not the enum.
+`JobState` enum values: `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed` (`src/domain/types/jobs/model.ts:4-11`). The additional logical states `waiting-children` (dependency gate) and `paused` (queue-level) are represented via shard membership (`waitingDeps`/`waitingChildren`) and `QueueState.paused`, not the enum.
 
 ## Business Logic / Control Flow
 
-### PUSH (`pushJob`, `push.ts:251`)
+### PUSH (`pushJob`, `src/application/operations/push.ts`)
 
-1. Compute `idx = shardIndex(queue)`; take `shardLocks[idx]` (write).
-2. **customId idempotency** (`handleCustomId`, `customId.ts`): if `input.customId` maps to a live job, skip and return the existing id. On terminal reuse, a completed generation is evicted from its completed collections and `jobs` row, while a DLQ generation is removed from its owning shard, DLQ counter, `jobIndex`, and SQLite before the new generation is admitted. The recycled id therefore starts fresh as `waiting` with exactly one observable generation; any stale timeout marker is also cleared to avoid resurrecting the #33/#75 duplicate-execution guard.
-3. `createJob(id, queue, input, now)`.
-4. **Deduplication** (`handleDeduplication`, `push.ts:133`): only if `job.uniqueKey` is set. Strategies — `replace` (remove old, register new), `extend` (reset TTL, return existing), default BullMQ-style (return existing if it is still waiting or active; broadcast `Duplicated`). If the existing job is completed/failed, a fresh insert is allowed.
-5. **Insert** (`insertJobToShard`): if `dependsOn` has unmet entries (not all in `completedJobs`/`depCompletions`), any already-present removed-completion proofs are durably pinned first, then the job goes to `shard.waitingDeps` and every dependency is registered (timeline `waiting-children`). This protects a late parent that finds one child complete but must still wait for another. Otherwise the job is pushed to the priority queue with `incrementQueued`; initial timeline state is `delayed` (if `runAt > now`), `prioritized` (if `priority > 0`), else `waiting`. `jobIndex` is set to `{ type: 'queue', shardIdx, queueName }`.
-6. `shard.notify(queue)` wakes one long-poll waiter for that queue, or records one coalesced retry hint when none is waiting.
-7. After the lock: persist via `storage.insertJob(job, input.durable)`, bump counters, broadcast `pushed`. **Durable** jobs bypass the 10 ms write buffer (immediate write); `pushJobBatch` (`push.ts:323`) splits durable jobs into a separate `insertJobsBatch(durableJobs, true)` so `addBulk` does not silently downgrade the durability guarantee (`push.ts:384`).
+1. Compute `idx = shardIndex(queue)` and acquire every target, custom-ID owner,
+   and parent shard write lock required by the request in ascending order.
+2. **Inspect custom-ID idempotency** (`handleCustomId`, `customId.ts`). A live
+   generation is an idempotent skip. Reusing a completed, DLQ, or
+   payload-free dependency-completion generation produces a retirement plan;
+   it does not delete the old generation yet.
+3. Create the candidate job, then inspect unique-key deduplication
+   (`pushDeduplication.ts`). Default/extend suppression returns the existing id.
+   Replace records the exact pending or active owner without changing heap,
+   index, counter, or key ownership.
+4. Prepare the candidate's initial state and any removed-completion pins without
+   publishing them (`pushInsert.ts`). A normal candidate is
+   `waiting`/`prioritized`/`delayed`, while an unresolved dependency candidate
+   is `waiting-children`. A `parentId` also prepares the child/parent topology.
+5. **Commit persistence before visibility whenever admission can reject.** A
+   durable insert, terminal-ID retirement, completion pin, dedup replacement,
+   active-key transfer, or parent link goes through the matching SQLite
+   admission transaction. Terminal cleanup (`jobs`, result, DLQ,
+   dependency-completion and flow-failure rows), completion pins, the candidate
+   insert, and parent updates commit together where applicable. If SQLite
+   rejects the transaction, including `SQLITE_FULL`, the old generation and all
+   RAM structures remain unchanged and the candidate is neither queryable nor
+   executable.
+6. Publish the committed plan to RAM: retire the old custom-ID generation,
+   transfer dedup ownership, install dependency pins/edges, insert into the heap
+   or wait set, update `jobIndex` and counters, then notify the queue. This
+   publication contains no expected throwing persistence operation. Dashboard
+   callbacks are guarded so observability cannot turn an accepted job into a
+   client-visible rejection.
+7. Plain non-durable inserts without admission metadata keep the throughput
+   path: publish in RAM and enqueue the row in the 10 ms `WriteBuffer`. Durable
+   inserts bypass that buffer. Only accepted jobs increment push telemetry and
+   emit `pushed`.
+
+`pushJobBatch` lives in `src/application/operations/pushBatch.ts` and preserves
+ordered accepted-prefix semantics. Each item completes the same admission
+sequence before the next item begins. If item N is rejected, items before N
+remain accepted and recoverable according to their durability mode; item N and
+all later items remain absent. A rejection of the first durable item therefore
+leaves no phantom batch in either Embedded or TCP mode.
 
 ### PULL (`pullJob`, `pull.ts`)
 
@@ -146,7 +181,7 @@ the jobs actually delivered.
 rule in reverse. It skips entirely if a management operation already claimed
 the job. Lock order shard → processing matches the documented hierarchy.
 
-### ACK (`ackJob`, `ack.ts:75`)
+### ACK (`ackJob`, `src/application/operations/ack/completion.ts:11-93`)
 
 1. Under `processingLocks[procIdx]`, remove the job from `processingShards`; if absent, **throw** `Job not found or not in processing state` (the `QueueManager` catches this to recover stall-retried jobs — see Edge Cases).
 2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId, job.id)` frees the concurrency slot/group and releases the unique key only if this job generation still owns it.
@@ -162,18 +197,18 @@ the job. Lock order shard → processing matches the documented hierarchy.
    queries.
 5. Bump counters, broadcast `completed`, call `onJobCompleted` (dependency processing), and re-schedule repeatable jobs via `onRepeat` if under `repeat.limit`.
 
-### FAIL (`failJob`, `ack.ts:193`)
+### FAIL (`failJob`, `src/application/operations/ack/failure.ts:63-175`)
 
 1. Extract from `processingShards` (throw if absent, as above).
-2. `attempts++`; if a `stack` is supplied, store `normalizeStacktrace(stack, stackTraceLimit)` BEFORE branching so both a retry and a DLQ entry carry it (#74, `ack.ts:218`). Append `failed` timeline entry.
+2. `attempts++`; if a `stack` is supplied, store `normalizeStacktrace(stack, stackTraceLimit)` BEFORE branching so both a retry and a DLQ entry carry it (#74, `ack/failure.ts:79-84`). Append `failed` timeline entry.
 3. Under `shardLocks[idx]`, `releaseJobResources`, then branch:
    - **Retry** (`!unrecoverable && canRetry(job)`, i.e. `attempts < maxAttempts`): `runAt = now + calculateBackoff(job)`, push back to queue, `incrementQueued(..., isDelayed=true, ...)`, `storage.updateForRetry`, set `wasRetried`. Appends a `waiting` timeline entry for the next attempt.
    - **removeOnFail**: delete from index + disk, bump `totalFailed`, release customId.
-   - **Terminal → DLQ** (`moveFailedJobToDlq`, `ack.ts:156`): `addToDlq(job, MaxAttemptsExceeded, error)`, set `jobIndex` to `dlq`, `saveDlqEntry`, `deleteJob`, bump `totalFailed`, emit `dlq:added` (+ `flow:failed` if `parentId`).
+   - **Terminal → DLQ** (`moveFailedJobToDlq`, `ack/failure.ts:17-43`): `addToDlq(job, MaxAttemptsExceeded, error)`, set `jobIndex` to `dlq`, atomically commit the DLQ row plus job-row removal (and any flow-failure outbox record), bump `totalFailed`, emit `dlq:added` (+ `flow:failed` if `parentId`).
 4. Broadcast `failed`; if retried, also broadcast `Retried` (prev `failed`).
 5. Flow propagation when NOT retried: `failParentOnFailure` → `onChildTerminalFailure`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure`/`continueParentOnFailure` → `onChildDependencyOption`.
 
-`calculateBackoff` (`job.ts:453`): fixed = `delay * (0.8 + rand*0.4)` (±20% jitter); exponential / default = `base * 2^attempts * (0.5 + rand)` (±50% jitter), capped at `backoffConfig.maxDelay ?? DEFAULT_MAX_BACKOFF` (1 h).
+`calculateBackoff` (`src/domain/job/state.ts:37-54`): fixed = `delay * (0.8 + rand*0.4)` (±20% jitter); exponential / default = `base * 2^attempts * (0.5 + rand)` (±50% jitter), capped at `backoffConfig.maxDelay ?? DEFAULT_MAX_BACKOFF` (1 h).
 
 ### Batch ack (`ackHelpers.ts`)
 
@@ -181,6 +216,11 @@ the job. Lock order shard → processing matches the documented hierarchy.
 `ackJob` for ≤4 ids. Larger batches: `groupByProcShard` → `extractJobs` (one
 lock per processing shard, parallel) → `groupByQueueShard` →
 `releaseResources` (one lock per queue shard) → `finalizeBatchAck`.
+Both paths return one extraction boolean per input position. `QueueManagerAck`
+classifies every `false` only after the processing lock: an exact retired
+timeout/cron generation becomes `ignored`, while an arbitrary missing job or
+wrong token remains an error. Positional evidence prevents duplicate job IDs
+from hiding which generation was retired.
 `removeOnComplete` entries use the same delete-plus-proof transaction in both
 optimized variants, including result-bearing ACKB. For retained jobs,
 `jobResults.set` happens before `completedJobs.add`, so a live dependent never
@@ -206,9 +246,23 @@ Locks are per-shard `RWLock`s acquired via `withWriteLock` and are **sequential,
   transition; persistence and delivery bookkeeping run after release.
 - `ackJob` / `failJob`: `processingLocks[procIdx]` (extract) released, then `shardLocks[idx]` (release resources / requeue / DLQ).
 
-Batch ack acquires each processing-shard lock and each queue-shard lock at most once, in parallel across distinct shards (`O(shards)` not `O(n)` — `ack.ts:303`).
+Batch ack acquires each processing-shard lock and each queue-shard lock at most once, in parallel across distinct shards (`O(shards)` not `O(n)` — `src/application/operations/ack/batch.ts:23-74`).
 
-Lock-token verification and stall-retry recovery live in `queue-manager/ack.ts`; the **#101 grace window** (`isExpiredButOwned`: an expired-but-still-ours lock on a still-processing job is accepted, not lost) lives in `queue-manager/delivery.ts`. Together they wrap these raw functions. `WaiterManager` partitions waiters by queue, tracks the active count in O(1), and consumes entries through a head cursor. Notifications clear the waiter's timer immediately; surplus notifications coalesce into one edge-triggered `pending` bit instead of accumulating notification debt. The array is compacted only after the consumed prefix reaches 1,024 entries and at least half the array. ACK/fail and every path that releases concurrency/group ownership notify the released job's queue, so an unrelated queue cannot steal the wake-up.
+Lock-token verification and stall-retry recovery live in
+`queue-manager/ack.ts`; the shared `assertLeaseToken` generation check lives in
+`queue-manager/delivery.ts`. Whenever a lease record exists, ACK, FAIL, both
+ACKB forms, and active manual moves require its exact token in embedded and TCP
+mode. Batch ownership is preflighted before the first extraction. An expired
+but still-current token is accepted (#101), while a token from an older
+processing generation is rejected. With no lease, an administrative active
+transition remains valid. `WaiterManager` partitions waiters by queue, tracks
+the active count in O(1), and consumes entries through a head cursor.
+Notifications clear the waiter's timer immediately; surplus notifications
+coalesce into one edge-triggered `pending` bit instead of accumulating
+notification debt. The array is compacted only after the consumed prefix
+reaches 1,024 entries and at least half the array. ACK/fail and every path that
+releases concurrency/group ownership notify the released job's queue, so an
+unrelated queue cannot steal the wake-up.
 
 Long-poll waiters also accept an optional `AbortSignal`. TCP creates one signal
 per connection and aborts it before disconnect-time lease release. Aborting
@@ -224,11 +278,20 @@ detached CLI, and durable recovery paths.
 ## Edge Cases & Failure Modes
 
 - **Idempotent push**: a live `customId` returns the existing job (no insert). A recycled terminal `customId` evicts the stale completed row or DLQ entry first, including persisted terminal state and counters, so state queries expose only the new generation; timeout markers are cleared too (#33/#75).
-- **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`push.ts:200`); the returned placeholder carries the correct existing id (`push.ts:286`).
+- **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`src/application/operations/pushDeduplication.ts:96-110`); the returned placeholder carries the correct existing id (`src/application/operations/push.ts:76-85`).
 - **Pull loss prevention**: `requeueJob` restores any job that fails to move to processing.
 - **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered. Their SQLite row (or pending buffered INSERT) is deleted before the heap/counter/index removal, preventing restart resurrection while keeping the shard critical section synchronous.
 - **markActive / persistence errors** during pull are swallowed — in-memory `processingShards` is the source of truth; SQLite recovery reconciles on restart.
-- **Late / stale ACK**: `ackJob` throws when the job is no longer in processing. `QueueManagerAck` recovers via `completeStallRetriedJob` to prevent duplicate execution (#33/#75), EXCEPT when the job is in `timedOutJobs` (a timeout sweep re-queued it for retry, which must win — the late ack is discarded in `queue-manager/ack.ts`).
+- **Late processor outcomes**: the timeout transition records the exact claimed
+  processing generation (`jobId`, `startedAt`, and lease token when present)
+  while holding the processing lock. ACK and FAIL classify again after their
+  own claim point, closing the validation-to-claim race. An exact retired
+  timeout or lock-expired `cron:` lease returns
+  `{ applied: false, reason: 'already-finalized' }`; ACKB additionally returns
+  ordered `ignoredIds` and `ignoredIndices`. Workers suppress local terminal
+  events for those outcomes. Missing IDs, missing/wrong tokens, and duplicate
+  outcomes against ordinary completed jobs still throw and cannot release a
+  newer lease.
 - **Retry vs. terminal**: `canRetry` uses `attempts < maxAttempts` after `attempts++`; `unrecoverable=true` (from `failJob`) forces the terminal path regardless of attempts.
 - **Stack trace persistence** (#74): the last failure's stack is normalized and capped at `stackTraceLimit` before branching; an absent stack (old clients) leaves any prior stack intact; `stackTraceLimit: 0` yields `null`.
 - **Memory bounds**: `timeline` is capped at 20 entries (older transitions are not recorded once full). `completedJobs`, `jobResults`, `customIdMap` are bounded LRU/FIFO collections (eviction in [Core Queue Engine](./core-queue-engine.md) / [Background Tasks](./background-tasks.md)).
@@ -250,7 +313,7 @@ These operations read no environment variables directly; behavior is driven by p
 | `JobInput.priority` | `0` | Higher = dequeued sooner; >0 sets `prioritized` timeline state. |
 | `JobInput.delay` | `0` | Adds to `runAt`; >0 → `delayed`. |
 | `JobInput.ttl` | `null` | Expiry; expired jobs skipped on pull. |
-| `JobInput.timeout` | `null` | Processing timeout (enforced by stall/timeout sweep, not here). |
+| `JobInput.timeout` | `null` | Processing timeout enforced by the next-deadline scheduler. |
 | `JobInput.removeOnComplete` / `removeOnFail` | `false` | Drop job on success / failure. |
 | `JobInput.durable` | `false` | Bypass the ~10 ms write buffer (immediate disk write). |
 | `JobInput.stackTraceLimit` | `10` | Max stored stack lines. |
@@ -271,5 +334,5 @@ These operations read no environment variables directly; behavior is driven by p
 - [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — pull-time gating.
 - [Client SDK: Worker](./client-worker-sdk.md) — locks, heartbeats, long poll.
 - [TCP Server Command Handlers](./tcp-server-handlers.md) — `PUSH`/`PULL`/`ACK`/`FAIL` routing.
-- [Background Tasks](./background-tasks.md) — stall/timeout sweeps, cleanup.
+- [Background Tasks](./background-tasks.md) — timeout deadlines, stall sweeps, cleanup.
 - [architecture](../architecture.md) · [data-model](../data-model.md)

@@ -2,6 +2,8 @@
  * Cron job domain types
  */
 
+import { normalizeJobPayload } from '../job/payload';
+
 /** Deduplication config for cron-spawned jobs */
 export interface CronDedup {
   readonly ttl?: number;
@@ -27,6 +29,7 @@ export interface CronJobOptions {
 /** Cron job definition */
 export interface CronJob {
   readonly name: string;
+  readonly jobName: string;
   readonly queue: string;
   readonly data: unknown;
   readonly schedule: string | null;
@@ -41,7 +44,7 @@ export interface CronJob {
   readonly uniqueKey: string | null;
   /** Deduplication options for cron-spawned jobs */
   readonly dedup: CronDedup | null;
-  /** Skip missed runs on restart instead of executing them (default: false) */
+  /** Skip missed runs on restart instead of executing them (default: true) */
   readonly skipMissedOnRestart: boolean;
   /** Skip job push if no worker is registered for the queue (default: false) */
   readonly skipIfNoWorker: boolean;
@@ -54,6 +57,7 @@ export interface CronJob {
 /** Input for creating a cron job */
 export interface CronJobInput {
   name: string;
+  jobName?: string;
   queue: string;
   data: unknown;
   schedule?: string;
@@ -66,7 +70,7 @@ export interface CronJobInput {
   uniqueKey?: string;
   /** Deduplication options for cron-spawned jobs */
   dedup?: CronDedup;
-  /** Skip missed runs on restart instead of executing them (default: false) */
+  /** Skip missed runs on restart instead of executing them (default: true) */
   skipMissedOnRestart?: boolean;
   /** Fire immediately on creation, then continue on schedule */
   immediately?: boolean;
@@ -84,8 +88,11 @@ export function createCronJob(input: CronJobInput, nextRun: number): CronJob {
     throw new Error('Cron job must have either schedule or repeatEvery');
   }
 
+  const payload = normalizeJobPayload({ name: input.jobName, data: input.data });
+
   return {
     name: input.name,
+    jobName: payload.name,
     queue: input.queue,
     data: input.data,
     schedule: input.schedule ?? null,

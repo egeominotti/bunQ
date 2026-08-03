@@ -80,6 +80,14 @@ console.log(`Recovered ${recovered.total} executions`);
 
 A timeout is re-armed on the time that is left, not from zero. A 24-hour approval window on a process restarted after 23 hours fires in one hour.
 
+If `close(true)` is followed immediately by a replacement Engine in the same
+process, a JavaScript compensate handler from the old Engine may still be
+settling after its store closed. Recovery waits for that exact local claim,
+reloads the durable row through the replacement store, and retries only if the
+unwind is still owed. The claim prevents overlapping local reversals; it is not
+a distributed lock, so provider-side idempotency is still required across
+process crashes or multiple processes.
+
 :::caution[Recovery is a manual call]
 Nothing resumes on its own. If you never call `recover()`, an interrupted run sits in the database untouched.
 :::

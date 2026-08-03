@@ -94,10 +94,13 @@ Every property run probes an adjacent TCP/HTTP port pair, starts its own broker,
 waits for the unauthenticated HTTP `/ready` response, and then verifies the TCP
 `Hello` identity before executing commands. The harness watches the subprocess
 exit code and drains stderr while it starts. A confirmed bind collision is
-retried on a fresh pair up to five times; a timeout, failed handshake, or any
-non-bind startup error fails immediately with the phase, both ports, exit
-diagnostics, and captured stderr. This removes the probe-to-bind race without
-turning genuine schema/config/bootstrap failures into silent retries.
+retried on a fresh pair up to five times. A failed TCP handshake after apparent
+HTTP readiness is retried too, because another process may own that `/ready`
+endpoint even when Bun's reusable-port probe succeeded. Timeouts and non-bind
+failures before readiness still fail immediately. Exhausted retries retain the
+phase, both ports, prior retry count, exit diagnostics, and captured stderr. This
+removes both probe-to-bind and foreign-readiness races without silently ignoring
+schema or configuration failures.
 
 ## Covered state
 
@@ -172,6 +175,9 @@ The generated transitions also assert the following contracts:
   their documented delivery rules;
 - concurrency and rate tokens remain bounded and are rolled back when a pull
   cannot acquire every required resource;
+- retrying a completed job clears its result and execution metadata in memory
+  and SQLite before the waiting generation becomes visible, and restart cannot
+  restore the retired completed result;
 - expired jobs are never delivered and are deleted exactly once from memory,
   counters, indexes, the write buffer and SQLite.
 

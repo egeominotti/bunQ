@@ -42,16 +42,17 @@ describe('Backward Compatibility', () => {
       // This tests the Hello endpoint works
       const tcp = (queue as unknown as { tcp: { send: (cmd: unknown) => Promise<unknown> } }).tcp;
 
-      if (tcp && tcp.send) {
-        const response = await tcp.send({
+      if (tcp?.send) {
+        const response = (await tcp.send({
           cmd: 'Hello',
-          protocolVersion: 2,
-          capabilities: ['pipelining'],
-        }) as { ok: boolean; protocolVersion?: number; capabilities?: string[] };
+          protocolVersion: 3,
+          capabilities: ['pipelining', 'separate-job-name'],
+        })) as { ok: boolean; protocolVersion?: number; capabilities?: string[] };
 
         expect(response.ok).toBe(true);
-        expect(response.protocolVersion).toBe(2);
+        expect(response.protocolVersion).toBe(3);
         expect(response.capabilities).toContain('pipelining');
+        expect(response.capabilities).toContain('separate-job-name');
       }
     });
   });
@@ -170,10 +171,8 @@ describe('Backward Compatibility', () => {
       );
 
       // Push some jobs
-      const jobs = await Promise.all(
-        Array.from({ length: 10 }, (_, i) =>
-          queue.add(`worker-job-${i}`, { index: i })
-        )
+      await Promise.all(
+        Array.from({ length: 10 }, (_, i) => queue.add(`worker-job-${i}`, { index: i }))
       );
 
       // Wait for processing
@@ -208,9 +207,7 @@ describe('Backward Compatibility', () => {
 
       // Push jobs
       await Promise.all(
-        Array.from({ length: 5 }, (_, i) =>
-          queue.add(`low-conc-${i}`, { index: i })
-        )
+        Array.from({ length: 5 }, (_, i) => queue.add(`low-conc-${i}`, { index: i }))
       );
 
       // Wait for processing (longer due to low concurrency)

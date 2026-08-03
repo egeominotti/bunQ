@@ -14,6 +14,7 @@
  */
 import { Resvg } from '@resvg/resvg-js';
 import { writeFileSync, mkdirSync } from 'fs';
+import { covers, type Cover } from './og-covers';
 
 const PINK = '#f472b6';
 const PINK_DEEP = '#ec4899';
@@ -24,49 +25,52 @@ const TEXT = '#fafafa';
 const GRAY = '#a1a1aa';
 const GRAY_D = '#5b5b64';
 
-type Cover = {
-  file: string;
-  eyebrow: string;
-  l1: string;
-  l2: string; // accent segment rendered pink
-  l2pre?: string; // optional white prefix on line 2
-  sub: string;
-  stats: [string, string, string];
-};
+interface LaneChip {
+  readonly x: number;
+  readonly w: number;
+  readonly on?: boolean;
+}
 
-const covers: Cover[] = [
-  { file: 'og-image', eyebrow: 'job queue · zero infrastructure', l1: 'The queue', l2pre: 'is ', l2: 'a file.', sub: 'Priorities, retries, cron and DLQ in one process. No Redis.', stats: ['150K+ ops/sec', 'SQLite WAL', 'MIT'] },
-  { file: 'og/getting-started', eyebrow: 'quickstart', l1: 'Working queue', l2pre: 'in ', l2: 'a minute.', sub: 'bun add bunqueue, write ten lines, run. Nothing to provision.', stats: ['1 dependency', '5.5 MB install', 'zero config'] },
-  { file: 'og/queue', eyebrow: 'queue api', l1: 'Every job, exactly', l2pre: 'where it ', l2: 'belongs.', sub: 'Priorities, delays, deduplication, bulk and durable writes.', stats: ['idempotent IDs', 'auto-batching', 'BullMQ-familiar'] },
-  { file: 'og/worker', eyebrow: 'workers', l1: 'Pull, process,', l2pre: 'ack, ', l2: 'repeat.', sub: 'Concurrency, heartbeats, stall detection, ACK batching.', stats: ['long polling', 'lock ownership', 'typed events'] },
-  { file: 'og/server-mode', eyebrow: 'server mode', l1: 'One process', l2pre: 'serves ', l2: 'them all.', sub: 'TCP and HTTP, token auth, native TLS, Unix sockets.', stats: ['TCP :6789', 'HTTP :6790', 'native TLS'] },
-  { file: 'og/client-sdk', eyebrow: 'sdks', l1: 'One protocol,', l2pre: 'every ', l2: 'runtime.', sub: 'Same Queue and Worker API on Node, Deno, Bun, Python, Workers.', stats: ['npm i bunqueue-client', '382 e2e scenarios', 'typed'] },
-  { file: 'og/api-reference', eyebrow: 'api reference', l1: 'Every endpoint,', l2pre: '', l2: 'documented.', sub: 'TCP commands, HTTP routes and every type, spelled out.', stats: ['40+ commands', 'msgpack wire', 'JSON HTTP'] },
-  { file: 'og/benchmarks', eyebrow: 'benchmarks', l1: 'Measured,', l2pre: 'not ', l2: 'mixed.', sub: 'Fresh native processes, distributions, integrity and exact workload labels.', stats: ['186K on-disk', '159K TCP PUSHB', '3.2K TCP workflows'] },
-  { file: 'og/integrations', eyebrow: 'integrations', l1: 'Plays well with', l2pre: 'your ', l2: 'stack.', sub: 'Hono, Elysia, MCP for AI agents, Prometheus, webhooks, S3.', stats: ['73 MCP tools', 'SSE + WebSocket', 'Prometheus'] },
-  { file: 'og/advanced', eyebrow: 'advanced', l1: 'Sagas, cron,', l2pre: 'rate limits, ', l2: 'DLQ.', sub: 'Workflow engine with compensation, everything operational.', stats: ['saga rollback', 'cron + tz', 'S3 backups'] },
-  { file: 'og/use-cases', eyebrow: 'production patterns', l1: 'What teams', l2pre: 'run ', l2: 'on it.', sub: 'Email, webhooks, payments, images, AI agents, cron.', stats: ['12+ patterns', 'saga rollback', '73 MCP tools'] },
-  { file: 'og/workflow', eyebrow: 'workflow engine', l1: 'Multi-step, with', l2pre: 'a ', l2: 'rollback plan.', sub: 'Saga compensation, branching, signals and loops.', stats: ['11 event types', 'waitFor signals', '0 extra services'] },
-  { file: 'og/production', eyebrow: 'guide · production', l1: 'What survives', l2pre: '', l2: 'a crash.', sub: 'At-least-once semantics, tested under kill -9. One file to back up.', stats: ['SIGKILL tested', 'fenced ACKs', 'S3 snapshots'] },
-  { file: 'og/hono', eyebrow: 'integrations · hono', l1: 'Background jobs', l2pre: 'for ', l2: 'Hono.', sub: 'Return the response now, do the work in the background.', stats: ['embedded mode', 'zero config', 'typed'] },
-  { file: 'og/elysia', eyebrow: 'integrations · elysia', l1: 'Background jobs', l2pre: 'for ', l2: 'Elysia.', sub: 'Return the response now, do the work in the background.', stats: ['embedded mode', 'zero config', 'typed'] },
-];
+interface LaneRow {
+  readonly y: number;
+  readonly chips: readonly LaneChip[];
+}
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // stylized simulator lanes anchored bottom: three lanes with chips,
 // one accented chip with glow
 function lanes(): string {
-  const rows = [
-    { y: 470, chips: [{ x: 60, w: 130 }, { x: 210, w: 96, on: true }, { x: 326, w: 118 }] },
-    { y: 522, chips: [{ x: 60, w: 88 }, { x: 168, w: 140 }] },
-    { y: 574, chips: [{ x: 60, w: 118 }, { x: 198, w: 86 }, { x: 304, w: 132 }] },
+  const rows: readonly LaneRow[] = [
+    {
+      y: 470,
+      chips: [
+        { x: 60, w: 130 },
+        { x: 210, w: 96, on: true },
+        { x: 326, w: 118 },
+      ],
+    },
+    {
+      y: 522,
+      chips: [
+        { x: 60, w: 88 },
+        { x: 168, w: 140 },
+      ],
+    },
+    {
+      y: 574,
+      chips: [
+        { x: 60, w: 118 },
+        { x: 198, w: 86 },
+        { x: 304, w: 132 },
+      ],
+    },
   ];
   let out = '';
   for (const r of rows) {
     out += `<line x1="48" y1="${r.y + 17}" x2="640" y2="${r.y + 17}" stroke="${LINE}" stroke-width="1"/>`;
     for (const c of r.chips) {
-      if ((c as any).on) {
+      if (c.on) {
         out += `<rect x="${c.x}" y="${r.y}" width="${c.w}" height="34" rx="9" fill="${PINK_DEEP}" opacity="0.9" filter="url(#glow)"/>`;
       } else {
         out += `<rect x="${c.x}" y="${r.y}" width="${c.w}" height="34" rx="9" fill="${SURFACE}" stroke="${LINE}" stroke-width="1.4"/>`;

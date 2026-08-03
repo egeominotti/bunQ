@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 import { Connection } from './connection.js';
+import type { Response } from './connection-types.js';
 import {
   MAX_POLL_TIMEOUT_MS,
   sleep,
@@ -182,13 +183,15 @@ export class WorkerBase<T = unknown, R = unknown> extends EventEmitter {
     this.emit('closed');
   }
 
-  /** Dispatch a command, routing failures to 'error'. Returns whether the
-   * command reached the server — callers gate success-only side effects
-   * ('completed'/'failed' emits, counters) on it. */
-  protected async safeCall(command: Record<string, unknown> & { cmd: string }): Promise<boolean> {
+  /** Dispatch a command and route failures to 'error'. The optional outcome
+   * parser decides whether a successful response authorizes local effects. */
+  protected async safeCall(
+    command: Record<string, unknown> & { cmd: string },
+    outcome: (response: Response) => boolean = () => true
+  ): Promise<boolean> {
     try {
-      await this.connection.call(command);
-      return true;
+      const response = await this.connection.call(command);
+      return outcome(response);
     } catch (err) {
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       return false;

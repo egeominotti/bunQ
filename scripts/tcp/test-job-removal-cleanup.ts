@@ -7,7 +7,7 @@
 
 import { Queue, Worker } from '../../src/client';
 
-const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789');
+const TCP_PORT = parseInt(process.env.TCP_PORT ?? '16789', 10);
 const connOpts = { port: TCP_PORT };
 
 let passed = 0;
@@ -34,7 +34,7 @@ function makeQueue(name: string): Queue {
 function makeWorker(
   name: string,
   processor: (job: any) => Promise<any>,
-  opts: Record<string, any> = {},
+  opts: Record<string, any> = {}
 ): Worker {
   const w = new Worker(name, processor, {
     connection: connOpts,
@@ -49,9 +49,7 @@ async function main() {
   console.log('=== Job Removal & Cleanup Tests (TCP) ===\n');
 
   // ---------------------------------------------------------------
-  // Test 1: removeOnComplete — verify job completes and result is stored
-  // Note: In TCP mode, removeOnComplete opts are not forwarded to server,
-  // so we verify the job completes and the result is accessible instead.
+  // Test 1: removeOnComplete removes the completed job over TCP.
   // ---------------------------------------------------------------
   console.log('1. Testing REMOVE ON COMPLETE (job completes with result)...');
   try {
@@ -59,15 +57,19 @@ async function main() {
     q.obliterate();
     await Bun.sleep(200);
 
-    const job = await q.add('task', { value: 1 });
+    const job = await q.add('task', { value: 1 }, { removeOnComplete: true, durable: true });
     const jobId = String(job.id);
 
     let completed = false;
 
-    const w = makeWorker('tcp-cleanup-remove-complete', async () => {
-      completed = true;
-      return { done: true };
-    }, { concurrency: 1 });
+    const w = makeWorker(
+      'tcp-cleanup-remove-complete',
+      async () => {
+        completed = true;
+        return { done: true };
+      },
+      { concurrency: 1 }
+    );
 
     // Wait for job to complete
     for (let i = 0; i < 100; i++) {
@@ -81,23 +83,17 @@ async function main() {
     if (!completed) {
       fail('Job was not processed');
     } else {
-      // Verify the job was processed and result is accessible
+      // The terminal event is observable, but retention removes the job row.
       const fetched = await q.getJob(jobId);
-      if (fetched !== null) {
-        ok(`Job completed and accessible (id: ${fetched.id})`);
-      } else {
-        // Job may have been cleaned — still valid
-        ok('Job completed (no longer in index, which is valid)');
-      }
+      if (fetched === null) ok('removeOnComplete removed the completed job');
+      else fail(`removeOnComplete kept completed job ${fetched.id}`);
     }
   } catch (e) {
     fail(`removeOnComplete test failed: ${e}`);
   }
 
   // ---------------------------------------------------------------
-  // Test 2: Job failure sends to DLQ after max attempts
-  // Note: removeOnFail opts are not forwarded in TCP mode.
-  // Instead, verify that a failed job transitions correctly.
+  // Test 2: removeOnFail removes the failed job without creating a DLQ entry.
   // ---------------------------------------------------------------
   console.log('\n2. Testing JOB FAILURE TRANSITIONS (max attempts exceeded)...');
   try {
@@ -105,14 +101,22 @@ async function main() {
     q.obliterate();
     await Bun.sleep(200);
 
-    const job = await q.add('fail-task', { value: 1 }, { attempts: 1 });
+    const job = await q.add(
+      'fail-task',
+      { value: 1 },
+      { attempts: 1, removeOnFail: true, durable: true }
+    );
     const jobId = String(job.id);
 
     let jobFailed = false;
 
-    const w = makeWorker('tcp-cleanup-remove-fail', async () => {
-      throw new Error('Deliberate failure');
-    }, { concurrency: 1 });
+    const w = makeWorker(
+      'tcp-cleanup-remove-fail',
+      async () => {
+        throw new Error('Deliberate failure');
+      },
+      { concurrency: 1 }
+    );
 
     w.on('failed', () => {
       jobFailed = true;
@@ -130,7 +134,14 @@ async function main() {
     if (!jobFailed) {
       fail('Job did not fail as expected');
     } else {
-      ok('Job failed correctly after max attempts');
+      const fetched = await q.getJob(jobId);
+      const dlq = await q.getDlqAsync();
+      const retainedInDlq = dlq.some((entry) => entry.job.id === jobId);
+      if (fetched === null && !retainedInDlq) {
+        ok('removeOnFail removed the failed job and bypassed the DLQ');
+      } else {
+        fail(`removeOnFail retained job=${fetched !== null}, dlq=${retainedInDlq}`);
+      }
     }
   } catch (e) {
     fail(`Job failure test failed: ${e}`);
@@ -150,10 +161,14 @@ async function main() {
 
     let completed = false;
 
-    const w = makeWorker('tcp-cleanup-persist', async () => {
-      completed = true;
-      return { result: 'ok' };
-    }, { concurrency: 1 });
+    const w = makeWorker(
+      'tcp-cleanup-persist',
+      async () => {
+        completed = true;
+        return { result: 'ok' };
+      },
+      { concurrency: 1 }
+    );
 
     // Wait for job to complete
     for (let i = 0; i < 100; i++) {
@@ -208,9 +223,13 @@ async function main() {
 
       const countsAfter = await q.getJobCountsAsync();
       if (countsAfter.waiting === 0 && countsAfter.active === 0) {
-        ok(`Obliterate removed waiting/active jobs (before: ${countsBefore.waiting} waiting, after: w=${countsAfter.waiting} a=${countsAfter.active})`);
+        ok(
+          `Obliterate removed waiting/active jobs (before: ${countsBefore.waiting} waiting, after: w=${countsAfter.waiting} a=${countsAfter.active})`
+        );
       } else {
-        fail(`Obliterate did not remove jobs (remaining: waiting=${countsAfter.waiting}, active=${countsAfter.active})`);
+        fail(
+          `Obliterate did not remove jobs (remaining: waiting=${countsAfter.waiting}, active=${countsAfter.active})`
+        );
       }
     }
   } catch (e) {
@@ -244,7 +263,9 @@ async function main() {
 
       const countsAfter = await q.getJobCountsAsync();
       if (countsAfter.waiting === 0) {
-        ok(`Clean removed waiting jobs (before: ${countsBefore.waiting}, cleaned: ${cleaned.length})`);
+        ok(
+          `Clean removed waiting jobs (before: ${countsBefore.waiting}, cleaned: ${cleaned.length})`
+        );
       } else {
         fail(`Clean did not remove all waiting jobs (remaining: ${countsAfter.waiting})`);
       }

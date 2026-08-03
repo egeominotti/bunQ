@@ -1,7 +1,7 @@
 defmodule Bunqueue.WorkerProcessor do
   @moduledoc false
 
-  alias Bunqueue.{Connection, Job, UnrecoverableError}
+  alias Bunqueue.{Connection, Job, ProtocolError, UnrecoverableError}
 
   def process(worker, raw, token) do
     job = Job.from_wire(raw, worker.connection, token)
@@ -21,13 +21,31 @@ defmodule Bunqueue.WorkerProcessor do
     record_result(worker, outcome, result)
   end
 
-  defp record_result(worker, outcome, {:ok, _response}) do
-    index = if match?({:ok, _}, outcome), do: 1, else: 2
-    :atomics.add_get(worker.stats, index, 1)
-    :ok
+  defp record_result(worker, outcome, {:ok, response}) do
+    case terminal_outcome(response) do
+      :applied ->
+        index = if match?({:ok, _}, outcome), do: 1, else: 2
+        :atomics.add_get(worker.stats, index, 1)
+        :ok
+
+      :ignored ->
+        :ok
+
+      {:error, error} ->
+        {:error, error}
+    end
   end
 
   defp record_result(_worker, _outcome, {:error, error}), do: {:error, error}
+
+  defp terminal_outcome(response) do
+    case Map.fetch(response, "data") do
+      :error -> :applied
+      {:ok, nil} -> :applied
+      {:ok, %{"applied" => false, "reason" => "already-finalized"}} -> :ignored
+      {:ok, _data} -> {:error, %ProtocolError{message: "invalid ACK/FAIL terminal response data"}}
+    end
+  end
 
   defp invoke(handler, job, limit) do
     try do

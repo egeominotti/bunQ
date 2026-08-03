@@ -37,6 +37,7 @@ serialization, Queue, Worker, FlowProducer, query, or admin code.
 | `queue_admin.py` | Admin mixin: DLQ, configs, rate limit, schedulers/cron, webhooks, monitoring |
 | `worker.py` | Worker lifecycle: start/run/pause/close, events |
 | `worker_runtime.py` | Worker runtime mixin: poll loop, job execution, heartbeats, registry |
+| `ack_outcome.py` / `ack_batcher.py` | Authoritative ACK/FAIL parsing and positional ACKB settlement |
 | `flow.py` | FlowProducer public creation/read API |
 | `flow_plan.py` / `flow_plan_legacy.py` | Pure ID allocation and closed tree/chain/fan-in planning |
 | `flow_commit.py` | One `PUSHF` call plus exact snapshot ID/queue validation |
@@ -52,7 +53,8 @@ serialization, Queue, Worker, FlowProducer, query, or admin code.
   int64/uint64 msgpack → the server (msgpackr) decodes them as `BigInt` →
   arithmetic crash (e.g. `ListWorkers`). `_js_safe()` converts them to
   float64 (exact ≤ 2^53). NEVER remove this conversion.
-- The **job name travels inside `data`**: `data = {"name": ..., **user}`.
+- `PUSH`/`PUSHB` carry protocol-owned `name` beside untouched user `data`.
+  Job readers prefer top-level `name` and retain legacy `data["name"]` fallback.
 - Responses **wrapped in `data`**: `GetLogs→data.logs`,
   `ListWorkers→data.workers`, `GetChildrenValues→data.values`,
   `AddWebhook→data.webhookId`, `ListWebhooks→data.webhooks`, `Ping→data.pong`.
@@ -71,6 +73,9 @@ serialization, Queue, Worker, FlowProducer, query, or admin code.
   `retry_jobs("completed")` = `RetryCompleted`.
 - `FAIL` supports `unrecoverable: true` (skip retries → DLQ) and
   `stack: string[]` (persisted, capped at `stackTraceLimit`).
+- Late ACK/FAIL responses can be successful no-ops with `applied:false`; do
+  not emit a terminal Worker event. ACKB suppression uses `ignoredIndices`,
+  not `ignoredIds`, because duplicate IDs may represent different positions.
 
 ## Tests
 

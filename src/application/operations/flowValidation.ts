@@ -1,5 +1,5 @@
 import type { AtomicFlowBatchInput } from '../../domain/types/flow';
-import type { JobInput } from '../../domain/types/job';
+import { normalizeJobPayload, type JobInput } from '../../domain/types/job';
 import { validateFlowTopology } from './flowTopologyValidation';
 
 const MAX_FLOW_JOBS = 10_000;
@@ -108,10 +108,13 @@ function validateData(data: unknown): { encodedLength: number; value: Record<str
     throw new Error('Job data too large (max 10MB)');
   }
   const value = data as Record<string, unknown>;
-  if (typeof value.name !== 'string' || value.name.length === 0 || value.name.length > 256) {
-    throw new Error('flow job data.name must be a non-empty string of at most 256 characters');
-  }
   return { encodedLength: encoded.length, value };
+}
+
+function validateName(name: string): void {
+  if (name.length === 0 || name.length > 256) {
+    throw new Error('flow job name must be a non-empty string of at most 256 characters');
+  }
 }
 
 function validateIdList(value: unknown, name: string): void {
@@ -169,7 +172,9 @@ export function validateAtomicFlowBatch(batch: AtomicFlowBatchInput): void {
     }
     validateIdList(job.input.dependsOn, 'dependsOn');
     validateIdList(job.input.childrenIds, 'childrenIds');
-    const validatedData = validateData(job.input.data);
+    const payload = normalizeJobPayload(job.input);
+    validateName(payload.name);
+    const validatedData = validateData(payload.data);
     totalDataBytes += validatedData.encodedLength;
     if (totalDataBytes > MAX_FLOW_DATA_BYTES) {
       throw new Error('flow data is too large (max 64MB per atomic batch)');

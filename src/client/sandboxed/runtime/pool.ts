@@ -123,5 +123,5 @@ export abstract class SandboxedPool<T = unknown> extends SandboxedLifecycle<T> {
 
   protected abstract dispatch(worker: WorkerProcess, job: DomainJob, token: string | null): void;
   protected abstract handleMessage(worker: WorkerProcess, message: IPCResponse): void;
-  protected abstract handleCrash(worker: WorkerProcess, index: number): void;
+  protected abstract handleCrash(worker: WorkerProcess, index: number, reportError?: boolean): void;
 }

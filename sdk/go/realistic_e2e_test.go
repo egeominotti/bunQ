@@ -13,7 +13,7 @@ func TestRealisticConcurrentInvoiceResultsAreNotCrossed(t *testing.T) {
 	queue := testQueue(t, "invoices")
 	var completed atomic.Int64
 	worker := NewWorker(queue.Name, func(job *Job) (any, error) {
-		data := job.Data()
+		data := asMap(job.Data())
 		return map[string]any{
 			"invoice": asInt(data["invoice"]),
 			"total":   asInt(data["cents"]) * 2,

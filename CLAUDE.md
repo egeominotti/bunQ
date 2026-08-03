@@ -73,7 +73,13 @@ and its JSON/NDJSON artifacts before handoff.
 
 ### Test isolation rules
 
-- Use native targeted tests for the fast edit/debug loop; use `bun run test:sandbox` as the authoritative full gate.
+- Run repository tests in isolated OrbStack Machines by default. A macOS-host test is diagnostic only and is not final validation evidence.
+- Use a fresh disposable Ubuntu 24.04 Machine on the Mac's native architecture (4 CPUs, request 16 GiB memory, at least 32 GiB disk) as the canonical local Linux gate. On Apple Silicon this is `arm64`; native `amd64` is covered independently by GitHub Actions `ubuntu-latest`. For every release, repeat the native product suites in a fresh Debian 13 Machine on the same host-native architecture. Record the effective cgroup limits because OrbStack may clamp requested resources.
+- A translated `amd64` Machine on Apple Silicon is diagnostic only. Repeat any result on a native-architecture Machine before using it as release evidence; process-heavy Bun tests may behave differently under Rosetta.
+- Create both Machines with `--isolated --isolate-network`. Never use `--mount` or `--forward-ssh-agent`, and never expose the repository, home directory, Docker socket, SSH agent, credentials, tokens, real `.env` files, or ignored files. A tracked placeholder-only template such as `.env.example` is allowed only after review. Copy an explicit sanitized snapshot over OrbStack's built-in SSH transport, including all intended worktree changes but excluding `.git`, dependencies, artifacts, SQLite files, generated output, and secrets.
+- Pin the same Bun version as CI and use the frozen lockfile. Directly inside each Machine run `bun test`, the TCP runner, the embedded runner, typecheck, and Biome. Run `git diff --check` on the host before snapshot transfer because `.git` is deliberately excluded. Record the OS, architecture, kernel, Bun version/revision, commands, exit codes, durations, and exact totals before deleting the Machine.
+- OrbStack Machines share OrbStack's underlying Linux kernel. Treat them as strong filesystem/process/network isolation, not as a separate-kernel or physical security boundary.
+- The Machine gates supplement `bun run test:sandbox` and `bun run test:sandbox:sdk`; they do not replace them. Benchmarks remain native macOS-only and must never be published from a Machine or container.
 - The three top-level suite containers run in parallel by default; use `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose resource contention.
 - Isolation covers processes, writable filesystems, `/tmp`, network namespaces, ports, databases, and environment. It is not physical isolation: containers share the OrbStack VM kernel plus host CPU, memory, and disk scheduling. Reproduce parallel-only failures sequentially before classifying them as application bugs.
 - Use `artifacts/test-sandbox/<timestamp>/` for complete, untruncated suite logs; failed containers remain available for inspection.
@@ -541,11 +547,12 @@ CREATE INDEX idx_jobs_run_at ON jobs(run_at) WHERE state IN ('waiting','delayed'
 ## Testing
 
 ```bash
-bun run test:sandbox                    # Authoritative isolated full gate
-bun test                                # Native unit diagnostics
-bun scripts/tcp/run-all-tests.ts        # Native TCP diagnostics; isolated per file
-bun scripts/embedded/run-all-tests.ts   # Native embedded diagnostics
-bun run bench                           # Native benchmarks only
+bun test                                # Run in each required OrbStack Machine
+bun scripts/tcp/run-all-tests.ts        # Run in each required OrbStack Machine
+bun scripts/embedded/run-all-tests.ts   # Run in each required OrbStack Machine
+bun run test:sandbox                    # Additional container-isolated full gate
+bun run test:sandbox:sdk                # Additional gate after SDK changes
+bun run bench                           # Native macOS benchmarks only
 ```
 
 ## Publishing

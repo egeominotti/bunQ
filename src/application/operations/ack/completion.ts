@@ -6,9 +6,14 @@ import { withWriteLock } from '../../../shared/lock';
 import { commitRemovedCompletion } from '../../dependencyCompletions';
 import { latencyTracker } from '../../latencyTracker';
 import { throughputTracker } from '../../throughputTracker';
-import type { AckContext } from '../../types/ack';
+import type { AckContext, CompletionOptions } from '../../types/ack';
 
-export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Promise<void> {
+export async function ackJob(
+  jobId: JobId,
+  result: unknown,
+  ctx: AckContext,
+  options: CompletionOptions = {}
+): Promise<boolean> {
   const startNs = Bun.nanoseconds();
   const processingIndex = processingShardIndex(jobId);
 
@@ -18,7 +23,7 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
     return job;
   });
 
-  if (!job) throw new Error(`Job not found or not in processing state: ${jobId}`);
+  if (!job) return false;
 
   const index = shardIndex(job.queue);
   await withWriteLock(ctx.shardLocks[index], () => {
@@ -30,7 +35,7 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
   if (job.customId && ctx.customIdMap) ctx.customIdMap.delete(job.customId);
   setDlqRetryState(job, null);
 
-  if (!job.removeOnComplete) {
+  if (!(job.removeOnComplete || options.removeOnComplete === true)) {
     const now = Date.now();
     job.completedAt = now;
     if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
@@ -75,4 +80,5 @@ export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext): Pr
   }
 
   latencyTracker.ack.observe((Bun.nanoseconds() - startNs) / 1e6);
+  return true;
 }

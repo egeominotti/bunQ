@@ -6,8 +6,15 @@ export function validateQueueName(name: string): string | null {
 }
 
 export function validateJobData(data: unknown): string | null {
-  const json = JSON.stringify(data);
-  if (json.length > 10 * 1024 * 1024) return 'Job data too large (max 10MB)';
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(data);
+  } catch {
+    return 'Job data must be JSON serializable';
+  }
+  if (json !== undefined && json.length > 10 * 1024 * 1024) {
+    return 'Job data too large (max 10MB)';
+  }
   return null;
 }
 

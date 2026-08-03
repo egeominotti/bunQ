@@ -1,5 +1,6 @@
 import type { Socket } from 'bun';
 import type { QueueManager } from '../../../application/queueManager';
+import type { JobEvent } from '../../../domain/types/queue';
 import { uuid } from '../../../shared/hash';
 import { tcpLog } from '../../../shared/logger';
 import { encodeMessagePack } from '../../../shared/msgpack';
@@ -14,6 +15,7 @@ import { MAX_CONCURRENT_PER_CONNECTION } from './constants';
 /** Owns per-client state, slowloris timers, backpressure, and disconnect cleanup. */
 export class TcpConnectionRegistry {
   readonly connections = new Map<string, Socket<TcpConnectionData>>();
+  private eventUnsubscribe: (() => void) | null = null;
 
   constructor(
     private readonly queueManager: QueueManager,
@@ -40,6 +42,7 @@ export class TcpConnectionRegistry {
       semaphore: new Semaphore(MAX_CONCURRENT_PER_CONNECTION),
       writeQueue: new SocketWriteQueue(this.maxWriteQueueBytes),
       stallTimer: null,
+      eventQueue: null,
     };
     this.connections.set(clientId, socket);
     this.queueManager.emitDashboardEvent('client:connected', { clientId, transport: 'tcp' });
@@ -87,7 +90,9 @@ export class TcpConnectionRegistry {
     const clientId = socket.data.state.clientId;
     this.clearStallTimer(socket);
     socket.data.writeQueue.clear();
+    socket.data.eventQueue = null;
     this.connections.delete(clientId);
+    this.releaseEventBridgeIfIdle();
     getRateLimiter().removeClient(clientId);
     this.queueManager.unregisterWorkersByClientId(clientId);
     this.queueManager.emitDashboardEvent('client:disconnected', {
@@ -118,10 +123,45 @@ export class TcpConnectionRegistry {
     }
   }
 
+  subscribeEvents(socket: Socket<TcpConnectionData>, queue: string): void {
+    socket.data.eventQueue = queue;
+    if (!this.eventUnsubscribe) {
+      this.eventUnsubscribe = this.queueManager.subscribe((event) => this.broadcastEvent(event));
+    }
+  }
+
+  unsubscribeEvents(socket: Socket<TcpConnectionData>): void {
+    socket.data.eventQueue = null;
+    this.releaseEventBridgeIfIdle();
+  }
+
+  private broadcastEvent(event: JobEvent): void {
+    let frame: Uint8Array | null = null;
+    for (const socket of this.connections.values()) {
+      if (socket.data.eventQueue !== event.queue) continue;
+      frame ??= FrameParser.frame(encodeMessagePack({ type: 'event', event }));
+      socket.data.writeQueue.write(socket, frame);
+      this.dropForWriteOverflow(socket);
+    }
+  }
+
+  private releaseEventBridgeIfIdle(): void {
+    if (!this.eventUnsubscribe) return;
+    for (const socket of this.connections.values()) {
+      if (socket.data.eventQueue !== null) return;
+    }
+    this.eventUnsubscribe();
+    this.eventUnsubscribe = null;
+  }
+
   closeAll(): void {
+    this.eventUnsubscribe?.();
+    this.eventUnsubscribe = null;
     for (const socket of this.connections.values()) {
       this.clearStallTimer(socket);
-      socket.end();
+      socket.data.eventQueue = null;
+      socket.data.writeQueue.clear();
+      socket.terminate();
     }
     this.connections.clear();
   }

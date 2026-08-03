@@ -48,7 +48,7 @@ export async function resumeCompensation(deps: RollbackDeps, executionId: string
     { retryFailed: true }
   );
 
-  if (outcome === 'claim-lost') {
+  if (outcome !== 'ran') {
     // Nothing was mutated: `runCompensation` returns this before the unwind begins.
     throw new Error(`execution "${executionId}" is already being rolled back by another driver`);
   }

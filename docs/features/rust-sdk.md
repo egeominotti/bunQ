@@ -1,7 +1,8 @@
 # Rust client SDK
 
 `sdk/rust/` is the official synchronous Rust client for bunqueue server mode.
-It speaks protocol v2 directly and does not depend on Bun at runtime.
+It speaks protocol v3 directly, including the separate job-name capability,
+and does not depend on Bun at runtime.
 
 ## Module map
 

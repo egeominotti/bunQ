@@ -211,7 +211,7 @@ The DLQ is the holding area for jobs that exhausted their retries, threw an unre
 
 ### Can I control processing order?
 
-FIFO (first in, first out) is the default for jobs of equal priority, so ordered processing needs no options. Use `{ priority: 10 }` to jump the line (higher runs sooner), or `{ lifo: true }` for newest-first among LIFO jobs. Note that a LIFO job does not jump ahead of FIFO jobs that were already queued.
+FIFO (first in, first out) is the default for jobs of equal priority, so ordered processing needs no options. Use `{ priority: 10 }` to jump the line (higher runs sooner), or `{ lifo: true }` for the newest-first LIFO partition. At equal numeric priority, LIFO jobs run ahead of FIFO jobs; FIFO entries retain oldest-first order within their partition.
 
 ## Scaling and production
 

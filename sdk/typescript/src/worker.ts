@@ -12,6 +12,7 @@ import { CommandTimeoutError, ConnectionClosedError, UnrecoverableError } from '
 import { compact } from './frame.js';
 import { Job } from './job.js';
 import type { PulledJobsResponse } from './responses.js';
+import { terminalOutcomeWasApplied } from './terminal-outcome.js';
 import { WorkerBase } from './worker-base.js';
 import {
   MAX_STACK_LINES,
@@ -140,11 +141,11 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
           id: job.id,
           token,
           result: result ?? undefined,
-          onSettled: (err) => {
+          onSettled: (err, applied) => {
             this.finishJob(job.id);
             if (err) {
               this.emit('error', err instanceof Error ? err : new Error(String(err)));
-            } else {
+            } else if (applied) {
               this.processed += 1;
               this.emit('completed', job, result);
             }
@@ -153,7 +154,8 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
         return;
       }
       const acked = await this.safeCall(
-        compact({ cmd: 'ACK', id: job.id, token, result: result ?? undefined }) as { cmd: string }
+        compact({ cmd: 'ACK', id: job.id, token, result: result ?? undefined }) as { cmd: string },
+        (response) => terminalOutcomeWasApplied(response.data)
       );
       // Free the slot BEFORE emitting: a throwing 'completed' listener must
       // not leak the active slot (same rationale as the batched path).
@@ -177,7 +179,8 @@ export class Worker<T = unknown, R = unknown> extends WorkerBase<T, R> {
           error: error.message || error.name,
           stack,
           unrecoverable: err instanceof UnrecoverableError ? true : undefined,
-        }) as { cmd: string }
+        }) as { cmd: string },
+        (response) => terminalOutcomeWasApplied(response.data)
       );
       this.finishJob(job.id);
       // Same asymmetry guard as the ACK path: if the FAIL never reached the

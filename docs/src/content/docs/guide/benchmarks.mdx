@@ -236,6 +236,11 @@ bun install
 # Core queue runners
 bun run src/benchmark/million-jobs.bench.ts
 BENCH_N=50000 BENCH_RUNS=21 bun run bench:tcp
+
+# The published push/bulk Embedded row is on-disk. Use a fresh path and point
+# BENCH_HOST/BENCH_PORT at a separately started fresh SQLite broker.
+BUNQUEUE_DATA_PATH=/tmp/bunqueue-bench-embedded.db \
+BENCH_HOST=127.0.0.1 BENCH_PORT=16794 \
 bun run bench:pushbulk
 
 # Workflow Engine, both modes and all scenarios
@@ -250,11 +255,18 @@ bun run bench:workflow:scale
 Run without `BUNQUEUE_EMBEDDED=1`; that test variable forces clients into
 Embedded mode and would invalidate a TCP label.
 
+The bare `bun run bench:pushbulk` command does not configure an Embedded
+`dataPath`; its Embedded half is in-memory. It must not be used to reproduce an
+on-disk row unless `BUNQUEUE_DATA_PATH` points to a fresh SQLite file. The TCP
+half likewise requires a fresh broker/database at the explicitly reported
+endpoint.
+
 The runners and report are in the repository:
 
 - [`bench/workflow-engine.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/workflow-engine.ts)
 - [`bench/workflow-engine/scale.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/workflow-engine/scale.ts)
 - [`docs/benchmarks/native-engineering-2026-07-30.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/native-engineering-2026-07-30.md)
+- [`docs/benchmarks/native-engineering-2026-08-02.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/native-engineering-2026-08-02.md)
 - [`docs/features/benchmarks.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/features/benchmarks.md)
 
 ## Functional evidence

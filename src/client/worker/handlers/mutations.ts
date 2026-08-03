@@ -2,6 +2,14 @@ import { jobId, type Job as InternalJob } from '../../../domain/types/job';
 import { getSharedManager } from '../../manager';
 import type { ChangePriorityOpts } from '../../types';
 import type { TcpConnection } from '../types';
+import { assertFlowTcpOk } from '../../flowJobTypes';
+
+function tokenError(response: Record<string, unknown>): Error | null {
+  if (response.ok === false && /token/i.test(String(response.error))) {
+    return new Error(typeof response.error === 'string' ? response.error : 'Invalid lock token');
+  }
+  return null;
+}
 
 export function createRemoveHandler(
   embedded: boolean,
@@ -20,8 +28,9 @@ export function createRemoveHandler(
 export function createRetryHandler(
   embedded: boolean,
   tcp: TcpConnection | null,
-  internalJob: InternalJob
+  options: { internalJob: InternalJob; token?: string; onTransitionApplied?: () => void }
 ): (id: string) => Promise<void> {
+  const { internalJob, token, onTransitionApplied } = options;
   return async (id: string) => {
     if (embedded) {
       const manager = getSharedManager();
@@ -29,22 +38,29 @@ export function createRetryHandler(
       if (state === 'failed') {
         const count = manager.retryDlq(internalJob.queue, jobId(id));
         if (count === 0) throw new Error(`Job ${id} is failed but not present in DLQ`);
+        onTransitionApplied?.();
         return;
       }
       if (state === 'active') {
-        const ok = await manager.moveActiveToWait(jobId(id));
+        const ok = await manager.moveActiveToWait(jobId(id), token);
         if (!ok) throw new Error(`Failed to retry active job ${id}`);
+        onTransitionApplied?.();
         return;
       }
       if (state === 'waiting' || state === 'prioritized' || state === 'delayed') return;
       throw new Error(`Cannot retry job ${id} from state '${state}'`);
     }
     if (!tcp) return;
-    const response = await tcp.send({ cmd: 'MoveToWait', id });
+    const response = await tcp.send({
+      cmd: 'MoveToWait',
+      id,
+      ...(token === undefined ? {} : { token }),
+    });
     if (response.ok !== true) {
       const error = typeof response.error === 'string' ? response.error : 'retry failed';
       throw new Error(error);
     }
+    onTransitionApplied?.();
   };
 }
 
@@ -58,7 +74,7 @@ export function createUpdateDataHandler(
       return;
     }
     if (!tcp) return;
-    await tcp.send({ cmd: 'Update', id, data });
+    assertFlowTcpOk(await tcp.send({ cmd: 'Update', id, data }), 'Update');
   };
 }
 
@@ -78,15 +94,28 @@ export function createPromoteHandler(
 
 export function createChangeDelayHandler(
   embedded: boolean,
-  tcp: TcpConnection | null
+  tcp: TcpConnection | null,
+  token?: string,
+  onTransitionApplied?: () => void
 ): (id: string, delay: number) => Promise<void> {
   return async (id: string, delay: number) => {
     if (embedded) {
-      await getSharedManager().changeDelay(jobId(id), delay);
+      const changed = await getSharedManager().changeDelay(jobId(id), delay, token);
+      if (!changed) throw new Error(`Failed to change delay for job ${id}`);
+      onTransitionApplied?.();
       return;
     }
     if (!tcp) return;
-    await tcp.send({ cmd: 'ChangeDelay', id, delay });
+    assertFlowTcpOk(
+      await tcp.send({
+        cmd: 'ChangeDelay',
+        id,
+        delay,
+        ...(token === undefined ? {} : { token }),
+      }),
+      'ChangeDelay'
+    );
+    onTransitionApplied?.();
   };
 }
 
@@ -140,43 +169,83 @@ export function createClearLogsHandler(
 
 export function createMoveToWaitHandler(
   embedded: boolean,
-  tcp: TcpConnection | null
-): (id: string, _token?: string) => Promise<boolean> {
-  return async (id: string, _token?: string) => {
-    if (embedded) return await getSharedManager().moveActiveToWait(jobId(id));
+  tcp: TcpConnection | null,
+  onTransitionApplied?: () => void
+): (id: string, token?: string) => Promise<boolean> {
+  return async (id: string, token?: string) => {
+    if (embedded) {
+      const moved = await getSharedManager().moveActiveToWait(jobId(id), token);
+      if (moved) onTransitionApplied?.();
+      return moved;
+    }
     if (!tcp) return false;
-    const response = await tcp.send({ cmd: 'MoveToWait', id });
-    return response.ok === true;
+    const response = await tcp.send({
+      cmd: 'MoveToWait',
+      id,
+      ...(token === undefined ? {} : { token }),
+    });
+    const error = tokenError(response);
+    if (error) throw error;
+    const moved = response.ok === true;
+    if (moved) onTransitionApplied?.();
+    return moved;
   };
 }
 
 export function createMoveToDelayedHandler(
   embedded: boolean,
-  tcp: TcpConnection | null
-): (id: string, timestamp: number, _token?: string) => Promise<void> {
-  return async (id: string, timestamp: number, _token?: string) => {
+  tcp: TcpConnection | null,
+  onTransitionApplied?: () => void
+): (id: string, timestamp: number, token?: string) => Promise<void> {
+  return async (id: string, timestamp: number, token?: string) => {
     const delay = Math.max(0, timestamp - Date.now());
     if (embedded) {
-      await getSharedManager().moveToDelayed(jobId(id), delay);
+      const moved = await getSharedManager().moveToDelayed(jobId(id), delay, token);
+      if (!moved) throw new Error(`Failed to move job ${id} to delayed`);
+      onTransitionApplied?.();
       return;
     }
     if (!tcp) return;
-    await tcp.send({ cmd: 'MoveToDelayed', id, delay });
+    const response = await tcp.send({
+      cmd: 'MoveToDelayed',
+      id,
+      delay,
+      ...(token === undefined ? {} : { token }),
+    });
+    if (response.ok !== true) {
+      throw new Error(
+        typeof response.error === 'string' ? response.error : 'Failed to move job to delayed'
+      );
+    }
+    onTransitionApplied?.();
   };
 }
 
 export function createMoveToWaitingChildrenHandler(
   embedded: boolean,
-  tcp: TcpConnection | null
+  tcp: TcpConnection | null,
+  onTransitionApplied?: () => void
 ): (
   id: string,
-  _token?: string,
+  token?: string,
   _opts?: { child?: { id: string; queue: string } }
 ) => Promise<boolean> {
-  return async (id: string) => {
-    if (embedded) return await getSharedManager().moveToWaitingChildren(jobId(id));
+  return async (id: string, token?: string) => {
+    if (embedded) {
+      const moved = await getSharedManager().moveToWaitingChildren(jobId(id), token);
+      if (moved) onTransitionApplied?.();
+      return moved;
+    }
     if (!tcp) return false;
-    const response = await tcp.send({ cmd: 'MoveToWaitingChildren', id });
-    return response.ok === true;
+    const response = await tcp.send({
+      cmd: 'MoveToWaitingChildren',
+      id,
+      ...(token === undefined ? {} : { token }),
+    });
+    const error = tokenError(response);
+    if (error) throw error;
+    const moved = response.ok === true;
+    if (moved) onTransitionApplied?.();
+    return moved;
   };
 }

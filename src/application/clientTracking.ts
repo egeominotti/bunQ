@@ -185,6 +185,7 @@ export function forceReleaseClientJobs(clientId: string, ctx: LockContext): numb
     // gate passes on the next eligible tick.
     job.lastHeartbeat = 0;
     job.startedAt = 0;
+    ctx.timeoutScheduler.cancel(jobId);
     touched++;
   }
 
@@ -209,6 +210,7 @@ function releaseJobToQueue(opts: ReleaseJobOptions): number {
 
   // Remove from processing
   ctx.processingShards[procIdx].delete(jobId);
+  ctx.timeoutScheduler.cancel(jobId);
 
   // Release lock if exists
   ctx.jobLocks.delete(jobId);

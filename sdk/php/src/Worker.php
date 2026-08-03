@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bunqueue;
 
 use Bunqueue\Exception\BunqueueException;
+use Bunqueue\Exception\CommandException;
 use Bunqueue\Wire\Protocol;
 
 /**
@@ -176,20 +177,24 @@ final class Worker
             return;
         }
         try {
-            $this->connection->call(Protocol::compact([
+            $response = $this->connection->call(Protocol::compact([
                 'cmd' => 'ACK',
                 'id' => $job->id(),
                 'token' => $token,
                 'result' => $result,
             ]));
+            $applied = $this->transitionWasApplied($response);
         } catch (BunqueueException $e) {
-            // The ACK never reached the server: only 'error' fires (the lock
-            // expiry will retry the job) — never claim a completion.
+            // Transport failure or malformed evidence: report only 'error',
+            // never invent a completion the broker did not confirm.
             unset($this->held[$job->id()]);
             $this->emit('error', $e);
             return;
         }
         unset($this->held[$job->id()]);
+        if (!$applied) {
+            return;
+        }
         $this->processed++;
         $this->emit('completed', $job, $result);
     }
@@ -207,7 +212,7 @@ final class Worker
             $cap
         );
         try {
-            $this->connection->call(Protocol::compact([
+            $response = $this->connection->call(Protocol::compact([
                 'cmd' => 'FAIL',
                 'id' => $job->id(),
                 'token' => $token,
@@ -215,12 +220,16 @@ final class Worker
                 'stack' => $stack,
                 'unrecoverable' => $error instanceof UnrecoverableError ? true : null,
             ]));
+            $applied = $this->transitionWasApplied($response);
         } catch (BunqueueException $e) {
             unset($this->held[$job->id()]);
             $this->emit('error', $e);
             return;
         }
         unset($this->held[$job->id()]);
+        if (!$applied) {
+            return;
+        }
         $this->failed++;
         $this->emit('failed', $job, $error);
     }
@@ -253,6 +262,20 @@ final class Worker
         } catch (BunqueueException $e) {
             $this->emit('error', $e);
         }
+    }
+
+    /** Parse a successful ACK/FAIL response without inventing local success. */
+    private function transitionWasApplied(array $response): bool
+    {
+        if (!array_key_exists('data', $response)) {
+            return true;
+        }
+        $data = $response['data'];
+        if (\is_array($data) && ($data['applied'] ?? null) === false
+            && ($data['reason'] ?? null) === 'already-finalized') {
+            return false;
+        }
+        throw new CommandException('invalid ACK/FAIL outcome from broker');
     }
 
     /** Register; mark the generation ONLY on success so failures retry. */

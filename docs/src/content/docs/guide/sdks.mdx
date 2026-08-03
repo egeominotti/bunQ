@@ -43,10 +43,10 @@ against the same queue, with no shared runtime and no translation layer.
 
 Every SDK is versioned independently from the server and follows semantic
 versioning; each changelog is linked in [Resources](#resources). The wire
-protocol is a formal, public, versioned contract (`protocolVersion: 2`,
-negotiated via `Hello`), so a client written today keeps working across
-server upgrades, and services in different languages interoperate on the
-same queues out of the box.
+protocol is a formal, public, versioned contract (`protocolVersion: 3`,
+negotiated via `Hello` with the `separate-job-name` capability), so a client
+written today keeps working across compatible server upgrades, and services in
+different languages interoperate on the same queues out of the box.
 
 ## Getting started
 
@@ -522,11 +522,11 @@ builders: runtime handling of unknown keys differs by language.
 | `timeout` | ms | - | Per-job processing timeout, up to 1 day |
 | `jobId` | string | - | Custom id; **idempotent**, re-adding an unfinished id is a no-op |
 | `deduplication` | `{ id, ttl?, extend?, replace? }` | - | Dedup window keyed on `id` |
-| `debounce` | `{ id, ttl? }` | - | Collapses bursts to the last job |
+| `debounce` | `{ id, ttl? }` | - | Persists compatibility metadata; use `deduplication` with `replace: true` for last-write-wins execution |
 | `dependsOn` | string[] | - | Job ids that must complete first |
 | `parentId` / `childrenIds` | string / string[] | - | Flow relationships (usually set via `FlowProducer`) |
 | `tags` / `groupId` | string[] / string | - | Metadata; `groupId` also scopes group rate limits |
-| `lifo` | boolean | false | Orders only among LIFO jobs; mixed queues stay FIFO |
+| `lifo` | boolean | false | At equal priority, LIFO jobs form a newest-first partition ahead of FIFO jobs |
 | `removeOnComplete` / `removeOnFail` | boolean | false | Drop the job record at the terminal state |
 | `durable` | boolean | false | Bypass the server write buffer, fsync before the ACK returns |
 | `repeat` | `{ every }` or `{ pattern, tz? }` + `limit?` | - | Repeatable jobs (see [Cron](/guide/cron/)) |
@@ -789,6 +789,14 @@ swallow listener exceptions. Every worker frees each job's concurrency
 slot *before* emitting, so a throwing listener cannot leak a slot or
 degrade throughput in any SDK. The error itself is yours to observe.
 
+Terminal outcomes are broker-authoritative in every official SDK. If a job
+timeout or retired cron lease wins before a processor returns, the successful
+`already-finalized` ACK/FAIL response settles that handler attempt without
+emitting a contradictory `completed`/`failed` event or incrementing a terminal
+counter. Rust does not synthesize terminal events or counters; Elixir applies
+the same rule to its Worker counters. Malformed outcome evidence is surfaced as
+a protocol error instead of being treated as completion.
+
 ### ACK batching (high volume)
 
 Opt-in: coalesce completed-job acknowledgements into `ACKB` round-trips.
@@ -823,7 +831,10 @@ worker = Worker(
 Semantics are strict: a job stays *active*, its lock still heartbeated,
 until the server confirms the batch; the batch is flushed on `close()`;
 every job settles exactly once even if an event listener throws. Defaults
-are off, so nothing changes unless you enable it.
+are off, so nothing changes unless you enable it. When the broker ignores a
+retired generation, TypeScript and Python require exact positional
+`ignoredIndices`; they never infer a position from `ignoredIds`, because one
+batch can contain two lease generations with the same job ID.
 
 ### Graceful shutdown
 

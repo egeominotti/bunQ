@@ -168,10 +168,12 @@ An experimental `SandboxedWorker` (built on Bun Workers) exists if you need proc
 The per-worker `limiter` works as in BullMQ. bunqueue also offers a queue-level limit:
 
 ```typescript
-queue.setGlobalRateLimit(100); // max 100 jobs per second across all workers
+queue.setGlobalRateLimit(100);         // max 100 jobs per second across all workers
+queue.setGlobalRateLimit(100, 60_000); // max 100 jobs per minute
 ```
 
-The optional second `duration` argument exists for BullMQ signature compatibility but is currently ignored, the limit is always jobs per second.
+The optional second `duration` argument is the window in milliseconds and is
+enforced by the broker in both embedded and TCP modes. It defaults to 1,000 ms.
 
 ### No Redis, no Redis Cluster
 

@@ -18,6 +18,7 @@ export function reflectFields(
     parent: parent ? { id: parent.id, queueQualifiedName: parent.queue } : undefined,
     repeatJobKey: repeat ? `${queueName}:${id}:${pattern}` : undefined,
     stacktrace: meta?.stacktrace ?? null,
+    returnvalue: meta?.returnvalue,
     failedReason: meta?.failedReason,
   };
 }

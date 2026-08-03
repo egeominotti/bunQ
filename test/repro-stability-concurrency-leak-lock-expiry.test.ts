@@ -39,21 +39,14 @@ import { QueueManager } from '../src/application/queueManager';
 import { checkExpiredLocks } from '../src/application/lockManager';
 import { shardIndex } from '../src/shared/hash';
 
-function getInternalLockContext(qm: QueueManager): any {
-  const qmAny = qm as any;
-  return {
-    shards: qmAny.shards,
-    shardLocks: qmAny.shardLocks,
-    processingShards: qmAny.processingShards,
-    processingLocks: qmAny.processingLocks,
-    jobIndex: qmAny.jobIndex,
-    jobLocks: qmAny.jobLocks,
-    clientJobs: qmAny.clientJobs,
-    eventsManager: qmAny.eventsManager,
-    stalledCandidates: qmAny.stalledCandidates,
-    storage: qmAny.storage,
-    dashboardEmit: null,
-  };
+function getInternalLockContext(qm: QueueManager): Parameters<typeof checkExpiredLocks>[0] {
+  return (
+    qm as unknown as {
+      contextFactory: {
+        getLockContext(): Parameters<typeof checkExpiredLocks>[0];
+      };
+    }
+  ).contextFactory.getLockContext();
 }
 
 /** Read the ConcurrencyLimiter's active count via internal poking. */

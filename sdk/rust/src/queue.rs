@@ -30,17 +30,15 @@ impl Queue {
     pub fn add(&self, name: impl Into<String>, data: Value, options: JobOptions) -> Result<Job> {
         let name = name.into();
         let payload = job_payload(&name, data);
-        let mut fields = map([
-            ("queue", Value::from(self.name.clone())),
-            ("data", payload.clone()),
-        ]);
+        let mut fields = map([("queue", Value::from(self.name.clone()))]);
+        fields.extend(payload.as_map().cloned().unwrap_or_default());
         fields.extend(options.to_wire(false));
         let response = self.call(command("PUSH", fields))?;
-        let raw = map([
+        let mut raw = map([
             ("id", get(&response, "id").cloned().unwrap_or(Value::Nil)),
             ("queue", Value::from(self.name.clone())),
-            ("data", payload),
         ]);
+        raw.extend(payload.as_map().cloned().unwrap_or_default());
         Ok(Job::new(raw, self.connection.clone(), None))
     }
 
@@ -48,7 +46,10 @@ impl Queue {
         let jobs = entries
             .into_iter()
             .map(|entry| {
-                let mut fields = map([("data", job_payload(&entry.name, entry.data))]);
+                let mut fields = job_payload(&entry.name, entry.data)
+                    .as_map()
+                    .cloned()
+                    .unwrap_or_default();
                 fields.extend(entry.options.to_wire(true));
                 Value::Map(fields)
             })
@@ -82,13 +83,8 @@ impl Queue {
 }
 
 pub(crate) fn job_payload(name: &str, data: Value) -> Value {
-    match data {
-        Value::Map(mut entries) => {
-            let mut out = vec![(Value::from("name"), Value::from(name))];
-            out.append(&mut entries);
-            Value::Map(out)
-        }
-        Value::Nil => Value::Map(map([("name", Value::from(name))])),
-        other => Value::Map(map([("name", Value::from(name)), ("payload", other)])),
-    }
+    Value::Map(vec![
+        (Value::from("name"), Value::from(name)),
+        (Value::from("data"), data),
+    ])
 }

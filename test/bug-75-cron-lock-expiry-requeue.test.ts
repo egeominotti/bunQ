@@ -23,26 +23,22 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { QueueManager } from '../src/application/queueManager';
 import { checkExpiredLocks } from '../src/application/lockManager';
-import type { JobId } from '../src/domain/types/job';
+import { jobId } from '../src/domain/types/job';
 import { shardIndex } from '../src/shared/hash';
 
-function getInternalLockContext(qm: QueueManager): any {
-  const qmAny = qm as any;
-  return {
-    shards: qmAny.shards,
-    shardLocks: qmAny.shardLocks,
-    processingShards: qmAny.processingShards,
-    processingLocks: qmAny.processingLocks,
-    jobIndex: qmAny.jobIndex,
-    jobLocks: qmAny.jobLocks,
-    clientJobs: qmAny.clientJobs,
-    eventsManager: qmAny.eventsManager,
-    stalledCandidates: qmAny.stalledCandidates,
-    storage: qmAny.storage,
-    dashboardEmit: null,
-  };
+function getInternalLockContext(qm: QueueManager): Parameters<typeof checkExpiredLocks>[0] {
+  return (
+    qm as unknown as {
+      contextFactory: {
+        getLockContext(): Parameters<typeof checkExpiredLocks>[0];
+      };
+    }
+  ).contextFactory.getLockContext();
 }
 
 describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reconnect', () => {
@@ -85,16 +81,16 @@ describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reco
     // 5. Run lock expiration check
     await checkExpiredLocks(getInternalLockContext(qm));
 
-    // BUG: Without fix, the cron job is re-queued (state = 'waiting')
-    // FIX: The cron job should be discarded (not in queue, not in processing)
-    const stateAfter = await qm.getJobState(job!.id);
-    // With the fix, the job should NOT be in the queue
-    expect(stateAfter).not.toBe('waiting');
+    expect(await qm.getJobState(job!.id)).toBe('unknown');
+    expect(await qm.pull('testing', 0)).toBeNull();
+    expect(
+      qm.getShards()[shardIndex('testing')].getUniqueKeyEntry('testing', 'cron:test-cron')
+    ).toBeNull();
   });
 
-  test('batch ACK should recover stall-retried cron job (like single ACK does)', async () => {
+  test('late batch ACK ignores only the exact retired cron lease', async () => {
     // 1. Push a cron job with uniqueKey
-    const cronJob = await qm.push('testing', {
+    await qm.push('testing', {
       data: { type: 'cron' },
       uniqueKey: 'cron:test-cron',
     });
@@ -106,19 +102,20 @@ describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reco
     // 3. Wait for lock to expire
     await Bun.sleep(100);
 
-    // 4. Lock expiration re-queues the job
+    // 4. Lock expiration retires the cron generation
     await checkExpiredLocks(getInternalLockContext(qm));
 
-    // Job should be back in queue
-    const stateBeforeAck = await qm.getJobState(job!.id);
+    expect(await qm.getJobState(job!.id)).toBe('unknown');
 
-    // 5. Simulate batch ACK (what the worker's ackBatcher sends)
-    // This should recover the stall-retried job, not silently skip it
-    await qm.ackBatchWithResults([{ id: job!.id, result: 'done', token: token! }]);
+    await expect(
+      qm.ackBatchWithResults([{ id: job!.id, result: 'wrong', token: 'wrong-token' }])
+    ).rejects.toThrow('Job not found');
+    await expect(
+      qm.ackBatchWithResults([{ id: job!.id, result: 'done', token: token! }])
+    ).resolves.toEqual({ ignoredIds: [job!.id], ignoredIndices: [0] });
 
-    // After batch ACK, the job should be completed or removed — not still waiting
-    const stateAfterAck = await qm.getJobState(job!.id);
-    expect(stateAfterAck).not.toBe('waiting');
+    expect(await qm.getJobState(job!.id)).toBe('unknown');
+    expect(await qm.pull('testing', 0)).toBeNull();
 
     // The uniqueKey should be released so the next cron fire can push
     const idx = shardIndex('testing');
@@ -127,9 +124,7 @@ describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reco
     expect(keyEntry).toBeNull();
   });
 
-  test('full scenario: re-queued cron job should not be pullable after ACK', async () => {
-    // This test simulates the full bug scenario from discussion #75
-
+  test('late single ACK cannot resurrect a retired cron generation', async () => {
     // 1. Push cron job
     await qm.push('testing', {
       data: { type: 'cron-job' },
@@ -144,11 +139,17 @@ describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reco
     await Bun.sleep(100);
     await checkExpiredLocks(getInternalLockContext(qm));
 
-    // 4. Worker finishes and ACKs via batch (like ackBatcher does)
-    await qm.ackBatchWithResults([{ id: job!.id, result: { done: true }, token: token! }]);
+    // 4. An embedded worker returns after its generation was retired.
+    await expect(qm.ack(job!.id, { done: true }, token!)).resolves.toEqual({
+      applied: false,
+      reason: 'already-finalized',
+    });
+    await expect(qm.fail(job!.id, 'late failure', token!)).resolves.toEqual({
+      applied: false,
+      reason: 'already-finalized',
+    });
 
-    // 5. Simulate "Run 2": new worker connects and tries to pull
-    // There should be NO job in the queue
+    expect(await qm.getJobState(job!.id)).toBe('unknown');
     const nextJob = await qm.pull('testing', 0);
     expect(nextJob).toBeNull();
 
@@ -156,5 +157,79 @@ describe('Bug #75: Cron lock expiry re-queues job causing immediate fire on reco
     const idx = shardIndex('testing');
     const shard = qm.getShards()[idx];
     expect(shard.getUniqueKeyEntry('testing', 'cron:start-new-test-job')).toBeNull();
+  });
+
+  test('ACK still rejects arbitrary missing and already-completed jobs', async () => {
+    const missingId = jobId(Bun.randomUUIDv7());
+    await expect(qm.ack(missingId, 'missing', 'unknown-token')).rejects.toThrow('Job not found');
+    await expect(
+      qm.ackBatchWithResults([{ id: missingId, result: 'missing', token: 'unknown-token' }])
+    ).rejects.toThrow('Job not found');
+
+    const accepted = await qm.push('testing', { data: { type: 'ordinary' } });
+    const pulled = await qm.pullWithLock('testing', 'worker-1');
+    expect(pulled.job?.id).toBe(accepted.id);
+    await qm.ack(accepted.id, 'first', pulled.token!);
+
+    await expect(qm.ack(accepted.id, 'duplicate', pulled.token!)).rejects.toThrow('Job not found');
+    await expect(
+      qm.ackBatchWithResults([{ id: accepted.id, result: 'duplicate', token: pulled.token! }])
+    ).rejects.toThrow('Job not found');
+    expect(await qm.getJobState(accepted.id)).toBe('completed');
+  });
+
+  test('custom-ID reuse cannot inherit a retired cron lease', async () => {
+    const customId = `cron-generation-${Bun.randomUUIDv7()}`;
+    const original = await qm.push('testing', {
+      data: { generation: 'retired' },
+      customId,
+      uniqueKey: 'cron:generation-safe',
+    });
+    const retired = await qm.pullWithLock('testing', 'worker-old', 0, 50);
+    expect(retired.job?.id).toBe(original.id);
+    await Bun.sleep(100);
+    await checkExpiredLocks(getInternalLockContext(qm));
+
+    const replacement = await qm.push('testing', {
+      data: { generation: 'current' },
+      customId,
+    });
+    expect(replacement.id).toBe(original.id);
+    const current = await qm.pullWithLock('testing', 'worker-new');
+    expect(current.job?.id).toBe(replacement.id);
+    expect(current.token).not.toBe(retired.token);
+
+    await expect(qm.ack(replacement.id, 'stale', retired.token!)).rejects.toThrow(
+      'Invalid or expired lock token'
+    );
+    await expect(qm.ack(replacement.id, 'current', current.token!)).resolves.toBeUndefined();
+    expect(await qm.getJobState(replacement.id)).toBe('completed');
+  });
+
+  test('discarded cron generation cannot recover from SQLite after restart', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'bunqueue-cron-retired-'));
+    const dataPath = join(directory, 'queue.db');
+    let persistent: QueueManager | null = new QueueManager({ dataPath });
+    try {
+      const accepted = await persistent.push('persistent-cron', {
+        data: { generation: 'retired' },
+        uniqueKey: 'cron:persistent-retirement',
+        durable: true,
+      });
+      const active = await persistent.pullWithLock('persistent-cron', 'worker-old', 0, 50);
+      expect(active.job?.id).toBe(accepted.id);
+      await Bun.sleep(100);
+      await checkExpiredLocks(getInternalLockContext(persistent));
+      expect(await persistent.getJobState(accepted.id)).toBe('unknown');
+
+      persistent.shutdown();
+      persistent = null;
+      persistent = new QueueManager({ dataPath });
+      expect(await persistent.getJobState(accepted.id)).toBe('unknown');
+      expect(await persistent.pull('persistent-cron', 0)).toBeNull();
+    } finally {
+      persistent?.shutdown();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

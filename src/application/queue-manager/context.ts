@@ -1,6 +1,6 @@
-import type { Job } from '../../domain/types/job';
 import type { ContextCallbacks, ContextDependencies } from '../contextFactory';
 import type { QueueManagerRuntime, QueueManagerStateView } from '../types';
+import { handleRepeat } from './repeat';
 
 export function managerRuntime(value: unknown): QueueManagerRuntime {
   return value as QueueManagerRuntime;
@@ -20,6 +20,9 @@ export function createContextDependencies(state: QueueManagerStateView): Context
     completedJobsData: state.completedJobsData,
     depCompletions: state.depCompletions,
     timedOutJobs: state.timedOutJobs,
+    retiredTimeoutLeaseTokens: state.retiredTimeoutLeaseTokens,
+    retiredCronLeaseTokens: state.retiredCronLeaseTokens,
+    timeoutScheduler: state.timeoutScheduler,
     jobResults: state.jobResults,
     dependencyResults: state.dependencyResults,
     customIdMap: state.customIdMap,
@@ -43,8 +46,10 @@ export function createContextDependencies(state: QueueManagerStateView): Context
 
 export function createContextCallbacks(runtime: QueueManagerRuntime): ContextCallbacks {
   return {
-    fail: (id, error, failureReason) =>
-      failureReason ? runtime.failWithReason(id, error, failureReason) : runtime.fail(id, error),
+    fail: async (id, error, failureReason) => {
+      if (failureReason) await runtime.failWithReason(id, error, failureReason);
+      else await runtime.fail(id, error);
+    },
     registerQueueName: (queue) => runtime.registerQueueName(queue),
     unregisterQueueName: (queue) => runtime.unregisterQueueName(queue),
     onJobCompleted: (id) => runtime.onJobCompleted(id),
@@ -56,37 +61,4 @@ export function createContextCallbacks(runtime: QueueManagerRuntime): ContextCal
     onChildTerminalFailure: (job, error) => runtime.failParentOnChildFailure(job, error),
     onChildDependencyOption: (job, error) => runtime.onChildDependencyOption(job, error),
   };
-}
-
-function handleRepeat(runtime: QueueManagerRuntime, job: Job): void {
-  if (!job.repeat) return;
-  const oldId = job.id;
-  void runtime
-    .push(job.queue, {
-      data: job.data,
-      priority: job.priority,
-      delay: job.repeat.every ?? 0,
-      maxAttempts: job.maxAttempts,
-      backoff: job.backoff,
-      ttl: job.ttl ?? undefined,
-      timeout: job.timeout ?? undefined,
-      tags: job.tags,
-      groupId: job.groupId ?? undefined,
-      lifo: job.lifo,
-      removeOnComplete: job.removeOnComplete,
-      removeOnFail: job.removeOnFail,
-      repeat: {
-        every: job.repeat.every,
-        limit: job.repeat.limit,
-        pattern: job.repeat.pattern,
-        count: job.repeat.count + 1,
-      },
-    })
-    .then((newJob) => {
-      runtime.repeatChain.set(oldId, newJob.id);
-      if (runtime.repeatChain.size > 10_000) {
-        const first = runtime.repeatChain.keys().next().value;
-        if (first !== undefined) runtime.repeatChain.delete(first);
-      }
-    });
 }

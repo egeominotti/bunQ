@@ -74,6 +74,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Defaults are `localhost:6789`, so constructors need no options on a local
 setup.
 
+Job names are top-level protocol metadata. `Job::name()` reads that field,
+while `Job::data()` returns the submitted `Value` unchanged, including a map
+with its own `name`, scalar, array, or `Nil`. Legacy maps that stored the job
+name inside `data` remain readable. Scheduler templates use separate
+`jobName` and `data` fields.
+The client negotiates protocol v3 and advertises `separate-job-name` in `Hello`.
+
 ## Failure semantics
 
 The processor returns `Result<Value, ProcessError>`:
@@ -93,6 +100,11 @@ queue all live in the server; the worker only pulls, heartbeats and
 acknowledges. Automatic lock heartbeats renew active leases through an
 independent connection, so jobs longer than the lock TTL survive; set
 `heartbeat_interval: None` to disable them.
+
+`run_once()` returns the number of handler attempts that settled. If the broker
+already finalized that exact lease generation (for example, by job timeout),
+its acknowledged `already-finalized` no-op still settles the attempt but cannot
+replace the broker's terminal state or persisted result.
 
 ## API surface
 

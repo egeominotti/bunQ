@@ -72,7 +72,7 @@ export async function handleMoveToDelayed(
   requestId?: string
 ): Promise<Response> {
   const id = jobId(command.id);
-  const success = await context.queueManager.moveToDelayed(id, command.delay);
+  const success = await context.queueManager.moveToDelayed(id, command.delay, command.token);
   if (success) {
     context.queueManager.emitDashboardEvent('job:moved-to-delayed', {
       jobId: command.id,
@@ -90,7 +90,7 @@ export async function handleDiscard(
   context: HandlerContext,
   requestId?: string
 ): Promise<Response> {
-  const success = await context.queueManager.discard(jobId(command.id));
+  const success = await context.queueManager.discard(jobId(command.id), command.token);
   if (success) context.queueManager.emitDashboardEvent('job:discarded', { jobId: command.id });
   return success ? response.ok(undefined, requestId) : response.error('Job not found', requestId);
 }
@@ -135,7 +135,11 @@ export async function handleChangeDelay(
   context: HandlerContext,
   requestId?: string
 ): Promise<Response> {
-  const success = await context.queueManager.changeDelay(jobId(command.id), command.delay);
+  const success = await context.queueManager.changeDelay(
+    jobId(command.id),
+    command.delay,
+    command.token
+  );
   if (success) {
     context.queueManager.emitDashboardEvent('job:delay-changed', {
       jobId: command.id,
@@ -155,7 +159,7 @@ export async function handleMoveToWait(
   const id = jobId(command.id);
   const state = await context.queueManager.getJobState(id);
   if (state === 'active') {
-    const success = await context.queueManager.moveActiveToWait(id);
+    const success = await context.queueManager.moveActiveToWait(id, command.token);
     return success
       ? response.ok(undefined, requestId)
       : response.error('Job not found or not active', requestId);

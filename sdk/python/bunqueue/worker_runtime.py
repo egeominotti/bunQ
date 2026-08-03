@@ -14,6 +14,7 @@ import traceback
 from typing import Any, Dict, Optional
 
 from .ack_batcher import AckItem
+from .ack_outcome import transition_was_applied
 from .errors import BunqueueError, UnrecoverableError
 from .job import Job
 from .wire import _compact
@@ -88,7 +89,7 @@ class WorkerRuntime:
             cap = raw.get("stackTraceLimit")
             cap = cap if isinstance(cap, int) and cap > 0 else MAX_STACK_LINES
             stack = traceback.format_exc().splitlines()[-cap:]
-            failed_sent = self._safe_call(
+            failure_applied = self._safe_transition(
                 _compact(
                     {
                         "cmd": "FAIL",
@@ -101,10 +102,9 @@ class WorkerRuntime:
                 )
             )
             self._finish_job(job.id)
-            # Only count/emit 'failed' when the server recorded the failure;
-            # on a wire failure only 'error' fired and the server re-leases
-            # the job after lock expiry (same gate as the TS worker).
-            if failed_sent:
+            # Count only a broker-applied failure. A transport/protocol failure
+            # emits only 'error'; an already-finalized generation emits neither.
+            if failure_applied is True:
                 self._failed += 1
                 self.emit("failed", job, exc)
             return
@@ -118,8 +118,8 @@ class WorkerRuntime:
                     id=job.id,
                     token=token,
                     result=result,
-                    on_settled=lambda err, job=job, result=result: self._on_ack_settled(
-                        job, result, err
+                    on_settled=lambda err, applied, job=job, result=result: self._on_ack_settled(
+                        job, result, err, applied
                     ),
                 )
             )
@@ -127,27 +127,26 @@ class WorkerRuntime:
         ack: Dict[str, Any] = {"cmd": "ACK", "id": job.id, "token": token}
         if result is not None:
             ack["result"] = result
-        acked = self._safe_call(ack)
+        acked = self._safe_transition(ack)
         # Free the slot BEFORE emitting (same rationale as the batched path).
         self._finish_job(job.id)
-        # Only count/emit 'completed' when the ACK reached the server: an
-        # unconfirmed ack means the job will be redelivered after lock expiry,
-        # so reporting success here would double-count (same gate as the
-        # batched path and the TS worker).
-        if acked:
+        # Count only a broker-applied ACK. Transport/protocol failure emits an
+        # error; an exact already-finalized generation emits neither outcome.
+        if acked is True:
             self._processed += 1
             self.emit("completed", job, result)
 
-    def _on_ack_settled(self, job: Job, result: Any, err: Optional[BaseException]) -> None:
+    def _on_ack_settled(
+        self, job: Job, result: Any, err: Optional[BaseException], applied: bool
+    ) -> None:
         """Settle callback for a batched ACK: free the slot, then report.
 
-        On a failed ACKB the job is NOT reported as completed: the server
-        never confirmed the ack (the job will be retried after lock expiry),
-        so the worker surfaces an 'error' event per job instead."""
+        A failed ACKB emits ``error``; a position the broker reports as
+        already finalized emits neither ``completed`` nor ``error``."""
         self._finish_job(job.id)
         if err is not None:
             self.emit("error", err)
-        else:
+        elif applied:
             self._processed += 1
             self.emit("completed", job, result)
 
@@ -219,3 +218,13 @@ class WorkerRuntime:
             logger.warning("swallowed %s failure: %s", command.get("cmd"), exc)
             self.emit("error", exc)
             return False
+
+    def _safe_transition(self, command: Dict[str, Any]) -> Optional[bool]:
+        """Send ACK/FAIL and distinguish applied, ignored, and error outcomes."""
+        try:
+            response = self.connection.call(command)
+            return transition_was_applied(response)
+        except BunqueueError as exc:
+            logger.warning("swallowed %s failure: %s", command.get("cmd"), exc)
+            self.emit("error", exc)
+            return None

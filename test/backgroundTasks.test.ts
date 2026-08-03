@@ -14,48 +14,22 @@ import {
 } from '../src/application/backgroundTasks';
 import { CronScheduler } from '../src/infrastructure/scheduler/cronScheduler';
 import type { BackgroundContext } from '../src/application/types';
-import { createJob, jobId, type Job, type JobId } from '../src/domain/types/job';
+import type { Job } from '../src/domain/types/job';
 import { processingShardIndex, SHARD_COUNT } from '../src/shared/hash';
+import { JobTimeoutScheduler } from '../src/application/background/timeouts';
 
 // ============ Helpers ============
 
 /**
  * Helper to extract a BackgroundContext from a QueueManager instance.
- * Uses (qm as any) to access private internals, matching patterns
- * used in other test files (e.g., stallDetection-unit.test.ts).
+ * Uses the same context factory wired into the manager's operations.
  */
 function getBackgroundContext(qm: QueueManager): BackgroundContext {
-  const raw = qm as any;
-  return {
-    config: raw.config,
-    storage: raw.storage,
-    shards: raw.shards,
-    shardLocks: raw.shardLocks,
-    processingShards: raw.processingShards,
-    processingLocks: raw.processingLocks,
-    jobIndex: raw.jobIndex,
-    completedJobs: raw.completedJobs,
-    jobResults: raw.jobResults,
-    customIdMap: raw.customIdMap,
-    jobLogs: raw.jobLogs,
-    jobLocks: raw.jobLocks,
-    clientJobs: raw.clientJobs,
-    stalledCandidates: raw.stalledCandidates,
-    pendingDepChecks: raw.pendingDepChecks,
-    queueNamesCache: raw.queueNamesCache,
-    eventsManager: raw.eventsManager,
-    webhookManager: raw.webhookManager,
-    metrics: raw.metrics,
-    startTime: raw.startTime,
-    fail: raw.fail.bind(qm),
-    registerQueueName: raw.registerQueueName.bind(qm),
-    unregisterQueueName: raw.unregisterQueueName.bind(qm),
-  };
-}
-
-function makeJob(id: string, queue = 'test', overrides: Partial<Job> = {}): Job {
-  const job = createJob(jobId(id), queue, { data: { id } }, Date.now());
-  return { ...job, ...overrides } as Job;
+  return (
+    qm as unknown as {
+      contextFactory: { getBackgroundContext(): BackgroundContext };
+    }
+  ).contextFactory.getBackgroundContext();
 }
 
 /** Wait for a given number of milliseconds */
@@ -85,7 +59,7 @@ describe('backgroundTasks', () => {
       const handles = startBackgroundTasks(ctx, cron);
 
       expect(handles.cleanupInterval).toBeDefined();
-      expect(handles.timeoutInterval).toBeDefined();
+      expect(handles.timeoutScheduler).toBeDefined();
       expect(handles.depCheckInterval).toBeDefined();
       expect(handles.stallCheckInterval).toBeDefined();
       expect(handles.dlqMaintenanceInterval).toBeDefined();
@@ -169,7 +143,7 @@ describe('backgroundTasks', () => {
       // Each start creates fresh intervals; they should differ from the previous ones
       // (Timer IDs are incremented internally by the runtime)
       expect(handles2.cleanupInterval).toBeDefined();
-      expect(handles2.timeoutInterval).toBeDefined();
+      expect(handles2.timeoutScheduler).toBeDefined();
 
       stopBackgroundTasks(handles2);
       cron.stop();
@@ -183,12 +157,12 @@ describe('backgroundTasks', () => {
       // Construct a fake handles object with dummy interval IDs
       const cron = new CronScheduler();
       const fakeHandles: BackgroundTaskHandles = {
-        cleanupInterval: setInterval(() => {}, 999999),
-        timeoutInterval: setInterval(() => {}, 999999),
-        depCheckInterval: setInterval(() => {}, 999999),
-        stallCheckInterval: setInterval(() => {}, 999999),
-        dlqMaintenanceInterval: setInterval(() => {}, 999999),
-        lockCheckInterval: setInterval(() => {}, 999999),
+        cleanupInterval: setInterval(() => undefined, 999999),
+        timeoutScheduler: new JobTimeoutScheduler(),
+        depCheckInterval: setInterval(() => undefined, 999999),
+        stallCheckInterval: setInterval(() => undefined, 999999),
+        dlqMaintenanceInterval: setInterval(() => undefined, 999999),
+        lockCheckInterval: setInterval(() => undefined, 999999),
         cronScheduler: cron,
       };
 
@@ -481,13 +455,13 @@ describe('backgroundTasks', () => {
 
       try {
         // Enable stall detection on a queue
-        const raw = shortQm as any;
+        const background = getBackgroundContext(shortQm);
         const queueName = 'stall-test';
         await shortQm.push(queueName, { data: { x: 1 } });
 
         // Configure stall detection
         const idx = (await import('../src/shared/hash')).shardIndex(queueName);
-        raw.shards[idx].setStallConfig(queueName, {
+        background.shards[idx].setStallConfig(queueName, {
           enabled: true,
           stallInterval: 10,
           maxStalls: 3,

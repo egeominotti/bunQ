@@ -5,6 +5,21 @@ export type {
   QueueOptions,
 } from './connection';
 export type { DlqConfig, DlqEntry, DlqFilter, DlqStats, FailureReason } from './dlq';
+export type {
+  ActiveEvent,
+  CompletedEvent,
+  DelayedEvent,
+  DrainedEvent,
+  DuplicatedEvent,
+  FailedEvent,
+  ProgressEvent,
+  QueueEventsOptions,
+  RemovedEvent,
+  RetriedEvent,
+  StalledEvent,
+  WaitingChildrenEvent,
+  WaitingEvent,
+} from './events';
 export type { FlowJobData, Processor, QueueEventType } from './flow';
 export type {
   ChangePriorityOpts,
@@ -16,6 +31,7 @@ export type {
   JobJsonRaw,
   JobStateType,
 } from './job';
+export type { QueueMetrics, QueueMetricsMeta, QueueMetricType } from './metrics';
 export type {
   BackoffOptions,
   DebounceOptions,

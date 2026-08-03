@@ -214,10 +214,10 @@ Used for sharding and distribution.
     <div class="bq-diag-cell">Single exclusive writer</div>
     <div class="bq-diag-cell">Writer priority <i>prevents starvation</i></div>
   </div>
-  <div class="bq-diag-layer bq-diag-accent">Fast path, uncontested write <i><code>if (!writer &amp;&amp; readers === 0) { writer = true; return guard; }</code>, synchronous, no Promise</i></div>
+  <div class="bq-diag-layer bq-diag-accent">Direct writer handoff <i>reserve <code>writer = true</code> before resolving the oldest waiter; late arrivals cannot barge</i></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">timeout cancellation</span>
-    <div class="bq-diag-layer">Mark entry as cancelled O(1), skip cancelled entries on release, no O(n) array splice</div>
+    <div class="bq-diag-layer">Settle once, decrement live writer count once, skip cancelled heads, then dispatch writers or the compatible reader cohort</div>
   </div>
 </div>
 

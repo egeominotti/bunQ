@@ -36,7 +36,7 @@
  * close(false) resolves promptly, isolating the group-limiter path as the cause.
  */
 
-import { describe, test, expect, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -56,6 +56,10 @@ function makeTmpDataPath(): string {
   return join(dir, 'queue.db');
 }
 
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(() => {
   shutdownManager();
   for (const dir of tmpDirs.splice(0)) {
@@ -68,7 +72,10 @@ afterEach(() => {
 });
 
 /** Resolves to 'resolved' if p settles before timeoutMs, else 'timeout'. */
-async function raceTimeout(p: Promise<unknown>, timeoutMs: number): Promise<'resolved' | 'timeout'> {
+async function raceTimeout(
+  p: Promise<unknown>,
+  timeoutMs: number
+): Promise<'resolved' | 'timeout'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutP = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs);

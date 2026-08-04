@@ -27,17 +27,23 @@
  * crash-recovery path did, and only after a crash landed inside an unwind.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true).catch(() => {});
   engine = undefined;
+  shutdownManager();
 });
 
 /** `a` reverses cleanly, `b` refuses, `boom` fails the run. Unwind order: b, then a. */
@@ -55,9 +61,13 @@ const parkedFlow = (onUndoA: () => void) =>
         throw new Error('refund refused');
       },
     })
-    .step('boom', async () => {
-      throw new Error('downstream rejected');
-    }, { retry: 1 });
+    .step(
+      'boom',
+      async () => {
+        throw new Error('downstream rejected');
+      },
+      { retry: 1 }
+    );
 
 describe('an unresolved reversal keeps the chain stopped', () => {
   test('recover() over a crashed unwind does not declare it clean', async () => {
@@ -72,8 +82,9 @@ describe('an unresolved reversal keeps the chain stopped', () => {
 
     // Exactly what a crash mid-unwind leaves behind: the row says an unwind is in
     // flight, and `listRecoverable()` hands it back at the next startup.
-    const store = (engine as unknown as { store: { get: (id: string) => never; update: (e: never) => void } })
-      .store;
+    const store = (
+      engine as unknown as { store: { get: (id: string) => never; update: (e: never) => void } }
+    ).store;
     const row = store.get(run.id) as unknown as { state: string };
     row.state = 'compensating';
     store.update(row as never);
@@ -111,9 +122,13 @@ describe('an unresolved reversal keeps the chain stopped', () => {
             if (refusals++ === 0) throw new Error('refund refused');
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('pay2');
@@ -144,9 +159,13 @@ describe('an unresolved reversal keeps the chain stopped', () => {
             undoA++;
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('pay3');

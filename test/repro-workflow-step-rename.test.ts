@@ -27,17 +27,23 @@
  * reason rather than as silence.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true).catch(() => {});
   engine = undefined;
+  shutdownManager();
 });
 
 describe('a renamed step cannot be reported as rolled back', () => {
@@ -55,9 +61,13 @@ describe('a renamed step cannot be reported as rolled back', () => {
             throw new Error('refund refused');
           },
         })
-        .step('boom', async () => {
-          throw new Error('downstream rejected');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('downstream rejected');
+          },
+          { retry: 1 }
+        )
     );
     const run = await engine.start('pay');
     expect(await waitForWorkflowState(engine, run.id, 'compensation-stuck')).toBeTruthy();
@@ -77,9 +87,13 @@ describe('a renamed step cannot be reported as rolled back', () => {
             refunds++;
           },
         })
-        .step('boom', async () => {
-          throw new Error('downstream rejected');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('downstream rejected');
+          },
+          { retry: 1 }
+        )
     );
     await engine.resumeCompensation(run.id).catch(() => {});
 
@@ -108,9 +122,13 @@ describe('a renamed step cannot be reported as rolled back', () => {
             log.push('release');
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('intact');

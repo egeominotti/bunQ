@@ -37,16 +37,46 @@ export function checkCompensationDispatches(
     if (behavior === 'none') {
       fail('I7 compensation sanity', `${identity} dispatched without a declared handler`);
     }
-    const successes = calls.filter((call) => call.outcome === 'completed').length;
-    if (successes > 1) {
-      fail('I7 compensation exactly-once', `${identity} completed ${successes} times`);
+
+    const compensationKeys = new Set(calls.map((call) => call.idempotencyKey));
+    if (compensationKeys.size !== 1 || !first.idempotencyKey) {
+      fail(
+        'I7 compensation idempotency',
+        `${identity} changed or omitted its compensation idempotency key`
+      );
+    }
+    const forwardKeys = new Set(calls.map((call) => call.forwardIdempotencyKey));
+    if (forwardKeys.size !== 1 || !first.forwardIdempotencyKey) {
+      fail(
+        'I7 compensation forward identity',
+        `${identity} changed or omitted its forward idempotency key`
+      );
+    }
+
+    const generations = new Set(calls.map((call) => call.engineGeneration));
+    for (const generation of generations) {
+      const successes = calls.filter(
+        (call) => call.engineGeneration === generation && call.outcome === 'completed'
+      ).length;
+      // The harness does not inject WorkflowStore write failures. Within one of its
+      // Engine generations, a second successful dispatch therefore identifies live
+      // concurrent recovery rather than a legitimate unknown checkpoint outcome.
+      if (successes > 1) {
+        fail(
+          'I7 compensation same-generation dispatch',
+          `${identity} completed ${successes} times in Engine generation ${generation}`
+        );
+      }
     }
     const resumes = ledger.operatorActions.filter(
       (action) =>
         action.kind === 'resume' &&
         actionAffectsExecution(action.executionId, first.executionId, executions)
     ).length;
-    const maxCalls = behavior === 'ok' ? 1 : behavior === 'fail-once' ? 2 : 1 + resumes;
+    const baseCalls = behavior === 'ok' ? 1 : behavior === 'fail-once' ? 2 : 1 + resumes;
+    // A force-close can leave an external reversal complete but its checkpoint
+    // unwritten. Each replacement Engine may therefore make one sequential replay.
+    const maxCalls = baseCalls + Math.max(0, generations.size - 1);
     if (calls.length > maxCalls) {
       fail(
         'I7 compensation dispatch bound',

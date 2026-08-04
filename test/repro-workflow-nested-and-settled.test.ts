@@ -33,17 +33,23 @@
  * module is for, and a worker slot held to produce it.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true).catch(() => {});
   engine = undefined;
+  shutdownManager();
 });
 
 describe('a rename cannot destroy a reversal that already succeeded', () => {
@@ -71,9 +77,13 @@ describe('a rename cannot destroy a reversal that already succeeded', () => {
             releases++;
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('pay');
@@ -99,9 +109,13 @@ describe('a rename cannot destroy a reversal that already succeeded', () => {
             releases++;
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     await engine.resumeCompensation(run.id).catch(() => {});
@@ -137,9 +151,13 @@ describe('a rename cannot destroy a reversal that already succeeded', () => {
             if (refuse) throw new Error('refund refused');
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('pay2');
@@ -155,9 +173,13 @@ describe('a rename cannot destroy a reversal that already succeeded', () => {
       new Workflow('pay2')
         .step('reserve-stock', async () => ({}), { retry: 1, compensate: async () => {} })
         .step('charge', async () => ({}), { retry: 1, compensate: async () => {} })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
     await engine.resumeCompensation(run.id).catch(() => {});
 
@@ -195,9 +217,13 @@ describe('resuming a parent reaches its child', () => {
           },
         })
         .subWorkflow('child-svc', () => ({}))
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('parent-svc');
@@ -226,9 +252,13 @@ describe('a child parked mid-rollback does not hold its parent', () => {
             throw new Error('refused');
           },
         })
-        .step('b', async () => {
-          throw new Error('child failed');
-        }, { retry: 1 })
+        .step(
+          'b',
+          async () => {
+            throw new Error('child failed');
+          },
+          { retry: 1 }
+        )
     );
     engine.register(new Workflow('p-stuck').subWorkflow('c-stuck', () => ({})));
 
@@ -239,14 +269,13 @@ describe('a child parked mid-rollback does not hold its parent', () => {
     // `unwindSet` dropped anything that is neither `completed` nor `failed`, so nothing
     // was eligible and the run reported `rollbackStatus: 'completed'` over a child still
     // holding stock (`test/repro-workflow-child-park-inherit.test.ts`).
-    expect(
-      await waitForWorkflowState(engine, run.id, 'compensation-stuck', 20_000)
-    ).toBeTruthy();
+    expect(await waitForWorkflowState(engine, run.id, 'compensation-stuck', 20_000)).toBeTruthy();
     const elapsed = Date.now() - started;
 
-    expect(elapsed, `the parent waited ${elapsed}ms on a child that was already parked`).toBeLessThan(
-      10_000
-    );
+    expect(
+      elapsed,
+      `the parent waited ${elapsed}ms on a child that was already parked`
+    ).toBeLessThan(10_000);
     const reason = engine.getExecution(run.id)?.failureReason ?? '';
     expect(reason, 'a timeout is the wrong diagnostic for a parked child').not.toContain(
       'timed out'

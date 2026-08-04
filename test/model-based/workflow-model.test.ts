@@ -26,6 +26,8 @@ import { Workflow } from '../../src/client/workflow';
 import { WorkflowStore } from '../../src/client/workflow/store';
 import { workflowCommandArbitraries } from './workflow-commands';
 import { disposeCampaign, RealWorkflow, type WorkflowModel } from './workflow-model-harness';
+import { checkCompensationDispatches } from './workflow-rollback-invariants';
+import type { Ledger, LedgerCall, WorkflowSpec } from './workflow-spec';
 import { workflowSpec } from './workflow-spec';
 
 const DEFAULT_RUNS = 40;
@@ -151,6 +153,56 @@ describe('Workflow engine state-machine model', () => {
           ).toThrow();
         }
       )
+    );
+  });
+
+  test('force-close replay is bounded by Engine generation and a stable idempotency key', () => {
+    const spec: WorkflowSpec = {
+      name: 'replay',
+      nodes: [
+        {
+          kind: 'step',
+          step: { name: 'charge', behavior: 'fail', retry: 1, compensation: 'ok' },
+        },
+      ],
+    };
+    const execution: Execution = {
+      id: 'wf-replay',
+      workflowName: spec.name,
+      state: 'failed',
+      input: {},
+      steps: {},
+      currentNodeIndex: 0,
+      signals: {},
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const call = (
+      engineGeneration: number,
+      idempotencyKey = 'wf-replay:charge#0:compensate',
+      forwardIdempotencyKey = 'wf-replay:charge#0:forward'
+    ) =>
+      ({
+        executionId: execution.id,
+        name: 'charge',
+        occurrence: 0,
+        idempotencyKey,
+        forwardIdempotencyKey,
+        outcome: 'completed' as const,
+        engineGeneration,
+      }) satisfies LedgerCall;
+    const check = (compensations: LedgerCall[]) => {
+      const ledger: Ledger = { steps: [], maps: [], compensations, operatorActions: [] };
+      checkCompensationDispatches(spec, ledger, [execution], (id, detail): never => {
+        throw new Error(`${id}: ${detail}`);
+      });
+    };
+
+    expect(() => check([call(0), call(1)])).not.toThrow();
+    expect(() => check([call(0), call(0)])).toThrow(/same-generation/);
+    expect(() => check([call(0), call(1, 'different-key')])).toThrow(/idempotency/);
+    expect(() => check([call(0), call(1, undefined, 'different-forward-key')])).toThrow(
+      /forward identity/
     );
   });
 

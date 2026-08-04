@@ -77,6 +77,7 @@ function failTimes(
 }
 
 beforeAll(async () => {
+  shutdownManager();
   await cleanupDb();
   qm = new QueueManager();
   server = createTcpServer(qm, { port: PORT, hostname: '127.0.0.1' });
@@ -146,11 +147,7 @@ describe('Issue #74 - stacktrace persisted server-side', () => {
     const q = tcpQueue('i74p-tcp-limit');
     const { worker, done } = failTimes('i74p-tcp-limit', 1, { embedded: false });
 
-    const job = await q.add(
-      'job',
-      { v: 1 },
-      { attempts: 3, backoff: 60_000, stackTraceLimit: 3 }
-    );
+    const job = await q.add('job', { v: 1 }, { attempts: 3, backoff: 60_000, stackTraceLimit: 3 });
     await done;
     await worker.close();
 

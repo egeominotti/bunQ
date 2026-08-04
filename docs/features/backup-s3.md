@@ -86,8 +86,13 @@ wins over environment configuration in `resolveBackupConfig`.
 ## Backup State Machine
 
 `S3BackupManager.start()` validates configuration, schedules the first backup
-one minute after startup, then schedules the configured interval.
-`S3BackupManager.stop()` clears both timers. Only one `backup()` may run on a
+one minute after startup, then schedules the configured interval. Repeated
+`start()` calls are idempotent while that scheduler is active: the manager owns
+exactly one initial timeout and one periodic interval. `stop()` invalidates the
+scheduler generation before clearing both handles, so a callback that was
+already queued cannot run a backup or detach a newer handle. A later `start()`
+creates a fresh generation and is supported. Stopping the scheduler does not
+cancel a `backup()` already in progress. Only one `backup()` may run on a
 manager instance; an overlap returns a failed `BackupResult`.
 
 `BackupTelemetry` owns the observable attempt state. It exposes label-free,

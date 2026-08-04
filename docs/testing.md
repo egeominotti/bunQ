@@ -60,10 +60,27 @@ and a non-zero exit, never a module-resolution stack trace.
 
 `test/repro-embedded-manager-leak-order.test.ts` locks the order-dependent
 failure that shipped in 2.8.56. Bun discovers test files in readdir order rather
-than sorted order, so a suite that leaves an embedded manager alive corrupts
+than sorted order, so a suite that leaves an embedded manager alive can affect
 whichever suite happens to run next — a different one on macOS than on Linux.
-Embedded suites therefore claim the singleton with `shutdownManager()` in
-`beforeEach` instead of trusting every other file to clean up after itself.
+An explicit conflicting `dataPath` now fails at construction instead of writing
+to the previous suite's database. Embedded suites must still claim the
+singleton with `shutdownManager()` in `beforeEach` and release it before
+removing temporary databases instead of trusting every other file to clean up.
+
+`test/repro-bunqueue-sync-throw-cancellation.test.ts` drives a synchronous
+Simple Mode processor failure through real retries and verifies that terminal
+state releases both the public signal and every internal cancellation
+generation. This distinguishes synchronous throws from ordinary rejected
+Promises without bypassing the Worker path. A second case makes the configured
+circuit-breaker hook throw and verifies that `finally` cleanup still owns the
+same generation. The remaining cases prove that synchronous failures follow
+the configured in-process retry policy and that closing during an armed
+backoff prevents every later processor invocation. The shutdown regression
+also enables a circuit breaker and proves that the abort cannot call `onOpen`
+or re-arm the breaker's reset timer after destruction. A complementary
+half-open case cancels a processor that deliberately ignores the signal and
+verifies that its successful outcome still closes the circuit, preserving the
+public cooperative-cancellation behavior.
 
 `test/issue-93-bun-only.test.ts` follows the same principle. Its end-to-end
 `node` spawn used to skip whenever `dist/bun-only.js` was missing, which made its
@@ -299,6 +316,15 @@ The workflow campaign closes every `Engine`, shuts down the process-wide
 embedded `QueueManager`, and only then removes its shared temporary SQLite
 directory. This ordering prevents background lock/DLQ timers from touching a
 database after teardown and keeps model output free of false disk-I/O alarms.
+
+Its compensation ledger records the reversal's `ctx.idempotencyKey` separately
+from `ctx.forwardIdempotencyKey`: the first deduplicates the undo at the provider,
+while the second reconciles the original forward effect. A force-close may leave
+an undo complete without its SQLite checkpoint, so the oracle permits one
+sequential replay in each replacement Engine generation only when both keys stay
+stable. It still rejects multiple successful dispatches inside one generation;
+the harness does not inject store-write failures, so that shape identifies live
+recovery re-entry rather than an ambiguous checkpoint outcome.
 
 Failures report a seed, a minimized command history, and a replay path. Convert
 every confirmed engine divergence into a deterministic

@@ -19,19 +19,24 @@
  *      to their own compensatable workflow steps — the shape that works today.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { generateText, stepCountIs, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { z } from 'zod';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
 afterEach(async () => {
   await engine?.close(true);
   engine = undefined;
+  shutdownManager();
 });
 
 async function settle(e: Engine, id: string, want: string, ms = 20_000) {
@@ -114,10 +119,7 @@ describe('AI SDK on the workflow engine: turn-per-step (doUntil)', () => {
             model,
             tools: provisionTool(provisioned),
             stopWhen: stepCountIs(1),
-            messages: [
-              { role: 'user', content: ctx.input.prompt },
-              ...(prior as never[]),
-            ],
+            messages: [{ role: 'user', content: ctx.input.prompt }, ...(prior as never[])],
           });
           return {
             done: result.text.length > 0,
@@ -231,9 +233,13 @@ describe('AI SDK on the workflow engine: tools as compensatable steps', () => {
           },
         }
       )
-      .step('verify', () => {
-        throw new Error('post-provision verification failed');
-      }, { retry: 1 });
+      .step(
+        'verify',
+        () => {
+          throw new Error('post-provision verification failed');
+        },
+        { retry: 1 }
+      );
 
     engine = new Engine({ embedded: true });
     engine.register(wf);

@@ -22,6 +22,7 @@ export class QueueState<T> {
   protected readonly tcpPool: TcpConnectionPool | null;
   protected readonly useSharedPool: boolean;
   protected readonly addBatcher: AddBatcher<unknown> | null;
+  private connectionReleased = false;
 
   constructor(name: string, opts: QueueOptions = {}) {
     this.name = name;
@@ -185,6 +186,8 @@ export class QueueState<T> {
   }
 
   protected releaseConnection(): void {
+    if (this.connectionReleased) return;
+    this.connectionReleased = true;
     if (!this.tcpPool) return;
     if (this.useSharedPool) releaseSharedPool(this.tcpPool);
     else this.tcpPool.close();

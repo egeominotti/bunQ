@@ -32,6 +32,7 @@ export class CloudAgent {
   private statsUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribeEvents: (() => void) | null = null;
   private sequenceId = 0;
+  private started = false;
   private stopped = false;
   private serverHandles?: ServerHandles;
   /** Event buffer — flushed into each HTTP snapshot */
@@ -71,6 +72,8 @@ export class CloudAgent {
 
   /** Start both channels */
   start(): void {
+    if (this.started || this.stopped) return;
+    this.started = true;
     cloudLog.info('Connecting to dashboard', {
       url: this.config.url,
       instance: this.config.instanceName,
@@ -175,14 +178,17 @@ export class CloudAgent {
 
   /** Schedule next snapshot with dynamic interval */
   private scheduleNext(): void {
-    if (this.stopped) return;
+    if (this.stopped || !this.started) return;
     const intervalMs = this.computeInterval();
     cloudLog.debug('Next snapshot', { intervalMs, compressedKB: this.httpSender.lastCompressedKB });
-    this.snapshotTimer = setTimeout(() => {
+    const snapshotTimer = setTimeout(() => {
+      if (this.stopped || this.snapshotTimer !== snapshotTimer) return;
+      this.snapshotTimer = null;
       void this.sendSnapshot().then(() => {
         this.scheduleNext();
       });
     }, intervalMs);
+    this.snapshotTimer = snapshotTimer;
   }
 
   /** Collect and send a snapshot via HTTP */

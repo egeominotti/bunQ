@@ -21,16 +21,22 @@
  * named for what it is so nobody reads it as proof those four sites are guarded.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true);
   engine = undefined;
+  shutdownManager();
 });
 
 async function settle(e: Engine, id: string, want: string, ms = 20_000) {

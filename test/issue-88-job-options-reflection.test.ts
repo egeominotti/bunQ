@@ -36,6 +36,7 @@ let tcpQueue: Queue;
 let embQueue: Queue;
 
 beforeAll(async () => {
+  shutdownManager();
   await cleanupDb();
   // TCP server backed by an in-memory manager
   qm = new QueueManager();

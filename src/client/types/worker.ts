@@ -12,6 +12,7 @@ export interface WorkerOptions {
   heartbeatInterval?: number;
   connection?: ConnectionOptions;
   embedded?: boolean;
+  /** Must match the process-wide embedded manager when one is already active. */
   dataPath?: string;
   batchSize?: number;
   pollTimeout?: number;

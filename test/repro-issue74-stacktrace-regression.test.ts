@@ -71,6 +71,7 @@ function expectStacktrace(result: FailedCapture, message: string) {
 }
 
 beforeAll(async () => {
+  shutdownManager();
   await cleanupDb();
   qm = new QueueManager();
   server = createTcpServer(qm, { port: PORT, hostname: '127.0.0.1' });

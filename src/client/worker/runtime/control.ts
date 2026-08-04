@@ -8,12 +8,9 @@ import { WorkerState } from './state';
 
 export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerState<T, R> {
   run(): void {
-    if (this.running || this.closed) return;
+    if (this.running || this.closed || this._closing || this._closingPromise !== null) return;
     this.running = true;
     this.paused = false;
-    this._closing = false;
-    this._forceClose = false;
-    this._closingPromise = null;
     queueMicrotask(() => {
       if (!this.closed) this.emit('ready');
     });
@@ -89,10 +86,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
     if (!this.running) return;
     this.running = false;
     this.paused = true;
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
-    }
+    this.clearPollTimer();
   }
 
   resume(): void {

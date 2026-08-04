@@ -190,7 +190,7 @@ No mutexes — single-threaded JS event loop. Concurrency is managed by:
 - **Connect dedupe**: the `connecting` flag + `waitForConnection` ensure overlapping `connect()` calls share one attempt.
 - **Reconnect single-flight**: `scheduleReconnect` no-ops if a timer is already armed or the manager is closed.
 - **Batcher flush serialization**: the `flushing` flag plus `inFlightFlushes` set ensure only one flush loop runs at a time; `disconnect()` awaits `flush()` and `waitForInFlight()` before stopping the batcher (`queue/runtime/connection.ts:5-12`).
-- **Shared-pool refcounting**: `addRef`/`release` (`tcpPool.ts:154-165`) — the pool closes only when the count hits zero; `getSharedPool` removes a closed pool from the map before recreating.
+- **Shared-pool refcounting**: `addRef`/`release` (`tcpPool.ts:154-165`) — the pool closes only when the count hits zero; `getSharedPool` removes a closed pool from the map before recreating. Each Queue records whether it has released its constructor-owned reference, so repeated `close()` calls and `disconnect()` followed by `close()` cannot decrement the same ownership twice or close a peer Queue's pool.
 
 ## Edge Cases & Failure Modes
 

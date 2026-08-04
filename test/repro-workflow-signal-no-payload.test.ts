@@ -30,18 +30,23 @@
  *                                          approver just authorised.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
 let dir: string | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
 afterEach(async () => {
   await engine?.close(true).catch(() => {});
   engine = undefined;
+  shutdownManager();
   if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   dir = undefined;
 });

@@ -76,7 +76,7 @@ The wire payload is `CloudSnapshot` (`types/snapshot.ts:41-88`) — a large flat
 ## Business Logic / Control Flow
 
 ### Startup (`cloudAgent.ts:73`)
-1. `start()` logs the connection and, if `useHttp`, fires one `sendSnapshot()` then `scheduleNext()` (`cloudAgent.ts:83`).
+1. The first `start()` marks the agent running, logs the connection and, if `useHttp`, fires one `sendSnapshot()` then `scheduleNext()`. The factories already call it; repeated calls are no-ops, including an explicit call on a factory-created agent.
 2. If `useWebSocket`, a `WsSender` is constructed. When `remoteCommands` is on, a command handler is registered that calls `handleCommand(...)` and pushes the result back via `wsSender.sendRaw` (`cloudAgent.ts:91-108`). Then `wsSender.connect()` opens the socket.
 3. `subscribeToEvents()` registers a `QueueManager.subscribe` callback (`cloudAgent.ts:210`).
 
@@ -94,7 +94,7 @@ The wire payload is `CloudSnapshot` (`types/snapshot.ts:41-88`) — a large flat
 4. On success → `circuitBreaker.onSuccess()`; on throw → `onFailure()` + buffer the snapshot. `401`/`403` are logged at error level (visible auth/plan failures) before re-throwing (`httpSender.ts:118-131`).
 
 ### Adaptive interval (`cloudAgent.ts:167-186`)
-`computeInterval()` chooses the next delay purely from `lastCompressedKB`: `<50KB → 5s`, `<200KB → 10s`, `<500KB → 20s`, else `30s`. `scheduleNext()` re-arms a `setTimeout` after each push (`cloudAgent.ts:176-186`). The configured `intervalMs` is logged at startup but is **not** used for scheduling.
+`computeInterval()` chooses the next delay purely from `lastCompressedKB`: `<50KB → 5s`, `<200KB → 10s`, `<500KB → 20s`, else `30s`. `scheduleNext()` re-arms one identity-checked `setTimeout` after each push. A cleared or superseded callback is a no-op and cannot detach the active handle. The configured `intervalMs` is logged at startup but is **not** used for scheduling.
 
 ### Remote command path (`wsSender.ts:115-171` → `commandHandler.ts:44-100`)
 1. Incoming binary frame is auto-detected as zstd (magic `28 b5 2f fd`) or plain msgpack, or JSON text, then unpacked (`wsSender.ts:146-171`).
@@ -110,12 +110,12 @@ a rejected backup therefore returns an explicit `command_result` with
 at command time is required because `start()` precedes `setServerHandles()`.
 
 ### Shutdown (`cloudAgent.ts:123-165`)
-Idempotent (`stopped` flag). Clears timers, unsubscribes events, collects one final snapshot with `shutdown=true`, and races `httpSender.send` against a 2s `Bun.sleep` (best-effort), then stops the WS sender (`cloudAgent.ts:138-164`). Wired into `bootstrap.ts:229-232` after active jobs drain.
+Effect-idempotent through the `stopped` flag. It clears timers, unsubscribes events, collects one shutdown snapshot with `shutdown=true`, and races `httpSender.send` against a 2s `Bun.sleep` (best-effort), then stops the WS sender. Shutdown is terminal, matching `WsSender`: a later `start()` is a no-op and cannot recreate a snapshot timer, WebSocket, or event subscription. Concurrent `stop()` callers do not share a completion promise, and a regular snapshot already in flight is not cancelled or awaited; the shutdown marker is therefore best-effort rather than a network-ordering barrier. Wired into `bootstrap.ts:229-232` after active jobs drain.
 
 ## Concurrency & Locking
 
 No queue locks are taken by this module; it is a read-mostly observer that calls `QueueManager` accessors and acquires whatever locks those methods take internally (see [Concurrency & Locking](./concurrency-and-locking.md)). Coordination here is single-threaded JS event-loop based:
-- Snapshot scheduling is a self-re-arming `setTimeout` chain (`scheduleNext`), so at most one snapshot is in flight per cycle; there is no overlap guard beyond the sequential `.then` chain.
+- Snapshot scheduling is a self-re-arming `setTimeout` chain (`scheduleNext`), so at most one regular snapshot is in flight per cycle. The sequential `.then` chain controls normal sends; timer ownership and lifecycle checks reject stale callbacks after stop. `stop()` can still overlap that already-started send with its best-effort shutdown snapshot, as documented above.
 - WS reconnect uses exponential backoff with jitter, doubling from 1s up to 30s, guarded by a single `reconnectTimer` so concurrent reconnects cannot stack (`wsSender.ts:188-201`).
 - The dashboard sends `ping` every ~25s; the agent replies `pong` to keep the socket alive (`wsSender.ts:9,120`).
 - HMAC `CryptoKey` is imported lazily once and cached (`hmacKey ??=`, `httpSender.ts:100`).

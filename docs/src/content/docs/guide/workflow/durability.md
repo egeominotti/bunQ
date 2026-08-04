@@ -190,11 +190,11 @@ mid-run.
 
 The engine has no distributed coordination, and the limit is tighter than it first looks: it is one engine per **process**, not one per database.
 
-Two engines in the same process collide even when their `dataPath` values differ. `getSharedManager()` memoises the first `QueueManager` it builds and ignores the data path every later caller passes, so both engines end up sharing one internal `__wf:steps` queue. The second engine's step jobs are then pulled by the first engine's worker, which looks them up in the wrong SQLite file, finds nothing, and acks them as done. That run sits in `running` forever, with no error raised anywhere.
+Two engines in the same process cannot own different databases. `getSharedManager()` memoises the first `QueueManager` it builds and now rejects a later explicit `dataPath` that identifies another database. This fail-fast check prevents two workflow stores from silently sharing one internal `__wf:steps` queue.
 
 ```typescript
 const a = new Engine({ embedded: true, dataPath: './a.db' });
-const b = new Engine({ embedded: true, dataPath: './b.db' }); // silently never runs
+const b = new Engine({ embedded: true, dataPath: './b.db' }); // throws dataPath conflict
 ```
 
-Register every workflow on a single engine instead. The same rule covers the distributed case: two engines in different processes pointed at one database would both recover the same executions and both drive them.
+`Engine.close()` does not shut down the process-wide queue manager. Register every workflow on one engine, or close all embedded clients and call `shutdownManager()` before switching paths. The same rule covers the distributed case: two engines in different processes pointed at one database would both recover the same executions and both drive them.

@@ -5,12 +5,11 @@ import type { PulledJob, WorkerDelivery } from './state';
 
 export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuffer<T, R> {
   protected poll(): void {
+    this.clearPollTimer();
     if (!this.running || this._closing) return;
 
     if (this.activeJobs >= this.opts.concurrency) {
-      this.pollTimer = setTimeout(() => {
-        this.poll();
-      }, 10);
+      this.schedulePoll(10);
       return;
     }
 
@@ -50,9 +49,7 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
       if (item) {
         if (this.activeJobs >= this.opts.concurrency) {
           this.requeueItem(item);
-          this.pollTimer = setTimeout(() => {
-            this.poll();
-          }, 10);
+          this.schedulePoll(10);
           return;
         }
         this.consecutiveErrors = 0;
@@ -63,9 +60,7 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
       } else {
         const hasBuffered = this.pendingJobsHead < this.pendingJobs.length;
         if (hasBuffered && this.groupLimiter) {
-          this.pollTimer = setTimeout(() => {
-            this.poll();
-          }, 10);
+          this.schedulePoll(10);
           return;
         }
         const now = Date.now();
@@ -74,9 +69,7 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
           this.emit('drained');
         }
         const waitTime = this.opts.pollTimeout > 0 ? 10 : this.opts.drainDelay;
-        this.pollTimer = setTimeout(() => {
-          this.poll();
-        }, waitTime);
+        this.schedulePoll(waitTime);
       }
     } catch (error) {
       if (!this.running) return;
@@ -106,12 +99,25 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
 
   private scheduleRateLimitPoll(): void {
     const waitTime = this.rateLimiter.getTimeUntilNextSlot();
-    this.pollTimer = setTimeout(
-      () => {
-        this.poll();
-      },
-      Math.max(waitTime, 10)
-    );
+    this.schedulePoll(Math.max(waitTime, 10));
+  }
+
+  private schedulePoll(delay: number): void {
+    if (!this.running || this._closing || this.closed) return;
+    const deadline = Date.now() + delay;
+    if (this.pollTimer !== null && this.pollDeadline !== null && this.pollDeadline <= deadline) {
+      return;
+    }
+    this.clearPollTimer();
+
+    const timer = setTimeout(() => {
+      if (this.pollTimer !== timer) return;
+      this.pollTimer = null;
+      this.pollDeadline = null;
+      this.poll();
+    }, delay);
+    this.pollTimer = timer;
+    this.pollDeadline = deadline;
   }
 
   protected handlePullError(errorValue: unknown): void {
@@ -129,9 +135,7 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
       WORKER_CONSTANTS.BASE_BACKOFF_MS * Math.pow(2, this.consecutiveErrors - 1),
       WORKER_CONSTANTS.MAX_BACKOFF_MS
     );
-    this.pollTimer = setTimeout(() => {
-      this.poll();
-    }, backoffMs);
+    this.schedulePoll(backoffMs);
   }
 
   protected abstract startJob(delivery: WorkerDelivery): boolean;

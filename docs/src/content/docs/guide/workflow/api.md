@@ -195,7 +195,7 @@ and emitter, so they remain distinct from queue-job state.
 
 | Limitation | Details |
 |---|---|
-| **One engine per process** | No distributed coordination, and two engines in one process collide even with different `dataPath` values. [Why](/guide/workflow/durability/#one-engine-per-process). |
+| **One engine per process** | No distributed coordination. A second engine with a different explicit `dataPath` is rejected; engines sharing a path still do not coordinate independently. [Why](/guide/workflow/durability/#one-engine-per-process). |
 | **At-least-once** | Recovered steps may re-run. Make external effects idempotent. |
 | **No `indeterminate` state** | A failed step is treated as possibly-committed and is compensated. There is no way yet to declare "this failed before any effect", so a clean failure is compensated too. |
 | **At-least-once interrupted work** | Completed records inside branches, parallel groups, loops and maps are skipped; a record left running has an unknown outcome and can replay. |

@@ -110,17 +110,30 @@ export abstract class BunqueueRuntime<T, R> {
 
     const abortController = this.cancellation.register(job.id);
     const runChain = () => this.runMiddlewareChain(job, abortController);
-    const execution = this.retryConfig ? executeWithRetry(runChain, this.retryConfig) : runChain();
+    let execution: Promise<R>;
+    try {
+      execution = this.retryConfig
+        ? executeWithRetry(runChain, this.retryConfig, abortController.signal)
+        : runChain();
+    } catch (error) {
+      execution = Promise.reject(error);
+    }
     return execution.then(
       (result) => {
-        this.cb?.onSuccess();
-        this.cancellation.unregister(job.id);
-        return result;
+        try {
+          this.cb?.onSuccess();
+          return result;
+        } finally {
+          this.cancellation.unregister(job.id, abortController);
+        }
       },
       (error: unknown) => {
-        this.cb?.onFailure();
-        this.cancellation.unregister(job.id);
-        throw error;
+        try {
+          this.cb?.onFailure();
+          throw error;
+        } finally {
+          this.cancellation.unregister(job.id, abortController);
+        }
       }
     );
   }
@@ -129,6 +142,7 @@ export abstract class BunqueueRuntime<T, R> {
     job: Job<T & FlowJobData>,
     abortController: AbortController
   ): Promise<R> {
+    if (abortController.signal.aborted) return Promise.reject(new Error('Job cancelled'));
     const publicJob = job as unknown as Job<T>;
     if (this.middlewares.length === 0) {
       const result = this.baseProcessor(job);

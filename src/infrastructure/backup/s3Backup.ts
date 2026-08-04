@@ -33,6 +33,7 @@ export class S3BackupManager {
   private readonly telemetry: BackupTelemetry;
   private backupInterval: ReturnType<typeof setInterval> | null = null;
   private initialBackupTimeout: ReturnType<typeof setTimeout> | null = null;
+  private schedulerGeneration = 0;
   private dashboardEmit: ((event: string, data: Record<string, unknown>) => void) | null = null;
 
   /** Set the dashboard event emitter callback */
@@ -102,27 +103,40 @@ export class S3BackupManager {
     if (!this.config.enabled) {
       return;
     }
+    if (this.initialBackupTimeout !== null || this.backupInterval !== null) return;
 
     const validation = this.validate();
     if (!validation.valid) {
       backupLog.error('S3 backup configuration invalid', { errors: validation.errors });
       return;
     }
+    const generation = ++this.schedulerGeneration;
 
     // Run initial backup after 1 minute
-    this.initialBackupTimeout = setTimeout(() => {
+    const initialBackupTimeout = setTimeout(() => {
+      if (
+        generation !== this.schedulerGeneration ||
+        this.initialBackupTimeout !== initialBackupTimeout
+      ) {
+        return;
+      }
       this.initialBackupTimeout = null;
       this.backup().catch((err: unknown) => {
         backupLog.error('Initial backup failed', { error: String(err) });
       });
     }, 60 * 1000);
+    this.initialBackupTimeout = initialBackupTimeout;
 
     // Schedule periodic backups
-    this.backupInterval = setInterval(() => {
+    const backupInterval = setInterval(() => {
+      if (generation !== this.schedulerGeneration || this.backupInterval !== backupInterval) {
+        return;
+      }
       this.backup().catch((err: unknown) => {
         backupLog.error('Scheduled backup failed', { error: String(err) });
       });
     }, this.config.intervalMs);
+    this.backupInterval = backupInterval;
     this.telemetry.setSchedulerRunning(true);
   }
 
@@ -130,6 +144,7 @@ export class S3BackupManager {
    * Stop automated backup scheduler
    */
   stop(): void {
+    this.schedulerGeneration++;
     if (this.initialBackupTimeout) {
       clearTimeout(this.initialBackupTimeout);
       this.initialBackupTimeout = null;

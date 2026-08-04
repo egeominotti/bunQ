@@ -20,10 +20,7 @@ export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerMa
     this._closing = true;
     this.running = false;
     this.paused = false;
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
-    }
+    this.clearPollTimer();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

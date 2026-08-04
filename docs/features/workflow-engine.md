@@ -307,13 +307,14 @@ closing the worker and queue.
   only one caller can claim a parked node's resume. A signal accepted before
   the run parks is consumed when that gate is reached.
 - **Timeout-timer vs. `signal()` race — now closed by a per-node claim.** `signal()` clears the pending timeout timer, so a signal that wins the race cancels the timeout. If the timer had *already fired* and enqueued a job at the `waitFor` node while `signal()` also enqueued, both jobs used to pass the `running`/`waiting` guard under `concurrency > 1` and advance the run twice. `processStep` now holds `nodesInFlight`, a claim keyed `<executionId>:<nodeIndex>` for the duration of the node, so the second job returns immediately. Two guards, different jobs: the cursor check (`data.nodeIndex !== exec.currentNodeIndex`) drops a job for a node the run has already left; the claim drops a concurrent second job for the node it is on. A deterministic `jobId` was tried instead and removed — dedup at the queue can swallow a *legitimate* re-enqueue and wedge the run, whereas a dropped duplicate cannot.
-- **One `Engine` per process — a real constraint, not an enforced guarantee.**
-  `src/client/manager.ts` memoises a process-global `QueueManager`, so the first
-  caller's data path wins and later engines share its queues even if they name
-  another file. Their workflow stores remain separate, allowing one worker to
-  consume a job whose execution row exists only in the other store. Until the
-  shared manager is keyed by data path, treat one engine per process as a hard
-  requirement.
+- **One `Engine` per process — enforced for conflicting paths.**
+  `src/client/manager.ts` memoises a process-global `QueueManager`. A later
+  engine with a different explicit `dataPath` now throws synchronously instead
+  of sharing the first engine's queue while opening a separate workflow store.
+  `Engine.close()` does not reset that process-wide manager; close all embedded
+  clients and call `shutdownManager()` before switching paths. Engines using
+  the same or omitted path still lack independent coordination, so treat one
+  engine per process as a hard requirement.
 
 - **In-memory store when `dataPath` is omitted.** `WorkflowStore` opens `dataPath ?? ':memory:'` (`store.ts:67`). In TCP/`connection` mode (no `dataPath`) execution state is in-memory only — it is lost on restart and `recover()` finds nothing. Persistence requires passing `dataPath` (typically with `embedded: true`).
 - **Retry vs. compensation.** A step failing all `retry` attempts throws out of `processStep`, which sets `failed`, persists, emits `workflow:failed`, runs compensation, then re-throws — failing the underlying `wf:step` job. If the queue retries that job, `processStep` short-circuits because the execution is now `failed`, so compensation does not double-run via that path.

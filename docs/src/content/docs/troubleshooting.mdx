@@ -125,7 +125,7 @@ The database is only created when a data path is configured.
 **Solution (embedded mode):**
 
 ```typescript
-import { Queue, Worker } from 'bunqueue/client';
+import { Queue, QueueEvents, Worker, shutdownManager } from 'bunqueue/client';
 
 // Pass dataPath directly
 const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
@@ -144,15 +144,18 @@ Without `dataPath` or `DATA_PATH`, bunqueue runs in-memory (no persistence acros
 
 ### Jobs not persisted across restarts
 
-In embedded mode the shared QueueManager is a singleton that is initialized by the **first** `Queue` or `Worker` constructed in the process. If no data path is known at that moment, it opens in-memory and later configuration has no effect.
+In embedded mode the shared QueueManager is a process-wide singleton initialized by the **first** embedded `Queue`, `Worker`, or `QueueEvents`. If that client has no explicit or environment data path, the manager starts in-memory. Clients that omit `dataPath` then join the active manager.
 
-Common pitfall: setting `process.env.DATA_PATH` at the top of `main.ts` and then importing a module that constructs a Queue/Worker. ESM imports are hoisted, so the module (and its constructors) run **before** the assignment.
+A later explicit path is never ignored. If it identifies a different database, construction throws an `Embedded QueueManager dataPath conflict` error before any job can be accepted with the wrong durability. Relative, absolute, and symlink spellings of the same existing database are accepted.
+
+Common pitfall: setting `process.env.DATA_PATH` at the top of `main.ts` and then importing a module that constructs a Queue, Worker, or QueueEvents. ESM imports are hoisted, so the module and its constructors run **before** the assignment.
 
 **Solution 1 (recommended):** pass `dataPath` directly in the constructor options, no env var needed:
 
 ```typescript
 const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
 const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
+const events = new QueueEvents('tasks', { embedded: true, dataPath: './data/bunqueue.db' });
 ```
 
 **Solution 2:** set the env var before the process starts:
@@ -160,6 +163,10 @@ const worker = new Worker('tasks', processor, { embedded: true, dataPath: './dat
 ```bash
 BUNQUEUE_DATA_PATH=./data/bunqueue.db bun run main.ts
 ```
+
+To switch databases in one process, close every embedded client and call
+`shutdownManager()` before constructing the next one. Use separate processes
+or TCP brokers when databases must remain active concurrently.
 
 ## Job Processing Issues
 

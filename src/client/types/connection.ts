@@ -27,6 +27,7 @@ export interface QueueOptions {
   defaultJobOptions?: JobOptions;
   connection?: ConnectionOptions;
   embedded?: boolean;
+  /** Must match the process-wide embedded manager when one is already active. */
   dataPath?: string;
   autoBatch?: AutoBatchOptions;
   prefixKey?: string;

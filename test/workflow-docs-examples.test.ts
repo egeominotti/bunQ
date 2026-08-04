@@ -13,19 +13,24 @@
  * as written even though the provider is not real.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { generateText, stepCountIs, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { z } from 'zod';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
 afterEach(async () => {
   await engine?.close(true);
   engine = undefined;
+  shutdownManager();
 });
 
 async function settle(e: Engine, id: string, want: string, ms = 20_000) {

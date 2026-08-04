@@ -32,7 +32,7 @@ Does NOT own:
 
 Internal:
 
-- `getSharedManager(dataPath?)` — process-wide `QueueManager` singleton; lazily created, env-var data path resolution `BUNQUEUE_DATA_PATH > BQ_DATA_PATH > DATA_PATH > SQLITE_PATH`, with a programmatic `dataPath` override (`manager.ts:13`, `manager.ts:20`). See [Core Queue Engine](./core-queue-engine.md), [Configuration & Entrypoint](./configuration.md).
+- `getSharedManager(dataPath?)` — process-wide `QueueManager` singleton; lazily created, env-var data path resolution `BUNQUEUE_DATA_PATH > BQ_DATA_PATH > DATA_PATH > SQLITE_PATH`, with a programmatic `dataPath` override. The first effective path is canonicalized and retained; a later explicit path must identify the same database or construction throws synchronously. See [Core Queue Engine](./core-queue-engine.md), [Configuration & Entrypoint](./configuration.md).
 - `TcpConnectionPool`, `getSharedPool`, `releaseSharedPool` — TCP transport. See [Client Transport](./client-transport.md).
 - `AddBatcher` — concurrent `add()` batching into `PUSHB` (`addBatcher.ts`).
 - `resolveToken`, `Forwarder`, operation modules (`operations/*`, `stall`, `dlq`, `rateLimit`, `scheduler`, `deduplication`, `jobMove`, `workers`, `bullmqCompat`).
@@ -125,7 +125,11 @@ are the authoritative operations for either runtime. `drainAllAsync` returns
 the aggregate removed count.
 
 Connection: `disconnect()` (flushes + waits for the in-flight batcher, then
-closes) and `close()` (`queue/runtime/connection.ts`).
+closes) and `close()` (`queue/runtime/connection.ts`). Both operations are
+idempotent at the Queue ownership boundary: a TCP pool reference acquired by
+the constructor is released exactly once. Repeated `close()` calls, including
+`disconnect()` followed by `close()`, therefore cannot close a shared pool
+still owned by another Queue.
 
 Also exported: `QueueEvents<R, P>`, `QueueEventsOptions`, `QueueMetrics`,
 `QueueMetricsMeta`, `QueueMetricType`,
@@ -167,6 +171,16 @@ warms `getSharedManager(opts.dataPath)` and leaves `tcpPool` / `addBatcher`
 null. TCP mode reuses the shared pool for the default unauthenticated
 four-connection case, otherwise creates a dedicated `TcpConnectionPool`. The
 `AddBatcher` is created unless `autoBatch.enabled === false`.
+
+The embedded manager is process-wide. Its first effective `dataPath` is
+resolved to a canonical absolute file identity (`:memory:` remains a distinct
+SQLite in-memory identity). Later clients that omit `dataPath` join that
+manager without re-reading environment variables. A later explicit path that
+does not identify the active database throws before the client is constructed;
+it is never silently ignored. Relative, absolute, and symlink spellings of the
+same existing database are accepted. To switch databases, close every embedded
+client and call `shutdownManager()` first. Concurrent databases require
+separate processes or TCP brokers.
 
 **add()** (`queue/operations/add/single.ts`): merges `defaultJobOptions` then
 per-call `opts`, injects `__parentId` / `__parentQueue` when a parent is set,
@@ -267,7 +281,7 @@ the transport — see [Client Transport](./client-transport.md).
 
 `AutoBatchOptions`: `enabled` default true for TCP / disabled for embedded, `maxSize = 50`, `maxDelayMs = 5`.
 
-Embedded data path env precedence (via `getSharedManager`): `BUNQUEUE_DATA_PATH > BQ_DATA_PATH > DATA_PATH > SQLITE_PATH` (`manager.ts:13`). `StallConfig` defaults (TCP cache + fallback): `enabled: true`, `stallInterval: 30000`, `maxStalls: 3`, `gracePeriod: 5000` (`stall.ts:16`).
+Embedded data path env precedence (via `getSharedManager`): `BUNQUEUE_DATA_PATH > BQ_DATA_PATH > DATA_PATH > SQLITE_PATH`. The environment is read only when a fresh manager is created; `shutdownManager()` resets both the manager and its path identity. `StallConfig` defaults (TCP cache + fallback): `enabled: true`, `stallInterval: 30000`, `maxStalls: 3`, `gracePeriod: 5000` (`stall.ts:16`).
 
 ## Related Docs
 

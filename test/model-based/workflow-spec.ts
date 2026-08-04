@@ -40,7 +40,12 @@ export interface LedgerCall {
   /** Durable record name, including the index for a forEach occurrence. */
   name: string;
   occurrence: number;
+  /** Key for the operation represented by this dispatch. */
   idempotencyKey?: string;
+  /** Forward-operation key exposed only to compensation handlers. */
+  forwardIdempotencyKey?: string;
+  /** Engine instance that owned the handler; increments only on model restart. */
+  engineGeneration: number;
   outcome: 'pending' | 'completed' | 'failed';
 }
 

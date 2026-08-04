@@ -25,6 +25,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 const SKUS = ['sku-a', 'sku-b', 'sku-c'];
@@ -38,19 +39,16 @@ let caseId = 0;
 
 // ONE directory and ONE queue database for the whole file. The embedded
 // QueueManager is a process-wide singleton that binds to the first dataPath it is
-// handed and ignores every later one, so a per-test database would leave it writing
-// into a directory the previous test already deleted (SQLITE_IOERR_VNODE). Tests
-// isolate through a unique queue name, workflow name and external world instead.
+// handed and rejects a different explicit path. Tests therefore share one queue
+// database and isolate through a unique queue name, workflow name and external world.
 beforeAll(() => {
+  shutdownManager();
   dir = mkdtempSync(join(tmpdir(), 'bq-saga-'));
 });
 
-// Deliberately NOT removing the directory. The embedded QueueManager is a
-// process-wide singleton bound to the first dataPath it is handed, and it outlives
-// this file: deleting the directory pulls the database out from under any test that
-// runs later in the same process (SQLITE_IOERR_VNODE). The OS reclaims tmpdir.
 afterAll(() => {
-  /* intentionally left in place — see above */
+  shutdownManager();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -185,10 +183,11 @@ class World {
  */
 function orderSaga(w: World, opts: { failAt: string; flakyRefund?: boolean }): Workflow {
   let refundAttempts = 0;
+  const listSkus = () => SKUS;
 
   return new Workflow(`fulfil-order-${caseId}`)
     .forEach(
-      () => SKUS,
+      listSkus,
       'reserve-stock',
       (ctx) => {
         const sku = ctx.steps.__item as string;
@@ -246,14 +245,22 @@ function orderSaga(w: World, opts: { failAt: string; flakyRefund?: boolean }): W
     )
     .parallel((wf) =>
       wf
-        .step('book-dhl', () => {
-          w.book('bk-dhl', 'dhl');
-          return { id: 'bk-dhl' };
-        }, { retry: 1, compensate: () => w.cancelBooking('bk-dhl') })
-        .step('book-ups', () => {
-          w.book('bk-ups', 'ups');
-          return { id: 'bk-ups' };
-        }, { retry: 1, compensate: () => w.cancelBooking('bk-ups') })
+        .step(
+          'book-dhl',
+          () => {
+            w.book('bk-dhl', 'dhl');
+            return { id: 'bk-dhl' };
+          },
+          { retry: 1, compensate: () => w.cancelBooking('bk-dhl') }
+        )
+        .step(
+          'book-ups',
+          () => {
+            w.book('bk-ups', 'ups');
+            return { id: 'bk-ups' };
+          },
+          { retry: 1, compensate: () => w.cancelBooking('bk-ups') }
+        )
     )
     .step(
       'send-invoice',
@@ -265,7 +272,12 @@ function orderSaga(w: World, opts: { failAt: string; flakyRefund?: boolean }): W
     );
 }
 
-async function settle(e: Engine, id: string, want: string, ms = 15_000): Promise<string | undefined> {
+async function settle(
+  e: Engine,
+  id: string,
+  want: string,
+  ms = 15_000
+): Promise<string | undefined> {
   const deadline = Date.now() + ms;
   while (e.getExecution(id)?.state !== want && Date.now() < deadline) await Bun.sleep(25);
   return e.getExecution(id)?.state;

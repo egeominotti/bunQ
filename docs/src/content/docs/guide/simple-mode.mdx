@@ -373,7 +373,7 @@ app = Bunqueue(
 | `fibonacci` | `delay × fib(attempt)` (1x, 2x, 3x, 5x, 8x, ...) | Gradual backoff |
 | `custom` | `customBackoff(attempt, error) → ms` | Anything |
 
-This is **in-process retry**: the job stays active while retrying. Different from core `attempts`/`backoff`, which re-queues the job.
+This is **in-process retry**: the job stays active while retrying. Different from core `attempts`/`backoff`, which re-queues the job. Synchronous throws and rejected Promises follow the same retry policy. The pending backoff is tied to the job's cancellation signal, so `cancel()` or `close()` clears it and cannot invoke the processor again after shutdown.
 
 ## Graceful cancellation
 
@@ -448,6 +448,13 @@ Cancellation applies once the job is running and its controller has been
 registered. If code adds and immediately cancels a job, wait for the Worker's
 `active` event first; sleeping for a fixed interval races worker polling.
 Calling `cancel()` for an unknown, queued, or finished id is a no-op.
+Repeated graceful calls keep the earliest requested deadline: a shorter grace
+period advances cancellation, while a longer one cannot postpone it. An
+immediate call supersedes and clears the pending grace timer. Job completion
+and `close()` also clear owned cancellation timers, so they do not keep the
+process alive after the job or app has finished. This cleanup also runs when a
+processor or middleware throws synchronously before returning a Promise, and
+it remains guaranteed if a user circuit-breaker callback throws.
 
 ## Circuit breaker
 
@@ -512,7 +519,7 @@ app.reset_circuit()      # force close + resume worker
 </TabItem>
 </Tabs>
 
-When both retry and circuit breaker are active: one job exhausting all its retries counts as one circuit breaker failure.
+When both retry and circuit breaker are active: one job exhausting all its retries counts as one circuit breaker failure. `close()` terminally destroys the breaker, so aborting a pending retry during shutdown cannot call hooks or arm another reset timer. Explicit cancellation keeps the normal cooperative outcome: a processor that ignores the signal and completes still reports success, while a cancellation-induced rejection reports failure.
 
 ## Event triggers
 
@@ -736,6 +743,10 @@ app = Bunqueue(
 
 </TabItem>
 </Tabs>
+
+The aging scheduler owns one interval. Shutdown invalidates callbacks that were
+already queued or waiting on a job query before clearing that interval, so an
+old tick cannot modify priorities after `close()`.
 
 ## Deduplication defaults
 

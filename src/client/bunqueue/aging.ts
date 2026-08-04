@@ -8,6 +8,7 @@ import type { PriorityAgingConfig } from './types';
 
 export class PriorityAger<T = unknown> {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private generation = 0;
   private readonly config: PriorityAgingConfig;
   private readonly queue: Queue<T>;
 
@@ -17,13 +18,16 @@ export class PriorityAger<T = unknown> {
   }
 
   start(): void {
+    if (this.timer !== null) return;
     const interval = this.config.interval ?? 60000;
+    const generation = ++this.generation;
     this.timer = setInterval(() => {
-      void this.tick();
+      void this.tick(generation);
     }, interval);
   }
 
-  private async tick(): Promise<void> {
+  private async tick(generation: number): Promise<void> {
+    if (generation !== this.generation) return;
     const minAge = this.config.minAge ?? 60000;
     const boost = this.config.boost ?? 1;
     const maxPriority = this.config.maxPriority ?? 100;
@@ -34,10 +38,12 @@ export class PriorityAger<T = unknown> {
       this.queue.getWaitingAsync(0, maxScan),
       this.queue.getJobsAsync({ state: 'prioritized', start: 0, end: maxScan }),
     ]);
+    if (generation !== this.generation) return;
     const jobs = [...waiting, ...prioritized];
     const now = Date.now();
 
     for (const job of jobs) {
+      if (generation !== this.generation) return;
       const age = now - job.timestamp;
       if (age >= minAge && job.priority < maxPriority) {
         const newPriority = Math.min(job.priority + boost, maxPriority);
@@ -53,9 +59,9 @@ export class PriorityAger<T = unknown> {
   }
 
   destroy(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.generation++;
+    const timer = this.timer;
+    this.timer = null;
+    if (timer !== null) clearInterval(timer);
   }
 }

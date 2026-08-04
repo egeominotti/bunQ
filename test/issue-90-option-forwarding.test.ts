@@ -54,6 +54,7 @@ function freshEmb<T = unknown>(name: string): Queue<T> {
 }
 
 beforeAll(async () => {
+  shutdownManager();
   await cleanupDb();
   qm = new QueueManager();
   server = createTcpServer(qm, { port: PORT, hostname: '127.0.0.1' });

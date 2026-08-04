@@ -28,17 +28,23 @@
  * fresh.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true).catch(() => {});
   engine = undefined;
+  shutdownManager();
 });
 
 type Store = { list: () => { id: string; workflowName: string; state: string }[] };
@@ -105,9 +111,11 @@ describe('a restarted parent resumes its child instead of starting another', () 
       })
     );
     engine.register(
-      new Workflow('p2').subWorkflow('c2', () => ({})).step('after', async (ctx) => ({
-        got: (ctx.steps as Record<string, unknown>)['sub:c2'],
-      }))
+      new Workflow('p2')
+        .subWorkflow('c2', () => ({}))
+        .step('after', async (ctx) => ({
+          got: (ctx.steps as Record<string, unknown>)['sub:c2'],
+        }))
     );
 
     const run = await engine.start('p2');

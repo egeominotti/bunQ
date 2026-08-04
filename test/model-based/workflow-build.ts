@@ -13,23 +13,28 @@ import {
 import { childName } from './workflow-spec-analysis';
 
 /** Every child definition a generated parent needs registered. */
-export function buildChildWorkflows(spec: WorkflowSpec, ledger: Ledger): Workflow[] {
+export function buildChildWorkflows(
+  spec: WorkflowSpec,
+  ledger: Ledger,
+  engineGeneration = 0
+): Workflow[] {
   return spec.nodes
     .filter((n) => n.kind === 'subWorkflow')
     .map((n) =>
       buildWorkflow(
         { name: childName(n.step.name), nodes: [{ kind: 'step', step: n.step }] },
-        ledger
+        ledger,
+        engineGeneration
       )
     );
 }
 
 /** Build a real Workflow whose handlers follow the spec and append to the ledger. */
-export function buildWorkflow(spec: WorkflowSpec, ledger: Ledger): Workflow {
+export function buildWorkflow(spec: WorkflowSpec, ledger: Ledger, engineGeneration = 0): Workflow {
   const handlerFor =
     (step: StepSpec) =>
     (ctx: StepContext): { name: string } => {
-      const call = ledgerCall(step, ctx, 'forward');
+      const call = ledgerCall(step, ctx, 'forward', engineGeneration);
       ledger.steps.push(call);
       const attempt = matchingCalls(ledger.steps, call);
       if (step.behavior === 'fail') {
@@ -50,7 +55,7 @@ export function buildWorkflow(spec: WorkflowSpec, ledger: Ledger): Workflow {
       ? {}
       : {
           compensate: async (ctx: StepContext) => {
-            const call = ledgerCall(step, ctx, 'compensate');
+            const call = ledgerCall(step, ctx, 'compensate', engineGeneration);
             ledger.compensations.push(call);
             const attempt = matchingCalls(ledger.compensations, call);
             await new Promise((resolve) => setTimeout(resolve, 12));
@@ -120,20 +125,20 @@ export function buildWorkflow(spec: WorkflowSpec, ledger: Ledger): Workflow {
 function ledgerCall(
   step: StepSpec,
   ctx: StepContext,
-  direction: 'forward' | 'compensate'
+  direction: 'forward' | 'compensate',
+  engineGeneration: number
 ): LedgerCall {
   const index = (ctx.steps as Record<string, unknown>).__index;
   const name = index === undefined ? step.name : `${step.name}:${String(index)}`;
-  const key =
-    direction === 'forward'
-      ? ctx.idempotencyKey
-      : (ctx.forwardIdempotencyKey ?? ctx.idempotencyKey);
+  const key = ctx.idempotencyKey;
   const occurrence = occurrenceFromKey(key) ?? (typeof index === 'number' ? index : 0);
   return {
     executionId: ctx.executionId,
     name,
     occurrence,
     idempotencyKey: key,
+    ...(direction === 'compensate' ? { forwardIdempotencyKey: ctx.forwardIdempotencyKey } : {}),
+    engineGeneration,
     outcome: direction === 'forward' ? 'completed' : 'pending',
   };
 }

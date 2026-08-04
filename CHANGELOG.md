@@ -4,6 +4,44 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+## [2.8.58] - 2026-08-04
+
+### Fixed
+
+- Made Queue and Worker shutdown ownership monotonic. A Queue now releases its
+  constructor-owned TCP pool reference exactly once, so repeated `close()` or
+  `disconnect()` followed by `close()` cannot terminate a shared pool still in
+  use by another Queue. Once Worker `close()` begins, stale `run()` or
+  `resume()` callbacks can no longer clear the closing state, restart polling,
+  or process a batch after shutdown has started.
+- Made field-owned timer lifecycles idempotent across graceful cancellation,
+  Simple Mode priority aging, scheduled S3 backups, and the Cloud Agent.
+  Repeated lifecycle calls no longer overwrite live handles, stop/destroy
+  clears every owned timer, and callbacks queued from an obsolete generation
+  cannot restart work or detach a newer handle. Graceful cancellation retains
+  the existing earliest-deadline behavior, and synchronous processor or
+  middleware throws now release their exact cancellation generation even when
+  a user circuit-breaker hook also throws. In-process retry now treats
+  synchronous throws like rejected Promises and owns its pending backoff:
+  cancellation or `close()` clears the delay and prevents a later processor
+  invocation after shutdown. Circuit-breaker destruction is terminal, so a
+  retry rejected by shutdown cannot reopen it or re-arm its reset timer;
+  explicit cooperative cancellation retains its existing success/failure
+  outcome semantics.
+- Fixed [#113](https://github.com/egeominotti/bunqueue/issues/113): concurrent
+  Worker completions and pull continuations now share one replaceable poll
+  timer while retaining the earliest pending wake-up. A later backoff cannot
+  postpone a poll that was already due sooner. Completed jobs can no longer
+  leave self-perpetuating orphan timer chains that make idle CPU usage grow
+  with the number of processed jobs; pause and close also clear the same timer
+  ownership state.
+- Embedded Queue, Worker, and QueueEvents construction now fails synchronously
+  when an explicit `dataPath` conflicts with the process-wide QueueManager's
+  active database. Equivalent relative, absolute, and symlink paths are
+  canonicalized, while omitted paths continue to join the active manager. This
+  prevents durable jobs from being accepted only in memory after another
+  embedded client selected a different backend.
+
 ### Removed
 
 - Removed StrykerJS from the TypeScript SDK: the mutation job, the

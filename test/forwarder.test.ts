@@ -55,6 +55,7 @@ async function waitFor(cond: () => Promise<boolean> | boolean, timeoutMs = 8000)
 }
 
 beforeAll(async () => {
+  shutdownManager();
   await cleanupDb();
   qm = new QueueManager();
   server = createTcpServer(qm, { port: REMOTE_PORT, hostname: '127.0.0.1' });
@@ -186,7 +187,7 @@ describe('queue.forward() failure handling', () => {
         port: 18879,
         commandTimeout: 300,
         // Don't retry the dead link forever during the test
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: exercise a deliberately incomplete connection.
       } as any,
     });
     open.push(fwd);

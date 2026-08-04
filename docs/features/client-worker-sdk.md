@@ -34,7 +34,7 @@ Does NOT own (delegated):
 ## Dependencies
 
 Internal:
-- `../manager` (`getSharedManager`) — embedded `QueueManager` access. See [Core Queue Engine](./core-queue-engine.md).
+- `../manager` (`getSharedManager`) — embedded `QueueManager` access. Worker construction synchronously rejects an explicit `dataPath` that differs from the process-wide manager's canonical path; an omitted path joins the active manager. See [Client SDK: Queue](./client-queue-sdk.md) and [Core Queue Engine](./core-queue-engine.md).
 - `../tcpPool` (`TcpConnectionPool`, `getSharedPool`/`releaseSharedPool`) — TCP transport. See [Client Transport](./client-transport.md).
 - `./processor` + `./processorHandlers` — execution and the `Job` method handlers (progress/log/state/children/mutations).
 - `./ackBatcher`, `./workerPull`, `./workerHeartbeat`, `./jobParser`.
@@ -147,6 +147,10 @@ See [data-model](../data-model.md) for the full `Job` shape. Key types used here
 `queueKey = (prefixKey ?? '') + name`, transport construction, ACK-batcher
 wiring, reconnect registration, and the `autorun` decision.
 
+In embedded mode the constructor claims the same process-wide manager used by
+Queue and QueueEvents. A supplied `dataPath` must identify its active database;
+a mismatch throws synchronously before polling or worker registration begins.
+
 `run()` (`worker/runtime/control.ts`) sets `running`, defers a `ready` emit via
 `queueMicrotask` (so immediately attached listeners still fire), subscribes to
 queue-scoped stalled events, registers the worker, and starts job-lease and
@@ -157,14 +161,25 @@ does not suppress processing, and normal reconnect logic later re-subscribes.
 active and buffered deliveries must retain their leases, and the broker must
 retain the worker registration. `resume()` reuses those timers instead of
 creating duplicate intervals, so repeated pause/resume cycles remain
-idempotent and `close()` can release every owned runtime handle.
+idempotent and `close()` can release every owned runtime handle. Starting
+`close()` is a terminal lifecycle transition: `run()` and `resume()` become
+no-ops as soon as shutdown owns its promise, so a stale timer or callback
+cannot clear the closing/force state and restart polling during teardown.
 
 ### Pull loop
-`poll()` (`worker/runtime/polling.ts`) returns if not running/closing; if
-`activeJobs >= concurrency` it reschedules in 10ms; if the rate limiter blocks,
-it waits for the next slot; otherwise it calls `tryProcess()`. `tryProcess()`
-repeats the limiter check before any batch pull, so its pipelined fan-out cannot
-bypass admission.
+`poll()` (`worker/runtime/polling.ts`) first retires its current wake-up handle,
+then returns if not running/closing. If `activeJobs >= concurrency` it
+reschedules in 10ms; if the rate limiter blocks, it waits for the next slot;
+otherwise it calls `tryProcess()`. Every concurrency, group, empty-pull,
+rate-limit and error-backoff path uses one earliest-deadline scheduler, so
+concurrent completion and pull continuations leave at most one live poll timer
+without allowing a later request to postpone an earlier wake-up. The timer
+callback verifies that it still owns the current handle before polling;
+`pause()` and `close()` use the same idempotent cleanup. This preserves the
+existing delays and pull fan-out without allowing completed jobs to create
+self-perpetuating orphan timer chains (issue #113). `tryProcess()` repeats the
+limiter check before any batch pull, so its pipelined fan-out cannot bypass
+admission.
 
 `tryProcess()` (`worker/runtime/polling.ts`) picks an eligible buffered job
 (`runtime/buffer.ts`) or pulls a batch. After the async pull it **re-checks**
@@ -300,7 +315,9 @@ process alive; `autoStart` can watch the queue after an idle stop.
 - **Graceful close** (`worker/runtime/lifecycle.ts`): `close(false)` stops
   timers, moves buffered leased jobs back to waiting, waits only for active
   processors, flushes ACKs, unregisters, and closes the pool. `close(true)`
-  breaks an in-progress graceful drain. It cannot cancel arbitrary user code,
+  breaks an in-progress graceful drain. Shutdown state is monotonic from the
+  first call, so stale `run()`/`resume()` calls cannot pull a batch after close
+  begins. It cannot cancel arbitrary user code,
   so a processor may still return later; that late outcome is abandoned before
   any broker command or event. The unfinished job remains recoverable through
   disconnect handling or server lock/stall expiry.

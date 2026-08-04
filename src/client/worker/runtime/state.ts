@@ -41,6 +41,7 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected closed = false;
   protected activeJobs = 0;
   protected pollTimer: ReturnType<typeof setTimeout> | null = null;
+  protected pollDeadline: number | null = null;
   protected consecutiveErrors = 0;
   protected readonly pulledJobIds: Set<string> = new Set();
   protected readonly jobTokens: Map<string, string> = new Map();
@@ -206,6 +207,13 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected clearDeliveries(): void {
     this.currentDeliveries.clear();
     this.activeDeliveries.clear();
+  }
+
+  protected clearPollTimer(): void {
+    const timer = this.pollTimer;
+    this.pollTimer = null;
+    this.pollDeadline = null;
+    if (timer !== null) clearTimeout(timer);
   }
 
   abstract run(): void;

@@ -3,11 +3,10 @@
  *
  * All campaign runs share one SQLite file and use unique queue/workflow names. The
  * embedded QueueManager is a process-wide singleton that binds to the FIRST
- * dataPath it is given and silently ignores every later one, so a per-run database
- * would leave the manager writing to a directory the previous run already deleted
- * (SQLITE_IOERR_VNODE). Unique workflow names also keep restart() honest — recover()
- * skips executions whose workflow is not registered, so a run only ever recovers
- * its own.
+ * dataPath it is given and rejects a different explicit path. The campaign therefore
+ * uses one shared database and unique workflow names. That also keeps restart()
+ * honest — recover() skips executions whose workflow is not registered, so a run
+ * only ever recovers its own.
  *
  * `restart()` is the model's stand-in for a crash: it closes the engine and opens
  * a fresh one over the same database, then calls recover(). That exercises the
@@ -33,6 +32,7 @@ export interface WorkflowModel {
 
 export class RealWorkflow {
   private engine: Engine;
+  private engineGeneration = 0;
   private readonly dataPath: string;
   private readonly queueName: string;
   readonly ledger: Ledger = emptyLedger();
@@ -71,8 +71,9 @@ export class RealWorkflow {
     });
     // Children first: a parent's subWorkflow node resolves its child by name at run
     // time, and recover() skips executions whose workflow is not registered.
-    for (const child of buildChildWorkflows(this.spec, this.ledger)) engine.register(child);
-    engine.register(buildWorkflow(this.spec, this.ledger));
+    const children = buildChildWorkflows(this.spec, this.ledger, this.engineGeneration);
+    for (const child of children) engine.register(child);
+    engine.register(buildWorkflow(this.spec, this.ledger, this.engineGeneration));
     return engine;
   }
 
@@ -118,6 +119,7 @@ export class RealWorkflow {
    */
   async restart(): Promise<void> {
     await this.engine.close(true);
+    this.engineGeneration++;
     this.engine = this.openEngine();
     await this.engine.recover();
     this.check();

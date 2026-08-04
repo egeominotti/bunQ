@@ -12,12 +12,12 @@
  * SINGLETON CAVEAT
  * ----------------------------------------------------------------------------
  * In embedded mode, `new Queue(name, { embedded: true, dataPath })` resolves a
- * PROCESS-SINGLETON QueueManager via getSharedManager() (src/client/manager.ts:
- * `instance ??= new QueueManager(...)`). The FIRST embedded Queue in the process
- * pins the manager to its dataPath; later dataPaths are ignored until the
- * singleton is reset. We therefore call `shutdownManager()` at the end of each
- * test to (a) reset the singleton so the next test gets a fresh manager on its
- * OWN dataPath, and (b) deterministically trigger the final flush + drop:
+ * PROCESS-SINGLETON QueueManager via getSharedManager(). The FIRST embedded
+ * Queue in the process pins the manager to its canonical dataPath; a later
+ * explicit, different path is rejected until the singleton is reset. We
+ * therefore call `shutdownManager()` at the end of each test to (a) reset the
+ * singleton so the next test gets a fresh manager on its OWN dataPath, and (b)
+ * deterministically trigger the final flush + drop:
  *
  *   shutdownManager() -> manager.shutdown() -> storage.close()
  *     -> writeBuffer.stop() -> flush() (fails on the poison UNIQUE collision)

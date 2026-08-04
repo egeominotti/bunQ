@@ -678,7 +678,10 @@ interface QueueOptions {
   /** Use embedded mode (in-process SQLite, default: false) */
   embedded?: boolean;
 
-  /** SQLite database path for embedded mode (overrides the DATA_PATH env vars) */
+  /**
+   * SQLite path for embedded mode. A later explicit path must match the
+   * process-wide manager's active database or construction throws.
+   */
   dataPath?: string;
 
   /**
@@ -810,7 +813,10 @@ interface WorkerOptions {
   /** Use embedded mode (in-process SQLite, default: false) */
   embedded?: boolean;
 
-  /** SQLite database path for embedded mode (overrides the DATA_PATH env vars) */
+  /**
+   * SQLite path for embedded mode. A later explicit path must match the
+   * process-wide manager's active database or construction throws.
+   */
   dataPath?: string;
 
   /** Number of jobs to pull per batch (default: 10, max: 1000) */
@@ -905,6 +911,7 @@ class QueueEvents<R = unknown, P = unknown> extends EventEmitter {
 interface QueueEventsOptions {
   embedded?: boolean;
   connection?: ConnectionOptions;
+  /** Must match the process-wide embedded manager when one is already active. */
   dataPath?: string;
   prefixKey?: string;
 }

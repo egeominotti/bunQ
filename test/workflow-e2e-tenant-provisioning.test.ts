@@ -23,9 +23,10 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 const SETUP_FEE = 49_900;
@@ -35,15 +36,15 @@ let engine: Engine | undefined;
 let caseId = 0;
 
 // One directory and one queue database for the whole file: the embedded
-// QueueManager is a process-wide singleton bound to the first dataPath it is handed,
-// and it outlives any single test. Isolation comes from unique queue and workflow
-// names. The directory is deliberately never deleted — pulling it out from under the
-// singleton breaks whatever runs next in the process.
+// QueueManager is a process-wide singleton bound to the first dataPath it is handed.
+// Isolation within the file comes from unique queue and workflow names.
 beforeAll(() => {
+  shutdownManager();
   dir = mkdtempSync(join(tmpdir(), 'bq-tenant-'));
 });
 afterAll(() => {
-  /* intentionally left in place */
+  shutdownManager();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 beforeEach(() => {

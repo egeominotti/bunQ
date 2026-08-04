@@ -21,12 +21,18 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 
 let engine: Engine | undefined;
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true);
   engine = undefined;
+  shutdownManager();
 });
 
 async function settle(e: Engine, id: string, want: string, ms = 10_000) {
@@ -69,7 +75,10 @@ describe('I1: exactly one compensation outcome per eligible step', () => {
       .step('a', () => ({ a: 1 }), { retry: 1, compensate: () => void calls.push('undo-a') })
       .step('boom', boom(), { retry: 1 });
 
-    engine = new Engine({ embedded: true, dataPath: join(mkdtempSync(join(tmpdir(), 'bq-saga-')), 'wf.db') });
+    engine = new Engine({
+      embedded: true,
+      dataPath: join(mkdtempSync(join(tmpdir(), 'bq-saga-')), 'wf.db'),
+    });
     engine.register(wf);
     const run = await engine.start('i1-twice', {});
     expect(await settle(engine, run.id, 'failed')).toBe('failed');
@@ -160,7 +169,7 @@ describe('I5 + I8: a definitive compensation failure parks the run', () => {
     const run = await engine.start('i5', {});
     expect(await settle(engine, run.id, 'compensation-stuck')).toBe('compensation-stuck');
 
-    engine.abandonCompensation(run.id);
+    void engine.abandonCompensation(run.id);
 
     const exec = engine.getExecution(run.id);
     expect(exec?.state).toBe('failed');

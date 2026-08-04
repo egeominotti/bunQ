@@ -5,7 +5,7 @@ export interface QueueEventsOptions {
   embedded?: boolean;
   /** TCP connection used when embedded is false. */
   connection?: ConnectionOptions;
-  /** Embedded SQLite path. */
+  /** Embedded SQLite path; must match an already-active shared manager. */
   dataPath?: string;
   /** Namespace prefix applied to the queue name. */
   prefixKey?: string;

@@ -4,6 +4,24 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+## [2.8.59] - 2026-08-05
+
+### Fixed
+
+- Fixed the order-dependent Linux release failure where the in-memory Workflow
+  loop suite left the process-wide embedded manager alive before a
+  SQLite-backed timeout regression selected its database. Both suites now own
+  the shared manager lifecycle explicitly, and a child-process regression
+  locks the exact file order that blocked the 2.8.58 release gate.
+
+### Distribution
+
+- GHCR now publishes an immutable tag matching the package version alongside
+  `latest`, the commit SHA, and the timestamp tag. GitHub release instructions
+  use that exact version so npm and container deployments can be pinned
+  together. This release completes the container publication missed by 2.8.58;
+  runtime behavior is unchanged from its verified Worker polling fix.
+
 ## [2.8.58] - 2026-08-04
 
 ### Fixed

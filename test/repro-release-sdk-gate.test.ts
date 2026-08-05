@@ -129,6 +129,16 @@ describe('release graph SDK gate', () => {
     expect(ciText).not.toMatch(/>>\s+\$GITHUB_(?:ENV|OUTPUT|PATH|STEP_SUMMARY)\b/);
   });
 
+  test('Docker publication exposes both the release version and latest tags', () => {
+    const metadata = ci.jobs.docker?.steps?.find(
+      (step) => step.uses === 'docker/metadata-action@v5'
+    );
+    const tags = String(metadata?.with?.tags ?? '');
+
+    expect(tags).toContain('type=raw,value=${{ needs.version-gate.outputs.version }}');
+    expect(tags).toContain('type=raw,value=latest');
+  });
+
   test('finite edge mutations are all detected', () => {
     for (const name of sdkNames) {
       const mutant = structuredClone(sdk);

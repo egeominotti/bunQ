@@ -6,21 +6,27 @@
  * must retain its causal failure independently from its rollback outcome.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
 let dir: string | undefined;
 
+beforeEach(() => {
+  shutdownManager();
+});
+
 afterEach(async () => {
   await engine?.close(true).catch(() => {
     // Preserve the assertion failure when teardown races a timeout callback.
   });
   engine = undefined;
+  shutdownManager();
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = undefined;
 });

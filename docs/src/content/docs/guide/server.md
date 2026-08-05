@@ -100,6 +100,20 @@ Priority when the same option is set in more than one place: CLI flags > config 
 
 ## Run it in Docker
 
+The published multi-arch image carries both the release version and `latest`.
+Pin the exact version when the server and client must move together:
+
+```bash
+docker run -d -p 6789:6789 -p 6790:6790 \
+  -v bunqueue-data:/app/data \
+  ghcr.io/egeominotti/bunqueue:2.8.59
+```
+
+`ghcr.io/egeominotti/bunqueue:latest` points to the same digest when a release
+is published.
+
+To build an application-specific image instead:
+
 ```dockerfile
 FROM oven/bun:latest
 WORKDIR /app

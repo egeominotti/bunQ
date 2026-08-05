@@ -1,11 +1,21 @@
-import { describe, test, expect, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { shutdownManager } from '../src/client';
 import { Workflow, Engine } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
-let engine: Engine;
+let engine: Engine | undefined;
+
+beforeEach(() => {
+  shutdownManager();
+});
 
 afterEach(async () => {
-  if (engine) await engine.close(true);
+  try {
+    await engine?.close(true);
+  } finally {
+    engine = undefined;
+    shutdownManager();
+  }
 });
 
 describe('Workflow Engine - doUntil', () => {

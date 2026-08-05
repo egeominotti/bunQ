@@ -16,6 +16,25 @@ head:
 
 ## Unreleased
 
+## [2.8.59] - 2026-08-05
+
+### Fixed
+
+- Fixed the order-dependent Linux release failure where the in-memory Workflow
+  loop suite left the process-wide embedded manager alive before a
+  SQLite-backed timeout regression selected its database. Both suites now
+  claim and release the singleton explicitly, and a child-process regression
+  locks the exact file order that blocked the 2.8.58 release gate.
+
+### Distribution
+
+- GHCR releases now publish the exact package version tag alongside `latest`,
+  the commit SHA, and the timestamp tag. Generated GitHub release instructions
+  use the immutable version tag, so npm and container deployments can be pinned
+  together. This completes the container publication that 2.8.58 missed when
+  its unit gate failed; runtime behavior is unchanged from the verified 2.8.58
+  Worker polling fix.
+
 ## [2.8.58] - 2026-08-04
 
 ### Fixed

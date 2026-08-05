@@ -351,6 +351,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=${{ needs.version-gate.outputs.version }}
             type=raw,value=latest
             type=sha,prefix=
             type=raw,value={{date 'YYYYMMDD-HHmm'}}
@@ -448,9 +449,11 @@ jobs:
             ### Docker (recommended)
 
             ```bash
-            docker pull ghcr.io/${{ github.repository }}:latest
-            docker run -p 6789:6789 -p 6790:6790 ghcr.io/${{ github.repository }}:latest
+            docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+            docker run -p 6789:6789 -p 6790:6790 ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
             ```
+
+            The immutable version tag and `latest` point to the same multi-arch image.
 
             ### Binary
 

@@ -66,6 +66,9 @@ An explicit conflicting `dataPath` now fails at construction instead of writing
 to the previous suite's database. Embedded suites must still claim the
 singleton with `shutdownManager()` in `beforeEach` and release it before
 removing temporary databases instead of trusting every other file to clean up.
+`test/repro-ci-workflow-manager-order.test.ts` runs the in-memory Workflow loop
+suite before a SQLite-backed timeout regression in a child process, locking the
+same Linux CI order that failed the v2.8.58 release gate.
 
 `test/repro-bunqueue-sync-throw-cancellation.test.ts` drives a synchronous
 Simple Mode processor failure through real retries and verifies that terminal
@@ -586,7 +589,11 @@ language jobs even when an earlier one failed or was cancelled. A root
 docs, and SDK result. The version
 gate, binary matrix, container publication, and GitHub release are all
 transitively downstream; Docker publication also waits for the complete binary
-matrix. The TypeScript package publisher is manual, runs the same reusable
+matrix. Each successful Docker release publishes the exact package version
+alongside `latest`, the commit SHA, and a timestamp, so production deployments
+can pin the same version as npm without losing the moving convenience tag.
+`test/repro-release-sdk-gate.test.ts` locks both the version and `latest` tags.
+The TypeScript package publisher is manual, runs the same reusable
 six-SDK gate, uses frozen installs and pinned Bun, publishes with `bun publish`,
 and creates its tag only after the registry accepts the package.
 

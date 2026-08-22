@@ -67,6 +67,9 @@ export class ShardDlq extends ShardDependencies {
   removeFromDlq(queue: string, jobId: JobId): DlqEntry | null {
     return this.dlqManager.remove(queue, jobId);
   }
+  removeAllFromDlq(queue: string, jobId: JobId): DlqEntry[] {
+    return this.dlqManager.removeAll(queue, jobId);
+  }
   getAutoRetryEntries(queue: string, now: number = Date.now()): DlqEntry[] {
     return this.dlqManager.getAutoRetryEntries(queue, now);
   }

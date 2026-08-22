@@ -214,7 +214,11 @@ export async function removeDlqJobAsync(ctx: DlqContext, id: string): Promise<bo
   if (ctx.embedded) return dlqOps.removeDlqJobEmbedded(ctx.name, id);
   if (!ctx.tcp) return false;
   const response = await ctx.tcp.send({ cmd: 'RemoveDlqJob', queue: ctx.name, jobId: id });
-  if (!response.ok) return false;
+  if (!response.ok) {
+    const error =
+      typeof response.error === 'string' ? response.error : 'Failed to remove the DLQ job';
+    throw new Error(error);
+  }
   const payload = response as unknown as { data?: { removed?: boolean } };
   return payload.data?.removed === true;
 }

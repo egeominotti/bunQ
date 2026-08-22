@@ -46,6 +46,8 @@ function dlqContext(manager: QueueManager): DlqContext {
     shards: manager.getShards(),
     jobIndex: manager.getJobIndex(),
     jobResults: new Map(),
+    dependencyResults: { releaseConsumer: () => {} },
+    customIdMap: new Map(),
     jobLogs: new Map(),
     storage: internals.storage,
   };

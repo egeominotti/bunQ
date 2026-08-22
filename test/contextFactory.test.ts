@@ -805,9 +805,11 @@ describe('ContextFactory', () => {
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
       expect(keys).toContain('jobResults');
+      expect(keys).toContain('dependencyResults');
+      expect(keys).toContain('customIdMap');
       expect(keys).toContain('jobLogs');
       expect(keys).toContain('storage');
-      expect(keys.length).toBe(5);
+      expect(keys.length).toBe(7);
     });
   });
 
@@ -842,7 +844,7 @@ describe('ContextFactory', () => {
     test('should extend DlqContext with completed job data and results', () => {
       const ctx = factory.getRetryCompletedContext();
       const keys = Object.keys(ctx);
-      expect(keys.length).toBe(7);
+      expect(keys.length).toBe(9);
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
       expect(keys).toContain('jobLogs');
@@ -850,6 +852,8 @@ describe('ContextFactory', () => {
       expect(keys).toContain('completedJobs');
       expect(keys).toContain('completedJobsData');
       expect(keys).toContain('jobResults');
+      expect(ctx.dependencyResults).toBe(deps.dependencyResults);
+      expect(ctx.customIdMap).toBe(deps.customIdMap);
     });
   });
 

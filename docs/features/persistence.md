@@ -91,7 +91,7 @@ Key methods (real signatures):
   `deleteDependencyCompletion(jobId)`, and
   `deleteDependencyCompletionsForQueue(queue)`.
 - Results: `storeResult(jobId, result)`, `getResult(jobId)`, `hasResult(jobId)`.
-- DLQ: `saveDlqEntry(entry)`, atomic `requeueDlqJob(job)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
+- DLQ: `saveDlqEntry(entry)`, atomic `requeueDlqJob(job)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, transactional `purgeDlqEntries(queue, dlqJobIds, terminalJobIds, clearQueue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
 - Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(): Set<JobId>`, `countPendingJobs()`, `countActiveJobs()`.
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
@@ -254,6 +254,13 @@ Delete: `deleteJob` in `persistence/sqlite/mutations.ts` calls
 row, then deletes the job and result atomically. DLQ rows are deliberately not
 cascaded; terminal failure commits the DLQ entry before deleting the live job
 row (`persistence/sqlite/jobs.ts`).
+
+Permanent DLQ cleanup uses `purgeDlqEntries`. It first removes pending buffered
+terminal inserts, then transactionally deletes either the selected
+`(queue, jobId)` rows or the queue's complete DLQ together with terminal
+`jobs`, `job_results`, and parent-owned `flow_failures`. The terminal-ID list is
+generation-guarded by the application layer so cleanup of a stale DLQ snapshot
+cannot delete a newer live generation with the same ID.
 
 Flow-failure transition: terminal child removal, its optional DLQ row and its
 `flow_failures` record commit in one `commitFailedJob` transaction. Parent-side

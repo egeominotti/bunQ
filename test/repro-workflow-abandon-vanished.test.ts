@@ -27,17 +27,23 @@
  * answer the vanished case the same way `unwindSet` did.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
 import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeAll(shutdownManager);
 afterEach(async () => {
-  await engine?.close(true).catch(() => {});
-  engine = undefined;
+  try {
+    await engine?.close(true);
+  } finally {
+    engine = undefined;
+    shutdownManager();
+  }
 });
 
 describe('abandoning a parked unwind leaves nothing owed', () => {
@@ -57,9 +63,13 @@ describe('abandoning a parked unwind leaves nothing owed', () => {
             throw new Error('refund refused');
           },
         })
-        .step('boom', async () => {
-          throw new Error('downstream rejected');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('downstream rejected');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('abandon-pay');
@@ -73,9 +83,13 @@ describe('abandoning a parked unwind leaves nothing owed', () => {
       new Workflow('abandon-pay')
         .step('reserve-stock', async () => ({}), { retry: 1, compensate: async () => {} })
         .step('charge', async () => ({}), { retry: 1, compensate: async () => {} })
-        .step('boom', async () => {
-          throw new Error('downstream rejected');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('downstream rejected');
+          },
+          { retry: 1 }
+        )
     );
     await engine.abandonCompensation(run.id);
 
@@ -102,9 +116,13 @@ describe('abandoning a parked unwind leaves nothing owed', () => {
             throw new Error('refund refused');
           },
         })
-        .step('boom', async () => {
-          throw new Error('x');
-        }, { retry: 1 })
+        .step(
+          'boom',
+          async () => {
+            throw new Error('x');
+          },
+          { retry: 1 }
+        )
     );
 
     const run = await engine.start('abandon-plain');

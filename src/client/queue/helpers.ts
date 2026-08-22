@@ -6,6 +6,7 @@
 import type { getSharedManager } from '../manager';
 import { shardIndex } from '../../shared/hash';
 import type { Shard } from '../../domain/queue/shard';
+import type { JobId } from '../../domain/types/job';
 import type { DlqFilter, DlqConfig as DomainDlqConfig } from '../../domain/types/dlq';
 import type { SqliteStorage } from '../../infrastructure/persistence';
 import type { DlqFilter as ClientDlqFilter } from '../types';
@@ -19,6 +20,8 @@ interface ManagerInternals {
   shards: Shard[];
   storage: SqliteStorage | null;
   jobResults: { delete(id: string): boolean };
+  dependencyResults: { releaseConsumer(id: string): void };
+  customIdMap: { get(id: string): JobId | undefined; delete(id: string): boolean };
   jobLogs: { delete(id: string): boolean };
 }
 
@@ -39,6 +42,8 @@ export function getDlqContext(manager: ReturnType<typeof getSharedManager>): dlq
     shards: getShards(manager),
     jobIndex: manager.getJobIndex(),
     jobResults: (manager as unknown as ManagerInternals).jobResults,
+    dependencyResults: (manager as unknown as ManagerInternals).dependencyResults,
+    customIdMap: (manager as unknown as ManagerInternals).customIdMap,
     jobLogs: (manager as unknown as ManagerInternals).jobLogs,
     // #110-class: without storage, retryDlqByFilter's deleteDlqEntry/insertJob
     // silently no-op — filtered retries were never persisted in embedded mode

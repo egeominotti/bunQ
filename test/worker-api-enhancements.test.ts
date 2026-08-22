@@ -3,7 +3,7 @@
  *
  * Tests for: concurrency getter/setter, closing promise, off(), name/opts properties
  */
-import { describe, it, expect, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach, beforeAll } from 'bun:test';
 import { Worker } from '../src/client/worker/worker';
 import { getSharedManager, shutdownManager } from '../src/client/manager';
 import { unlinkSync } from 'fs';
@@ -14,9 +14,13 @@ function cleanup() {
   for (const f of [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
     try {
       unlinkSync(f);
-    } catch {}
+    } catch {
+      // The database artifact may already be absent.
+    }
   }
 }
+
+beforeAll(shutdownManager);
 
 describe('Worker API enhancements', () => {
   let worker: Worker;
@@ -24,10 +28,14 @@ describe('Worker API enhancements', () => {
   afterEach(async () => {
     try {
       await worker?.close(true);
-    } catch {}
+    } catch {
+      // Continue teardown so the shared manager is always released.
+    }
     try {
       shutdownManager();
-    } catch {}
+    } catch {
+      // Cleanup is best-effort after a failed test.
+    }
     cleanup();
   });
 

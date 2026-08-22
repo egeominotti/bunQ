@@ -292,7 +292,9 @@ for the tokenless public `retry()`, `changeDelay(delay)`, and synchronous
 ### 6.5 DLQ
 
 `Dlq` (`queue`, `count?` → `{jobs}` top-level), `RetryDlq` (`queue`,
-`jobId?`, `count?` → `{count}`), `PurgeDlq` (→ `{count}`), `RetryCompleted`.
+`jobId?`, `count?` → `{count}`), `PurgeDlq` (→ `{count}`),
+`RemoveDlqJob` (`queue`, `jobId` → `{data:{removed:boolean}}`),
+`RetryCompleted`.
 "Retry a failed job" is `MoveToWait`; `RetryDlq` re-queues dead-lettered
 entries.
 

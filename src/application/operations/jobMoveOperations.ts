@@ -85,7 +85,7 @@ export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promi
   const validJob = job;
   const idx = shardIndex(validJob.queue);
   const fromProcessing = location.type === 'processing';
-  const entry = await withWriteLock(ctx.shardLocks[idx], () => {
+  await withWriteLock(ctx.shardLocks[idx], () => {
     const shard = ctx.shards[idx];
     if (fromProcessing) {
       shard.releaseJobResources(validJob.queue, validJob.uniqueKey, validJob.groupId, validJob.id);
@@ -95,9 +95,14 @@ export async function discardJob(jobId: JobId, ctx: JobManagementContext): Promi
     }
     const dlqEntry = shard.addToDlq(validJob);
     ctx.jobIndex.set(jobId, { type: 'dlq', queueName: validJob.queue });
-    return dlqEntry;
+    // SQLite writes are synchronous. Keeping them in this critical section
+    // prevents a concurrent permanent removal from racing a late DLQ insert.
+    ctx.storage?.saveDlqEntry(dlqEntry);
+    ctx.storage?.deleteJob(jobId);
+    ctx.dependencyResults.releaseConsumer(jobId);
+    if (validJob.customId && ctx.customIdMap.get(validJob.customId) === jobId) {
+      ctx.customIdMap.delete(validJob.customId);
+    }
   });
-  ctx.storage?.saveDlqEntry(entry);
-  ctx.storage?.deleteJob(jobId);
   return true;
 }

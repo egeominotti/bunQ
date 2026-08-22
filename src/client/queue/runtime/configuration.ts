@@ -83,12 +83,12 @@ export class QueueConfiguration<T> extends QueueControl<T> {
   }
 
   /** Remove one DLQ entry and resolve when the removal completes. */
-  removeDlqJob(id: string) {
+  removeDlqJob(id: string): Promise<boolean> {
     return dlqOps.removeDlqJobAsync(this.ctx, id);
   }
 
-  /** Backward-compatible alias for removeDlqJob. */
-  removeDlqJobAsync(id: string) {
+  /** Explicit async alias for removeDlqJob. */
+  removeDlqJobAsync(id: string): Promise<boolean> {
     return this.removeDlqJob(id);
   }
 

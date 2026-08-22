@@ -1,6 +1,6 @@
 ---
-title: "DLQ Operations: Filter, Retry, Purge"
-description: "Everyday work against the bunqueue Dead Letter Queue: filter entries by reason or age, retry a subset, read DLQ health counters and purge what you do not need."
+title: "DLQ Operations: Filter, Retry, Remove, Purge"
+description: "Everyday work against the bunqueue Dead Letter Queue: filter entries by reason or age, retry a subset, permanently remove one entry, read health counters and purge what you do not need."
 head:
   - tag: meta
     attrs:
@@ -265,6 +265,20 @@ curl 'http://localhost:6790/queues/emails/dlq/stats'
 Use synchronous `getDlqStats()` for a Bun embedded snapshot and
 `getDlqStatsAsync()` for an authoritative Bun result in either runtime. The
 other SDKs do not expose a stats helper yet; the HTTP result is authoritative.
+
+### Permanently remove one failed job
+
+```typescript
+const removed = await queue.removeDlqJob('job-123');
+// true: the selected DLQ entry was deleted
+// false: it was already absent
+```
+
+`removeDlqJobAsync(id)` is an explicit alias with the same
+`Promise<boolean>` contract. The operation does not retry the job. It removes
+the durable entry and terminal auxiliary state before resolving, including any
+recovered duplicate rows for the same queue and job ID. Broker and persistence
+errors reject the Promise; only a successful miss resolves `false`.
 
 ### Purge
 

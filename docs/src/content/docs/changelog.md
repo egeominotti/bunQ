@@ -16,6 +16,37 @@ head:
 
 ## Unreleased
 
+### Added
+
+- Added `Queue.removeDlqJob(id)` and `removeDlqJobAsync(id)` for permanently
+  deleting one failed job without retrying it. Both methods await the selected
+  embedded or TCP broker and return whether an entry existed.
+
+### Fixed
+
+- Selective DLQ deletion is now restart-safe and complete. It propagates broker
+  failures, closes the discard/removal persistence race, removes all recovered
+  duplicate rows, and releases terminal custom-ID, dependency-result,
+  result/log, job-index, and flow-failure ownership.
+
+## [2.8.61] - 2026-08-22
+
+### Fixed
+
+- Fixed the order-dependent Linux release failure where persistent embedded
+  suites inherited a process-wide in-memory QueueManager before selecting
+  their SQLite database. The affected Workflow, Worker, and stacktrace suites
+  now claim the singleton at file entry and release it only after their clients
+  close. A dedicated regression guard locks both suite boundaries.
+
+### Changed
+
+- Updated the repository agent instructions so every commit contains a
+  corresponding changelog update and uses a concise, specific English
+  description as its mandatory message. Pushes now verify outgoing commits
+  without starting another changelog cycle; version bumps and package
+  publication remain separate actions requiring explicit authorization.
+
 ## [2.8.60] - 2026-08-22
 
 ### Fixed

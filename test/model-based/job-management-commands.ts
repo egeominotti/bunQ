@@ -239,6 +239,36 @@ class RetryTerminalCommand extends QueueCommand {
   }
 }
 
+class RemoveDlqCommand extends QueueCommand {
+  constructor(private readonly slot: number) {
+    super();
+  }
+
+  check(model: Readonly<QueueModel>): boolean {
+    return model.jobs.get(MODEL_JOB_IDS[this.slot]!)?.state === 'failed';
+  }
+
+  async run(model: QueueModel, real: RealQueue): Promise<void> {
+    const id = MODEL_JOB_IDS[this.slot]!;
+    const job = model.jobs.get(id)!;
+    const response = await real.send({ cmd: 'RemoveDlqJob', jobId: id, queue: real.queue });
+    expect(response.ok).toBe(true);
+    expect((response.data as { removed?: boolean }).removed).toBe(true);
+    const repeated = await real.send({ cmd: 'RemoveDlqJob', jobId: id, queue: real.queue });
+    expect(repeated.ok).toBe(true);
+    expect((repeated.data as { removed?: boolean }).removed).toBe(false);
+    model.terminalGenerations.delete(terminalGeneration(id, job));
+    model.jobs.delete(id);
+    model.removed++;
+    real.tokens.delete(id);
+    await this.verify(model, real);
+  }
+
+  toString(): string {
+    return `removeDlq(${MODEL_JOB_IDS[this.slot]})`;
+  }
+}
+
 export function jobManagementCommandArbitraries(): Arbitrary<
   AsyncCommand<QueueModel, RealQueue>
 >[] {
@@ -258,5 +288,6 @@ export function jobManagementCommandArbitraries(): Arbitrary<
     slot.map((value) => new RemoveCommand(value, true)),
     slot.map((value) => new RetryTerminalCommand(value, false)),
     slot.map((value) => new RetryTerminalCommand(value, true)),
+    slot.map((value) => new RemoveDlqCommand(value)),
   ];
 }

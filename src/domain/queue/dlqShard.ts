@@ -170,6 +170,21 @@ export class DlqShard {
     return entries.splice(idx, 1)[0];
   }
 
+  /** Remove every entry with the same job ID from one queue. */
+  removeAll(queue: string, jobId: JobId): DlqEntry[] {
+    const entries = this.dlq.get(queue);
+    if (!entries) return [];
+    const removed: DlqEntry[] = [];
+    const remaining: DlqEntry[] = [];
+    for (const entry of entries) {
+      (entry.job.id === jobId ? removed : remaining).push(entry);
+    }
+    if (removed.length === 0) return removed;
+    this.dlq.set(queue, remaining);
+    this.stats.decrementDlq(removed.length);
+    return removed;
+  }
+
   /** Get entries ready for auto-retry */
   getAutoRetryEntries(queue: string, now: number = Date.now()): DlqEntry[] {
     const entries = this.dlq.get(queue);

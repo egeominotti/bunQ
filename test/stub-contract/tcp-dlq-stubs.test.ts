@@ -112,6 +112,21 @@ describe('TCP DLQ async facade returns authoritative results', () => {
     expect((await queue.getDlqAsync()).map((entry) => entry.job.id)).toEqual([retainedId]);
   });
 
+  test('removeDlqJob rejects broker failures instead of reporting a missing entry', async () => {
+    const h = setup();
+    const queue = makeTcpQueue(h, name('remove-dlq-job-error'));
+    const originalRemove = h.manager.removeDlqJob;
+    h.manager.removeDlqJob = () => {
+      throw new Error('forced removal failure');
+    };
+
+    try {
+      await expect(queue.removeDlqJob('failure-id')).rejects.toThrow('forced removal failure');
+    } finally {
+      h.manager.removeDlqJob = originalRemove;
+    }
+  });
+
   test('retryCompletedAsync returns the number moved back to waiting', async () => {
     const h = setup();
     const queueName = name('retry-completed');

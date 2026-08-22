@@ -1148,6 +1148,28 @@ Clear all jobs from the dead-letter queue.
 
 ---
 
+#### RemoveDlqJob
+
+Permanently delete one failed job without retrying it.
+
+**Request:**
+
+```typescript
+{ cmd: 'RemoveDlqJob', queue: string, jobId: string }
+```
+
+**Response:**
+
+```typescript
+{ ok: true, data: { removed: boolean } }
+```
+
+`removed: false` is an idempotent miss. Persistence or handler failures return
+the normal `{ ok: false, error }` response and must not be interpreted as a
+missing entry.
+
+---
+
 #### RetryCompleted
 
 Re-queue completed jobs back to waiting state.
@@ -2211,6 +2233,7 @@ Job data payloads are limited to **10 MB** when serialized.
 | | `GetDlqStats` | Get aggregate DLQ statistics |
 | | `RetryDlq` | Retry DLQ jobs |
 | | `PurgeDlq` | Clear DLQ |
+| | `RemoveDlqJob` | Permanently delete one DLQ job |
 | | `RetryCompleted` | Re-queue completed jobs |
 | **Cron** | `Cron` | Create/update cron schedule |
 | | `CronDelete` | Delete cron schedule |

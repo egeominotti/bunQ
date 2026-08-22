@@ -55,6 +55,23 @@ interface DlqEntry<T> {
 
 Each `AttemptRecord` carries the attempt number, start and failure timestamps, failure reason, error message, and duration in ms.
 
+### Bun Queue methods
+
+| Method | Result | Runtime behavior |
+|--------|--------|------------------|
+| `getDlq(filter?)` | `DlqEntry[]` | Synchronous embedded snapshot |
+| `getDlqAsync(filter?)` | `Promise<DlqEntry[]>` | Authoritative embedded or TCP read |
+| `getDlqStatsAsync()` | `Promise<DlqStats>` | Authoritative embedded or TCP statistics |
+| `retryDlqAsync(id?)` | `Promise<number>` | Re-queues selected entries and returns the count |
+| `retryDlqByFilterAsync(filter)` | `Promise<number>` | Re-queues matching entries |
+| `removeDlqJob(id)` | `Promise<boolean>` | Permanently removes one job; rejects broker errors |
+| `removeDlqJobAsync(id)` | `Promise<boolean>` | Explicit alias of `removeDlqJob` |
+| `purgeDlqAsync()` | `Promise<number>` | Permanently removes every entry and returns the count |
+
+Selective removal is idempotent: `false` means the entry did not exist. It is
+not an error fallback. A failed durable delete rejects and leaves the DLQ entry
+authoritative.
+
 :::tip[Related Guides]
 - [Stall Detection & Recovery](/guide/stall-detection/) - Stalled jobs are sent to the DLQ
 - [Worker API](/guide/worker/) - Configure retry behavior

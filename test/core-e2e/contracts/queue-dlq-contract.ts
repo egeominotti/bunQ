@@ -94,6 +94,26 @@ export async function runQueueDlqContract(mode: CoreE2eMode): Promise<CoverageTr
     );
     ensure(stats.total === 1, `getDlqStatsAsync returned total ${stats.total}`);
 
+    const remove = await failedFixture('remove');
+    const removed = await tracker.invoke('Queue', 'removeDlqJob', () =>
+      remove.queue.removeDlqJob(remove.id)
+    );
+    ensure(removed, 'removeDlqJob did not remove the selected entry');
+    ensure(
+      (await remove.queue.getJobState(remove.id)) === 'unknown',
+      'removed job remained visible'
+    );
+
+    const removeAsync = await failedFixture('remove-async');
+    const removedAsync = await tracker.invoke('Queue', 'removeDlqJobAsync', () =>
+      removeAsync.queue.removeDlqJobAsync(removeAsync.id)
+    );
+    ensure(removedAsync, 'removeDlqJobAsync did not remove the selected entry');
+    ensure(
+      !(await removeAsync.queue.removeDlqJobAsync(removeAsync.id)),
+      'repeated DLQ removal was not idempotent'
+    );
+
     const retrySync = await failedFixture('retry-sync');
     const syncRetryCount = tracker.call('Queue', 'retryDlq', () =>
       retrySync.queue.retryDlq(retrySync.id)

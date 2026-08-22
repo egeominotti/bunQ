@@ -205,6 +205,13 @@ the job. Lock order shard → processing matches the documented hierarchy.
    - **Retry** (`!unrecoverable && canRetry(job)`, i.e. `attempts < maxAttempts`): `runAt = now + calculateBackoff(job)`, push back to queue, `incrementQueued(..., isDelayed=true, ...)`, `storage.updateForRetry`, set `wasRetried`. Appends a `waiting` timeline entry for the next attempt.
    - **removeOnFail**: delete from index + disk, bump `totalFailed`, release customId.
    - **Terminal → DLQ** (`moveFailedJobToDlq`, `ack/failure.ts:17-43`): `addToDlq(job, MaxAttemptsExceeded, error)`, set `jobIndex` to `dlq`, atomically commit the DLQ row plus job-row removal (and any flow-failure outbox record), bump `totalFailed`, emit `dlq:added` (+ `flow:failed` if `parentId`).
+
+`Discard` reaches the same terminal state from waiting or active work. Its
+DLQ insert and live-row deletion remain synchronous while the destination shard
+lock is held, so a concurrent `RemoveDlqJob` cannot delete the visible entry
+before a late SQLite insert. Selective permanent removal then transitions
+`failed` to absent without retrying and releases terminal indexes, custom-ID,
+dependency-result, result/log, and parent flow-failure ownership.
 4. Broadcast `failed`; if retried, also broadcast `Retried` (prev `failed`).
 5. Flow propagation when NOT retried: `failParentOnFailure` → `onChildTerminalFailure`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure`/`continueParentOnFailure` → `onChildDependencyOption`.
 

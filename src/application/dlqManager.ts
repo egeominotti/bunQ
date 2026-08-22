@@ -120,12 +120,25 @@ export function purgeDlqJobs(queue: string, ctx: DlqContext): number {
 /** Remove one DLQ entry without re-enqueuing it. */
 export function removeDlqJob(queue: string, id: JobId, ctx: DlqContext): boolean {
   const shard = ctx.shards[shardIndex(queue)];
-  if (!shard.removeFromDlq(queue, id)) return false;
-  ctx.jobIndex.delete(id);
-  ctx.jobResults.delete(id);
-  ctx.jobLogs.delete(id);
-  ctx.storage?.deleteDlqEntry(id);
-  ctx.storage?.deleteJob(id);
+  const entry = shard.getDlqEntries(queue).find((candidate) => candidate.job.id === id);
+  if (!entry) return false;
+
+  const location = ctx.jobIndex.get(id);
+  const terminalJobIds =
+    location === undefined || (location.type === 'dlq' && location.queueName === queue)
+      ? [id]
+      : [];
+
+  // Keep the in-memory entry visible until the durable transaction succeeds.
+  // This prevents a failed SQLite write from leaving memory and disk out of sync.
+  ctx.storage?.purgeDlqEntries(queue, [id], terminalJobIds, false);
+  shard.removeFromDlq(queue, id);
+
+  if (terminalJobIds.length > 0) {
+    ctx.jobIndex.delete(id);
+    ctx.jobResults.delete(id);
+    ctx.jobLogs.delete(id);
+  }
   return true;
 }
 

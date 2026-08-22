@@ -82,8 +82,12 @@ export class QueueConfiguration<T> extends QueueControl<T> {
     return dlqOps.purgeDlqAsync(this.ctx);
   }
 
-  removeDlqJobAsync(id: string) {
+  removeDlqJob(id: string) {
     return dlqOps.removeDlqJobAsync(this.ctx, id);
+  }
+
+  removeDlqJobAsync(id: string) {
+    return this.removeDlqJob(id);
   }
 
   retryCompleted(id?: string) {

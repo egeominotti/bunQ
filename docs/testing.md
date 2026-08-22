@@ -63,9 +63,13 @@ failure that shipped in 2.8.56. Bun discovers test files in readdir order rather
 than sorted order, so a suite that leaves an embedded manager alive can affect
 whichever suite happens to run next — a different one on macOS than on Linux.
 An explicit conflicting `dataPath` now fails at construction instead of writing
-to the previous suite's database. Embedded suites must still claim the
-singleton with `shutdownManager()` in `beforeEach` and release it before
-removing temporary databases instead of trusting every other file to clean up.
+to the previous suite's database. Embedded suites that select a persistent path
+must claim the singleton with `beforeAll(shutdownManager)` before constructing
+clients. Their teardown must close every Queue, Worker, or Engine before calling
+`shutdownManager()` and removing temporary databases; `beforeEach` can provide
+stronger per-test isolation when a suite does not intentionally reuse a manager.
+`test/repro-ci-embedded-suite-isolation.test.ts` locks those entry and exit
+boundaries for the persistent suites involved in the v2.8.60 Linux CI failure.
 `test/repro-ci-workflow-manager-order.test.ts` runs the in-memory Workflow loop
 suite before a SQLite-backed timeout regression in a child process, locking the
 same Linux CI order that failed the v2.8.58 release gate.

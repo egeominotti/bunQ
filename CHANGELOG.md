@@ -4,6 +4,16 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+## [2.8.61] - 2026-08-22
+
+### Fixed
+
+- Fixed the order-dependent Linux release failure where persistent embedded
+  suites inherited a process-wide in-memory QueueManager before selecting
+  their SQLite database. Every affected suite now claims the shared manager at
+  file entry and releases it after closing its clients; a regression guard
+  locks both suite boundaries.
+
 ## [2.8.60] - 2026-08-22
 
 ### Fixed

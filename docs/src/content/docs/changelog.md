@@ -16,6 +16,16 @@ head:
 
 ## Unreleased
 
+## [2.8.61] - 2026-08-22
+
+### Fixed
+
+- Fixed the order-dependent Linux release failure where persistent embedded
+  suites inherited a process-wide in-memory QueueManager before selecting
+  their SQLite database. The affected Workflow, Worker, and stacktrace suites
+  now claim the singleton at file entry and release it only after their clients
+  close. A dedicated regression guard locks both suite boundaries.
+
 ### Changed
 
 - Updated the repository agent instructions so every commit contains a

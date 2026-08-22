@@ -68,7 +68,7 @@ docker run -d -p 6789:6789 -p 6790:6790 \
 ```
 
 Release images also carry the exact package version. For reproducible
-deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.60`; `latest` points to the
+deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.61`; `latest` points to the
 same multi-arch image at release time.
 
 Then produce and process from the language you already use:

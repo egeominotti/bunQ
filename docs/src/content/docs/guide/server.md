@@ -106,7 +106,7 @@ Pin the exact version when the server and client must move together:
 ```bash
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:2.8.60
+  ghcr.io/egeominotti/bunqueue:2.8.61
 ```
 
 `ghcr.io/egeominotti/bunqueue:latest` points to the same digest when a release

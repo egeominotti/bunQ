@@ -22,17 +22,22 @@
  * it cannot go green by accident of timing.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { shutdownManager } from '../src/client';
 import { Engine, Workflow } from '../src/client/workflow';
-import { waitForWorkflowState } from './workflowTestUtils';
 
 let engine: Engine | undefined;
+beforeAll(shutdownManager);
 afterEach(async () => {
-  await engine?.close(true).catch(() => {});
-  engine = undefined;
+  try {
+    await engine?.close(true);
+  } finally {
+    engine = undefined;
+    shutdownManager();
+  }
 });
 
 describe('a sub-workflow child is not recovered independently of its parent', () => {

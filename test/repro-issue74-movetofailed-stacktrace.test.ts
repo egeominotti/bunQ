@@ -84,6 +84,7 @@ function manualFailWorker(
   return { worker, failed: promise };
 }
 
+beforeAll(shutdownManager);
 beforeAll(async () => {
   await cleanupDb();
   qm = new QueueManager();

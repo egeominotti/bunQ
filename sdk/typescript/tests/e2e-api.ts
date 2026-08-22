@@ -56,7 +56,7 @@ test('api: Job instance methods (state, updateData, priority, delay, promote, re
   await job.updateData({ name: 'j', v: 2 });
   await job.changePriority({ priority: 42 });
   const reloaded = await queue.getJob(added.id);
-  assertEq((reloaded?.data as { v: number }).v, 2, 'job.updateData');
+  assertEq((reloaded?.data as { v: number } | undefined)?.v, 2, 'job.updateData');
   assertEq(reloaded?.priority, 42, 'job.changePriority');
   await job.moveToDelayed(60_000);
   assertEq(await job.getState(), 'delayed', 'job.moveToDelayed');

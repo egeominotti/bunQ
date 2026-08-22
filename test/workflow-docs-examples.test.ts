@@ -494,7 +494,7 @@ describe('docs: Loops and Iteration', () => {
     const notified: string[] = [];
     engine = new Engine({ embedded: true });
     engine.register(
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+      // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
       new Workflow<{ userIds: string[] }>('notify-all').forEach(
         (ctx) => ctx.input.userIds,
         'notify',
@@ -773,7 +773,7 @@ describe('docs: Vercel AI SDK examples', () => {
         },
         { retry: 2, timeout: 90_000 }
       )
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+      // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
       .forEach(
         (ctx) => (ctx.steps.plan as { planned: { name: string; args: unknown }[] }).planned,
         'apply',

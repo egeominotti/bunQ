@@ -183,7 +183,7 @@ export class Engine {
     // Before the worker: a waitFor timer that fires during shutdown enqueues a step
     // job, and a queue closing underneath it turns an orderly shutdown into a rejected
     // add. Releasing the timers first makes the order irrelevant.
-    this.executor.close();
+    this.executor.close(force);
     await this.worker.close(force);
     this.queue.close();
     this.store.close();

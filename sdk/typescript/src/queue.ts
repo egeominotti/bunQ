@@ -41,7 +41,7 @@ export interface BulkJobEntry<T = unknown> {
   opts?: JobOptions;
 }
 
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: prototype-mixin composition — Object.assign at the bottom installs exactly the methods the merged interface declares
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- prototype-mixin composition installs the declared methods with Object.assign below
 export class Queue<T = unknown> {
   readonly name: string;
   readonly connection: ConnectionLike;
@@ -138,6 +138,6 @@ export class Queue<T = unknown> {
  * The declaration merging is intentional and safe: Object.assign below
  * installs exactly the methods the interface declares. The unused type
  * parameter is required — merged interfaces must repeat the class generics. */
-// biome-ignore lint/correctness/noUnusedVariables: generic must match the class declaration
+// oxlint-disable-next-line no-unused-vars -- generic must match the class declaration
 export interface Queue<T = unknown> extends QueueQueryApi, QueueControlApi, QueueAdminApi {}
 Object.assign(Queue.prototype, queryMethods, controlMethods, adminMethods);

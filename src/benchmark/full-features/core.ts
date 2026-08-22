@@ -30,10 +30,12 @@ export async function runCoreFeatureSections(): Promise<void> {
     const first = await qm.pull('priority', 0);
     const second = await qm.pull('priority', 0);
     const third = await qm.pull('priority', 0);
-    await test('high priority pulled first', () => (first?.data as { id: string }).id === 'high');
+    await test('high priority pulled first', () =>
+      (first?.data as { id: string } | undefined)?.id === 'high');
     await test('medium priority pulled second', () =>
-      (second?.data as { id: string }).id === 'medium');
-    await test('low priority pulled third', () => (third?.data as { id: string }).id === 'low');
+      (second?.data as { id: string } | undefined)?.id === 'medium');
+    await test('low priority pulled third', () =>
+      (third?.data as { id: string } | undefined)?.id === 'low');
     await qm.ack(first!.id);
     await qm.ack(second!.id);
     await qm.ack(third!.id);
@@ -73,7 +75,7 @@ export async function runCoreFeatureSections(): Promise<void> {
     await qm.push('deps', { data: { type: 'child' }, dependsOn: [parent.id] });
     const childBefore = await qm.pull('deps', 0);
     await test('parent pulled first (child blocked)', () =>
-      (childBefore?.data as { type: string }).type === 'parent');
+      (childBefore?.data as { type: string } | undefined)?.type === 'parent');
     await qm.ack(childBefore!.id);
     await Bun.sleep(1200);
     const childAfter = await qm.pull('deps', 0);

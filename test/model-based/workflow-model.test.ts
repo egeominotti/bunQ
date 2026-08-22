@@ -133,7 +133,7 @@ describe('Workflow engine state-machine model', () => {
           ).toThrow();
           expect(() =>
             new Workflow('invalid-each')
-              // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+              // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
               .forEach(
                 () => [],
                 'work',

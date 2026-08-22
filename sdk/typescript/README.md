@@ -431,7 +431,7 @@ Every release is validated against a real bunqueue server, spawned fresh for eac
 ```bash
 bun install
 bun run build          # tsc, emits dist/
-bun run check          # Biome lint and format verification
+bun run check          # Oxlint and Oxfmt verification
 BUNQUEUE_FLOW_PBT_SEED=20260730 bun run test:property
 
 bun tests/integration.ts                            # smoke suite
@@ -447,9 +447,9 @@ concurrency, 24-way idempotent retries, 12-way single-lease contention,
 fixed-seed generated payloads, malformed mutation fuzzing, a 1500-job spike,
 server crash/restart, and realistic zero-loss accounting. `test:soak` reuses
 one pooled client; tune `BUNQUEUE_SDK_SOAK_BATCH` for stress diagnostics.
-Engineering standards: Biome, a maximum of 250 lines per file, and relative
-imports with explicit `.js` extensions for NodeNext resolution. Maintainers
-should read the [runtime invariants](INVARIANTS.md), the
+Engineering standards: Oxlint and Oxfmt, a maximum of 250 lines per file, and
+relative imports with explicit `.js` extensions for NodeNext resolution.
+Maintainers should read the [runtime invariants](INVARIANTS.md), the
 [module and protocol guide](CLAUDE.md), and the
 [local agent rules](AGENTS.md) before changing behavior.
 

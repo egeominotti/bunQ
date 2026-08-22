@@ -13,7 +13,6 @@ export class BenchmarkTcpClient {
   private connected = false;
   private readonly frameParser = new FrameParser();
 
-  // biome-ignore lint/suspicious/useAwait: async preserves connection errors as rejected promises.
   async connect(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       Bun.connect({
@@ -59,7 +58,6 @@ export class BenchmarkTcpClient {
     });
   }
 
-  // biome-ignore lint/suspicious/useAwait: async preserves preflight errors as rejected promises.
   async send(command: object): Promise<TcpResponse> {
     if (!this.socketWrite || !this.connected) throw new Error('Not connected');
     return new Promise((resolve, reject) => {

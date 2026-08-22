@@ -5,7 +5,8 @@
 !tsconfig.json
 !tsconfig.test.json
 !tsconfig.build.json
-!biome.json
+!.oxlintrc.json
+!.oxfmtrc.json
 !.gitignore
 !src/
 !src/**

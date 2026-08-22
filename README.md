@@ -68,7 +68,7 @@ docker run -d -p 6789:6789 -p 6790:6790 \
 ```
 
 Release images also carry the exact package version. For reproducible
-deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.59`; `latest` points to the
+deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.60`; `latest` points to the
 same multi-arch image at release time.
 
 Then produce and process from the language you already use:
@@ -89,7 +89,7 @@ new Worker('emails', async (job) => ({ sent: true }), { concurrency: 10 });
 Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 [One Queue, Any Language](#one-queue-any-language-sdks).
 
-> Only the server and embedded mode are **Bun-only** (`bun >= 1.3.9`,
+> Only the server and embedded mode are **Bun-only** (`bun >= 1.4.0`,
 > [bun.sh](https://bun.sh)); producers and workers can run anywhere.
 
 [Quick Start guide →](https://bunqueue.dev/guide/quickstart/)

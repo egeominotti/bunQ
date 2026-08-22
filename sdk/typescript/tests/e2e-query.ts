@@ -21,8 +21,8 @@ test('add + getJob + name + state', async () => {
     assert(state === 'waiting' || state === 'prioritized', `state waiting/prioritized (${state})`);
     const fetched = await queue.getJob(job.id);
     assert(fetched !== null, 'job fetched');
-    assertEq(fetched?.name, 'send', 'job name');
-    assertEq((fetched?.data as Record<string, unknown>).to, 'a@b.c', 'job data');
+    assertEq(fetched!.name, 'send', 'job name');
+    assertEq((fetched!.data as Record<string, unknown>).to, 'a@b.c', 'job data');
   } finally {
     queue.close();
   }

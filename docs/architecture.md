@@ -41,7 +41,7 @@ Producers ──add()──┐                          ┌──process()──
 
 | Choice | Where | Why |
 | --- | --- | --- |
-| **Bun runtime** (`>=1.3.9`) | [`package.json:164`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
+| **Bun runtime** (`>=1.4.0`) | [`package.json:164`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
 | **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
 | **MessagePack** (`msgpackr`) | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties. |
 | **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:75`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
@@ -141,6 +141,9 @@ be claimed.
   QueueEvents and Worker stall notifications share a focused dedicated TCP
   subscription adapter under `client/queue-events/`; public event payloads live
   separately under `client/types/events.ts`.
+  Workflow shutdown ownership is centralized in `workflow/executionFence.ts`;
+  node publication lives in `workflow/executorQueue.ts`, and the extracted
+  `workflow/forEachRunner.ts` keeps each orchestration module below 300 lines.
 - **`shared/`** — Cross-cutting primitives: `fnv1a`/`uuid`/`shardIndex`
   ([`src/shared/hash.ts`](../src/shared/hash.ts)), the stable lock façade
   (`lock.ts`) with focused `asyncLock.ts`/`rwLock.ts` implementations, `Semaphore`,

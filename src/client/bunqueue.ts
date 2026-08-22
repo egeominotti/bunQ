@@ -1,4 +1,4 @@
-// biome-ignore-all lint/suspicious/noExplicitAny: implementation signatures forward typed overloads.
+/* oxlint-disable typescript/no-explicit-any -- implementation signatures forward typed overloads */
 import type { SchedulerInfo } from './queue/scheduler';
 import type { DlqConfig, DlqEntry, DlqFilter, DlqStats, Job, JobOptions } from './types';
 import { BunqueueRuntime } from './bunqueue/runtime';

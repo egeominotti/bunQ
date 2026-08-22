@@ -11,12 +11,13 @@ import type { Queue } from '../queue/queue';
 import type { Workflow } from './workflow';
 import type { WorkflowStore } from './store';
 import type { WorkflowEmitter } from './emitter';
-import type { Execution, StepJobData, RecoverResult, WorkflowNode } from './types';
+import type { Execution, RecoverResult, WorkflowNode } from './types';
 import { runCompensation } from './compensator';
 import { hasSignal } from './storeSignals';
 import { clock, type TimerHandle } from './clock';
 import { decideAdmission } from './admission';
 import { bindExecutionDefinition } from './definitionGuard';
+import { enqueueWorkflowStep } from './executorQueue';
 
 export interface RecoverDeps {
   store: WorkflowStore;
@@ -33,14 +34,17 @@ export interface RecoverDeps {
    * the ordinary way to reach this.
    */
   nodesInFlight: ReadonlySet<string>;
+  assertActive: () => void;
 }
 
 export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResult> {
   const { store, workflows } = deps;
+  deps.assertActive();
   const executions = store.listRecoverable();
   const result: RecoverResult = { running: 0, waiting: 0, compensating: 0, total: 0 };
 
   for (const snapshot of executions) {
+    deps.assertActive();
     const wf = workflows.get(snapshot.workflowName);
     if (!wf) continue;
 
@@ -61,11 +65,13 @@ export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResul
       // Only `already-in-flight` is reachable here: the state is `running` by the
       // branch and the index is the execution's own cursor.
       if (admission.kind === 'run') {
-        await enqueueExecution(exec, deps.queue);
+        await enqueueWorkflowStep(deps.queue, exec, deps.assertActive);
+        deps.assertActive();
         result.running++;
       }
     } else if (exec.state === 'waiting') {
       await recoverWaiting(exec, wf, deps);
+      deps.assertActive();
       result.waiting++;
     } else if (
       exec.state === 'compensating' ||
@@ -76,7 +82,10 @@ export async function recoverExecutions(deps: RecoverDeps): Promise<RecoverResul
       // recoverable until runCompensation writes an explicit rollbackStatus.
       // A lost claim means another driver owns this unwind, so nothing happened here
       // and counting it as a recovery would overstate what recover() did.
-      if (await recoverCompensation(exec.id, wf, deps)) result.compensating++;
+      if (await recoverCompensation(exec.id, wf, deps)) {
+        deps.assertActive();
+        result.compensating++;
+      }
     }
   }
 
@@ -90,6 +99,7 @@ async function recoverCompensation(
   deps: RecoverDeps
 ): Promise<boolean> {
   while (true) {
+    deps.assertActive();
     const exec = deps.store.get(executionId);
     if (
       !exec ||
@@ -99,7 +109,10 @@ async function recoverCompensation(
       return false;
     }
     bindExecutionDefinition(exec, wf, (value) => deps.store.update(value));
-    const outcome = await runCompensation(exec, wf, deps.store, deps.emitter, deps.workflows);
+    const outcome = await runCompensation(exec, wf, deps.store, deps.emitter, deps.workflows, {
+      assertActive: deps.assertActive,
+    });
+    deps.assertActive();
     if (outcome === 'ran') return true;
 
     // A live unwind owned by this executor's store is not orphaned. Waiting here
@@ -112,26 +125,15 @@ async function recoverCompensation(
     // identity, so it waits for that owner, then re-reads the durable row: it may have
     // finished, or this engine must resume the owed unwind.
     await outcome.settled;
+    deps.assertActive();
   }
-}
-
-async function enqueueExecution(exec: Execution, queue: Queue): Promise<void> {
-  const jobData: StepJobData = {
-    executionId: exec.id,
-    workflowName: exec.workflowName,
-    nodeIndex: exec.currentNodeIndex,
-  };
-  // No deterministic jobId, for the reason documented in WorkflowExecutor.enqueue:
-  // the duplicate this path can create is neutralised by the cursor guard in
-  // processStep, and dedup here risks swallowing a legitimate re-enqueue after a
-  // restart, which wedges the run for good.
-  await queue.add('wf:step', jobData);
 }
 
 async function recoverWaiting(exec: Execution, wf: Workflow, deps: RecoverDeps): Promise<void> {
   const node = wf.nodes[exec.currentNodeIndex] as WorkflowNode | undefined;
   if (node?.type !== 'waitFor') {
-    await enqueueExecution(exec, deps.queue);
+    await enqueueWorkflowStep(deps.queue, exec, deps.assertActive);
+    deps.assertActive();
     return;
   }
 
@@ -139,9 +141,11 @@ async function recoverWaiting(exec: Execution, wf: Workflow, deps: RecoverDeps):
   // engine was recreated but before recover() reached the row. Key presence, not
   // value: a payload-less signal records the key with an `undefined` value.
   if (hasSignal(exec.signals, node.event)) {
+    deps.assertActive();
     exec.state = 'running';
     deps.store.update(exec);
-    await enqueueExecution(exec, deps.queue);
+    await enqueueWorkflowStep(deps.queue, exec, deps.assertActive);
+    deps.assertActive();
     return;
   }
 
@@ -156,10 +160,13 @@ async function recoverWaiting(exec: Execution, wf: Workflow, deps: RecoverDeps):
     const remaining = node.timeout - elapsed;
 
     if (remaining <= 0) {
+      deps.assertActive();
       exec.state = 'running';
       deps.store.update(exec);
-      await enqueueExecution(exec, deps.queue);
+      await enqueueWorkflowStep(deps.queue, exec, deps.assertActive);
+      deps.assertActive();
     } else {
+      deps.assertActive();
       deps.scheduleTimeoutCheck(exec.id, exec.workflowName, exec.currentNodeIndex, remaining);
     }
   }

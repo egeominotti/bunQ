@@ -18,6 +18,7 @@ export interface RollbackDeps {
   store: WorkflowStore;
   emitter: WorkflowEmitter | null;
   workflows: Map<string, Workflow>;
+  assertActive: () => void;
 }
 
 /**
@@ -37,6 +38,7 @@ export interface RollbackDeps {
  * the parked run exactly as the operator found it.
  */
 export async function resumeCompensation(deps: RollbackDeps, executionId: string): Promise<void> {
+  deps.assertActive();
   const { exec, wf } = parked(deps, executionId);
 
   const outcome: UnwindOutcome = await runCompensation(
@@ -45,7 +47,7 @@ export async function resumeCompensation(deps: RollbackDeps, executionId: string
     deps.store,
     deps.emitter,
     deps.workflows,
-    { retryFailed: true }
+    { retryFailed: true, assertActive: deps.assertActive }
   );
 
   if (outcome !== 'ran') {
@@ -56,11 +58,13 @@ export async function resumeCompensation(deps: RollbackDeps, executionId: string
 
 /** Accept a partial rollback: the outstanding steps are recorded as skipped. */
 export function abandonParkedCompensation(deps: RollbackDeps, executionId: string): void {
+  deps.assertActive();
   const { exec, wf } = parked(deps, executionId);
-  abandonCompensation(exec, wf, deps.store, deps.emitter);
+  abandonCompensation(exec, wf, deps.store, deps.emitter, deps.assertActive);
 }
 
 function parked(deps: RollbackDeps, executionId: string): { exec: Execution; wf: Workflow } {
+  deps.assertActive();
   const exec = deps.store.get(executionId);
   if (!exec) throw new Error(`Execution "${executionId}" not found`);
   if (exec.state !== 'compensation-stuck') {

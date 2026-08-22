@@ -140,7 +140,7 @@ export class QueueManagerAck extends QueueManagerDelivery {
     }
   }
 
-  // biome-ignore lint/complexity/useMaxParams: public compatibility signature carries removal policy.
+  // oxlint-disable-next-line max-params -- public compatibility signature carries removal policy
   async fail(
     jobId: JobId,
     error?: string,

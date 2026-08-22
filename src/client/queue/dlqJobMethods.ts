@@ -7,8 +7,10 @@ import type { TcpConnectionPool } from '../tcpPool';
 import { buildFailCommand, failEmbeddedArgs } from './failWire';
 import type { SimpleJobContext } from './jobProxy';
 
-export interface DlqJobContext
-  extends Pick<SimpleJobContext, 'getJobState' | 'removeAsync' | 'retryJob' | 'getChildrenValues'> {
+export interface DlqJobContext extends Pick<
+  SimpleJobContext,
+  'getJobState' | 'removeAsync' | 'retryJob' | 'getChildrenValues'
+> {
   name: string;
   embedded: boolean;
   tcp: TcpConnectionPool | null;

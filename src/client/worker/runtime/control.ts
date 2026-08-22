@@ -164,7 +164,6 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
     // No-op for API compatibility; stall detection is automatic.
   }
 
-  // biome-ignore lint/suspicious/useAwait: public compatibility contract is asynchronous
   async delay(milliseconds = 0, abortController?: AbortController): Promise<void> {
     if (milliseconds <= 0) return;
     return new Promise<void>((resolve, reject) => {

@@ -10,11 +10,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Lint + format (Biome, one pass)
-echo "🔎 Biome check (lint + format)..."
-bun run check:biome
+# Lint and format verification (Oxlint + Oxfmt)
+echo "🔎 Oxlint and Oxfmt check..."
+bun run check:oxc
 if [ $? -ne 0 ]; then
-  echo "❌ Biome errors found. Run 'bun run lint:fix && bun run format' to fix."
+  echo "❌ Lint or format errors found. Run 'bun run lint:fix && bun run format' to fix."
   exit 1
 fi
 

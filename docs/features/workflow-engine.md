@@ -2,7 +2,8 @@
 
 > **Category:** Orchestration · **Source:** `src/client/workflow/`. The facade and
 > graph live in `engine.ts`/`workflow.ts`; lifecycle dispatch is split across
-> `executor*.ts`, `runner*.ts`, `loops.ts`, `mapRunner.ts`,
+> `executor*.ts`, `executionFence.ts`, `runner*.ts`, `loops.ts`,
+> `forEachRunner.ts`, `mapRunner.ts`,
 > `subWorkflowRunner.ts`, `waitFor.ts` and `workflowDecisions.ts`; durability is
 > split across `store*.ts`, `definitionGuard.ts` and `workflowDefinition.ts`;
 > rollback is split across `compensator.ts`, `compensation*.ts`,
@@ -20,8 +21,8 @@ Owns:
 - **Execution scheduling**: turning nodes into `__wf:steps` jobs and walking `currentNodeIndex` forward (`executor.ts`).
 - **Step execution semantics**: retry with exponential backoff, per-step timeout, input/output schema validation (`runner.ts`).
 - **Saga compensation** in reverse order (`compensator.ts`).
-- **Loops & transforms**: `doUntil`/`doWhile`/`forEach` (`loops.ts`) and durable
-  `map` lifecycle handling (`mapRunner.ts`).
+- **Loops & transforms**: `doUntil`/`doWhile` (`loops.ts`), `forEach`
+  (`forEachRunner.ts`) and durable `map` lifecycle handling (`mapRunner.ts`).
 - **Crash recovery** of orphaned executions (`recovery.ts`).
 - **Persistence** of execution rows + archival/cleanup (`store.ts`, its own SQLite DB).
 - **Typed observability events** (`emitter.ts`, 15 event types, including four `compensation:*`).
@@ -318,6 +319,22 @@ closing the worker and queue.
 
 - **In-memory store when `dataPath` is omitted.** `WorkflowStore` opens `dataPath ?? ':memory:'` (`store.ts:67`). In TCP/`connection` mode (no `dataPath`) execution state is in-memory only — it is lost on restart and `recover()` finds nothing. Persistence requires passing `dataPath` (typically with `embedded: true`).
 - **Retry vs. compensation.** A step failing all `retry` attempts throws out of `processStep`, which sets `failed`, persists, emits `workflow:failed`, runs compensation, then re-throws — failing the underlying `wf:step` job. If the queue retries that job, `processStep` short-circuits because the execution is now `failed`, so compensation does not double-run via that path.
+- **Forced-close generation fence.** `WorkflowExecutor.close(true)` aborts the
+  shared `WorkflowExecutionFence` before Worker teardown. Admission and every
+  asynchronous continuation check that fence before mutating the execution,
+  writing SQLite, publishing a node, arming a timeout, emitting an event, or
+  starting new user code. It covers retry backoff, maps, loops and journaled
+  decisions, sub-workflow start/adoption/polling, `waitFor`, lifecycle calls,
+  and recovery. The close sentinel passes through parallel `AggregateError`
+  and error-preservation catches without being recorded as an application
+  failure. A child that completes after its old parent closes therefore cannot
+  advance that parent, and a late map error cannot start rollback. Work already
+  inside a forward handler cannot be cancelled; its external effect remains
+  at-least-once and must use the stable idempotency key. A compensation handler
+  that already owns the process-local claim may checkpoint its outcome and
+  release that claim, but the fence prevents the old Engine from starting the
+  next reversal. Graceful `close()` does not abort the fence and drains the
+  active control flow normally.
 - **Crash or force-close mid-compensation** leaves state `compensating`;
   `recover()` re-enters the unwind, but per-step outcomes are checkpointed, so
   only steps without a settled outcome are attempted again. When an old Engine's

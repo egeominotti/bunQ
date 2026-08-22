@@ -78,7 +78,7 @@ export async function controls(env: Env): Promise<Record<string, unknown>> {
       resumed,
       stateDelayed,
       statePromoted,
-      updatedV: (updated?.data as { v: number }).v,
+      updatedV: (updated?.data as { v: number } | undefined)?.v,
       updatedPriority: updated?.priority,
       removed: afterRemove === null,
     };
@@ -93,7 +93,9 @@ export async function bigPayload(env: Env): Promise<Record<string, unknown>> {
     const blob = 'x'.repeat(1024 * 1024);
     const job = await queue.add('big', { blob });
     const fetched = await queue.getJob(job.id);
-    return { intact: (fetched?.data as { blob: string }).blob.length === blob.length };
+    return {
+      intact: (fetched?.data as { blob: string } | undefined)?.blob.length === blob.length,
+    };
   } finally {
     queue.close();
   }

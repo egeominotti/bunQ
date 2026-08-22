@@ -61,7 +61,7 @@ test('edge: 2MB payload roundtrip', async () => {
   const job = await queue.add('big', { blob });
   const fetched = await queue.getJob(job.id);
   assert(fetched !== null, 'job found');
-  assertEq((fetched?.data as { blob: string }).blob.length, blob.length, 'payload intact');
+  assertEq((fetched!.data as { blob: string }).blob.length, blob.length, 'payload intact');
   queue.close();
 });
 

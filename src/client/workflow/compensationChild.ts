@@ -14,6 +14,7 @@ export interface ChildUnwindRequest {
   emitter: WorkflowEmitter | null;
   workflows?: Map<string, Workflow>;
   retryFailed?: boolean;
+  assertActive: () => void;
 }
 
 export type ChildUnwind = (request: ChildUnwindRequest) => Promise<'ran' | LostCompensationClaim>;
@@ -25,11 +26,13 @@ export interface UnwindChildRequest {
   workflows?: Map<string, Workflow>;
   runChild: ChildUnwind;
   retryFailed?: boolean;
+  assertActive: () => void;
 }
 
 /** Run the child workflow's own unwind and propagate every uncertain outcome. */
 export async function unwindChild(request: UnwindChildRequest): Promise<void> {
-  const { record, store, emitter, workflows, runChild, retryFailed } = request;
+  const { record, store, emitter, workflows, runChild, retryFailed, assertActive } = request;
+  assertActive();
   const childId = record.childExecutionId;
   if (!childId) throw new Error('sub-workflow record carries no child execution id');
   if (!workflows) throw new Error('workflow registry unavailable to unwind a sub-workflow');
@@ -58,6 +61,7 @@ export async function unwindChild(request: UnwindChildRequest): Promise<void> {
     emitter,
     workflows,
     retryFailed,
+    assertActive,
   });
   if (outcome !== 'ran') {
     throw new Error(

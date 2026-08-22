@@ -26,7 +26,7 @@ import type { BunqueueMiddleware, BunqueueOptions } from './types.js';
 
 type Raw = Record<string, unknown>;
 
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: prototype-mixin composition — Object.assign below installs exactly the methods BunqueueApi declares
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- prototype-mixin composition installs the BunqueueApi methods with Object.assign below
 export class Bunqueue<T = unknown, R = unknown> {
   readonly name: string;
   readonly queue: Queue<T>;
@@ -219,6 +219,7 @@ export class Bunqueue<T = unknown, R = unknown> {
   }
 }
 
+// oxlint-disable-next-line typescript/no-empty-object-type -- declaration merging exposes the methods installed below
 export interface Bunqueue<T = unknown, R = unknown> extends BunqueueApi<T, R> {}
 
 Object.assign(Bunqueue.prototype, bunqueueApi);

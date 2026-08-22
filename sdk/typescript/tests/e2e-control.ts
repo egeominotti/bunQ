@@ -52,7 +52,7 @@ test('control: updateJobData + changeJobPriority', async () => {
     const job = await queue.add('t', { v: 1 });
     await queue.updateJobData(job.id, { name: 't', v: 2 });
     const fetched = await queue.getJob(job.id);
-    assertEq((fetched?.data as Record<string, unknown>).v, 2, 'data updated');
+    assertEq((fetched?.data as Record<string, unknown> | undefined)?.v, 2, 'data updated');
     await queue.changeJobPriority(job.id, { priority: 99 });
     const again = await queue.getJob(job.id);
     assertEq(again?.priority, 99, 'priority changed');

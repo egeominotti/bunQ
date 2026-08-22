@@ -12,12 +12,15 @@ export async function resolveDecision<T>(
   exec: Execution,
   key: string,
   evaluate: () => T | Promise<T>,
-  updateFn: (exec: Execution) => void
+  updateFn: (exec: Execution) => void,
+  assertActive: () => void
 ): Promise<T> {
+  assertActive();
   const decisions = (exec.decisions ??= {});
   if (hasOwn(decisions, key)) return decisions[key] as T;
 
   const value = await evaluate();
+  assertActive();
   decisions[key] = value;
   updateFn(exec);
   return value;

@@ -48,7 +48,6 @@ import {
 } from '../handlers/query';
 import type { HandlerContext } from '../types';
 
-// biome-ignore lint/suspicious/useAwait: stable router API always returns a Promise.
 export async function routeCoreCommand(
   command: Command,
   context: HandlerContext,
@@ -76,7 +75,6 @@ export async function routeCoreCommand(
   }
 }
 
-// biome-ignore lint/suspicious/useAwait: stable router API always returns a Promise.
 export async function routeQueryCommand(
   command: Command,
   context: HandlerContext,
@@ -112,7 +110,6 @@ export async function routeQueryCommand(
   }
 }
 
-// biome-ignore lint/suspicious/useAwait: stable router API always returns a Promise.
 export async function routeManagementCommand(
   command: Command,
   context: HandlerContext,

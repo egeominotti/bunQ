@@ -164,7 +164,7 @@ run the unit, TCP, and embedded commands above plus:
 
 ```bash
 bun run typecheck
-bun run check:biome
+bun run check:oxc
 ```
 
 The Machine gate also supplies a real bounded filesystem for SQLite admission
@@ -233,8 +233,8 @@ failure summary instead of exiting without artifacts. `Dockerfile.sdk-test`
 uses one target per toolchain so SDK dependencies and language versions remain
 isolated; runtime containers have no external network, credentials, home
 mount, repository mount, or Docker socket. The minimal build context retains
-the root `.gitignore` because Biome's VCS-aware SDK checks require the same
-ignore boundary used in the worktree. Cloudflare's local runtime receives
+the root `.gitignore` so Oxfmt uses the same ignore boundary as the worktree.
+Cloudflare's local runtime receives
 `CLOUDFLARE_CF_FETCH_ENABLED=false`, preventing its optional `Request.cf`
 metadata fetch from weakening the no-network guarantee or delaying the gate.
 The TypeScript target also includes Node 22, matching CI, because Wrangler's
@@ -328,6 +328,15 @@ sequential replay in each replacement Engine generation only when both keys stay
 stable. It still rejects multiple successful dispatches inside one generation;
 the harness does not inject store-write failures, so that shape identifies live
 recovery re-entry rather than an ambiguous checkpoint outcome.
+
+Forward retry budgets stay cumulative across Engine generations. Bun 1.4 made
+seed `-795204925`, path `10`, reproduce a retry timer from a force-closed Engine
+racing its replacement and dispatching a fourth call against a budget of three.
+`test/repro-model-workflow-force-close-retry.test.ts` retains that exact graph
+and operator history; shutdown must stop the old executor before the timer can
+invoke user code again. `test/repro-workflow-graceful-close-retry.test.ts`
+separately proves that graceful close drains the retry, while forced close
+cannot persist a late final failure or start its compensation after returning.
 
 Failures report a seed, a minimized command history, and a replay path. Convert
 every confirmed engine divergence into a deterministic
@@ -453,7 +462,7 @@ per-attempt floors.
 
 The environment is reproducible:
 
-- Bun is pinned to 1.3.14, matching CI and the published benchmark environment.
+- Bun is pinned to 1.4.0, matching CI, the SDK gates, and the release build environment.
 - Dependencies use `bun install --frozen-lockfile --ignore-scripts`.
 - Timezone is UTC and the process runs as the image's non-root `bun` user.
 - OpenSSL is installed because the TLS regression suites generate certificates.

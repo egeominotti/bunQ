@@ -91,7 +91,7 @@ function scriptedModel(turns: Array<string | { call: string; args: unknown }>): 
         ],
       } as ModelResponse;
     },
-    // biome-ignore lint/correctness/useYield: the streaming path is unused by these tests
+    // oxlint-disable-next-line require-yield -- the streaming path is unused by these tests
     async *getStreamedResponse() {
       throw new Error('streaming is not used in these tests');
     },

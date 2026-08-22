@@ -1,5 +1,5 @@
 /**
- * Floating-promise defect surfaced by the Biome migration (noFloatingPromises):
+ * Floating-promise defect captured by the type-aware no-floating-promises rule:
  * `Queue.removeAsync()` — which backs the BullMQ-style `job.remove()` — does NOT
  * await the cancellation on the EMBEDDED path.
  *

@@ -110,6 +110,7 @@ export function readinessEndpoint(queueManager: QueueManager, corsOrigins?: Set<
 /** GC endpoint - force garbage collection */
 export function gcEndpoint(queueManager: QueueManager): Response {
   const before = process.memoryUsage();
+  // oxlint-disable-next-line typescript/prefer-optional-chain -- the typeof guard avoids referencing an unavailable Bun global
   if (typeof Bun !== 'undefined' && Bun.gc) {
     Bun.gc(true);
   }
@@ -133,6 +134,7 @@ export function gcEndpoint(queueManager: QueueManager): Response {
 
 /** Heap stats endpoint - for debugging memory leaks */
 export async function heapStatsEndpoint(queueManager: QueueManager): Promise<Response> {
+  // oxlint-disable-next-line typescript/prefer-optional-chain -- the typeof guard avoids referencing an unavailable Bun global
   if (typeof Bun !== 'undefined' && Bun.gc) {
     Bun.gc(true);
   }

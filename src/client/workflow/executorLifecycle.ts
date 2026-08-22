@@ -16,6 +16,7 @@ interface LifecycleDeps {
   emitter: WorkflowEmitter | null;
   timers: Map<string, TimerHandle>;
   enqueue: (exec: Execution) => Promise<void>;
+  assertActive: () => void;
 }
 
 export async function startExecution(
@@ -24,6 +25,7 @@ export async function startExecution(
   input: unknown,
   parentExecutionId?: string
 ): Promise<RunHandle> {
+  deps.assertActive();
   const wf = deps.workflows.get(workflowName);
   if (!wf) throw new Error(`Workflow "${workflowName}" not registered`);
   if (wf.nodes.length === 0) throw new Error(`Workflow "${workflowName}" has no steps`);
@@ -43,16 +45,29 @@ export async function startExecution(
     createdAt: now,
     updatedAt: now,
   };
+  deps.assertActive();
   deps.store.save(exec);
-  deps.emitter?.emitWorkflow('workflow:started', id, workflowName, 'running', { input });
 
   try {
+    deps.emitter?.emitWorkflow('workflow:started', id, workflowName, 'running', { input });
+    deps.assertActive();
     await deps.enqueue(exec);
+    deps.assertActive();
   } catch (error) {
     // start() cannot return an id when publication fails. Removing the row keeps both
     // top-level starts and sub-workflow starts from creating an unreachable orphan.
-    deps.store.remove(id);
-    throw error;
+    let failure = error;
+    try {
+      deps.assertActive();
+    } catch (closedError) {
+      failure = closedError;
+    }
+    try {
+      deps.store.remove(id);
+    } catch {
+      // If shutdown already closed SQLite, recovery owns the still-running row.
+    }
+    throw failure;
   }
   return { id, workflowName };
 }
@@ -63,6 +78,7 @@ export async function signalExecution(
   event: string,
   payload: unknown
 ): Promise<void> {
+  deps.assertActive();
   const bad = unusableEventName(event);
   if (bad) throw new Error(`Cannot signal an event ${bad}`);
 
@@ -74,22 +90,33 @@ export async function signalExecution(
   deps.emitter?.emitSignal('signal:received', executionId, outcome.workflowName, event, payload);
   if (!outcome.resumed) return;
 
-  const timer = deps.timers.get(executionId);
-  if (timer) {
-    clock().clearTimeout(timer);
-    deps.timers.delete(executionId);
-  }
-
   try {
+    deps.assertActive();
+    const timer = deps.timers.get(executionId);
+    if (timer) {
+      clock().clearTimeout(timer);
+      deps.timers.delete(executionId);
+    }
     await deps.queue.add('wf:step', {
       executionId,
       workflowName: outcome.workflowName,
       nodeIndex: outcome.currentNodeIndex,
     } satisfies StepJobData);
+    deps.assertActive();
   } catch (error) {
     // Preserve the accepted payload but release the publication claim. Recovery sees
     // a waiting execution with its signal present and republishes the same node.
-    deps.store.restoreSignalWait(executionId, event, outcome.currentNodeIndex);
-    throw error;
+    let failure = error;
+    try {
+      deps.assertActive();
+    } catch (closedError) {
+      failure = closedError;
+    }
+    try {
+      deps.store.restoreSignalWait(executionId, event, outcome.currentNodeIndex);
+    } catch {
+      // A closed store leaves a recoverable running row with its signal preserved.
+    }
+    throw failure;
   }
 }

@@ -99,7 +99,7 @@ export function buildWorkflow(spec: WorkflowSpec, ledger: Ledger, engineGenerati
     } else if (node.kind === 'forEach') {
       const items = Array.from({ length: node.count }, (_, index) => index);
       // This is Workflow.forEach, whose callback returns the generated item list.
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: see above
+      // oxlint-disable-next-line array-callback-return -- see above
       wf = wf.forEach(
         () => items,
         node.step.name,

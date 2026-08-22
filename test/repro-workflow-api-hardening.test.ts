@@ -204,7 +204,7 @@ describe('workflow production API hardening', () => {
     ).toThrow(/maxIterations/);
     expect(() =>
       new Workflow('fractional-loop')
-        // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+        // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
         .forEach(
           () => [],
           'work',
@@ -275,6 +275,7 @@ describe('workflow production API hardening', () => {
       emitter: null,
       timers: new Map(),
       enqueue: async () => undefined,
+      assertActive: () => undefined,
     };
     setClock(simulatedClock(7123));
     const first = await startExecution(deps, workflow.name, {});

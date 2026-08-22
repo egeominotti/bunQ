@@ -2,18 +2,14 @@
  * Loop execution logic for the Workflow Engine.
  */
 
-import type {
-  StepDefinition,
-  StepContext,
-  Execution,
-  LoopDefinition,
-  ForEachDefinition,
-} from './types';
+import type { StepDefinition, Execution, LoopDefinition } from './types';
 import type { WorkflowEmitter } from './emitter';
-import { executeStepWithRetry, buildContext } from './runner';
-import { forEachItemsDecisionKey, loopDecisionKey, resolveDecision } from './workflowDecisions';
+import { assertWorkflowActive, isWorkflowExecutionClosed } from './executionFence';
+import { executeStepWithRetry, buildContext, type StepHooks } from './runner';
+import { loopDecisionKey, resolveDecision } from './workflowDecisions';
 
 export { executeMap } from './mapRunner';
+export { executeForEach } from './forEachRunner';
 
 /**
  * Run one iteration of a loop body step, unless it already ran.
@@ -49,9 +45,11 @@ async function runIteration(
   step: StepDefinition,
   exec: Execution,
   iteration: number,
-  emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
+  hooks: StepHooks
 ): Promise<void> {
+  const { emitter, updateFn } = hooks;
+  const assertActive = hooks.assertActive ?? assertWorkflowActive;
+  assertActive();
   const indexed = `${step.name}:${iteration}`;
   const already = exec.steps[indexed];
   if (already?.status === 'completed') {
@@ -65,8 +63,17 @@ async function runIteration(
   let thrown: unknown;
   let threw = false;
   try {
-    await executeStepWithRetry(step, buildContext(exec), exec, { emitter, updateFn }, iteration);
+    await executeStepWithRetry(
+      step,
+      buildContext(exec),
+      exec,
+      { emitter, updateFn, assertActive },
+      iteration
+    );
+    assertActive();
   } catch (error) {
+    if (isWorkflowExecutionClosed(error)) throw error;
+    assertActive();
     // Caught rather than left to a `finally`, because the mirror write below must not be
     // able to REPLACE this error. An exception thrown from a `finally` supersedes the one
     // in flight, so a store that refused the mirror write turned "provider timeout after
@@ -105,6 +112,7 @@ async function runIteration(
       try {
         updateFn(exec);
       } catch (writeError) {
+        if (isWorkflowExecutionClosed(writeError)) throw writeError;
         if (!threw) throw writeError;
       }
     }
@@ -118,17 +126,21 @@ export async function executeDoUntil(
   def: LoopDefinition,
   exec: Execution,
   emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
+  updateFn: (exec: Execution) => void,
+  assertActive: () => void = assertWorkflowActive
 ): Promise<void> {
+  assertActive();
   let iteration = 0;
 
   let shouldStop = false;
   while (!shouldStop) {
+    assertActive();
     if (iteration >= def.maxIterations) {
       throw new Error(`doUntil exceeded maxIterations (${def.maxIterations})`);
     }
     for (const step of def.steps) {
-      await runIteration(step, exec, iteration, emitter, updateFn);
+      await runIteration(step, exec, iteration, { emitter, updateFn, assertActive });
+      assertActive();
     }
     iteration++;
     const ctx = buildContext(exec);
@@ -136,8 +148,10 @@ export async function executeDoUntil(
       exec,
       loopDecisionKey('doUntil', def.steps[0].name, iteration),
       () => def.condition(ctx, iteration),
-      updateFn
+      updateFn,
+      assertActive
     );
+    assertActive();
     if (typeof shouldStop !== 'boolean') {
       throw new Error('doUntil condition must return a boolean');
     }
@@ -149,16 +163,20 @@ export async function executeDoWhile(
   def: LoopDefinition,
   exec: Execution,
   emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
+  updateFn: (exec: Execution) => void,
+  assertActive: () => void = assertWorkflowActive
 ): Promise<void> {
+  assertActive();
   for (let iteration = 0; ; iteration++) {
     const ctx = buildContext(exec);
     const shouldContinue = await resolveDecision(
       exec,
       loopDecisionKey('doWhile', def.steps[0].name, iteration),
       () => def.condition(ctx, iteration),
-      updateFn
+      updateFn,
+      assertActive
     );
+    assertActive();
     if (typeof shouldContinue !== 'boolean') {
       throw new Error('doWhile condition must return a boolean');
     }
@@ -168,106 +186,8 @@ export async function executeDoWhile(
       throw new Error(`doWhile exceeded maxIterations (${def.maxIterations})`);
     }
     for (const step of def.steps) {
-      await runIteration(step, exec, iteration, emitter, updateFn);
+      await runIteration(step, exec, iteration, { emitter, updateFn, assertActive });
+      assertActive();
     }
-  }
-}
-
-/** Execute a forEach loop: iterate over items, executing the step for each */
-export async function executeForEach(
-  def: ForEachDefinition,
-  exec: Execution,
-  emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
-): Promise<void> {
-  const ctx = buildContext(exec);
-  const items = await resolveDecision(
-    exec,
-    forEachItemsDecisionKey(def.step.name),
-    () => structuredClone(def.items(ctx)),
-    updateFn
-  );
-
-  // Anything with a `length` used to be accepted, and JavaScript is generous about
-  // what has one. A number iterated ZERO times and the run reported `completed`, so a
-  // batch that processed nothing was indistinguishable from a batch with nothing to
-  // do. A string iterated its CHARACTERS, so an id list that arrived as `'u1,u2'`
-  // silently processed five "items" nobody passed. `null`/`undefined` were caught only
-  // by accident, because reading `.length` throws. The likely production shapes were
-  // exactly the ones that passed (`test/repro-workflow-foreach-non-array.test.ts`).
-  if (!Array.isArray(items)) {
-    throw new Error(
-      `forEach items must be an array, got ${items === null ? 'null' : typeof items}`
-    );
-  }
-
-  if (items.length > def.maxIterations) {
-    throw new Error(`forEach items (${items.length}) exceeds maxIterations (${def.maxIterations})`);
-  }
-
-  for (let i = 0; i < items.length; i++) {
-    const item = structuredClone(items[i]);
-    const indexedName = `${def.step.name}:${i}`;
-    const indexedStep: StepDefinition = {
-      ...def.step,
-      name: indexedName,
-      handler: (stepCtx: StepContext) => {
-        const enrichedCtx: StepContext = {
-          ...stepCtx,
-          steps: { ...stepCtx.steps, __item: item, __index: i },
-        };
-        return def.step.handler(enrichedCtx);
-      },
-    };
-    // Memoised the same way as doUntil/doWhile: an item already provisioned before a
-    // crash must not be provisioned again when the node is re-entered. Restore the
-    // declared bare name too: it is the public result of the final iteration, while
-    // the indexed record remains the durable execution/compensation identity.
-    const completed = exec.steps[indexedName];
-    if (completed?.status === 'completed') {
-      exec.steps[def.step.name] = { ...completed };
-      updateFn(exec);
-      continue;
-    }
-
-    const stepCtx = buildContext(exec);
-    let thrown: unknown;
-    let threw = false;
-    try {
-      await executeStepWithRetry(indexedStep, stepCtx, exec, { emitter, updateFn }, i);
-    } catch (error) {
-      // Same reason `runIteration` catches instead of using a `finally`: a write that
-      // fails below must not REPLACE the step's own error, which is what `failureReason`
-      // records and the only account of what went wrong.
-      thrown = error;
-      threw = true;
-    }
-
-    {
-      // Persist this iteration's __item/__index alongside the step record so saga
-      // compensation can restore the correct per-iteration context later.
-      //
-      // Recording on BOTH paths is load-bearing: the iteration that THROWS is itself
-      // eligible for compensation, and without its item recorded its compensate handler
-      // is handed an undefined `__item` and silently releases nothing — the reservation
-      // it had already taken at the warehouse leaks
-      // (test/workflow-saga-extreme.test.ts).
-      const record = exec.steps[indexedName];
-      if (record) {
-        record.loopItem = item;
-        record.loopIndex = i;
-        // Keep the documented aggregate view in sync on success and failure. The
-        // indexed record is still the authoritative unit of work; compensator.ts
-        // excludes this mirror whenever an indexed sibling exists.
-        exec.steps[def.step.name] = { ...record };
-        try {
-          updateFn(exec);
-        } catch (writeError) {
-          if (!threw) throw writeError;
-        }
-      }
-    }
-
-    if (threw) throw thrown;
   }
 }

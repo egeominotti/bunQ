@@ -34,7 +34,7 @@ services:
 
   # Optional: Development with hot reload
   bunqueue-dev:
-    image: oven/bun:1-alpine
+    image: oven/bun:1.4.0-alpine
     container_name: bunqueue-dev
     working_dir: /app
     ports:

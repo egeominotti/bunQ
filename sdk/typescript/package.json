@@ -30,9 +30,12 @@
     "test:property": "bun test tests/flow-plan.property.test.ts tests/flow-identity.property.test.ts tests/flow-plan.validation.test.ts tests/flow-plan.limits.test.ts tests/flow-plan.contract.test.ts tests/flow-commit.test.ts",
     "test:integration": "bun tests/integration.ts",
     "test:soak": "bun tests/soak.ts",
-    "lint": "biome lint src tests",
-    "format": "biome format --write src tests",
-    "check": "biome check src tests",
+    "lint": "oxlint src tests",
+    "lint:fix": "oxlint --fix src tests",
+    "format": "oxfmt --write src tests",
+    "format:check": "oxfmt --check src tests",
+    "check:oxc": "bun run lint && bun run format:check",
+    "check": "bun run check:oxc",
     "test:workers": "cd tests/workers && bun install --frozen-lockfile && cd ../.. && bun pm pack --destination tests/workers && cd tests/workers && mv bunqueue-client-*.tgz bunqueue-client.tgz && rm -rf node_modules/bunqueue-client && mkdir -p node_modules/bunqueue-client && tar -xzf bunqueue-client.tgz -C node_modules/bunqueue-client --strip-components=1 && node run.mjs"
   },
   "keywords": [
@@ -52,6 +55,9 @@
   },
   "devDependencies": {
     "fast-check": "4.9.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
+    "oxlint-tsgolint": "7.0.2001",
     "typescript": "^5.7.0",
     "@types/node": "^22.0.0"
   },

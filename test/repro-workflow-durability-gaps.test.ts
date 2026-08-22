@@ -349,7 +349,18 @@ describe('workflow durability invariants', () => {
       },
     };
 
-    scheduleTimeoutCheck({ queue: queue as never, timers }, 'timer-retry', 'timer-workflow', 0, 5);
+    scheduleTimeoutCheck(
+      {
+        queue: queue as never,
+        timers,
+        assertActive: () => undefined,
+        isActive: () => true,
+      },
+      'timer-retry',
+      'timer-workflow',
+      0,
+      5
+    );
     sim.advance(5);
     await Promise.resolve();
     await Promise.resolve();

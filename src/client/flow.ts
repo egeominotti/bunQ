@@ -162,7 +162,6 @@ export class FlowProducer extends EventEmitter {
   }
 
   /** Get a flow tree starting from a job (BullMQ v5 compatible). */
-  // biome-ignore lint/suspicious/useAwait: preserves the public Promise return contract.
   async getFlow<T = unknown>(opts: GetFlowOpts): Promise<JobNode<T> | null> {
     return readFlow<T>(
       {

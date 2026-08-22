@@ -96,21 +96,19 @@ export function planBulkThen<T>(
   const seen = new Set<string>();
   const parallelIds = parallel.map((step) => allocate(step, seen));
   const finalId = allocate(final, seen);
-  const parallelJobs = parallel.map(
-    (step, index): AtomicFlowJobInput => ({
-      id: parallelIds[index],
-      queue: step.queueName,
-      input: flowJobInput(
-        step.name,
-        dataFor(step, {
-          __parentId: String(finalId),
-          __parentQueue: final.queueName,
-        }),
-        step.opts ?? {},
-        { parentId: finalId }
-      ),
-    })
-  );
+  const parallelJobs = parallel.map((step, index): AtomicFlowJobInput => ({
+    id: parallelIds[index],
+    queue: step.queueName,
+    input: flowJobInput(
+      step.name,
+      dataFor(step, {
+        __parentId: String(finalId),
+        __parentQueue: final.queueName,
+      }),
+      step.opts ?? {},
+      { parentId: finalId }
+    ),
+  }));
   const finalJob: AtomicFlowJobInput = {
     id: finalId,
     queue: final.queueName,

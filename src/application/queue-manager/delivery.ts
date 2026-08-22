@@ -64,7 +64,7 @@ export class QueueManagerDelivery extends QueueManagerState {
     return jobs;
   }
 
-  // biome-ignore lint/complexity/useMaxParams: public API includes cancellation and lock policy
+  // oxlint-disable-next-line max-params -- public API includes cancellation and lock policy
   async pullBatchWithLock(
     queue: string,
     count: number,

@@ -86,11 +86,6 @@ export type {
   RepeatOptions,
 } from './types.js';
 export { Worker } from './worker.js';
-export type {
-  AckBatchOptions,
-  Processor,
-  WorkerEventMap,
-  WorkerOptions,
-} from './worker-types.js';
+export type { AckBatchOptions, Processor, WorkerEventMap, WorkerOptions } from './worker-types.js';
 
 export const __version__ = '0.1.10';

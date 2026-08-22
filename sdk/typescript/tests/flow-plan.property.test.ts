@@ -69,8 +69,10 @@ function assertTreePlan(flows: FlowJob<GeneratedData>[]): void {
       expect(child).toBeDefined();
       expect(dependenciesOf(job)).toContain(childId);
       expect(child?.input.parentId).toBe(job.id);
-      expect((child?.input.data as Record<string, unknown>).__parentId).toBe(job.id);
-      expect((child?.input.data as Record<string, unknown>).__parentQueue).toBe(job.queue);
+      expect((child?.input.data as Record<string, unknown> | undefined)?.__parentId).toBe(job.id);
+      expect((child?.input.data as Record<string, unknown> | undefined)?.__parentQueue).toBe(
+        job.queue
+      );
       expect(positions.get(childId)).toBeLessThan(positions.get(job.id) ?? -1);
     }
     expect(data.__childrenIds).toEqual(childrenOf(job).length > 0 ? childrenOf(job) : undefined);

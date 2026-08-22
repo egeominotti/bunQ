@@ -62,7 +62,7 @@ export async function apiJobMethods(env: Env): Promise<Record<string, unknown>> 
     return {
       delayed,
       promotedOk: ['waiting', 'prioritized', 'active'].includes(promoted),
-      dataV: (reloaded?.data as { v: number }).v,
+      dataV: (reloaded?.data as { v: number } | undefined)?.v,
       priority: reloaded?.priority,
     };
   } finally {

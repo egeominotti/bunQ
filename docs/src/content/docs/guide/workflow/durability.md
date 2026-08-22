@@ -88,6 +88,19 @@ unwind is still owed. The claim prevents overlapping local reversals; it is not
 a distributed lock, so provider-side idempotency is still required across
 process crashes or multiple processes.
 
+A forced close aborts the old Engine's execution generation before Worker
+teardown. Every asynchronous continuation — retry backoff, map or loop work,
+sub-workflow polling, signal waits and recovery — checks that generation before
+it can persist, publish, emit, or start more user code. A replacement Engine
+continues from the last SQLite checkpoint; the old parent cannot advance merely
+because a child completed after shutdown. This does not cancel a handler that
+had already started, so its external effect can still be observed before
+recovery replays the unknown outcome and the idempotency requirement remains.
+An already-started compensation retains its local claim long enough to
+checkpoint and release it, while no following reversal starts. Plain `close()`
+is graceful and does not abort the generation: it waits for active control flow
+to finish and checkpoint normally.
+
 :::caution[Recovery is a manual call]
 Nothing resumes on its own. If you never call `recover()`, an interrupted run sits in the database untouched.
 :::

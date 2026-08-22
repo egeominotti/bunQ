@@ -169,7 +169,10 @@ describe('Parallel failure aggregation', () => {
 
     let caughtError: Error | null = null;
     try {
-      await executeParallelSteps(steps, ctx, exec, emitter, (e) => updates.push({ ...e }));
+      await executeParallelSteps(steps, ctx, exec, {
+        emitter,
+        updateFn: (e) => updates.push({ ...e }),
+      });
     } catch (err) {
       caughtError = err as Error;
     }
@@ -406,7 +409,7 @@ describe('forEach indexed namespace protection', () => {
     // own completed work and skips the iteration. Refuse it at registration instead.
     const flow = new Workflow('collision')
       .step('process:0', async () => ({ source: 'manual-step' }))
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+      // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
       .forEach(
         () => [1, 2],
         'process',
@@ -546,7 +549,7 @@ describe('Parallel context snapshot contract', () => {
     ];
 
     const ctx = buildContext(exec);
-    await executeParallelSteps(steps, ctx, exec, emitter, () => undefined);
+    await executeParallelSteps(steps, ctx, exec, { emitter, updateFn: () => undefined });
 
     expect(seenByB['step-a']).toBeUndefined();
   });
@@ -582,7 +585,7 @@ describe('forEach per-iteration compensation', () => {
     const compensateCalls: { item: unknown; index: unknown }[] = [];
 
     const flow = new Workflow<{ items: number[] }>('foreach-compensate')
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: Workflow.forEach extracts items
+      // oxlint-disable-next-line array-callback-return -- Workflow.forEach extracts items
       .forEach(
         (ctx) => (ctx.input as { items: number[] }).items,
         'process',

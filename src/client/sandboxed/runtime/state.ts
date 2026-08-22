@@ -17,7 +17,7 @@ export abstract class SandboxedState<T = unknown> extends EventEmitter {
   on(event: 'progress', listener: (job: Job<T>, progress: number) => void): this;
   on(event: 'log', listener: (job: Job<T>, message: string) => void): this;
   on(event: 'error', listener: (error: Error) => void): this;
-  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback listener is intentionally untyped
+  // oxlint-disable-next-line typescript/no-explicit-any -- EventEmitter's fallback listener is intentionally untyped
   on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -29,7 +29,7 @@ export abstract class SandboxedState<T = unknown> extends EventEmitter {
   once(event: 'progress', listener: (job: Job<T>, progress: number) => void): this;
   once(event: 'log', listener: (job: Job<T>, message: string) => void): this;
   once(event: 'error', listener: (error: Error) => void): this;
-  // biome-ignore lint/suspicious/noExplicitAny: EventEmitter's fallback listener is intentionally untyped
+  // oxlint-disable-next-line typescript/no-explicit-any -- EventEmitter's fallback listener is intentionally untyped
   once(event: string, listener: (...args: any[]) => void): this {
     return super.once(event, listener);
   }

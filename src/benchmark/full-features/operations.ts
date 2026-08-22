@@ -94,7 +94,7 @@ export async function runOperationalFeatureSections(): Promise<void> {
     const fetched = await qm.getJob(created.id);
     await test('getJob returns job', () => fetched?.id === created.id);
     await test('getJob returns correct data', () =>
-      (fetched?.data as { fetch?: boolean }).fetch === true);
+      (fetched?.data as { fetch?: boolean } | undefined)?.fetch === true);
     await test('getJob returns null for unknown id', async () =>
       (await qm.getJob(jobId('non-existent-id'))) === null);
     const pulled = await qm.pull('get-job', 0);

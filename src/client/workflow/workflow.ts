@@ -7,7 +7,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return */
-/* biome-ignore-all lint/suspicious/noExplicitAny: generic accumulator uses intentional type erasure */
+/* oxlint-disable typescript/no-explicit-any -- generic accumulator uses intentional type erasure */
 // Type erasure via `any` is required for the generic accumulator pattern.
 // Each builder method narrows the return type but stores handlers in type-erased form.
 

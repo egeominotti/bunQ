@@ -61,6 +61,13 @@ resume/abandon. After every action the oracle checks:
 - final non-vacuous liveness after opening untimed gates and resolving parked
   compensation.
 
+Bun 1.4 changed timer scheduling enough to make seed `-795204925`, path `10`,
+deterministically expose an old Engine's retry backoff waking after
+`close(true)` while its replacement recovered the same node. The preserved
+`repro-model-workflow-force-close-retry.test.ts` history verifies that the old
+executor stops before another handler dispatch and that the cumulative retry
+budget remains authoritative across the replacement.
+
 The same file runs focused Fast-Check properties for every filtered execution
 page against the SQLite oracle (`createdAt DESC, id DESC`) and for invalid
 timeout/iteration/child-poll bounds. The harness reads all pages rather than

@@ -24,6 +24,8 @@ const TIMEOUT_ENQUEUE_RETRY_MS = 5_000;
 export interface TimerDeps {
   queue: Queue;
   timers: Map<string, TimerHandle>;
+  assertActive: () => void;
+  isActive: () => boolean;
 }
 
 export interface WaitForDeps {
@@ -32,6 +34,8 @@ export interface WaitForDeps {
   advance: (exec: Execution, nextIdx: number, wf: Workflow) => Promise<void>;
   compensate: (exec: Execution, wf: Workflow) => Promise<void>;
   scheduleTimeoutCheck: (execId: string, workflowName: string, nodeIdx: number, ms: number) => void;
+  updateFn: (exec: Execution) => void;
+  assertActive: () => void;
 }
 
 /**
@@ -50,6 +54,7 @@ export function scheduleTimeoutCheck(
   ms: number
 ): void {
   const arm = (requestedDelay: number): void => {
+    deps.assertActive();
     const delay = Math.min(Math.max(requestedDelay, 0), MAX_TIMER_MS);
     // Replacing a live timer for the same execution — re-entering a waitFor node used
     // to leak the previous one, which then fired against a node the run had left.
@@ -57,6 +62,10 @@ export function scheduleTimeoutCheck(
     if (previous) clock().clearTimeout(previous);
 
     const timer = clock().setTimeout(() => {
+      if (!deps.isActive()) {
+        if (deps.timers.get(execId) === timer) deps.timers.delete(execId);
+        return;
+      }
       const jobData: StepJobData = { executionId: execId, workflowName, nodeIndex: nodeIdx };
       const published = (): void => {
         // Keep the handle in the map while add() is pending. signal() and close() use
@@ -65,6 +74,10 @@ export function scheduleTimeoutCheck(
       };
       const failed = (): void => {
         if (deps.timers.get(execId) !== timer) return;
+        if (!deps.isActive()) {
+          deps.timers.delete(execId);
+          return;
+        }
         arm(TIMEOUT_ENQUEUE_RETRY_MS);
       };
 
@@ -108,6 +121,7 @@ export async function runWaitFor(
   idx: number,
   wf: Workflow
 ): Promise<void> {
+  deps.assertActive();
   if (hasSignal(exec.signals, node.event)) {
     await deps.advance(exec, idx + 1, wf);
     return;
@@ -126,11 +140,14 @@ export async function runWaitFor(
       // (refund, release stock) work the approver just authorised.
       const fresh = deps.store.get(exec.id);
       if (fresh && hasSignal(fresh.signals, node.event)) {
+        deps.assertActive();
         exec.signals = fresh.signals;
         await deps.advance(exec, idx + 1, wf);
         return;
       }
+      deps.assertActive();
       deps.emitter?.emitSignal('signal:timeout', exec.id, exec.workflowName, node.event);
+      deps.assertActive();
       const timeoutReason = `Signal "${node.event}" timed out after ${node.timeout}ms`;
       exec.steps[waitKey] = {
         status: 'failed',
@@ -140,24 +157,19 @@ export async function runWaitFor(
       };
       exec.state = 'failed';
       exec.failureReason = timeoutReason;
-      // Unguarded on purpose, same reasoning as the failure write in `executor.ts`. Disk
-      // still says `waiting`, which `listRecoverable()` covers, so `recoverWaiting`
-      // recomputes the remaining time, re-enqueues, and the gate times out again rather
-      // than leaving a run that looks settled and was never unwound.
-      //
-      // A throw here skips the compensate CALL below but not the compensation: it
-      // propagates into `runNode`'s catch, which compensates anyway. That is the generic
-      // path the `WaitForSignalError` sentinel below exists to avoid on the normal route,
-      // so the outcome is a redundant route, not a missing rollback.
-      deps.store.update(exec);
+      // Persist failure before starting rollback. The lifecycle guard leaves the
+      // durable row waiting if force-close won, so replacement recovery re-evaluates
+      // the same elapsed deadline without starting an old executor's compensation.
+      deps.updateFn(exec);
       // Compensate here, then signal completion via the WaitForSignalError sentinel
       // so processStep short-circuits (return null) instead of re-running
       // compensation through its generic catch path.
       await deps.compensate(exec, wf);
+      deps.assertActive();
       deps.emitter?.emitWorkflow('workflow:failed', exec.id, exec.workflowName, 'failed');
       throw new WaitForSignalError(node.event);
     }
-    deps.store.update(exec);
+    deps.updateFn(exec);
     remaining = node.timeout - (clock().now() - waitingSince);
   }
 
@@ -165,6 +177,7 @@ export async function runWaitFor(
   // can land: it would be recorded with no parked run left to claim the resume,
   // hanging the execution forever. parkForSignal() re-reads the persisted signals
   // and only transitions 'running' -> 'waiting' when none has arrived.
+  deps.assertActive();
   const park = deps.store.parkForSignal(exec.id, node.event);
   if (park.signalPresent) {
     exec.signals = park.signals;
@@ -179,8 +192,10 @@ export async function runWaitFor(
 
   exec.state = 'waiting';
   if (node.timeout !== undefined) {
+    deps.assertActive();
     deps.scheduleTimeoutCheck(exec.id, exec.workflowName, idx, remaining);
   }
+  deps.assertActive();
   deps.emitter?.emitWorkflow('workflow:waiting', exec.id, exec.workflowName, 'waiting');
   throw new WaitForSignalError(node.event);
 }

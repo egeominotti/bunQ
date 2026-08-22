@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -58,7 +58,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-      - name: Lint (biome)
+      - name: Oxlint and Oxfmt check
         working-directory: sdk/typescript
         run: bun run check
       - name: Flow planner properties (fast-check)
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -163,7 +163,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -200,7 +200,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.26.5
@@ -251,7 +251,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: rustfmt, clippy
@@ -293,7 +293,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}

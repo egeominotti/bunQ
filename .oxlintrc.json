@@ -1,0 +1,104 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "oxc", "typescript", "unicorn"],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "array-callback-return": "error",
+    "eqeqeq": "error",
+    "max-params": ["error", { "max": 5 }],
+    "no-array-constructor": "error",
+    "no-console": "off",
+    "no-empty": "warn",
+    "no-extra-boolean-cast": "error",
+    "no-fallthrough": "error",
+    "no-prototype-builtins": "error",
+    "no-regex-spaces": "error",
+    "no-unused-expressions": "off",
+    "no-unused-vars": "error",
+    "no-useless-catch": "error",
+    "no-useless-escape": "error",
+    "no-var": "error",
+    "no-with": "error",
+    "prefer-const": "error",
+    "prefer-rest-params": "error",
+    "prefer-spread": "error",
+    "radix": "error",
+    "require-yield": "error",
+    "import/no-commonjs": "error",
+    "typescript/no-explicit-any": "warn",
+    "typescript/await-thenable": "off",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-meaningless-void-operator": "off",
+    "typescript/no-mixed-enums": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-declaration-merging": "error",
+    "typescript/no-useless-constructor": "error",
+    "typescript/no-useless-empty-export": "error",
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "typescript/prefer-optional-chain": "error",
+    "typescript/prefer-readonly": "warn",
+    "typescript/require-await": "warn",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/unbound-method": "off",
+    "typescript/unified-signatures": "error",
+    "unicorn/no-new-array": "off",
+    "unicorn/no-static-only-class": "error",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "unicorn/no-useless-spread": "off"
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**", "src/mcp/**", "*.js", "*.cjs", "*.mjs"],
+  "overrides": [
+    {
+      "files": ["src/benchmark/**/*.ts"],
+      "rules": {
+        "array-callback-return": "off",
+        "max-params": "off",
+        "radix": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["src/infrastructure/persistence/**/*.ts"],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["src/infrastructure/scheduler/**/*.ts"],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["src/domain/queue/**/*.ts"],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["src/application/**/*.ts"],
+      "rules": {
+        "typescript/require-await": "off"
+      }
+    },
+    {
+      "files": ["test/**/*.ts"],
+      "rules": {
+        "max-params": "off",
+        "typescript/no-non-null-assertion": "off",
+        "typescript/require-await": "off"
+      }
+    }
+  ]
+}

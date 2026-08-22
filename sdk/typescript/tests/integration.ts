@@ -130,7 +130,7 @@ test('add + query + name + counts', async () => {
     const fetched = await queue.getJob(job.id);
     assert(fetched !== null, 'job fetched');
     assertEq(fetched?.name, 'send', 'job name');
-    assertEq((fetched?.data as Record<string, unknown>).to, 'a@b.c', 'job data');
+    assertEq((fetched?.data as Record<string, unknown> | undefined)?.to, 'a@b.c', 'job data');
     const counts = await queue.getJobCounts();
     assertEq(counts.waiting + counts.prioritized, 1, 'one job queued');
   } finally {

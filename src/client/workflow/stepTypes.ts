@@ -1,4 +1,4 @@
-/* biome-ignore-all lint/suspicious/noExplicitAny: runtime definitions intentionally erase accumulated generics */
+/* oxlint-disable typescript/no-explicit-any -- runtime definitions intentionally erase accumulated generics */
 /** Workflow handler, definition, and graph types. */
 
 /** Context passed to step handlers */

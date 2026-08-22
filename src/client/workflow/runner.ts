@@ -8,6 +8,7 @@ import type { Workflow } from './workflow';
 import type { WorkflowEmitter } from './emitter';
 import { clock } from './clock';
 import { retryBackoffDelay, runWithTimeout } from './runnerTiming';
+import { assertWorkflowActive, isWorkflowExecutionClosed } from './executionFence';
 
 export { runWithTimeout } from './runnerTiming';
 export { executeSubWorkflow } from './subWorkflowRunner';
@@ -16,7 +17,10 @@ export { executeSubWorkflow } from './subWorkflowRunner';
 export interface StepHooks {
   emitter: WorkflowEmitter | null;
   updateFn: (exec: Execution) => void;
+  assertActive?: () => void;
 }
+
+export { isWorkflowExecutionClosed, WorkflowExecutionClosedError } from './executionFence';
 
 /** Execute a step with retry logic and exponential backoff */
 export async function executeStepWithRetry(
@@ -27,6 +31,8 @@ export async function executeStepWithRetry(
   occurrence = 0
 ): Promise<void> {
   const { emitter, updateFn } = hooks;
+  const assertActive = hooks.assertActive ?? assertWorkflowActive;
+  assertActive();
   const maxAttempts = def.retry;
   const current = exec.steps[def.name];
   const previous = current && (current.occurrence ?? 0) === occurrence ? current : undefined;
@@ -48,6 +54,7 @@ export async function executeStepWithRetry(
   let finalAttempt = attemptsUsed;
 
   for (let attempt = attemptsUsed + 1; attempt <= maxAttempts; attempt++) {
+    assertActive();
     finalAttempt = attempt;
     exec.steps[def.name] = {
       status: 'running',
@@ -61,6 +68,7 @@ export async function executeStepWithRetry(
       attempt,
       maxAttempts,
     });
+    assertActive();
 
     try {
       if (!inputParsed) {
@@ -76,6 +84,7 @@ export async function executeStepWithRetry(
             { cause: error }
           );
         }
+        assertActive();
       }
       if (inputValidationError) throw inputValidationError;
       const controller = new AbortController();
@@ -84,7 +93,9 @@ export async function executeStepWithRetry(
         input: validatedInput,
         signal: controller.signal,
       };
+      assertActive();
       let result = await runWithTimeout(def.handler(handlerCtx), def.timeout, controller);
+      assertActive();
       if (def.outputSchema) {
         try {
           const parsed = def.outputSchema.parse(result);
@@ -94,7 +105,9 @@ export async function executeStepWithRetry(
             cause: e,
           });
         }
+        assertActive();
       }
+      assertActive();
       exec.steps[def.name] = {
         status: 'completed',
         compensatable: def.compensate !== undefined,
@@ -113,6 +126,8 @@ export async function executeStepWithRetry(
       });
       return;
     } catch (err) {
+      if (isWorkflowExecutionClosed(err)) throw err;
+      assertActive();
       lastError = err instanceof Error ? err : new Error(describeError(err));
       if (attempt < maxAttempts) {
         emitter?.emitStep('step:retry', exec.id, exec.workflowName, def.name, {
@@ -120,13 +135,16 @@ export async function executeStepWithRetry(
           attempt,
           maxAttempts,
         });
+        assertActive();
         await new Promise<void>((r) => clock().setTimeout(() => r(), retryBackoffDelay(attempt)));
+        assertActive();
         continue;
       }
     }
   }
 
   const finalError = lastError ?? new Error('Step failed');
+  assertActive();
   exec.steps[def.name] = {
     status: 'failed',
     compensatable: def.compensate !== undefined,
@@ -152,7 +170,8 @@ export async function executeStepWithRetry(
   // record that never reached disk is one whose work runs again.
   try {
     updateFn(exec);
-  } catch {
+  } catch (error) {
+    if (isWorkflowExecutionClosed(error)) throw error;
     // Deliberately swallowed: `finalError` is thrown below and carries the real cause.
   }
   emitter?.emitStep('step:failed', exec.id, exec.workflowName, def.name, {
@@ -168,12 +187,15 @@ export async function executeParallelSteps(
   steps: StepDefinition[],
   ctx: StepContext,
   exec: Execution,
-  emitter: WorkflowEmitter | null,
-  updateFn: (exec: Execution) => void
+  hooks: StepHooks
 ): Promise<void> {
+  const { emitter, updateFn } = hooks;
+  const assertActive = hooks.assertActive ?? assertWorkflowActive;
+  assertActive();
   const results = await Promise.allSettled(
-    steps.map((def) => executeStepWithRetry(def, ctx, exec, { emitter, updateFn }))
+    steps.map((def) => executeStepWithRetry(def, ctx, exec, { emitter, updateFn, assertActive }))
   );
+  assertActive();
   const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
   if (failed.length > 0) {
     const errors = failed.map((r) =>

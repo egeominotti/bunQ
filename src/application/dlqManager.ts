@@ -23,12 +23,7 @@ export interface DlqContext {
   storage: SqliteStorage | null;
 }
 
-export {
-  processAutoRetry,
-  retryDlqByFilter,
-  retryDlqJob,
-  retryDlqJobs,
-} from './dlqRetry';
+export { processAutoRetry, retryDlqByFilter, retryDlqJob, retryDlqJobs } from './dlqRetry';
 
 /** Get jobs from DLQ (backward compatible) */
 export function getDlqJobs(queue: string, ctx: DlqContext, count?: number): Job[] {

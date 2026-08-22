@@ -70,7 +70,7 @@ export async function add<T>(
       updateProgress: async (id, progress, message) => {
         await manager.updateProgress(jobId(id), progress, message);
       },
-      // biome-ignore lint/suspicious/useAwait: public callback contract is asynchronous.
+      // oxlint-disable-next-line typescript/require-await -- public callback contract is asynchronous
       log: async (id, message) => {
         manager.addLog(jobId(id), message);
       },

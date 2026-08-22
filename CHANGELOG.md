@@ -4,6 +4,25 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+## [2.8.60] - 2026-08-22
+
+### Fixed
+
+- Prevented every asynchronous workflow path owned by a force-closed Engine
+  from persisting, publishing, emitting, or starting more user code after a
+  replacement Engine begins recovery. Bun 1.4 made the original retry overlap
+  deterministic; the generation fence now also covers maps, loops, decisions,
+  sub-workflow polling, waits, lifecycle calls and recovery while preserving
+  graceful drain and already-started compensation handoff.
+
+### Changed
+
+- Raised the minimum Bun version to 1.4.0 and pinned Bun 1.4.0 across CI,
+  release images, validation images, SDK workflows, and local development.
+- Replaced Biome with pinned Oxlint and Oxfmt tooling in the root project and
+  TypeScript SDK, including type-aware linting, CI, pre-commit hooks, isolated
+  validation images, suppression directives, and contributor documentation.
+
 ## [2.8.59] - 2026-08-05
 
 ### Fixed

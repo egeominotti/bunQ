@@ -3,6 +3,7 @@
 import { compensationContext, settle } from './compensationSupport';
 import { unwindChild, type ChildUnwind } from './compensationChild';
 import type { WorkflowEmitter } from './emitter';
+import { isWorkflowExecutionClosed } from './executionFence';
 import { describeError } from './identity';
 import { buildContext, findStepDef, runWithTimeout } from './runner';
 import type { WorkflowStore } from './store';
@@ -18,14 +19,16 @@ export interface UnwindPass {
   eligible: [string, StepRecord][];
   workflows?: Map<string, Workflow>;
   retryFailed?: boolean;
+  assertActive: () => void;
 }
 
 export async function unwind(pass: UnwindPass, runChild: ChildUnwind): Promise<void> {
-  const { exec, wf, store, emitter, eligible, workflows, retryFailed } = pass;
+  const { exec, wf, store, emitter, eligible, workflows, retryFailed, assertActive } = pass;
   const baseCtx = buildContext(exec);
   let haltedAt: string | null = null;
   let writeFailure: unknown;
 
+  assertActive();
   exec.state = 'compensating';
   try {
     store.update(exec);
@@ -36,9 +39,11 @@ export async function unwind(pass: UnwindPass, runChild: ChildUnwind): Promise<v
   }
   if (writeFailure === undefined) {
     emitter?.emitWorkflow('workflow:compensating', exec.id, exec.workflowName, 'compensating');
+    assertActive();
   }
 
   for (const [name, record] of eligible) {
+    assertActive();
     if (writeFailure !== undefined) break;
 
     const action = decideUnwindAction(wf, name, record, haltedAt !== null, retryFailed);
@@ -54,13 +59,23 @@ export async function unwind(pass: UnwindPass, runChild: ChildUnwind): Promise<v
       emitter?.emitStep('compensation:failed', exec.id, exec.workflowName, name, {
         error: 'step no longer declared',
       });
+      assertActive();
       continue;
     }
 
     emitter?.emitStep('compensation:started', exec.id, exec.workflowName, name);
+    assertActive();
     try {
       if (action.kind === 'unwind-child') {
-        await unwindChild({ record, store, emitter, workflows, runChild, retryFailed });
+        await unwindChild({
+          record,
+          store,
+          emitter,
+          workflows,
+          runChild,
+          retryFailed,
+          assertActive,
+        });
       } else {
         const def = findStepDef(wf, name);
         const controller = new AbortController();
@@ -73,6 +88,7 @@ export async function unwind(pass: UnwindPass, runChild: ChildUnwind): Promise<v
       settle(record, 'compensated');
       emitter?.emitStep('compensation:completed', exec.id, exec.workflowName, name);
     } catch (error) {
+      if (isWorkflowExecutionClosed(error)) throw error;
       const message = describeError(error);
       settle(record, 'compensation-failed', message);
       emitter?.emitStep('compensation:failed', exec.id, exec.workflowName, name, {

@@ -6,11 +6,7 @@
 import { SHARD_COUNT } from '../shared/hash';
 import type { StatsContext } from './types';
 
-export {
-  getAllQueueJobCounts,
-  getPerQueueStats,
-  getQueueJobCounts,
-} from './queueStatsAggregator';
+export { getAllQueueJobCounts, getPerQueueStats, getQueueJobCounts } from './queueStatsAggregator';
 export type { PerQueueStats, QueueJobCounts } from './queueStatsAggregator';
 
 export interface QueueStats {

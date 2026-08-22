@@ -4,7 +4,6 @@ import { WorkerManual } from './manual';
 import type { WorkerDelivery } from './state';
 
 export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerManual<T, R> {
-  // biome-ignore lint/suspicious/useAwait: preserves the public async close contract
   async close(force = false): Promise<void> {
     if (this.closed) return;
     if (this._closingPromise) {

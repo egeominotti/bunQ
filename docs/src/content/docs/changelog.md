@@ -16,6 +16,25 @@ head:
 
 ## Unreleased
 
+## [2.8.60] - 2026-08-22
+
+### Fixed
+
+- Fixed workflow generation races exposed by Bun 1.4. After `close(true)`, the
+  old Engine can no longer persist, enqueue, emit, or start user code from a
+  late retry, map, loop, decision, child poll, wait, lifecycle call or recovery
+  continuation. Graceful close still drains, and already-started forward and
+  compensation handlers retain their documented at-least-once semantics.
+
+### Changed
+
+- Raised the Bun runtime floor to 1.4.0. CI, release builds, the production and
+  validation images, SDK workflows, local Compose development, and Bun type
+  definitions now use Bun 1.4.0 consistently.
+- Replaced Biome with pinned Oxlint and Oxfmt tooling in the root project and
+  TypeScript SDK, including type-aware linting, CI, pre-commit hooks, isolated
+  validation images, suppression directives, and contributor documentation.
+
 ## [2.8.59] - 2026-08-05
 
 ### Fixed

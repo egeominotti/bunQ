@@ -22,7 +22,7 @@ Be respectful and inclusive. We welcome contributors of all backgrounds and expe
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) v1.3.9+
+- [Bun](https://bun.sh) v1.4.0+
 - Git
 - A GitHub account
 
@@ -79,7 +79,9 @@ before fixing it. The model run is required in addition to the final isolated
 
 ### Code Style
 
-We use [Biome](https://biomejs.dev) (one tool for linting + formatting):
+We use [Oxlint](https://oxc.rs/docs/guide/usage/linter/quickstart.html) for
+type-aware linting and
+[Oxfmt](https://oxc.rs/docs/guide/usage/formatter/quickstart.html) for formatting:
 
 ```bash
 # Lint
@@ -88,8 +90,8 @@ bun run lint
 # Format code
 bun run format
 
-# Lint + format check in one pass (what CI / the pre-commit hook run)
-bun run check:biome
+# Lint + format verification (what CI / the pre-commit hook run)
+bun run check:oxc
 ```
 
 ## Making Changes
@@ -121,7 +123,7 @@ test: add DLQ filtering tests
 3. Add/update tests
 4. Update documentation
 5. Run `bun run test:model` for core queue changes, then the authoritative
-   `bun run test:sandbox` gate and `bun run check:biome`
+   `bun run test:sandbox` gate and `bun run check:oxc`
 6. Push and create a PR
 
 ### PR Template

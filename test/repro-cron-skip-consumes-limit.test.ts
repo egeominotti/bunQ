@@ -12,7 +12,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 
 function tickScheduler(mgr: QueueManager): Promise<void> {
-  // biome-ignore lint/suspicious/noExplicitAny: reaching the private scheduler for deterministic ticks
+  // oxlint-disable-next-line typescript/no-explicit-any -- reaching the private scheduler for deterministic ticks
   return (mgr as any).cronScheduler.tick();
 }
 
@@ -71,7 +71,7 @@ describe('REPRO: skipped cron fires must not consume maxLimit', () => {
 
     // Force the cron due on demand by mutating the live heap entry: an
     // upsert would reset lastFiredAt (H10) and defeat the overlap guard.
-    // biome-ignore lint/suspicious/noExplicitAny: reaching scheduler internals for a deterministic overlap
+    // oxlint-disable-next-line typescript/no-explicit-any -- reaching scheduler internals for a deterministic overlap
     const sched = (manager as any).cronScheduler;
     const fireNow = () => {
       const entry = sched.cronJobs.get('overlap-budget');

@@ -1,4 +1,5 @@
 import { clock } from './clock';
+import { assertWorkflowActive } from './executionFence';
 import type { Execution } from './types';
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -7,6 +8,7 @@ export interface SubWorkflowRunOptions {
   pollIntervalMs?: number;
   maxWaitMs?: number;
   existingChildId?: string;
+  assertActive?: () => void;
 }
 
 /** Start or resume a child execution and poll its durable terminal state. */
@@ -19,6 +21,8 @@ export async function executeSubWorkflow(
 ): Promise<{ results: Record<string, unknown>; executionId: string }> {
   const pollIntervalMs = options.pollIntervalMs ?? 100;
   const maxWaitMs = options.maxWaitMs ?? 300_000;
+  const assertActive = options.assertActive ?? assertWorkflowActive;
+  assertActive();
   if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
     throw new Error('Sub-workflow pollIntervalMs must be finite and greater than 0');
   }
@@ -27,11 +31,14 @@ export async function executeSubWorkflow(
   }
 
   // Resume a durable child claimed by an earlier entry into this parent node.
+  assertActive();
   const existing = options.existingChildId ? getFn(options.existingChildId) : null;
   const handle = existing ? { id: existing.id } : await startFn(workflowName, input);
+  assertActive();
   const startedAt = existing?.createdAt ?? getFn(handle.id)?.createdAt ?? clock().now();
 
   for (;;) {
+    assertActive();
     const subExec = getFn(handle.id);
     if (subExec?.state === 'completed') {
       const results: Record<string, unknown> = {};
@@ -58,5 +65,6 @@ export async function executeSubWorkflow(
     await new Promise<void>((resolve) =>
       clock().setTimeout(() => resolve(), Math.min(pollIntervalMs, remaining, MAX_TIMER_DELAY_MS))
     );
+    assertActive();
   }
 }

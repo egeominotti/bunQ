@@ -4,7 +4,7 @@
 # ============================================
 
 # Stage 1: Build
-FROM oven/bun:1-alpine AS builder
+FROM oven/bun:1.4.0-alpine AS builder
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ RUN bun build --compile --minify src/main.ts --outfile bunqueue
 
 # ============================================
 # Stage 2: Production
-FROM oven/bun:1-alpine AS production
+FROM oven/bun:1.4.0-alpine AS production
 
 WORKDIR /app
 

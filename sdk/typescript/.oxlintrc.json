@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "oxc", "typescript", "unicorn"],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-array-constructor": "error",
+    "no-console": "off",
+    "no-fallthrough": "error",
+    "no-prototype-builtins": "error",
+    "no-unused-vars": "error",
+    "import/no-commonjs": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-spread": "off",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/no-unsafe-declaration-merging": "error"
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**"]
+}

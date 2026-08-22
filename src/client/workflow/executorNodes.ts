@@ -2,6 +2,7 @@
 
 import { clock } from './clock';
 import type { WorkflowEmitter } from './emitter';
+import { isWorkflowExecutionClosed } from './executionFence';
 import { describeError } from './identity';
 import { executeDoUntil, executeDoWhile, executeForEach, executeMap } from './loops';
 import {
@@ -28,6 +29,7 @@ interface NodeExecutionDeps {
   start: (name: string, input: unknown, parentId: string) => Promise<RunHandle>;
   enqueue: (exec: Execution) => Promise<void>;
   waitFor: WaitForDeps;
+  assertActive: () => void;
 }
 
 export async function executeWorkflowNode(
@@ -37,40 +39,41 @@ export async function executeWorkflowNode(
   idx: number,
   wf: Workflow
 ): Promise<void> {
+  deps.assertActive();
   if (node.type === 'step') {
     await executeStepWithRetry(node.def, buildContext(exec), exec, {
       emitter: deps.emitter,
       updateFn: deps.updateFn,
+      assertActive: deps.assertActive,
     });
   } else if (node.type === 'branch') {
     await runBranch(deps, exec, node, idx);
   } else if (node.type === 'parallel') {
-    await executeParallelSteps(
-      node.def.steps,
-      buildContext(exec),
-      exec,
-      deps.emitter,
-      deps.updateFn
-    );
+    await executeParallelSteps(node.def.steps, buildContext(exec), exec, {
+      emitter: deps.emitter,
+      updateFn: deps.updateFn,
+      assertActive: deps.assertActive,
+    });
   } else if (node.type === 'subWorkflow') {
     await runSubWorkflow(deps, exec, node, idx);
   } else if (node.type === 'doUntil') {
-    await executeDoUntil(node.def, exec, deps.emitter, deps.updateFn);
+    await executeDoUntil(node.def, exec, deps.emitter, deps.updateFn, deps.assertActive);
   } else if (node.type === 'doWhile') {
-    await executeDoWhile(node.def, exec, deps.emitter, deps.updateFn);
+    await executeDoWhile(node.def, exec, deps.emitter, deps.updateFn, deps.assertActive);
   } else if (node.type === 'forEach') {
-    await executeForEach(node.def, exec, deps.emitter, deps.updateFn);
+    await executeForEach(node.def, exec, deps.emitter, deps.updateFn, deps.assertActive);
   } else if (node.type === 'map') {
-    await executeMap(node.def, exec, deps.emitter, deps.updateFn);
+    await executeMap(node.def, exec, deps.emitter, deps.updateFn, deps.assertActive);
   } else if (node.type === 'pivot') {
     // A pivot commits the saga before the cursor moves beyond it.
     exec.committedAt = idx;
-    deps.store.update(exec);
+    deps.updateFn(exec);
   } else {
     await runWaitFor(deps.waitFor, exec, node, idx, wf);
     return;
   }
 
+  deps.assertActive();
   await deps.advance(exec, idx + 1, wf);
 }
 
@@ -80,12 +83,15 @@ async function runBranch(
   node: Extract<WorkflowNode, { type: 'branch' }>,
   idx: number
 ): Promise<void> {
+  deps.assertActive();
   const pathName = await resolveDecision(
     exec,
     branchDecisionKey(idx),
     () => node.def.condition(buildContext(exec)),
-    deps.updateFn
+    deps.updateFn,
+    deps.assertActive
   );
+  deps.assertActive();
   if (typeof pathName !== 'string') {
     throw new Error(`Branch at node ${idx} returned a non-string path`);
   }
@@ -107,7 +113,9 @@ async function runBranch(
     await executeStepWithRetry(step, buildContext(exec), exec, {
       emitter: deps.emitter,
       updateFn: deps.updateFn,
+      assertActive: deps.assertActive,
     });
+    deps.assertActive();
   }
 }
 
@@ -117,33 +125,43 @@ async function runSubWorkflow(
   node: Extract<WorkflowNode, { type: 'subWorkflow' }>,
   idx: number
 ): Promise<void> {
+  deps.assertActive();
   const subInput = await resolveDecision(
     exec,
     subWorkflowInputDecisionKey(idx),
     () => structuredClone(node.inputMapper(buildContext(exec))),
-    deps.updateFn
+    deps.updateFn,
+    deps.assertActive
   );
+  deps.assertActive();
   const recordKey = `sub:${node.name}`;
   const childExecutionId = await adoptExistingChild(deps, exec, node.name, recordKey);
+  deps.assertActive();
   try {
     const { results, executionId } = await executeSubWorkflow(
       node.name,
       subInput,
       async (name, input) => {
         const handle = await deps.start(name, input, exec.id);
+        deps.assertActive();
         // Claim the child before polling it. A restart can then resume the existing
         // child instead of starting another one.
         exec.steps[recordKey] = { status: 'running', childExecutionId: handle.id };
-        deps.store.update(exec);
+        deps.updateFn(exec);
         return handle;
       },
-      (id) => deps.store.get(id),
+      (id) => {
+        deps.assertActive();
+        return deps.store.get(id);
+      },
       {
         pollIntervalMs: node.pollInterval,
         maxWaitMs: node.timeout,
         existingChildId: childExecutionId,
+        assertActive: deps.assertActive,
       }
     );
+    deps.assertActive();
     exec.steps[recordKey] = {
       status: 'completed',
       result: results,
@@ -151,7 +169,9 @@ async function runSubWorkflow(
       childExecutionId: executionId,
     };
   } catch (error) {
-    settleFailedChild(deps.store, exec, recordKey, error);
+    if (isWorkflowExecutionClosed(error)) throw error;
+    deps.assertActive();
+    settleFailedChild(deps.updateFn, exec, recordKey, error);
     throw error;
   }
 }
@@ -162,6 +182,7 @@ async function adoptExistingChild(
   workflowName: string,
   recordKey: string
 ): Promise<string | undefined> {
+  deps.assertActive();
   const claimedId = exec.steps[recordKey]?.childExecutionId;
   const child = claimedId ? deps.store.get(claimedId) : deps.store.findChild(exec.id, workflowName);
   if (!child) return claimedId;
@@ -172,17 +193,20 @@ async function adoptExistingChild(
       status: 'running',
       childExecutionId: child.id,
     };
-    deps.store.update(exec);
+    deps.updateFn(exec);
   }
   // The child row is durable before its initial queue publication. A crash in that
   // gap leaves it running but undelivered; duplicate publication is safe because node
   // admission and persisted outcomes make it idempotent.
-  if (child.state === 'running') await deps.enqueue(child);
+  if (child.state === 'running') {
+    await deps.enqueue(child);
+    deps.assertActive();
+  }
   return child.id;
 }
 
 function settleFailedChild(
-  store: WorkflowStore,
+  updateFn: (exec: Execution) => void,
   exec: Execution,
   recordKey: string,
   error: unknown
@@ -197,8 +221,9 @@ function settleFailedChild(
     completedAt: clock().now(),
   };
   try {
-    store.update(exec);
-  } catch {
+    updateFn(exec);
+  } catch (writeError) {
+    if (isWorkflowExecutionClosed(writeError)) throw writeError;
     // The generic failure path persists this in-memory record. Do not replace the
     // child's diagnostic with an incidental write error.
   }

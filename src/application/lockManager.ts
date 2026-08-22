@@ -111,7 +111,7 @@ export async function checkExpiredLocks(ctx: LockContext): Promise<void> {
  * Process a single expired lock (called with both locks already held)
  * Lock hierarchy already satisfied: shardLock -> processingLock held by caller
  */
-// biome-ignore lint/complexity/useMaxParams: lock-processing inner fn needs the full lock context (7 params)
+// oxlint-disable-next-line max-params -- lock-processing inner fn needs the full lock context (7 params)
 function processExpiredLockInner(
   jobId: JobId,
   lock: JobLock,

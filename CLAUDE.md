@@ -107,14 +107,25 @@ Any change to the code MUST update the corresponding technical documentation und
 
 A code change is not complete until `/docs` reflects it. No exceptions.
 
-**MANDATORY: After every commit, ALWAYS:**
+**MANDATORY: For every commit:**
 
-1. Bump version in `package.json`
-2. Update changelog in `docs/src/content/docs/changelog.md`
-3. `git push origin main`
-4. `bun publish` to publish new version to npm
+1. Update `docs/src/content/docs/changelog.md` for the staged changes and
+   include that update in the same commit.
+2. Use a mandatory, non-empty, concise, specific English commit message that
+   describes the actual changes; generic placeholder messages are forbidden.
 
-No exceptions. Every commit = new version + changelog + npm publish.
+**MANDATORY: Before every push:**
+
+1. Verify that each outgoing commit already contains its corresponding
+   changelog update and has a compliant commit message.
+2. Do not edit the changelog solely because a push is being performed; the
+   push-time requirement is verification, not another changelog cycle.
+3. Run `git push origin main` only with the user's explicit authorization.
+
+Version bumps and `bun publish` are separate release actions. Perform either
+one only when the user explicitly requests it; permission to commit or push
+does not authorize a version change or package publication. Never use
+`npm publish`.
 
 High-performance job queue server for Bun. SQLite persistence, cron jobs, priorities, DLQ, S3 backups.
 

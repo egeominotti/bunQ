@@ -16,6 +16,14 @@ head:
 
 ## Unreleased
 
+### Changed
+
+- Updated the repository agent instructions so every commit contains a
+  corresponding changelog update and uses a concise, specific English
+  description as its mandatory message. Pushes now verify outgoing commits
+  without starting another changelog cycle; version bumps and package
+  publication remain separate actions requiring explicit authorization.
+
 ## [2.8.60] - 2026-08-22
 
 ### Fixed

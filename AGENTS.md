@@ -240,11 +240,17 @@ and assert both the returned result and any affected counters/state.
 
 ## Commits and handoff
 
-- Do not create commits, push, or publish unless the user explicitly authorizes
-  that workflow. Repository policy treats every commit as a release: bump the
-  version in `package.json`, update
-  `docs/src/content/docs/changelog.md`, push `origin main`, and publish with
-  `bun publish` (never `npm publish`). Confirm authorization for the complete
-  release workflow before creating the commit.
+- Before every authorized `git commit`, update
+  `docs/src/content/docs/changelog.md` for the staged changes and include that
+  update in the same commit. The commit message is mandatory and must be a
+  non-empty, concise, specific English description of the actual changes;
+  generic placeholder messages are forbidden.
+- Before every authorized `git push`, verify that each outgoing commit already
+  contains its corresponding changelog update and has a compliant commit
+  message. Do not edit the changelog solely because a push is being performed.
+- Do not create commits, push, bump the package version, or publish unless the
+  user explicitly authorizes the relevant action. Version bumps and
+  `bun publish` are separate release actions and are not implied by permission
+  to commit or push. Never publish with `npm publish`.
 - Report the files changed, behavior fixed, and exact validation commands/results.
 - Call out any test or check that could not be run and why.

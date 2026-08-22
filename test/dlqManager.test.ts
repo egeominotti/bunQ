@@ -127,6 +127,20 @@ describe('DLQ Manager', () => {
   });
 
   describe('DLQ isolation', () => {
+    test('removing one queue entry does not remove another queue entry', async () => {
+      await qm.push('queue1', { data: { q: 1 }, maxAttempts: 1 });
+      const job1 = await qm.pull('queue1');
+      await qm.fail(job1!.id, 'Error');
+
+      await qm.push('queue2', { data: { q: 2 }, maxAttempts: 1 });
+      const job2 = await qm.pull('queue2');
+      await qm.fail(job2!.id, 'Error');
+
+      expect(qm.removeDlqJob('queue1', job1!.id)).toBe(true);
+      expect(qm.getDlq('queue1')).toEqual([]);
+      expect(qm.getDlq('queue2').map((job) => job.id)).toEqual([job2!.id]);
+    });
+
     test('should isolate DLQ per queue', async () => {
       // Fail job in queue1
       await qm.push('queue1', { data: { q: 1 }, maxAttempts: 1 });

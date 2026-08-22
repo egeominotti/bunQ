@@ -188,6 +188,7 @@ Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 | `waiting`/`active` | `failed`→DLQ | `Discard` (`token?` required for a live lease)       |
 | `active`      | `failed`→DLQ      | timeout / max stalls / max attempts                  |
 | `failed`(DLQ) | `waiting`         | `RetryDlq` / auto-retry                              |
+| `failed`(DLQ) | removed           | `RemoveDlqJob` / selective permanent deletion       |
 | `waiting`/`prioritized`/`delayed` | `delayed` | `ChangeDelay` / `MoveToDelayed` (in-place `runAt`)   |
 | `active`      | `delayed`         | `ChangeDelay` / `MoveToDelayed` (two-phase re-queue)  |
 
@@ -617,7 +618,7 @@ Command families (each is a `cmd`-tagged interface under `src/domain/types/comma
 `MoveToWaitingChildren`, `Discard`, `MoveToWait`, `PromoteJobs`, `ChangeDelay`,
 `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`), **Queue Control**
 (`Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`),
-**DLQ** (`Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RetryCompleted`), **Rate/Concurrency**
+**DLQ** (`Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RemoveDlqJob`, `RetryCompleted`), **Rate/Concurrency**
 (`RateLimit`, `SetConcurrency`, `*Clear`), **Config** (`Set/GetStallConfig`,
 `Set/GetDlqConfig`), **Cron** (`Cron`, `CronDelete`, `CronList`, `CronGet`),
 **Logs** (`AddLog`, `GetLogs`, `ClearLogs`), **Heartbeat/Workers** (`Heartbeat`,
@@ -645,6 +646,9 @@ The extended introspection/DLQ shapes are:
   preserve the full failure metadata and embedded job snapshot.
 - `GetDlqStats { queue }` returns `{ data: { stats } }`.
 - `RetryDlq { queue, jobId?, count?, filter? }` returns the applied `count`.
+- `RemoveDlqJob { queue, jobId }` returns `{ data: { removed } }`. It is an
+  idempotent permanent deletion: `false` means no matching entry, while command
+  errors remain error responses.
 - `RetryCompleted { queue, id?, count?, timestamp? }` applies the optional
   terminal-time cutoff before the count cap. Each applied transition atomically
   changes the durable job to `waiting` and removes its `job_results` row before

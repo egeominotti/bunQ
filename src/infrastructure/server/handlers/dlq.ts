@@ -64,6 +64,15 @@ export function handlePurgeDlq(
   return { ok: true, count, reqId };
 }
 
+export function handleRemoveDlqJob(
+  cmd: Extract<Command, { cmd: 'RemoveDlqJob' }>,
+  ctx: HandlerContext,
+  reqId?: string
+): Response {
+  const removed = ctx.queueManager.removeDlqJob(cmd.queue, jobId(cmd.jobId));
+  return resp.data({ removed }, reqId);
+}
+
 /** Handle RetryCompleted command - retry completed jobs */
 export function handleRetryCompleted(
   cmd: Extract<Command, { cmd: 'RetryCompleted' }>,

@@ -18,6 +18,10 @@ export class QueueManagerFlowFailures extends QueueManagerDependencyRuntime {
       this.jobIndex.delete(entry.job.id);
       this.jobResults.delete(entry.job.id);
       this.jobLogs.delete(entry.job.id);
+      this.dependencyResults.releaseConsumer(entry.job.id);
+      if (entry.job.customId && this.customIdMap.get(entry.job.customId) === entry.job.id) {
+        this.customIdMap.delete(entry.job.customId);
+      }
     }
     this.storage?.purgeDlqEntries(
       entry.job.queue,

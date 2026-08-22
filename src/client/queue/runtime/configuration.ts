@@ -82,6 +82,16 @@ export class QueueConfiguration<T> extends QueueControl<T> {
     return dlqOps.purgeDlqAsync(this.ctx);
   }
 
+  /** Remove one DLQ entry and resolve when the removal completes. */
+  removeDlqJob(id: string): Promise<boolean> {
+    return dlqOps.removeDlqJobAsync(this.ctx, id);
+  }
+
+  /** Explicit async alias for removeDlqJob. */
+  removeDlqJobAsync(id: string): Promise<boolean> {
+    return this.removeDlqJob(id);
+  }
+
   retryCompleted(id?: string) {
     return dlqOps.retryCompleted(this.ctx, id);
   }

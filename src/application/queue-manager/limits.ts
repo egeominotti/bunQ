@@ -52,6 +52,11 @@ export class QueueManagerLimits extends QueueManagerControl {
     return dlqOps.purgeDlqJobs(queue, this.contextFactory.getDlqContext());
   }
 
+  /** Remove one terminal DLQ job without re-enqueuing it. */
+  removeDlqJob(queue: string, jobId: JobId): boolean {
+    return dlqOps.removeDlqJob(queue, jobId, this.contextFactory.getDlqContext());
+  }
+
   retryCompleted(
     queue: string,
     jobId?: JobId,

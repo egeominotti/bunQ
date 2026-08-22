@@ -1,6 +1,6 @@
 /**
  * Executable proof for /guide/dlq/operations/
- * ("DLQ Operations: Filter, Retry, Purge").
+ * ("DLQ Operations: Filter, Retry, Remove, Purge").
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -154,6 +154,17 @@ for (const mode of MODES) {
       expect(stats.pendingRetry).toBe(0);
       expect(stats.oldestEntry).toBeNumber();
       expect(stats.newestEntry).toBeNumber();
+    }, 60_000);
+
+    test('removeDlqJob permanently deletes one entry and is idempotent', async () => {
+      harness = await startHarness('dlq-operations', mode);
+      const queue = await seedDlq(harness, 'remove-one', 2);
+      const target = (await queue.getDlqAsync())[0].job.id;
+
+      expect(await queue.removeDlqJob(target)).toBe(true);
+      expect(await queue.removeDlqJobAsync(target)).toBe(false);
+      expect(await queue.getJobState(target)).toBe('unknown');
+      expect(await queue.getDlqAsync()).toHaveLength(1);
     }, 60_000);
 
     test('purgeDlqAsync deletes every entry and returns the count', async () => {

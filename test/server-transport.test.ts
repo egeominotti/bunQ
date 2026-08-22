@@ -1226,6 +1226,16 @@ describe('Handler Routes', () => {
       expect(result!.ok).toBe(true);
     });
 
+    test('should route RemoveDlqJob command', () => {
+      const result = routeDlqCommand(
+        { cmd: 'RemoveDlqJob', queue: 'test', jobId: 'missing' },
+        ctx
+      );
+      expect(result).not.toBeNull();
+      expect(result!.ok).toBe(true);
+      expect((result as any).data.removed).toBe(false);
+    });
+
     test('should route RetryCompleted command', () => {
       const result = routeDlqCommand(
         { cmd: 'RetryCompleted', queue: 'test' },
@@ -1541,10 +1551,10 @@ describe('Handler Routes', () => {
     });
 
     test('all DLQ commands should be routable', () => {
-      const dlqCommands = ['Dlq', 'RetryDlq', 'PurgeDlq', 'RetryCompleted'];
+      const dlqCommands = ['Dlq', 'RetryDlq', 'PurgeDlq', 'RemoveDlqJob', 'RetryCompleted'];
       for (const cmd of dlqCommands) {
         const result = routeDlqCommand(
-          { cmd, queue: 'test' } as any,
+          { cmd, queue: 'test', jobId: 'missing' } as any,
           ctx
         );
         expect(result).not.toBeNull();

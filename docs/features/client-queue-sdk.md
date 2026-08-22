@@ -90,6 +90,12 @@ Management (`queue/runtime/control.ts`, `queue/operations/management.ts`):
 `clearJobLogs`, `updateJobData`, `changeJobDelay`, `changeJobPriority`,
 `extendJobLock`.
 
+DLQ configuration (`queue/runtime/configuration.ts`) also exposes
+`removeDlqJob(id)` and `removeDlqJobAsync(id)`, both returning
+`Promise<boolean>`. They permanently delete only the selected failed job,
+return `false` for an idempotent miss, and propagate embedded persistence or
+TCP broker errors instead of treating them as misses.
+
 `retryJobs({ state, count, timestamp })` supports both declared states. `failed`
 retries matching DLQ entries and `completed` re-queues completed jobs; `count`
 is a non-negative cap and `timestamp` includes only entries whose terminal
@@ -242,7 +248,7 @@ zero.
   batcher rejects queued callers (e.g. auth failure) rather than resolving them
   with `undefined` jobs (`operations/add/single.ts:109-113`,
   `operations/add/bulk.ts:130-133`).
-- **Synchronous TCP boundaries**: `getJobs`/`getWaiting`/… (sync) return `[]`, `count()` returns `0`, `getCountsPerPriority()` returns `{}`, and `isPaused()` returns `false` in TCP mode because their signatures cannot await a round trip. Use the corresponding `Async` variants for authoritative remote results. The same rule applies to synchronous DLQ reads and fire-and-forget mutation forms; use `getDlqAsync`, `getDlqStatsAsync`, `retryDlqAsync`, `retryDlqByFilterAsync`, `purgeDlqAsync`, and `retryCompletedAsync` when the result matters. Limit getters, worker discovery, dependency methods, deduplication methods, and `moveToWaitingChildren` are asynchronous and now query or mutate the selected broker runtime directly.
+- **Synchronous TCP boundaries**: `getJobs`/`getWaiting`/… (sync) return `[]`, `count()` returns `0`, `getCountsPerPriority()` returns `{}`, and `isPaused()` returns `false` in TCP mode because their signatures cannot await a round trip. Use the corresponding `Async` variants for authoritative remote results. The same rule applies to synchronous DLQ reads and fire-and-forget mutation forms; use `getDlqAsync`, `getDlqStatsAsync`, `retryDlqAsync`, `retryDlqByFilterAsync`, `purgeDlqAsync`, and `retryCompletedAsync` when the result matters. Selective `removeDlqJob` is deliberately Promise-based even without the suffix, and `removeDlqJobAsync` is its explicit alias. Limit getters, worker discovery, dependency methods, deduplication methods, and `moveToWaitingChildren` are asynchronous and now query or mutate the selected broker runtime directly.
 - **Detached conversion helpers**: broker-returned `Job` instances always receive a complete live operation context. Low-level callers that invoke `createPublicJob` without a context receive only detached fallback behavior and must not treat that helper as a broker client.
 - **Idempotency**: `jobId`/`deduplication.id` make `add` idempotent (custom-id dedup, server-side, retention-window-bounded). `forward()` uses deterministic remote ids (`fwd:<queue>:<localId>`) so re-forwards don't duplicate (see [Store-and-Forward](./store-and-forward.md)).
 - **Metrics/event retention**: `getMetrics(type,start,end)` returns queue-scoped,

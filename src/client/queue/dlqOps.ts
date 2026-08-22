@@ -64,6 +64,11 @@ export function purgeDlqEmbedded(queue: string): number {
   return getSharedManager().purgeDlq(queue);
 }
 
+/** Remove one DLQ entry in embedded mode. */
+export function removeDlqJobEmbedded(queue: string, id: string): boolean {
+  return getSharedManager().removeDlqJob(queue, jobId(id));
+}
+
 /** Set stall config (embedded only) */
 export function setStallConfigEmbedded(queue: string, config: Record<string, unknown>): void {
   const manager = getSharedManager();

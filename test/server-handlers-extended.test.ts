@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 import type { HandlerContext } from '../src/infrastructure/server/types';
 import { handlePush, handlePull, handleFail } from '../src/infrastructure/server/handlers/core';
-import { handleDlq, handleRetryDlq, handlePurgeDlq, handleRetryCompleted } from '../src/infrastructure/server/handlers/dlq';
+import { handleDlq, handleRetryDlq, handlePurgeDlq, handleRemoveDlqJob, handleRetryCompleted } from '../src/infrastructure/server/handlers/dlq';
 import { handleCron, handleCronDelete, handleCronList } from '../src/infrastructure/server/handlers/cron';
 import { handlePing, handleHeartbeat, handleJobHeartbeat, handleRegisterWorker,
   handleUnregisterWorker, handleListWorkers, handleAddWebhook, handleRemoveWebhook,
@@ -66,6 +66,30 @@ describe('DLQ Handlers (direct)', () => {
     test('should propagate reqId', () => {
       const res = handlePurgeDlq({ cmd: 'PurgeDlq', queue: 'q', reqId: 'r3' }, ctx, 'r3');
       expect(res.reqId).toBe('r3');
+    });
+  });
+
+  describe('handleRemoveDlqJob', () => {
+    test('should remove only the selected entry and propagate reqId', async () => {
+      await handlePush(
+        { cmd: 'PUSH', queue: 'remove-dlq', data: { value: 1 }, maxAttempts: 1 },
+        ctx
+      );
+      const pulled = await handlePull({ cmd: 'PULL', queue: 'remove-dlq' }, ctx);
+      const id = (pulled as any).job?.id as string;
+      await handleFail({ cmd: 'FAIL', id, error: 'terminal' }, ctx);
+      const res = handleRemoveDlqJob(
+        { cmd: 'RemoveDlqJob', queue: 'remove-dlq', jobId: id, reqId: 'r-remove' },
+        ctx,
+        'r-remove'
+      );
+      expect(res.ok).toBe(true);
+      expect((res as any).data.removed).toBe(true);
+      expect(res.reqId).toBe('r-remove');
+      expect((handleRemoveDlqJob(
+        { cmd: 'RemoveDlqJob', queue: 'remove-dlq', jobId: id },
+        ctx
+      ) as any).data.removed).toBe(false);
     });
   });
 

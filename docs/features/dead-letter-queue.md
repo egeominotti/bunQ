@@ -12,7 +12,7 @@ What this module owns:
 
 - In-memory per-queue storage of `DlqEntry[]` (`DlqShard`, one instance per `Shard`) and per-queue `DlqConfig` / `StallConfig`.
 - Building `DlqEntry` metadata from a failed `Job` (`createDlqEntry`), enforcing `maxEntries` (oldest-first eviction).
-- Reading/filtering entries (`getEntries`, `getFiltered`, `getDlqStats`), removing single entries, clearing a queue.
+- Reading/filtering entries (`getEntries`, `getFiltered`, `getDlqStats`), permanently removing a selected job, clearing a queue.
 - Re-queuing dead jobs back to their `PriorityQueue` (`retryDlqJob`, `retryDlqJobs`, `retryDlqByFilter`, `processAutoRetry`).
 - Lifecycle policy: expiry detection (`isDlqEntryExpired`), auto-retry eligibility (`canAutoRetry`), retry scheduling with exponential backoff (`scheduleNextRetry`).
 - Client SDK surface for embedded and TCP modes (`Queue.getDlq/retryDlq/purgeDlq/...`).
@@ -55,6 +55,7 @@ class DlqShard {
   getJobs(queue: string, count?: number): Job[];
   getFiltered(queue: string, filter: DlqFilter): DlqEntry[];
   remove(queue: string, jobId: JobId): DlqEntry | null;
+  removeAll(queue: string, jobId: JobId): DlqEntry[];
   getAutoRetryEntries(queue: string, now?: number): DlqEntry[];
   getExpiredEntries(queue: string, now?: number): DlqEntry[];
   purgeExpired(queue: string, now?: number): number;
@@ -67,7 +68,7 @@ class DlqShard {
 
 ### Application functions (`src/application/dlqManager.ts`, `dlqRetry.ts`)
 
-`dlqManager.ts` owns reads, statistics, configuration, purge and completed-job retry. `dlqRetry.ts` owns `retryDlqJob`, `retryDlqJobs`, `retryDlqByFilter`, and `processAutoRetry`; the split isolates retry transitions and keeps both modules below 300 lines. All operations take a `DlqContext { shards, jobIndex, jobResults, jobLogs, storage }` (or `RetryCompletedContext`). `storage` is **required (nullable)**: every builder passes it or explicit `null`, so persistence cannot silently disappear. Result/log maps are required because permanent removal clears all global ownership, not only the shard entry.
+`dlqManager.ts` owns reads, statistics, configuration, purge and completed-job retry. `dlqRetry.ts` owns `retryDlqJob`, `retryDlqJobs`, `retryDlqByFilter`, and `processAutoRetry`; the split isolates retry transitions and keeps both modules below 300 lines. All operations take a `DlqContext { shards, jobIndex, jobResults, dependencyResults, customIdMap, jobLogs, storage }` (or `RetryCompletedContext`). `storage` is **required (nullable)**: every builder passes it or explicit `null`, so persistence cannot silently disappear. The auxiliary stores are required because permanent removal clears all terminal ownership, not only the shard entry.
 
 ### Domain helpers (`src/domain/types/dlq.ts`)
 
@@ -90,6 +91,8 @@ queue.retryDlqByFilter(filter: DlqFilter): number    // TCP fire-and-forget; ret
 queue.retryDlqByFilterAsync(filter: DlqFilter): Promise<number>
 queue.purgeDlq(): number
 queue.purgeDlqAsync(): Promise<number>
+queue.removeDlqJob(id: string): Promise<boolean>
+queue.removeDlqJobAsync(id: string): Promise<boolean>
 queue.retryCompleted(id?: string): number
 queue.retryCompletedAsync(id?: string): Promise<number>
 queue.retryJobs(opts?: {
@@ -110,6 +113,7 @@ placeholder values.
 - `GetDlqStats` → `handleGetDlqStats` — returns authoritative aggregate statistics.
 - `RetryDlq` → `handleRetryDlq` — retries one (`jobId`), a bounded batch (`count`), or entries selected by `filter`; emits `dlq:retried` / `dlq:retry-all`.
 - `PurgeDlq` → `handlePurgeDlq` (`:41`) — clears the queue's DLQ; emits `dlq:purged`.
+- `RemoveDlqJob` → `handleRemoveDlqJob` — permanently removes the selected entry and returns `data.removed`; a missing entry is a successful, idempotent `false` result.
 - `RetryCompleted` → `handleRetryCompleted` — accepts `id?`, `count?`, and `timestamp?` and returns the applied count.
 - `GetDlqConfig` / `SetDlqConfig` → `handleGetDlqConfig` / `handleSetDlqConfig` (`src/infrastructure/server/handlers/advanced/queue.ts:172` for GetDlqConfig, `:153` for SetDlqConfig).
 
@@ -153,7 +157,7 @@ SQLite `dlq` table (`src/infrastructure/persistence/schema.ts:73`): `id INTEGER 
 
 ### Entering the DLQ
 
-`DlqShard` only stores entries; callers decide eligibility. All entry paths follow the same write order: `shard.addToDlq()` (memory) → set `jobIndex[id] = { type: 'dlq', queueName }` → `storage.saveDlqEntry(entry)` → `storage.deleteJob(id)` (drop the `jobs` row). Entry points:
+`DlqShard` only stores entries; callers decide eligibility. Entry paths publish the shard entry and index, persist the DLQ row, and delete the live `jobs` row while ownership remains synchronous. Explicit discard performs those writes while still holding the shard lock, so selective removal cannot observe the in-memory entry and then race a late durable insert. Entry points:
 
 1. **Processor failure at max attempts** — `moveFailedJobToDlq` (`src/application/operations/ack/failure.ts`), terminal branch of `failJob`. Ordinary processor failures use `MaxAttemptsExceeded`; their prior retryable attempts are recorded as `ExplicitFail`. Emits `dlq:added`.
 2. **Processing timeout** — `checkJobTimeouts` (`src/application/background/timeouts.ts`) invokes the same failure transition with an explicit `Timeout` classification. Retryable and terminal timeout attempts therefore remain `Timeout`, including after SQLite recovery. A subsequent ordinary processor failure is classified normally and is not contaminated by the earlier timeout marker.
@@ -183,13 +187,25 @@ round trip.
 
 `retryDlqJob` (`dlqRetry.ts`) removes the entry, clears its automatic-retry generation, resets `attempts`, `runAt`, `startedAt`, `stallCount`, and `lastHeartbeat`, appends a `waiting` timeline entry, re-enqueues it, restores counters/index ownership, then calls `storage.requeueDlqJob(job)`. That persistence method atomically deletes the old DLQ row and inserts the waiting job; the `jobs` row was deleted on DLQ entry, so the re-insert is essential for restart safety. `retryDlqJobs` with no id clears the whole queue's DLQ in one pass, then re-queues every entry. With an optional `limit` (the `RetryDlq` command's `count`, surfaced client-side as `queue.retryJobs({ state:'failed', count })`) it instead retries only the first `limit` entries by looping the per-entry transition, leaving the remainder in the DLQ — before this the client's `count` was silently dropped and the whole DLQ was drained (a #111-class silent-loss). `retryDlqByFilter` applies the same transition to the filtered entries.
 
+### Permanent selective removal
+
+`removeDlqJob(queue, id)` deletes a failed job without re-enqueuing it. The
+SQLite transaction runs first; only after it succeeds does `DlqShard.removeAll`
+drop every recovered in-memory duplicate and decrement the counter by the exact
+number removed. Terminal ownership cleanup covers `jobIndex`, results, logs,
+dependency-result consumers, the guarded custom-ID mapping, pending buffered
+rows, durable jobs/results, and parent-owned `flow_failures`. If the same ID
+already belongs to a newer live generation, only the stale `(queue, jobId)` DLQ
+rows are deleted. Repeating the call returns `false`; a storage or broker error
+throws and leaves the entry authoritative.
+
 ### Auto-retry (background, opt-in)
 
 `processAutoRetry` (`dlqRetry.ts`) runs only if `config.autoRetry`. It removes each due entry, calls `scheduleNextRetry` to advance `retryCount`/`lastRetryAt` and the backoff, and carries that state on the live job. SQLite `requeueDlqJob` atomically deletes the DLQ row and inserts the waiting job, so a crash cannot restore a stale DLQ copy beside it. A terminal re-failure reconstructs the same chain instead of resetting it. Backoff is `autoRetryInterval * 2^(retryCount-1)`; `nextRetryAt` becomes `null` at `maxAutoRetries`.
 
 ### Auto-purge + maintenance loop
 
-`performDlqMaintenance` (`src/application/background/dlq.ts`) iterates every cached queue name, calls `processAutoRetry` then `purgeExpiredDlq`, and emits `dlq:auto-retried` / `dlq:expired`. `purgeExpiredDlq` (`dlqManager.ts`) uses one timestamp to snapshot and remove exactly the same expired entries. Both expiration and explicit `purgeDlqJobs` then remove each terminal job from `jobIndex`, results, logs, the WriteBuffer, `jobs`, `job_results`, and `dlq`. SQLite deletion is one transaction (`SqliteStorage.purgeDlqEntries`); an all-queue purge clears only that queue's DLQ rows, while expiration deletes only the captured `(queue, jobId)` pairs. If the ID already identifies a newer live generation, only its stale DLQ row is removed: the current job row, buffer entry, result/log state, and index survive. This prevents a purged terminal job from remaining observable as `failed` or resurrecting after restart without affecting another queue or a retried/recreated job. The interval is registered in `background/lifecycle.ts` from `ctx.config.dlqMaintenanceMs`; the default is **60_000 ms** (`src/application/types/config.ts`).
+`performDlqMaintenance` (`src/application/background/dlq.ts`) iterates every cached queue name, calls `processAutoRetry` then `purgeExpiredDlq`, and emits `dlq:auto-retried` / `dlq:expired`. `purgeExpiredDlq` (`dlqManager.ts`) uses one timestamp to snapshot and remove exactly the same expired entries. Both expiration and explicit `purgeDlqJobs` then remove each terminal job from `jobIndex`, results, logs, dependency-result ownership, guarded custom-ID ownership, the WriteBuffer, `jobs`, `job_results`, parent-owned `flow_failures`, and `dlq`. SQLite deletion is one transaction (`SqliteStorage.purgeDlqEntries`); an all-queue purge clears only that queue's DLQ rows, while expiration deletes only the captured `(queue, jobId)` pairs. If the ID already identifies a newer live generation, only its stale DLQ row is removed: the current job row, buffer entry, auxiliary state, and index survive. This prevents a purged terminal job from remaining observable as `failed` or resurrecting after restart without affecting another queue or a retried/recreated job. The interval is registered in `background/lifecycle.ts` from `ctx.config.dlqMaintenanceMs`; the default is **60_000 ms** (`src/application/types/config.ts`).
 
 ### `retryCompleted`
 
@@ -216,8 +232,9 @@ memory-only, persisted embedded, and TCP deployments.
 - `moveFailedJobToDlq` runs inside `failJob`'s `withWriteLock(shardLocks[idx])` after the processing-shard lock released the job (`src/application/operations/ack/failure.ts:71-75`, `:99-138`).
 - `moveParentToFailed` (`queue-manager/flow-failures.ts`) acquires the shard write lock and **re-checks `jobIndex.get(parentId)?.type === 'queue'` inside the lock** — a TOCTOU guard preventing two concurrent child-failure callbacks from creating duplicate DLQ entries for the same parent.
 - `discardJob` takes the queue or processing lock to extract the job, then a
-  separate shard write lock to `addToDlq`
-  (`src/application/operations/jobMoveOperations.ts:59-102`).
+  separate shard write lock to add and synchronously persist the DLQ entry,
+  delete the live row, and release terminal dependency/custom-ID ownership.
+  No `await` occurs inside that critical section.
 - The maintenance task and `getDlq*` reads are not lock-protected, consistent with the cooperative single-thread model; auto-retry mutates entries it owns before removing them.
 
 ## Edge Cases & Failure Modes
@@ -227,9 +244,9 @@ memory-only, persisted embedded, and TCP deployments.
 - **`deleteJob` does not cascade the DLQ** — by design (`persistence/sqlite/mutations.ts`): `moveFailedJobToDlq` writes the DLQ row then drops the `jobs` row; cleanup callers that genuinely want the DLQ gone must call `deleteDlqEntry` explicitly.
 - **Purge is a full terminal deletion** — clearing only `DlqShard`/the `dlq` table leaves a dangling `jobIndex` location, so `GetState` still reports `failed`. `purgeDlqJobs` and `purgeExpiredDlq` share the same cleanup path and transactionally remove durable job/result rows plus pending buffered inserts before dropping the global indexes. Repeating expiry cleanup is a no-op, and purging one queue cannot delete another queue's entries.
 - **Recovery double-count avoidance** — `recover` loads `loadDlqJobIds()` and `recoverActiveJobs` skips stale `active` rows already present in the DLQ (legacy DBs predate the failJob fix), dropping the orphan row (`background/recovery/active.ts`). `quarantineCorruptDependsOn` persists the entry and drops the row but deliberately does **not** add to in-memory DLQ — the later `restoreDlq` pass restores it exactly once (`background/recovery/shared.ts`, `restore.ts`).
-- **`job_id` is not UNIQUE in the `dlq` table** — `insertDlq` is a plain `INSERT`; `deleteDlqEntry` deletes every matching row and `loadDlq` orders by `entered_at`. Normal terminal transitions own one generation, retries remove its row before requeue, and capacity eviction removes stale matches.
+- **`job_id` is not UNIQUE in the `dlq` table** — `insertDlq` is a plain `INSERT`; `deleteDlqEntry` deletes every matching row and `loadDlq` orders by `entered_at`. Selective permanent removal therefore drops every matching recovered row in one pass and decrements the in-memory counter by that exact number.
 - **Choose the async remote surface** — `getDlq` and `getDlqStats` retain synchronous embedded return types, so their TCP forms cannot return broker results. Synchronous `retryDlqByFilter` does send the filtered mutation over TCP, but returns the non-authoritative value `0`. Use `getDlqAsync`, `getDlqStatsAsync`, and `retryDlqByFilterAsync`; they round-trip full entries, statistics, and filtered retry counts. `getDlqConfig` returns the client-side TCP cache or `{}`, while `getDlqConfigAsync` reads the broker.
-- **Synchronous DLQ mutations are fire-and-forget in TCP mode** — `retryDlq`, `retryDlqByFilter`, and `purgeDlq` send the operation and return `0` regardless of the eventual server result. Their async counterparts return authoritative counts.
+- **Synchronous DLQ mutations are fire-and-forget in TCP mode** — `retryDlq`, `retryDlqByFilter`, and `purgeDlq` send the operation and return `0` regardless of the eventual server result. Their async counterparts return authoritative counts. `removeDlqJob` and its explicit `Async` alias are always Promise-based and reject broker errors; `false` means only that no matching entry existed.
 - **Auto-retry default off** — `DEFAULT_DLQ_CONFIG.autoRetry = false`; entries created under it get `nextRetryAt = null` and are never auto-retried until config is changed. Changing config later does not retro-set `nextRetryAt` on existing entries.
 - **`maxAge: null`** disables expiry (`expiresAt = null`), so entries persist until manually purged or evicted by `maxEntries`.
 - **Timeline cap** — re-queue paths only push a `waiting` timeline entry while `timeline.length < MAX_TIMELINE_ENTRIES`, bounding per-job timeline growth across repeated retries.

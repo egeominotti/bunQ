@@ -179,6 +179,7 @@ export class ContextFactory {
       jobLocks: this.deps.jobLocks,
       clientJobs: this.deps.clientJobs,
       dependencyResults: this.deps.dependencyResults,
+      customIdMap: this.deps.customIdMap,
       depCompletions: this.deps.depCompletions,
       maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       webhookManager: this.deps.webhookManager,
@@ -208,6 +209,8 @@ export class ContextFactory {
       shards: this.deps.shards,
       jobIndex: this.deps.jobIndex,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
+      customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
       storage: this.deps.storage,
     };
@@ -222,6 +225,8 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
+      dependencyResults: this.deps.dependencyResults,
+      customIdMap: this.deps.customIdMap,
     };
   }
 

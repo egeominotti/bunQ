@@ -210,12 +210,14 @@ export abstract class SqliteJobs extends SqliteAdmission {
       const clearDlq = this.statements.get('clearDlqQueue')!;
       const deleteJob = this.statements.get('deleteJob')!;
       const deleteResult = this.statements.get('deleteJobResult')!;
+      const deleteFlowFailures = this.db.prepare('DELETE FROM flow_failures WHERE parent_id = ?');
       const transaction = this.db.transaction(() => {
         if (clearQueue) clearDlq.run(queue);
         else for (const jobId of dlqJobIds) deleteDlq.run(jobId, queue);
         for (const jobId of terminalJobIds) {
           deleteJob.run(jobId);
           deleteResult.run(jobId);
+          deleteFlowFailures.run(jobId);
         }
       });
       transaction();

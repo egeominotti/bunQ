@@ -97,7 +97,10 @@ be claimed.
   `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
   JobLogs, Stats managers, and the batch `QueueStatsAggregator`. DLQ reads/purge
   live in `dlqManager.ts`; manual and automatic retry transitions live in
-  `dlqRetry.ts`. Completion-chained repeat calculation and validation live in
+  `dlqRetry.ts`. Selective permanent DLQ removal is durable-first, removes all
+  recovered duplicates for the selected ID, and generation-guards cleanup of
+  global custom-ID, dependency-result, result/log, job-index, and flow-failure
+  ownership. Completion-chained repeat calculation and validation live in
   `repeatJobs.ts`, while `queue-manager/repeat.ts` owns successor dispatch and
   chain linking. Single-job admission lives in `operations/push.ts`, ordered
   accepted-prefix batches in `operations/pushBatch.ts`, and the persistence-

@@ -48,6 +48,7 @@ export type Command =
   | Dlq.GetDlqStatsCommand
   | Dlq.RetryDlqCommand
   | Dlq.PurgeDlqCommand
+  | Dlq.RemoveDlqJobCommand
   | Dlq.RetryCompletedCommand
   | Dlq.SetDlqConfigCommand
   | Dlq.GetDlqConfigCommand

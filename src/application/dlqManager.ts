@@ -17,6 +17,8 @@ export interface DlqContext {
   shards: Shard[];
   jobIndex: Map<JobId, JobLocation>;
   jobResults: { delete(id: JobId): boolean };
+  dependencyResults: { releaseConsumer(id: JobId): void };
+  customIdMap: { get(id: string): JobId | undefined; delete(id: string): boolean };
   jobLogs: { delete(id: JobId): boolean };
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
@@ -117,6 +119,47 @@ export function purgeDlqJobs(queue: string, ctx: DlqContext): number {
   return entries.length;
 }
 
+/** Remove one DLQ entry without re-enqueuing it. */
+export function removeDlqJob(queue: string, id: JobId, ctx: DlqContext): boolean {
+  const shard = ctx.shards[shardIndex(queue)];
+  const entries = shard.getDlqEntries(queue).filter((entry) => entry.job.id === id);
+  if (entries.length === 0) return false;
+
+  const location = ctx.jobIndex.get(id);
+  const terminalJobIds =
+    location === undefined || (location.type === 'dlq' && location.queueName === queue) ? [id] : [];
+
+  // Keep the in-memory entry visible until the durable transaction succeeds.
+  // This prevents a failed SQLite write from leaving memory and disk out of sync.
+  ctx.storage?.purgeDlqEntries(queue, [id], terminalJobIds, false);
+  shard.removeAllFromDlq(queue, id);
+  cleanupTerminalEntries(queue, entries, terminalJobIds, ctx);
+  return true;
+}
+
+function cleanupTerminalEntries(
+  queue: string,
+  entries: readonly DlqEntry[],
+  terminalJobIds: readonly JobId[],
+  ctx: DlqContext
+): void {
+  const terminalIds = new Set(terminalJobIds);
+  for (const entry of entries) {
+    if (!terminalIds.has(entry.job.id)) continue;
+    const customId = entry.job.customId;
+    if (customId && ctx.customIdMap.get(customId) === entry.job.id) {
+      ctx.customIdMap.delete(customId);
+    }
+  }
+  for (const jobId of terminalJobIds) {
+    const location = ctx.jobIndex.get(jobId);
+    if (location?.type === 'dlq' && location.queueName === queue) ctx.jobIndex.delete(jobId);
+    ctx.jobResults.delete(jobId);
+    ctx.jobLogs.delete(jobId);
+    ctx.dependencyResults.releaseConsumer(jobId);
+  }
+}
+
 /** Remove every durable and global reference owned by terminal DLQ entries. */
 function cleanupPurgedEntries(
   queue: string,
@@ -136,14 +179,7 @@ function cleanupPurgedEntries(
   // auxiliary state must survive cleanup of the stale terminal generation.
   ctx.storage?.purgeDlqEntries(queue, jobIds, terminalJobIds, clearQueue);
 
-  for (const jobId of terminalJobIds) {
-    const location = ctx.jobIndex.get(jobId);
-    if (location?.type === 'dlq' && location.queueName === queue) {
-      ctx.jobIndex.delete(jobId);
-    }
-    ctx.jobResults.delete(jobId);
-    ctx.jobLogs.delete(jobId);
-  }
+  cleanupTerminalEntries(queue, entries, terminalJobIds, ctx);
 }
 
 /** Configure DLQ for a queue */

@@ -69,6 +69,7 @@ export interface JobManagementContext {
   eventsManager: EventsManager;
   repeatChain?: Map<JobId, JobId>;
   dependencyResults: DependencyResultTracker;
+  customIdMap: { get(id: string): JobId | undefined; delete(id: string): boolean };
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
 }

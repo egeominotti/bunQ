@@ -16,6 +16,19 @@ head:
 
 ## Unreleased
 
+### Added
+
+- Added `Queue.removeDlqJob(id)` and `removeDlqJobAsync(id)` for permanently
+  deleting one failed job without retrying it. Both methods await the selected
+  embedded or TCP broker and return whether an entry existed.
+
+### Fixed
+
+- Selective DLQ deletion is now restart-safe and complete. It propagates broker
+  failures, closes the discard/removal persistence race, removes all recovered
+  duplicate rows, and releases terminal custom-ID, dependency-result,
+  result/log, job-index, and flow-failure ownership.
+
 ## [2.8.61] - 2026-08-22
 
 ### Fixed

@@ -19,6 +19,7 @@ import {
   handleDlq,
   handleGetDlqStats,
   handlePurgeDlq,
+  handleRemoveDlqJob,
   handleRetryCompleted,
   handleRetryDlq,
 } from '../handlers/dlq';
@@ -64,6 +65,8 @@ export function routeDlqCommand(
       return handleRetryDlq(command, context, requestId);
     case 'PurgeDlq':
       return handlePurgeDlq(command, context, requestId);
+    case 'RemoveDlqJob':
+      return handleRemoveDlqJob(command, context, requestId);
     case 'RetryCompleted':
       return handleRetryCompleted(command, context, requestId);
     default:

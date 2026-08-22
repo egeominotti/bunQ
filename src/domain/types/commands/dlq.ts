@@ -22,6 +22,11 @@ export interface PurgeDlqCommand extends BaseCommand {
   readonly cmd: 'PurgeDlq';
   readonly queue: string;
 }
+export interface RemoveDlqJobCommand extends BaseCommand {
+  readonly cmd: 'RemoveDlqJob';
+  readonly queue: string;
+  readonly jobId: string;
+}
 export interface RetryCompletedCommand extends BaseCommand {
   readonly cmd: 'RetryCompleted';
   readonly queue: string;

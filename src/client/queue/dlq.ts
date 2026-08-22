@@ -209,6 +209,20 @@ export async function purgeDlqAsync(ctx: DlqContext): Promise<number> {
   return (response.count ?? 0) as number;
 }
 
+/** Remove one DLQ entry without re-enqueuing it. */
+export async function removeDlqJobAsync(ctx: DlqContext, id: string): Promise<boolean> {
+  if (ctx.embedded) return dlqOps.removeDlqJobEmbedded(ctx.name, id);
+  if (!ctx.tcp) return false;
+  const response = await ctx.tcp.send({ cmd: 'RemoveDlqJob', queue: ctx.name, jobId: id });
+  if (!response.ok) {
+    const error =
+      typeof response.error === 'string' ? response.error : 'Failed to remove the DLQ job';
+    throw new Error(error);
+  }
+  const payload = response as unknown as { data?: { removed?: boolean } };
+  return payload.data?.removed === true;
+}
+
 /** Retry completed job */
 export function retryCompleted(ctx: DlqContext, id?: string): number {
   if (ctx.embedded) {

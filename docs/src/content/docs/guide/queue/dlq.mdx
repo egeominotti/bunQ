@@ -49,6 +49,7 @@ const remoteStats = await queue.getDlqStatsAsync();
 queue.retryDlq();           // Retry all
 queue.retryDlq('job-123');  // Retry one
 queue.purgeDlq();           // Clear all
+const removed = await queue.removeDlqJob('job-123'); // Permanently delete one
 const retried = await queue.retryDlqByFilterAsync({ reason: 'stalled' });
 ```
 
@@ -162,7 +163,9 @@ and the synchronous mutation forms are fire-and-forget over TCP. Use
 `getDlqAsync(filter?)`, `getDlqStatsAsync()`, `retryDlqAsync()`,
 `retryDlqByFilterAsync(filter)`, and `purgeDlqAsync()` when a remote result or
 count matters. Full entry metadata and every live `Job` method survive the TCP
-round trip. `getDlqConfigAsync()` reads the authoritative server config.
+round trip. `removeDlqJob(id)` and `removeDlqJobAsync(id)` are Promise-based in
+both modes: they return `false` only when the entry is absent and reject broker
+errors. `getDlqConfigAsync()` reads the authoritative server config.
 :::
 
 See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/guide/stall-detection/) for `setStallConfig()`, which controls when unresponsive jobs are recovered.

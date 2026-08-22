@@ -117,6 +117,18 @@ export function purgeDlqJobs(queue: string, ctx: DlqContext): number {
   return entries.length;
 }
 
+/** Remove one DLQ entry without re-enqueuing it. */
+export function removeDlqJob(queue: string, id: JobId, ctx: DlqContext): boolean {
+  const shard = ctx.shards[shardIndex(queue)];
+  if (!shard.removeFromDlq(queue, id)) return false;
+  ctx.jobIndex.delete(id);
+  ctx.jobResults.delete(id);
+  ctx.jobLogs.delete(id);
+  ctx.storage?.deleteDlqEntry(id);
+  ctx.storage?.deleteJob(id);
+  return true;
+}
+
 /** Remove every durable and global reference owned by terminal DLQ entries. */
 function cleanupPurgedEntries(
   queue: string,

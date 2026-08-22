@@ -98,6 +98,18 @@ describe('TCP DLQ async facade returns authoritative results', () => {
     expect(h.manager.getDlqCount(queueName)).toBe(0);
   });
 
+  test('removeDlqJobAsync removes only the requested DLQ entry', async () => {
+    const h = setup();
+    const queueName = name('remove-dlq-job');
+    const queue = makeTcpQueue(h, queueName);
+    const removedId = await failJob(h, queue, queueName, { removed: true });
+    const retainedId = await failJob(h, queue, queueName, { retained: true });
+
+    expect(await queue.removeDlqJobAsync(removedId)).toBe(true);
+    expect(await queue.removeDlqJobAsync(removedId)).toBe(false);
+    expect((await queue.getDlqAsync()).map((entry) => entry.job.id)).toEqual([retainedId]);
+  });
+
   test('retryCompletedAsync returns the number moved back to waiting', async () => {
     const h = setup();
     const queueName = name('retry-completed');

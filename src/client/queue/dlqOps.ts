@@ -64,6 +64,7 @@ export function purgeDlqEmbedded(queue: string): number {
   return getSharedManager().purgeDlq(queue);
 }
 
+/** Remove one DLQ entry in embedded mode. */
 export function removeDlqJobEmbedded(queue: string, id: string): boolean {
   return getSharedManager().removeDlqJob(queue, jobId(id));
 }

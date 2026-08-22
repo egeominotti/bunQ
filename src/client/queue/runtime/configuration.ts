@@ -82,10 +82,12 @@ export class QueueConfiguration<T> extends QueueControl<T> {
     return dlqOps.purgeDlqAsync(this.ctx);
   }
 
+  /** Remove one DLQ entry and resolve after the server has processed it. */
   removeDlqJob(id: string) {
     return dlqOps.removeDlqJobAsync(this.ctx, id);
   }
 
+  /** Backward-compatible alias for removeDlqJob. */
   removeDlqJobAsync(id: string) {
     return this.removeDlqJob(id);
   }

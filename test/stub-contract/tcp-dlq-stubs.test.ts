@@ -107,6 +107,8 @@ describe('TCP DLQ async facade returns authoritative results', () => {
 
     expect(await queue.removeDlqJob(removedId)).toBe(true);
     expect(await queue.removeDlqJobAsync(removedId)).toBe(false);
+    const aliasId = await failJob(h, queue, queueName, { alias: true });
+    expect(await queue.removeDlqJobAsync(aliasId)).toBe(true);
     expect((await queue.getDlqAsync()).map((entry) => entry.job.id)).toEqual([retainedId]);
   });
 

@@ -21,7 +21,7 @@ const LOG_ROOT = `${ROOT}/artifacts/test-sandbox`;
 const LOG_DIR = `${LOG_ROOT}/${RUN_ID}`;
 
 const suites = [
-  { name: 'unit', command: ['bun', 'test'] },
+  { name: 'unit', command: ['bun', 'test', '--parallel=4'] },
   { name: 'tcp', command: ['bun', 'scripts/tcp/run-all-tests.ts'] },
   { name: 'embedded', command: ['bun', 'scripts/embedded/run-all-tests.ts'] },
 ] as const;

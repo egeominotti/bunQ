@@ -22,7 +22,7 @@ bun run test:sandbox
 It builds the current worktree once and runs ALL THREE required suites concurrently in separate disposable containers:
 
 ```bash
-bun test                                # Unit tests (~5000 tests)
+bun test --parallel=4                   # Unit tests (four isolated file workers)
 bun scripts/tcp/run-all-tests.ts        # TCP integration tests (~50 suites)
 bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites)
 ```
@@ -55,8 +55,8 @@ BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150 \
 BUNQUEUE_MODEL_SEED=-1959189325 bun run test:model
 ```
 
-This targeted command does not replace `bun run test:sandbox`; plain `bun test`
-inside the sandbox runs the model again.
+This targeted command does not replace `bun run test:sandbox`; the full
+`bun test --parallel=4` unit command inside the sandbox runs the model again.
 
 **MANDATORY: After ANY modification under `sdk/`, run before handoff (and run
 again before committing if the SDK changed afterward):**
@@ -77,7 +77,7 @@ and its JSON/NDJSON artifacts before handoff.
 - Use a fresh disposable Ubuntu 24.04 Machine on the Mac's native architecture (4 CPUs, request 16 GiB memory, at least 32 GiB disk) as the canonical local Linux gate. On Apple Silicon this is `arm64`; native `amd64` is covered independently by GitHub Actions `ubuntu-latest`. For every release, repeat the native product suites in a fresh Debian 13 Machine on the same host-native architecture. Record the effective cgroup limits because OrbStack may clamp requested resources.
 - A translated `amd64` Machine on Apple Silicon is diagnostic only. Repeat any result on a native-architecture Machine before using it as release evidence; process-heavy Bun tests may behave differently under Rosetta.
 - Create both Machines with `--isolated --isolate-network`. Never use `--mount` or `--forward-ssh-agent`, and never expose the repository, home directory, Docker socket, SSH agent, credentials, tokens, real `.env` files, or ignored files. A tracked placeholder-only template such as `.env.example` is allowed only after review. Copy an explicit sanitized snapshot over OrbStack's built-in SSH transport, including all intended worktree changes but excluding `.git`, dependencies, artifacts, SQLite files, generated output, and secrets.
-- Pin the same Bun version as CI and use the frozen lockfile. Directly inside each Machine run `bun test`, the TCP runner, the embedded runner, typecheck, Oxlint, and Oxfmt. Run `git diff --check` on the host before snapshot transfer because `.git` is deliberately excluded. Record the OS, architecture, kernel, Bun version/revision, commands, exit codes, durations, and exact totals before deleting the Machine.
+- Pin the same Bun version as CI and use the frozen lockfile. Directly inside each Machine run `bun test --parallel=4`, the TCP runner, the embedded runner, typecheck, Oxlint, and Oxfmt. Run `git diff --check` on the host before snapshot transfer because `.git` is deliberately excluded. Record the OS, architecture, kernel, Bun version/revision, commands, exit codes, durations, and exact totals before deleting the Machine.
 - OrbStack Machines share OrbStack's underlying Linux kernel. Treat them as strong filesystem/process/network isolation, not as a separate-kernel or physical security boundary.
 - The Machine gates supplement `bun run test:sandbox` and `bun run test:sandbox:sdk`; they do not replace them. Benchmarks remain native macOS-only and must never be published from a Machine or container.
 - The three top-level suite containers run in parallel by default; use `BUNQUEUE_TEST_SEQUENTIAL=1` only to diagnose resource contention.
@@ -558,7 +558,7 @@ CREATE INDEX idx_jobs_run_at ON jobs(run_at) WHERE state IN ('waiting','delayed'
 ## Testing
 
 ```bash
-bun test                                # Run in each required OrbStack Machine
+bun test --parallel=4                   # Run in each required OrbStack Machine
 bun scripts/tcp/run-all-tests.ts        # Run in each required OrbStack Machine
 bun scripts/embedded/run-all-tests.ts   # Run in each required OrbStack Machine
 bun run test:sandbox                    # Additional container-isolated full gate

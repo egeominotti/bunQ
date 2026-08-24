@@ -40,8 +40,8 @@ bun install
 There are three suites. All three must pass before any change lands:
 
 ```bash
-# Unit tests (~5000 tests)
-bun test
+# Unit tests (four isolated file workers)
+bun test --parallel=4
 
 # TCP integration tests (~50 suites, spawns a real server)
 bun scripts/tcp/run-all-tests.ts
@@ -63,11 +63,11 @@ bun run test:model
 BUNQUEUE_MODEL_RUNS=500 BUNQUEUE_MODEL_COMMANDS=150 \
 BUNQUEUE_MODEL_SEED=-1959189325 bun run test:model
 
-# Run with coverage
-bun test --coverage
+# Run the full unit suite with coverage
+bun test --parallel=4 --coverage
 ```
 
-Note: `bun test` preloads `test/preload.ts`, which sets `BUNQUEUE_EMBEDDED=1`. Tests that need real TCP behavior must opt out with an explicit `embedded: false` and spawn a server.
+Note: `bun test` preloads `test/preload.ts`, which sets `BUNQUEUE_EMBEDDED=1`. The full unit command uses four isolated worker processes; tests inside an individual file remain serial. Tests that need real TCP behavior must opt out with an explicit `embedded: false` and spawn a server.
 
 Changes to queue lifecycle, persistence/recovery, scheduling, dependencies,
 deduplication, leases, limits, TTL, counters, or indexes must run

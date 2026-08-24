@@ -87,14 +87,17 @@ function releaseGraphViolations(ci: Workflow, sdk: Workflow): string[] {
   return violations;
 }
 
-const [ciText, sdkText, releaseText] = await Promise.all([
+const [ciText, sdkText, releaseText, sandboxText, packageText] = await Promise.all([
   Bun.file(`${root}/.github/workflows/ci.yml`).text(),
   Bun.file(`${root}/.github/workflows/sdk.yml`).text(),
   Bun.file(`${root}/.github/workflows/sdk-release.yml`).text(),
+  Bun.file(`${root}/scripts/test-sandbox.ts`).text(),
+  Bun.file(`${root}/package.json`).text(),
 ]);
 const ci = Bun.YAML.parse(ciText) as Workflow;
 const sdk = Bun.YAML.parse(sdkText) as Workflow;
 const sdkRelease = Bun.YAML.parse(releaseText) as Workflow;
+const packageManifest = JSON.parse(packageText) as { scripts: Record<string, string> };
 
 describe('release graph SDK gate', () => {
   test('the SDK workflow is reusable and has no independent push race', () => {
@@ -127,6 +130,14 @@ describe('release graph SDK gate', () => {
 
   test('workflow command-file paths are quoted for ShellCheck', () => {
     expect(ciText).not.toMatch(/>>\s+\$GITHUB_(?:ENV|OUTPUT|PATH|STEP_SUMMARY)\b/);
+  });
+
+  test('local, sandbox, and CI unit gates use four isolated Bun workers', () => {
+    expect(packageManifest.scripts.test).toBe('BUNQUEUE_EMBEDDED=1 bun test --parallel=4');
+    expect(sandboxText).toContain("{ name: 'unit', command: ['bun', 'test', '--parallel=4'] }");
+    expect(ci.jobs.test?.steps?.find((step) => step.name === 'Run unit tests')?.run).toBe(
+      'bun test --parallel=4'
+    );
   });
 
   test('Docker publication exposes both the release version and latest tags', () => {

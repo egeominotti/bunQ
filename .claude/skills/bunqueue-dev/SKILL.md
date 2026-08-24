@@ -71,7 +71,7 @@ its logs. Direct macOS-host runs are diagnostic only. Machine runs supplement
 the mandatory Docker sandbox and never replace it.
 
 ```bash
-bun test                                # Unit tests (~5000 tests)
+bun test --parallel=4                   # Unit tests (four isolated file workers)
 bun scripts/tcp/run-all-tests.ts        # TCP integration tests (~50 suites)
 bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites)
 bun run test:sandbox                    # Additional container isolation gate

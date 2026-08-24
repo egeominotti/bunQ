@@ -22,6 +22,13 @@ head:
   deleting one failed job without retrying it. Both methods await the selected
   embedded or TCP broker and return whether an entry existed.
 
+### Changed
+
+- The full unit suite now uses Bun 1.4 file parallelism with four isolated
+  workers in the local package script, disposable Docker sandbox, and GitHub
+  Actions. The shared configuration is covered by a repository gate to prevent
+  the three entry points from drifting.
+
 ### Fixed
 
 - Selective DLQ deletion is now restart-safe and complete. It propagates broker

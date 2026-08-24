@@ -134,7 +134,7 @@ Provision the exact Bun version pinned by CI and install from the frozen
 lockfile. Then run, directly in each Machine:
 
 ```bash
-bun test
+bun test --parallel=4
 bun scripts/tcp/run-all-tests.ts
 bun scripts/embedded/run-all-tests.ts
 bun run typecheck
@@ -165,7 +165,7 @@ The sandbox builds the current worktree and runs ALL THREE required suites in
 parallel, in separate disposable containers:
 
 ```bash
-bun test                                # Unit tests (~5000 tests)
+bun test --parallel=4                   # Unit tests (four isolated file workers)
 bun scripts/tcp/run-all-tests.ts        # TCP integration tests (~50 suites)
 bun scripts/embedded/run-all-tests.ts   # Embedded integration tests (~35 suites)
 ```

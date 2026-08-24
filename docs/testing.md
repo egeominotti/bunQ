@@ -27,10 +27,16 @@ weakening the release gate:
 The sandbox executes these exact commands:
 
 ```bash
-bun test
+bun test --parallel=4
 bun scripts/tcp/run-all-tests.ts
 bun scripts/embedded/run-all-tests.ts
 ```
+
+The unit suite uses Bun 1.4's process-level file parallelism with four workers.
+`--parallel` implies per-file isolation, while tests inside each file remain
+serial unless they opt into `test.concurrent`. The explicit worker count keeps
+local, sandbox, and CI behavior consistent instead of scaling unexpectedly with
+the host's CPU count.
 
 The unit command includes `test/package-consumer-smoke.test.ts`. That test runs
 the library build, creates the exact npm tarball without network access, unpacks
@@ -309,8 +315,9 @@ command-serialization tests protect this distinction so a model expectation
 cannot accidentally bypass the engine's lease enforcement.
 
 The default campaign uses 150 runs and at most 80 generated commands. It is part
-of plain `bun test`, so the mandatory `test:sandbox` unit container executes it
-without a separate container. For deeper native investigation:
+of the full `bun test --parallel=4` unit suite, so the mandatory `test:sandbox`
+unit container executes it without a separate container. For deeper native
+investigation:
 
 ```bash
 BUNQUEUE_MODEL_RUNS=500 \
@@ -475,7 +482,10 @@ The environment is reproducible:
 
 `scripts/test-sandbox.ts` builds the image once, then starts one container per
 suite concurrently. Parallelism reduces wall-clock time to approximately the
-slowest suite instead of the sum of all three durations. Each container has:
+slowest suite instead of the sum of all three durations. Inside the unit
+container, Bun additionally distributes test files across four isolated worker
+processes; the TCP and embedded script runners retain their own sequencing.
+Each container has:
 
 - no host bind mounts, Docker socket, home directory, or credentials;
 - no external network (`--network none`); TCP/HTTP integration uses loopback;
@@ -578,7 +588,9 @@ tests specifically covering buffered visibility should poll with a deadline.
 GitHub Actions already gives each job a fresh virtual machine, so the unit, TCP,
 and embedded jobs remain parallel rather than starting nested Docker. They use
 the same pinned Bun version and frozen lockfile as the local sandbox. A CI job is
-the isolation equivalent of one local suite container.
+the isolation equivalent of one local suite container. The unit job runs
+`bun test --parallel=4`, matching both `bun run test` and the sandbox unit
+container.
 
 `test-core-e2e` runs `bun run test:core-e2e` as a distinct required job. Its
 TypeScript-compiler inventory currently covers 308 public instance methods

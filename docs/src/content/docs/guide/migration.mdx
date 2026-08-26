@@ -1,6 +1,6 @@
 ---
-title: "Replace BullMQ: Migrate to bunqueue in Minutes"
-description: "Replace BullMQ with bunqueue in minutes: keep your Queue and Worker API, delete the Redis config, switch to Bun-native SQLite."
+title: 'Replace BullMQ: Migrate to bunqueue in Minutes'
+description: 'Replace BullMQ with bunqueue in minutes: keep your Queue and Worker API, delete the Redis config, switch to Bun-native SQLite.'
 head:
   - tag: meta
     attrs:
@@ -12,8 +12,13 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · migration</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">BullMQ code, minus <em>Redis.</em></h1>
-  <p class="bq-hero-sub">bunqueue keeps the BullMQ Queue and Worker API. Most migrations are an import change and a deleted Redis config. This page shows the diff first, then lists every real difference.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    BullMQ code, minus <em>Redis.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    bunqueue keeps the BullMQ Queue and Worker API. Most migrations are an import change and a
+    deleted Redis config. This page shows the diff first, then lists every real difference.
+  </p>
 </div>
 
 This page is for BullMQ users. It shows the full before/after up front, then walks the steps and the few API differences that actually matter.
@@ -29,19 +34,27 @@ import { Queue, Worker } from 'bullmq';
 
 const connection = { host: 'localhost', port: 6379 };
 const queue = new Queue('emails', { connection });
-const worker = new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { connection, concurrency: 5 });
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+    return { sent: true };
+  },
+  { connection, concurrency: 5 }
+);
 
 // After: bunqueue, no Redis
 import { Queue, Worker } from 'bunqueue/client';
 
 const queue = new Queue('emails', { embedded: true, dataPath: './data/bunq.db' });
-const worker = new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { embedded: true, concurrency: 5 });
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+    return { sent: true };
+  },
+  { embedded: true, concurrency: 5 }
+);
 ```
 
 </TabItem>
@@ -53,19 +66,27 @@ import { Queue, Worker } from 'bullmq';
 
 const connection = { host: 'localhost', port: 6379 };
 const queue = new Queue('emails', { connection });
-const worker = new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { connection, concurrency: 5 });
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+    return { sent: true };
+  },
+  { connection, concurrency: 5 }
+);
 
 // After: bunqueue server + bunqueue-client, no Redis
 import { Queue, Worker } from 'bunqueue-client';
 
 const queue = new Queue('emails'); // connects to localhost:6789
-const worker = new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { concurrency: 5 });
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+    return { sent: true };
+  },
+  { concurrency: 5 }
+);
 ```
 
 Staying on Node.js or Deno? Install `bunqueue-client` instead of `bunqueue`, start the server once with `bunx bunqueue start --data-path ./data/bunq.db`, and keep your runtime.
@@ -73,7 +94,7 @@ Staying on Node.js or Deno? Install `bunqueue-client` instead of `bunqueue`, sta
 </TabItem>
 </Tabs>
 
-*Embedded mode (`embedded: true`) ships in the Bun `bunqueue` package only. On Node.js and Deno, `bunqueue-client` connects to a bunqueue server; the Queue and Worker API is otherwise the same.*
+_Embedded mode (`embedded: true`) ships in the Bun `bunqueue` package only. On Node.js and Deno, `bunqueue-client` connects to a bunqueue server; the Queue and Worker API is otherwise the same._
 
 `embedded: true` runs the queue inside your process, backed by a local SQLite file, so there is no queue server to operate. `dataPath` says where that file lives.
 
@@ -143,7 +164,7 @@ BullMQ's legacy `repeat: { cron: '...' }` key becomes `pattern`:
 
 ```typescript
 await queue.add('task', data, { repeat: { pattern: '0 * * * *' } }); // cron syntax
-await queue.add('task', data, { repeat: { every: 3600000 } });        // fixed interval
+await queue.add('task', data, { repeat: { every: 3600000 } }); // fixed interval
 ```
 
 ### removeOnComplete is boolean only
@@ -155,10 +176,14 @@ BullMQ accepts `removeOnComplete: { age, count }` for retention rules. bunqueue 
 BullMQ lets you pass a file path as the processor to run it in a child process. In bunqueue, move that logic into an inline processor function (recommended, production-ready):
 
 ```typescript
-const worker = new Worker('queue', async (job) => {
-  // the same logic from your processor.js
-  return result;
-}, { embedded: true, concurrency: 4 });
+const worker = new Worker(
+  'queue',
+  async (job) => {
+    // the same logic from your processor.js
+    return result;
+  },
+  { embedded: true, concurrency: 4 }
+);
 ```
 
 An experimental `SandboxedWorker` (built on Bun Workers) exists if you need process isolation. See [Worker vs SandboxedWorker](/guide/worker/sandboxed/#worker-vs-sandboxedworker).
@@ -168,22 +193,28 @@ An experimental `SandboxedWorker` (built on Bun Workers) exists if you need proc
 The per-worker `limiter` works as in BullMQ. bunqueue also offers a queue-level limit:
 
 ```typescript
-queue.setGlobalRateLimit(100);         // max 100 jobs per second across all workers
+queue.setGlobalRateLimit(100); // max 100 jobs per second across all workers
 queue.setGlobalRateLimit(100, 60_000); // max 100 jobs per minute
 ```
 
 The optional second `duration` argument is the window in milliseconds and is
 enforced by the broker in both embedded and TCP modes. It defaults to 1,000 ms.
 
-### No Redis, no Redis Cluster
+### No Redis required
 
-bunqueue is single-instance: one server process owns the SQLite file. Many workers can connect to it over TCP, but you cannot shard the queue itself across servers like Redis Cluster. If you need that, see [when BullMQ is the better pick](/guide/comparison/#when-to-use-bullmq-instead).
+bunqueue uses one SQLite broker by default, and many workers may connect over
+TCP. If the broker tier must scale, standalone servers can instead share a
+PostgreSQL 18.6 database/namespace. This is not Redis Cluster and does not copy
+its topology or Redis-specific semantics; see [storage
+backends](/guide/databases/) and [when BullMQ is the better
+pick](/guide/comparison/#when-to-use-bullmq-instead).
 
 ## Migration checklist
 
 - [ ] `bun remove bullmq ioredis`, `bun add bunqueue`
 - [ ] Imports point to `bunqueue/client`
 - [ ] Redis connection config deleted, `embedded: true` + `dataPath` (or `connection`) added
+- [ ] For multi-broker server mode, PostgreSQL 18.6 URL/namespace and unique broker IDs configured
 - [ ] `repeat: { cron }` renamed to `repeat: { pattern }`
 - [ ] `removeOnComplete`/`removeOnFail` objects replaced with booleans
 - [ ] File-path processors converted to inline processor functions
@@ -193,7 +224,9 @@ bunqueue is single-instance: one server process owns the SQLite file. Many worke
 ## Gotchas
 
 - **Persistence is opt-in for embedded mode.** No `dataPath` means in-memory only. Server mode reads `BUNQUEUE_DATA_PATH` or `--data-path`.
-- **One writer per SQLite file.** Do not point two embedded processes at the same database file. For multi-process setups, run one server and connect workers over TCP.
+- **One writer per SQLite file.** Do not point two embedded processes or brokers
+  at the same file. Multiple clients use one SQLite server; multiple active
+  brokers use PostgreSQL 18.6.
 - **`SandboxedWorker` is experimental.** Prefer inline processors in production.
 
 ## Getting help
@@ -201,7 +234,8 @@ bunqueue is single-instance: one server process owns the SQLite file. Many worke
 Open a [GitHub issue](https://github.com/egeominotti/bunqueue/issues) or ask in [Discussions](https://github.com/egeominotti/bunqueue/discussions).
 
 :::tip[Related]
+
 - [bunqueue vs BullMQ](/guide/comparison/), features and benchmarks
 - [Queue API](/guide/queue/) and [Worker API](/guide/worker/)
 - [FAQ](/faq/), common migration questions
-:::
+  :::

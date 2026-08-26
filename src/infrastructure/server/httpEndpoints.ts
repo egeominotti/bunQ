@@ -3,6 +3,7 @@
  */
 
 import type { QueueManager } from '../../application/queueManager';
+import { clientStorageStatus, isStorageDegraded } from '../../shared/storageHealth';
 import { VERSION } from '../../shared/version';
 import { throughputTracker } from '../../application/throughputTracker';
 import { jsonResponse } from './httpResponse';
@@ -55,7 +56,8 @@ export function healthEndpoint(
   const uptime = process.uptime();
   const memoryUsage = process.memoryUsage();
   const storageStatus = queueManager.getStorageStatus();
-  const isHealthy = !storageStatus.diskFull;
+  const clientStorage = clientStorageStatus(storageStatus);
+  const isHealthy = !isStorageDegraded(storageStatus);
 
   return jsonResponse(
     {
@@ -80,11 +82,11 @@ export function healthEndpoint(
         heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
         rss: Math.round(memoryUsage.rss / 1024 / 1024),
       },
-      ...(storageStatus.diskFull && {
+      ...(!isHealthy && {
         storage: {
-          diskFull: true,
-          error: storageStatus.error,
-          since: storageStatus.since,
+          diskFull: clientStorage.diskFull,
+          error: clientStorage.error,
+          since: clientStorage.since,
         },
       }),
     },
@@ -95,12 +97,21 @@ export function healthEndpoint(
 /** Readiness check - persistence failures must stop new traffic. */
 export function readinessEndpoint(queueManager: QueueManager, corsOrigins?: Set<string>): Response {
   const storage = queueManager.getStorageStatus();
-  const ready = !storage.diskFull;
+  const clientStorage = clientStorageStatus(storage);
+  const ready = !isStorageDegraded(storage);
   return jsonResponse(
     {
       ok: ready,
       ready,
-      ...(ready ? {} : { storage: { diskFull: true, error: storage.error, since: storage.since } }),
+      ...(ready
+        ? {}
+        : {
+            storage: {
+              diskFull: clientStorage.diskFull,
+              error: clientStorage.error,
+              since: clientStorage.since,
+            },
+          }),
     },
     ready ? 200 : 503,
     corsOrigins

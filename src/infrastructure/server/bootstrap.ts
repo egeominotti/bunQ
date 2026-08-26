@@ -9,7 +9,6 @@ import { QueueManager } from '../../application/queueManager';
 import { createTcpServer } from './tcp';
 import { createHttpServer } from './http';
 import { Logger, serverLog, statsLog, type LogLevel } from '../../shared/logger';
-import { stopRateLimiter } from './rateLimiter';
 import { VERSION } from '../../shared/version';
 import { S3BackupManager } from '../backup';
 import { CloudAgent } from '../cloud';
@@ -21,19 +20,16 @@ import {
   type BunqueueConfig,
   type ResolvedConfig,
 } from '../../config';
+import {
+  backupStartupError,
+  createServerQueueManager,
+  shutdownServerQueueManager,
+  storageDisplay,
+  storageStartupError,
+} from './storageManager';
+import { createServerShutdown } from './shutdownCoordinator';
 
-/** Return a startup error when an enabled file backup has no file to snapshot. */
-export function backupStartupError(
-  config: Pick<ResolvedConfig, 's3BackupEnabled' | 'dataPath'>
-): string | null {
-  if (config.s3BackupEnabled && !config.dataPath) {
-    return (
-      'S3 backup requires persistent SQLite storage. Set BUNQUEUE_DATA_PATH ' +
-      'or storage.dataPath before enabling S3_BACKUP_ENABLED.'
-    );
-  }
-  return null;
-}
+export { backupStartupError } from './storageManager';
 
 /** Print startup banner */
 function printBanner(config: ResolvedConfig, cloudUrl?: string): void {
@@ -64,9 +60,7 @@ function printBanner(config: ResolvedConfig, cloudUrl?: string): void {
     ? `${green}enabled${reset} ${dim}(${config.tcpSocketPath ? 'TCP' : ''}${config.tcpSocketPath && config.httpSocketPath ? '+' : ''}${config.httpSocketPath ? 'HTTP' : ''})${reset}`
     : `${dim}disabled${reset}`;
 
-  const storageDisplay = config.dataPath
-    ? `${bold}SQLite${reset} ${dim}·${reset} ${config.dataPath}`
-    : `in-memory ${dim}· ephemeral${reset}`;
+  const persistenceDisplay = storageDisplay(config);
 
   console.log(`
 ${magenta}        (\\(\\        ${reset}
@@ -78,7 +72,7 @@ ${dim}────────────────────────�
 ${row(active, 'TCP', tcpDisplay)}
 ${row(active, 'HTTP', httpDisplay)}
 ${row(hasUnixSockets ? active : inactive, 'Unix socket', socketDisplay)}
-${row(info, 'Storage', storageDisplay)}
+${row(info, 'Storage', persistenceDisplay)}
 ${row(config.s3BackupEnabled ? active : inactive, 'S3 Backup', config.s3BackupEnabled ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
 ${row(config.tlsCertFile ? active : inactive, 'TLS', config.tlsCertFile ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
 ${row(config.authTokens.length > 0 ? active : inactive, 'Auth', config.authTokens.length > 0 ? `${green}enabled${reset}` : `${dim}disabled${reset}`)}
@@ -91,7 +85,10 @@ ${dim}────────────────────────�
 }
 
 /** Boot the full server from resolved configuration. Runs until shutdown. */
-export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedConfig): void {
+export async function bootServer(
+  fileConfig: BunqueueConfig | null,
+  config: ResolvedConfig
+): Promise<void> {
   // Apply logging config before anything else
   const logFormat = fileConfig?.logging?.format ?? Bun.env.LOG_FORMAT;
   const logLevel = fileConfig?.logging?.level ?? Bun.env.LOG_LEVEL?.toLowerCase();
@@ -101,9 +98,9 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
     if (validLevels.includes(logLevel as LogLevel)) Logger.setLevel(logLevel as LogLevel);
   }
 
-  const backupError = backupStartupError(config);
-  if (backupError) {
-    serverLog.error(backupError);
+  const startupError = storageStartupError(config) ?? backupStartupError(config);
+  if (startupError) {
+    serverLog.error(startupError);
     process.exitCode = 1;
     return;
   }
@@ -120,13 +117,17 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
     process.exit(1);
   }
 
+  let queueManager: QueueManager;
+  try {
+    queueManager = await createServerQueueManager(config);
+  } catch (error) {
+    serverLog.error('Failed to initialize storage', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+    return;
+  }
   printBanner(config, cloudConfig?.url);
-
-  // Create queue manager
-  const queueManager = new QueueManager({
-    dataPath: config.dataPath,
-    maxPrometheusQueues: config.maxPrometheusQueues,
-  });
 
   // Start TCP + HTTP servers; a bind failure must not leave a half-started process
   let tcpServer: ReturnType<typeof createTcpServer>;
@@ -152,13 +153,13 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error(`Failed to start server: ${msg}`);
-    queueManager.shutdown();
+    await shutdownServerQueueManager(queueManager);
     process.exit(1);
   }
 
   // Initialize S3 backup manager
   let backupManager: S3BackupManager | null = null;
-  if (config.dataPath) {
+  if (config.storageDriver === 'sqlite' && config.dataPath) {
     const backupConfig = resolveBackupConfig(fileConfig, config.dataPath);
     backupManager = new S3BackupManager({
       ...backupConfig,
@@ -199,44 +200,17 @@ export function bootServer(fileConfig: BunqueueConfig | null, config: ResolvedCo
     shards: SHARD_COUNT,
   });
 
-  // Graceful shutdown
-  let shuttingDown = false;
-  const shutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    serverLog.info(`Received ${signal}, shutting down...`);
-
-    // Stop stats interval immediately
-    clearInterval(statsInterval);
-
-    tcpServer.stop();
-    httpServer.stop();
-
-    const shutdownTimeout = config.shutdownTimeoutMs;
-    const start = Date.now();
-    while (Date.now() - start < shutdownTimeout) {
-      const stats = queueManager.getStats();
-      if (stats.active === 0) break;
-      serverLog.info(`Waiting for ${stats.active} active jobs...`);
-      await Bun.sleep(1000);
-    }
-
-    // Stop backup manager
-    if (backupManager) {
-      backupManager.stop();
-    }
-
-    // Stop Cloud agent (sends final shutdown snapshot)
-    if (cloudAgent) {
-      await cloudAgent.stop();
-    }
-
-    queueManager.emitDashboardEvent('server:shutdown', { signal });
-    queueManager.shutdown();
-    stopRateLimiter();
-    serverLog.info('Shutdown complete');
-    process.exit(0);
-  };
+  const shutdown = createServerShutdown({
+    shutdownTimeoutMs: config.shutdownTimeoutMs,
+    stopStats: () => clearInterval(statsInterval),
+    stopTcp: () => tcpServer.stop(),
+    stopHttp: () => httpServer.stop(),
+    getActiveJobs: () => queueManager.getStats().active,
+    ...(backupManager && { stopBackup: () => backupManager.stop() }),
+    emitShutdown: (signal) => queueManager.emitDashboardEvent('server:shutdown', { signal }),
+    ...(cloudAgent && { stopCloud: () => cloudAgent.stop() }),
+    shutdownStorage: () => shutdownServerQueueManager(queueManager),
+  });
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

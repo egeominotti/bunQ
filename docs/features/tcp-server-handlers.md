@@ -1,10 +1,10 @@
 # TCP Server Command Handlers
 
-> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/`, `src/infrastructure/server/tcp/eventSubscriptions.ts`, `src/infrastructure/server/tcp/connections.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types/`
+> **Category:** Transport · **Source:** `src/infrastructure/server/handler.ts`, `src/infrastructure/server/errors.ts`, `src/infrastructure/server/handlerRoutes.ts`, `src/infrastructure/server/handlers/`, `src/infrastructure/server/tcp/eventSubscriptions.ts`, `src/infrastructure/server/tcp/connections.ts`, `src/infrastructure/server/bootstrap.ts`, `src/infrastructure/server/types/`
 
 ## Purpose
 
-This module is the request-handling layer of the server: it takes an already-decoded `Command` object (a msgpack frame unpacked by the TCP transport), authenticates it, dispatches it through a chain of category routers to the matching handler function, and returns a typed `Response`. Each handler is a thin adapter that validates wire input, calls one method on the `QueueManager`, and shapes the result into a response builder — it contains no queue business logic itself. `bootstrap.ts` is the single place that wires a full server together (`QueueManager` + TCP server + HTTP server + S3 backup + Cloud agent + stats interval + graceful shutdown), so both entry points (`bunqueue` bare and `bunqueue start`) cannot drift.
+This module is the request-handling layer of the server: it takes an already-decoded `Command` object (a msgpack frame unpacked by the TCP transport), authenticates it, dispatches it through a chain of category routers to the matching handler function, and returns a typed `Response`. Each handler is a thin adapter that validates wire input, calls one method on the selected manager, and shapes the result into a response builder — it contains no queue business logic itself. Memory/SQLite manager calls remain synchronous; handlers return a promise only for durable operations exposed by the optional PostgreSQL manager. `bootstrap.ts` is the single place that wires a full server together (selected storage manager + TCP server + HTTP server + SQLite-only S3 backup + Cloud agent + stats interval + graceful shutdown), so both entry points (`bunqueue` bare and `bunqueue start`) cannot drift.
 
 ## Responsibilities & Scope
 
@@ -12,7 +12,11 @@ Owns:
 
 - The top-level dispatch entry point `handleCommand(cmd, ctx)` (`handler.ts:48`) and the per-command authentication gate.
 - Authentication: constant-time token comparison and the "Not authenticated" gate (`handler.ts:30`, `handler.ts:58`).
-- Category routing: ten `route*Command` functions that switch on `cmd.cmd` and return `Response | null` (`handlerRoutes.ts`).
+- Category routing: ten `route*Command` functions that switch on `cmd.cmd` and
+  return `Response | Promise<Response> | null` where durable PostgreSQL I/O is
+  possible. `DashboardOverview` is async in PostgreSQL mode because it reads the
+  durable worker/cron registries; the remaining dashboard commands and the
+  complete memory/SQLite dashboard path stay synchronous (`handlerRoutes.ts`).
 - Per-handler wire-input validation (queue name, job data size, numeric-field bounds, webhook URL/events, config-number sanitization) before delegating to `QueueManager`.
 - Mapping `QueueManager` return values / thrown errors into the typed `Response` union via the `resp.*` builders.
 - Client-job ownership registration on pull and de-registration on ack/fail (`registerClientJob` / `unregisterClientJob`).
@@ -39,6 +43,9 @@ Internal:
 - `src/infrastructure/server/protocol.ts` — `validateQueueName`, `validateJobData`, `validateJobOptions`, `validateNumericField`, `validateWebhookUrl`.
 - `src/shared/hash.ts` — `constantTimeEqual` (auth), `SHARD_COUNT` (bootstrap banner/events).
 - `src/shared/pausedView.ts` — `pausedView` (paused-aware count bucketing, #92).
+- `src/shared/storageHealth.ts` — common degraded-state predicate and the
+  client-safe projection that keeps SQLite disk-full detail while redacting
+  non-disk infrastructure diagnostics.
 - `src/application/throughputTracker.ts`, `src/application/latencyTracker.ts` — rate/latency snapshots for stats, metrics, dashboard.
 - `src/domain/types/webhook.ts` — `WEBHOOK_EVENTS` allow-list for webhook validation.
 - `bootstrap.ts` additionally depends on `./tcp`, `./http`, `../backup` (`S3BackupManager`), `../cloud` (`CloudAgent`), `./rateLimiter`, `../../config`, `../../shared/logger`.
@@ -50,8 +57,10 @@ External / runtime: Bun (`Bun.env`, `Bun.sleep`, `process.memoryUsage`, signal h
 Exported functions:
 
 - `handleCommand(cmd: Command, ctx: HandlerContext): Promise<Response>` (`handler.ts:48`) — the dispatch entry point.
-- Ten category routers (`handlerRoutes.ts`): `routeCoreCommand`, `routeQueryCommand`, `routeManagementCommand` (all `async`, return `Promise<Response | null>`), and `routeQueueControlCommand`, `routeDlqCommand`, `routeRateLimitCommand`, `routeConfigCommand`, `routeCronCommand`, `routeMonitoringCommand`, `routeDashboardCommand` (sync, return `Response | null`).
-- `bootServer(fileConfig: BunqueueConfig | null, config: ResolvedConfig): void` (`bootstrap.ts:94`).
+- Ten category routers (`handlerRoutes.ts`): core/query/management are async;
+  queue-control, DLQ, rate, config, cron, and monitoring return
+  `Response | Promise<Response> | null`; dashboard returns `Response | null`.
+- `bootServer(fileConfig: BunqueueConfig | null, config: ResolvedConfig): Promise<void>` (`bootstrap.ts`).
 - `PROTOCOL_VERSION = 3` and `SUPPORTED_CAPABILITIES = ['pipelining', 'separate-job-name']`, returned by `Hello`. Revision 3 uses top-level `job.name` and leaves `job.data` unchanged; legacy requests without a top-level name are decoded only by the inbound command handlers.
 - `interface HandlerContext` re-exported from `handler.ts` (defined in `src/infrastructure/server/types.ts:8-16`).
 
@@ -66,7 +75,12 @@ TCP commands handled (exact `cmd.cmd` values), by router:
 - **Rate** (`routeRateLimitCommand`): `RateLimit`, `RateLimitClear`, `SetConcurrency`, `ClearConcurrency`.
 - **Config** (`routeConfigCommand`): `SetStallConfig`, `GetStallConfig`, `SetDlqConfig`, `GetDlqConfig`.
 - **Cron** (`routeCronCommand`): `Cron`, `CronGet`, `CronDelete`, `CronList`.
-- **Monitoring** (`routeMonitoringCommand`): `Stats`, `Metrics`, `Prometheus`, `AddLog`, `GetLogs`, `Heartbeat`, `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `Hello`, `RegisterWorker`, `UnregisterWorker`, `ListWorkers`, `AddWebhook`, `RemoveWebhook`, `ListWebhooks`, `StorageStatus`, `ClearLogs`, `SetWebhookEnabled`, `CompactMemory`.
+- **Monitoring** (`routeMonitoringCommand`): `Stats`, `Metrics` (global or
+  queue/type metrics), `TrimEvents`, `Prometheus`, `AddLog`, `GetLogs`,
+  `Heartbeat`, `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `Hello`,
+  `RegisterWorker`, `UnregisterWorker`, `ListWorkers`, `AddWebhook`,
+  `RemoveWebhook`, `ListWebhooks`, `StorageStatus`, `ClearLogs`,
+  `SetWebhookEnabled`, `CompactMemory`.
 - **Dashboard** (`routeDashboardCommand`): `DashboardOverview`, `DashboardQueues`, `DashboardQueue`.
 - **Event subscription** (intercepted by `src/infrastructure/server/tcp.ts:85-90` before `handleCommand`):
   `SubscribeEvents`, `UnsubscribeEvents`. They still pass the connection rate
@@ -93,7 +107,13 @@ Main dispatch (`handleCommand`, `handler.ts:48`):
 3. Auth gate: if `ctx.authTokens.size > 0 && !ctx.authenticated`, return `error('Not authenticated')` (`handler.ts:58`). When no tokens are configured, the TCP `open` handler pre-sets `ctx.authenticated = true` so this gate is a no-op.
 4. Run the routers in fixed order (`handler.ts:65`–`93`): core → query → management → queue-control → dlq → rate-limit → config → cron → monitoring → dashboard. The first router returning a non-null `Response` wins (`if (result) return result;`).
 5. If all routers return `null`, return `error('Unknown command: ...')`.
-6. Any thrown error is caught at `handler.ts:96`; messages containing `SQLITE` or `database` are replaced with `'Internal server error'` to avoid leaking internals, everything else is passed through.
+6. Any thrown error is caught at the dispatch boundary and passed to
+   `sanitizeServerError`. PostgreSQL SQLSTATE/driver/constraint diagnostics,
+   SQLite failures, and connection details become `'Internal server error'`;
+   intended domain validation and lifecycle errors remain actionable. Handlers
+   with local `catch` blocks apply the same sanitizer instead of bypassing the
+   outer boundary, and dependency reads propagate failures rather than
+   fabricating successful empty values.
 
 The TCP adapter handles event subscription commands beside this router because
 they mutate socket-owned state. `handleEventSubscription` applies the same auth
@@ -106,8 +126,21 @@ Auth (`handleAuth`, `handler.ts:30`): iterate configured tokens, comparing with 
 
 Core paths:
 
-- `handlePush` (`core.ts:20`): validates queue name, data size (≤10MB), and numeric option bounds, then validates each `dependsOn` id exists in `jobIndex` **or** `completedJobs` **or** `depCompletions` — the third check covers a `removeOnComplete` parent whose row was deleted, otherwise a late dependent is wrongly rejected (`core.ts:43`). On success returns the new job id via `resp.ok(job.id)`.
-- `handlePushBatch` (`src/infrastructure/server/handlers/core.ts:104-124`): validates queue name, then runs `validatePushBatchJobs` (`pushBatchValidation.ts`) per job: the same data-size, `validateJobOptions` bounds, and `dependsOn` existence gate as `PUSH`, with the gate extended to accept the custom ids of **any jobs in the same batch** so order-independent intra-batch chains keep working. On violation returns an error naming the offending index (`jobs[i]: ...`); on success returns `resp.batch(ids)`.
+- `handlePush` (`core.ts`): validates queue name, data size (≤10MB), and numeric
+  option bounds. Memory/SQLite validates each `dependsOn` id against
+  `jobIndex`, `completedJobs`, or `depCompletions`. PostgreSQL first queries the
+  authoritative namespace so a remote parent is accepted even while the local
+  event snapshot lags; admission repeats the existence assertion inside the
+  write transaction under the dependency locks, closing the preflight/removal
+  TOCTOU. On success it returns the new job id via `resp.ok(job.id)`.
+- `handlePushBatch` (`src/infrastructure/server/handlers/core.ts`) validates the
+  queue, then runs async-capable `validatePushBatchJobs` per job with the same
+  bounds and engine-aware dependency gate as `PUSH`. Same-batch custom IDs are
+  accepted in either order. PostgreSQL performs one set-based preflight and one
+  transaction-final assertion, so a planned parent that deduplicates to a
+  different ID rolls the entire batch back. SQLite keeps its synchronous local
+  validation. On validation failure, the handler returns an indexed
+  `jobs[i]: ...` error when available; on success it returns `resp.batch(ids)`.
 - `handlePushFlow` (`flow.ts`): passes the fully resolved multi-queue graph to
   `QueueManager.pushFlow`. The application validator checks the complete batch
   before mutation, including strict string/array/boolean wire types, internal
@@ -122,7 +155,11 @@ Core paths:
 
 Notable management/advanced flows:
 
-- `handleMoveToWait` (`src/infrastructure/server/handlers/advanced/jobs.ts:154-183`): dispatches on the job's current state — `active`→`moveActiveToWait`, `delayed`→`promote`, `failed`→`retryDlq`, `waiting`/`prioritized`→no-op success, anything else→error. Mirrors the embedded branching in `jobMove.ts`.
+- `handleMoveToWait` (`src/infrastructure/server/handlers/advanced/jobs.ts`):
+  dispatches on the job's current state — `active`→`moveActiveToWait`,
+  `delayed`→`promote`, `failed`→the PostgreSQL `retryDlqDurable` method when
+  present or the unchanged synchronous SQLite `retryDlq` fallback,
+  `waiting`/`prioritized`→no-op success, anything else→error.
 - `handleMoveToWaitingChildren` requires an active job and delegates the full resource/index/persistence transition to `QueueManager`; a non-active id returns an error.
 - The introspection handlers return live queue-limit status and owner-aware deduplication lookup/removal through `DataResponse` payloads.
 - `handleDlq` returns both jobs and full filtered entries; `handleGetDlqStats` returns the authoritative aggregate. Filtered retries and completed retries pass their `count`/`timestamp` selectors to the manager instead of dropping them. `handleRemoveDlqJob` returns `data.removed` from the durable, idempotent selective deletion; thrown persistence errors are converted by the top-level handler into an error response rather than a false miss.
@@ -130,7 +167,12 @@ Notable management/advanced flows:
 - `handleWaitJob` (`src/infrastructure/server/handlers/advanced/jobs.ts:98-132`): caps `timeout` to `[0, 600000]` (default 30s); returns immediately if `job.completedAt` is set, otherwise awaits `waitForJobCompletion` (event-driven, no polling).
 - Config setters (`handleSetStallConfig`, `handleSetDlqConfig`): run `sanitizeConfigNumbers` (`handlers/advanced/configNumbers.ts:7-27`) to coerce numeric strings and drop non-numeric garbage so the manager's merge never stores `NaN` (a string `stallInterval` would otherwise silently disable stall detection).
 
-Query/dashboard count handling: `handleGetJobCounts` (`src/infrastructure/server/handlers/query.ts:63-88`) and `handleDashboardQueue` (`src/infrastructure/server/handlers/dashboard.ts:116`) both run `pausedView(waiting, prioritized, isPaused)` so a paused queue reports its ready jobs under `paused` rather than double-counting (#92, BullMQ semantics).
+Query/dashboard count handling: `handleGetJobCounts` and
+`handleDashboardQueue` both run `pausedView(waiting, prioritized, isPaused)` so
+a paused queue reports its ready jobs under `paused` rather than double-counting
+(#92, BullMQ semantics). `DashboardOverview` is async only for PostgreSQL and
+reads the shared worker and cron registries; memory/SQLite retains the original
+synchronous local-manager path.
 
 `handleGetJobs` forwards `cmd.asc ?? true` to the manager. Ordering therefore
 occurs over the complete logical state result before `offset`/`limit` slicing;
@@ -138,7 +180,13 @@ an explicit `false` must not be collapsed to the ascending default.
 
 Webhook creation (`handleAddWebhook`, `handlers/monitoring/webhooks.ts:13-29`): validates the URL (SSRF guard via `validateWebhookUrl`) and rejects any event not in `WEBHOOK_EVENTS` (a webhook on a dead event would be created "ok" then never fire).
 
-Bootstrap (`bootServer`, `bootstrap.ts:94`): applies logging config, resolves cloud/TLS config (fails fast `process.exit(1)` on partial cert/key), prints the banner, constructs the `QueueManager`, then starts TCP + HTTP servers inside a try/catch that shuts the manager down and exits on bind failure. It then conditionally starts `S3BackupManager` (only when `dataPath` is set) and the `CloudAgent`, registers SIGINT/SIGTERM/`uncaughtException`/`unhandledRejection` handlers, and a stats interval. Graceful shutdown (`bootstrap.ts:202-239`) stops the servers and drains active jobs up to `shutdownTimeoutMs` before exiting.
+Bootstrap (`bootServer`, `bootstrap.ts`): applies logging config, validates the
+storage/backup combination, resolves cloud/TLS config, and awaits
+`createServerQueueManager()`. That factory returns the unchanged `QueueManager`
+for memory/SQLite or an initialized `PostgresQueueManager` for PostgreSQL. Only
+then does bootstrap print the banner and bind TCP + HTTP. `S3BackupManager` starts
+only for persistent SQLite. Shutdown dispatches to synchronous SQLite cleanup or
+awaited PostgreSQL lease/worker/broker/listener/pool cleanup.
 
 ## Concurrency & Locking
 
@@ -153,28 +201,47 @@ Concurrency relevant to this layer:
 
 ## Edge Cases & Failure Modes
 
-- **Error sanitization (double layer):** `handleCommand` catches and rewrites `SQLITE`/`database` errors to `'Internal server error'` (`handler.ts:96-101`); the transport's `processFrame` repeats the same sanitization as a secondary net (`src/infrastructure/server/tcp.ts:93-98`).
+- **Error sanitization (double layer):** `handleCommand` and the TCP frame
+  boundary both call `server/errors.ts`. Storage SQLSTATE, constraint, driver,
+  host, and network diagnostics are never returned to a protocol client, while
+  domain errors are preserved. Non-throwing storage-health payloads use
+  `clientStorageStatus` for the same guarantee across health/readiness,
+  dashboard, MCP, and Cloud boundaries; SQLite `diskFull:true` retains its
+  actionable message and timestamp.
 - **PUSHB validation parity:** batch push runs the same option bounds and `dependsOn` existence gate as single `PUSH` (`pushBatchValidation.ts`); a job `PUSH` would reject is rejected inside a batch too, with the error naming the offending index. `dependsOn` may additionally reference any same-batch custom id.
 - **`Stats`/`Metrics` routing quirk:** these two are dispatched calling `handleStats(ctx, reqId)` / `handleMetrics(ctx, reqId)` without the `cmd` argument (`src/infrastructure/server/handler-routes/monitoring.ts:36-47`); all other handlers receive `cmd` first.
 - **`MetricsData` placeholder fields:** `sqliteSizeMb` and `activeConnections` are hard-coded to `0` in `handleMetrics` (`src/infrastructure/server/handlers/management.ts:128-145`); real connection/SSE/WS counts are only surfaced via the bootstrap stats interval and the Cloud agent handles.
 - **Idempotency / custom id:** `customId` (`cmd.jobId`) and `uniqueKey` dedup are enforced inside `QueueManager.push`, not here. The handler just forwards them. See [Deduplication & Unique Jobs](./deduplication-and-unique.md).
-- **Graceful "values" fallback:** flow-value queries (`GetChildrenValues`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`) catch internally and return `{ values: {} }` rather than an error (`query.ts:137-148`, `src/infrastructure/server/handlers/advanced/dependencies.ts:7-30`).
+- **Flow-value read failures:** `GetChildrenValues`,
+  `GetFailedChildrenValues`, and `GetIgnoredChildrenFailures` return a sanitized
+  error response when their authoritative read fails. An empty successful map
+  now means the read succeeded and found no values; database failures can no
+  longer masquerade as that result.
 - **NaN / non-finite guards:** `validateNumericField` rejects `NaN`/`Infinity` (important for `WaitJob`/`PULL` timeouts, which a hand-rolled `<min`/`>max` check would let through and resolve instantly; `protocol/validation.ts:21-42`), and `toFiniteNumber` guards `RateLimit`/`SetConcurrency` limits (`handlers/advanced/configNumbers.ts:1-5`).
 - **Auth bypass surface:** `Auth` is processed before the auth gate, so it is always reachable; failed attempts emit `auth:failed` but otherwise return a generic `Invalid token`. There is no per-connection attempt counter at this layer.
 - **`ConnectionState.authenticated` is vestigial:** `protocol/commands.ts:29-31` sets it to `false`, but the authoritative auth flag is `HandlerContext.authenticated` (set to `authTokens.size === 0` at `tcp/connections.ts:35-40`). Do not read `state.authenticated` for gating.
-- **Bootstrap fail-fast:** partial TLS cert/key or a port-bind failure calls `process.exit(1)` (after shutting down the manager for bind failures) rather than starting half a server (`bootstrap.ts:114-121`, `bootstrap.ts:131-157`).
+- **Bootstrap fail-fast:** partial TLS, ambiguous/missing storage configuration,
+  unsupported backup mode, PostgreSQL initialization failure, or a port-bind
+  failure prevents a half-started server. A manager created before bind failure
+  is shut down.
 - **Shutdown drain bound:** active jobs are awaited only up to `shutdownTimeoutMs`; jobs still active after the deadline are abandoned to the next process's stall detector.
 
 ## Configuration
 
 Environment variables read directly within this module's files:
 
-| Var | Default | Effect |
-| --- | --- | --- |
-| `WORKER_TIMEOUT_MS` | `30000` | `handlers/monitoring/workers.ts:10-13` — threshold for `ListWorkers` to mark a worker `active` vs `stale`. |
-| `LOG_FORMAT` / `LOG_LEVEL` | unset | `bootstrap.ts:75` — JSON mode and log level (overridden by file config if present). |
+| Var                        | Default | Effect                                                                                                     |
+| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `WORKER_TIMEOUT_MS`        | `30000` | `handlers/monitoring/workers.ts:10-13` — threshold for `ListWorkers` to mark a worker `active` vs `stale`. |
+| `LOG_FORMAT` / `LOG_LEVEL` | unset   | `bootstrap.ts:75` — JSON mode and log level (overridden by file config if present).                        |
 
-Resolved-config fields consumed by `bootServer` (sourced from env/CLI/file via `../../config`): `tcpPort` (`TCP_PORT`, 6789), `httpPort` (`HTTP_PORT`, 6790), `hostname` (`HOST`), `authTokens` (`AUTH_TOKENS`), `corsOrigins` (`CORS_ALLOW_ORIGIN`), `requireAuthForMetrics` (`METRICS_AUTH`), `maxPrometheusQueues` (`METRICS_MAX_QUEUES`, 100), `dataPath` (`BUNQUEUE_DATA_PATH`), `tcpSocketPath`/`httpSocketPath`, `tlsCertFile`/`tlsKeyFile` (`TLS_CERT_FILE`/`TLS_KEY_FILE`), `shutdownTimeoutMs` (`SHUTDOWN_TIMEOUT_MS`, 30000), `statsIntervalMs` (`STATS_INTERVAL_MS`), `s3BackupEnabled`. See [Configuration & Entrypoint](./configuration.md) and [Security: TLS, Auth, CORS](./security-tls-auth.md).
+Resolved-config fields consumed by `bootServer` include the existing transport,
+auth, telemetry, timeout, SQLite path, TLS, Cloud, and S3 fields plus
+`storageDriver`, `postgresUrl`, `postgresNamespace`, `postgresBrokerId`,
+`postgresPoolSize`, `postgresLeaseDurationMs`, and
+`postgresPollIntervalMs`. See [Configuration & Entrypoint](./configuration.md),
+[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md), and
+[Security: TLS, Auth, CORS](./security-tls-auth.md).
 
 Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL`/`PULLB` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`. `backoff` accepts either a number (ms) or the object form `{ type: 'fixed'|'exponential', delay }` (`validateBackoffField`) — `type` must be `fixed`/`exponential` and `delay` ≤1day, matching embedded parity; `PUSH`, `PUSHB` (per job, via `validatePushBatchJobs`) and `PUSHF` validate the applicable bounds. `PUSHF` additionally caps the full graph as described above.
 

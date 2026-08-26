@@ -34,7 +34,7 @@ async function startServer(): Promise<void> {
   // Load config file (bunqueue.config.ts) if present, then merge with env vars
   const fileConfig = await loadConfigFile();
   const config = resolveServerConfig(fileConfig);
-  bootServer(fileConfig, config);
+  await bootServer(fileConfig, config);
 }
 
 // Logger env-var bootstrap only applies when this file is the entry point.

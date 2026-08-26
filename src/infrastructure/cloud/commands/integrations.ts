@@ -1,9 +1,9 @@
 import type { CloudCommandHandler } from '../types/command';
 
 export const INTEGRATION_COMMANDS: Partial<Record<string, CloudCommandHandler>> = {
-  'cron:upsert': (queueManager, command) => {
-    queueManager.removeCron(command.name ?? '');
-    const cron = queueManager.addCron({
+  'cron:upsert': async (adapter, command) => {
+    await adapter.removeCron(command.name ?? '');
+    const cron = await adapter.addCron({
       name: command.name ?? '',
       jobName: 'default',
       queue: command.queue ?? '',
@@ -12,11 +12,11 @@ export const INTEGRATION_COMMANDS: Partial<Record<string, CloudCommandHandler>> 
     });
     return { name: cron.name, nextRun: cron.nextRun };
   },
-  'cron:delete': (queueManager, command) => ({
-    deleted: queueManager.removeCron(command.name ?? ''),
+  'cron:delete': async (adapter, command) => ({
+    deleted: await adapter.removeCron(command.name ?? ''),
   }),
-  'webhook:add': (queueManager, command) => {
-    const webhook = queueManager.webhookManager.add(
+  'webhook:add': (adapter, command) => {
+    const webhook = adapter.manager.webhookManager.add(
       command.url ?? '',
       command.events ?? [],
       command.queue ?? undefined,
@@ -24,11 +24,11 @@ export const INTEGRATION_COMMANDS: Partial<Record<string, CloudCommandHandler>> 
     );
     return { id: webhook.id, url: webhook.url, events: webhook.events };
   },
-  'webhook:remove': (queueManager, command) => ({
-    removed: queueManager.webhookManager.remove(command.webhookId ?? ''),
+  'webhook:remove': (adapter, command) => ({
+    removed: adapter.manager.webhookManager.remove(command.webhookId ?? ''),
   }),
-  'webhook:set-enabled': (queueManager, command) => ({
-    updated: queueManager.webhookManager.setEnabled(
+  'webhook:set-enabled': (adapter, command) => ({
+    updated: adapter.manager.webhookManager.setEnabled(
       command.webhookId ?? '',
       command.enabled ?? true
     ),

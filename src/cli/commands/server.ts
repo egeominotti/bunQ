@@ -129,5 +129,5 @@ export async function runServer(args: string[], showHelp: boolean): Promise<void
   const config = resolveServerConfig(mergedConfig);
 
   // Same full server as the bare `bunqueue` entry (shared bootstrap)
-  bootServer(mergedConfig, config);
+  await bootServer(mergedConfig, config);
 }

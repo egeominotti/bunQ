@@ -21,7 +21,18 @@ export interface BunqueueConfig {
     requireAuthForMetrics?: boolean;
   };
   storage?: {
+    /** Persistence backend. Inferred from url/dataPath when omitted. */
+    driver?: 'memory' | 'sqlite' | 'postgres';
     dataPath?: string;
+    /** PostgreSQL connection URL. Required when driver is postgres. */
+    url?: string;
+    /** Isolates independent bunqueue installations sharing one PostgreSQL database. */
+    namespace?: string;
+    /** Stable identifier for this broker process; generated automatically when omitted. */
+    brokerId?: string;
+    poolSize?: number;
+    leaseDurationMs?: number;
+    pollIntervalMs?: number;
   };
   telemetry?: {
     /** Maximum queue label values exposed to Prometheus; zero disables per-queue series. */

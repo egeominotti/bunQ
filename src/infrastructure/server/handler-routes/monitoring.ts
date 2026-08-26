@@ -37,7 +37,7 @@ export function routeMonitoringCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'Stats':
       return handleStats(context, requestId);
@@ -92,7 +92,7 @@ export function routeDashboardCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'DashboardOverview':
       return handleDashboardOverview(command, context, requestId);

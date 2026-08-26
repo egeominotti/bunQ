@@ -5,6 +5,7 @@ import { generatePrometheusMetrics, type OperationalMetrics } from '../metricsEx
 import { selectPrometheusQueues } from '../prometheusOperationalMetrics';
 import * as statsMgr from '../statsManager';
 import type { QueueMetricType } from '../../domain/types/metrics';
+import { isStorageDegraded } from '../../shared/storageHealth';
 import { QueueManagerStats } from './stats';
 
 export class QueueManagerObservability extends QueueManagerStats {
@@ -45,7 +46,7 @@ export class QueueManagerObservability extends QueueManagerStats {
       this.webhookManager,
       statsMgr.getPerQueueStats(this.contextFactory.getStatsContext(), queueSelection.selected),
       {
-        storageDegraded: storageStatus.diskFull,
+        storageDegraded: isStorageDegraded(storageStatus),
         storageDiskFull: storageStatus.diskFull,
         ...(this.storage && { sqliteDatabaseSizeBytes: this.storage.getSize() }),
         processHeapUsedBytes: memory.heapUsed,

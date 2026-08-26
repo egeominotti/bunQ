@@ -18,7 +18,7 @@ Owns:
 
 Does NOT own:
 
-- Event *emission* — the queue engine calls `eventsManager.broadcast(...)` and operations call `webhookManager.trigger(...)`; this module never decides when a job changes state. See [Job Lifecycle](./job-lifecycle.md) and [Core Queue Engine](./core-queue-engine.md).
+- Event _emission_ — the queue engine calls `eventsManager.broadcast(...)` and operations call `webhookManager.trigger(...)`; this module never decides when a job changes state. See [Job Lifecycle](./job-lifecycle.md) and [Core Queue Engine](./core-queue-engine.md).
 - Transport/fan-out plumbing — SSE/WebSocket streaming, the `/webhooks/*` HTTP routes, and the `Stats`/`Metrics` payloads live in [HTTP / REST / SSE / WebSocket API](./http-api.md) and [Stats, Metrics & Monitoring](./stats-and-monitoring.md).
 
 Every `EventsManager.broadcast` is also consumed by the manager-owned
@@ -27,8 +27,12 @@ lifecycle journal for `trimEvents`, even when no user listener or webhook is
 registered. Terminal completed/failed events update a separate minute-metrics
 store; retry-attempt failures stay in the journal but do not increment failed
 metrics.
-- Persistence — webhooks and job logs are in-memory only; nothing here is written to SQLite. See [Persistence](./persistence.md).
-- Stall recovery — `clientTracking` only *triggers* recovery (resets heartbeats); the stall detector in [Background Tasks](./background-tasks.md) reclaims orphaned jobs.
+
+- Persistence — webhooks and job logs are in-memory only in the memory/SQLite
+  engine. PostgreSQL mode persists job logs and lifecycle events, but webhook
+  definitions/delivery remain process-local. See [Persistence](./persistence.md)
+  and [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+- Stall recovery — `clientTracking` only _triggers_ recovery (resets heartbeats); the stall detector in [Background Tasks](./background-tasks.md) reclaims orphaned jobs.
 
 ## Dependencies
 
@@ -92,17 +96,17 @@ function forceReleaseClientJobs(clientId, ctx): number;        // lock-free fall
 
 ### TCP commands handled
 
-| Command | Fields | Purpose |
-| --- | --- | --- |
-| `AddWebhook` | `url`, `events: string[]`, `queue?`, `secret?` | Register webhook (validates URL + events) |
-| `RemoveWebhook` | `webhookId` | Delete webhook |
-| `ListWebhooks` | — | List webhooks + `getStats()` |
-| `SetWebhookEnabled` | `id`, `enabled` | Toggle delivery |
-| `AddLog` | `id`, `message`, `level?` | Append a job log line |
-| `GetLogs` | `id`, `start?`, `end?` | Read logs (inclusive slice) |
-| `ClearLogs` | `id`, `keepLogs?` | Clear / trim logs |
-| `SubscribeEvents` | `queue` | Select one queue's live `JobEvent` stream on this connection |
-| `UnsubscribeEvents` | — | Stop that stream without closing the connection |
+| Command             | Fields                                         | Purpose                                                      |
+| ------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| `AddWebhook`        | `url`, `events: string[]`, `queue?`, `secret?` | Register webhook (validates URL + events)                    |
+| `RemoveWebhook`     | `webhookId`                                    | Delete webhook                                               |
+| `ListWebhooks`      | —                                              | List webhooks + `getStats()`                                 |
+| `SetWebhookEnabled` | `id`, `enabled`                                | Toggle delivery                                              |
+| `AddLog`            | `id`, `message`, `level?`                      | Append a job log line                                        |
+| `GetLogs`           | `id`, `start?`, `end?`                         | Read logs (inclusive slice)                                  |
+| `ClearLogs`         | `id`, `keepLogs?`                              | Clear / trim logs                                            |
+| `SubscribeEvents`   | `queue`                                        | Select one queue's live `JobEvent` stream on this connection |
+| `UnsubscribeEvents` | —                                              | Stop that stream without closing the connection              |
 
 Command shapes: `src/domain/types/commands/monitoring.ts:3-28` (logs and webhooks) and `src/domain/types/commands/extended.ts:3-7` (`ClearLogs`). Handlers: `src/infrastructure/server/handlers/monitoring/health.ts:24-50` (`AddLog`/`GetLogs`), `src/infrastructure/server/handlers/monitoring/webhooks.ts:13-100`, and `src/infrastructure/server/handlers/monitoring/operations.ts:21-27` (`ClearLogs`). Routing: `src/infrastructure/server/handler-routes/monitoring.ts:45-87`.
 
@@ -124,25 +128,49 @@ Command shapes: `src/domain/types/commands/monitoring.ts:3-28` (logs and webhook
 See [data-model](../data-model.md) for full definitions. Most relevant here:
 
 ```ts
-interface Webhook {                 // webhook.ts:31
-  id: WebhookId; url: string; events: WebhookEvent[];
-  queue: string | null;             // null = all queues
-  secret: string | null;            // null = no HMAC signature
-  createdAt: number; lastTriggered: number | null;
-  successCount: number; failureCount: number; enabled: boolean;
+interface Webhook {
+  // webhook.ts:31
+  id: WebhookId;
+  url: string;
+  events: WebhookEvent[];
+  queue: string | null; // null = all queues
+  secret: string | null; // null = no HMAC signature
+  createdAt: number;
+  lastTriggered: number | null;
+  successCount: number;
+  failureCount: number;
+  enabled: boolean;
 }
 
-interface WebhookPayload {           // webhook.ts:66 — the JSON POST body
-  event: WebhookEvent; timestamp: number; jobId: string; queue: string;
-  data?: unknown; error?: string; progress?: number;
+interface WebhookPayload {
+  // webhook.ts:66 — the JSON POST body
+  event: WebhookEvent;
+  timestamp: number;
+  jobId: string;
+  queue: string;
+  data?: unknown;
+  error?: string;
+  progress?: number;
 }
 
-interface JobEvent {                 // src/domain/types/queue.ts:148-162 — internal broadcast shape
-  eventType: EventType; queue: string; jobId: string; timestamp: number;
-  data?: unknown; error?: string; progress?: number; prev?: string; delay?: number;
+interface JobEvent {
+  // src/domain/types/queue.ts:148-162 — internal broadcast shape
+  eventType: EventType;
+  queue: string;
+  jobId: string;
+  timestamp: number;
+  data?: unknown;
+  error?: string;
+  progress?: number;
+  prev?: string;
+  delay?: number;
 }
 
-interface JobLogEntry { timestamp: number; level: 'info'|'warn'|'error'; message: string; } // src/domain/types/worker.ts:63-67
+interface JobLogEntry {
+  timestamp: number;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+} // src/domain/types/worker.ts:63-67
 ```
 
 > Note: `src/domain/types/queue.ts:164-170` also declares a second, unused `Webhook` interface (with `EventType[]` events). The authoritative type used by `WebhookManager` is the one in `src/domain/types/webhook.ts`.
@@ -188,6 +216,14 @@ payloads; TCP Workers reuse the same dedicated subscription for `stalled`.
 - The `renewalCount > 0` guard prevents a **double-execute** race: with a pooled client, heartbeats travel on a different connection than the one that pulled, so the pulling socket closing does not mean the worker died — such jobs are left for lock-expiry/stall detection to reclaim (`clientTracking.ts:66`).
 - `forceReleaseClientJobs` is intentionally lock-free: it always drops `jobLocks[jobId]` (no stale token survives the disconnect) and, for still-`processing` jobs, sets `lastHeartbeat = 0` and `startedAt = 0` so the stall detector's grace gate passes on its next eligible tick. It accepts that a concurrent stall/lock-expiry path may mutate the same job — worst case the write lands on an object no longer in the map (wasted, never corrupting) (`clientTracking.ts:167`).
 - `releaseClientJobs` clears `clientJobs` in a `finally` block even on mid-flight lock failure, preventing an unbounded `clientJobs` leak across disconnects that hit lock timeouts (`clientTracking.ts:136`).
+
+The PostgreSQL adapter keeps the same connection-facing contract with durable
+lease ownership. Disconnect release row-locks the exact generation and only
+requeues a still-live, never-renewed token. A heartbeat received by another
+broker increments `lease_renewals` and transfers `lease_broker_id`, so loss of
+the original pull socket cannot double-deliver the job. Broker shutdown releases
+its remaining untransferred leases; expired protected cron leases are discarded.
+
 - `EventsManager`/`WebhookManager` hold no locks; `broadcast` is synchronous and webhook delivery is async fire-and-forget.
 
 ## Edge Cases & Failure Modes
@@ -204,10 +240,10 @@ payloads; TCP Workers reuse the same dedicated subscription for `stalled`.
 
 ## Configuration
 
-| Env var | Default | Effect |
-| --- | --- | --- |
-| `WEBHOOK_MAX_RETRIES` | `3` | Max delivery attempts per webhook (`webhookManager.ts:17`) |
-| `WEBHOOK_RETRY_DELAY_MS` | `1000` | Base inter-attempt delay; actual wait = `delay * (attempt+1)` (`webhookManager.ts:20`) |
+| Env var                  | Default | Effect                                                                                 |
+| ------------------------ | ------- | -------------------------------------------------------------------------------------- |
+| `WEBHOOK_MAX_RETRIES`    | `3`     | Max delivery attempts per webhook (`webhookManager.ts:17`)                             |
+| `WEBHOOK_RETRY_DELAY_MS` | `1000`  | Base inter-attempt delay; actual wait = `delay * (attempt+1)` (`webhookManager.ts:20`) |
 
 Options (not env): `WebhookManager({ validateUrls })` — defaults ON; wired from `config.validateWebhookUrls` in `queue-manager/state.ts`. Job-log bounds: `maxLogsPerJob = 100`, `maxJobLogs = 10_000` (config default). Webhook fetch timeout is a hardcoded 10 000 ms.
 
@@ -219,5 +255,7 @@ Options (not env): `WebhookManager({ validateUrls })` — defaults ON; wired fro
 - [Background Tasks](./background-tasks.md) — stall detector that completes `clientTracking`'s force-release recovery.
 - [Concurrency & Locking](./concurrency-and-locking.md) — the shard→processing lock order used by `releaseClientJobs`.
 - [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — the resources released on disconnect.
+- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — durable
+  events/logs and cross-broker lease release/fencing.
 - [bunqueue Cloud Dashboard Integration](./cloud-integration.md) — consumer of `setDashboardEmit` events.
 - [architecture](../architecture.md) · [data-model](../data-model.md)

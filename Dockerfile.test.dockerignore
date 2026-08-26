@@ -19,6 +19,7 @@
 !monitoring/
 !monitoring/**
 !docker-compose.yml
+!docker-compose.postgres.yml
 !docs/
 !docs/*.md
 !docs/benchmarks/

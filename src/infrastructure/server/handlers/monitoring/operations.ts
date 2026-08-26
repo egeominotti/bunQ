@@ -5,7 +5,7 @@ import type {
   ExtendLocksCommand,
   PrometheusCommand,
 } from '../../../../domain/types/command';
-import { jobId } from '../../../../domain/types/job';
+import { jobId, type JobId } from '../../../../domain/types/job';
 import type { Response } from '../../../../domain/types/response';
 import * as response from '../../../../domain/types/response';
 import type { HandlerContext } from '../../types';
@@ -22,8 +22,17 @@ export function handleClearLogs(
   command: ClearLogsCommand,
   context: HandlerContext,
   requestId?: string
-): Response {
-  context.queueManager.clearLogs(jobId(command.id), command.keepLogs);
+): Response | Promise<Response> {
+  const id = jobId(command.id);
+  const manager = context.queueManager as typeof context.queueManager & {
+    clearLogsDurable?: (id: JobId, keepLogs?: number) => Promise<void>;
+  };
+  if (manager.clearLogsDurable) {
+    return manager
+      .clearLogsDurable(id, command.keepLogs)
+      .then(() => response.ok(undefined, requestId));
+  }
+  manager.clearLogs(id, command.keepLogs);
   return response.ok(undefined, requestId);
 }
 

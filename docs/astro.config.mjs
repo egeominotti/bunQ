@@ -101,7 +101,7 @@ export default defineConfig({
       disable404Route: true,
       title: 'bunqueue',
       description:
-        'High-performance job queue for Bun & AI agents. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups. Zero external infrastructure.',
+        'High-performance Bun job queue for AI agents. SQLite by default, optional PostgreSQL 18.6 multi-broker persistence, DLQ, cron, and MCP.',
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: false,
@@ -634,7 +634,9 @@ export default defineConfig({
         // MCP, workflow, benchmarks, comparison, use-cases, and the entry points a
         // first-time reader lands on (simple mode, the SDK guide, the BullMQ migration)
         else if (
-          url.match(/^\/(guide\/(mcp|workflow|benchmarks|comparison|use-cases|simple-mode|sdks|migration))\//)
+          url.match(
+            /^\/(guide\/(mcp|workflow|benchmarks|comparison|use-cases|simple-mode|sdks|migration))\//
+          )
         ) {
           item.priority = 0.9;
           item.changefreq = 'weekly';

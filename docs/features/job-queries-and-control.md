@@ -48,14 +48,20 @@ External/runtime: Bun's `bun:sqlite` (via `SqliteStorage`), `Date.now()` for tem
 `queryOperations.ts`:
 
 ```typescript
-function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | null>
-function getJobResult(jobId: JobId, ctx: QueryContext): unknown
-function getJobByCustomId(customId: string, ctx: QueryContext): Job | null
-function getJobProgress(jobId: JobId, ctx: QueryContext): { progress: number; message: string | null } | null
-function getJobState(jobId: JobId, ctx: QueryContext): Promise<JobState | 'unknown'>
-function getJobs(queue: string, shardIdx: number,
+function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | null>;
+function getJobResult(jobId: JobId, ctx: QueryContext): unknown;
+function getJobByCustomId(customId: string, ctx: QueryContext): Job | null;
+function getJobProgress(
+  jobId: JobId,
+  ctx: QueryContext
+): { progress: number; message: string | null } | null;
+function getJobState(jobId: JobId, ctx: QueryContext): Promise<JobState | 'unknown'>;
+function getJobs(
+  queue: string,
+  shardIdx: number,
   options: { state?: string | string[]; start?: number; end?: number; asc?: boolean },
-  ctx: GetJobsContext): Job[]
+  ctx: GetJobsContext
+): Job[];
 ```
 
 `getJobResult` first uses the two in-memory result maps. On SQLite fallback,
@@ -68,33 +74,53 @@ check is allowed because `0`, `false`, and `''` are valid results.
 `jobManagement.ts`:
 
 ```typescript
-function cancelJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>
-function updateJobProgress(jobId: JobId, progress: number, ctx: JobManagementContext, message?: string): Promise<boolean>
-function updateJobData(jobId: JobId, data: unknown, ctx: JobManagementContext): Promise<boolean>
-function changeJobPriority(jobId: JobId, priority: number, ctx: JobManagementContext, lifo?: boolean): Promise<boolean>
-function promoteJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>
-function moveJobToDelayed(jobId: JobId, delay: number, ctx: JobManagementContext): Promise<boolean>
-function discardJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>
+function cancelJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
+function updateJobProgress(
+  jobId: JobId,
+  progress: number,
+  ctx: JobManagementContext,
+  message?: string
+): Promise<boolean>;
+function updateJobData(jobId: JobId, data: unknown, ctx: JobManagementContext): Promise<boolean>;
+function changeJobPriority(
+  jobId: JobId,
+  priority: number,
+  ctx: JobManagementContext,
+  lifo?: boolean
+): Promise<boolean>;
+function promoteJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
+function moveJobToDelayed(jobId: JobId, delay: number, ctx: JobManagementContext): Promise<boolean>;
+function discardJob(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
 ```
 
 `queueControl.ts`:
 
 ```typescript
-function pauseQueue(queue: string, ctx: QueueControlContext): void
-function resumeQueue(queue: string, ctx: QueueControlContext): void
-function isQueuePaused(queue: string, ctx: QueueControlContext): boolean
-function drainQueue(queue: string, ctx: QueueControlContext): number
-function obliterateQueue(queue: string, ctx: QueueControlContext): JobId[]
-function listAllQueues(ctx: QueueControlContext): string[]
-function cleanQueue(queue: string, graceMs: number, ctx: QueueControlContext, state?: string, limit?: number): JobId[]
-function getQueueCount(queue: string, ctx: QueueControlContext): number
+function pauseQueue(queue: string, ctx: QueueControlContext): void;
+function resumeQueue(queue: string, ctx: QueueControlContext): void;
+function isQueuePaused(queue: string, ctx: QueueControlContext): boolean;
+function drainQueue(queue: string, ctx: QueueControlContext): number;
+function obliterateQueue(queue: string, ctx: QueueControlContext): JobId[];
+function listAllQueues(ctx: QueueControlContext): string[];
+function cleanQueue(
+  queue: string,
+  graceMs: number,
+  ctx: QueueControlContext,
+  state?: string,
+  limit?: number
+): JobId[];
+function getQueueCount(queue: string, ctx: QueueControlContext): number;
 ```
 
 `pausedView.ts`:
 
 ```typescript
-interface PausedDerivedCounts { waiting: number; prioritized: number; paused: number }
-function pausedView(waiting: number, prioritized: number, isPaused: boolean): PausedDerivedCounts
+interface PausedDerivedCounts {
+  waiting: number;
+  prioritized: number;
+  paused: number;
+}
+function pausedView(waiting: number, prioritized: number, isPaused: boolean): PausedDerivedCounts;
 ```
 
 ### Context types
@@ -236,6 +262,14 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 - `queueControl.pauseQueue`/`resumeQueue`/`getQueueCount` delegate to `Shard` methods that manage their own internal state; no lock taken at this layer.
 - Lock acquisition is bounded by `LOCK_TIMEOUT_MS` (default 5000ms) — see [Concurrency & Locking](./concurrency-and-locking.md).
 
+PostgreSQL destructive commands share a separate transaction protocol: discover
+candidates, lock their dependency identities in sorted order, lock candidate and
+live-consumer rows in sorted order, revalidate the command predicate, then delete
+only producers whose consumers are deleted in the same transaction. Single-item
+operations return `false` for a protected producer; range cleanup skips it;
+`obliterate` rejects if another queue still consumes one of its jobs. These rules
+are PostgreSQL-specific and do not alter the synchronous SQLite implementation.
+
 ## Edge Cases & Failure Modes
 
 - **Post-restart recovery:** `getJob`/`getJobState` fall back to SQLite (jobs table + DLQ + raw state) when `jobIndex` has no entry (`src/application/operations/query/jobLookup.ts:9-16`, `src/application/operations/query/state.ts:6-19`). Without storage (pure embedded) they return `null`/`'unknown'`.
@@ -248,8 +282,10 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
   preserves the prior message when a later update omits one, refreshes
   `lastHeartbeat`, and writes all three values through to SQLite while the
   processing lock is held. A confirmed update therefore survives active-job
-  crash recovery. The progress webhook failure is caught and logged, never
-  propagated.
+  crash recovery. PostgreSQL applies the same omitted-message rule under its
+  job-row lock and commits the effective payload and event atomically; it does
+  not alter the synchronous SQLite path. The progress webhook failure is caught
+  and logged, never propagated.
 - **Active-to-waiting durability:** `moveActiveToWait` persists `runAt`, derived
   `state='waiting'`, and `startedAt=NULL` after the in-memory claim/requeue.
   Restart therefore reloads the job as ready work without charging a phantom
@@ -258,6 +294,10 @@ Lock acquisition follows the project hierarchy: `jobIndex` (plain `Map`, read wi
 - **SQLite write failures swallowed:** `safeDeleteJob`/`safeDeleteDlqEntry` (`queueControl.ts:83`) catch errors (e.g. `SQLITE_FULL`); in-memory state is already cleared and the orphan row is GC'd by crash-recovery on restart.
 - **Memory-bound visibility:** completed-job queries depend on bounded LRU/Set collections — `completedJobs` (50k), `jobResults` (10k), `jobLogs` (10k), `customIdMap` (50k). Once evicted, results/custom-id lookups fall back to SQLite or return `null`. `getJobByCustomId` returns `null` if the LRU has evicted the mapping.
 - **Dependency-safe obliterate:** `shard.obliterate` removes queue-owned jobs from both `waitingDeps` and `waitingChildren`. Removing a `waitingDeps` job goes through `DependencyTracker.removeWaitingJob`, so its waiter id is also deleted from every reverse `dependencyIndex` entry. The returned id set then drives global-index and SQLite cleanup; no `waiting-children` ghost remains queryable after the operation.
+- **PostgreSQL completion-only obliterate:** queue-owned completion tombstones
+  are candidates even when their full job rows have already been removed.
+  Obliteration therefore cannot leave an old generation observable, while a
+  cross-queue live consumer makes the complete transaction fail atomically.
 - **Dependency counts on the public Queue client:** `Queue.getJobCounts()` and `getJobCountsAsync()` expose the server/manager's `'waiting-children'` bucket in both embedded and TCP modes. An empty or obliterated queue returns the key with value `0`, preserving a stable shape and allowing count/list conservation checks at the public boundary.
 - **`finishedOn`/`processedOn` on list queries (#104):** these fields are populated client-side. `getJob` (single) already returned them via `buildJobProperties`, but list paths build results with `createSimpleJob`, which hard-codes them `undefined`. The fix patches `src/client/queue/operations/query.ts` to mirror the single-job mapping (numeric `startedAt`/`completedAt` → `processedOn`/`finishedOn`, `null`→`undefined`). Failed jobs intentionally keep `finishedOn` undefined (no `completedAt`). See [Client SDK: Queue](./client-queue-sdk.md).
 

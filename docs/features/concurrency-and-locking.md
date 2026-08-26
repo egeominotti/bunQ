@@ -18,8 +18,8 @@ Owns:
 
 Does NOT own:
 
-- The shard data structures, the lock *hierarchy* discipline at call sites, or `releaseJobResources` (concurrency-slot / group / unique-key release) — see [Core Queue Engine](./core-queue-engine.md) and [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md).
-- The actual `pull`/`ack`/`fail` state transitions that *call* these lock APIs — see [Job Lifecycle](./job-lifecycle.md).
+- The shard data structures, the lock _hierarchy_ discipline at call sites, or `releaseJobResources` (concurrency-slot / group / unique-key release) — see [Core Queue Engine](./core-queue-engine.md) and [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md).
+- The actual `pull`/`ack`/`fail` state transitions that _call_ these lock APIs — see [Job Lifecycle](./job-lifecycle.md).
 - Client-side `useLocks` / `heartbeatInterval` worker behavior — see [Client SDK: Worker](./client-worker-sdk.md).
 - Background-task scheduling (the timers that drive `checkExpiredLocks`/`checkStalledJobs`) — see [Background Tasks](./background-tasks.md).
 
@@ -43,7 +43,9 @@ External / runtime:
 ### `src/shared/lock.ts`
 
 ```typescript
-export interface LockGuard { release(): void; }
+export interface LockGuard {
+  release(): void;
+}
 export class LockTimeoutError extends Error {}
 
 export class AsyncLock {
@@ -58,7 +60,11 @@ export class RWLock {
   getState(): { readers: number; writer: boolean; writerWaiting: number };
 }
 
-export function withLock<T>(lock: AsyncLock, fn: () => T | Promise<T>, timeoutMs?: number): Promise<T>;
+export function withLock<T>(
+  lock: AsyncLock,
+  fn: () => T | Promise<T>,
+  timeoutMs?: number
+): Promise<T>;
 export function withReadLock<T>(lock: RWLock, fn, timeoutMs?): Promise<T>;
 export function withWriteLock<T>(lock: RWLock, fn, timeoutMs?): Promise<T>;
 ```
@@ -82,10 +88,23 @@ export function withSemaphore<T>(semaphore: Semaphore, fn: () => Promise<T>): Pr
 ### `src/application/lockOperations.ts`
 
 ```typescript
-export function createLock(jobId: JobId, owner: string, ctx: LockContext, ttl?: number): LockToken | null;
+export function createLock(
+  jobId: JobId,
+  owner: string,
+  ctx: LockContext,
+  ttl?: number
+): LockToken | null;
 export function verifyLock(jobId: JobId, token: string, ctx: LockContext): boolean;
-export function renewJobLock(jobId: JobId, token: string, ctx: LockContext, newTtl?: number): boolean;
-export function renewJobLockBatch(items: Array<{ id: JobId; token: string; ttl?: number }>, ctx: LockContext): string[];
+export function renewJobLock(
+  jobId: JobId,
+  token: string,
+  ctx: LockContext,
+  newTtl?: number
+): boolean;
+export function renewJobLockBatch(
+  items: Array<{ id: JobId; token: string; ttl?: number }>,
+  ctx: LockContext
+): string[];
 export function releaseLock(jobId: JobId, ctx: LockContext, token?: string): boolean;
 export function getLockInfo(jobId: JobId, ctx: LockContext): JobLock | null;
 ```
@@ -134,13 +153,13 @@ Full type definitions live in the source files cited below. Most relevant here:
 ```typescript
 interface JobLock {
   readonly jobId: JobId;
-  readonly token: LockToken;     // Bun.randomUUIDv7()
-  readonly owner: string;        // worker/client id
-  readonly createdAt: number;    // load-bearing for the #101 re-lease guard
+  readonly token: LockToken; // Bun.randomUUIDv7()
+  readonly owner: string; // worker/client id
+  readonly createdAt: number; // load-bearing for the #101 re-lease guard
   expiresAt: number;
   lastRenewalAt: number;
   renewalCount: number;
-  readonly ttl: number;          // DEFAULT_LOCK_TTL = 30_000 ms
+  readonly ttl: number; // DEFAULT_LOCK_TTL = 30_000 ms
 }
 ```
 
@@ -150,10 +169,10 @@ interface JobLock {
 
 ```typescript
 interface StallConfig {
-  enabled: boolean;       // default true
-  stallInterval: number;  // default 30_000 ms (no-heartbeat timeout)
-  maxStalls: number;      // default 3 (then → DLQ)
-  gracePeriod: number;    // default 5_000 ms after start before checking
+  enabled: boolean; // default true
+  stallInterval: number; // default 30_000 ms (no-heartbeat timeout)
+  maxStalls: number; // default 3 (then → DLQ)
+  gracePeriod: number; // default 5_000 ms after start before checking
 }
 ```
 
@@ -190,6 +209,34 @@ processing-map claim used by `moveActiveToWait`, `moveToWaitingChildren`,
 `moveJobToDelayed`, and active `discardJob`. Both deletions are idempotent, so a
 concurrent disconnect cleanup cannot leave a lease behind or release the
 requeued job a second time.
+
+The PostgreSQL multi-broker adapter applies the same generation rule across its
+asynchronous boundary: both awaited and fire-and-forget disconnect cleanup
+capture every `(jobId, token)` before the first await/enqueue. The SQL release is
+fenced by that immutable token, and local token removal is conditional on the
+same value still being current. A deferred callback from an old custom-ID
+generation therefore cannot release or erase a newer lease. This does not
+change the synchronous memory/SQLite lock implementation described above.
+
+The PostgreSQL manager also places a reentrant lifecycle gate around every
+database-backed public operation. Once shutdown closes admission, late work is
+rejected before it can reach the SQL pool; work accepted earlier retains its
+scope through the post-commit snapshot refresh. Nested manager calls reuse that
+scope, synchronous compatibility mutations atomically reserve their deferred
+write slot, and escaped async descendants cannot borrow a scope after it has
+settled. A long-poll owns admission only during each actual claim transaction,
+so an empty pull cannot hold shutdown open. Disconnect cleanup that arrives
+after the boundary is local-only and idempotent.
+
+PostgreSQL DLQ auto-retry follows the distributed lock order even though it
+must read completion evidence. It discovers the bounded candidate/dependency
+identity set without row locks, takes queue-policy share locks, acquires all
+consumer and dependency completion advisory locks in sorted order, and only
+then locks failed rows. Current dependency edges and retry policy are re-read
+after those waits; a late edge outside the prelocked set is deferred to the next
+sweep. Generation reuse and tombstone retirement therefore serialize before a
+consumer becomes runnable, and four brokers can inspect the same candidate
+without duplicating its retry event.
 
 ### Outcome ownership check + #101 grace window
 
@@ -247,21 +294,21 @@ Runs on the background timer at `stallCheckMs` (5 s), registered in `background/
 
 **Lock hierarchy** (acquire strictly in this order — CLAUDE.md): `jobIndex` → `completedJobs` → `shards[N]` → `processingShards[N]`. In practice `jobIndex` (a plain `Map`) and `completedJobs` (a `BoundedSet`) are **read lock-free first**, then the two real `RWLock` arrays are taken as write locks in order: `shardLocks[shardIdx]` **before** `processingLocks[procIdx]`. Both `checkExpiredLocks` (lockManager.ts:87–97) and `handleStalledJob` (stallDetection.ts:91–92) follow this; `checkExpiredLocks` pre-groups its work by `(shardIdx, procIdx)` specifically so it can take locks in hierarchy order even when many expired locks span shards.
 
-**Lease vs. heartbeat (two independent stall signals).** A job can be reclaimed by either (a) `JobLock` TTL expiry (`checkExpiredLocks`), used when the worker pulled *with* a lock token, or (b) heartbeat-timeout stall detection (`checkStalledJobs`), driven by `job.lastHeartbeat`/`stallInterval`. `renewJobLock` updates both (lockOperations.ts:66–69), so a worker heartbeating its lease also keeps stall detection satisfied.
+**Lease vs. heartbeat (two independent stall signals).** A job can be reclaimed by either (a) `JobLock` TTL expiry (`checkExpiredLocks`), used when the worker pulled _with_ a lock token, or (b) heartbeat-timeout stall detection (`checkStalledJobs`), driven by `job.lastHeartbeat`/`stallInterval`. `renewJobLock` updates both (lockOperations.ts:66–69), so a worker heartbeating its lease also keeps stall detection satisfied.
 
 **Races handled:**
 
-- *Late ACK after lock expiry* — the #101 grace window (`isExpiredButOwned`) honors a genuine same-instance completion while rejecting a re-pulled-job double-completion via the `createdAt >= startedAt` guard (`queue-manager/delivery.ts`).
-- *Stall re-lease generation* — the stall retry path may leave the previous
+- _Late ACK after lock expiry_ — the #101 grace window (`isExpiredButOwned`) honors a genuine same-instance completion while rejecting a re-pulled-job double-completion via the `createdAt >= startedAt` guard (`queue-manager/delivery.ts`).
+- _Stall re-lease generation_ — the stall retry path may leave the previous
   lock as a stale-outcome guard while the job is queued. When a later pull has
   a newer `startedAt`, `createLock` atomically replaces that lease and removes
   the old TCP client ownership before the new connection is registered. A
   duplicate lock request for the same processing generation still returns
   `null`. The stale worker token can therefore neither heartbeat nor complete
   the replacement generation.
-- *Concurrent completion vs. stall handler* — both `checkExpiredLocks` and `handleStalledJob` re-verify membership in `processingShards` under the locks before mutating (lockManager.ts:57, stallDetection.ts:94), so a job completed between phases is skipped and no stale `Stalled`/`Failed` event fires.
-- *Atomic pull handoff (2.8.31):* the queue to processing transition happens in one synchronous critical section under the shard write lock: `tryDequeueNextJob` pops the job, inserts it into `processingShards`, and flips the `jobIndex` entry to `processing` before yielding (pull.ts:97-117). The processing-shard `Map` is written without taking `processingLocks` there; this is safe because until the flip no id-targeted critical section can be mid-operation on that id, and it avoids holding the hot shard write lock across an await. `finalizeProcessing` (pull.ts:133) then does only post-await bookkeeping (markActive persistence, counters, broadcast) and re-checks membership in `processingShards` first: if a management op (discard, moveToDelayed, obliterate) claimed the job in between, the pull does not deliver it to the worker.
-- *Double release* — every `LockGuard` is idempotent.
+- _Concurrent completion vs. stall handler_ — both `checkExpiredLocks` and `handleStalledJob` re-verify membership in `processingShards` under the locks before mutating (lockManager.ts:57, stallDetection.ts:94), so a job completed between phases is skipped and no stale `Stalled`/`Failed` event fires.
+- _Atomic pull handoff (2.8.31):_ the queue to processing transition happens in one synchronous critical section under the shard write lock: `tryDequeueNextJob` pops the job, inserts it into `processingShards`, and flips the `jobIndex` entry to `processing` before yielding (pull.ts:97-117). The processing-shard `Map` is written without taking `processingLocks` there; this is safe because until the flip no id-targeted critical section can be mid-operation on that id, and it avoids holding the hot shard write lock across an await. `finalizeProcessing` (pull.ts:133) then does only post-await bookkeeping (markActive persistence, counters, broadcast) and re-checks membership in `processingShards` first: if a management op (discard, moveToDelayed, obliterate) claimed the job in between, the pull does not deliver it to the worker.
+- _Double release_ — every `LockGuard` is idempotent.
 
 ## Edge Cases & Failure Modes
 
@@ -280,16 +327,16 @@ Runs on the background timer at `stallCheckMs` (5 s), registered in `background/
 
 ## Configuration
 
-| Name | Default | Effect |
-| --- | --- | --- |
-| `LOCK_TIMEOUT_MS` (env) | `5000` | Default timeout for `AsyncLock`/`RWLock` acquisition (`lockTimeout.ts`). |
-| `DEFAULT_LOCK_TTL` | `30_000` ms | Job lease TTL when `pullWithLock` is called without an explicit `ttl` (`src/domain/job/constants.ts:3`, consumed by `src/domain/job/locks.ts:5-10`). |
-| `StallConfig.enabled` | `true` | Per-queue toggle for stall detection (stall.ts:21). |
-| `StallConfig.stallInterval` | `30_000` ms | No-heartbeat window before a job is a stall candidate; per-job `stallTimeout` overrides. |
-| `StallConfig.maxStalls` | `3` | Stalls before the job is moved to DLQ. |
-| `StallConfig.gracePeriod` | `5_000` ms | Quiet period after start before stall checks apply. |
-| `stallCheckMs` (config) | `5_000` ms | Interval for **both** `checkStalledJobs` and `checkExpiredLocks` (`application/types/config.ts`, `background/lifecycle.ts`). |
-| `MAX_CONCURRENT_PER_CONNECTION` | `50` | Per-socket semaphore permits for pipelined TCP command processing (`server/tcp/constants.ts:1`, constructed at `server/tcp/connections.ts:42`). |
+| Name                            | Default     | Effect                                                                                                                                               |
+| ------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOCK_TIMEOUT_MS` (env)         | `5000`      | Default timeout for `AsyncLock`/`RWLock` acquisition (`lockTimeout.ts`).                                                                             |
+| `DEFAULT_LOCK_TTL`              | `30_000` ms | Job lease TTL when `pullWithLock` is called without an explicit `ttl` (`src/domain/job/constants.ts:3`, consumed by `src/domain/job/locks.ts:5-10`). |
+| `StallConfig.enabled`           | `true`      | Per-queue toggle for stall detection (stall.ts:21).                                                                                                  |
+| `StallConfig.stallInterval`     | `30_000` ms | No-heartbeat window before a job is a stall candidate; per-job `stallTimeout` overrides.                                                             |
+| `StallConfig.maxStalls`         | `3`         | Stalls before the job is moved to DLQ.                                                                                                               |
+| `StallConfig.gracePeriod`       | `5_000` ms  | Quiet period after start before stall checks apply.                                                                                                  |
+| `stallCheckMs` (config)         | `5_000` ms  | Interval for **both** `checkStalledJobs` and `checkExpiredLocks` (`application/types/config.ts`, `background/lifecycle.ts`).                         |
+| `MAX_CONCURRENT_PER_CONNECTION` | `50`        | Per-socket semaphore permits for pipelined TCP command processing (`server/tcp/constants.ts:1`, constructed at `server/tcp/connections.ts:42`).      |
 
 Per-queue `StallConfig` is set via `queue.setStallConfig({...})` (embedded) and read by the sweeps through `shard.getStallConfig(queue)`.
 

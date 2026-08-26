@@ -10,23 +10,55 @@ import * as resp from '../../../domain/types/response';
 import type { HandlerContext } from '../types';
 import { throughputTracker } from '../../../application/throughputTracker';
 import { latencyTracker } from '../../../application/latencyTracker';
+import type { CronJob } from '../../../domain/types/cron';
+import type { Worker } from '../../../domain/types/worker';
 import { pausedView } from '../../../shared/pausedView';
+import { clientStorageStatus } from '../../../shared/storageHealth';
+
+const WORKER_TIMEOUT_MS = parseInt(Bun.env.WORKER_TIMEOUT_MS ?? '30000', 10);
+
+type DurableDashboardManager = HandlerContext['queueManager'] & {
+  listWorkersDurable?: () => Promise<Worker[]>;
+  listCronsDurable?: () => Promise<CronJob[]>;
+};
 
 /** Dashboard overview - single call for all dashboard data */
 export function handleDashboardOverview(
   _cmd: Extract<Command, { cmd: 'DashboardOverview' }>,
   ctx: HandlerContext,
   reqId?: string
+): Response | Promise<Response> {
+  const manager = ctx.queueManager as DurableDashboardManager;
+  if (manager.listWorkersDurable || manager.listCronsDurable) {
+    return Promise.all([
+      manager.listWorkersDurable
+        ? manager.listWorkersDurable()
+        : Promise.resolve(manager.workerManager.list()),
+      manager.listCronsDurable ? manager.listCronsDurable() : Promise.resolve(manager.listCrons()),
+    ]).then(([workers, crons]) => dashboardOverviewResponse(manager, workers, crons, reqId));
+  }
+  return dashboardOverviewResponse(
+    manager,
+    manager.workerManager.list(),
+    manager.listCrons(),
+    reqId
+  );
+}
+
+function dashboardOverviewResponse(
+  queueManager: HandlerContext['queueManager'],
+  workers: Worker[],
+  crons: CronJob[],
+  reqId?: string
 ): Response {
-  const stats = ctx.queueManager.getStats();
+  const stats = queueManager.getStats();
   const rates = throughputTracker.getRates();
   const latencies = latencyTracker.getPercentiles();
   const avgLatencies = latencyTracker.getAverages();
-  const memStats = ctx.queueManager.getMemoryStats();
-  const workers = ctx.queueManager.workerManager.list();
-  const workerStats = ctx.queueManager.workerManager.getStats();
-  const crons = ctx.queueManager.listCrons();
-  const storage = ctx.queueManager.getStorageStatus();
+  const memStats = queueManager.getMemoryStats();
+  const now = Date.now();
+  const activeWorkers = workers.filter((worker) => now - worker.lastSeen < WORKER_TIMEOUT_MS);
+  const storage = clientStorageStatus(queueManager.getStorageStatus());
   const mem = process.memoryUsage();
 
   return resp.data(
@@ -55,8 +87,8 @@ export function handleDashboardOverview(
       },
       collections: memStats,
       workers: {
-        total: workerStats.total,
-        active: workerStats.active,
+        total: workers.length,
+        active: activeWorkers.length,
         list: workers.map((w) => ({
           id: w.id,
           name: w.name,

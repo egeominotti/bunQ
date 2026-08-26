@@ -4,11 +4,21 @@
 
 ## Purpose
 
-The persistence layer is the durable store behind the sharded queues. The ten-line `SqliteStorage` façade inherits focused lifecycle, job, mutation, query, flow, control, state and record capabilities from `persistence/sqlite/`; storage contracts are isolated in `persistence/types/`. It wraps Bun's native `bun:sqlite` in WAL mode, batches inserts through `WriteBuffer`, serializes payloads with MessagePack, and exposes recovery queries used to rebuild state after restart.
+This document covers the existing memory/SQLite engine, which remains unchanged
+and is still the default for both embedded and server mode. The ten-line
+`SqliteStorage` façade inherits focused lifecycle, job, mutation, query, flow,
+control, state and record capabilities from `persistence/sqlite/`; storage
+contracts are isolated in `persistence/types/`. It wraps Bun's native
+`bun:sqlite` in WAL mode, batches inserts through `WriteBuffer`, serializes
+payloads with MessagePack, and exposes recovery queries used to rebuild state
+after restart. The optional server-only, database-authoritative backend is
+documented separately in
+[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ## Responsibilities & Scope
 
 Owns:
+
 - The SQLite `Database` handle, PRAGMA tuning, schema creation, and incremental
   migrations (`persistence/sqlite/state.ts`, `schema.ts`).
 - Buffered and durable (immediate) job inserts, single and bulk (`insertJob`,
@@ -25,6 +35,10 @@ Owns:
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
 
 Does NOT own (delegated elsewhere):
+
+- PostgreSQL transactions, schema, leases, or event replay — see
+  [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md). Selecting
+  PostgreSQL does not instantiate this SQLite store.
 - The recovery orchestration / re-enqueue logic — `recover()` in
   `application/background/recovery/index.ts` consumes these read APIs and decides
   what to enqueue, retry, or quarantine. See
@@ -38,6 +52,7 @@ Does NOT own (delegated elsewhere):
 ## Dependencies
 
 Internal:
+
 - `domain/types/job` (`Job`, `JobId`, `JobTimelineEntry`), `domain/types/cron` (`CronJob`), `domain/types/dlq` (`DlqEntry`, `FailureReason`, `createDlqEntry`).
 - `shared/logger` (`storageLog`).
 - Sibling modules in this folder: `schema.ts`, `migrations.ts`, `statements.ts`,
@@ -45,6 +60,7 @@ Internal:
   `dependencyCompletionSchema.ts`, and `dependencyCompletionStore.ts`.
 
 External/runtime:
+
 - `bun:sqlite` `Database` (native SQLite).
 - `msgpackr` `pack`/`unpack` — the only third-party runtime dependency touched here.
 - `Bun.file()` for `getSize()`.
@@ -59,8 +75,8 @@ interface SqliteConfig {
   walMode?: boolean;
   synchronous?: 'OFF' | 'NORMAL' | 'FULL';
   cacheSize?: number;
-  writeBufferSize?: number;     // default: 100
-  writeBufferFlushMs?: number;  // constructor default: 10 (JSDoc says 50 — stale)
+  writeBufferSize?: number; // default: 100
+  writeBufferFlushMs?: number; // constructor default: 10 (JSDoc says 50 — stale)
   onCriticalLoss?: SqliteCriticalLossCallback;
 }
 type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: number) => void;
@@ -72,6 +88,7 @@ applies the effective defaults `writeBufferSize=100` and
 `writeBufferFlushMs=10`.
 
 Key methods (real signatures):
+
 - Inserts:
   `insertJob(job: Job, durable?: boolean, admission?: DurableAdmissionMetadata): void`,
   `insertJobImmediate(job: Job, admission?: DurableAdmissionMetadata): void`,
@@ -108,11 +125,13 @@ Key methods (real signatures):
 `sqliteBatch.ts` is the stable compatibility facade. It re-exports
 `BatchInsertManager` from `batchInsert.ts`, `WriteBuffer` from `writeBuffer.ts`,
 and the batch callback/result types from `types/batch.ts`:
+
 - `class BatchInsertManager` — `insertJobsBatch(jobs: Job[]): BatchInsertResult` (never throws).
 - `class WriteBuffer` — `add`, `addBatch`, `flush(): number`, `hasPending(id)`, `removePending(id)`, `pendingCount`, `stop()`, `stopGracefully(timeoutMs=5000): Promise<number>`, `getRetryState()`.
 - Types: `BatchInsertResult { transient: Job[]; conflicts: Job[]; error?: Error }`, `WriteBufferErrorCallback`, `CriticalErrorCallback`.
 
 `sqliteSerializer.ts` exports:
+
 - `pack(data): Uint8Array`, `unpack<T>(buffer, fallback, context): T`.
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
@@ -177,6 +196,7 @@ dedup/debounce flags, etc.).
 ## Business Logic / Control Flow
 
 Buffered write (default path):
+
 1. `insertJob(job)` in `persistence/sqlite/jobs.ts` calls
    `writeBuffer.add(job)` (`persistence/writeBuffer.ts`).
 2. The buffer auto-flushes every `writeBufferFlushMs` (10ms), or immediately
@@ -342,6 +362,7 @@ restart, then close the database. Flush and checkpoint failures are logged.
 ## Concurrency & Locking
 
 This module is not lock-coordinated with the shard locks documented in [Concurrency & Locking](./concurrency-and-locking.md) — it relies on the single-threaded JS event loop plus SQLite's own locking:
+
 - `PRAGMA busy_timeout = 5000` lets SQLite wait out a busy lock rather than failing immediately (`schema.ts:13`).
 - `WriteBuffer.flushing` is a reentrancy guard: a concurrent `flush()` returns
   zero. The timer also skips while a backoff retry is pending
@@ -410,6 +431,8 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 
 ## Related Docs
 
+- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — optional
+  server backend; intentionally separate from this synchronous SQLite path.
 - [architecture](../architecture.md) — where persistence sits in the request/recovery flow.
 - [data-model](../data-model.md) — full `Job`, `CronJob`, `DlqEntry` definitions.
 - [Core Queue Engine](./core-queue-engine.md) — the in-memory state hydrated from these loads.

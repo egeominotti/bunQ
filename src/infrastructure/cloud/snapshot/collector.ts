@@ -2,6 +2,7 @@ import { arch, cpus, hostname, platform } from 'os';
 import type { QueueManager } from '../../../application/queueManager';
 import type { CloudSnapshot } from '../types';
 import type { CollectSnapshotParams } from '../types/collector';
+import type { CloudSnapshotSource } from '../queueAdapter/types';
 
 /** Cached host and runtime metadata. */
 export const SNAPSHOT_HOST = hostname();
@@ -25,7 +26,11 @@ export function resolveRedaction(params: CollectSnapshotParams): {
 
 /** Map cron definitions to their snapshot shape. */
 export function collectCrons(queueManager: QueueManager): CloudSnapshot['crons'] {
-  return queueManager.listCrons().map((cron) => ({
+  return mapSnapshotCrons(queueManager.listCrons());
+}
+
+export function mapSnapshotCrons(crons: CloudSnapshotSource['crons']): CloudSnapshot['crons'] {
+  return crons.map((cron) => ({
     name: cron.name,
     queue: cron.queue,
     schedule: cron.schedule ?? null,
@@ -102,6 +107,40 @@ export function collectWorkerDetails(
   });
 }
 
+export function mapSnapshotWorkers(
+  workers: CloudSnapshotSource['workers'],
+  now: number
+): CloudSnapshot['workerDetails'] {
+  const workerTimeoutMs = 30_000;
+  return workers.map((worker) => {
+    const totalJobs = worker.processedJobs + worker.failedJobs;
+    return {
+      id: worker.id,
+      name: worker.name,
+      queues: worker.queues,
+      concurrency: worker.concurrency,
+      hostname: worker.hostname,
+      pid: worker.pid,
+      registeredAt: worker.registeredAt,
+      lastSeen: worker.lastSeen,
+      activeJobs: worker.activeJobs,
+      processedJobs: worker.processedJobs,
+      failedJobs: worker.failedJobs,
+      currentJob: worker.currentJob,
+      uptime: now - worker.registeredAt,
+      status:
+        now - worker.lastSeen > workerTimeoutMs
+          ? ('stalled' as const)
+          : worker.activeJobs > 0
+            ? ('active' as const)
+            : ('idle' as const),
+      errorRate: totalJobs > 0 ? +(worker.failedJobs / totalJobs).toFixed(4) : 0,
+      utilization:
+        worker.concurrency > 0 ? +(worker.activeJobs / worker.concurrency).toFixed(4) : 0,
+    };
+  });
+}
+
 /** Collect results, logs, and active locks for the snapshot. */
 export function collectJobArtifacts(
   queueManager: QueueManager
@@ -124,4 +163,14 @@ export function collectJobArtifacts(
   }));
 
   return { jobResults, jobLogEntries, activeLocks };
+}
+
+export function mapSnapshotJobArtifacts(
+  source: CloudSnapshotSource
+): Pick<CloudSnapshot, 'jobResults' | 'jobLogEntries' | 'activeLocks'> {
+  return {
+    jobResults: Object.fromEntries(source.jobResults),
+    jobLogEntries: Object.fromEntries([...source.jobLogs].map(([id, logs]) => [id, [...logs]])),
+    activeLocks: [...source.activeLocks],
+  };
 }

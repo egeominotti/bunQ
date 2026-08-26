@@ -11,6 +11,9 @@ import type { HandlerContext } from '../types';
 import { throughputTracker } from '../../../application/throughputTracker';
 import { latencyTracker } from '../../../application/latencyTracker';
 import { validateQueueName } from '../protocol/validation';
+import type { QueueMetrics, QueueMetricType } from '../../../domain/types/metrics';
+import { clientStorageStatus } from '../../../shared/storageHealth';
+import { sanitizeServerError } from '../errors';
 
 /** Handle Cancel command */
 export async function handleCancel(
@@ -70,8 +73,14 @@ export function handlePause(
   cmd: Extract<Command, { cmd: 'Pause' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
-  ctx.queueManager.pause(cmd.queue);
+): Response | Promise<Response> {
+  const manager = ctx.queueManager as typeof ctx.queueManager & {
+    pauseDurable?: (queue: string, paused: boolean) => Promise<void>;
+  };
+  if (manager.pauseDurable) {
+    return manager.pauseDurable(cmd.queue, true).then(() => resp.ok(undefined, reqId));
+  }
+  manager.pause(cmd.queue);
   return resp.ok(undefined, reqId);
 }
 
@@ -80,8 +89,14 @@ export function handleResume(
   cmd: Extract<Command, { cmd: 'Resume' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
-  ctx.queueManager.resume(cmd.queue);
+): Response | Promise<Response> {
+  const manager = ctx.queueManager as typeof ctx.queueManager & {
+    pauseDurable?: (queue: string, paused: boolean) => Promise<void>;
+  };
+  if (manager.pauseDurable) {
+    return manager.pauseDurable(cmd.queue, false).then(() => resp.ok(undefined, reqId));
+  }
+  manager.resume(cmd.queue);
   return resp.ok(undefined, reqId);
 }
 
@@ -90,9 +105,14 @@ export function handleDrain(
   cmd: Extract<Command, { cmd: 'Drain' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
-  const count = ctx.queueManager.drain(cmd.queue);
-  return { ok: true, count, reqId };
+): Response | Promise<Response> {
+  const manager = ctx.queueManager as typeof ctx.queueManager & {
+    drainDurable?: (queue: string) => Promise<number>;
+  };
+  if (manager.drainDurable) {
+    return manager.drainDurable(cmd.queue).then((count) => ({ ok: true, count, reqId }));
+  }
+  return { ok: true, count: manager.drain(cmd.queue), reqId };
 }
 
 /** Handle Stats command */
@@ -121,7 +141,7 @@ export function handleStorageStatus(
   ctx: HandlerContext,
   reqId?: string
 ): Response {
-  const status = ctx.queueManager.getStorageStatus();
+  const status = clientStorageStatus(ctx.queueManager.getStorageStatus());
   return resp.data({ diskFull: status.diskFull, error: status.error, since: status.since }, reqId);
 }
 
@@ -150,20 +170,34 @@ export function handleQueueMetrics(
   cmd: Extract<Command, { cmd: 'Metrics' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
+): Response | Promise<Response> {
   if (typeof cmd.queue !== 'string') return resp.error('Metrics queue is required', reqId);
   const queueError = validateQueueName(cmd.queue);
   if (queueError) return resp.error(queueError, reqId);
   if (cmd.type !== 'completed' && cmd.type !== 'failed') {
     return resp.error("Metrics type must be 'completed' or 'failed'", reqId);
   }
+  const manager = ctx.queueManager as typeof ctx.queueManager & {
+    getQueueMetricsDurable?: (
+      queue: string,
+      type: QueueMetricType,
+      start?: number,
+      end?: number
+    ) => Promise<QueueMetrics>;
+  };
+  if (manager.getQueueMetricsDurable) {
+    return manager
+      .getQueueMetricsDurable(cmd.queue, cmd.type, cmd.start ?? 0, cmd.end ?? -1)
+      .then((metrics) => resp.data(metrics, reqId))
+      .catch((error) => resp.error(sanitizeServerError(error), reqId));
+  }
   try {
     return resp.data(
-      ctx.queueManager.getQueueMetrics(cmd.queue, cmd.type, cmd.start ?? 0, cmd.end ?? -1),
+      manager.getQueueMetrics(cmd.queue, cmd.type, cmd.start ?? 0, cmd.end ?? -1),
       reqId
     );
   } catch (error) {
-    return resp.error(error instanceof Error ? error.message : String(error), reqId);
+    return resp.error(sanitizeServerError(error), reqId);
   }
 }
 
@@ -172,15 +206,21 @@ export function handleTrimEvents(
   cmd: Extract<Command, { cmd: 'TrimEvents' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
+): Response | Promise<Response> {
   const queueError = validateQueueName(cmd.queue);
   if (queueError) return resp.error(queueError, reqId);
+  const manager = ctx.queueManager as typeof ctx.queueManager & {
+    trimQueueEventsDurable?: (queue: string, maxLength: number) => Promise<number>;
+  };
+  if (manager.trimQueueEventsDurable) {
+    return manager
+      .trimQueueEventsDurable(cmd.queue, cmd.maxLength)
+      .then((removed) => resp.data({ removed }, reqId))
+      .catch((error) => resp.error(sanitizeServerError(error), reqId));
+  }
   try {
-    return resp.data(
-      { removed: ctx.queueManager.trimQueueEvents(cmd.queue, cmd.maxLength) },
-      reqId
-    );
+    return resp.data({ removed: manager.trimQueueEvents(cmd.queue, cmd.maxLength) }, reqId);
   } catch (error) {
-    return resp.error(error instanceof Error ? error.message : String(error), reqId);
+    return resp.error(sanitizeServerError(error), reqId);
   }
 }

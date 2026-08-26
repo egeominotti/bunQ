@@ -24,11 +24,33 @@ function ctxFor(m: QueueManager): HandlerContext {
 }
 
 describe('config validation audit', () => {
+  it('sanitizes PostgreSQL diagnostics returned by asynchronous handlers', async () => {
+    const leaked =
+      'duplicate key value violates unique constraint bunqueue_jobs_pkey (SQLSTATE 23505) at postgres.internal:5432';
+    const manager = {
+      setRateLimitDurable: async () => {
+        throw Object.assign(new Error(leaked), { code: '23505' });
+      },
+      emitDashboardEvent: () => undefined,
+    } as unknown as QueueManager;
+    const response = await handleCommand(
+      { cmd: 'RateLimit', queue: 'postgres-errors', limit: 1 } as never,
+      ctxFor(manager)
+    );
+    expect(response).toMatchObject({ ok: false, error: 'Internal server error' });
+    expect(JSON.stringify(response)).not.toContain('23505');
+    expect(JSON.stringify(response)).not.toContain('postgres.internal');
+  });
+
   it('stall-config: garbage string is dropped, default kept (detection stays valid)', async () => {
     qm = new QueueManager();
     const ctx = ctxFor(qm);
     await handleCommand(
-      { cmd: 'SetStallConfig', queue: 'q', config: { stallInterval: 'abc', maxStalls: 'xyz' } } as never,
+      {
+        cmd: 'SetStallConfig',
+        queue: 'q',
+        config: { stallInterval: 'abc', maxStalls: 'xyz' },
+      } as never,
       ctx
     );
     const cfg = qm.getStallConfig('q') as { stallInterval: number; maxStalls: number };
@@ -63,7 +85,10 @@ describe('config validation audit', () => {
     const ctx = ctxFor(qm);
     const r1 = await handleCommand({ cmd: 'RateLimit', queue: 'q', limit: 'abc' } as never, ctx);
     expect(r1.ok).toBe(false);
-    const r2 = await handleCommand({ cmd: 'SetConcurrency', queue: 'q', limit: 'abc' } as never, ctx);
+    const r2 = await handleCommand(
+      { cmd: 'SetConcurrency', queue: 'q', limit: 'abc' } as never,
+      ctx
+    );
     expect(r2.ok).toBe(false);
     // valid numeric string still works
     const r3 = await handleCommand({ cmd: 'RateLimit', queue: 'q', limit: '100' } as never, ctx);

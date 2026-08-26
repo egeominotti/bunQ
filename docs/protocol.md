@@ -73,7 +73,7 @@ The words MUST / MUST NOT / SHOULD are used as in RFC 2119.
 Request:
 
 ```jsonc
-{ "cmd": "PUSH", "reqId": "any-string", /* command fields */ }
+{ "cmd": "PUSH", "reqId": "any-string" /* command fields */ }
 ```
 
 Response:
@@ -141,10 +141,10 @@ the shapes and the rules a client MUST get right. All commands below answer
 
 ### 6.1 Producing
 
-| Command | Key request fields | Response |
-|---|---|---|
-| `PUSH` | `queue`, `name`, `data`, plus job options (below) | `{id}` |
-| `PUSHB` | `queue`, `jobs: [{name, data, ...JobInput}]` | `{ids: []}` |
+| Command | Key request fields                                | Response    |
+| ------- | ------------------------------------------------- | ----------- |
+| `PUSH`  | `queue`, `name`, `data`, plus job options (below) | `{id}`      |
+| `PUSHB` | `queue`, `jobs: [{name, data, ...JobInput}]`      | `{ids: []}` |
 
 Job options on `PUSH` (all optional, exact names): `priority`, `delay`,
 `maxAttempts`, `backoff` (ms or `{type, delay, maxDelay}`), `ttl`, `timeout`,
@@ -170,19 +170,19 @@ Client MUSTs:
 
 ### 6.2 Query
 
-| Command | Request | Response |
-|---|---|---|
-| `GetJob` | `id` | `{job}` |
-| `GetJobByCustomId` | `queue`, `customId` | `{job}` |
-| `GetJobs` | `queue`, `state` (string or list), `offset`, `limit`, `asc?` (default `true`) | `{jobs: []}` |
-| `GetState` | `id` | `{state}` |
-| `GetResult` | `id` | `{result}` |
-| `GetProgress` | `id` | `{progress, message}` — top-level |
-| `GetJobCounts` | `queue` | `{counts: {waiting, prioritized, delayed, active, completed, failed, ...}}` |
-| `Count` | `queue` | `{count}` |
-| `WaitJob` | `id`, `timeout` (ms, **0..600000**) | `{completed: bool, result?}` |
-| `GetLogs` | `id`, `start?`, `end?` | `{data: {logs: []}}` — **wrapped** |
-| `GetChildrenValues` | `id` | `{data: {values: {}}}` — **wrapped** |
+| Command             | Request                                                                       | Response                                                                    |
+| ------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GetJob`            | `id`                                                                          | `{job}`                                                                     |
+| `GetJobByCustomId`  | `queue`, `customId`                                                           | `{job}`                                                                     |
+| `GetJobs`           | `queue`, `state` (string or list), `offset`, `limit`, `asc?` (default `true`) | `{jobs: []}`                                                                |
+| `GetState`          | `id`                                                                          | `{state}`                                                                   |
+| `GetResult`         | `id`                                                                          | `{result}`                                                                  |
+| `GetProgress`       | `id`                                                                          | `{progress, message}` — top-level                                           |
+| `GetJobCounts`      | `queue`                                                                       | `{counts: {waiting, prioritized, delayed, active, completed, failed, ...}}` |
+| `Count`             | `queue`                                                                       | `{count}`                                                                   |
+| `WaitJob`           | `id`, `timeout` (ms, **0..600000**)                                           | `{completed: bool, result?}`                                                |
+| `GetLogs`           | `id`, `start?`, `end?`                                                        | `{data: {logs: []}}` — **wrapped**                                          |
+| `GetChildrenValues` | `id`                                                                          | `{data: {values: {}}}` — **wrapped**                                        |
 
 `GetResult` distinguishes a completed persisted `null` from an ID with no
 result: the former returns `result: null`, while the latter has an undefined /
@@ -208,10 +208,10 @@ Client MUSTs:
 
 #### Queue event stream
 
-| Command | Request | Response |
-|---|---|---|
-| `SubscribeEvents` | `queue` | `{}` |
-| `UnsubscribeEvents` | none | `{}` |
+| Command             | Request | Response |
+| ------------------- | ------- | -------- |
+| `SubscribeEvents`   | `queue` | `{}`     |
+| `UnsubscribeEvents` | none    | `{}`     |
 
 One TCP connection can subscribe to one queue at a time. A new subscription
 replaces the previous queue; unsubscribe leaves the connection usable for
@@ -226,20 +226,20 @@ request correlation and MUST NOT resolve an in-flight command with it.
 
 ### 6.3 Consuming (the worker loop)
 
-| Command | Request | Response |
-|---|---|---|
-| `PULL` | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?` | `{job, token}` — top-level, both `null`-ish when empty |
-| `PULLB` | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?` | `{jobs: [], tokens: []}` |
-| `ACK` | `id`, `token`, `result?` | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
-| `ACKB` | `ids: []`, `tokens: []`, `results?` | `{}` or `{data: {ignoredIds, ignoredIndices}}` |
-| `FAIL` | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool` | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
-| `Heartbeat` | `id` (= workerId), `activeJobs`, `processed`, `failed` | `{data: {pong}}` |
-| `JobHeartbeatB` | `ids: []`, `tokens: []` | `{data: {ok, count}}` — renews the jobs' locks |
-| `RegisterWorker` | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}` |
-| `UnregisterWorker` | `workerId` | `{}` |
-| `ExtendLock` | `id`, `token`, `duration` | `{}` |
-| `Progress` | `id`, `progress` (0..100 by client convention; not server-enforced), `message?` | `{}` — job MUST be active |
-| `AddLog` | `id`, `message`, `level?` (default `info`) | `{data: {added}}` — **wrapped**; read back via `GetLogs` |
+| Command            | Request                                                                         | Response                                                        |
+| ------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `PULL`             | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?`                         | `{job, token}` — top-level, both `null`-ish when empty          |
+| `PULLB`            | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?`      | `{jobs: [], tokens: []}`                                        |
+| `ACK`              | `id`, `token`, `result?`                                                        | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
+| `ACKB`             | `ids: []`, `tokens: []`, `results?`                                             | `{}` or `{data: {ignoredIds, ignoredIndices}}`                  |
+| `FAIL`             | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool`              | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
+| `Heartbeat`        | `id` (= workerId), `activeJobs`, `processed`, `failed`                          | `{data: {pong}}`                                                |
+| `JobHeartbeatB`    | `ids: []`, `tokens: []`                                                         | `{data: {ok, count}}` — renews the jobs' locks                  |
+| `RegisterWorker`   | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}`                                                 |
+| `UnregisterWorker` | `workerId`                                                                      | `{}`                                                            |
+| `ExtendLock`       | `id`, `token`, `duration`                                                       | `{}`                                                            |
+| `Progress`         | `id`, `progress` (0..100 by client convention; not server-enforced), `message?` | `{}` — job MUST be active                                       |
+| `AddLog`           | `id`, `message`, `level?` (default `info`)                                      | `{data: {added}}` — **wrapped**; read back via `GetLogs`        |
 
 Semantics a client MUST implement:
 
@@ -262,7 +262,10 @@ Semantics a client MUST implement:
   MUST disable heartbeats — never turn into a zero-delay loop.
 - Worker registration is **per-connection server state**: after any
   reconnect the client MUST re-send `RegisterWorker`, or `skipIfNoWorker`
-  schedulers silently stop firing (discussion #103 class).
+  schedulers silently stop firing (discussion #103 class). In PostgreSQL
+  multi-broker mode, `Heartbeat` and `UnregisterWorker` are fenced by the
+  server-derived broker and connection identities; another connection cannot
+  mutate a registration merely by knowing its worker ID.
 - Completion callbacks/events MUST be gated on the `ACK`/`FAIL` actually
   reaching the server. If the send fails, the lock expiry retries the job:
   claiming completion would be a lie.
@@ -287,7 +290,9 @@ Semantics a client MUST implement:
 lease, the exact current token is required; unlocked jobs retain the
 administrative form. Worker processor Job objects bind that token automatically
 for the tokenless public `retry()`, `changeDelay(delay)`, and synchronous
-`discard()` methods.
+`discard()` methods. For a failed job, PostgreSQL `MoveToWait` executes the
+durable DLQ retry transaction; memory/SQLite retains the existing synchronous
+retry path.
 
 ### 6.5 DLQ
 
@@ -300,12 +305,12 @@ entries.
 
 ### 6.6 Schedulers (cron)
 
-| Command | Request | Response |
-|---|---|---|
-| `Cron` | `name`, `jobName?`, `queue`, `data`, `schedule?` (cron pattern), `repeatEvery?` (ms), `timezone?`, `immediately?`, **`maxLimit?`**, `uniqueKey?`, `dedup?`, `skipIfNoWorker?`, `skipMissedOnRestart?`, `preventOverlap?`, `priority?`, `jobOptions?` | `{cron}` — authoritative normalized definition |
-| `CronGet` | `name` | `{cron}` — top-level; not-found → error |
-| `CronList` | — | `{crons: []}` |
-| `CronDelete` | `name` | `{}` |
+| Command      | Request                                                                                                                                                                                                                                              | Response                                       |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `Cron`       | `name`, `jobName?`, `queue`, `data`, `schedule?` (cron pattern), `repeatEvery?` (ms), `timezone?`, `immediately?`, **`maxLimit?`**, `uniqueKey?`, `dedup?`, `skipIfNoWorker?`, `skipMissedOnRestart?`, `preventOverlap?`, `priority?`, `jobOptions?` | `{cron}` — authoritative normalized definition |
+| `CronGet`    | `name`                                                                                                                                                                                                                                               | `{cron}` — top-level; not-found → error        |
+| `CronList`   | —                                                                                                                                                                                                                                                    | `{crons: []}`                                  |
+| `CronDelete` | `name`                                                                                                                                                                                                                                               | `{}`                                           |
 
 - An SDK "limit" option MUST map to wire **`maxLimit`** (#111). `maxLimit`
   `<= 0` means unlimited.
@@ -342,6 +347,11 @@ entries.
   `TrimEvents(queue,maxLength)` → `{data:{removed}}`. `ListQueues` → `{queues}`
   (names as strings); `Ping` →
   `{data: {pong}}`.
+- `StorageStatus` → `{data:{diskFull,error,since}}`. A SQLite disk-full status
+  keeps its actionable error string. Other storage failures set `diskFull:false`
+  and expose only `Internal server error`; SQLSTATE, constraint, host, driver,
+  and connection diagnostics are never part of a protocol response. The same
+  projection applies to health/readiness and dashboard payloads.
 
 ### 6.8 Response wrapping summary
 
@@ -402,20 +412,20 @@ NOT silently accept unverified peers.
   class) and reconnect lazily on the next call, re-running `Auth` (and
   `RegisterWorker` for workers).
 - The server enforces: `PULLB.timeout <= 60000`, `WaitJob.timeout <=
-  600000`, `PULLB.count <= 1000`. Clients MUST clamp rather than surface
+600000`, `PULLB.count <= 1000`. Clients MUST clamp rather than surface
   avoidable validation errors for values their API accepts.
 
 ## 10. Server limits and defaults (informative)
 
-| Item | Value |
-|---|---|
-| Default attempts / backoff | 3 / 1000 ms |
-| Default lock TTL | 30000 ms |
-| `stackTraceLimit` default | 10 (first N lines kept) |
-| Write buffer flush | ~10 ms (jobs pushed non-`durable` can be lost in a crash within this window) |
-| Frame cap | 64 MiB |
-| Max `PULLB` count | 1000 |
-| Max long-poll / WaitJob | 60 s / 600 s |
+| Item                       | Value                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| Default attempts / backoff | 3 / 1000 ms                                                                  |
+| Default lock TTL           | 30000 ms                                                                     |
+| `stackTraceLimit` default  | 10 (first N lines kept)                                                      |
+| Write buffer flush         | ~10 ms (jobs pushed non-`durable` can be lost in a crash within this window) |
+| Frame cap                  | 64 MiB                                                                       |
+| Max `PULLB` count          | 1000                                                                         |
+| Max long-poll / WaitJob    | 60 s / 600 s                                                                 |
 
 ## 11. Conformance
 

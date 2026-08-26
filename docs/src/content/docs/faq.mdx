@@ -1,6 +1,6 @@
 ---
-title: "bunqueue FAQ: Bun Job Queue Questions Answered"
-description: "Common questions about bunqueue answered: SQLite vs Redis, embedded vs server mode, performance, retries, scaling, backups, and BullMQ migration."
+title: 'bunqueue FAQ: Bun Job Queue Questions Answered'
+description: 'Common questions about bunqueue answered: SQLite, PostgreSQL 18.6 multi-broker mode, embedded vs server, performance, retries, scaling, backups, and migration.'
 head:
   - tag: meta
     attrs:
@@ -12,8 +12,13 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · faq</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Asked, <em>answered.</em></h1>
-  <p class="bq-hero-sub">One-paragraph answers on storage, modes, performance, retries, scaling and migration. If your question is not here, GitHub Discussions is the next stop.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Asked, <em>answered.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    One-paragraph answers on storage, modes, performance, retries, scaling and migration. If your
+    question is not here, GitHub Discussions is the next stop.
+  </p>
 </div>
 
 Short answers to the questions people actually ask. Each answer links to the page that owns the topic.
@@ -22,11 +27,11 @@ Short answers to the questions people actually ask. Each answer links to the pag
 
 ### What is bunqueue?
 
-bunqueue is a job queue for Bun: you push jobs (units of work, like "send this email") onto a named queue, and workers pull and process them with retries, priorities, and scheduling. It persists jobs in SQLite (a database stored in a single local file) instead of Redis, and its API is compatible with BullMQ, so migration is mostly an import change. Start with the [quickstart](/guide/quickstart/).
+bunqueue is a job queue for Bun: you push jobs (units of work, like "send this email") onto a named queue, and workers pull and process them with retries, priorities, and scheduling. It uses memory/SQLite by default and offers an optional PostgreSQL 18.6 server backend for multiple brokers. Its API is compatible with BullMQ, so migration is mostly an import change. Start with the [quickstart](/guide/quickstart/).
 
 ### Why SQLite instead of Redis?
 
-One less server. There is nothing to install, monitor, or pay hosting for, jobs survive restarts by default, and backup is copying one file (or letting the built-in [S3 backup](/guide/backup/) do it). Bun's native SQLite bindings make it fast enough that bunqueue beats BullMQ on bulk throughput; see the [comparison](/guide/comparison/). The trade-off is that the queue is single-instance, covered under Scaling below.
+For the default deployment it means one less server. There is nothing to install or monitor, and backup is one safe SQLite snapshot (or the built-in [S3 backup](/guide/backup/)). Bun's native SQLite bindings keep the hot path synchronous; see the [comparison](/guide/comparison/). When brokers themselves must scale horizontally, select the separate PostgreSQL backend instead.
 
 ### Does it run on Node.js?
 
@@ -44,27 +49,40 @@ Two runtime dependencies: `croner` (cron parsing) and `msgpackr` (binary seriali
 
 ### What is the difference between embedded and server mode?
 
-Embedded mode (`new Queue('q', { embedded: true })`) runs the queue inside your process: no network, best when producers and workers live in one app. Server mode runs `bunqueue start` as a standalone process and clients connect over TCP: best when multiple processes or machines share queues. The API is the same in both. Pick one mode per deployment; the same SQLite file must never be opened by two processes at once.
+Embedded mode (`new Queue('q', { embedded: true })`) runs the queue inside your process with memory/SQLite. Server mode runs `bunqueue start` and clients connect over TCP. A server may use memory/SQLite with one broker or PostgreSQL 18.6 with multiple brokers. Pick one backend per deployment; the same SQLite file must never be opened by two processes at once.
 
 ### Where is my data stored?
 
-Nowhere, unless you say so. Without a data path, jobs are held in memory and lost on restart. Set `dataPath` in the constructor for embedded mode, or `BUNQUEUE_DATA_PATH` (also accepted: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) or `--data-path` for the server:
+Nowhere, unless you say so. Without a data path or PostgreSQL URL, jobs are held in memory and lost on restart. Set `dataPath` in embedded mode, a SQLite data-path variable/flag for one server, or `BUNQUEUE_POSTGRES_URL` plus the PostgreSQL driver for a multi-broker server:
 
 ```bash
 BUNQUEUE_DATA_PATH=./data/production.db bunqueue start
+
+# or, in standalone multi-broker mode
+BUNQUEUE_STORAGE_DRIVER=postgres \
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:secret@postgres:5432/bunqueue' \
+bunqueue start
 ```
 
 ### How does persistence work?
 
 Jobs are written to SQLite in WAL mode (write-ahead logging, a journal that lets reads and writes overlap). By default writes are buffered for up to 10ms and flushed in batches, which is what enables ~100k jobs/sec. If a 10ms loss window is unacceptable for a job, add it with `{ durable: true }` to write it to disk before `add()` returns (~10k jobs/sec). Details in [configuration](/guide/configuration/).
 
-### Can I use Postgres or MySQL instead?
+In PostgreSQL mode, PostgreSQL is authoritative and each mutation is
+transactional. Competing brokers claim with row locks and `SKIP LOCKED`; opaque
+database-clock leases fence stale ACK/FAIL attempts. SQLite buffering and its
+published performance figures do not apply to that backend.
 
-No, bunqueue is SQLite-only by design: the storage layer is built on synchronous `bun:sqlite`, and swapping the database would not add clustering to a single-instance engine. On serverless or ephemeral filesystems, mount a persistent volume for the data path, or forward jobs to a central durable server. See [storage backends](/guide/databases/).
+### Can I use PostgreSQL or MySQL instead?
+
+PostgreSQL **18.6 is supported in standalone server mode** and allows multiple
+active bunqueue brokers to share one database/namespace. SQLite remains the
+default and the only persistent embedded backend. MySQL is not supported. See
+[storage backends](/guide/databases/) for configuration and boundaries.
 
 ### How do I back up and restore?
 
-Enable the built-in S3 backup (`S3_BACKUP_ENABLED=1` plus bucket and credentials, it uploads on an interval and prunes old copies), or take manual snapshots with `sqlite3 queue.db ".backup backup.db"`. Restore with `bunqueue backup list` and `bunqueue backup restore <key> --force`. Full guide: [backup](/guide/backup/).
+For SQLite, enable the built-in S3 backup (`S3_BACKUP_ENABLED=1` plus bucket and credentials) or take a safe SQLite snapshot. Restore with `bunqueue backup list` and `bunqueue backup restore <key> --force`. For PostgreSQL, use your database provider's backup and point-in-time-recovery tooling; bunqueue's S3 command does not snapshot PostgreSQL. Full SQLite guide: [backup](/guide/backup/).
 
 ## Performance
 
@@ -217,11 +235,18 @@ FIFO (first in, first out) is the default for jobs of equal priority, so ordered
 
 ### Can I run multiple workers?
 
-Yes. In server mode any number of worker processes, on any machines, connect over TCP and share the queues. That is the standard way to scale processing: the queue server stays single, the workers multiply.
+Yes. Any number of worker processes can connect over TCP and share queues. With
+SQLite the queue broker stays single while workers multiply. With PostgreSQL
+18.6, both workers and bunqueue broker processes can multiply.
 
-### Does bunqueue support clustering or high availability?
+### Does bunqueue support multiple brokers or high availability?
 
-No built-in clustering: bunqueue is single-instance, one server process owns the SQLite file. For disaster recovery, use S3 backups plus restore on a replacement host. For edge or multi-site setups, run local embedded queues and use store-and-forward (`queue.forward()`) to drain jobs to a central server. If the queue itself must scale across servers, BullMQ on Redis Cluster is the better fit; see the [comparison](/guide/comparison/).
+Yes, when server mode uses PostgreSQL 18.6. Brokers share authoritative rows,
+leases, limits, cron/worker state, and durable events; a stale broker cannot
+finalize a lease recovered elsewhere. Database availability, routing, backup,
+and failover remain operator responsibilities. SQLite mode deliberately stays
+single-broker. This is not a multi-region consensus layer; see
+[storage backends](/guide/databases/) and [deployment](/guide/deployment/).
 
 ### Is bunqueue production-ready?
 
@@ -238,11 +263,13 @@ Yes, and it is usually small: change the import to `bunqueue/client`, delete the
 There is no importer, but the job format is plain JSON. Export your jobs and bulk-insert them:
 
 ```typescript
-await queue.addBulk(oldJobs.map((j) => ({
-  name: j.type,
-  data: j.payload,
-  opts: { priority: j.priority },
-})));
+await queue.addBulk(
+  oldJobs.map((j) => ({
+    name: j.type,
+    data: j.payload,
+    opts: { priority: j.priority },
+  }))
+);
 ```
 
 ## Workflows
@@ -276,7 +303,8 @@ Usually accumulation: completed jobs kept around, a growing DLQ, or oversized jo
 Report bugs on [GitHub Issues](https://github.com/egeominotti/bunqueue/issues), propose features in [Discussions](https://github.com/egeominotti/bunqueue/discussions), or send a PR. To develop locally: clone the repo, `bun install`, `bun test`.
 
 :::tip[Related]
+
 - [Troubleshooting](/troubleshooting/), debug common issues
 - [Quickstart](/guide/quickstart/), first queue in two minutes
 - [bunqueue vs BullMQ](/guide/comparison/), features and honest benchmarks
-:::
+  :::

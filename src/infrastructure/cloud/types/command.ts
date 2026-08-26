@@ -1,4 +1,4 @@
-import type { QueueManager } from '../../../application/queueManager';
+import type { CloudQueueAdapter } from '../queueAdapter/types';
 import type { CloudSnapshot } from './snapshot';
 
 /** Incoming command from the dashboard. */
@@ -46,7 +46,7 @@ export interface CommandContext {
 }
 
 export type CloudCommandHandler = (
-  queueManager: QueueManager,
+  adapter: CloudQueueAdapter,
   command: CloudCommand,
   context?: CommandContext
 ) => unknown;

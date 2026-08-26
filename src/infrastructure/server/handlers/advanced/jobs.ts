@@ -4,6 +4,7 @@ import type { Response } from '../../../../domain/types/response';
 import * as response from '../../../../domain/types/response';
 import { validateNumericField } from '../../protocol';
 import type { HandlerContext } from '../../types';
+import { sanitizeServerError } from '../../errors';
 
 export async function handleUpdate(
   command: Extract<Command, { cmd: 'Update' }>,
@@ -59,10 +60,7 @@ export async function handleUpdateParent(
     await context.queueManager.updateJobParent(jobId(command.childId), jobId(command.parentId));
     return response.ok(undefined, requestId);
   } catch (error) {
-    return response.error(
-      error instanceof Error ? error.message : 'Failed to update parent',
-      requestId
-    );
+    return response.error(sanitizeServerError(error), requestId);
   }
 }
 
@@ -173,7 +171,12 @@ export async function handleMoveToWait(
   if (state === 'failed') {
     const job = await context.queueManager.getJob(id);
     if (!job) return response.error('Job not found', requestId);
-    const count = context.queueManager.retryDlq(job.queue, id);
+    const manager = context.queueManager as typeof context.queueManager & {
+      retryDlqDurable?: (queue: string, jobId: typeof id) => Promise<number>;
+    };
+    const count = manager.retryDlqDurable
+      ? await manager.retryDlqDurable(job.queue, id)
+      : manager.retryDlq(job.queue, id);
     return count > 0
       ? response.ok(undefined, requestId)
       : response.error('Failed job not in DLQ', requestId);

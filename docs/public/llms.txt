@@ -48,7 +48,7 @@ Key facts:
 - [S3 Backup & Recovery](https://bunqueue.dev/guide/backup/): Automated backups to AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces
 - [Webhooks](https://bunqueue.dev/guide/webhooks/): HMAC-SHA256 signed HTTP callbacks on job events
 - [Security](https://bunqueue.dev/security/): Token auth, rate limiting, network config, vulnerability reporting
-- [Postgres, MySQL & Storage Backends](https://bunqueue.dev/guide/databases/): Why SQLite-only, and how to run on serverless/ephemeral platforms
+- [SQLite & PostgreSQL Storage Backends](https://bunqueue.dev/guide/databases/): SQLite defaults, PostgreSQL 18.6 multi-broker mode, and serverless/ephemeral patterns
 - [CPU-Intensive Workers over TCP](https://bunqueue.dev/guide/cpu-intensive-workers/): Ping intervals, command timeouts, yield patterns
 - [IoT & Edge](https://bunqueue.dev/guide/iot-edge/): Run on Raspberry Pi/ARM64 gateways, MQTT bridging, store-and-forward
 - [Troubleshooting](https://bunqueue.dev/troubleshooting/): SQLite locks, memory, connection timeouts, common fixes

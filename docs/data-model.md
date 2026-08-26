@@ -3,11 +3,12 @@
 This document is the authoritative reference for how bunqueue represents data
 across its three boundaries:
 
-| Boundary      | Representation                | Source of truth                                   |
-| ------------- | ----------------------------- | ------------------------------------------------- |
-| **In-memory** | Plain TS objects + collections | `src/domain/types/*`, `src/application/types/*`  |
-| **On-disk**   | SQLite rows, BLOB = MessagePack | `src/infrastructure/persistence/schema.ts`        |
-| **On-wire**   | msgpack-encoded `Command` / `Response` frames | `src/domain/types/command.ts`, `response.ts` |
+| Boundary                   | Representation                                | Source of truth                                     |
+| -------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| **In-memory**              | Plain TS objects + collections                | `src/domain/types/*`, `src/application/types/*`     |
+| **On-disk (default)**      | SQLite rows, BLOB = MessagePack               | `src/infrastructure/persistence/schema.ts`          |
+| **On-disk (multi-broker)** | PostgreSQL rows, BYTEA = MessagePack          | `src/infrastructure/persistence/postgres/schema.ts` |
+| **On-wire**                | msgpack-encoded `Command` / `Response` frames | `src/domain/types/command.ts`, `response.ts`        |
 
 The same logical `Job` flows through all three: a client sends a `PushCommand`
 over TCP (msgpack), the server materializes a `Job` object in a shard's
@@ -33,27 +34,27 @@ The core record. Defined in `src/domain/types/jobs/model.ts:41-90`.
 
 ```typescript
 export interface Job {
-  readonly id: JobId;            // UUIDv7, branded string (types/jobs/model.ts:1)
+  readonly id: JobId; // UUIDv7, branded string (types/jobs/model.ts:1)
   readonly queue: string;
-  readonly data: unknown;        // user payload (msgpack BLOB on disk)
-  readonly priority: number;     // higher = sooner
-  readonly createdAt: number;    // epoch ms
-  readonly lifo: boolean;        // tie-break among equal priority
+  readonly data: unknown; // user payload (msgpack BLOB on disk)
+  readonly priority: number; // higher = sooner
+  readonly createdAt: number; // epoch ms
+  readonly lifo: boolean; // tie-break among equal priority
 
   // Scheduling
-  runAt: number;                 // createdAt + delay; <=now means ready
-  startedAt: number | null;      // set when pulled (active)
-  completedAt: number | null;    // set when completed
+  runAt: number; // createdAt + delay; <=now means ready
+  startedAt: number | null; // set when pulled (active)
+  completedAt: number | null; // set when completed
 
   // Retry config
-  attempts: number;              // attempts consumed so far
+  attempts: number; // attempts consumed so far
   readonly maxAttempts: number;
-  readonly backoff: number;          // base backoff ms
-  readonly backoffConfig: BackoffConfig | null;  // persisted in extended_options
+  readonly backoff: number; // base backoff ms
+  readonly backoffConfig: BackoffConfig | null; // persisted in extended_options
 
   // Timeouts
-  readonly ttl: number | null;       // time-to-live from createdAt
-  readonly timeout: number | null;   // max processing time
+  readonly ttl: number | null; // time-to-live from createdAt
+  readonly timeout: number | null; // max processing time
 
   // Deduplication
   readonly uniqueKey: string | null;
@@ -63,33 +64,33 @@ export interface Job {
   readonly dependsOn: JobId[];
   readonly parentId: JobId | null;
   childrenIds: JobId[];
-  childrenCompleted: number;     // runtime only; reset to 0 on reload
+  childrenCompleted: number; // runtime only; reset to 0 on reload
 
   // Metadata
   readonly tags: string[];
   readonly groupId: string | null;
 
   // Progress tracking
-  progress: number;              // 0..100
+  progress: number; // 0..100
   progressMessage: string | null;
 
   // Failure info
-  stacktrace: string[] | null;   // last failure stack, capped (#74)
+  stacktrace: string[] | null; // last failure stack, capped (#74)
 
   // Cleanup config
   readonly removeOnComplete: boolean;
   readonly removeOnFail: boolean;
 
   // Repeat config
-  readonly repeat: RepeatConfig | null;   // persisted in extended_options
+  readonly repeat: RepeatConfig | null; // persisted in extended_options
 
   // Stall detection
   lastHeartbeat: number;
   readonly stallTimeout: number | null;
-  stallCount: number;            // persisted; cumulative across restarts
+  stallCount: number; // persisted; cumulative across restarts
 
   // BullMQ v5 additional options
-  readonly stackTraceLimit: number;            // default 10
+  readonly stackTraceLimit: number; // default 10
   readonly keepLogs: number | null;
   readonly sizeLimit: number | null;
   readonly failParentOnFailure: boolean;
@@ -101,9 +102,9 @@ export interface Job {
   readonly deduplicationReplace: boolean;
   readonly debounceId: string | null;
   readonly debounceTtl: number | null;
-  readonly durable?: boolean;                    // persisted in extended_options
+  readonly durable?: boolean; // persisted in extended_options
 
-  timeline: JobTimelineEntry[];  // state-transition log (persisted as BLOB)
+  timeline: JobTimelineEntry[]; // state-transition log (persisted as BLOB)
 }
 ```
 
@@ -138,22 +139,22 @@ Notable supporting types:
 - `JobTimelineEntry` (`src/domain/types/jobs/model.ts:33-39`) — `{ state, timestamp, worker?, error?, attempt? }`,
   capped at `MAX_TIMELINE_ENTRIES = 20` (`src/domain/job/constants.ts:2`).
 - `JobLock` (`src/domain/types/jobs/model.ts:139-148`) — `{ jobId, token, owner, createdAt, expiresAt,
-  lastRenewalAt, renewalCount, ttl }`. `DEFAULT_LOCK_TTL = 30_000`.
+lastRenewalAt, renewalCount, ttl }`. `DEFAULT_LOCK_TTL = 30_000`.
 
 ### Job State Machine
 
 The persisted/enum states live in `JobState` (`src/domain/types/jobs/model.ts:4-11`):
 
-| State          | Enum value      | Meaning                                            |
-| -------------- | --------------- | -------------------------------------------------- |
-| `waiting`      | `Waiting`       | Ready to be pulled (`runAt <= now`, priority `0`)  |
-| `prioritized`  | `Prioritized`   | Ready, `priority > 0` (derived from waiting+prio)  |
-| `delayed`      | `Delayed`       | `runAt > now`, waiting for its scheduled time      |
-| `active`       | `Active`        | Pulled by a worker, in `processingShards`          |
-| `completed`    | `Completed`     | ACKed successfully                                 |
-| `failed`       | `Failed`        | Terminal failure → DLQ                             |
+| State         | Enum value    | Meaning                                           |
+| ------------- | ------------- | ------------------------------------------------- |
+| `waiting`     | `Waiting`     | Ready to be pulled (`runAt <= now`, priority `0`) |
+| `prioritized` | `Prioritized` | Ready, `priority > 0` (derived from waiting+prio) |
+| `delayed`     | `Delayed`     | `runAt > now`, waiting for its scheduled time     |
+| `active`      | `Active`      | Pulled by a worker, in `processingShards`         |
+| `completed`   | `Completed`   | ACKed successfully                                |
+| `failed`      | `Failed`      | Terminal failure → DLQ                            |
 
-Two additional states are reported in counts/queries but are *not* members of
+Two additional states are reported in counts/queries but are _not_ members of
 the `JobState` enum (see `JobCounts`, `src/domain/types/responses/model.ts:50-59`):
 
 - `waiting-children` — parked in `shard.waitingDeps` or `shard.waitingChildren`
@@ -175,22 +176,22 @@ fresh location for up to 4 passes instead of reporting a false `unknown` (2.8.31
 Allowed transitions (enforced across `pull`/`ack`/`fail` operations and
 `jobStateTransitions.ts`):
 
-| From          | To                | Trigger                                              |
-| ------------- | ----------------- | ---------------------------------------------------- |
-| `delayed`     | `waiting`         | scheduler when `runAt <= now`, or `Promote`          |
-| `waiting`     | `active`          | `PULL` / `PULLB`                                      |
-| `waiting`     | `waiting-children`| unmet dependency, including a linked `parent` child (`parentLink.ts`) |
-| `waiting-children` | `waiting`    | all `dependsOn` completed                            |
-| `active`      | `completed`       | `ACK` (`ack`)                                        |
-| `active`      | `failed`/`delayed`| `FAIL`: retry w/ backoff if `attempts < maxAttempts` |
-| `active`      | `waiting`         | `moveActiveToWait` (`jobStateTransitions.ts:16`)     |
-| `active`      | `waiting-children`| `moveToWaitingChildren` (`jobStateTransitions.ts:84`)|
-| `waiting`/`active` | `failed`→DLQ | `Discard` (`token?` required for a live lease)       |
-| `active`      | `failed`→DLQ      | timeout / max stalls / max attempts                  |
-| `failed`(DLQ) | `waiting`         | `RetryDlq` / auto-retry                              |
-| `failed`(DLQ) | removed           | `RemoveDlqJob` / selective permanent deletion       |
-| `waiting`/`prioritized`/`delayed` | `delayed` | `ChangeDelay` / `MoveToDelayed` (in-place `runAt`)   |
-| `active`      | `delayed`         | `ChangeDelay` / `MoveToDelayed` (two-phase re-queue)  |
+| From                              | To                 | Trigger                                                               |
+| --------------------------------- | ------------------ | --------------------------------------------------------------------- |
+| `delayed`                         | `waiting`          | scheduler when `runAt <= now`, or `Promote`                           |
+| `waiting`                         | `active`           | `PULL` / `PULLB`                                                      |
+| `waiting`                         | `waiting-children` | unmet dependency, including a linked `parent` child (`parentLink.ts`) |
+| `waiting-children`                | `waiting`          | all `dependsOn` completed                                             |
+| `active`                          | `completed`        | `ACK` (`ack`)                                                         |
+| `active`                          | `failed`/`delayed` | `FAIL`: retry w/ backoff if `attempts < maxAttempts`                  |
+| `active`                          | `waiting`          | `moveActiveToWait` (`jobStateTransitions.ts:16`)                      |
+| `active`                          | `waiting-children` | `moveToWaitingChildren` (`jobStateTransitions.ts:84`)                 |
+| `waiting`/`active`                | `failed`→DLQ       | `Discard` (`token?` required for a live lease)                        |
+| `active`                          | `failed`→DLQ       | timeout / max stalls / max attempts                                   |
+| `failed`(DLQ)                     | `waiting`          | `RetryDlq` / auto-retry                                               |
+| `failed`(DLQ)                     | removed            | `RemoveDlqJob` / selective permanent deletion                         |
+| `waiting`/`prioritized`/`delayed` | `delayed`          | `ChangeDelay` / `MoveToDelayed` (in-place `runAt`)                    |
+| `active`                          | `delayed`          | `ChangeDelay` / `MoveToDelayed` (two-phase re-queue)                  |
 
 > `ChangeDelay` and `MoveToDelayed` both carry a **relative** `delay` (ms) and an
 > optional lease `token` on the wire; the client converts the public absolute
@@ -215,39 +216,39 @@ Helper predicates: `isDelayed`, `isReady`, `isExpired`, `isTimedOut`,
 `JobInput` (`src/domain/types/jobs/model.ts:92-137`) is the creation-time shape. Defaults are applied
 by `createJob` (`src/domain/job/create.ts:77-118`) using `JOB_DEFAULTS` (`src/domain/job/constants.ts:5-13`).
 
-| Option                       | Type                                                    | Default        |
-| ---------------------------- | ------------------------------------------------------- | -------------- |
-| `data`                       | `unknown` (required)                                    | —              |
-| `priority`                   | `number`                                                | `0`            |
-| `delay`                      | `number` (ms)                                           | `0`            |
-| `maxAttempts`                | `number`                                                | `3`            |
-| `backoff`                    | `number \| { type: 'fixed'\|'exponential'; delay }`     | `1000`         |
-| `ttl`                        | `number \| null`                                        | `null`         |
-| `timeout`                    | `number \| null`                                        | `null`         |
-| `uniqueKey`                  | `string \| null`                                        | `null`         |
-| `customId`                   | `string \| null`                                        | `null`         |
-| `dependsOn`                  | `JobId[]`                                               | `[]`           |
-| `childrenIds`                | `JobId[]`                                               | `[]`           |
-| `parentId`                   | `JobId \| null`                                         | `null`         |
-| `tags`                       | `string[]`                                              | `[]`           |
-| `groupId`                    | `string \| null`                                        | `null`         |
-| `lifo`                       | `boolean`                                               | `false`        |
-| `removeOnComplete`           | `boolean` (coerced, #90)                                | `false`        |
-| `removeOnFail`               | `boolean` (coerced, #90)                                | `false`        |
-| `stallTimeout`               | `number \| null`                                        | `null`         |
-| `repeat`                     | `{ every?, limit?, pattern?, count?, tz?, … }`          | `null`         |
-| `dedup`                      | `{ ttl?, extend?, replace? }`                           | see below      |
-| `durable`                    | `boolean` (bypass write buffer)                         | `false`        |
-| `stackTraceLimit`            | `number`                                                | `10`           |
-| `keepLogs`                   | `number \| null`                                        | `null`         |
-| `sizeLimit`                  | `number \| null`                                        | `null`         |
-| `failParentOnFailure`        | `boolean`                                               | `false`        |
-| `removeDependencyOnFailure`  | `boolean`                                               | `false`        |
-| `continueParentOnFailure`    | `boolean`                                               | `false`        |
-| `ignoreDependencyOnFailure`  | `boolean`                                               | `false`        |
-| `debounceId`                 | `string \| null`                                        | `null`         |
-| `debounceTtl`                | `number \| null`                                        | `null`         |
-| `timestamp`                  | `number` (overrides `createdAt`)                        | `Date.now()`   |
+| Option                      | Type                                                | Default      |
+| --------------------------- | --------------------------------------------------- | ------------ |
+| `data`                      | `unknown` (required)                                | —            |
+| `priority`                  | `number`                                            | `0`          |
+| `delay`                     | `number` (ms)                                       | `0`          |
+| `maxAttempts`               | `number`                                            | `3`          |
+| `backoff`                   | `number \| { type: 'fixed'\|'exponential'; delay }` | `1000`       |
+| `ttl`                       | `number \| null`                                    | `null`       |
+| `timeout`                   | `number \| null`                                    | `null`       |
+| `uniqueKey`                 | `string \| null`                                    | `null`       |
+| `customId`                  | `string \| null`                                    | `null`       |
+| `dependsOn`                 | `JobId[]`                                           | `[]`         |
+| `childrenIds`               | `JobId[]`                                           | `[]`         |
+| `parentId`                  | `JobId \| null`                                     | `null`       |
+| `tags`                      | `string[]`                                          | `[]`         |
+| `groupId`                   | `string \| null`                                    | `null`       |
+| `lifo`                      | `boolean`                                           | `false`      |
+| `removeOnComplete`          | `boolean` (coerced, #90)                            | `false`      |
+| `removeOnFail`              | `boolean` (coerced, #90)                            | `false`      |
+| `stallTimeout`              | `number \| null`                                    | `null`       |
+| `repeat`                    | `{ every?, limit?, pattern?, count?, tz?, … }`      | `null`       |
+| `dedup`                     | `{ ttl?, extend?, replace? }`                       | see below    |
+| `durable`                   | `boolean` (bypass write buffer)                     | `false`      |
+| `stackTraceLimit`           | `number`                                            | `10`         |
+| `keepLogs`                  | `number \| null`                                    | `null`       |
+| `sizeLimit`                 | `number \| null`                                    | `null`       |
+| `failParentOnFailure`       | `boolean`                                           | `false`      |
+| `removeDependencyOnFailure` | `boolean`                                           | `false`      |
+| `continueParentOnFailure`   | `boolean`                                           | `false`      |
+| `ignoreDependencyOnFailure` | `boolean`                                           | `false`      |
+| `debounceId`                | `string \| null`                                    | `null`       |
+| `debounceTtl`               | `number \| null`                                    | `null`       |
+| `timestamp`                 | `number` (overrides `createdAt`)                    | `Date.now()` |
 
 `dedup` maps onto job fields via `parseBullMQV5Options` (`src/domain/job/create.ts:60-74`):
 `deduplicationTtl = dedup.ttl ?? null`, `deduplicationExtend = dedup.extend ??
@@ -262,13 +263,14 @@ See [Deduplication & Unique Jobs](./features/deduplication-and-unique.md).
 Defined in `src/domain/types/queue.ts`.
 
 ```typescript
-export interface QueueState {       // src/domain/types/queue.ts:7-17
+export interface QueueState {
+  // src/domain/types/queue.ts:7-17
   readonly name: string;
   paused: boolean;
-  rateLimit: number | null;         // token-bucket capacity
+  rateLimit: number | null; // token-bucket capacity
   rateLimitDuration: number | null; // window ms (null = 1000ms default)
   rateLimitExpiresAt: number | null; // epoch ms auto-expiry (null = permanent)
-  concurrencyLimit: number | null;  // max active jobs
+  concurrencyLimit: number | null; // max active jobs
   activeCount: number;
 }
 ```
@@ -308,7 +310,8 @@ See [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md),
 Defined in `src/domain/types/dlq.ts`.
 
 ```typescript
-export const enum FailureReason {     // dlq.ts:9-24
+export const enum FailureReason {
+  // dlq.ts:9-24
   ExplicitFail = 'explicit_fail',
   MaxAttemptsExceeded = 'max_attempts_exceeded',
   Timeout = 'timeout',
@@ -318,37 +321,39 @@ export const enum FailureReason {     // dlq.ts:9-24
   Unknown = 'unknown',
 }
 
-export interface AttemptRecord {       // dlq.ts:27-40
-  readonly attempt: number;            // 1-based
+export interface AttemptRecord {
+  // dlq.ts:27-40
+  readonly attempt: number; // 1-based
   readonly startedAt: number;
   readonly failedAt: number;
   readonly reason: FailureReason;
   readonly error: string | null;
-  readonly duration: number;           // ms
+  readonly duration: number; // ms
 }
 
-export interface DlqEntry {            // dlq.ts:43-62
-  readonly job: Job;                   // full original job
+export interface DlqEntry {
+  // dlq.ts:43-62
+  readonly job: Job; // full original job
   readonly enteredAt: number;
   readonly reason: FailureReason;
   readonly error: string | null;
-  readonly attempts: AttemptRecord[];  // full attempt history
-  retryCount: number;                  // retries from DLQ
+  readonly attempts: AttemptRecord[]; // full attempt history
+  retryCount: number; // retries from DLQ
   lastRetryAt: number | null;
-  nextRetryAt: number | null;          // null = no auto-retry
-  readonly expiresAt: number | null;   // null = never expire
+  nextRetryAt: number | null; // null = no auto-retry
+  readonly expiresAt: number | null; // null = never expire
 }
 ```
 
 `DlqConfig` (`dlq.ts:65-76`) with `DEFAULT_DLQ_CONFIG` (`dlq.ts:79-85`):
 
-| Field              | Default                | Meaning                          |
-| ------------------ | ---------------------- | -------------------------------- |
-| `autoRetry`        | `false`                | enable auto-retry from DLQ       |
-| `autoRetryInterval`| `3_600_000` (1h)       | base interval (exponential)      |
-| `maxAutoRetries`   | `3`                    | retries before giving up         |
-| `maxAge`           | `604_800_000` (7d)     | age before auto-purge (`null`=∞) |
-| `maxEntries`       | `10000`                | per-queue cap                    |
+| Field               | Default            | Meaning                          |
+| ------------------- | ------------------ | -------------------------------- |
+| `autoRetry`         | `false`            | enable auto-retry from DLQ       |
+| `autoRetryInterval` | `3_600_000` (1h)   | base interval (exponential)      |
+| `maxAutoRetries`    | `3`                | retries before giving up         |
+| `maxAge`            | `604_800_000` (7d) | age before auto-purge (`null`=∞) |
+| `maxEntries`        | `10000`            | per-queue cap                    |
 
 Auto-retry uses exponential backoff: `autoRetryInterval * 2^(retryCount-1)`
 (`scheduleNextRetry`, `dlq.ts:153-165`). Lifecycle helpers: `createDlqEntry`,
@@ -380,23 +385,24 @@ them as terminal DLQ entries.
 Defined in `src/domain/types/cron.ts`.
 
 ```typescript
-export interface CronJob {            // cron.ts:28-52
-  readonly name: string;             // primary key
+export interface CronJob {
+  // cron.ts:28-52
+  readonly name: string; // primary key
   readonly queue: string;
   readonly data: unknown;
-  readonly schedule: string | null;  // cron pattern
+  readonly schedule: string | null; // cron pattern
   readonly repeatEvery: number | null; // ms interval (alt. to schedule)
   readonly priority: number;
-  readonly timezone: string | null;  // IANA, e.g. "Europe/Rome"
-  nextRun: number;                    // mutable
-  executions: number;                 // mutable count
-  readonly maxLimit: number | null;   // null = unlimited
+  readonly timezone: string | null; // IANA, e.g. "Europe/Rome"
+  nextRun: number; // mutable
+  executions: number; // mutable count
+  readonly maxLimit: number | null; // null = unlimited
   readonly uniqueKey: string | null;
-  readonly dedup: CronDedup | null;   // { ttl?, extend?, replace? }
+  readonly dedup: CronDedup | null; // { ttl?, extend?, replace? }
   readonly skipMissedOnRestart: boolean;
   readonly skipIfNoWorker: boolean;
   readonly preventOverlap: boolean;
-  readonly jobOptions: CronJobOptions | null;  // retry/cleanup policy (#86)
+  readonly jobOptions: CronJobOptions | null; // retry/cleanup policy (#86)
 }
 ```
 
@@ -412,7 +418,9 @@ treat the cron as already exhausted (`cron.ts:99`).
 `removeOnComplete`, `removeOnFail`.
 
 Predicates: `isAtLimit` (`cron.ts:110-113`), `isDue` (`cron.ts:116-118`).
-Persisted in the `cron_jobs` table; `dedup` and `jobOptions` are BLOBs.
+The SQLite engine persists this in `cron_jobs`; `dedup` and `jobOptions` are
+BLOBs. The PostgreSQL engine persists the complete MessagePack cron value in
+`bunqueue_crons.payload` beside indexed `next_run`/execution fields.
 
 See [Scheduler & Cron](./features/scheduler-and-cron.md).
 
@@ -421,12 +429,15 @@ See [Scheduler & Cron](./features/scheduler-and-cron.md).
 ## Worker Model
 
 Defined in `src/domain/types/worker.ts`. Worker registrations are in-memory only
-(not persisted to SQLite).
+in the memory/SQLite engine. PostgreSQL multi-broker mode also stores the encoded
+worker, broker/client ownership, queue array, and heartbeat in
+`bunqueue_workers`, so every broker sees the same registry.
 
 ```typescript
 export type WorkerId = string;
 
-export interface Worker {             // worker.ts:11-26
+export interface Worker {
+  // worker.ts:11-26
   id: WorkerId;
   name: string;
   queues: string[];
@@ -434,12 +445,12 @@ export interface Worker {             // worker.ts:11-26
   hostname: string;
   pid: number;
   registeredAt: number;
-  lastSeen: number;                   // updated by Heartbeat
+  lastSeen: number; // updated by Heartbeat
   activeJobs: number;
   processedJobs: number;
   failedJobs: number;
   currentJob: string | null;
-  clientId: string | null;            // TCP client that registered (for cleanup)
+  clientId: string | null; // TCP client that registered (for cleanup)
 }
 ```
 
@@ -447,7 +458,8 @@ export interface Worker {             // worker.ts:11-26
 `hostname:'unknown'`, `pid:0`, and generates `id` via `uuid()` if not given.
 
 ```typescript
-export interface JobLogEntry {        // worker.ts:63-67
+export interface JobLogEntry {
+  // worker.ts:63-67
   timestamp: number;
   level: 'info' | 'warn' | 'error';
   message: string;
@@ -463,19 +475,25 @@ See [Workers Management](./features/workers-management.md).
 Defined in `src/domain/types/webhook.ts`.
 
 ```typescript
-export const WEBHOOK_EVENTS = [       // webhook.ts:16-22
-  'job.pushed', 'job.started', 'job.completed', 'job.failed', 'job.progress',
+export const WEBHOOK_EVENTS = [
+  // webhook.ts:16-22
+  'job.pushed',
+  'job.started',
+  'job.completed',
+  'job.failed',
+  'job.progress',
 ] as const;
 
 // 'job.stalled' accepted on stored webhooks for back-compat but never emitted.
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | 'job.stalled';
 
-export interface Webhook {            // webhook.ts:31-42
-  id: WebhookId;                      // uuid
+export interface Webhook {
+  // webhook.ts:31-42
+  id: WebhookId; // uuid
   url: string;
   events: WebhookEvent[];
-  queue: string | null;              // null = all queues
-  secret: string | null;             // HMAC signing
+  queue: string | null; // null = all queues
+  secret: string | null; // HMAC signing
   createdAt: number;
   lastTriggered: number | null;
   successCount: number;
@@ -483,7 +501,8 @@ export interface Webhook {            // webhook.ts:31-42
   enabled: boolean;
 }
 
-export interface WebhookPayload {     // webhook.ts:66-74
+export interface WebhookPayload {
+  // webhook.ts:66-74
   event: WebhookEvent;
   timestamp: number;
   jobId: string;
@@ -504,15 +523,17 @@ counters. See [Webhooks & Events](./features/webhooks-and-events.md).
 ### Stall (`src/domain/types/stall.ts`)
 
 ```typescript
-export interface StallConfig {        // stall.ts:9-18
-  enabled: boolean;                   // default true
-  stallInterval: number;              // default 30_000 ms
-  maxStalls: number;                  // default 3
-  gracePeriod: number;                // default 5_000 ms
+export interface StallConfig {
+  // stall.ts:9-18
+  enabled: boolean; // default true
+  stallInterval: number; // default 30_000 ms
+  maxStalls: number; // default 3
+  gracePeriod: number; // default 5_000 ms
 }
 // DEFAULT_STALL_CONFIG at stall.ts:21-26
 
-export interface StallCheckResult {   // stall.ts:29-38
+export interface StallCheckResult {
+  // stall.ts:29-38
   isStalled: boolean;
   stalledFor: number;
   shouldMoveToDlq: boolean;
@@ -530,16 +551,18 @@ within `gracePeriod`; otherwise stalled when `now - lastHeartbeat > stallInterva
 ```typescript
 export type DeduplicationStrategy = 'reject' | 'extend' | 'replace';
 
-export interface DeduplicationOptions { // deduplication.ts:14-23
-  id: string;                          // maps to job.uniqueKey
-  ttl?: number;                        // no expiry if unset
-  extend?: boolean;                    // reset TTL instead of rejecting
-  replace?: boolean;                   // replace data instead of rejecting
+export interface DeduplicationOptions {
+  // deduplication.ts:14-23
+  id: string; // maps to job.uniqueKey
+  ttl?: number; // no expiry if unset
+  extend?: boolean; // reset TTL instead of rejecting
+  replace?: boolean; // replace data instead of rejecting
 }
 
-export interface UniqueKeyEntry {      // deduplication.ts:28-35
+export interface UniqueKeyEntry {
+  // deduplication.ts:28-35
   jobId: JobId;
-  expiresAt: number | null;            // null = never
+  expiresAt: number | null; // null = never
   registeredAt: number;
 }
 ```
@@ -563,14 +586,15 @@ The discriminated union `Command` (`src/domain/types/commands/union.ts:13-105`) 
 Representative shapes:
 
 ```typescript
-export interface PushCommand extends BaseCommand {  // src/domain/types/commands/core.ts:5-52
+export interface PushCommand extends BaseCommand {
+  // src/domain/types/commands/core.ts:5-52
   readonly cmd: 'PUSH';
   readonly queue: string;
   readonly data: unknown;
   readonly priority?: number;
   readonly delay?: number;
   readonly maxAttempts?: number;
-  readonly jobId?: string;            // == customId
+  readonly jobId?: string; // == customId
   readonly dependsOn?: string[];
   readonly durable?: boolean;
   readonly dedup?: { ttl?; extend?; replace? };
@@ -583,29 +607,32 @@ export interface PushFlowCommand extends BaseCommand {
   readonly jobs: AtomicFlowJobInput[]; // fully-resolved IDs and graph edges
 }
 
-export interface PullCommand extends BaseCommand {  // src/domain/types/commands/core.ts:65-72
+export interface PullCommand extends BaseCommand {
+  // src/domain/types/commands/core.ts:65-72
   readonly cmd: 'PULL';
   readonly queue: string;
-  readonly timeout?: number;          // long-poll ms
-  readonly owner?: string;            // lock owner id
-  readonly lockTtl?: number;          // default 30000
-  readonly detach?: boolean;          // don't auto-release on disconnect
+  readonly timeout?: number; // long-poll ms
+  readonly owner?: string; // lock owner id
+  readonly lockTtl?: number; // default 30000
+  readonly detach?: boolean; // don't auto-release on disconnect
 }
 
-export interface AckCommand extends BaseCommand {   // src/domain/types/commands/core.ts:83-89
+export interface AckCommand extends BaseCommand {
+  // src/domain/types/commands/core.ts:83-89
   readonly cmd: 'ACK';
   readonly id: string;
   readonly result?: unknown;
-  readonly token?: string;            // lock token verification
+  readonly token?: string; // lock token verification
 }
 
-export interface FailCommand extends BaseCommand {  // src/domain/types/commands/core.ts:99-107
+export interface FailCommand extends BaseCommand {
+  // src/domain/types/commands/core.ts:99-107
   readonly cmd: 'FAIL';
   readonly id: string;
   readonly error?: string;
   readonly token?: string;
-  readonly unrecoverable?: boolean;   // skip remaining retries
-  readonly stack?: string[];          // persisted server-side, capped (#74)
+  readonly unrecoverable?: boolean; // skip remaining retries
+  readonly stack?: string[]; // persisted server-side, capped (#74)
 }
 ```
 
@@ -635,6 +662,12 @@ Command families (each is a `cmd`-tagged interface under `src/domain/types/comma
 `pipelining` and `separate-job-name`: job envelopes expose top-level `name`
 while preserving `data` as the original user value. Only the inbound legacy
 decoder interprets an object-shaped `data.name` when top-level `name` is absent.
+
+`StorageStatus` returns `{ data: { diskFull, error, since } }`. The manager keeps
+the full internal diagnostic, but server/MCP/Cloud client projections replace a
+non-disk storage error with `Internal server error`. SQLite disk-full responses
+retain their existing actionable message and timestamp. A non-null error marks
+health/readiness degraded even when `diskFull` is false.
 
 `GetJobsCommand` carries optional `state`, `limit`, `offset`, and `asc`. The
 server defaults `asc` to `true`; `false` reverses the stable createdAt/job-id
@@ -673,32 +706,32 @@ sides can be extended only while the parent is still queued.
 The `Response` union (`src/domain/types/responses/model.ts:155-176`) is also discriminated by shape, all
 sharing `ok`. Key variants:
 
-| Response               | Shape (besides `ok`)                          | Used by             |
-| ---------------------- | --------------------------------------------- | ------------------- |
-| `OkResponse`           | `{ id? }`                                     | PUSH, ACK, …        |
-| `DataResponse<AckAlreadyFinalized>` | `{ data: { applied:false; reason:'already-finalized' } }` | retired ACK / FAIL |
-| `DataResponse<AckBatchIgnored>` | `{ data: { ignoredIds; ignoredIndices } }` | mixed retired ACKB |
-| `BatchResponse`        | `{ ids: string[] }`                           | PUSHB               |
-| `DataResponse<AtomicFlowBatchResult>` | `{ data: { jobs: Job[] } }` | PUSHF |
-| `JobResponse`          | `{ job: Job }`                                | GetJob              |
-| `NullableJobResponse`  | `{ job: Job \| null }`                        | —                   |
-| `PulledJobResponse`    | `{ job: Job\|null; token: string\|null }`     | PULL                |
-| `PulledJobsResponse`   | `{ jobs: Job[]; tokens: string[] }`           | PULLB               |
-| `JobsResponse`         | `{ jobs: Job[] }`                             | GetJobs             |
-| `StateResponse`        | `{ id; state: JobState }`                     | GetState            |
-| `ResultResponse`       | `{ id; result: unknown }`                     | GetResult           |
-| `JobCountsResponse`    | `{ counts: JobCounts }`                       | GetJobCounts        |
-| `QueuesResponse`       | `{ queues: QueueInfo[] }`                     | ListQueues          |
-| `ProgressResponse`     | `{ progress: number; message: string\|null }` | GetProgress         |
-| `BoolResponse`         | `{ value: boolean }`                          | IsPaused            |
-| `CountResponse`        | `{ count: number; ids?: string[] }`           | Count / Clean       |
-| `StatsResponse`        | `{ stats: StatsData }`                        | Stats               |
-| `MetricsResponse`      | `{ metrics: MetricsData }`                    | Metrics             |
-| `CronResponse`         | `{ cron: CronInfo }`                          | Cron                |
-| `CronListResponse`     | `{ crons: CronInfo[] }`                       | CronList            |
-| `HelloResponse`        | `{ protocolVersion; capabilities; server; version }` | Hello        |
-| `DataResponse<T>`      | `{ data: T }`                                 | generic payloads    |
-| `ErrorResponse`        | `{ ok: false; error: string }`                | failures            |
+| Response                              | Shape (besides `ok`)                                      | Used by            |
+| ------------------------------------- | --------------------------------------------------------- | ------------------ |
+| `OkResponse`                          | `{ id? }`                                                 | PUSH, ACK, …       |
+| `DataResponse<AckAlreadyFinalized>`   | `{ data: { applied:false; reason:'already-finalized' } }` | retired ACK / FAIL |
+| `DataResponse<AckBatchIgnored>`       | `{ data: { ignoredIds; ignoredIndices } }`                | mixed retired ACKB |
+| `BatchResponse`                       | `{ ids: string[] }`                                       | PUSHB              |
+| `DataResponse<AtomicFlowBatchResult>` | `{ data: { jobs: Job[] } }`                               | PUSHF              |
+| `JobResponse`                         | `{ job: Job }`                                            | GetJob             |
+| `NullableJobResponse`                 | `{ job: Job \| null }`                                    | —                  |
+| `PulledJobResponse`                   | `{ job: Job\|null; token: string\|null }`                 | PULL               |
+| `PulledJobsResponse`                  | `{ jobs: Job[]; tokens: string[] }`                       | PULLB              |
+| `JobsResponse`                        | `{ jobs: Job[] }`                                         | GetJobs            |
+| `StateResponse`                       | `{ id; state: JobState }`                                 | GetState           |
+| `ResultResponse`                      | `{ id; result: unknown }`                                 | GetResult          |
+| `JobCountsResponse`                   | `{ counts: JobCounts }`                                   | GetJobCounts       |
+| `QueuesResponse`                      | `{ queues: QueueInfo[] }`                                 | ListQueues         |
+| `ProgressResponse`                    | `{ progress: number; message: string\|null }`             | GetProgress        |
+| `BoolResponse`                        | `{ value: boolean }`                                      | IsPaused           |
+| `CountResponse`                       | `{ count: number; ids?: string[] }`                       | Count / Clean      |
+| `StatsResponse`                       | `{ stats: StatsData }`                                    | Stats              |
+| `MetricsResponse`                     | `{ metrics: MetricsData }`                                | Metrics            |
+| `CronResponse`                        | `{ cron: CronInfo }`                                      | Cron               |
+| `CronListResponse`                    | `{ crons: CronInfo[] }`                                   | CronList           |
+| `HelloResponse`                       | `{ protocolVersion; capabilities; server; version }`      | Hello              |
+| `DataResponse<T>`                     | `{ data: T }`                                             | generic payloads   |
+| `ErrorResponse`                       | `{ ok: false; error: string }`                            | failures           |
 
 Normal ACK/FAIL/ACKB responses retain their historical `OkResponse` shape.
 The data envelopes appear only when an exact timeout or retired-cron
@@ -1036,45 +1069,248 @@ Migration 6 is represented as two explicit statements so a partial historical
 upgrade resumes at the missing column. A failed upgrade therefore keeps its old
 version and is retried on reopen (`src/infrastructure/persistence/sqlite/state.ts`).
 
-| Version | Change                                                            |
-| ------- | ----------------------------------------------------------------- |
-| 1       | Base `SCHEMA` (all tables + base indexes)                         |
+| Version | Change                                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1       | Base `SCHEMA` (all tables + base indexes)                                                                             |
 | 5       | Performance indexes: `idx_dlq_entered_at`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority` |
-| 6       | `cron_jobs.unique_key`, `cron_jobs.dedup` (dedup for cron jobs)   |
-| 7       | `jobs.timeline` BLOB                                              |
-| 8       | `cron_jobs.skip_missed_on_restart`                                |
-| 9       | `cron_jobs.skip_if_no_worker`                                     |
-| 10      | `cron_jobs.prevent_overlap` (default 1)                           |
-| 11      | `idx_jobs_completed_order` (completed-job recovery, #84)          |
-| 12      | `cron_jobs.job_options` BLOB (per-cron retry/cleanup policy, #86) |
-| 13      | `jobs.stacktrace` BLOB (persist last failure stack, #74)          |
-| 14      | Stable `getJobs` indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)` |
-| 15      | `queue_state.rate_limit_duration` (rate-limit window)            |
-| 16      | `queue_state.rate_limit_expires_at` (rate-limit TTL auto-expiry; split from 15 so each ALTER retries idempotently) |
-| 17      | `jobs.stall_count` (cumulative crash/stall budget across recovery) |
-| 18      | `queue_state.stall_enabled`                                     |
-| 19      | `queue_state.stall_interval`                                    |
-| 20      | `queue_state.max_stalls`                                        |
-| 21      | `queue_state.stall_grace_period`                                |
-| 22      | `queue_state.dlq_config` (effective per-queue DLQ policy, MessagePack) |
-| 23      | `jobs.fail_parent_on_failure` |
-| 24      | `jobs.remove_dependency_on_failure` |
-| 25      | `jobs.continue_parent_on_failure` |
-| 26      | `jobs.ignore_dependency_on_failure` |
-| 27      | `flow_failures` durable outbox + parent index; rebuild pending indexes for `prioritized`/`waiting-children` |
-| 28      | Bounded `dependency_completions` evidence for crash-safe `removeOnComplete` dependency recovery |
-| 29      | `dependency_completions.pinned` ownership for proofs referenced by live waiting parents |
-| 30      | `jobs.dlq_retry_state` (bounded auto-retry chain/history across restart) |
-| 31      | `jobs.name` (operation name separated from user data) |
-| 32      | `cron_jobs.job_name` (scheduled operation name separated from data) |
-| 33      | Queue event journal and per-queue metric tables/indexes |
-| 34      | `jobs.extended_options` (repeat and advanced generation policy across restart) |
+| 6       | `cron_jobs.unique_key`, `cron_jobs.dedup` (dedup for cron jobs)                                                       |
+| 7       | `jobs.timeline` BLOB                                                                                                  |
+| 8       | `cron_jobs.skip_missed_on_restart`                                                                                    |
+| 9       | `cron_jobs.skip_if_no_worker`                                                                                         |
+| 10      | `cron_jobs.prevent_overlap` (default 1)                                                                               |
+| 11      | `idx_jobs_completed_order` (completed-job recovery, #84)                                                              |
+| 12      | `cron_jobs.job_options` BLOB (per-cron retry/cleanup policy, #86)                                                     |
+| 13      | `jobs.stacktrace` BLOB (persist last failure stack, #74)                                                              |
+| 14      | Stable `getJobs` indexes on `(queue, created_at, id)` and `(queue, state, created_at, id)`                            |
+| 15      | `queue_state.rate_limit_duration` (rate-limit window)                                                                 |
+| 16      | `queue_state.rate_limit_expires_at` (rate-limit TTL auto-expiry; split from 15 so each ALTER retries idempotently)    |
+| 17      | `jobs.stall_count` (cumulative crash/stall budget across recovery)                                                    |
+| 18      | `queue_state.stall_enabled`                                                                                           |
+| 19      | `queue_state.stall_interval`                                                                                          |
+| 20      | `queue_state.max_stalls`                                                                                              |
+| 21      | `queue_state.stall_grace_period`                                                                                      |
+| 22      | `queue_state.dlq_config` (effective per-queue DLQ policy, MessagePack)                                                |
+| 23      | `jobs.fail_parent_on_failure`                                                                                         |
+| 24      | `jobs.remove_dependency_on_failure`                                                                                   |
+| 25      | `jobs.continue_parent_on_failure`                                                                                     |
+| 26      | `jobs.ignore_dependency_on_failure`                                                                                   |
+| 27      | `flow_failures` durable outbox + parent index; rebuild pending indexes for `prioritized`/`waiting-children`           |
+| 28      | Bounded `dependency_completions` evidence for crash-safe `removeOnComplete` dependency recovery                       |
+| 29      | `dependency_completions.pinned` ownership for proofs referenced by live waiting parents                               |
+| 30      | `jobs.dlq_retry_state` (bounded auto-retry chain/history across restart)                                              |
+| 31      | `jobs.name` (operation name separated from user data)                                                                 |
+| 32      | `cron_jobs.job_name` (scheduled operation name separated from data)                                                   |
+| 33      | Queue event journal and per-queue metric tables/indexes                                                               |
+| 34      | `jobs.extended_options` (repeat and advanced generation policy across restart)                                        |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
 See [Persistence](./features/persistence.md).
 
 ---
+
+## PostgreSQL 18.6 Schema
+
+Source: `src/infrastructure/persistence/postgres/schema.ts`. This normalized
+schema belongs to the optional server-only multi-broker engine. It is separate
+from the SQLite schema above: selecting PostgreSQL never opens or migrates a
+SQLite file. Every tenant-visible primary/unique key includes `namespace`, whose
+default is `default`; all brokers intended to share work must use the same
+namespace.
+
+Schema initialization runs inside a transaction guarded by
+`pg_advisory_xact_lock(hashtext('bunqueue:schema'))`. The current
+`POSTGRES_SCHEMA_VERSION` is **15**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+EXISTS` statements upgrade earlier development schemas before version insertion.
+The v15 migration also backfills `bunqueue_queue_state(namespace, queue)` from
+distinct existing job rows so an empty-but-still-registered queue remains
+discoverable after its last job is removed.
+
+### `bunqueue_jobs`
+
+Primary key: `(namespace, id)`. One row is the authoritative job generation.
+
+| Column family  | Columns / meaning                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Identity       | `namespace`, `id`, `queue`                                                                                             |
+| Encoded model  | `payload BYTEA` — complete MessagePack `Job`                                                                           |
+| Lifecycle      | `state`, `run_at`, `created_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `ttl`, `timeout`, `version` |
+| Ordering       | `priority`, `lifo`, `group_id`                                                                                         |
+| Idempotency    | `unique_key`, `unique_expires_at`, `custom_id`                                                                         |
+| Relationships  | `parent_id`                                                                                                            |
+| Lease fence    | `lease_owner`, `lease_broker_id`, `lease_token`, `lease_until`, `lease_renewals`                                       |
+| Terminal state | `result`, `dlq_entry`, `dlq_retry_state`, `error`, `failure_reason`                                                    |
+
+`state` is constrained to `waiting`, `prioritized`, `delayed`,
+`waiting-children`, `active`, `completed`, or `failed`. Paused is a queue view,
+not a stored job state. `lease_token` is the opaque fencing credential;
+`lease_until` is compared against the PostgreSQL clock, and `lease_renewals`
+distinguishes an initial client-owned lease from one transferred by a heartbeat.
+
+Indexes:
+
+- `bunqueue_jobs_ready_idx(namespace, queue, priority DESC, run_at, id)` for
+  pending rows;
+- `bunqueue_jobs_state_idx(namespace, queue, state, created_at, id)`;
+- partial `bunqueue_jobs_lease_idx(namespace, lease_until)` for active rows;
+- partial `bunqueue_jobs_parent_idx(namespace, parent_id)`;
+- partial `bunqueue_jobs_group_ready_idx` and
+  `bunqueue_jobs_group_active_idx` for grouped candidate/head ownership;
+- partial `bunqueue_jobs_lifo_ready_idx` for the mixed-order probe;
+- partial `bunqueue_jobs_ttl_pending_idx` for pending-expiry scans; and
+- unique partial `bunqueue_jobs_live_unique_key_idx(namespace, queue,
+unique_key)` for live states.
+
+The common FIFO claim follows `bunqueue_jobs_ready_idx` ordering directly and
+locks narrow ID/order tuples before payload retrieval. Indexed probes select the
+mixed FIFO/LIFO or grouped path only when those features are present. All paths
+use `FOR UPDATE SKIP LOCKED` and recheck current-row eligibility.
+
+### Relationship and completion tables
+
+| Table                    | Primary key                          | Purpose / important indexes                                                                                                                                                                 |
+| ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bunqueue_dependencies`  | `(namespace, job_id, dependency_id)` | Durable unresolved/completed dependency edges; reverse index `(namespace, dependency_id, job_id)`.                                                                                          |
+| `bunqueue_completions`   | `(namespace, job_id)`                | Generation-scoped completion proof and optional result, including removed jobs; queue index `(namespace, queue, job_id)` and retention index `(namespace, completed_at DESC, job_id DESC)`. |
+| `bunqueue_flow_failures` | `(namespace, parent_id, child_id)`   | Durable child failure policy (`fail`, `remove`, `ignore`, `continue`), error and timestamp; indexed by parent/mode.                                                                         |
+| `bunqueue_repeat_links`  | `(namespace, original_id)`           | Exactly one successor generation per completed repeat job; successor reverse index.                                                                                                         |
+
+Dependency evidence has its own namespace/ID advisory-lock domain. Admission
+locks every referenced dependency before reading proof or inserting an edge;
+batch and flow admission lock the sorted union in one statement. Completion
+uses the same order, locks the affected parents before child rows, writes the
+completion proof, then promotes resolved parents with their encoded payload,
+timeline, state, version, and durable event in the same transaction. This closes
+both commit orders of a concurrent late-consumer race without changing the
+SQLite relationship model. The same child key serializes dynamic attachment,
+detach, explicit terminal failure, and lease recovery. Those paths re-read
+`parent_id` only after the child key is held, then acquire the sorted flow-parent
+keys before job rows, closing the attachment TOCTOU window.
+
+Custom-ID reuse retires an existing completion only while holding that same
+identity lock and only after ID/key deduplication proves that exact candidate
+will be inserted. A deduplicated candidate therefore preserves both
+completion-only and retained terminal generations. Serial batches may exempt
+only consumers inserted earlier in the same transaction, then recompute every
+surviving inserted row against final proof and update its original `pushed`
+payload without changing event order. A pre-existing live consumer still
+rejects reuse. Unreferenced completion-only rows are retained newest-first up to
+`maxCompletedJobs`; proofs referenced by live consumers are pinned outside the
+cap. The local PostgreSQL Snapshot separately caps completed job objects at
+`maxCompletedJobs` and results at `maxJobResults`, while durable child-result
+queries continue to read this table directly.
+
+Destructive commands discover IDs before locking, acquire sorted completion
+identity locks, lock candidate/live-consumer rows, and then revalidate. A
+producer is deletable only when each live consumer is part of the same atomic
+delete set. This rule covers cancel/remove, clean/TTL/drain, DLQ limit/expiry,
+cron lease cleanup, retry of completed generations, and obliterate; it prevents
+an admitted `waiting-children` row from outliving both its job row and completion
+proof.
+
+### `bunqueue_queue_state`
+
+Primary key: `(namespace, queue)`. The row serializes distributed control state:
+
+- `paused`;
+- `rate_limit`, `rate_duration_ms`, `rate_window_started_at`,
+  `rate_expires_at`, and `rate_count`;
+- `concurrency_limit`; and
+- MessagePack `stall_config` and `dlq_config`.
+
+Claim transactions ensure this row exists. Default-policy claims hold `FOR
+SHARE`, so competing claimers can proceed while queue-control updates remain
+ordered behind them. Configured rate/concurrency claims retry with `FOR UPDATE`
+before calculating shared capacity. A missing row means default
+unpaused/unlimited policy and is recreated idempotently. Rate-limit duration and
+TTL use the same normalization as SQLite: non-positive/non-finite duration is
+stored as `NULL` and claims use the effective 1,000 ms default; a
+non-positive/non-finite TTL is stored as `NULL` and does not expire.
+
+### Cron, worker, and broker coordination
+
+| Table              | Primary key              | Stored data                                                                                                                                  |
+| ------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bunqueue_crons`   | `(namespace, name)`      | MessagePack cron payload, `next_run`, execution count, optional limit, update time; due index `(namespace, next_run, name)`.                 |
+| `bunqueue_workers` | `(namespace, id)`        | Owning `broker_id`, optional TCP `client_id`, queue array, MessagePack worker, `last_seen`; GIN queue index and broker/client cleanup index. |
+| `bunqueue_brokers` | `(namespace, broker_id)` | Broker `started_at` and `heartbeat_at` used for liveness and singleton startup reconciliation.                                               |
+
+Cron slots and heartbeats use PostgreSQL time. `skipIfNoWorker` reads the shared
+worker table. `preventOverlap` cron jobs are never resurrected as ordinary work
+when their protected lease expires or their broker shuts down.
+
+### Events, logs, and metrics
+
+- `bunqueue_events`: `BIGSERIAL id`, namespace, queue, event type, job ID,
+  PostgreSQL-clock timestamp, optional MessagePack payload, and
+  `transaction_id`. Job events can include job/state, result, error/removal, DLQ
+  entry, and DLQ retry state so a remote broker can update its compatibility
+  snapshot without a queue scan. The
+  `(namespace, transaction_id, id)` index joins immutable event rows to their
+  commit envelope; physical-ID indexes remain for trimming and diagnostics.
+- `bunqueue_event_prune_watermarks`: namespace, queue, source event ID, and the
+  highest physical event ID pruned through, plus `transaction_id`, `commit_seq`,
+  cumulative `pruned_commit_seq`, and the transient
+  `prunes_current_transaction` marker. The primary key
+  `(namespace, queue, source_event_id)` preserves concurrently committed
+  checkpoints. Windowed reads retain the maximum pruned-commit frontier even
+  when a later physical ID belongs to an older commit; dominated physical
+  checkpoints are compacted transactionally.
+- `bunqueue_event_commit_seq`: a global PostgreSQL sequence fixed at `CACHE 1`.
+  A deferred constraint trigger first takes a transaction advisory lock derived
+  from the namespace and then calls `nextval`, so same-namespace values follow
+  commit eligibility without updating a shared heap row. `CACHE 1` is a
+  correctness guard: per-session sequence blocks could otherwise be consumed
+  out of order by different broker connections. Rollbacks may leave harmless
+  gaps.
+- `bunqueue_event_commits`: one durable commit envelope per
+  `(namespace, transaction_id)`, registered by statement transition triggers.
+  The deferred trigger stamps only this compact row and any prune watermark;
+  event rows remain immutable and replay joins through the envelope's indexed
+  `commit_seq`. Envelopes with no remaining event or watermark reference are
+  collected at startup and during maintenance.
+- `bunqueue_job_logs`: `BIGSERIAL id`, namespace/job ID, timestamp, constrained
+  level (`info`, `warn`, `error`), and message; indexed by namespace/job/id.
+  Writers and retention/clear operations lock the owning `bunqueue_jobs` row,
+  which serializes them with job removal and makes the retained maximum exact.
+- `bunqueue_metric_buckets`: one completed/failed count per
+  `(namespace, queue, metric_type, minute)`.
+- `bunqueue_metric_totals`: durable cumulative total and previous-sample fields
+  per `(namespace, queue, metric_type)`.
+
+A transaction writes its lifecycle event and `pg_notify` wake-up before commit.
+The v13 deferred sequencer assigns one `commit_seq` to its commit envelope and
+watermarks immediately before commit. The advisory lock makes that sequence
+commit-ordered within each namespace, while unrelated namespaces do not contend
+on a heap row. LISTEN/NOTIFY is only a hint; brokers join the envelopes to
+`bunqueue_events` after their `(commit_seq, id)` cursor. Event
+pruning, including explicit trimming and batches larger than the retained
+window, records a cumulative per-queue pruned-commit frontier in the same
+transaction. A broker refreshes only when its per-queue applied commit cursor is
+behind discarded history. Explicit trim derives its frontier from the deleted
+rows' already-stamped commit envelopes, so a current broker is not invalidated
+by the trim transaction itself. Physical `BIGSERIAL` allocation order is never
+treated as commit order.
+
+### `bunqueue_schema_migrations`
+
+Primary key: `version`; `applied_at` stores the application timestamp for that
+schema version. The schema version is database-global because all bunqueue
+namespaces share the same physical tables. PostgreSQL engine schema v15
+backfills durable queue registry rows, v14 adds bounded-completion query indexes,
+and v13 adds the commit-ordered journal.
+Initialization rejects a recorded version newer than the runtime and verifies
+the journal tables, columns, indexes, functions, and
+enabled triggers before skipping DDL. The guard verifies definitions rather than
+names alone: sequence type/bounds/increment/cache/cycle, column
+types/defaults/nullability, ordered index expressions and predicates, trigger
+timing/transition tables/function bindings, and normalized PL/pgSQL bodies. A
+semantically unchanged schema stays on the no-DDL path; drift is repaired under
+the migration lock.
+
+See [PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md)
+for transaction boundaries, lease fencing, recovery, runtime configuration, and
+the dedicated PostgreSQL validation suite.
 
 ## In-Memory Collections & Bounds
 
@@ -1083,19 +1319,19 @@ its context interfaces in `src/application/types/contexts.ts`, and sized by
 `DEFAULT_CONFIG` (`src/application/types/config.ts`). Cleanup runs every `cleanupIntervalMs`
 (default 10 s).
 
-| Collection        | Type                       | Max     | Eviction                       |
-| ----------------- | -------------------------- | ------- | ------------------------------ |
-| `jobIndex`        | `Map<JobId, JobLocation>`  | unbounded* | follows job lifecycle (no cap) |
-| `completedJobs`   | `BoundedSet<JobId>`        | 50,000  | FIFO, **10% batch**            |
-| `depCompletions`  | `DependencyCompletionTracker` | 50,000 recent + live pins | exact FIFO; pins released with reverse edges |
-| `jobResults`      | `LRUMap<JobId, unknown>`   | 10,000  | LRU (1 entry on overflow)      |
-| `jobLogs`         | `LRUMap<JobId, JobLogEntry[]>` | 10,000 | LRU                          |
-| `customIdMap`     | `LRUMap<string, JobId>`    | 50,000  | LRU                            |
-| `timedOutJobs`    | `BoundedMap<JobId, RetiredTimeoutGeneration>` | 50,000 | FIFO batch |
-| `retiredTimeoutLeaseTokens` | `BoundedMap<string, RetiredTimeoutGeneration>` | 50,000 | FIFO batch |
-| `waitingDeps`     | per-shard map              | unbounded* | follows live dependency waiters |
-| `telemetryJournal.events` | per-queue arrays | 10,000 each | oldest event first |
-| terminal metric buckets | per queue/type map or SQLite rows | 20,160 each | minutes older than newest window |
+| Collection                  | Type                                           | Max                       | Eviction                                     |
+| --------------------------- | ---------------------------------------------- | ------------------------- | -------------------------------------------- |
+| `jobIndex`                  | `Map<JobId, JobLocation>`                      | unbounded*                | follows job lifecycle (no cap)               |
+| `completedJobs`             | `BoundedSet<JobId>`                            | 50,000                    | FIFO, **10% batch**                          |
+| `depCompletions`            | `DependencyCompletionTracker`                  | 50,000 recent + live pins | exact FIFO; pins released with reverse edges |
+| `jobResults`                | `LRUMap<JobId, unknown>`                       | 10,000                    | LRU (1 entry on overflow)                    |
+| `jobLogs`                   | `LRUMap<JobId, JobLogEntry[]>`                 | 10,000                    | LRU                                          |
+| `customIdMap`               | `LRUMap<string, JobId>`                        | 50,000                    | LRU                                          |
+| `timedOutJobs`              | `BoundedMap<JobId, RetiredTimeoutGeneration>`  | 50,000                    | FIFO batch                                   |
+| `retiredTimeoutLeaseTokens` | `BoundedMap<string, RetiredTimeoutGeneration>` | 50,000                    | FIFO batch                                   |
+| `waitingDeps`               | per-shard map                                  | unbounded*                | follows live dependency waiters              |
+| `telemetryJournal.events`   | per-queue arrays                               | 10,000 each               | oldest event first                           |
+| terminal metric buckets     | per queue/type map or SQLite rows              | 20,160 each               | minutes older than newest window             |
 
 \* `jobIndex` and `waitingDeps` are keyed by live jobs; entries are removed with
 their lifecycle or dependency edges rather than capped by size. The
@@ -1138,15 +1374,9 @@ shared with the external SDKs.
 
 ```typescript
 interface Execution {
-  id: string;                       // wf_ + 32 lowercase hex digits
+  id: string; // wf_ + 32 lowercase hex digits
   workflowName: string;
-  state:
-    | 'running'
-    | 'waiting'
-    | 'completed'
-    | 'failed'
-    | 'compensating'
-    | 'compensation-stuck';
+  state: 'running' | 'waiting' | 'completed' | 'failed' | 'compensating' | 'compensation-stuck';
   input: unknown;
   steps: Record<string, StepRecord>;
   currentNodeIndex: number;
@@ -1163,8 +1393,8 @@ interface Execution {
 }
 
 interface ExecutionListOptions {
-  limit?: number;   // default 100, integer 1..1000
-  offset?: number;  // default 0, non-negative safe integer
+  limit?: number; // default 100, integer 1..1000
+  offset?: number; // default 0, non-negative safe integer
 }
 ```
 
@@ -1193,19 +1423,19 @@ or compensation handler.
 
 `workflow_executions`:
 
-| Column | Type | Meaning |
-| --- | --- | --- |
-| `id` | `TEXT PRIMARY KEY` | Opaque execution ID |
-| `workflow_name` | `TEXT NOT NULL` | Registered definition name |
-| `state` | `TEXT NOT NULL` | `ExecutionState` |
-| `input` | `BLOB` | MessagePack workflow input |
-| `steps` | `BLOB` | MessagePack `Record<string, StepRecord>` |
-| `current_node_index` | `INTEGER NOT NULL` | Durable graph cursor |
-| `resolved_steps` | `BLOB` | Selected branch step names |
-| `signals` | `BLOB` | First-writer-wins signal payload map |
-| `created_at` | `INTEGER NOT NULL` | Creation time in milliseconds |
-| `updated_at` | `INTEGER NOT NULL` | Last persisted transition |
-| `meta` | `BLOB NULL` | Version-tolerant lifecycle metadata |
+| Column               | Type               | Meaning                                  |
+| -------------------- | ------------------ | ---------------------------------------- |
+| `id`                 | `TEXT PRIMARY KEY` | Opaque execution ID                      |
+| `workflow_name`      | `TEXT NOT NULL`    | Registered definition name               |
+| `state`              | `TEXT NOT NULL`    | `ExecutionState`                         |
+| `input`              | `BLOB`             | MessagePack workflow input               |
+| `steps`              | `BLOB`             | MessagePack `Record<string, StepRecord>` |
+| `current_node_index` | `INTEGER NOT NULL` | Durable graph cursor                     |
+| `resolved_steps`     | `BLOB`             | Selected branch step names               |
+| `signals`            | `BLOB`             | First-writer-wins signal payload map     |
+| `created_at`         | `INTEGER NOT NULL` | Creation time in milliseconds            |
+| `updated_at`         | `INTEGER NOT NULL` | Last persisted transition                |
+| `meta`               | `BLOB NULL`        | Version-tolerant lifecycle metadata      |
 
 `meta` currently packs `rollbackStatus`, `failureReason`, `committedAt`,
 `parentExecutionId`, `decisions`, and `definitionHash`. It was added with a
@@ -1257,7 +1487,7 @@ the same msgpack-encoded `Command`/`Response` objects.
 - `rowToJob` (`sqliteSerializer.ts:71-151`) rebuilds a full `Job`, applying
   defaults for the non-persisted fields and re-branding ids.
 - **Corrupt-dependency safety:** a `depends_on` blob that fails to decode is
-  *not* silently turned into `[]` (which the recovery path would treat as
+  _not_ silently turned into `[]` (which the recovery path would treat as
   "ready, no deps" → out-of-order execution). `decodeDependsOn`
   (`sqliteSerializer.ts:54-68`) flags corruption and `rowToJob` stamps the job
   with the non-enumerable `CORRUPT_DEPENDS_ON` symbol (`sqliteSerializer.ts:42-47`)

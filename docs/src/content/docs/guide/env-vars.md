@@ -1,6 +1,6 @@
 ---
-title: "bunqueue Environment Variables Reference"
-description: Complete environment variable reference for bunqueue. TCP/HTTP ports, SQLite path, auth tokens, S3 backup, timeouts, and logging options.
+title: 'bunqueue Environment Variables Reference'
+description: Complete environment variable reference for bunqueue, including SQLite and PostgreSQL 18.6 storage, ports, auth, backups, timeouts, and logging.
 head:
   - tag: meta
     attrs:
@@ -20,22 +20,46 @@ A typed `bunqueue.config.ts` can replace most of these, with IntelliSense and ev
 
 ## Server & storage
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `TCP_PORT` | number | `6789` | TCP server port for client connections |
-| `HTTP_PORT` | number | `6790` | HTTP server port for REST API and metrics |
-| `HOST` | string | `0.0.0.0` | Bind address (`127.0.0.1` for local-only) |
-| `BUNQUEUE_DATA_PATH` | string | (in-memory) | SQLite database path. Without it, jobs are lost on restart |
-| `HTTP_SOCKET_PATH` | string | (none) | Unix socket for the HTTP server, replaces `HTTP_PORT` |
-| `TCP_SOCKET_PATH` | string | (none) | **Reserved, not functional yet** (see below) |
-| `TLS_CERT_FILE` | string | (none) | PEM certificate, enables native TLS on TCP + HTTP |
-| `TLS_KEY_FILE` | string | (none) | PEM private key matching `TLS_CERT_FILE` |
+| Variable                              | Type             | Default     | Description                                                                    |
+| ------------------------------------- | ---------------- | ----------- | ------------------------------------------------------------------------------ |
+| `TCP_PORT`                            | number           | `6789`      | TCP server port for client connections                                         |
+| `HTTP_PORT`                           | number           | `6790`      | HTTP server port for REST API and metrics                                      |
+| `HOST`                                | string           | `0.0.0.0`   | Bind address (`127.0.0.1` for local-only)                                      |
+| `BUNQUEUE_STORAGE_DRIVER`             | string           | inferred    | `memory`, `sqlite`, or `postgres`                                              |
+| `BUNQUEUE_DATA_PATH`                  | string           | (in-memory) | SQLite database path. Without it or a PostgreSQL URL, jobs are lost on restart |
+| `BUNQUEUE_POSTGRES_URL`               | string           | (none)      | PostgreSQL connection URL; implies the `postgres` driver when no driver is set |
+| `BUNQUEUE_POSTGRES_NAMESPACE`         | string           | `default`   | Isolates independent bunqueue installations in one PostgreSQL database         |
+| `BUNQUEUE_BROKER_ID`                  | string           | generated   | Stable unique ID for this PostgreSQL broker process                            |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`         | positive integer | `10`        | PostgreSQL pool size (runtime minimum `2`)                                     |
+| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS` | positive integer | `30000`     | Default database-clock lease duration (runtime minimum `1000`)                 |
+| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`  | positive integer | `250`       | Event/cron fallback polling interval (runtime minimum `25`)                    |
+| `HTTP_SOCKET_PATH`                    | string           | (none)      | Unix socket for the HTTP server, replaces `HTTP_PORT`                          |
+| `TCP_SOCKET_PATH`                     | string           | (none)      | **Reserved, not functional yet** (see below)                                   |
+| `TLS_CERT_FILE`                       | string           | (none)      | PEM certificate, enables native TLS on TCP + HTTP                              |
+| `TLS_KEY_FILE`                        | string           | (none)      | PEM private key matching `TLS_CERT_FILE`                                       |
 
 ```bash
 BUNQUEUE_DATA_PATH=/var/lib/queue.db TCP_PORT=6789 bunqueue start
 ```
 
 **Data path aliases.** Four names are read for the SQLite path, in priority order: `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`. They are equivalent; prefer `BUNQUEUE_DATA_PATH`.
+
+**Storage selection.** An explicit driver wins. Otherwise a PostgreSQL URL
+selects PostgreSQL, a data path selects SQLite, and neither selects memory.
+PostgreSQL and a SQLite data path cannot be combined. PostgreSQL is server-only,
+validated against version 18.6, and every active broker sharing a namespace must
+have a unique broker ID. MySQL is not supported. In the repository Compose
+topology, `POSTGRES_PASSWORD` configures the database and
+`BUNQUEUE_POSTGRES_URL` configures brokers; if the secret contains URI-reserved
+characters, percent-encode its password component in the URL.
+
+```bash
+BUNQUEUE_STORAGE_DRIVER=postgres \
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:secret@postgres:5432/bunqueue' \
+BUNQUEUE_POSTGRES_NAMESPACE=production \
+BUNQUEUE_BROKER_ID=broker-a \
+bunqueue start
+```
 
 **TLS.** Set both `TLS_CERT_FILE` and `TLS_KEY_FILE` or neither, setting only one is a startup error (fail fast, never silent plaintext). See the [TLS guide](/guide/tls/).
 
@@ -45,13 +69,13 @@ The variable is accepted and shown in the startup banner, but the TCP listener a
 
 ## Authentication & security
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AUTH_TOKENS` | string | (none) | Comma-separated auth tokens. When set, every TCP and HTTP request needs a valid token |
-| `BQ_TOKEN` / `BUNQUEUE_TOKEN` | string | (none) | Default token for CLI client commands (avoids `--token` on every command) |
-| `METRICS_AUTH` | boolean | `false` | Require auth for `/prometheus`. Only `true` enables it; without `AUTH_TOKENS`, the endpoint returns 503 |
-| `METRICS_MAX_QUEUES` | integer | `100` | Maximum queue names exposed as Prometheus label values; `0` disables per-queue series |
-| `CORS_ALLOW_ORIGIN` | string | (none) | Comma-separated allowed CORS origins for the HTTP API |
+| Variable                      | Type    | Default | Description                                                                                             |
+| ----------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `AUTH_TOKENS`                 | string  | (none)  | Comma-separated auth tokens. When set, every TCP and HTTP request needs a valid token                   |
+| `BQ_TOKEN` / `BUNQUEUE_TOKEN` | string  | (none)  | Default token for CLI client commands (avoids `--token` on every command)                               |
+| `METRICS_AUTH`                | boolean | `false` | Require auth for `/prometheus`. Only `true` enables it; without `AUTH_TOKENS`, the endpoint returns 503 |
+| `METRICS_MAX_QUEUES`          | integer | `100`   | Maximum queue names exposed as Prometheus label values; `0` disables per-queue series                   |
+| `CORS_ALLOW_ORIGIN`           | string  | (none)  | Comma-separated allowed CORS origins for the HTTP API                                                   |
 
 ```bash
 # Server side
@@ -72,10 +96,10 @@ without configuring any token fails closed with 503.
 
 ## Logging
 
-| Variable | Type | Default | Values |
-|----------|------|---------|--------|
-| `LOG_LEVEL` | string | `info` | `debug`, `info`, `warn`, `error` |
-| `LOG_FORMAT` | string | `text` | `text`, `json` |
+| Variable     | Type   | Default | Values                           |
+| ------------ | ------ | ------- | -------------------------------- |
+| `LOG_LEVEL`  | string | `info`  | `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | string | `text`  | `text`, `json`                   |
 
 ```bash
 LOG_LEVEL=debug LOG_FORMAT=json bunqueue start
@@ -84,31 +108,38 @@ LOG_LEVEL=debug LOG_FORMAT=json bunqueue start
 JSON output looks like:
 
 ```json
-{"level":"info","msg":"Server started","tcp":6789,"http":6790,"ts":"2024-01-15T10:30:00Z"}
+{
+  "level": "info",
+  "msg": "Server started",
+  "tcp": 6789,
+  "http": 6790,
+  "ts": "2024-01-15T10:30:00Z"
+}
 ```
 
 ## S3 backup
 
 Automatic snapshots of the SQLite database to any S3-compatible storage. Full guide: [S3 Backup](/guide/backup/).
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `S3_BACKUP_ENABLED` | boolean | `false` | Enable automated backups (`1` / `true`) |
-| `S3_BUCKET` | string | (none) | Bucket name (alias: `AWS_BUCKET`) |
-| `S3_ACCESS_KEY_ID` | string | (none) | Access key (alias: `AWS_ACCESS_KEY_ID`) |
-| `S3_SECRET_ACCESS_KEY` | string | (none) | Secret key (alias: `AWS_SECRET_ACCESS_KEY`) |
-| `S3_SESSION_TOKEN` | string | (none) | Temporary credential token (alias: `AWS_SESSION_TOKEN`) |
-| `S3_REGION` | string | `us-east-1` | Region (alias: `AWS_REGION`) |
-| `S3_ENDPOINT` | string | (none) | Custom endpoint for non-AWS providers (alias: `AWS_ENDPOINT`) |
-| `S3_VIRTUAL_HOSTED_STYLE` | boolean | provider default | Force bucket-in-host addressing (`1` / `true`) |
-| `S3_BACKUP_INTERVAL` | number | `21600000` (6h) | Interval between backups in ms |
-| `S3_BACKUP_RETENTION` | number | `7` | Number of backups to keep |
-| `S3_BACKUP_PREFIX` | string | `backups/` | Key prefix for backup files |
+| Variable                  | Type    | Default          | Description                                                   |
+| ------------------------- | ------- | ---------------- | ------------------------------------------------------------- |
+| `S3_BACKUP_ENABLED`       | boolean | `false`          | Enable automated backups (`1` / `true`)                       |
+| `S3_BUCKET`               | string  | (none)           | Bucket name (alias: `AWS_BUCKET`)                             |
+| `S3_ACCESS_KEY_ID`        | string  | (none)           | Access key (alias: `AWS_ACCESS_KEY_ID`)                       |
+| `S3_SECRET_ACCESS_KEY`    | string  | (none)           | Secret key (alias: `AWS_SECRET_ACCESS_KEY`)                   |
+| `S3_SESSION_TOKEN`        | string  | (none)           | Temporary credential token (alias: `AWS_SESSION_TOKEN`)       |
+| `S3_REGION`               | string  | `us-east-1`      | Region (alias: `AWS_REGION`)                                  |
+| `S3_ENDPOINT`             | string  | (none)           | Custom endpoint for non-AWS providers (alias: `AWS_ENDPOINT`) |
+| `S3_VIRTUAL_HOSTED_STYLE` | boolean | provider default | Force bucket-in-host addressing (`1` / `true`)                |
+| `S3_BACKUP_INTERVAL`      | number  | `21600000` (6h)  | Interval between backups in ms                                |
+| `S3_BACKUP_RETENTION`     | number  | `7`              | Number of backups to keep                                     |
+| `S3_BACKUP_PREFIX`        | string  | `backups/`       | Key prefix for backup files                                   |
 
 Backups require a persistent SQLite data path (`BUNQUEUE_DATA_PATH`,
 `BQ_DATA_PATH`, `DATA_PATH`, or `SQLITE_PATH`). There is no file to snapshot in
-in-memory mode, so enabling backup without one fails server startup before
-binding TCP/HTTP.
+in-memory mode, and the built-in snapshot facility does not back up PostgreSQL.
+Enabling it without persistent SQLite fails server startup before binding
+TCP/HTTP.
 
 ```bash
 # Cloudflare R2
@@ -120,77 +151,77 @@ S3_ENDPOINT=http://localhost:9000 S3_BACKUP_ENABLED=1 bunqueue start
 
 ## Timeouts & limits
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SHUTDOWN_TIMEOUT_MS` | number | `30000` | How long graceful shutdown waits for active jobs |
-| `STATS_INTERVAL_MS` | number | `300000` | Stats logging interval |
-| `WORKER_TIMEOUT_MS` | number | `30000` | Worker-registration freshness window. Older heartbeats mark a worker stale; cleanup removes it after 3× this value |
-| `LOCK_TIMEOUT_MS` | number | `5000` | Timeout for acquiring internal locks |
-| `WORKER_CLEANUP_INTERVAL_MS` | number | `60000` | Interval for removing inactive worker registrations |
-| `TCP_IDLE_TIMEOUT_MS` | number | `60000` | Slowloris mitigation: close a connection that starts a frame but makes no progress within this window. Idle connections with no partial frame are never affected. `0` disables |
-| `TCP_MAX_WRITE_QUEUE_BYTES` | number | `67108864` (64 MB) | Max bytes buffered per connection's outbound queue before it is dropped (protects against clients that stop reading). `0` disables |
+| Variable                     | Type   | Default            | Description                                                                                                                                                                    |
+| ---------------------------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SHUTDOWN_TIMEOUT_MS`        | number | `30000`            | How long graceful shutdown waits for active jobs                                                                                                                               |
+| `STATS_INTERVAL_MS`          | number | `300000`           | Stats logging interval                                                                                                                                                         |
+| `WORKER_TIMEOUT_MS`          | number | `30000`            | Worker-registration freshness window. Older heartbeats mark a worker stale; cleanup removes it after 3× this value                                                             |
+| `LOCK_TIMEOUT_MS`            | number | `5000`             | Timeout for acquiring internal locks                                                                                                                                           |
+| `WORKER_CLEANUP_INTERVAL_MS` | number | `60000`            | Interval for removing inactive worker registrations                                                                                                                            |
+| `TCP_IDLE_TIMEOUT_MS`        | number | `60000`            | Slowloris mitigation: close a connection that starts a frame but makes no progress within this window. Idle connections with no partial frame are never affected. `0` disables |
+| `TCP_MAX_WRITE_QUEUE_BYTES`  | number | `67108864` (64 MB) | Max bytes buffered per connection's outbound queue before it is dropped (protects against clients that stop reading). `0` disables                                             |
 
 ## Webhooks
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `WEBHOOK_MAX_RETRIES` | number | `3` | Max delivery retry attempts |
-| `WEBHOOK_RETRY_DELAY_MS` | number | `1000` | Delay between delivery retries |
+| Variable                 | Type   | Default | Description                    |
+| ------------------------ | ------ | ------- | ------------------------------ |
+| `WEBHOOK_MAX_RETRIES`    | number | `3`     | Max delivery retry attempts    |
+| `WEBHOOK_RETRY_DELAY_MS` | number | `1000`  | Delay between delivery retries |
 
 ## Server rate limiting
 
 Protects the server itself from misbehaving clients (per TCP connection or HTTP client IP). Unrelated to per-queue job rate limiting, which is set via the [Queue API](/guide/rate-limiting/).
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
+| Variable                  | Type   | Default | Description                               |
+| ------------------------- | ------ | ------- | ----------------------------------------- |
 | `RATE_LIMIT_MAX_REQUESTS` | number | `10000` | Max requests per client within the window |
-| `RATE_LIMIT_WINDOW_MS` | number | `60000` | Window duration |
-| `RATE_LIMIT_CLEANUP_MS` | number | `60000` | Cleanup interval for tracking data |
+| `RATE_LIMIT_WINDOW_MS`    | number | `60000` | Window duration                           |
+| `RATE_LIMIT_CLEANUP_MS`   | number | `60000` | Cleanup interval for tracking data        |
 
 ## Monitoring thresholds
 
 These control the real-time monitoring events (`queue:idle`, `queue:threshold`, `worker:overloaded`, `server:memory-warning`, `storage:size-warning`) delivered over WebSocket/SSE. See the [HTTP API events reference](/api/http/#explicit-subscription-events-86).
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QUEUE_IDLE_THRESHOLD_MS` | `30000` | Emit `queue:idle` when a queue is empty with no active jobs for this long. `0` disables |
-| `QUEUE_SIZE_THRESHOLD` | `0` (disabled) | Emit `queue:threshold` when a queue's waiting count reaches this size |
-| `WORKER_OVERLOAD_THRESHOLD_MS` | `30000` | Emit `worker:overloaded` when a worker stays at max concurrency for this long |
-| `MEMORY_WARNING_MB` | `0` (disabled) | Emit `server:memory-warning` when heap usage exceeds this many MB |
-| `STORAGE_WARNING_MB` | `0` (disabled) | Emit `storage:size-warning` when the SQLite database exceeds this many MB |
+| Variable                       | Default        | Description                                                                             |
+| ------------------------------ | -------------- | --------------------------------------------------------------------------------------- |
+| `QUEUE_IDLE_THRESHOLD_MS`      | `30000`        | Emit `queue:idle` when a queue is empty with no active jobs for this long. `0` disables |
+| `QUEUE_SIZE_THRESHOLD`         | `0` (disabled) | Emit `queue:threshold` when a queue's waiting count reaches this size                   |
+| `WORKER_OVERLOAD_THRESHOLD_MS` | `30000`        | Emit `worker:overloaded` when a worker stays at max concurrency for this long           |
+| `MEMORY_WARNING_MB`            | `0` (disabled) | Emit `server:memory-warning` when heap usage exceeds this many MB                       |
+| `STORAGE_WARNING_MB`           | `0` (disabled) | Emit `storage:size-warning` when the SQLite database exceeds this many MB               |
 
 ## bunqueue Cloud
 
 Telemetry agent for the bunqueue Cloud dashboard. Cloud mode activates only when `BUNQUEUE_CLOUD_URL`, `BUNQUEUE_CLOUD_API_KEY`, **and** `BUNQUEUE_CLOUD_INSTANCE_ID` are all set.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BUNQUEUE_CLOUD_URL` | (none) | Cloud dashboard URL. Required for cloud mode |
-| `BUNQUEUE_CLOUD_API_KEY` | (none) | API key. Required for cloud mode |
-| `BUNQUEUE_CLOUD_INSTANCE_ID` | (none) | Unique instance identifier. Required for cloud mode |
-| `BUNQUEUE_CLOUD_INSTANCE_NAME` | hostname | Display name for this instance |
-| `BUNQUEUE_CLOUD_SIGNING_SECRET` | (none) | HMAC signing secret for payloads |
-| `BUNQUEUE_CLOUD_INTERVAL_MS` | `15000` | Snapshot upload interval in ms |
-| `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA` | `true` | Include job payloads in telemetry. Set `false` for metadata only |
-| `BUNQUEUE_CLOUD_REDACT_FIELDS` | (none) | Comma-separated payload fields to redact |
-| `BUNQUEUE_CLOUD_EVENTS` | (all) | Comma-separated event filter |
-| `BUNQUEUE_CLOUD_BUFFER_SIZE` | `720` | Snapshot buffer size while offline |
-| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive failures before the circuit breaker opens |
-| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_RESET_MS` | `60000` | Circuit breaker reset window in ms |
-| `BUNQUEUE_CLOUD_USE_WEBSOCKET` | `true` | Stream via WebSocket. Set `false` to disable |
-| `BUNQUEUE_CLOUD_USE_HTTP` | `true` | Upload via HTTP. Set `false` to disable |
-| `BUNQUEUE_CLOUD_REMOTE_COMMANDS` | `true` | Allow remote commands from the dashboard. Set `false` to disable |
+| Variable                                   | Default  | Description                                                      |
+| ------------------------------------------ | -------- | ---------------------------------------------------------------- |
+| `BUNQUEUE_CLOUD_URL`                       | (none)   | Cloud dashboard URL. Required for cloud mode                     |
+| `BUNQUEUE_CLOUD_API_KEY`                   | (none)   | API key. Required for cloud mode                                 |
+| `BUNQUEUE_CLOUD_INSTANCE_ID`               | (none)   | Unique instance identifier. Required for cloud mode              |
+| `BUNQUEUE_CLOUD_INSTANCE_NAME`             | hostname | Display name for this instance                                   |
+| `BUNQUEUE_CLOUD_SIGNING_SECRET`            | (none)   | HMAC signing secret for payloads                                 |
+| `BUNQUEUE_CLOUD_INTERVAL_MS`               | `15000`  | Snapshot upload interval in ms                                   |
+| `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA`          | `true`   | Include job payloads in telemetry. Set `false` for metadata only |
+| `BUNQUEUE_CLOUD_REDACT_FIELDS`             | (none)   | Comma-separated payload fields to redact                         |
+| `BUNQUEUE_CLOUD_EVENTS`                    | (all)    | Comma-separated event filter                                     |
+| `BUNQUEUE_CLOUD_BUFFER_SIZE`               | `720`    | Snapshot buffer size while offline                               |
+| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_THRESHOLD` | `5`      | Consecutive failures before the circuit breaker opens            |
+| `BUNQUEUE_CLOUD_CIRCUIT_BREAKER_RESET_MS`  | `60000`  | Circuit breaker reset window in ms                               |
+| `BUNQUEUE_CLOUD_USE_WEBSOCKET`             | `true`   | Stream via WebSocket. Set `false` to disable                     |
+| `BUNQUEUE_CLOUD_USE_HTTP`                  | `true`   | Upload via HTTP. Set `false` to disable                          |
+| `BUNQUEUE_CLOUD_REMOTE_COMMANDS`           | `true`   | Allow remote commands from the dashboard. Set `false` to disable |
 
 ## Client & CLI
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `BUNQUEUE_MODE` | string | `embedded` | Connection mode for the MCP server (`embedded` or `tcp`) |
-| `BUNQUEUE_HOST` | string | `localhost` | Server host for the MCP server in TCP mode; also a CLI fallback for `--host` |
-| `BUNQUEUE_PORT` | number | `6789` | Server port for the MCP server in TCP mode |
-| `BUNQUEUE_POOL_SIZE` | number | `2` | Connection pool size for the MCP server in TCP mode |
-| `BUNQUEUE_EMBEDDED` | string | (none) | Set to `1` to force embedded mode for the client library |
-| `NO_COLOR` | string | (none) | Set to `1` to disable colored CLI output |
+| Variable             | Type   | Default     | Description                                                                  |
+| -------------------- | ------ | ----------- | ---------------------------------------------------------------------------- |
+| `BUNQUEUE_MODE`      | string | `embedded`  | Connection mode for the MCP server (`embedded` or `tcp`)                     |
+| `BUNQUEUE_HOST`      | string | `localhost` | Server host for the MCP server in TCP mode; also a CLI fallback for `--host` |
+| `BUNQUEUE_PORT`      | number | `6789`      | Server port for the MCP server in TCP mode                                   |
+| `BUNQUEUE_POOL_SIZE` | number | `2`         | Connection pool size for the MCP server in TCP mode                          |
+| `BUNQUEUE_EMBEDDED`  | string | (none)      | Set to `1` to force embedded mode for the client library                     |
+| `NO_COLOR`           | string | (none)      | Set to `1` to disable colored CLI output                                     |
 
 ```bash
 # Point the MCP server at a remote bunqueue instance
@@ -250,8 +281,8 @@ services:
   bunqueue:
     image: bunqueue:latest
     ports:
-      - "6789:6789"
-      - "6790:6790"
+      - '6789:6789'
+      - '6790:6790'
     volumes:
       - bunqueue-data:/data
     environment:

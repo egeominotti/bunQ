@@ -3,6 +3,7 @@ import { jobId as toJobId } from '../../../domain/types/job';
 import type { SerializedCron, WebhookInfo, WorkerInfo } from '../../types/adapter';
 import { serializeMcpCron } from '../serializers';
 import { EmbeddedQueueBackend } from './queues';
+import { clientStorageStatus } from '../../../shared/storageHealth';
 
 export class EmbeddedServiceBackend extends EmbeddedQueueBackend {
   addCron(input: CronJobInput): Promise<SerializedCron> {
@@ -123,7 +124,7 @@ export class EmbeddedServiceBackend extends EmbeddedQueueBackend {
   }
 
   getStorageStatus() {
-    const status = this.manager.getStorageStatus();
+    const status = clientStorageStatus(this.manager.getStorageStatus());
     return Promise.resolve({ diskFull: status.diskFull, error: status.error });
   }
 

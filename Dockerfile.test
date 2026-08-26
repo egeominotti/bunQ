@@ -22,6 +22,7 @@ COPY --chown=bun:bun scripts ./scripts
 COPY --chown=bun:bun bench ./bench
 COPY --chown=bun:bun monitoring ./monitoring
 COPY --chown=bun:bun docker-compose.yml ./
+COPY --chown=bun:bun docker-compose.postgres.yml ./
 COPY --chown=bun:bun docs/*.md ./docs/
 COPY --chown=bun:bun docs/benchmarks ./docs/benchmarks
 COPY --chown=bun:bun docs/features ./docs/features

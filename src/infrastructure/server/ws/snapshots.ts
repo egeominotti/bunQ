@@ -1,11 +1,41 @@
 import type { QueueManager } from '../../../application/queueManager';
 import { throughputTracker } from '../../../application/throughputTracker';
+import type { CronJob } from '../../../domain/types/cron';
+import type { Worker } from '../../../domain/types/worker';
+import { isStorageDegraded } from '../../../shared/storageHealth';
 
-export function buildStatsSnapshot(queueManager: QueueManager): Record<string, unknown> {
+const WORKER_TIMEOUT_MS = parseInt(Bun.env.WORKER_TIMEOUT_MS ?? '30000', 10);
+
+type DurableSnapshotManager = QueueManager & {
+  listWorkersDurable?: () => Promise<Worker[]>;
+  listCronsDurable?: () => Promise<CronJob[]>;
+};
+
+export function buildStatsSnapshot(
+  queueManager: QueueManager
+): Record<string, unknown> | Promise<Record<string, unknown>> {
+  const manager = queueManager as DurableSnapshotManager;
+  if (manager.listWorkersDurable || manager.listCronsDurable) {
+    return Promise.all([
+      manager.listWorkersDurable
+        ? manager.listWorkersDurable()
+        : Promise.resolve(manager.workerManager.list()),
+      manager.listCronsDurable ? manager.listCronsDurable() : Promise.resolve(manager.listCrons()),
+    ]).then(([workers, crons]) => statsSnapshot(manager, workers, crons.length));
+  }
+  return statsSnapshot(manager, manager.workerManager.list(), manager.listCrons().length);
+}
+
+function statsSnapshot(
+  queueManager: QueueManager,
+  workers: Worker[],
+  cronJobs: number
+): Record<string, unknown> {
   const stats = queueManager.getStats();
   const rates = throughputTracker.getRates();
   const perQueue = queueManager.getPerQueueStats();
-  const workerStats = queueManager.workerManager.getStats();
+  const now = Date.now();
+  const activeWorkers = workers.filter((worker) => now - worker.lastSeen < WORKER_TIMEOUT_MS);
   const queues: Record<string, object> = {};
   for (const [name, value] of perQueue) {
     queues[name] = {
@@ -29,8 +59,8 @@ export function buildStatsSnapshot(queueManager: QueueManager): Record<string, u
     pullPerSec: rates.pullPerSec,
     uptime: stats.uptime,
     queues,
-    workers: { total: workerStats.total, active: workerStats.active },
-    cronJobs: queueManager.listCrons().length,
+    workers: { total: workers.length, active: activeWorkers.length },
+    cronJobs,
   };
 }
 
@@ -42,7 +72,7 @@ export function buildHealthSnapshot(
   const memory = process.memoryUsage();
   const storage = queueManager.getStorageStatus();
   return {
-    ok: !storage.diskFull,
+    ok: !isStorageDegraded(storage),
     uptime: Math.floor(process.uptime()),
     memory: {
       rss: Math.round(memory.rss / 1024 / 1024),

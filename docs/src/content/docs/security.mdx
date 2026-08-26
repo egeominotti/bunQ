@@ -1,6 +1,6 @@
 ---
-title: "Security: Authentication, TLS & Hardening"
-description: "The bunqueue security model: token authentication, native TLS, network isolation, abuse protection and how to report a vulnerability."
+title: 'Security: Authentication, TLS & Hardening'
+description: 'The bunqueue security model: token authentication, native TLS, network isolation, abuse protection and how to report a vulnerability.'
 head:
   - tag: meta
     attrs:
@@ -12,8 +12,14 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · security</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Security, hardened by <em>default.</em></h1>
-  <p class="bq-hero-sub">The bunqueue security model: the defaults you get out of the box, the controls available to harden a deployment, and how to report vulnerabilities. Every statement on this page reflects the current codebase.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Security, hardened by <em>default.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The bunqueue security model: the defaults you get out of the box, the controls available to
+    harden a deployment, and how to report vulnerabilities. Every statement on this page reflects
+    the current codebase.
+  </p>
 </div>
 
 ## Reporting vulnerabilities
@@ -36,8 +42,9 @@ advisory database.
 A bunqueue server exposes two listeners: the TCP protocol on port 6789, used
 by every client SDK, and the HTTP API on port 6790, used for health,
 metrics, dashboards and the REST surface. Both listeners share the same
-authentication and TLS configuration. The server is a single process and a
-single trust domain: any authenticated client can operate on any queue.
+authentication and TLS configuration. Each broker is one process, and a shared
+SQLite server or PostgreSQL namespace is one trust domain: any authenticated
+client can operate on any queue.
 Multi tenant isolation, when required, is achieved by running one instance
 per tenant, or by namespacing queues with `prefixKey` where the boundary is
 organizational rather than adversarial.
@@ -180,14 +187,14 @@ Three options, in order of preference for typical deployments:
 Defaults favor a working local setup. Review this table before exposing an
 instance beyond a trusted network:
 
-| Setting | Default | Production recommendation |
-|---|---|---|
-| `AUTH_TOKENS` | unset, no authentication | Always set; rotate with multiple tokens |
-| `HOST` | `0.0.0.0`, all interfaces | Bind to `127.0.0.1` or a private interface unless remote clients need direct access |
-| TLS | disabled | Enable native TLS or terminate at a proxy |
-| `CORS_ALLOW_ORIGIN` | unset, no cross origin access is granted | Set explicitly, and only to your dashboard origins, when a browser client needs the HTTP API |
-| `METRICS_AUTH` | `false`, `/prometheus` is public | Set `true` if metrics may leak operational detail; with no `AUTH_TOKENS`, `/prometheus` fails closed with 503 |
-| Protocol rate limit | 10,000 requests per 60 s per client | Tune with `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WINDOW_MS` |
+| Setting             | Default                                  | Production recommendation                                                                                     |
+| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `AUTH_TOKENS`       | unset, no authentication                 | Always set; rotate with multiple tokens                                                                       |
+| `HOST`              | `0.0.0.0`, all interfaces                | Bind to `127.0.0.1` or a private interface unless remote clients need direct access                           |
+| TLS                 | disabled                                 | Enable native TLS or terminate at a proxy                                                                     |
+| `CORS_ALLOW_ORIGIN` | unset, no cross origin access is granted | Set explicitly, and only to your dashboard origins, when a browser client needs the HTTP API                  |
+| `METRICS_AUTH`      | `false`, `/prometheus` is public         | Set `true` if metrics may leak operational detail; with no `AUTH_TOKENS`, `/prometheus` fails closed with 503 |
+| Protocol rate limit | 10,000 requests per 60 s per client      | Tune with `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WINDOW_MS`                                                  |
 
 ## Abuse protection
 
@@ -206,6 +213,12 @@ instance beyond a trusted network:
 - **Input validation.** Queue names are restricted to a safe character set,
   job payloads are capped at 10 MB, and numeric options are bounds checked
   server side.
+- **Error redaction.** TCP/HTTP command failures preserve intended domain
+  messages, but PostgreSQL SQLSTATE, constraint, driver, host, SQLite, and
+  network diagnostics are replaced with a generic internal-server error. The
+  same rule applies to non-throwing storage status in health/readiness,
+  dashboards, MCP, and Cloud telemetry. SQLite disk-full keeps its actionable
+  message so operators can distinguish and remediate exhausted local storage.
 
 ## Data protection
 
@@ -268,8 +281,9 @@ SDKs (`bunqueue`, `bunqueue-client`) on the latest release. Updates are
 announced through GitHub Security Advisories and npm advisories.
 
 :::tip[Related]
+
 - [Native TLS](/guide/tls/), certificates, custom CAs, client options
 - [Environment Variables](/guide/env-vars/), the full configuration reference
 - [Deployment Guide](/guide/deployment/), Docker, systemd, PM2
 - [Server Mode](/guide/server/), running and operating the server
-:::
+  :::

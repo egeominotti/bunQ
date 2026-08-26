@@ -108,12 +108,12 @@ opposite of the contract.
 Be explicit about where that end-to-end case actually executes, so nobody later
 mistakes it for coverage it does not provide:
 
-| Environment | `node` on `PATH` | e2e case |
-| --- | --- | --- |
-| GitHub Actions `ubuntu-latest` | real Node from the runner image | runs |
-| macOS host with Node installed | real Node | runs |
-| `bun run test:sandbox` (`oven/bun`) | Bun fallback shim | skipped |
-| Ubuntu 24.04 / Debian 13 Machine (Bun only) | absent | skipped |
+| Environment                                 | `node` on `PATH`                | e2e case |
+| ------------------------------------------- | ------------------------------- | -------- |
+| GitHub Actions `ubuntu-latest`              | real Node from the runner image | runs     |
+| macOS host with Node installed              | real Node                       | runs     |
+| `bun run test:sandbox` (`oven/bun`)         | Bun fallback shim               | skipped  |
+| Ubuntu 24.04 / Debian 13 Machine (Bun only) | absent                          | skipped  |
 
 CI is therefore the environment that enforces the contract; the container and
 Machine gates only assert the three Node-independent contract checks. The probe
@@ -367,17 +367,17 @@ test instead of being hidden by a generic port-wait timeout.
 The native suites use each public SDK against real disposable brokers. Every
 language covers the same failure classes, with idiomatic mechanics:
 
-| Layer | Required SDK evidence |
-| --- | --- |
-| Unit / integration / E2E | Pure option and wire logic, real TCP framing, Queue/Worker/Flow business paths, and permanent regressions for fixed bugs |
-| Contract | All 17 independent producer/consumer conformance checks |
-| Race / idempotency | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded |
-| Property / fuzz | Native generators shrink flow plans while checking graph conservation, reciprocal edges, ordering, reserved metadata, and zero I/O on invalid input; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
-| Mutation | A pinned native mutation engine challenges the pure flow planner of every SDK except TypeScript (no engine, fast-check only) on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant |
-| Chaos / recovery | Hard process termination, half-open timeout, reconnect and durable-job visibility after restart |
-| Load / spike | Bounded bulk and worker bursts run in the normal gate, including 512-1500 job spikes |
-| Soak / stress | One long-lived SDK connection repeatedly adds, queries, and resets batches for a configurable duration and batch size |
-| Security / compatibility | Auth-first and CA-verification regressions, weekly dependency advisories, and the runtime version matrix in `.github/workflows/sdk.yml` |
+| Layer                    | Required SDK evidence                                                                                                                                                                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit / integration / E2E | Pure option and wire logic, real TCP framing, Queue/Worker/Flow business paths, and permanent regressions for fixed bugs                                                                                                                |
+| Contract                 | All 17 independent producer/consumer conformance checks                                                                                                                                                                                 |
+| Race / idempotency       | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded                                                                                                         |
+| Property / fuzz          | Native generators shrink flow plans while checking graph conservation, reciprocal edges, ordering, reserved metadata, and zero I/O on invalid input; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
+| Mutation                 | A pinned native mutation engine challenges the pure flow planner of every SDK except TypeScript (no engine, fast-check only) on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant                      |
+| Chaos / recovery         | Hard process termination, half-open timeout, reconnect and durable-job visibility after restart                                                                                                                                         |
+| Load / spike             | Bounded bulk and worker bursts run in the normal gate, including 512-1500 job spikes                                                                                                                                                    |
+| Soak / stress            | One long-lived SDK connection repeatedly adds, queries, and resets batches for a configurable duration and batch size                                                                                                                   |
+| Security / compatibility | Auth-first and CA-verification regressions, weekly dependency advisories, and the runtime version matrix in `.github/workflows/sdk.yml`                                                                                                 |
 
 The bounded cases belong in `test:sandbox:sdk`. Sustained profiles are opt-in
 because hours-long tests are not a useful per-edit gate. They run weekly in CI
@@ -451,11 +451,12 @@ contracts. Copying the documentation is intentional: section coverage,
 language-tab parity, and stale architecture-reference checks must execute in
 the sandbox instead of passing vacuously against an empty tree. The allow-listed
 configuration also includes `docs/vercel.json`, the CI workflow files, and the
-small per-SDK mutation configuration files consumed by structural regressions.
-It includes `Dockerfile.test` itself so tests can verify that this contract stays
-synchronized with the workflow files. It does not install SDK toolchains or
-copy credentials into the core test image. `Dockerfile.test.dockerignore`
-limits the build context to those inputs.
+two Compose manifests, plus the small per-SDK mutation configuration files
+consumed by structural regressions. The PostgreSQL manifest is required by the
+credential-safety test. The image includes `Dockerfile.test` itself so tests can
+verify that this contract stays synchronized with the workflow files. It does
+not install SDK toolchains or copy credentials into the core test image.
+`Dockerfile.test.dockerignore` limits the build context to those inputs.
 
 Regression helpers that poll state must fail closed when their deadline expires.
 Tests concerned with failure classification rather than scheduling explicitly
@@ -463,6 +464,26 @@ set `backoff: 0`, so randomized production retry jitter cannot turn an incomplet
 observation into a misleading downstream assertion. Migration regressions always
 verify the current schema version; schema 30 also has a direct 29-to-30 upgrade
 test for the durable `jobs.dlq_retry_state` column.
+
+PostgreSQL Fast Check scopes delete every generated namespace in one set-based
+transaction and use an explicit database-hook timeout. Deep campaigns therefore
+retain complete cleanup without opening one pool per generated case or depending
+on Bun's short default hook deadline.
+
+PostgreSQL lifecycle regressions use explicit post-commit barriers rather than
+timing guesses. They pause admission, claim, relationship mutation, and startup
+hydration between durable commit and local refresh, start shutdown, and assert
+that the accepted operation settles before the pool closes. Companion cases
+prove that a 60-second empty long-poll does not own lifecycle admission, late
+synchronous writes fail at the gate, and disconnect cleanup remains harmless.
+Direct-child removal tests exercise two managers against one database and assert
+pending-state coverage, exact event emission, idempotence, active/terminal lease
+and result retention, plus fixed-point protection for shared dependency graphs.
+
+PostgreSQL cron overlap tests disable incidental maintenance ticks, observe the
+durable `next_run` against the database clock, and accept either competing broker
+as the `SKIP LOCKED` winner. They do not infer scheduler correctness from a fixed
+host sleep or require one named broker to win a valid race.
 
 Wall-clock backoff tests assert the lower bound of each retry's own jitter
 window. They never require adjacent exponential delays to be monotonic: the
@@ -611,8 +632,12 @@ a CI artifact. See
 it once and waits for an explicit `sdk-gate` that checks the result of all six
 language jobs even when an earlier one failed or was cancelled. A root
 `quality-gate` similarly checks the public-API E2E job plus every other core,
-docs, and SDK result. The version
-gate, binary matrix, container publication, and GitHub release are all
+docs, SDK, and PostgreSQL compatibility result. `test-postgres` is both a
+declared `needs` dependency and an explicitly checked result, so a failed or
+cancelled PostgreSQL 18.6/17/16 matrix cannot leave the release DAG green.
+Expiry boundary cases derive timestamps from the PostgreSQL clock so
+host/container clock skew cannot turn lifecycle coverage into a timing-only
+failure. The version gate, binary matrix, container publication, and GitHub release are all
 transitively downstream; Docker publication also waits for the complete binary
 matrix. Each successful Docker release publishes the exact package version
 alongside `latest`, the commit SHA, and a timestamp, so production deployments

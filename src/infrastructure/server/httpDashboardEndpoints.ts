@@ -5,12 +5,45 @@
 import type { QueueManager } from '../../application/queueManager';
 import { latencyTracker } from '../../application/latencyTracker';
 import { throughputTracker } from '../../application/throughputTracker';
+import type { CronJob } from '../../domain/types/cron';
+import type { Worker } from '../../domain/types/worker';
 import { pausedView } from '../../shared/pausedView';
+import { clientStorageStatus } from '../../shared/storageHealth';
 import { jsonResponse } from './httpResponse';
+
+const WORKER_TIMEOUT_MS = parseInt(Bun.env.WORKER_TIMEOUT_MS ?? '30000', 10);
+
+type DurableDashboardManager = QueueManager & {
+  listWorkersDurable?: () => Promise<Worker[]>;
+  listCronsDurable?: () => Promise<CronJob[]>;
+};
 
 /** Dashboard overview endpoint - aggregates all dashboard data in a single call */
 export function dashboardOverviewEndpoint(
   queueManager: QueueManager,
+  corsOrigins?: Set<string>
+): Response | Promise<Response> {
+  const manager = queueManager as DurableDashboardManager;
+  if (manager.listWorkersDurable || manager.listCronsDurable) {
+    return Promise.all([
+      manager.listWorkersDurable
+        ? manager.listWorkersDurable()
+        : Promise.resolve(manager.workerManager.list()),
+      manager.listCronsDurable ? manager.listCronsDurable() : Promise.resolve(manager.listCrons()),
+    ]).then(([workers, crons]) => dashboardOverviewResponse(manager, workers, crons, corsOrigins));
+  }
+  return dashboardOverviewResponse(
+    manager,
+    manager.workerManager.list(),
+    manager.listCrons(),
+    corsOrigins
+  );
+}
+
+function dashboardOverviewResponse(
+  queueManager: QueueManager,
+  workers: Worker[],
+  crons: CronJob[],
   corsOrigins?: Set<string>
 ): Response {
   const stats = queueManager.getStats();
@@ -18,10 +51,9 @@ export function dashboardOverviewEndpoint(
   const latencies = latencyTracker.getPercentiles();
   const avgLatencies = latencyTracker.getAverages();
   const memStats = queueManager.getMemoryStats();
-  const workers = queueManager.workerManager.list();
-  const workerStats = queueManager.workerManager.getStats();
-  const crons = queueManager.listCrons();
-  const storage = queueManager.getStorageStatus();
+  const now = Date.now();
+  const activeWorkers = workers.filter((worker) => now - worker.lastSeen < WORKER_TIMEOUT_MS);
+  const storage = clientStorageStatus(queueManager.getStorageStatus());
   const mem = process.memoryUsage();
 
   return jsonResponse(
@@ -51,8 +83,8 @@ export function dashboardOverviewEndpoint(
       },
       collections: memStats,
       workers: {
-        total: workerStats.total,
-        active: workerStats.active,
+        total: workers.length,
+        active: activeWorkers.length,
         list: workers
           .slice(0, 100)
           .map(

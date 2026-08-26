@@ -46,8 +46,8 @@ describe('Issue #63: disable stall config', () => {
   });
 
   it('cloud queue:detail response should include enabled field in stallConfig', async () => {
-    // Import cloud commands to test the response shape
-    const { COMMANDS } = await import('../src/infrastructure/cloud/commands');
+    // Exercise the production Cloud command boundary.
+    const { handleCommand } = await import('../src/infrastructure/cloud/commandHandler');
     const { getSharedManager } = await import('../src/client/manager');
 
     const manager = getSharedManager();
@@ -56,12 +56,16 @@ describe('Issue #63: disable stall config', () => {
     // Disable stall config
     manager.setStallConfig(queueName, { enabled: false });
 
-    // Simulate cloud queue:detail command
-    const handler = COMMANDS['queue:detail']!;
-    const result = handler(manager, { type: 'queue:detail', queue: queueName });
+    const response = await handleCommand(manager, {
+      type: 'command',
+      id: 'issue-63-detail',
+      action: 'queue:detail',
+      queue: queueName,
+    });
 
     // The stallConfig in the response MUST include `enabled`
-    expect(result).toBeDefined();
-    expect((result as { stallConfig: { enabled: boolean } }).stallConfig.enabled).toBe(false);
+    expect(response.success).toBe(true);
+    const result = response.data as { stallConfig: { enabled: boolean } };
+    expect(result.stallConfig.enabled).toBe(false);
   });
 });

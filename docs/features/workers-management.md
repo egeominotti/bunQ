@@ -43,8 +43,13 @@ Does NOT own (delegated elsewhere):
   [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md).
 - The client-side `Worker` that sends these commands — see
   [Client SDK: Worker](./client-worker-sdk.md).
-- Persistence: the worker registry is **in-memory only**; nothing is written to
-  SQLite. See [Persistence](./persistence.md).
+- Persistence: the memory/SQLite registry is **in-memory only**. PostgreSQL
+  multi-broker mode durably stores broker/client ownership, queues, payload, and
+  `last_seen` in `bunqueue_workers`, making the registry shared across brokers.
+  Re-registration transfers ownership atomically; owner-fenced heartbeat and
+  unregister operations reject a stale broker or connection generation.
+  See [Persistence](./persistence.md) and
+  [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ## Dependencies
 
@@ -120,7 +125,12 @@ filtered live view.
 - `ListWorkers` → `handleListWorkers` (`src/infrastructure/server/handlers/monitoring/workers.ts:63-92`).
 - `Heartbeat` (worker-level) → `handleHeartbeat` (`src/infrastructure/server/handlers/monitoring/health.ts:53-74`); fields:
   `id`, `activeJobs?`, `processed?`, `failed?` (`src/domain/types/commands/workers.ts:3-9`). This is the
-  only worker command that touches `WorkerManager`.
+  only worker command that touches `WorkerManager`. For TCP requests in
+  PostgreSQL mode, the handler also supplies the server-derived connection
+  `clientId`; the durable update succeeds only for the broker and connection
+  that most recently registered that worker ID. A different connection cannot
+  heartbeat or unregister the worker, even through another broker. Reconnecting
+  workers must therefore re-send `RegisterWorker` before their next heartbeat.
 - `JobHeartbeat` / `JobHeartbeatB` → routed to `QueueManager` job-lock subsystem,
   **not** `WorkerManager` (`src/infrastructure/server/handlers/monitoring/health.ts:76-102`).
 
@@ -130,9 +140,14 @@ filtered live view.
 - `POST /workers` → `RegisterWorker` (`httpRouteResources.ts:150`)
 - `DELETE /workers/:id` → `UnregisterWorker` (`httpRouteResources.ts:175`)
 - `POST /workers/:id/heartbeat` → `Heartbeat` (`httpRouteResources.ts:187`)
-- `GET /queues/:queue/workers` → `workerManager.getForQueue(queue)` (`httpRouteQueues.ts:36-55`)
-- Worker fleet is also embedded in the dashboard overview endpoint
-  (`httpEndpoints.ts:205`).
+- `GET /queues/:queue/workers` uses `workerManager.getForQueue(queue)` for
+  memory/SQLite. PostgreSQL reads the durable namespace registry, filters by
+  queue and `WORKER_TIMEOUT_MS`, and therefore includes active workers
+  registered through another broker (`httpRouteQueues.ts`).
+- Worker fleet is also embedded in the TCP/HTTP dashboard overview and periodic
+  WebSocket/SSE stats snapshots. Those surfaces read the shared PostgreSQL
+  registry when available and keep the original synchronous local path for
+  memory/SQLite.
 
 ### CLI subcommands (`src/cli/commands/worker.ts`)
 
@@ -161,10 +176,10 @@ interface Worker {
   name: string;
   queues: string[];
   concurrency: number;
-  hostname: string;        // 'unknown' if not provided
-  pid: number;             // 0 if not provided
-  registeredAt: number;    // opts.startedAt ?? Date.now()
-  lastSeen: number;        // refreshed on heartbeat/increment/complete/fail
+  hostname: string; // 'unknown' if not provided
+  pid: number; // 0 if not provided
+  registeredAt: number; // opts.startedAt ?? Date.now()
+  lastSeen: number; // refreshed on heartbeat/increment/complete/fail
   activeJobs: number;
   processedJobs: number;
   failedJobs: number;
@@ -207,6 +222,12 @@ handler injects the connection's `clientId` so disconnect cleanup can find it
    value from the aggregate counter and adds the new one, keeping the global
    counters consistent (`workerManager.ts:102-118`).
 
+For a PostgreSQL-backed TCP manager, `heartbeatWorkerDurable` first fences the
+row by both `broker_id` and the connection-derived `client_id`. The generic
+`Worker not found` response intentionally does not disclose whether the ID
+exists under another owner. Once the durable write succeeds, the owning
+broker's in-memory registry is updated with the same absolute statistics.
+
 ### Per-job counter mutators
 
 - `incrementActive` (`workerManager.ts:123`): `activeJobs++`, aggregate++, set
@@ -242,8 +263,8 @@ At startup `QueueManagerState` wires the cron worker check
 (`queue-manager/state.ts`):
 
 ```typescript
-this.cronScheduler.setWorkerCheckCallback((queue) =>
-  this.workerManager.getForQueue(queue).length > 0
+this.cronScheduler.setWorkerCheckCallback(
+  (queue) => this.workerManager.getForQueue(queue).length > 0
 );
 ```
 
@@ -304,17 +325,19 @@ renewal live in the job subsystem (`renewJobLock`), reached via `JobHeartbeat`.
 - **Stale-but-not-reaped window:** between `WORKER_TIMEOUT_MS` and the reaper
   cutoff a worker reports `status: 'stale'` and is excluded from `listActive` /
   `getForQueue`, but still counts toward `getStats.total` and appears in `list`.
-- **No persistence:** a server restart drops the entire registry; clients must
-  re-register (the client `Worker` does this automatically on (re)connect).
+- **SQLite restart:** a memory/SQLite server restart drops the registry; clients
+  re-register automatically on reconnect. PostgreSQL retains registrations but
+  filters/purges them by shared heartbeat freshness, and graceful broker/client
+  shutdown removes the rows it owns.
 - **Cleanup leak on shutdown:** `stop()` must be called to clear the interval;
   `QueueManager.shutdown` calls `workerManager.stop()` (`queue-manager/lifecycle.ts`).
 
 ## Configuration
 
-| Env var | Default | Effect |
-| --- | --- | --- |
-| `WORKER_TIMEOUT_MS` | `30000` | Liveness window: a worker is "active"/"stale" relative to `lastSeen` (`workerManager.ts:14`). Also re-read in `src/infrastructure/server/handlers/monitoring/workers.ts:10`. |
-| `WORKER_CLEANUP_INTERVAL_MS` | `60000` | How often `cleanupStale` runs (`workerManager.ts:17`). |
+| Env var                      | Default | Effect                                                                                                                                                                       |
+| ---------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKER_TIMEOUT_MS`          | `30000` | Liveness window: a worker is "active"/"stale" relative to `lastSeen` (`workerManager.ts:14`). Also re-read in `src/infrastructure/server/handlers/monitoring/workers.ts:10`. |
+| `WORKER_CLEANUP_INTERVAL_MS` | `60000` | How often `cleanupStale` runs (`workerManager.ts:17`).                                                                                                                       |
 
 The stale-removal threshold is derived, not configurable directly:
 `WORKER_TIMEOUT_MS * 3` (`workerManager.ts:218`).
@@ -328,6 +351,8 @@ The stale-removal threshold is derived, not configurable directly:
 - [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — concurrency enforcement
 - [Stats, Metrics & Monitoring](./stats-and-monitoring.md) — fleet stats and dashboard surface
 - [TCP Server Command Handlers](./tcp-server-handlers.md) — `Register/Unregister/ListWorkers/Heartbeat` dispatch
+- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — shared
+  worker rows, cross-broker heartbeat ownership, and cleanup.
 - [HTTP / REST / SSE / WebSocket API](./http-api.md) — `/workers` routes and disconnect cleanup
 - [CLI](./cli.md) — `bunqueue worker …` subcommands
 - [Webhooks, Events & Job Logs](./webhooks-and-events.md) — `JobLogEntry` co-located in `worker.ts`

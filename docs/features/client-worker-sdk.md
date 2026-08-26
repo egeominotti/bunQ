@@ -9,6 +9,7 @@ The Worker SDK is the consumer side of bunqueue: a BullMQ-style polling worker t
 ## Responsibilities & Scope
 
 Owns:
+
 - Job pull loop, concurrency gate, batch pulling, long-poll and pull-error backoff (`runtime/polling.ts`).
 - Lease accounting and buffered-job selection (`runtime/state.ts`, `runtime/buffer.ts`, `runtime/execution.ts`).
 - Processor invocation, auto-ack on success, fail/retry dispatch,
@@ -26,7 +27,8 @@ Owns:
 - Sandboxed thread lifecycle, dispatch, timeout, crash restart and idle recycle (`sandboxed/runtime/`).
 
 Does NOT own (delegated):
-- Queue state, priority ordering, persistence, stall *detection itself*, lock storage — all server/`QueueManager` side. See [Core Queue Engine](./core-queue-engine.md), [Job Lifecycle](./job-lifecycle.md), [Persistence](./persistence.md).
+
+- Queue state, priority ordering, persistence, stall _detection itself_, lock storage — all server/`QueueManager` side. See [Core Queue Engine](./core-queue-engine.md), [Job Lifecycle](./job-lifecycle.md), [Persistence](./persistence.md).
 - The TCP wire framing and connection pool/reconnect — see [Client Transport](./client-transport.md) and [TCP Wire Protocol](./tcp-protocol.md).
 - Producing jobs — see [Client SDK: Queue](./client-queue-sdk.md).
 - DLQ routing on max-attempts — see [Dead Letter Queue](./dead-letter-queue.md).
@@ -34,6 +36,7 @@ Does NOT own (delegated):
 ## Dependencies
 
 Internal:
+
 - `../manager` (`getSharedManager`) — embedded `QueueManager` access. Worker construction synchronously rejects an explicit `dataPath` that differs from the process-wide manager's canonical path; an omitted path joins the active manager. See [Client SDK: Queue](./client-queue-sdk.md) and [Core Queue Engine](./core-queue-engine.md).
 - `../tcpPool` (`TcpConnectionPool`, `getSharedPool`/`releaseSharedPool`) — TCP transport. See [Client Transport](./client-transport.md).
 - `./processor` + `./processorHandlers` — execution and the `Job` method handlers (progress/log/state/children/mutations).
@@ -42,6 +45,7 @@ Internal:
 - `../resolveToken`, `../types` (`WorkerOptions`, `Processor`, `Job`, `RateLimiterOptions`).
 
 External / runtime:
+
 - Bun APIs: `Worker` (sandboxed threads), `Bun.sleep`, `Bun.file`, `Bun.env`, `Bun.gc` indirectly via `smol`.
 - Node `events.EventEmitter`, `os.hostname`, `node:fs`/`node:fs/promises`/`node:path` (sandboxed wrapper file generation).
 
@@ -51,39 +55,39 @@ External / runtime:
 
 ```typescript
 class Worker<T = unknown, R = unknown> extends EventEmitter {
-  constructor(name: string, processor: Processor<T, R>, opts?: WorkerOptions)
+  constructor(name: string, processor: Processor<T, R>, opts?: WorkerOptions);
 
-  run(): void
-  pause(): void
-  resume(): void
-  isRunning(): boolean
-  isPaused(): boolean
-  isClosed(): boolean
-  get concurrency(): number
-  set concurrency(val: number)        // clamped to >= 1; bumps poll if raised
-  get closing(): Promise<void> | null
-  waitUntilReady(): Promise<void>     // TCP: sends Ping; embedded: no-op
+  run(): void;
+  pause(): void;
+  resume(): void;
+  isRunning(): boolean;
+  isPaused(): boolean;
+  isClosed(): boolean;
+  get concurrency(): number;
+  set concurrency(val: number); // clamped to >= 1; bumps poll if raised
+  get closing(): Promise<void> | null;
+  waitUntilReady(): Promise<void>; // TCP: sends Ping; embedded: no-op
 
   // Manual job control
-  getNextJob(token?: string, opts?: { block?: boolean }): Promise<ManualJob<T> | undefined>
-  processJobManually(job, token?, fetchNextCallback?): Promise<ManualJob<T> | undefined>
-  extendJobLocks(jobIds: string[], tokens: string[], duration: number): Promise<number>
+  getNextJob(token?: string, opts?: { block?: boolean }): Promise<ManualJob<T> | undefined>;
+  processJobManually(job, token?, fetchNextCallback?): Promise<ManualJob<T> | undefined>;
+  extendJobLocks(jobIds: string[], tokens: string[], duration: number): Promise<number>;
 
   // Cancellation (cooperative; processor must check isJobCancelled)
-  cancelJob(jobId: string, reason?: string): boolean
-  cancelAllJobs(reason?: string): void
-  isJobCancelled(jobId: string): boolean
+  cancelJob(jobId: string, reason?: string): boolean;
+  cancelAllJobs(reason?: string): void;
+  isJobCancelled(jobId: string): boolean;
 
   // Rate limiter (delegated to WorkerRateLimiter)
-  getRateLimiterInfo(): { current: number; max: number; duration: number } | null
-  rateLimit(expireTimeMs: number): void
-  isRateLimited(): boolean
+  getRateLimiterInfo(): { current: number; max: number; duration: number } | null;
+  rateLimit(expireTimeMs: number): void;
+  isRateLimited(): boolean;
 
   // BullMQ v5 compat
-  startStalledCheckTimer(): Promise<void>   // no-op (stall detection is server-side)
-  delay(ms?: number, abortController?: AbortController): Promise<void>
+  startStalledCheckTimer(): Promise<void>; // no-op (stall detection is server-side)
+  delay(ms?: number, abortController?: AbortController): Promise<void>;
 
-  close(force?: boolean): Promise<void>
+  close(force?: boolean): Promise<void>;
 }
 ```
 
@@ -91,16 +95,18 @@ class Worker<T = unknown, R = unknown> extends EventEmitter {
 
 ```typescript
 class SandboxedWorker<T = unknown> extends EventEmitter {
-  constructor(queueName: string, options: SandboxedWorkerOptions)
-  start(): Promise<void>
-  stop(force?: boolean): Promise<void>
-  isRunning(): boolean
-  getStats(): { total: number; busy: number; idle: number; recycled: number; restarts: number }
+  constructor(queueName: string, options: SandboxedWorkerOptions);
+  start(): Promise<void>;
+  stop(force?: boolean): Promise<void>;
+  isRunning(): boolean;
+  getStats(): { total: number; busy: number; idle: number; recycled: number; restarts: number };
 }
 ```
+
 Re-exported (with a `@deprecated` alias) from `src/client/sandboxedWorker.ts`.
 
 ### Helper modules
+
 - `processJob(internalJob, ProcessorConfig)` (`processor.ts:60`).
 - `AckBatcher` (`ackBatcher.ts:25`) with `queue/flush/stop/waitForInFlight/hasPending`.
 - `pullEmbedded(config, count)` / `pullTcp(config, tcp, count, closing)` (`workerPull.ts`).
@@ -139,6 +145,7 @@ See [data-model](../data-model.md) for the full `Job` shape. Key types used here
 ## Business Logic / Control Flow
 
 ### Construction & startup
+
 `resolveWorkerOptions` in `worker/runtime/options.ts` applies defaults:
 `concurrency=1`, `autorun=true`, `heartbeatInterval=10000`,
 `batchSize=min(opts,1000)` default 10, `pollTimeout=min(opts,30000)` default 0,
@@ -167,11 +174,16 @@ no-ops as soon as shutdown owns its promise, so a stale timer or callback
 cannot clear the closing/force state and restart polling during teardown.
 
 ### Pull loop
+
 `poll()` (`worker/runtime/polling.ts`) first retires its current wake-up handle,
 then returns if not running/closing. If `activeJobs >= concurrency` it
 reschedules in 10ms; if the rate limiter blocks, it waits for the next slot;
-otherwise it calls `tryProcess()`. Every concurrency, group, empty-pull,
-rate-limit and error-backoff path uses one earliest-deadline scheduler, so
+otherwise it starts `tryProcess()` immediately. Worker startup, timer wake-ups,
+and resume therefore keep their existing scheduling behavior. Only job
+completion callbacks use the `processingScheduled` gate and a shared follow-up
+dispatch, so a released wave of 64 leases requests the next available capacity
+with one `PULLB` instead of racing 64 one-job `PULL` transactions. Every concurrency, group,
+empty-pull, rate-limit and error-backoff path uses one earliest-deadline scheduler, so
 concurrent completion and pull continuations leave at most one live poll timer
 without allowing a later request to postpone an earlier wake-up. The timer
 callback verifies that it still owns the current handle before polling;
@@ -222,6 +234,7 @@ job object from an older redelivery generation cannot replace or publish an
 outcome through the current generation.
 
 ### Processing & outcome (`processor.ts`, `processorOutcome.ts`)
+
 `processJob` builds the public `Job` with all handlers (`worker/handlers/`),
 emits `active`, then awaits `processor(job)`. A confirmed `moveToCompleted()`,
 `moveToFailed()`, `retry()`, `changeDelay()`, `moveToWait()`,
@@ -252,7 +265,7 @@ Failure path (`handleJobFailure`, `processorOutcome.ts`): `DelayedError` →
 `handleDelayedError` re-delays the job (`backoff || 1000`) without counting a
 failure and forwards the current lease token in both transports;
 `UnrecoverableError` → forces `maxAttempts=1, attempts=0` so retries are
-skipped; stack lines are computed *before* the send (capped at 50 on the wire,
+skipped; stack lines are computed _before_ the send (capped at 50 on the wire,
 authoritative cap server-side — bug #74), then `FAIL` is sent (embedded
 `manager.fail`, TCP `FAIL` with `stack`/`token`/`unrecoverable`). `failedReason`
 and `stacktrace` are populated on the event object, then `failed` is emitted
@@ -293,6 +306,13 @@ process alive; `autoStart` can watch the queue after an idle stop.
   token whenever a lock exists in both transports; unlocked jobs retain the
   administrative transition path. See
   [Concurrency & Locking](./concurrency-and-locking.md).
+- **PostgreSQL disconnect fencing:** the multi-broker manager snapshots all
+  tracked `(jobId, token)` pairs before the first awaited or deferred release.
+  Store fencing revalidates that immutable token, and local cleanup removes it
+  only if the active-token map still contains the same value. Reusing a custom
+  ID while old disconnect work is queued cannot release or forget the newer
+  lease. This is PostgreSQL adapter behavior; the existing SQLite lock path is
+  unchanged.
 - **Stall race (#33)**: stall detection may re-dispatch a job while the old
   handler still runs. The new pull receives a fresh broker token and local
   delivery generation. Only the current generation is heartbeated and allowed
@@ -311,7 +331,7 @@ process alive; `autoStart` can watch the queue after an idle stop.
 - **Pull errors**: `handlePullError` in `worker/runtime/polling.ts` emits
   `error` with `consecutiveErrors` / `context:'pull'` and backs off
   exponentially from 100ms to 30s. A successful pick resets the counter.
-- **ACK batching/backpressure** (`ackBatcher.ts`): flush triggers at `config.batchSize` or after `interval` (`DEFAULT_ACK_INTERVAL=50ms`). The buffer is bounded at `MAX_PENDING_ACKS=10000`; `queue()` blocks (awaits in-flight, then flushes) rather than dropping acks. `sendBatchWithRetry` retries transient failures up to `maxRetries=3` with exponential backoff (`100,200,400ms`). A valid structured `ignoredIndices` response settles only those exact pending positions as `false` without retry or error; malformed/unknown evidence is rejected. On true exhaustion it logs `(N acks lost)` and rejects each pending promise. `stop()` clears any still-queued acks *without settling their promises* (callers are expected to `flush()` + `waitForInFlight()` first, as `Worker.close()` does); a batch already mid-retry when `stop()` lands is rejected with `AckBatcher stopped`.
+- **ACK batching/backpressure** (`ackBatcher.ts`): flush triggers at `config.batchSize` or after `interval` (`DEFAULT_ACK_INTERVAL=50ms`). The buffer is bounded at `MAX_PENDING_ACKS=10000`; `queue()` blocks (awaits in-flight, then flushes) rather than dropping acks. `sendBatchWithRetry` retries transient failures up to `maxRetries=3` with exponential backoff (`100,200,400ms`). A valid structured `ignoredIndices` response settles only those exact pending positions as `false` without retry or error; malformed/unknown evidence is rejected. On true exhaustion it logs `(N acks lost)` and rejects each pending promise. `stop()` clears any still-queued acks _without settling their promises_ (callers are expected to `flush()` + `waitForInFlight()` first, as `Worker.close()` does); a batch already mid-retry when `stop()` lands is rejected with `AckBatcher stopped`.
 - **Graceful close** (`worker/runtime/lifecycle.ts`): `close(false)` stops
   timers, moves buffered leased jobs back to waiting, waits only for active
   processors, flushes ACKs, unregisters, and closes the pool. `close(true)`

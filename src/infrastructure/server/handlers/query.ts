@@ -11,6 +11,7 @@ import type { Job } from '../../../domain/types/job';
 import { lastFailedReason } from '../../../domain/job/terminal';
 import { pausedView } from '../../../shared/pausedView';
 import type { HandlerContext } from '../types';
+import { sanitizeServerError } from '../errors';
 
 interface JobView extends Job {
   state?: string;
@@ -143,7 +144,7 @@ export async function handleGetChildrenValues(
   try {
     const values = await ctx.queueManager.getChildrenValues(jobId(cmd.id));
     return resp.data({ values }, reqId);
-  } catch {
-    return resp.data({ values: {} }, reqId);
+  } catch (error) {
+    return resp.error(sanitizeServerError(error), reqId);
   }
 }

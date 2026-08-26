@@ -1,6 +1,6 @@
 ---
-title: "Storage: SQLite by Design, No Postgres Needed"
-description: "bunqueue persists jobs in a single local SQLite file, no Postgres, MySQL, or Redis. Why, and how to deploy on serverless and ephemeral platforms anyway."
+title: 'Storage: SQLite or PostgreSQL 18.6'
+description: 'Use SQLite by default for a zero-infrastructure bunqueue, or PostgreSQL 18.6 for a database-authoritative multi-broker server deployment.'
 head:
   - tag: meta
     attrs:
@@ -12,15 +12,23 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · storage</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">SQLite by default, tuned for <em>queues.</em></h1>
-  <p class="bq-hero-sub">bunqueue stores jobs in a single local SQLite file. No Postgres, no MySQL, no Redis, and none planned. This page explains why, and what to do on platforms without a durable disk.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    SQLite by default. PostgreSQL for <em>many brokers.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Keep the zero-infrastructure SQLite engine for embedded and single-broker deployments, or opt
+    into PostgreSQL 18.6 when several bunqueue servers must share one authoritative queue.
+  </p>
 </div>
 
-This page answers two questions evaluators ask: "can I point bunqueue at my Postgres?" (no, by design) and "how do I keep jobs safe on a platform where the disk disappears on restart?" (three patterns, below).
+The storage choice is explicit and deployment-specific. SQLite behavior has not
+changed. PostgreSQL is a separate server backend; MySQL is not supported.
 
 ## The short answer
 
-bunqueue needs **zero external infrastructure**. Persistence is one SQLite file, and the only runtime dependencies are `croner` and `msgpackr`. If your host has a disk that survives restarts, you are done:
+bunqueue still needs **zero external infrastructure by default**. Persistence is
+one SQLite file, and the only runtime dependencies are `croner` and `msgpackr`.
+If one server or embedded process and a durable disk meet your needs, use SQLite:
 
 ```bash
 # Server mode: point the data path at durable storage
@@ -32,7 +40,132 @@ BUNQUEUE_DATA_PATH=/data/bunq.db bunqueue start
 const queue = new Queue('jobs', { embedded: true, dataPath: '/data/jobs.db' });
 ```
 
-*Embedded mode (and `queue.forward()` below) ships in the Bun `bunqueue` package only. From every other language, run the server and connect with a [client SDK](/guide/sdks/), as in Option 3.*
+_Embedded mode (and `queue.forward()` below) ships in the Bun `bunqueue` package only. From every other language, run the server and connect with a [client SDK](/guide/sdks/), as in Option 3._
+
+For multiple active broker processes, use the PostgreSQL server backend. It is
+database-authoritative: claims, leases, ACK/FAIL, queue limits, cron schedules,
+worker registrations, metrics, and events are coordinated in PostgreSQL rather
+than independent in-memory queues.
+
+## PostgreSQL 18.6 multi-broker mode
+
+PostgreSQL is available in **standalone server mode**. Embedded `Queue` and
+`Worker` continue to use memory/SQLite.
+
+The repository Compose file pins the requested PostgreSQL version exactly:
+
+```bash
+POSTGRES_PASSWORD='replace-me' \
+  BUNQUEUE_POSTGRES_URL='postgres://bunqueue:replace-me@postgres:5432/bunqueue' \
+  docker compose -f docker-compose.postgres.yml up --build -d
+```
+
+The database password and broker URL are separate Compose inputs so a raw secret
+is never interpolated into a URI. When the password contains URI-reserved
+characters, percent-encode the password component in
+`BUNQUEUE_POSTGRES_URL` (for example, `p@ss/word` becomes
+`p%40ss%2Fword`) while passing the original value as `POSTGRES_PASSWORD`.
+
+It starts `postgres:18.6-alpine` and two bunqueue brokers against the same
+database and namespace:
+
+| Service    |    TCP |   HTTP |
+| ---------- | -----: | -----: |
+| `broker-a` | `6789` | `6790` |
+| `broker-b` | `7789` | `7790` |
+
+To configure a broker directly:
+
+```bash
+BUNQUEUE_STORAGE_DRIVER=postgres \
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:secret@postgres:5432/bunqueue' \
+BUNQUEUE_POSTGRES_NAMESPACE=production \
+BUNQUEUE_BROKER_ID=broker-a \
+bunqueue start
+```
+
+Or use `bunqueue.config.ts`:
+
+```typescript
+import { defineConfig } from 'bunqueue';
+
+export default defineConfig({
+  storage: {
+    driver: 'postgres',
+    url: process.env.BUNQUEUE_POSTGRES_URL!,
+    namespace: 'production',
+    brokerId: process.env.HOSTNAME,
+    poolSize: 10,
+    leaseDurationMs: 30_000,
+    pollIntervalMs: 250,
+  },
+});
+```
+
+Every active broker needs a unique `brokerId` and the same URL/namespace.
+Credentials should come from a secret manager. Do not also set a SQLite data
+path: ambiguous PostgreSQL + SQLite configuration fails startup. The built-in
+S3 snapshot feature is SQLite-only; use normal PostgreSQL backup/PITR tooling for
+this backend.
+
+The broker count is not limited to the two services in the example. The
+PostgreSQL integration gate also starts four independent bunqueue processes,
+each with its own ports and connection pool, against one PostgreSQL 18.6
+namespace. It exercises concurrent production/consumption, shared rate and
+concurrency limits, pause/resume, cross-broker ACK, and recovery after one broker
+is killed while holding leases.
+
+PostgreSQL transactions use `FOR UPDATE SKIP LOCKED` for competing claims and
+opaque, database-clock leases for fencing. LISTEN/NOTIFY only wakes other
+brokers; a transactional outbox ordered at commit time repairs missed or
+coalesced notifications even when physical event IDs were allocated in a
+different order. An expired owner cannot ACK a generation after another broker
+recovers it. Dependency admission queries PostgreSQL and rechecks existence in
+the write transaction, so broker B can reference a parent just committed on
+broker A without relying on event timing. Worker and cron views in dashboards,
+per-queue worker routes, and streamed stats likewise read the shared registry.
+
+Completion proofs used by live dependencies are pinned in PostgreSQL; unused
+`removeOnComplete` proofs and each broker's completed/result snapshot are
+bounded independently. Reusing a custom ID retires the previous proof only when
+no live consumer still owns it. Destructive commands use the same identity lock
+as admission, so drain, clean, TTL/DLQ pruning, and obliterate cannot strand a
+`waiting-children` job. PostgreSQL also requires at least one retained durable
+event per queue; its runtime rejects `maxQueueEvents: 0`. SQLite and in-memory
+retention behavior is unchanged.
+
+### PostgreSQL 18 performance settings
+
+bunqueue does not override server-wide PostgreSQL settings. PostgreSQL 18 uses
+the `worker` asynchronous I/O method by default, but this queue workload is
+normally dominated by cached B-tree lookups, WAL, and row coordination rather
+than cold sequential reads. Measure the actual server before increasing
+`io_workers` or `io_max_concurrency`; more workers can add overhead when the
+working set is already cached.
+
+For a dedicated database, size `shared_buffers` from the available memory and
+working set (PostgreSQL documents roughly 25% of system memory as a starting
+point, not a universal target). `wal_compression=lz4` can reduce full-page-image
+WAL at a CPU cost. Keep `fsync=on`, `synchronous_commit=on`, and
+`full_page_writes=on` when acknowledged queue writes must survive a database or
+host crash. Disabling those durability controls is not a bunqueue performance
+mode.
+
+Profile with `pg_stat_statements`, `track_io_timing`, `pg_stat_io`, and
+`pg_stat_wal`. In the native 20,000-job/16-consumer engineering profile, the
+final indexed claim path produced zero temp files and read almost entirely from
+shared buffers. Its final rates were 11,749 admission, 9,782 processing, and
+5,338 complete lifecycle jobs/s with two managers and 16 claim loops. A
+21-instance PostgreSQL 18.6 matrix found only a 6.3% median uplift from a 512 MiB
+shared buffer allocation and no decisive AIO/JIT/WAL compression winner. Treat
+those figures as local diagnostics and benchmark the production storage,
+payload size, broker count, and journal retention window.
+
+After the commit-ordered journal was finalized, a fresh 10,000-job profile with
+the same two-manager/16-loop shape measured 11,318 admission, 10,064 processing,
+and 5,327 lifecycle jobs/s. Moving the commit token to a compact envelope removed
+the second event-row rewrite and its roughly 49 MiB of profiled WAL per 10,000-job
+run. These remain local engineering diagnostics, not production sizing claims.
 
 The rest of this page covers hosts where the disk does not survive restarts.
 
@@ -42,13 +175,13 @@ The rest of this page covers hosts where the disk does not survive restarts.
 
 Most container platforms can attach a durable disk. Point the data path at it and SQLite behaves normally across restarts.
 
-| Platform | Durable storage |
-| --- | --- |
-| Fly.io | Fly Volumes |
-| Railway | Volumes |
-| Render | Persistent Disks |
+| Platform         | Durable storage                              |
+| ---------------- | -------------------------------------------- |
+| Fly.io           | Fly Volumes                                  |
+| Railway          | Volumes                                      |
+| Render           | Persistent Disks                             |
 | Docker / Compose | A named volume mounted at the data directory |
-| Kubernetes | A PersistentVolumeClaim |
+| Kubernetes       | A PersistentVolumeClaim                      |
 
 :::note
 bunqueue runs SQLite in WAL mode (write-ahead logging, a mode that allows concurrent reads and writes). WAL creates `-wal` and `-shm` sidecar files next to the `.db` file, so mount the whole data directory on the durable volume, not just the database file.
@@ -162,31 +295,34 @@ Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare W
 
 ### Choosing
 
-| Your situation | Use |
-| --- | --- |
-| Container with an attachable disk | Persistent volume (Option 1) |
-| Scale-to-zero instances, want local durability first | Store-and-forward (Option 2) |
-| Many stateless workers, one durable host | Central TCP server (Option 3) |
-| The queue must live inside a shared Postgres | A Postgres-native queue (below) |
+| Your situation                                       | Use                           |
+| ---------------------------------------------------- | ----------------------------- |
+| Container with an attachable disk                    | Persistent volume (Option 1)  |
+| Scale-to-zero instances, want local durability first | Store-and-forward (Option 2)  |
+| Many stateless workers, one durable host             | Central TCP server (Option 3) |
+| Multiple active bunqueue brokers sharing state       | PostgreSQL 18.6 backend       |
 
-## Why not Postgres or MySQL?
+## Guarantees and boundaries
 
-Two engineering reasons, beyond the zero-infrastructure philosophy:
+| Capability                       | Memory / SQLite                             | PostgreSQL 18.6           |
+| -------------------------------- | ------------------------------------------- | ------------------------- |
+| Embedded mode                    | Yes                                         | No                        |
+| Standalone server                | Yes                                         | Yes                       |
+| Active brokers sharing one queue | One                                         | Multiple                  |
+| Authority                        | Process memory + optional SQLite durability | PostgreSQL transactions   |
+| Claim coordination               | In-process locks                            | Row locks + `SKIP LOCKED` |
+| Lease clock                      | Broker process                              | PostgreSQL                |
+| Built-in S3 snapshots            | SQLite only                                 | No; use database backups  |
+| MySQL compatibility              | No                                          | No                        |
 
-1. **Synchronous storage is load-bearing.** The storage layer is built on `bun:sqlite`, which is synchronous. Bun's Postgres and MySQL client (`bun:sql`) is async only, and making storage async would push `await` through the hot push, pull, and ack paths, adding latency exactly where bunqueue is tuned to be fast.
-
-2. **A database swap would not buy horizontal scaling.** bunqueue is a single-process engine: in-memory queues are the source of truth at runtime, and SQLite is the durability log behind them. There is no distributed locking, so two bunqueue processes sharing one Postgres would double-run jobs. Real multi-instance elasticity would be a different product, not a storage adapter.
-
-If a shared SQL database as the queue is a hard requirement, use a Postgres-native queue such as [pg-boss](https://github.com/timgit/pg-boss) or [graphile-worker](https://github.com/graphile/worker). bunqueue optimizes for a different point: one fast process with nothing else to operate.
-
-## Will Postgres support be added?
-
-Not planned. It could be reconsidered as an optional durability adapter if strong, specific demand emerges, but as explained above it would not add clustering by itself. Share requirements on [discussion #105](https://github.com/egeominotti/bunqueue/discussions/105).
+The existing SQLite performance figures apply only to SQLite. PostgreSQL
+functional validation is not a benchmark, and its throughput depends on network,
+database sizing, connection pool, retention, and transaction latency.
 
 ## See also
 
 - [Deployment Guide](/guide/deployment/) - Docker, systemd, and PM2
 - [IoT & Edge](/guide/iot-edge/) - Store-and-forward in depth
-- [Environment Variables](/guide/env-vars/) - `BUNQUEUE_DATA_PATH` and friends
+- [Environment Variables](/guide/env-vars/) - SQLite and PostgreSQL settings
 - [Comparison](/guide/comparison/) - bunqueue vs Redis-backed queues
 - [FAQ](/faq/)

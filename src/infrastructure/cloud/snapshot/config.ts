@@ -1,5 +1,6 @@
 import type { QueueManager } from '../../../application/queueManager';
 import type { CloudSnapshot } from '../types';
+import type { CloudSnapshotSource } from '../queueAdapter/types';
 
 export function collectQueueConfigs(
   queueManager: QueueManager,
@@ -37,6 +38,35 @@ export function collectQueueConfigs(
     }
   }
   return configs;
+}
+
+export function mapSnapshotQueueConfigs(
+  queues: CloudSnapshotSource['queues']
+): CloudSnapshot['queueConfigs'] {
+  return Object.fromEntries(
+    queues.map((queue) => [
+      queue.name,
+      {
+        paused: queue.paused,
+        rateLimit: queue.rateLimit,
+        concurrencyLimit: queue.concurrencyLimit,
+        concurrencyActive: queue.counts.active,
+        stallConfig: {
+          enabled: queue.stallConfig.enabled,
+          stallInterval: queue.stallConfig.stallInterval,
+          maxStalls: queue.stallConfig.maxStalls,
+          gracePeriod: queue.stallConfig.gracePeriod,
+        },
+        dlqConfig: {
+          autoRetry: queue.dlqConfig.autoRetry,
+          autoRetryInterval: queue.dlqConfig.autoRetryInterval,
+          maxRetries: queue.dlqConfig.maxAutoRetries,
+          maxAge: queue.dlqConfig.maxAge ?? 0,
+          maxEntries: queue.dlqConfig.maxEntries,
+        },
+      },
+    ])
+  );
 }
 
 export function collectWebhooks(queueManager: QueueManager): CloudSnapshot['webhooks'] {
@@ -87,6 +117,28 @@ export function collectTopErrors(
     }
   }
   return [...errorMap.entries()]
+    .map(([message, data]) => ({ message, ...data }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function mapSnapshotTopErrors(
+  entries: CloudSnapshotSource['dlqEntries']
+): CloudSnapshot['topErrors'] {
+  const errors = new Map<string, { count: number; queue: string; lastSeen: number }>();
+  for (const entry of entries) {
+    const message = entry.error ?? entry.reason;
+    const current = errors.get(message);
+    if (!current) {
+      errors.set(message, { count: 1, queue: entry.job.queue, lastSeen: entry.enteredAt });
+      continue;
+    }
+    current.count++;
+    if (entry.enteredAt > current.lastSeen) {
+      current.lastSeen = entry.enteredAt;
+      current.queue = entry.job.queue;
+    }
+  }
+  return [...errors]
     .map(([message, data]) => ({ message, ...data }))
     .sort((a, b) => b.count - a.count);
 }

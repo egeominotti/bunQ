@@ -2,6 +2,7 @@ import type { QueueManager } from '../../../application/queueManager';
 import { redactData } from '../redact';
 import type { CloudSnapshot } from '../types';
 import type { RedactOptions } from '../types/redact';
+import type { CloudSnapshotSource } from '../queueAdapter/types';
 
 const ALL_STATES = [
   'waiting',
@@ -129,6 +130,45 @@ function mapJobToSnapshot(job: DomainJob, state: string, redact: RedactOptions):
   return { ...mapJobCore(job, state, redact), ...mapJobExtended(job) } as SnapshotJob;
 }
 
+export function mapSnapshotJobs(
+  jobs: CloudSnapshotSource['jobs'],
+  redact: RedactOptions
+): CloudSnapshot['recentJobs'] {
+  return jobs.map(({ job, state }) => mapJobToSnapshot(job, state, redact));
+}
+
+export function mapSnapshotDlqEntries(
+  source: CloudSnapshotSource['dlqEntries'],
+  redact: RedactOptions
+): CloudSnapshot['dlqEntries'] {
+  return source
+    .map((entry) => ({
+      jobId: String(entry.job.id),
+      queue: entry.job.queue,
+      reason: entry.reason,
+      error: entry.error,
+      enteredAt: entry.enteredAt,
+      retryCount: entry.retryCount,
+      lastRetryAt: entry.lastRetryAt ?? undefined,
+      nextRetryAt: entry.nextRetryAt ?? undefined,
+      expiresAt: entry.expiresAt ?? undefined,
+      jobAttempts: entry.job.attempts,
+      jobMaxAttempts: entry.job.maxAttempts,
+      jobData: redact.includeJobData ? redactData(entry.job.data, redact.redactFields) : undefined,
+      jobCreatedAt: entry.job.createdAt,
+      jobPriority: entry.job.priority,
+      attemptHistory: entry.attempts.map((attempt) => ({
+        attempt: attempt.attempt,
+        startedAt: attempt.startedAt,
+        failedAt: attempt.failedAt,
+        reason: attempt.reason,
+        error: attempt.error,
+        duration: attempt.duration,
+      })),
+    }))
+    .sort((left, right) => right.enteredAt - left.enteredAt);
+}
+
 export function collectLiveJobs(
   queueManager: QueueManager,
   queueNames: string[],
@@ -139,7 +179,7 @@ export function collectLiveJobs(
   for (const name of queueNames) {
     for (const state of ALL_STATES) {
       try {
-        const queueJobs = queueManager.getJobs(name, { state: [state], start: 0, end: 999 });
+        const queueJobs = queueManager.getJobs(name, { state: [state], start: 0, end: 1000 });
         for (const job of queueJobs) jobs.push(mapJobToSnapshot(job, state, redact));
       } catch {
         // Skip queue/state on error.

@@ -1,6 +1,6 @@
 ---
-title: "BullMQ on Bun: Compatibility & SQLite Alternative"
-description: "Does BullMQ work on Bun? Yes, and bunqueue removes the Redis requirement: honest benchmarks, feature differences, and when BullMQ is the better pick."
+title: 'BullMQ on Bun: Compatibility & SQLite Alternative'
+description: 'Does BullMQ work on Bun? Yes, and bunqueue removes the Redis requirement: honest benchmarks, feature differences, and when BullMQ is the better pick.'
 head:
   - tag: meta
     attrs:
@@ -13,17 +13,26 @@ import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · comparison</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">bunqueue vs BullMQ, one less <em>server.</em></h1>
-  <p class="bq-hero-sub">Benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical workloads, a feature comparison, and the cases where BullMQ is still the better pick.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    bunqueue vs BullMQ, one less <em>server.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical
+    workloads, a feature comparison, and the cases where BullMQ is still the better pick.
+  </p>
 </div>
 
 This page helps you decide between bunqueue and BullMQ. Short version first, then the numbers with their caveats, then features.
 
 ## Quick answer
 
-Pick **bunqueue** if you run on Bun and one queue server (or one process, in embedded mode) is enough. You get the same Queue and Worker API as BullMQ with no Redis to install, monitor, or pay for. Jobs persist in a SQLite file.
+Pick **bunqueue** if you run on Bun and want embedded/single-broker SQLite or a
+PostgreSQL 18.6 multi-broker server without Redis. You get the same Queue and
+Worker API across these server backends.
 
-Pick **BullMQ** if you need to scale the queue itself across multiple servers, already operate Redis, or need workers in languages beyond bunqueue's official SDKs (TypeScript and Python). Details in [When to Use BullMQ Instead](#when-to-use-bullmq-instead).
+Pick **BullMQ** if Redis/Redis Cluster is already your operational standard, you
+need Redis-specific behavior, or you cannot run a Bun broker. Details in
+[When to Use BullMQ Instead](#when-to-use-bullmq-instead).
 
 ## The numbers
 
@@ -31,34 +40,42 @@ Pick **BullMQ** if you need to scale the queue itself across multiple servers, a
   <div class="bq-card">
     <BqIcon name="speed" />
     <h3>1.3x Faster Push</h3>
-    <p><b>54,140 vs 43,261 ops/sec</b></p>
+    <p>
+      <b>54,140 vs 43,261 ops/sec</b>
+    </p>
     <p>Single job push</p>
   </div>
   <div class="bq-card">
     <BqIcon name="spark" />
     <h3>3.2x Faster Bulk</h3>
-    <p><b>139,200 vs 44,000 ops/sec</b></p>
+    <p>
+      <b>139,200 vs 44,000 ops/sec</b>
+    </p>
     <p>Bulk push, 100 jobs per batch</p>
   </div>
   <div class="bq-card">
     <BqIcon name="check" />
     <h3>Lower Bulk Latency</h3>
-    <p><b>3.26 vs 4.53 ms p99</b></p>
+    <p>
+      <b>3.26 vs 4.53 ms p99</b>
+    </p>
     <p>Bulk push tail latency</p>
   </div>
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Infrastructure</h3>
-    <p><b>No Redis required</b></p>
+    <p>
+      <b>No Redis required</b>
+    </p>
     <p>Embedded SQLite. 7 packages, 5.5 MB installed.</p>
   </div>
 </div>
 
-| Operation | bunqueue | BullMQ | Speedup |
-|-----------|----------|--------|---------|
-| **Push** (single job) | 54,140 ops/sec | 43,261 ops/sec | **1.3x** |
-| **Bulk push** (100 per batch) | 139,200 ops/sec | 44,000 ops/sec | **3.2x** |
-| **Bulk push p99 latency** | 3.26 ms | 4.53 ms | **1.4x lower** |
+| Operation                     | bunqueue        | BullMQ         | Speedup        |
+| ----------------------------- | --------------- | -------------- | -------------- |
+| **Push** (single job)         | 54,140 ops/sec  | 43,261 ops/sec | **1.3x**       |
+| **Bulk push** (100 per batch) | 139,200 ops/sec | 44,000 ops/sec | **3.2x**       |
+| **Bulk push p99 latency**     | 3.26 ms         | 4.53 ms        | **1.4x lower** |
 
 :::note[Read this before quoting numbers]
 Benchmark figures depend on hardware and library versions, and they change across bunqueue versions. Two things to know:
@@ -67,30 +84,84 @@ Benchmark figures depend on hardware and library versions, and they change acros
 2. This page does not quote a Process (end-to-end job consumption) figure. Older published Process numbers predate a worker-leasing correctness fix in 2.8.18 that bounds how many jobs one TCP worker can lease. A single worker at `concurrency: 50` now measures in the thousands of ops/sec, and end-to-end throughput scales with worker count, not queue depth. See the [benchmarks page](/guide/benchmarks/) for current numbers.
 
 Reproduce either run with `bun run bench/comparison/run.ts`.
+
+All bunqueue figures on this page measure the memory/SQLite engine. PostgreSQL
+18.6 functional tests are not benchmarks and these numbers must not be applied
+to the multi-broker backend.
 :::
 
 <Aside type="note">
-This is a fair comparison: both systems go over the network (bunqueue TCP vs Redis TCP), same payload size (100 bytes), same batch sizes, same push strategy. Embedded mode (queue inside your process, no network) benchmarks significantly higher; see [benchmarks](/guide/benchmarks/).
+  This is a fair comparison: both systems go over the network (bunqueue TCP vs Redis TCP), same
+  payload size (100 bytes), same batch sizes, same push strategy. Embedded mode (queue inside your
+  process, no network) benchmarks significantly higher; see [benchmarks](/guide/benchmarks/).
 </Aside>
 
 <div class="bq-chart-grid">
   <div class="bq-chart">
-    <p class="bq-chart-title">Push <span>ops/sec, higher is better</span></p>
-    <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">54,140</span></div>
-    <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:80%"></div></div><span class="bq-hval">43,261</span></div>
-    <p class="bq-chart-note"><b>1.3x faster</b></p>
+    <p class="bq-chart-title">
+      Push <span>ops/sec, higher is better</span>
+    </p>
+    <div class="bq-hrow">
+      <span class="bq-hname">bunqueue</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill" style="width:100%"></div>
+      </div>
+      <span class="bq-hval">54,140</span>
+    </div>
+    <div class="bq-hrow">
+      <span class="bq-hname">BullMQ</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill bq-hfill-them" style="width:80%"></div>
+      </div>
+      <span class="bq-hval">43,261</span>
+    </div>
+    <p class="bq-chart-note">
+      <b>1.3x faster</b>
+    </p>
   </div>
   <div class="bq-chart">
-    <p class="bq-chart-title">Bulk push <span>ops/sec, higher is better</span></p>
-    <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:100%"></div></div><span class="bq-hval">139,200</span></div>
-    <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:32%"></div></div><span class="bq-hval">44,000</span></div>
-    <p class="bq-chart-note"><b>3.2x faster</b></p>
+    <p class="bq-chart-title">
+      Bulk push <span>ops/sec, higher is better</span>
+    </p>
+    <div class="bq-hrow">
+      <span class="bq-hname">bunqueue</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill" style="width:100%"></div>
+      </div>
+      <span class="bq-hval">139,200</span>
+    </div>
+    <div class="bq-hrow">
+      <span class="bq-hname">BullMQ</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill bq-hfill-them" style="width:32%"></div>
+      </div>
+      <span class="bq-hval">44,000</span>
+    </div>
+    <p class="bq-chart-note">
+      <b>3.2x faster</b>
+    </p>
   </div>
   <div class="bq-chart">
-    <p class="bq-chart-title">Bulk push p99 <span>ms, lower is better</span></p>
-    <div class="bq-hrow"><span class="bq-hname">bunqueue</span><div class="bq-htrack"><div class="bq-hfill" style="width:72%"></div></div><span class="bq-hval">3.26 ms</span></div>
-    <div class="bq-hrow"><span class="bq-hname">BullMQ</span><div class="bq-htrack"><div class="bq-hfill bq-hfill-them" style="width:100%"></div></div><span class="bq-hval">4.53 ms</span></div>
-    <p class="bq-chart-note"><b>1.4x lower</b></p>
+    <p class="bq-chart-title">
+      Bulk push p99 <span>ms, lower is better</span>
+    </p>
+    <div class="bq-hrow">
+      <span class="bq-hname">bunqueue</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill" style="width:72%"></div>
+      </div>
+      <span class="bq-hval">3.26 ms</span>
+    </div>
+    <div class="bq-hrow">
+      <span class="bq-hname">BullMQ</span>
+      <div class="bq-htrack">
+        <div class="bq-hfill bq-hfill-them" style="width:100%"></div>
+      </div>
+      <span class="bq-hval">4.53 ms</span>
+    </div>
+    <p class="bq-chart-note">
+      <b>1.4x lower</b>
+    </p>
   </div>
 </div>
 
@@ -105,33 +176,35 @@ This is a fair comparison: both systems go over the network (bunqueue TCP vs Red
 
 ## Feature comparison
 
-| Feature | bunqueue | BullMQ |
-|---------|----------|--------|
-| Queue types (standard, priority, LIFO) | ✅ | ✅ |
-| Delayed jobs, retries with backoff | ✅ | ✅ |
-| Dead letter queue (holding area for jobs that failed all retries) | ✅ Built-in, with auto-retry and expiration | ⚠️ Failed set, no dedicated DLQ |
-| Rate limiting | ✅ Per-worker and per-queue | ✅ Per-worker |
-| Cron / repeatable jobs | ✅ Built-in | ✅ Via Job Scheduler |
-| Parent-child flows | ✅ | ✅ |
-| Persistence | SQLite file, embedded | Redis server |
-| Horizontal scaling of the queue itself | ❌ Single instance | ✅ Redis Cluster |
-| External dependencies | ✅ None (2 runtime deps) | ❌ Redis required |
-| S3 backup | ✅ Built-in | ❌ Manual |
-| MCP server for AI agents | ✅ Built-in | ❌ |
-| Client languages | TypeScript, Python | Node.js, Python, and community ports |
+| Feature                                                           | bunqueue                                           | BullMQ                               |
+| ----------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------ |
+| Queue types (standard, priority, LIFO)                            | ✅                                                 | ✅                                   |
+| Delayed jobs, retries with backoff                                | ✅                                                 | ✅                                   |
+| Dead letter queue (holding area for jobs that failed all retries) | ✅ Built-in, with auto-retry and expiration        | ⚠️ Failed set, no dedicated DLQ      |
+| Rate limiting                                                     | ✅ Per-worker and per-queue                        | ✅ Per-worker                        |
+| Cron / repeatable jobs                                            | ✅ Built-in                                        | ✅ Via Job Scheduler                 |
+| Parent-child flows                                                | ✅                                                 | ✅                                   |
+| Persistence                                                       | Memory/SQLite by default; PostgreSQL 18.6 optional | Redis server                         |
+| Horizontal broker scaling                                         | ✅ PostgreSQL mode                                 | ✅ Redis Cluster                     |
+| External infrastructure                                           | ✅ None with SQLite; PostgreSQL optional           | ❌ Redis required                    |
+| Built-in S3 backup                                                | ✅ SQLite mode                                     | ❌ Manual                            |
+| MCP server for AI agents                                          | ✅ Built-in                                        | ❌                                   |
+| Client languages                                                  | TypeScript, Python                                 | Node.js, Python, and community ports |
 
 ## When to Use BullMQ Instead
 
-bunqueue is single-instance: one server process owns the SQLite file, and workers connect to it. BullMQ is the better pick when:
+bunqueue's SQLite mode is single-broker; its PostgreSQL mode supports multiple
+brokers. BullMQ is still the better pick when:
 
-- **The queue itself must scale horizontally** across multiple servers (Redis Cluster).
+- **Redis Cluster is a hard requirement** or already provides your queue HA model.
 - **Redis is already in your stack** and operating it costs you nothing extra.
 - **You need Redis-specific features** such as pub/sub fan-out or custom Lua scripts.
-- **Your workers are written in languages** outside bunqueue's official SDKs (TypeScript and Python).
+- **Your workers are written in languages** outside bunqueue's official SDKs.
 - **You cannot run on Bun.** bunqueue's server and embedded mode require the Bun runtime.
 
 <Aside>
-For single-process apps, a service plus its workers, or edge deployments, bunqueue gives you the same API with one less moving part.
+  For single-process apps, a service plus its workers, edge deployments, or a PostgreSQL-backed
+  broker fleet, bunqueue keeps the same client API.
 </Aside>
 
 ## Run it yourself
@@ -147,7 +220,7 @@ bun run bench/comparison/run.ts
 Source: [`bench/comparison/run.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/comparison/run.ts).
 
 <Aside type="tip" title="Related">
-- [Migration from BullMQ](/guide/migration/), the step-by-step switch
-- [Benchmarks](/guide/benchmarks/), full throughput and latency numbers
-- [Production Operations](/guide/production/), what running bunqueue actually costs
+  - [Migration from BullMQ](/guide/migration/), the step-by-step switch -
+  [Benchmarks](/guide/benchmarks/), full throughput and latency numbers - [Production
+  Operations](/guide/production/), what running bunqueue actually costs
 </Aside>

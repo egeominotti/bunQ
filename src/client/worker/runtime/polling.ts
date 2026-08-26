@@ -21,6 +21,15 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     void this.tryProcess();
   }
 
+  protected scheduleProcessing(): void {
+    if (!this.running || this._closing || this.processingScheduled) return;
+    this.processingScheduled = true;
+    setImmediate(() => {
+      this.processingScheduled = false;
+      void this.tryProcess();
+    });
+  }
+
   protected async tryProcess(): Promise<void> {
     if (!this.running || this._closing) return;
 

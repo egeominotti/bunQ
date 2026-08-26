@@ -1,6 +1,6 @@
 ---
-title: "bunqueue in Production: What Survives a Crash"
-description: "Plain answers to what happens when a worker or the server dies mid-job: at-least-once delivery, durable writes, backups, monitoring, and a go-live checklist."
+title: 'bunqueue in Production: What Survives a Crash'
+description: 'Plain answers to what happens when a worker or the server dies mid-job: at-least-once delivery, durable writes, backups, monitoring, and a go-live checklist.'
 template: splash
 head:
   - tag: meta
@@ -13,52 +13,75 @@ import { Aside } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · production</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">What survives <em>a crash.</em></h1>
-  <p class="bq-hero-sub">Running bunqueue in production is one process plus one SQLite file. This page answers, in plain words, what happens when something dies mid-job, what to monitor, and what to check before go-live.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    What survives <em>a crash.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Run the default engine as one process plus SQLite, or run multiple brokers against PostgreSQL
+    18.6. This page explains crash behavior, monitoring, and the storage-specific checks before
+    go-live.
+  </p>
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">quick answers</span>
   <h2 class="bq-h2">If it dies, what happens?</h2>
-  <p class="bq-lede">The short version first. Each row is a real failure and the behavior you get out of the box.</p>
+  <p class="bq-lede">The short version first. These rows describe the default SQLite path; PostgreSQL differences follow.</p>
 
-  | Failure | What happens to the job |
-  |---------|-------------------------|
-  | Worker crashes mid-job | The job is redelivered to another worker after its lease expires. It may run twice, never zero times. |
-  | Server killed hard (`kill -9`) | Jobs written to disk survive and recover on restart. Jobs accepted in the last ~10 ms may be lost, unless they were added with `durable: true`. |
-  | Server restarted gracefully (SIGTERM, deploys) | Nothing is lost, even buffered jobs. Shutdown flushes all pending writes before exiting. |
-  | Job fails repeatedly | After its retry attempts are exhausted it moves to the DLQ (dead letter queue, a parking lot for failed jobs you can inspect and retry). See [DLQ](/guide/dlq/). |
-  | Disk fills up | The server stays up and reports itself `degraded` on `/health`. Durable pushes fail explicitly instead of pretending to succeed. |
-  | The whole machine is lost | You restore the last S3 snapshot. Your maximum data loss is the backup interval. |
+| Failure                                        | What happens to the job                                                                                                                                          |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker crashes mid-job                         | The job is redelivered to another worker after its lease expires. It may run twice, never zero times.                                                            |
+| Server killed hard (`kill -9`)                 | Jobs written to disk survive and recover on restart. Jobs accepted in the last ~10 ms may be lost, unless they were added with `durable: true`.                  |
+| Server restarted gracefully (SIGTERM, deploys) | Nothing is lost, even buffered jobs. Shutdown flushes all pending writes before exiting.                                                                         |
+| Job fails repeatedly                           | After its retry attempts are exhausted it moves to the DLQ (dead letter queue, a parking lot for failed jobs you can inspect and retry). See [DLQ](/guide/dlq/). |
+| Disk fills up                                  | The server stays up and reports itself `degraded` on `/health`. Durable pushes fail explicitly instead of pretending to succeed.                                 |
+| The whole machine is lost                      | You restore the last S3 snapshot. Your maximum data loss is the backup interval.                                                                                 |
 
 </div>
+
+<Aside title="PostgreSQL 18.6 multi-broker failures">
+  PostgreSQL mutations are transactional and do not use SQLite's 10 ms write buffer. If a broker
+  dies mid-job, another broker recovers the database-clock lease and stale ACK/FAIL tokens are
+  fenced. Protect the PostgreSQL service with database-native backups/PITR and HA; bunqueue's S3
+  snapshot command is SQLite-only. See [Storage backends](/guide/databases/).
+</Aside>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">the crash timeline</span>
   <h2 class="bq-h2">The worker dies before the ACK.</h2>
   <p class="bq-lede">This is the failure that defines a queue's honesty. Here is the exact sequence.</p>
 
-  1. A worker pulls a job. The server marks it active and gives the worker a **lease**: a lock with a time-to-live (default 30 seconds, the worker's `lockDuration`), renewed by heartbeats while the job runs.
-  2. Your handler does its side effect. The email is sent, the charge is captured.
-  3. The worker dies **before its ACK reaches the server**. An ACK is the worker's "done" confirmation; without it the server has no idea the work happened.
-  4. The lease expires and the server requeues the job with its attempt count incremented.
-  5. Another worker pulls it. **Your side effect runs again.**
+1. A worker pulls a job. The server marks it active and gives the worker a **lease**: a lock with a time-to-live (default 30 seconds, the worker's `lockDuration`), renewed by heartbeats while the job runs.
+2. Your handler does its side effect. The email is sent, the charge is captured.
+3. The worker dies **before its ACK reaches the server**. An ACK is the worker's "done" confirmation; without it the server has no idea the work happened.
+4. The lease expires and the server requeues the job with its attempt count incremented.
+5. Another worker pulls it. **Your side effect runs again.**
 
-  The guarantee is **at-least-once**: a job is never lost, but it can run more than once. No queue on any backend can promise better, because your side effect and the acknowledgment are two separate systems and a crash can always land between them. What bunqueue does guarantee around the edges:
+The guarantee is **at-least-once**: a job is never lost, but it can run more than once. No queue on any backend can promise better, because your side effect and the acknowledgment are two separate systems and a crash can always land between them. What bunqueue does guarantee around the edges:
 
-  - A late ACK after ordinary lease expiry is accepted only while that exact
-    generation still owns the processing slot and the job was not re-leased.
-    If the job's processing `timeout` already finalized that generation, the
-    ACK/FAIL is instead an explicit idempotent no-op. Two generations can never
-    both complete the same job.
-  - Re-adding a job with the same custom `jobId` is a no-op, even under heavy concurrency. Producers that retry on timeout should always set one.
-  - Duplicate ACKs are harmless.
+- A late ACK after ordinary lease expiry is accepted only while that exact
+  generation still owns the processing slot and the job was not re-leased.
+  If the job's processing `timeout` already finalized that generation, the
+  ACK/FAIL is instead an explicit idempotent no-op. Two generations can never
+  both complete the same job.
+- Re-adding a job with the same custom `jobId` is a no-op, even under heavy concurrency. Producers that retry on timeout should always set one.
+- Duplicate ACKs are harmless.
 
-  <Aside type="caution" title="What you must do">
-  - Write handlers so running the same job twice is harmless. Put an **idempotency key** (derived from `job.id` or your own `jobId`) on every external side effect: payments, emails, webhooks.
-  - Set a custom `jobId` wherever the producer might retry an add.
-  - Mark jobs you cannot afford to lose as `durable: true`.
-  </Aside>
+<Aside type="caution" title="What you must do">
+  <ul>
+    <li>
+      Write handlers so running the same job twice is harmless. Put an <strong>idempotency key</strong>{' '}
+      (derived from <code>job.id</code> or your own <code>jobId</code>) on every external side effect:
+      payments, emails, webhooks.
+    </li>
+    <li>
+      Set a custom <code>jobId</code> wherever the producer might retry an add.
+    </li>
+    <li>
+      Mark jobs you cannot afford to lose as <code>durable: true</code>.
+    </li>
+  </ul>
+</Aside>
 </div>
 
 <div class="bq-wrap bq-section">
@@ -66,17 +89,18 @@ import { Aside } from '@astrojs/starlight/components';
   <h2 class="bq-h2">Two write modes, one decision.</h2>
   <p class="bq-lede">By default bunqueue batches writes to SQLite every 10 ms for throughput. A durable write skips the batch and hits disk before the add returns.</p>
 
-  | Mode | Throughput | Loss window on a hard crash |
-  |------|-----------|------------------------------|
-  | Buffered (default) | ~100k jobs/sec | up to 10 ms of accepted jobs |
-  | `durable: true` per job | ~10k jobs/sec | none |
+| Mode                    | Throughput     | Loss window on a hard crash  |
+| ----------------------- | -------------- | ---------------------------- |
+| Buffered (default)      | ~100k jobs/sec | up to 10 ms of accepted jobs |
+| `durable: true` per job | ~10k jobs/sec  | none                         |
 
 ```typescript
-await queue.add('send-newsletter', data);                  // buffered, fast
+await queue.add('send-newsletter', data); // buffered, fast
 await queue.add('capture-payment', data, { durable: true }); // on disk before this returns
 ```
 
-  Mixing is free: mark only the jobs that are money as durable and keep the rest batched. The 10 ms window only exists for hard crashes; graceful restarts flush everything. Measured numbers per mode are in [Benchmarks](/guide/benchmarks/).
+Mixing is free: mark only the jobs that are money as durable and keep the rest batched. The 10 ms window only exists for hard crashes; graceful restarts flush everything. Measured numbers per mode are in [Benchmarks](/guide/benchmarks/).
+
 </div>
 
 <div class="bq-wrap bq-section">
@@ -106,7 +130,8 @@ bunqueue backup restore <key> --force   # stop the server first
 bunqueue backup status
 ```
 
-  Restore validates before it replaces: it verifies sizes and checksum, runs an integrity check on a temp copy, quarantines stale WAL/SHM sidecars, and only then swaps it in. A corrupt backup never touches your live database. Stop the server before restoring, size the interval to how much queue state you can afford to lose, and rehearse one restore before you need it. Provider setup lives in the [S3 Backup guide](/guide/backup/).
+Restore validates before it replaces: it verifies sizes and checksum, runs an integrity check on a temp copy, quarantines stale WAL/SHM sidecars, and only then swaps it in. A corrupt backup never touches your live database. Stop the server before restoring, size the interval to how much queue state you can afford to lose, and rehearse one restore before you need it. Provider setup lives in the [S3 Backup guide](/guide/backup/).
+
 </div>
 
 <div class="bq-wrap bq-section">
@@ -114,24 +139,25 @@ bunqueue backup status
   <h2 class="bq-h2">Three endpoints, no agent.</h2>
   <p class="bq-lede">Everything is on the HTTP port (default 6790). Point Prometheus at it or just curl it.</p>
 
-  | Endpoint | What it gives you |
-  |----------|-------------------|
-  | `GET /health` | `healthy` or `degraded`, uptime, version, job counts per state, memory, and a `storage.diskFull` flag when the disk is full |
-  | `GET /healthz`, `/live` | Bare liveness probes; remain 200 while the process responds |
-  | `GET /ready` | Readiness; returns 503 when persistent storage is degraded |
-  | `GET /prometheus` | Metrics in Prometheus text format: job counts, totals, latency, bounded per-queue gauges, process/connections, storage and backup freshness |
-  | `GET /metrics` | The same counters as JSON |
+| Endpoint                | What it gives you                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`           | `healthy` or `degraded`, uptime, version, job counts per state, memory, and a `storage.diskFull` flag when the disk is full                 |
+| `GET /healthz`, `/live` | Bare liveness probes; remain 200 while the process responds                                                                                 |
+| `GET /ready`            | Readiness; returns 503 when persistent storage is degraded                                                                                  |
+| `GET /prometheus`       | Metrics in Prometheus text format: job counts, totals, latency, bounded per-queue gauges, process/connections, storage and backup freshness |
+| `GET /metrics`          | The same counters as JSON                                                                                                                   |
 
-  Set `METRICS_AUTH=true` to require an `AUTH_TOKENS` bearer token on `/prometheus`; a missing token configuration fails closed with 503. Alert on these production symptoms:
+Set `METRICS_AUTH=true` to require an `AUTH_TOKENS` bearer token on `/prometheus`; a missing token configuration fails closed with 503. Alert on these production symptoms:
 
-  - **DLQ growth**: `bunqueue_jobs_dlq` climbing means handlers are failing terminally.
-  - **Queue depth**: `bunqueue_jobs_waiting + bunqueue_jobs_prioritized` growing steadily means workers cannot keep up.
-  - **`/health` reporting `degraded`**: the disk is full.
-  - **Backup freshness**: an enabled scheduler that is stopped, failing, or has no success within two intervals puts recovery objectives at risk.
-  - **Telemetry truncation**: `bunqueue_queue_metrics_omitted > 0` means per-queue drill-down is incomplete; review cardinality before raising the cap.
-  - **Memory drift**: RSS should plateau once the workload does; internal caches are hard-capped.
+- **DLQ growth**: `bunqueue_jobs_dlq` climbing means handlers are failing terminally.
+- **Queue depth**: `bunqueue_jobs_waiting + bunqueue_jobs_prioritized` growing steadily means workers cannot keep up.
+- **`/health` reporting `degraded`**: the disk is full.
+- **Backup freshness**: an enabled scheduler that is stopped, failing, or has no success within two intervals puts recovery objectives at risk.
+- **Telemetry truncation**: `bunqueue_queue_metrics_omitted > 0` means per-queue drill-down is incomplete; review cardinality before raising the cap.
+- **Memory drift**: RSS should plateau once the workload does; internal caches are hard-capped.
 
-  Dashboards and webhook alerting are covered in [Monitoring](/guide/monitoring/).
+Dashboards and webhook alerting are covered in [Monitoring](/guide/monitoring/).
+
 </div>
 
 <div class="bq-wrap bq-section">
@@ -139,41 +165,69 @@ bunqueue backup status
   <h2 class="bq-h2">SIGTERM is a contract.</h2>
   <p class="bq-lede">Deploys restart the server constantly. The shutdown path is what makes that boring.</p>
 
-  On SIGTERM the server stops accepting connections, waits up to `SHUTDOWN_TIMEOUT_MS` (default 30,000 ms) for active jobs to finish, then flushes every pending write and closes the database cleanly. That flush is why even non-durable jobs survive deploys.
+On SIGTERM the server stops accepting connections, waits up to `SHUTDOWN_TIMEOUT_MS` (default 30,000 ms) for active jobs to finish, then flushes every pending write and closes the database cleanly. That flush is why even non-durable jobs survive deploys.
 
-  Jobs still running when the deadline hits are not lost either: they are already persisted as active, and the next startup requeues them for retry. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler, and give your orchestrator a termination grace period slightly above that (Kubernetes defaults to 30 s).
+Jobs still running when the deadline hits are not lost either: they are already persisted as active, and the next startup requeues them for retry. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler, and give your orchestrator a termination grace period slightly above that (Kubernetes defaults to 30 s).
+
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">go-live checklist</span>
   <h2 class="bq-h2">Before you point traffic at it.</h2>
 
-  <ul class="bq-checks">
-    <li><code>durable: true</code> on every job you cannot re-derive</li>
-    <li>idempotency keys in every handler side effect</li>
-    <li>custom <code>jobId</code> wherever producers retry</li>
-    <li><code>S3_BACKUP_ENABLED=1</code> and one rehearsed restore</li>
-    <li>alerts on DLQ growth and waiting-queue depth</li>
-    <li><code>/healthz</code> and <code>/ready</code> wired into your orchestrator</li>
-    <li><code>AUTH_TOKENS</code> set; <code>METRICS_AUTH</code> if metrics are exposed</li>
-    <li><a href="/guide/tls/">native TLS</a> or a private network between clients and server</li>
-    <li><code>SHUTDOWN_TIMEOUT_MS</code> sized above your longest handler</li>
-    <li>disk alert covering the <code>.db</code> and <code>.db-wal</code> files</li>
-    <li>worker <code>lockDuration</code> above your slowest job, or heartbeats on</li>
-  </ul>
+<ul class="bq-checks">
+  <li>
+    <code>durable: true</code> on every job you cannot re-derive
+  </li>
+  <li>idempotency keys in every handler side effect</li>
+  <li>
+    custom <code>jobId</code> wherever producers retry
+  </li>
+  <li>
+    SQLite: <code>S3_BACKUP_ENABLED=1</code>; PostgreSQL: provider backup/PITR; rehearse one restore
+  </li>
+  <li>alerts on DLQ growth and waiting-queue depth</li>
+  <li>
+    <code>/healthz</code> and <code>/ready</code> wired into your orchestrator
+  </li>
+  <li>
+    <code>AUTH_TOKENS</code> set; <code>METRICS_AUTH</code> if metrics are exposed
+  </li>
+  <li>
+    <a href="/guide/tls/">native TLS</a> or a private network between clients and server
+  </li>
+  <li>
+    <code>SHUTDOWN_TIMEOUT_MS</code> sized above your longest handler
+  </li>
+  <li>
+    SQLite disk alerts for <code>.db</code>/<code>.db-wal</code>, or PostgreSQL storage/connection
+    alerts
+  </li>
+  <li>
+    worker <code>lockDuration</code> above your slowest job, or heartbeats on
+  </li>
+</ul>
 
   <Aside title="Honest limits">
-  Buffered jobs can lose up to ~10 ms of writes on a hard crash; `durable: true` closes that per job. bunqueue is single-instance, so losing the host means restoring the last snapshot; your recovery point is the backup interval. At-least-once means duplicates are possible by design. SQLite in WAL mode (writes append to a `.db-wal` sidecar file) keeps that sidecar small on its own, but watch its size on disk: sustained growth usually means a long-lived read is pinning it. When upgrading, restart the server first (the schema migrates forward automatically), then update clients.
+  In SQLite mode, buffered jobs can lose up to ~10 ms of writes on a hard crash; `durable: true` closes that per job, and losing the single host means restoring a snapshot. PostgreSQL mode removes that buffer and supports several brokers, but database availability and recovery are still your responsibility. Both modes provide at-least-once processing, so handlers must tolerate duplicates. Watch SQLite WAL growth or PostgreSQL storage/connection health as appropriate. When upgrading, roll brokers only after the storage schema initializes successfully, then update clients.
   </Aside>
 </div>
 
 <div class="bq-wrap bq-cta">
   <h2 class="bq-h2">Ready to deploy?</h2>
-  <p class="bq-lede" style="margin: 0 auto;">The deployment guide has the Docker, systemd, and PM2 configs to paste.</p>
+  <p class="bq-lede" style="margin: 0 auto;">
+    The deployment guide has the Docker, systemd, and PM2 configs to paste.
+  </p>
   <div class="bq-actions">
-    <button type="button" class="bq-hero-install" aria-label="Copy install command">bun add bunqueue</button>
-    <a class="bq-btn" href="/guide/deployment/">Deployment guide</a>
-    <a class="bq-btn-ghost" href="/guide/quickstart/">Quickstart</a>
+    <button type="button" class="bq-hero-install" aria-label="Copy install command">
+      bun add bunqueue
+    </button>
+    <a class="bq-btn" href="/guide/deployment/">
+      Deployment guide
+    </a>
+    <a class="bq-btn-ghost" href="/guide/quickstart/">
+      Quickstart
+    </a>
   </div>
 </div>
 

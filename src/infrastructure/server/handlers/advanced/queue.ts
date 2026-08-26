@@ -20,8 +20,14 @@ export function handleObliterate(
   command: Extract<Command, { cmd: 'Obliterate' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
-  context.queueManager.obliterate(command.queue);
+): Response | Promise<Response> {
+  const manager = context.queueManager as typeof context.queueManager & {
+    obliterateDurable?: (queue: string) => Promise<void>;
+  };
+  if (manager.obliterateDurable) {
+    return manager.obliterateDurable(command.queue).then(() => response.ok(undefined, requestId));
+  }
+  manager.obliterate(command.queue);
   return response.ok(undefined, requestId);
 }
 
@@ -41,21 +47,39 @@ export function handleClean(
   command: Extract<Command, { cmd: 'Clean' }>,
   context: HandlerContext,
   requestId?: string
+): Response | Promise<Response> {
+  const manager = context.queueManager as typeof context.queueManager & {
+    cleanDurable?: (
+      queue: string,
+      graceMs: number,
+      state?: string,
+      limit?: number
+    ) => Promise<string[]>;
+  };
+  if (manager.cleanDurable) {
+    return manager
+      .cleanDurable(command.queue, command.grace, command.state, command.limit)
+      .then((ids) => cleanResponse(manager, command.queue, command.state, ids, requestId));
+  }
+  const ids = manager.clean(command.queue, command.grace, command.state, command.limit);
+  return cleanResponse(manager, command.queue, command.state, ids, requestId);
+}
+
+function cleanResponse(
+  manager: HandlerContext['queueManager'],
+  queue: string,
+  state: string | undefined,
+  ids: readonly string[],
+  requestId?: string
 ): Response {
-  const ids = context.queueManager.clean(
-    command.queue,
-    command.grace,
-    command.state,
-    command.limit
-  );
   if (ids.length > 0) {
-    context.queueManager.emitDashboardEvent('queue:cleaned', {
-      queue: command.queue,
-      state: command.state,
+    manager.emitDashboardEvent('queue:cleaned', {
+      queue,
+      state,
       count: ids.length,
     });
   }
-  return { ok: true, count: ids.length, ids, reqId: requestId };
+  return { ok: true, count: ids.length, ids: [...ids], reqId: requestId };
 }
 
 export function handleCount(
@@ -70,13 +94,31 @@ export function handleRateLimit(
   command: Extract<Command, { cmd: 'RateLimit' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
+): Response | Promise<Response> {
   const limit = toFiniteNumber(command.limit);
   if (limit === undefined) return response.error('limit must be a finite number', requestId);
   const duration = toFiniteNumber(command.duration);
   const ttl = toFiniteNumber(command.ttl);
-  context.queueManager.setRateLimit(command.queue, limit, duration, ttl);
-  context.queueManager.emitDashboardEvent('ratelimit:set', {
+  const manager = context.queueManager as typeof context.queueManager & {
+    setRateLimitDurable?: (
+      queue: string,
+      limit: number | null,
+      durationMs: number | null,
+      ttlMs?: number | null
+    ) => Promise<void>;
+  };
+  if (manager.setRateLimitDurable) {
+    return manager.setRateLimitDurable(command.queue, limit, duration ?? 1000, ttl).then(() => {
+      manager.emitDashboardEvent('ratelimit:set', {
+        queue: command.queue,
+        max: limit,
+        duration: duration ?? 1000,
+      });
+      return response.ok(undefined, requestId);
+    });
+  }
+  manager.setRateLimit(command.queue, limit, duration, ttl);
+  manager.emitDashboardEvent('ratelimit:set', {
     queue: command.queue,
     max: limit,
     ...(duration !== undefined && { duration }),
@@ -89,9 +131,23 @@ export function handleRateLimitClear(
   command: Extract<Command, { cmd: 'RateLimitClear' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
-  context.queueManager.clearRateLimit(command.queue);
-  context.queueManager.emitDashboardEvent('ratelimit:cleared', { queue: command.queue });
+): Response | Promise<Response> {
+  const manager = context.queueManager as typeof context.queueManager & {
+    setRateLimitDurable?: (
+      queue: string,
+      limit: number | null,
+      durationMs: number | null,
+      ttlMs?: number | null
+    ) => Promise<void>;
+  };
+  if (manager.setRateLimitDurable) {
+    return manager.setRateLimitDurable(command.queue, null, null).then(() => {
+      manager.emitDashboardEvent('ratelimit:cleared', { queue: command.queue });
+      return response.ok(undefined, requestId);
+    });
+  }
+  manager.clearRateLimit(command.queue);
+  manager.emitDashboardEvent('ratelimit:cleared', { queue: command.queue });
   return response.ok(undefined, requestId);
 }
 
@@ -99,11 +155,23 @@ export function handleSetConcurrency(
   command: Extract<Command, { cmd: 'SetConcurrency' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
+): Response | Promise<Response> {
   const limit = toFiniteNumber(command.limit);
   if (limit === undefined) return response.error('limit must be a finite number', requestId);
-  context.queueManager.setConcurrency(command.queue, limit);
-  context.queueManager.emitDashboardEvent('concurrency:set', {
+  const manager = context.queueManager as typeof context.queueManager & {
+    setConcurrencyDurable?: (queue: string, limit: number | null) => Promise<void>;
+  };
+  if (manager.setConcurrencyDurable) {
+    return manager.setConcurrencyDurable(command.queue, limit).then(() => {
+      manager.emitDashboardEvent('concurrency:set', {
+        queue: command.queue,
+        concurrency: limit,
+      });
+      return response.ok(undefined, requestId);
+    });
+  }
+  manager.setConcurrency(command.queue, limit);
+  manager.emitDashboardEvent('concurrency:set', {
     queue: command.queue,
     concurrency: limit,
   });
@@ -114,9 +182,18 @@ export function handleClearConcurrency(
   command: Extract<Command, { cmd: 'ClearConcurrency' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
-  context.queueManager.clearConcurrency(command.queue);
-  context.queueManager.emitDashboardEvent('concurrency:cleared', { queue: command.queue });
+): Response | Promise<Response> {
+  const manager = context.queueManager as typeof context.queueManager & {
+    setConcurrencyDurable?: (queue: string, limit: number | null) => Promise<void>;
+  };
+  if (manager.setConcurrencyDurable) {
+    return manager.setConcurrencyDurable(command.queue, null).then(() => {
+      manager.emitDashboardEvent('concurrency:cleared', { queue: command.queue });
+      return response.ok(undefined, requestId);
+    });
+  }
+  manager.clearConcurrency(command.queue);
+  manager.emitDashboardEvent('concurrency:cleared', { queue: command.queue });
   return response.ok(undefined, requestId);
 }
 
@@ -124,18 +201,24 @@ export function handleSetStallConfig(
   command: Extract<Command, { cmd: 'SetStallConfig' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
+): Response | Promise<Response> {
   const config = sanitizeConfigNumbers(command.config, [
     'stallInterval',
     'maxStalls',
     'gracePeriod',
   ]);
-  context.queueManager.setStallConfig(command.queue, config);
-  context.queueManager.emitDashboardEvent('config:stall-changed', {
-    queue: command.queue,
-    config,
-  });
-  return response.ok(undefined, requestId);
+  const manager = context.queueManager as typeof context.queueManager & {
+    setStallConfigDurable?: (queue: string, patch: Record<string, unknown>) => Promise<void>;
+  };
+  const complete = (): Response => {
+    manager.emitDashboardEvent('config:stall-changed', { queue: command.queue, config });
+    return response.ok(undefined, requestId);
+  };
+  if (manager.setStallConfigDurable) {
+    return manager.setStallConfigDurable(command.queue, config).then(complete);
+  }
+  manager.setStallConfig(command.queue, config);
+  return complete();
 }
 
 export function handleGetStallConfig(
@@ -154,19 +237,25 @@ export function handleSetDlqConfig(
   command: Extract<Command, { cmd: 'SetDlqConfig' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
+): Response | Promise<Response> {
   const config = sanitizeConfigNumbers(command.config, [
     'autoRetryInterval',
     'maxAutoRetries',
     'maxAge',
     'maxEntries',
   ]);
-  context.queueManager.setDlqConfig(command.queue, config);
-  context.queueManager.emitDashboardEvent('config:dlq-changed', {
-    queue: command.queue,
-    config,
-  });
-  return response.ok(undefined, requestId);
+  const manager = context.queueManager as typeof context.queueManager & {
+    setDlqConfigDurable?: (queue: string, patch: Record<string, unknown>) => Promise<void>;
+  };
+  const complete = (): Response => {
+    manager.emitDashboardEvent('config:dlq-changed', { queue: command.queue, config });
+    return response.ok(undefined, requestId);
+  };
+  if (manager.setDlqConfigDurable) {
+    return manager.setDlqConfigDurable(command.queue, config).then(complete);
+  }
+  manager.setDlqConfig(command.queue, config);
+  return complete();
 }
 
 export function handleGetDlqConfig(

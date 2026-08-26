@@ -1,6 +1,6 @@
 ---
-title: "Integrations: Web Frameworks, Databases, AI Agents"
-description: "How bunqueue fits your stack: background jobs in Hono and Elysia, storage options, and AI agent control over MCP. Start here, then follow the detailed guides."
+title: 'Integrations: Web Frameworks, Databases, AI Agents'
+description: 'How bunqueue fits your stack: background jobs in Hono and Elysia, storage options, and AI agent control over MCP. Start here, then follow the detailed guides.'
 head:
   - tag: meta
     attrs:
@@ -27,9 +27,13 @@ import { Queue, Worker } from 'bunqueue/client';
 const emails = new Queue('emails', { embedded: true });
 
 // The worker: runs your function on each job
-new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-}, { embedded: true });
+new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+  },
+  { embedded: true }
+);
 
 // Anywhere in your app (an HTTP handler, for example):
 await emails.add('welcome', { to: 'user@example.com' });
@@ -45,16 +49,20 @@ All framework examples use `embedded: true`. Without it, bunqueue tries to conne
 
 The pattern above plus each framework's idioms (typed context, validation, plugins):
 
-| Framework | What the guide adds | Guide |
-|-----------|--------------------|-------|
-| [Hono](https://hono.dev) | Routes, job status endpoints, typed middleware | [Hono Integration](/guide/hono/) |
+| Framework                      | What the guide adds                                 | Guide                                |
+| ------------------------------ | --------------------------------------------------- | ------------------------------------ |
+| [Hono](https://hono.dev)       | Routes, job status endpoints, typed middleware      | [Hono Integration](/guide/hono/)     |
 | [Elysia](https://elysiajs.com) | Schema validation with `t.Object()`, plugin pattern | [Elysia Integration](/guide/elysia/) |
 
 Using another framework? The smallest example above works as is; only the routing syntax changes.
 
 ## Databases
 
-bunqueue needs no external database. Persistence is a single local SQLite file. If you were expecting a Postgres or MySQL backend, or you deploy on a platform without a durable disk, read [Storage: SQLite by Design](/guide/databases/). It explains why, and shows three patterns for serverless and ephemeral filesystems.
+bunqueue needs no external database in its default memory/SQLite modes. For a
+standalone fleet, PostgreSQL 18.6 is an optional database-authoritative backend
+that coordinates multiple brokers; MySQL is not supported. See
+[Storage backends](/guide/databases/) for both topologies and ephemeral-host
+patterns.
 
 ## AI agents (MCP)
 

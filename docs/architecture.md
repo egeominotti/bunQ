@@ -1,17 +1,21 @@
 # Architecture Overview
 
-bunqueue is a high-performance job queue for the [Bun](https://bun.sh) runtime. A
-single process embeds **sharded in-memory priority queues** for hot-path job
-movement, an **SQLite write-behind store** (WAL + MessagePack) for durability, and
-two network transports — a binary **TCP** protocol on port `6789` and an **HTTP /
-REST / SSE / WebSocket** API on port `6790`. The same engine can run fully
-**in-process** (no sockets) behind a BullMQ-style SDK, drive a **workflow/saga
-engine**, or expose itself to AI agents over a native **MCP server**.
+bunqueue is a high-performance job queue for the [Bun](https://bun.sh) runtime.
+Its default engine embeds **sharded in-memory priority queues** for hot-path job
+movement and an **SQLite write-behind store** (WAL + MessagePack) for durability.
+An optional server-only **PostgreSQL 18.6** engine makes the database
+authoritative and coordinates multiple brokers with transactions and fenced
+leases. Both server engines expose a binary **TCP** protocol on port `6789` and
+an **HTTP / REST / SSE / WebSocket** API on port `6790`. The SQLite engine can
+also run fully **in-process** (no sockets) behind a BullMQ-style SDK, drive a
+**workflow/saga engine**, or expose itself to AI agents over a native **MCP
+server**.
 
-The defining constraint is **zero external runtime infrastructure**: there is no
-Redis, no broker, no companion service. Persistence is a local SQLite file; the
-only npm dependencies are `croner` (cron parsing) and `msgpackr` (MessagePack)
-([`package.json:83`](../package.json)). Everything else — hashing, heaps,
+Zero external runtime infrastructure remains the default: memory/SQLite needs no
+Redis, database server, broker, or companion service. Multi-broker mode opts into
+PostgreSQL 18.6. The only npm runtime dependencies remain `croner` (cron parsing)
+and `msgpackr` (MessagePack); PostgreSQL access uses Bun's built-in `SQL` client
+([`package.json`](../package.json)). Everything else — hashing, heaps,
 skip-lists, locks, the wire protocol, TLS — is built on Bun primitives.
 
 A bare `bunqueue` invocation boots the full server; any other argv goes through the
@@ -39,14 +43,15 @@ Producers ──add()──┐                          ┌──process()──
 
 ## Technology Stack & Rationale
 
-| Choice | Where | Why |
-| --- | --- | --- |
-| **Bun runtime** (`>=1.4.0`) | [`package.json:164`](../package.json) | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
-| **`bun:sqlite`** | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts) | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue. |
-| **MessagePack** (`msgpackr`) | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts) | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties. |
-| **Native TCP + TLS** | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:75`](../src/config/resolve.ts) | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext. |
-| **Zero external deps** | [`package.json:83`](../package.json) | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). Smaller supply chain, trivial install, no version-skew between queue and broker. |
-| **4-ary heaps / queue-local skip-lists** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts), [`src/domain/queue/temporalIndex.ts`](../src/domain/queue/temporalIndex.ts) | 4-ary branching improves cache locality vs binary heaps; one skip-list per queue orders cleanup candidates, with a reverse job-ID index for direct deletion. A compacting 4-ary min-heap tracks delayed jobs. |
+| Choice                                   | Where                                                                                                                                                                                                              | Why                                                                                                                                                                                                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Bun runtime** (`>=1.4.0`)              | [`package.json:164`](../package.json)                                                                                                                                                                              | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
+| **`bun:sqlite`**                         | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts)                                                                                                              | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue.                                                                         |
+| **Bun `SQL` + PostgreSQL 18.6**          | [`src/infrastructure/persistence/postgres/`](../src/infrastructure/persistence/postgres)                                                                                                                           | Optional server-only multi-broker coordination. PostgreSQL is the source of truth; row/advisory locks, `SKIP LOCKED`, database-clock leases, and durable events provide distributed ownership without adding a JavaScript database dependency.                           |
+| **MessagePack** (`msgpackr`)             | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts)                                                 | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties.                                                                                                        |
+| **Native TCP + TLS**                     | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:75`](../src/config/resolve.ts)                                                                                  | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext.                            |
+| **Two runtime npm deps**                 | [`package.json`](../package.json)                                                                                                                                                                                  | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). PostgreSQL support uses Bun's built-in client.                                                                                         |
+| **4-ary heaps / queue-local skip-lists** | [`src/shared/minHeap.ts:2`](../src/shared/minHeap.ts), [`src/domain/queue/priorityQueue.ts:56`](../src/domain/queue/priorityQueue.ts), [`src/domain/queue/temporalIndex.ts`](../src/domain/queue/temporalIndex.ts) | 4-ary branching improves cache locality vs binary heaps; one skip-list per queue orders cleanup candidates, with a reverse job-ID index for direct deletion. A compacting 4-ary min-heap tracks delayed jobs.                                                            |
 
 ## Layered Architecture
 
@@ -63,7 +68,7 @@ domain        Pure business logic — no I/O. Shard, IndexedPriorityQueue,
 application   Use cases over the domain. QueueManager orchestrator +
   ▲           pure operation modules (push/pull/ack/query/control) invoked
   │           via context objects, plus DLQ/Events/Workers/Stats managers.
-infrastructure  External edges: SQLite persistence, TCP/HTTP servers,
+infrastructure  External edges: SQLite/PostgreSQL persistence, TCP/HTTP servers,
   ▲             cron scheduler, S3 backup, cloud agent. Drives application.
 client · cli · mcp   Consumer-facing facades: SDK (Queue/Worker/Flow/
                      Workflow), CLI verbs, MCP tool surface.
@@ -115,13 +120,26 @@ be claimed.
   `sqlite/admission.ts` applies terminal-generation retirement and dependency-
   completion pins inside the same transaction as persistence-sensitive job
   admission; its ID-only contract lives in `types/admission.ts`.
+  The optional `PostgresQueueStore` façade composes focused async modules under
+  `persistence/postgres/`; `application/postgres-queue-manager/` adapts that
+  database-authoritative store to the transport-facing `QueueManager` surface.
+  `server/storageAdapter.ts` defines the persistence Strategy, immutable Registry,
+  and lifecycle Facade used by the composition root. This keeps backend selection
+  replaceable in unit tests and prevents feature modules from introducing driver
+  branches into transports or the SQLite hot path. PostgreSQL rate-limit input is
+  normalized once in `persistence/postgres/rateLimit.ts`; transport error
+  boundaries share `server/errors.ts` so infrastructure diagnostics are redacted
+  consistently without hiding domain failures.
   `jobOptionsBlob.ts` serializes repeat and advanced generation policy that has
   no dedicated legacy column.
   Server handler routing, protocol parsing, TCP connection/event-subscription
   state, HTTP routes, SSE and WebSocket state are likewise split by
-  responsibility. Cloud command
-  families, snapshot collectors and contracts live under `cloud/commands/`,
-  `cloud/snapshot/` and `cloud/types/`. The layer also provides `WriteBuffer`,
+  responsibility. Cloud command families, snapshot collectors and contracts
+  live under `cloud/commands/`, `cloud/snapshot/` and `cloud/types/`.
+  `cloud/queueAdapter/` adds a complete Strategy/Registry boundary: the local
+  Strategy preserves memory/SQLite behavior, while PostgreSQL shared reads come
+  from one durable repeatable-read model with no per-method cache fallback. The
+  layer also provides `WriteBuffer`,
   `BatchInsertManager`,
   `createTcpServer` / `createHttpServer`, `CronScheduler`, `S3BackupManager`,
   `CloudAgent`, plus `QueueCountsScheduler` for coalesced WS/SSE count updates.
@@ -151,7 +169,8 @@ be claimed.
   ([`src/shared/hash.ts`](../src/shared/hash.ts)), the stable lock façade
   (`lock.ts`) with focused `asyncLock.ts`/`rwLock.ts` implementations, `Semaphore`,
   `LRUMap`/`BoundedSet`/`BoundedMap`/`TtlMap`, `MinHeap`, `SkipList`, `Histogram`,
-  `Logger`, `webhookValidation`.
+  `Logger`, `webhookValidation`, and the storage-health predicates/client-safe
+  projection ([`src/shared/storageHealth.ts`](../src/shared/storageHealth.ts)).
 - **`cli/`** — `bunqueue` executable: server boot detection + thin TCP client that
   maps verbs to protocol commands.
 - **`mcp/`** — `bunqueue-mcp` binary exposing the queue to AI agents over MCP/stdio.
@@ -162,13 +181,16 @@ Logic and types are intentionally separate, and every TypeScript source file
 under `src/` is capped at 300 lines. A façade only establishes the stable import
 surface; it does not duplicate implementation logic.
 
-| Public surface | Focused implementation | Dedicated contracts |
-| --- | --- | --- |
-| `application/queueManager.ts` | `application/queue-manager/`, `application/operations/`, `application/background/` | `application/types/` |
-| `client/queue/queue.ts` | `client/queue/runtime/`, `client/queue/operations/`, job/DLQ helpers | `client/queue/types/` |
-| `client/worker/worker.ts` | `client/worker/runtime/`, `processor.ts`, `processorOutcome.ts`, pull, heartbeat and ACK modules | `client/worker/types/` |
-| `client/sandboxed/worker.ts` | `client/sandboxed/runtime/`, wrapper and queue adapters | `client/sandboxed/types/` |
-| `infrastructure/persistence/sqlite.ts` | `infrastructure/persistence/sqlite/`, buffering and schema modules | `infrastructure/persistence/types/` |
+| Public surface                            | Focused implementation                                                                           | Dedicated contracts                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `application/queueManager.ts`             | `application/queue-manager/`, `application/operations/`, `application/background/`               | `application/types/`                           |
+| `client/queue/queue.ts`                   | `client/queue/runtime/`, `client/queue/operations/`, job/DLQ helpers                             | `client/queue/types/`                          |
+| `client/worker/worker.ts`                 | `client/worker/runtime/`, `processor.ts`, `processorOutcome.ts`, pull, heartbeat and ACK modules | `client/worker/types/`                         |
+| `client/sandboxed/worker.ts`              | `client/sandboxed/runtime/`, wrapper and queue adapters                                          | `client/sandboxed/types/`                      |
+| `infrastructure/persistence/sqlite.ts`    | `infrastructure/persistence/sqlite/`, buffering and schema modules                               | `infrastructure/persistence/types/`            |
+| `infrastructure/persistence/postgres.ts`  | `infrastructure/persistence/postgres/`                                                           | `infrastructure/persistence/postgres/types.ts` |
+| `application/postgresQueueManager.ts`     | `application/postgres-queue-manager/`                                                            | `application/postgres-queue-manager/state.ts`  |
+| `infrastructure/server/storageManager.ts` | `infrastructure/server/storageAdapter.ts` and registered backend strategies                      | `config/types.ts`                              |
 
 `test/source-architecture.test.ts` enforces the 300-line ceiling, the small
 façade boundaries, the presence of dedicated type modules, and the absence of
@@ -232,6 +254,22 @@ wrappers select the transport, preventing the two implementations from drifting.
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
+The diagram above is the default memory/SQLite topology. PostgreSQL mode swaps
+the in-memory-authoritative manager and SQLite write-behind boundary for one
+`PostgresQueueManager` per broker and a shared database-authoritative store:
+
+```
+Clients ──► Broker A (TCP/HTTP) ──┐
+                                  ├──► PostgreSQL 18.6
+Clients ──► Broker B (TCP/HTTP) ──┘    jobs · leases · limits · cron · events
+                 ▲                         │
+                 └──── LISTEN/NOTIFY + durable event cursor ────┘
+```
+
+PostgreSQL transactions own correctness; each broker's local snapshot is a read
+cache and event projection, never the distributed lock authority. See
+[PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md).
+
 The TCP and HTTP servers are thin adapters: both decode a request into a command
 and call the shared `handleCommand` dispatcher against the single `QueueManager`
 instance created in `bootServer()`
@@ -259,18 +297,25 @@ over TCP. Trade-off: scoped to one process; multiple
 processes pointing at the same SQLite file is **not** supported for concurrent
 writers.
 
-**(b) Standalone server (TCP + HTTP).** `bunqueue start` (or bare `bunqueue`) boots
+**(b) Standalone SQLite server (TCP + HTTP).** `bunqueue start` (or bare `bunqueue`) boots
 both transports, S3 backup, the cloud agent, the stats interval, and graceful
 shutdown ([`bootstrap.ts:73`](../src/infrastructure/server/bootstrap.ts)). Many
 clients connect over TCP `:6789` / HTTP `:6790`. Trade-off: a network hop and
 msgpack encode/decode per op, but a single source of truth and full observability.
 
-**(c) Distributed producer / consumer.** Separate processes run `Queue` (producers)
-and `Worker` (consumers) against one standalone server over TCP. Workers register,
-heartbeat, pull with leases, and ack/fail. Trade-off: horizontal worker scaling
-and fault isolation; the central server remains the single coordination point.
+**(c) Multi-broker PostgreSQL server.** Two or more `bunqueue start` processes
+select `storage.driver: 'postgres'`, use unique broker IDs, and share one
+PostgreSQL 18.6 URL and namespace. Transactions, row locks, `SKIP LOCKED`, and
+lease tokens coordinate claims and outcomes. Trade-off: an external database
+and async storage hop in exchange for horizontally scalable brokers and shared
+failover state. Embedded mode does not use this driver.
 
-**(d) Edge store-and-forward.** An embedded edge queue drains its local jobs to a
+**(d) Distributed producer / consumer.** Separate processes run `Queue` (producers)
+and `Worker` (consumers) against one or more standalone servers over TCP. Workers
+register, heartbeat, pull with leases, and ack/fail. With SQLite the central
+server is the single coordination point; PostgreSQL allows several brokers.
+
+**(e) Edge store-and-forward.** An embedded edge queue drains its local jobs to a
 remote server via `embeddedQueue.forward({ to, queue })`
 ([`src/client/forwarder.ts`](../src/client/forwarder.ts)). Remote failures fall
 back to local retry/DLQ, so nothing is lost; a deterministic remote jobId
@@ -282,6 +327,7 @@ IoT/edge that must tolerate intermittent connectivity. See
 ## Request Data Flows
 
 **PUSH** (`Queue.add`)
+
 1. Client serializes the job and either calls `QueueManager.push()` directly
    (embedded) or sends a `PUSH`/`PUSHB` msgpack frame over the `TcpPool`.
 2. TCP server decodes + authenticates the frame and dispatches to the push handler.
@@ -330,6 +376,7 @@ failure-outbox key. Only a genuinely new edge requires a queued parent and
 mutates both sides of the topology.
 
 **PULL** (`Worker` poll)
+
 1. Worker requests work (`PULL`/`PULLB`, optionally with a lease/owner) for a queue.
 2. Dispatch → `QueueManager.pull()` / `pullWithLock()`
    ([`queue-manager/delivery.ts`](../src/application/queue-manager/delivery.ts),
@@ -353,6 +400,7 @@ mutates both sides of the topology.
 5. The job (and token) is returned; the worker registry counters update.
 
 **ACK** (success)
+
 1. Worker reports `ACK`/`ACKB` with the jobId, lock token, and optional result.
 2. Dispatch → `ackJob()` / `ackJobBatch()`
    ([`operations/ack.ts`](../src/application/operations/ack.ts)).
@@ -369,6 +417,7 @@ mutates both sides of the topology.
    flow parents are scheduled.
 
 **FAIL** (error)
+
 1. Worker reports `FAIL` with jobId, token, and error message/stack.
 2. Dispatch → `failJob()` ([`operations/ack.ts`](../src/application/operations/ack.ts)).
 3. The same post-claim generation check as ACK suppresses a processor failure
@@ -391,8 +440,8 @@ two means the mask `SHARD_MASK = SHARD_COUNT - 1` ([`hash.ts:45`](../src/shared/
 turns modulo into a single bitwise AND.
 
 ```ts
-shardIndex(queue) = fnv1a(queue) & SHARD_MASK          // queue → shard
-processingShardIndex(jobId) = fnv1a(jobId) & SHARD_MASK // active job → proc shard
+shardIndex(queue) = fnv1a(queue) & SHARD_MASK; // queue → shard
+processingShardIndex(jobId) = fnv1a(jobId) & SHARD_MASK; // active job → proc shard
 ```
 
 `fnv1a` is a 32-bit FNV-1a hash ([`hash.ts:13`](../src/shared/hash.ts)) chosen for
@@ -417,9 +466,13 @@ prevent deadlock. Locks must be acquired in this order:
 The canonical pattern is **read the bare index first, then take the lock**:
 
 ```ts
-const completed = completedJobs.has(id);     // cheap read, no lock
-const shard = await shards[idx].acquire();    // RWLock write guard
-try { /* mutate shard state */ } finally { shard.release(); }
+const completed = completedJobs.has(id); // cheap read, no lock
+const shard = await shards[idx].acquire(); // RWLock write guard
+try {
+  /* mutate shard state */
+} finally {
+  shard.release();
+}
 ```
 
 `RWLock` supports multiple concurrent readers or one writer. Writer ownership is
@@ -466,6 +519,134 @@ Persisted tables: `jobs`, `flow_failures`, `dependency_completions`,
 `queue_metrics_meta`, `queue_metric_buckets` (plus the `migrations`
 bookkeeping table) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
+
+### PostgreSQL multi-broker path
+
+When the server resolves `storageDriver === 'postgres'`,
+`ServerStorageManager` resolves the PostgreSQL Strategy from
+`StorageAdapterRegistry`, constructs it, and initializes `PostgresQueueManager`
+before binding either transport. Strategy fakes exercise creation, validation,
+display, concurrent shutdown, and failed-shutdown retry without PostgreSQL.
+PostgreSQL is authoritative for every lifecycle transition; there is no SQLite
+write buffer and the existing SQLite code path is not invoked.
+
+Admission composition is isolated in `postgres/admissionStore.ts`; its result
+contract lives in
+[`postgres/admissionResult.ts`](../src/infrastructure/persistence/postgres/admissionResult.ts),
+and
+[`postgres/serialAdmission.ts`](../src/infrastructure/persistence/postgres/serialAdmission.ts)
+reconciles the final dependency generation without reordering its original
+outbox event. The bulk implementation is split across `postgres/batchAdmission.ts`,
+`postgres/claimSelection.ts`, `postgres/claimBatch.ts`, `postgres/batchCompletion.ts`,
+`postgres/batchEvents.ts`, `postgres/completionEvents.ts`,
+`postgres/dependencyPromotion.ts`, and the manager-side
+`postgres-queue-manager/batchSnapshot.ts`. Terminal ACK/failure delivery and its
+shutdown drain live in `postgres-queue-manager/terminalDelivery.ts`; the
+reentrant lifecycle boundary in `postgres-queue-manager/operationGate.ts` covers
+all database-backed manager operations, and
+[`postgres-queue-manager/config.ts`](../src/application/postgres-queue-manager/config.ts)
+isolates their construction contract. Completion outcome/lifecycle/query modules
+and destructive dependency/queue/mutation modules keep generation retention and
+removal independently testable. Direct pending-child removal is a dedicated
+fixed-point transaction in
+[`postgres/removeUnprocessedChildren.ts`](../src/infrastructure/persistence/postgres/removeUnprocessedChildren.ts).
+Manager snapshot views are pure
+functions in `postgres-queue-manager/snapshotViews.ts`; the mutable Snapshot
+owns only state transitions and bounds. `postgres/eventRetention.ts` centralizes
+the indexed journal cutoff, non-blocking inline lock, ordered candidate plan,
+and blocking single-queue sweep used by manual trim and crash recovery.
+`postgres/dlqMaintenance.ts` composes normal DLQ upkeep with an authoritative
+retention repair without changing the store's explicit maintenance API.
+`postgres/dlqRetryPlan.ts` discovers failed consumers before taking locks, then
+locks queue policy, dependency identities, and job rows in canonical order and
+revalidates the current dependency edge set before auto-retry. This prevents a
+reused dependency generation from invalidating completion evidence already used
+to make a consumer runnable. Server process teardown is independently owned by
+`server/shutdownCoordinator.ts`: duplicate signals share one task, optional
+backup/Cloud failures cannot skip storage cleanup, transient storage close is
+retried once with a bound, and an exit code is emitted in every terminal path.
+
+- **Admission and outcomes.** Jobs, dependencies, result/DLQ state, repeat links,
+  metrics, and durable events change inside PostgreSQL transactions. Independent
+  `PUSHB`, unique-ID `ACKB`, claim updates, events, and completion metrics use
+  set-based statements; feature-bearing conflicts retain the serial semantic
+  path. Admission and completion acquire dependency-evidence locks in canonical
+  order; single and batch admissions acquire their complete ID/deduplication key
+  union through the same set-based lock order. Completion creates an immutable
+  lock-plan Command before child row locks and promotes newly ready parents,
+  including their payload timeline, version, state, and event, in that same
+  transaction. Serial admission resolves ID/key deduplication before retiring
+  the requested generation. Its final set reconciliation promotes or demotes
+  only rows inserted by that transaction and corrects their already-ordered
+  `pushed` payload before commit. Parent attachment/failure/recovery reuse the
+  child dependency key, re-read the current parent, then acquire sorted parent
+  keys before rows.
+- **Claims.** Default-policy claimers hold compatible queue-state share locks;
+  configured rate/concurrency decisions retain an exclusive row lock. Indexed
+  FIFO, mixed-order, and grouped selection paths apply `FOR UPDATE SKIP LOCKED`
+  to narrow tuples before payload fetch, then assign an opaque token plus
+  database-clock lease deadline before commit.
+- **Fencing and recovery.** ACK/FAIL/renewal lock the row and require the exact
+  live token. Expired leases are recovered idempotently by any broker. Graceful
+  broker/client release is an optimization, not the correctness boundary.
+  Shutdown stops all new database-backed operation admission, drains every
+  accepted admission, claim attempt, mutation, query, startup hydration, and
+  deferred write, then closes post-commit maintenance and the SQL pool. Nested
+  async scopes are reentrant, while an empty long-poll owns no admission between
+  claim attempts. Late disconnect cleanup clears local ownership without
+  touching a closed pool.
+- **Generation-safe removal.** Cancel/remove, clean/TTL/drain, DLQ pruning,
+  completed retry, protected-cron cleanup, dedup replacement, and obliterate
+  share dependency identity locks with admission. Candidate and live-consumer
+  rows are revalidated after locking; bulk commands skip protected producers
+  and queue obliteration rejects external live consumers. Completion-only rows
+  are bounded newest-first without evicting proofs pinned by live dependencies.
+  Retention uses independent 1,000-row transactions until no overage remains;
+  startup awaits convergence, while identity-fenced coalesced post-commit retries
+  and a periodic sweep repair interrupted cleanup or a later configuration
+  reduction. DLQ startup and periodic sweeps aggregate only failed queues above
+  their stored bound, lock the current policy, and reuse the same ordered,
+  dependency-safe deletion transaction across concurrent brokers.
+  `removeUnprocessedChildren` additionally locks the parent, direct pending
+  candidates, and all live consumers, then computes the fixed point of children
+  required by surviving consumers. It deletes safe generations and detaches
+  protected shared children in one transaction while leaving active and terminal
+  generations untouched.
+- **Events.** A transactional outbox registers each event-producing transaction
+  with a deferred commit sequencer. Its pre-commit trigger takes a
+  namespace-scoped transaction advisory lock, allocates one value from a global
+  `CACHE 1` sequence, and stamps a compact commit envelope plus any watermark.
+  Immutable event rows join that envelope through `transaction_id`; brokers
+  replay by `(commit_seq, event_id)`, while `pg_notify` is only a wake-up hint.
+  Inline retention never waits for a second queue lock after job locks are held;
+  candidate tuples are locked by ascending ID, and a commit-aware autonomous
+  sweep recalculates the cutoff under one per-queue advisory lock. Cumulative
+  per-queue prune frontiers refresh only a broker behind discarded history.
+  A 256-event startup accumulator retries the authoritative snapshot when it
+  overflows, while per-job/queue version fences prevent hydration or an in-flight
+  query from overwriting a newer replayed state. Failed authoritative refreshes
+  retain their coalesced dirty marker and retry with bounded backoff, so pruning
+  cannot strand a broker on only the retained event subset. Per-queue failures
+  participate in storage health until recovery, and shutdown stops retry loops.
+- **Distributed control state.** Pause, limits, cron schedules, worker and broker
+  heartbeats, logs, and queue metric totals are namespace-scoped database rows.
+
+The PostgreSQL implementation combines a store Facade, focused transaction
+scripts using an explicit context/transaction Unit of Work, a commit-ordered
+transactional outbox observed by the event stream, and a local Snapshot read
+model. Adding a feature means adding one focused persistence module and exposing
+it through the Facade; SQL and lock boundaries stay explicit rather than hidden
+behind a generic repository or ORM. Strategy fakes, explicit contexts, and
+separate startup-accumulator, deferred-write, and event-health components keep
+lifecycle and failure paths testable without coupling every test to a complete
+server. The reentrant operation gate and atomic deferred-write admission make
+shutdown races deterministic at the manager boundary. Concurrent drains share
+an immutable sequence checkpoint, making error observation deterministic without
+exposing queue internals.
+
+The normalized table/index reference is in [Data Model](./data-model.md); the
+algorithms and failure boundaries are in
+[PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md).
 
 ### Workflow execution path
 
@@ -534,27 +715,27 @@ See [Workflow Engine](./features/workflow-engine.md) and the workflow section in
 from `DEFAULT_CONFIG` ([`application/types/config.ts`](../src/application/types/config.ts),
 [`application/background/lifecycle.ts`](../src/application/background/lifecycle.ts)).
 
-| Task | Interval (default) | Purpose |
-| --- | --- | --- |
-| Cleanup + monitoring | `cleanupIntervalMs` = **10 s** | Enforce memory bounds, evict orphans, run monitoring checks |
-| Job timeout deadline | per active `startedAt + timeout` | Fail/requeue at the earliest registered processing deadline |
-| Stall check | `stallCheckMs` = **5 s** | Two-phase detection of unresponsive workers |
-| Lock expiration | `stallCheckMs` = **5 s** | Reclaim leases whose token TTL elapsed |
-| Dependency resolution | `dependencyCheckMs` = **30 s** (safety fallback) | Resolve flow/child deps; fast path is event-driven |
-| DLQ maintenance | `dlqMaintenanceMs` = **60 s** | Age-based auto-purge + opt-in auto-retry |
-| Cron scheduler | event-driven | Fire delayed/recurring jobs onto queues |
-| S3 backup | `S3_BACKUP_INTERVAL` (6 h) | Flush buffer → `VACUUM INTO` WAL-safe snapshot → integrity check → gzip/SHA-256 → metadata-first S3 publication → retention |
-| Stats log | `STATS_INTERVAL_MS` = **5 min** | Periodic queue/memory/worker stats line |
+| Task                  | Interval (default)                               | Purpose                                                                                                                     |
+| --------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Cleanup + monitoring  | `cleanupIntervalMs` = **10 s**                   | Enforce memory bounds, evict orphans, run monitoring checks                                                                 |
+| Job timeout deadline  | per active `startedAt + timeout`                 | Fail/requeue at the earliest registered processing deadline                                                                 |
+| Stall check           | `stallCheckMs` = **5 s**                         | Two-phase detection of unresponsive workers                                                                                 |
+| Lock expiration       | `stallCheckMs` = **5 s**                         | Reclaim leases whose token TTL elapsed                                                                                      |
+| Dependency resolution | `dependencyCheckMs` = **30 s** (safety fallback) | Resolve flow/child deps; fast path is event-driven                                                                          |
+| DLQ maintenance       | `dlqMaintenanceMs` = **60 s**                    | Age-based auto-purge + opt-in auto-retry                                                                                    |
+| Cron scheduler        | event-driven                                     | Fire delayed/recurring jobs onto queues                                                                                     |
+| S3 backup             | `S3_BACKUP_INTERVAL` (6 h)                       | Flush buffer → `VACUUM INTO` WAL-safe snapshot → integrity check → gzip/SHA-256 → metadata-first S3 publication → retention |
+| Stats log             | `STATS_INTERVAL_MS` = **5 min**                  | Periodic queue/memory/worker stats line                                                                                     |
 
 Memory bounds enforced by the bounded collections (cleanup evicts ~10% when full):
 
-| Collection | Max | Eviction |
-| --- | --- | --- |
-| `completedJobs` | 50,000 | FIFO batch |
+| Collection                   | Max    | Eviction                                           |
+| ---------------------------- | ------ | -------------------------------------------------- |
+| `completedJobs`              | 50,000 | FIFO batch                                         |
 | `depCompletions` recent tier | 50,000 | Exact FIFO; live-edge pins are released separately |
-| `jobResults` | 10,000 | LRU |
-| `jobLogs` | 10,000 | LRU |
-| `customIdMap` | 50,000 | LRU |
+| `jobResults`                 | 10,000 | LRU                                                |
+| `jobLogs`                    | 10,000 | LRU                                                |
+| `customIdMap`                | 50,000 | LRU                                                |
 
 See [Background Tasks](./features/background-tasks.md) and
 [Scheduler & Cron](./features/scheduler-and-cron.md).
@@ -563,15 +744,15 @@ See [Background Tasks](./features/background-tasks.md) and
 
 Current representative native measurements are operation-specific:
 
-| Operation / topology | Median on the 2026-07-30 host | Persistence boundary |
-| --- | ---: | --- |
-| Internal batched push, Embedded, 1M jobs | 729,395 jobs/s | In-memory; no `dataPath` |
-| Public `addBulk`, Embedded, sustained 50K cell | 186,384 jobs/s | On-disk buffered SQLite |
-| TCP `PUSHB`, fresh 50K sample | 158,779 jobs/s | Broker on-disk buffered SQLite |
-| TCP no-work worker drain, concurrency 50 | 17,256 jobs/s | Full pull/process/ACK path |
-| Sequential `durable:true` add, Embedded / TCP | 60,835 / 27,191 ops/s | Synchronous persistence |
-| Linear Workflow Engine, Embedded / TCP | 2,700 / 3,187 workflows/s | Workflow SQLite plus 3 queue nodes |
-| 12 tuned linear Workflow Engines, Embedded / TCP | 25,873 / 17,496 workflows/s | Independent stores/queues; TCP protocol cap raised and reported |
+| Operation / topology                             | Median on the 2026-07-30 host | Persistence boundary                                            |
+| ------------------------------------------------ | ----------------------------: | --------------------------------------------------------------- |
+| Internal batched push, Embedded, 1M jobs         |                729,395 jobs/s | In-memory; no `dataPath`                                        |
+| Public `addBulk`, Embedded, sustained 50K cell   |                186,384 jobs/s | On-disk buffered SQLite                                         |
+| TCP `PUSHB`, fresh 50K sample                    |                158,779 jobs/s | Broker on-disk buffered SQLite                                  |
+| TCP no-work worker drain, concurrency 50         |                 17,256 jobs/s | Full pull/process/ACK path                                      |
+| Sequential `durable:true` add, Embedded / TCP    |         60,835 / 27,191 ops/s | Synchronous persistence                                         |
+| Linear Workflow Engine, Embedded / TCP           |     2,700 / 3,187 workflows/s | Workflow SQLite plus 3 queue nodes                              |
+| 12 tuned linear Workflow Engines, Embedded / TCP |   25,873 / 17,496 workflows/s | Independent stores/queues; TCP protocol cap raised and reported |
 
 Throughput comes from: 4-ary heaps (cache locality), per-shard parallelism, the
 double-buffered write-behind path, UUIDv7 ids that sort by time (string compare,
@@ -579,10 +760,10 @@ no `localeCompare`), MessagePack framing, and transparent client-side add-batchi
 that coalesces concurrent `add()` calls into one `PUSHB` round-trip. The only
 data-loss exposure is the ≤10 ms buffered window — including normal TCP
 `PUSH`/`PUSHB`, which acknowledge the in-memory acceptance while SQLite flushes
-  behind it. It is eliminated per job with `durable: true`; when SQLite is
-  configured, `PUSHF` always uses one immediate all-job transaction because
-  partial durable flow state is not a valid outcome. In memory-only mode,
-  `PUSHF` still provides atomic visibility but no crash durability. The internal
+behind it. It is eliminated per job with `durable: true`; when SQLite is
+configured, `PUSHF` always uses one immediate all-job transaction because
+partial durable flow state is not a valid outcome. In memory-only mode,
+`PUSHF` still provides atomic visibility but no crash durability. The internal
 in-memory row has no persistence boundary and must not be presented as an
 SQLite figure. Numbers are hardware-, scale-, and operation-dependent.
 
@@ -651,21 +832,22 @@ guarantees a continuously-running deployment depends on. Each drives a real
 `QueueManager` + `createTcpServer` (several spawn the real `src/main.ts` process
 against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
-| Category | File | What it proves |
-| --- | --- | --- |
-| Model-based state machine | `model-based/queue-model` | Generated valid command histories agree with a compact specification across API state, counts, SQLite/DLQ membership, payload/priority persistence, leases, dependencies, limiters, and `SIGKILL` recovery; failures shrink and replay by seed. |
-| Protocol fuzzing | `repro-fuzz-protocol` | Malformed frames, corrupt MessagePack, lying length prefixes, >64 MB frames, torn/coalesced frames, and pre-auth commands never crash or wedge the server; the pre-auth gate never leaks. |
-| Chaos / fault injection | `repro-chaos-fault-injection` | At-least-once redelivery when a worker dies mid-job; a heartbeated-then-dropped job is not double-dispatched but is reclaimed by lock-expiry; lock-expiry under contention loses nothing; cron next-run is monotonic under clock skew/DST. |
-| Race / concurrency | `repro-race-concurrency` | N concurrent PULLs on one job → exactly one delivery; concurrent same-`jobId` PUSH → exactly one job; active re-add is an idempotent skip (no UNIQUE crash); cancel-during-active is a safe no-op; stale ACK vs lock-expiry never double-completes; K-workers×M-jobs drain processes each exactly once. |
-| Crash-recovery | `repro-chaos-crash-recovery` | Under `SIGKILL` (no flush): durable jobs are never lost, ACKed durable jobs stay completed, paused-state and DLQ entries persist, an active-at-crash job is recovered (attempts incremented), and multi-cycle crash fuzzing loses nothing cumulatively. |
-| Soak / endurance | `repro-chaos-soak` | Sustained produce/consume with a worker socket killed every ~400 ms: no job lost (server-authoritative), p99 latency does not drift, WAL stays bounded, and internal collections return to baseline after drain (no per-job/per-connection leak). Env-tunable (`SOAK_MS`) for real multi-hour runs. |
-| Stress / degradation | `repro-stress-degradation` | A huge backlog stays bounded and responsive then drains; 100 slowloris connections are all terminated by the stall bound while a healthy client stays fast; >50 in-flight pipelined commands on one socket all complete; latency returns to baseline after a load spike. |
-| Upgrade / rolling restart | `repro-upgrade-restart` | Graceful `SIGTERM` flushes the write buffer so even buffered (non-durable) jobs survive; waiting/completed(+result)/paused/DLQ state all round-trip a restart; rolling restarts under load lose nothing cumulatively. |
-| Long-running semantics | `repro-longrunning-semantics` | Cron next-run does not drift across thousands of ticks (incl. DST); `jobResults` and the custom-id dedup map stay bounded under pressure (oldest evicted, newest retained); the DLQ is bounded to `maxEntries` and remains retryable. |
+| Category                  | File                          | What it proves                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model-based state machine | `model-based/queue-model`     | Generated valid command histories agree with a compact specification across API state, counts, SQLite/DLQ membership, payload/priority persistence, leases, dependencies, limiters, and `SIGKILL` recovery; failures shrink and replay by seed.                                                         |
+| Protocol fuzzing          | `repro-fuzz-protocol`         | Malformed frames, corrupt MessagePack, lying length prefixes, >64 MB frames, torn/coalesced frames, and pre-auth commands never crash or wedge the server; the pre-auth gate never leaks.                                                                                                               |
+| Chaos / fault injection   | `repro-chaos-fault-injection` | At-least-once redelivery when a worker dies mid-job; a heartbeated-then-dropped job is not double-dispatched but is reclaimed by lock-expiry; lock-expiry under contention loses nothing; cron next-run is monotonic under clock skew/DST.                                                              |
+| Race / concurrency        | `repro-race-concurrency`      | N concurrent PULLs on one job → exactly one delivery; concurrent same-`jobId` PUSH → exactly one job; active re-add is an idempotent skip (no UNIQUE crash); cancel-during-active is a safe no-op; stale ACK vs lock-expiry never double-completes; K-workers×M-jobs drain processes each exactly once. |
+| Crash-recovery            | `repro-chaos-crash-recovery`  | Under `SIGKILL` (no flush): durable jobs are never lost, ACKed durable jobs stay completed, paused-state and DLQ entries persist, an active-at-crash job is recovered (attempts incremented), and multi-cycle crash fuzzing loses nothing cumulatively.                                                 |
+| Soak / endurance          | `repro-chaos-soak`            | Sustained produce/consume with a worker socket killed every ~400 ms: no job lost (server-authoritative), p99 latency does not drift, WAL stays bounded, and internal collections return to baseline after drain (no per-job/per-connection leak). Env-tunable (`SOAK_MS`) for real multi-hour runs.     |
+| Stress / degradation      | `repro-stress-degradation`    | A huge backlog stays bounded and responsive then drains; 100 slowloris connections are all terminated by the stall bound while a healthy client stays fast; >50 in-flight pipelined commands on one socket all complete; latency returns to baseline after a load spike.                                |
+| Upgrade / rolling restart | `repro-upgrade-restart`       | Graceful `SIGTERM` flushes the write buffer so even buffered (non-durable) jobs survive; waiting/completed(+result)/paused/DLQ state all round-trip a restart; rolling restarts under load lose nothing cumulatively.                                                                                   |
+| Long-running semantics    | `repro-longrunning-semantics` | Cron next-run does not drift across thousands of ticks (incl. DST); `jobResults` and the custom-id dedup map stay bounded under pressure (oldest evicted, newest retained); the DLQ is bounded to `maxEntries` and remains retryable.                                                                   |
 
 ## Module Map
 
 ### Engineering tooling
+
 - [Test Isolation and Reproducibility](./testing.md) — Pinned test image, parallel disposable unit/TCP/embedded containers, per-file TCP server and SQLite isolation, container resource time series, per-test/file timing KPIs, anomaly reports, CI equivalence, cleanup guarantees, and native-only benchmarks.
 - [Documentation Tooling](./features/documentation-tooling.md) — Astro data checks, API-reference generation, and the split Open Graph cover definitions/rendering pipeline under `docs/scripts/`.
 - [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) — Compiler-discovered exact coverage of every callable Queue/Worker/Job/Cron/DLQ/Flow/Workflow facade method in every applicable mode, plus the TCP-only connection pool, without test doubles.
@@ -673,11 +855,13 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Model-Based Queue Verification](./features/model-based-testing.md) — `fast-check` command model against a real broker and SQLite, with layered invariants, shrinking, deterministic replay, dependency flows, limiters, and crash recovery.
 
 ### Core engine & data structures
+
 - [Core Queue Engine (QueueManager & Shards)](./features/core-queue-engine.md) — Central coordinator that shards queues, owns global job indexes, and orchestrates all job operations by delegating to operation modules via context objects.
 - [Data Structures (PriorityQueue, heaps, maps)](./features/data-structures.md) — Generic, dependency-free in-memory building blocks: an indexed 4-ary priority heap for queued jobs, a skip-list temporal cleanup index plus a 4-ary min-heap tracking delayed jobs, and bounded/LRU/TTL containers plus a latency histogram.
 - [Concurrency & Locking](./features/concurrency-and-locking.md) — In-process synchronization primitives (RWLock, Semaphore) plus job-leasing and stall detection that keep bunqueue's sharded state consistent under concurrent access.
 
 ### Job operations
+
 - [Job Lifecycle (push / pull / ack / fail)](./features/job-lifecycle.md) — The four primitive pure-logic operations (push, pull, ack, fail) that move a job through its state machine beneath the TCP/HTTP servers and embedded SDK.
 - [Job Queries & Queue Control](./features/job-queries-and-control.md) — Read/control surface of QueueManager: point/list job queries, single-job mutations, and queue-wide lifecycle operations as pure context-driven functions.
 - [Dead Letter Queue (DLQ)](./features/dead-letter-queue.md) — Terminal sink for jobs that exhausted retries/stalled/lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.
@@ -685,21 +869,26 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Rate Limiting & Concurrency Control](./features/rate-limiting-and-concurrency.md) — Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.
 
 ### Persistence & scheduling
+
 - [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, queue control-state, and the bounded per-queue event/metric journal, and serves batched recovery reads on restart.
+- [PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md) — Optional database-authoritative server backend with transactional lifecycle updates, `SKIP LOCKED` claims, lease fencing/recovery, shared policies/cron/workers/metrics, and durable LISTEN/NOTIFY replay across brokers.
 - [Scheduler & Cron](./features/scheduler-and-cron.md) — Event-driven server engine that fires recurring cron/interval jobs onto queues, persisting next-run/execution state for crash-safe at-most-once-per-slot scheduling.
 - [Background Tasks](./features/background-tasks.md) — Periodic server-side maintenance: timers for timeouts, stall/lock recovery, DLQ upkeep, dependency resolution, memory-bound cleanup, monitoring, plus startup recovery from SQLite.
 
 ### Orchestration
+
 - [FlowProducer & Job Dependencies](./features/flow-producer.md) — Client-side API for building parent/child job trees and dependency chains spanning queues, with BullMQ v5 compatibility.
 - [Workflow Engine (saga orchestration)](./features/workflow-engine.md) — Multi-step saga orchestration built on a bunqueue Queue/Worker pair: a typed DSL of nodes driven one-node-per-job, with retries, parallelism, signals, loops, sub-workflows, SQLite-persisted state, and reverse-order compensation.
 
 ### Transports & protocol
+
 - [TCP Wire Protocol & Framing](./features/tcp-protocol.md) — Binary length-prefixed MessagePack transport that frames, pipelines, and backpressure-manages all TCP client/server commands and responses.
 - [TCP Server Command Handlers](./features/tcp-server-handlers.md) — Request-handling layer that authenticates decoded TCP commands, dispatches them through category routers to thin handler adapters, and shapes QueueManager results into typed responses; also wires the full server in bootstrap.
 - [HTTP / REST / SSE / WebSocket API](./features/http-api.md) — HTTP transport (port 6790) exposing the queue control surface as REST plus SSE/WebSocket real-time event streams, diagnostics, and metrics — all adapting requests onto the shared handleCommand dispatcher.
 - [Security: TLS, Auth, CORS](./features/security-tls-auth.md) — Transport TLS (TCP+HTTP), bearer-token auth on both transports, CORS, webhook SSRF validation, and HMAC signing for webhooks and the Cloud uplink.
 
 ### Client SDK
+
 - [Client Transport (TCP pool, reconnect, batching)](./features/client-transport.md) — Wire-level TCP transport (pool, pipelining, reconnect, health, TLS, add-batching) used by the Queue and Worker SDKs.
 - [Client SDK: Queue](./features/client-queue-sdk.md) — Producer-side BullMQ-style Queue<T> SDK that transparently drives embedded (in-process QueueManager) and TCP (msgpack-over-pool) backends.
 - [Client SDK: Worker (& sandboxed)](./features/client-worker-sdk.md) — BullMQ-style consumer worker that pulls jobs (embedded or TCP), runs the user processor, and reports ack/fail — plus a process-isolated SandboxedWorker variant.
@@ -711,6 +900,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [Store-and-Forward & BullMQ Compatibility](./features/store-and-forward.md) — Client-side edge store-and-forward (drain a local queue to a remote bunqueue server, idempotently) plus partial BullMQ v5 read-API shims on Queue.
 
 ### Observability & operations
+
 - [Webhooks, Events & Job Logs](./features/webhooks-and-events.md) — Server-side observability: outbound HTTP webhooks, in-process event pub/sub, bounded per-job logs, and client-job ownership/disconnect release.
 - [Worker Registry & Management](./features/workers-management.md) — Server-side in-memory registry of connected workers tracking liveness, queues, concurrency, and per-worker job counters; backs skipIfNoWorker crons and dashboard/HTTP/CLI worker visibility.
 - [Stats, Metrics & Monitoring](./features/stats-and-monitoring.md) — Read-only aggregation of queue depth counts, cumulative counters, bounded per-queue labels, standard process/build/connection collectors, S3 backup outcomes and latency histograms, exposed via TCP Stats/Metrics/Prometheus/Ping, HTTP /stats /metrics /prometheus /health /dashboard, and the periodic stats log.
@@ -718,6 +908,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 - [bunqueue Cloud Dashboard Integration](./features/cloud-integration.md) — Opt-in agent that pushes full server telemetry snapshots to the bunqueue.io dashboard over HTTP and receives whitelisted remote commands over WebSocket.
 
 ### Interfaces & configuration
+
 - [Native MCP Server](./features/mcp-server.md) — Exposes bunqueue to AI agents over MCP/stdio via the bunqueue-mcp binary, registering 73 tools, 5 resources, and 3 prompts backed by either an embedded QueueManager or a remote TCP server.
 - [CLI](./features/cli.md) — The bunqueue executable: boots the server or acts as a thin one-shot TCP client that maps CLI verbs to msgpack protocol commands and renders responses.
 - [Configuration & Entrypoint](./features/configuration.md) — Config layer and process entrypoint: resolves config-file/env/default precedence into typed config, dispatches the bunqueue executable, and provides the Logger, VERSION, and Bun-only runtime guards.

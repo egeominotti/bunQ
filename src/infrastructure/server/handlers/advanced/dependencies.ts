@@ -3,6 +3,7 @@ import { jobId } from '../../../../domain/types/job';
 import type { Response } from '../../../../domain/types/response';
 import * as response from '../../../../domain/types/response';
 import type { HandlerContext } from '../../types';
+import { sanitizeServerError } from '../../errors';
 
 export async function handleGetFailedChildrenValues(
   command: Extract<Command, { cmd: 'GetFailedChildrenValues' }>,
@@ -12,8 +13,8 @@ export async function handleGetFailedChildrenValues(
   try {
     const values = await context.queueManager.getFailedChildrenValues(jobId(command.id));
     return { ok: true, values, reqId: requestId } as Response;
-  } catch {
-    return { ok: true, values: {}, reqId: requestId } as Response;
+  } catch (error) {
+    return response.error(sanitizeServerError(error), requestId);
   }
 }
 
@@ -25,8 +26,8 @@ export async function handleGetIgnoredChildrenFailures(
   try {
     const values = await context.queueManager.getIgnoredChildrenFailures(jobId(command.id));
     return { ok: true, values, reqId: requestId } as Response;
-  } catch {
-    return { ok: true, values: {}, reqId: requestId } as Response;
+  } catch (error) {
+    return response.error(sanitizeServerError(error), requestId);
   }
 }
 
@@ -39,7 +40,7 @@ export async function handleRemoveChildDependency(
     const removed = await context.queueManager.removeChildDependency(jobId(command.id));
     return { ok: true, removed, reqId: requestId } as Response;
   } catch (error) {
-    return response.error(error instanceof Error ? error.message : String(error), requestId);
+    return response.error(sanitizeServerError(error), requestId);
   }
 }
 
@@ -52,6 +53,6 @@ export async function handleRemoveUnprocessedChildren(
     await context.queueManager.removeUnprocessedChildren(jobId(command.id));
     return response.ok(undefined, requestId);
   } catch (error) {
-    return response.error(error instanceof Error ? error.message : String(error), requestId);
+    return response.error(sanitizeServerError(error), requestId);
   }
 }

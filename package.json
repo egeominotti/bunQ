@@ -1,14 +1,74 @@
 {
   "name": "bunqueue",
   "version": "2.8.61",
-  "description": "High-performance job queue for Bun & AI agents. SQLite persistence, cron scheduling, priorities, retries, DLQ, webhooks, native MCP server. Zero external infrastructure.",
-  "type": "module",
-  "main": "dist/main.js",
-  "types": "dist/main.d.ts",
+  "description": "High-performance job queue for Bun and AI agents. SQLite by default, optional PostgreSQL 18.6 multi-broker persistence, cron, retries, DLQ, and MCP.",
+  "keywords": [
+    "agentic",
+    "ai",
+    "ai-agent",
+    "ai-native",
+    "automation",
+    "background-jobs",
+    "bullmq-alternative",
+    "bun",
+    "compensation",
+    "cron",
+    "dead-letter-queue",
+    "delayed-jobs",
+    "dlq",
+    "human-in-the-loop",
+    "inngest-alternative",
+    "job-queue",
+    "mcp",
+    "message-queue",
+    "model-context-protocol",
+    "multi-broker",
+    "multi-step",
+    "orchestration",
+    "postgresql",
+    "priority-queue",
+    "prometheus",
+    "queue",
+    "redis-alternative",
+    "retries",
+    "saga",
+    "saga-pattern",
+    "scheduler",
+    "sqlite",
+    "step-functions",
+    "task-queue",
+    "temporal-alternative",
+    "typescript",
+    "webhooks",
+    "worker",
+    "workflow",
+    "workflow-engine"
+  ],
+  "homepage": "https://bunqueue.dev",
+  "bugs": {
+    "url": "https://github.com/egeominotti/bunqueue/issues"
+  },
+  "license": "MIT",
+  "author": "egeominotti",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/egeominotti/bunqueue.git"
+  },
   "bin": {
     "bunqueue": "./dist/cli/index.js",
     "bunqueue-mcp": "./dist/mcp/index.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/bunqueue",
+    "!dist/benchmark",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
   "exports": {
     ".": {
       "types": "./dist/main.d.ts",
@@ -42,14 +102,6 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist/**/*.js",
-    "dist/**/*.d.ts",
-    "!dist/bunqueue",
-    "!dist/benchmark",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "prepare": "git config core.hooksPath .husky",
     "dev": "bun run --watch src/main.ts",
@@ -61,6 +113,8 @@
     "test": "BUNQUEUE_EMBEDDED=1 bun test --parallel=4",
     "test:core-e2e": "bun test test/core-e2e/core-public-api.e2e.test.ts",
     "test:model": "BUNQUEUE_EMBEDDED=1 bun test test/model-based/queue-model.test.ts test/model-based/workflow-model.test.ts test/model-based/flow-producer-model.test.ts test/model-based/backup-model.test.ts test/model-based/monitoring-model.test.ts test/model-based/enterprise-telemetry-model.test.ts",
+    "test:postgres": "bun test test/postgres-*.test.ts",
+    "test:postgres:fast-check": "bun test test/postgres-fast-check-*.test.ts",
     "test:sandbox": "bun run scripts/test-sandbox.ts",
     "test:sandbox:sdk": "bun run scripts/test-sdk-sandbox.ts",
     "bench": "bun run bench/comprehensive.ts",
@@ -113,56 +167,6 @@
       "optional": true
     }
   },
-  "keywords": [
-    "bun",
-    "job-queue",
-    "message-queue",
-    "task-queue",
-    "background-jobs",
-    "queue",
-    "worker",
-    "cron",
-    "scheduler",
-    "sqlite",
-    "redis-alternative",
-    "bullmq-alternative",
-    "priority-queue",
-    "delayed-jobs",
-    "retries",
-    "dead-letter-queue",
-    "dlq",
-    "webhooks",
-    "prometheus",
-    "typescript",
-    "ai",
-    "ai-agent",
-    "ai-native",
-    "mcp",
-    "model-context-protocol",
-    "agentic",
-    "automation",
-    "workflow",
-    "workflow-engine",
-    "orchestration",
-    "saga",
-    "saga-pattern",
-    "temporal-alternative",
-    "inngest-alternative",
-    "step-functions",
-    "multi-step",
-    "compensation",
-    "human-in-the-loop"
-  ],
-  "author": "egeominotti",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/egeominotti/bunqueue.git"
-  },
-  "bugs": {
-    "url": "https://github.com/egeominotti/bunqueue/issues"
-  },
-  "homepage": "https://bunqueue.dev",
   "engines": {
     "bun": ">=1.4.0"
   }

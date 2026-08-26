@@ -1,6 +1,6 @@
 ---
-title: "Quick Start: Your First Bun Job Queue in Minutes"
-description: "Get started with bunqueue in minutes. Create queues, add jobs, and process them with Workers. Includes SQLite persistence setup."
+title: 'Quick Start: Your First Bun Job Queue in Minutes'
+description: 'Get started with bunqueue in minutes. Create queues, add jobs, and process them with Workers. Includes SQLite persistence setup.'
 head:
   - tag: meta
     attrs:
@@ -12,8 +12,14 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · quickstart</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Working queue in <em>a minute.</em></h1>
-  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and turn on persistence. On Bun everything runs embedded in a single process with zero configuration; from any other language, start the server once and connect.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Working queue in <em>a minute.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Create a queue, add jobs, process them with a Worker, and turn on persistence. On Bun everything
+    runs embedded in a single process with zero configuration; from any other language, start the
+    server once and connect.
+  </p>
 </div>
 
 ## The smallest working queue
@@ -30,10 +36,14 @@ import { Queue, Worker } from 'bunqueue/client';
 const queue = new Queue('emails', { embedded: true });
 
 // The worker: pulls jobs and runs your function on each one
-const worker = new Worker('emails', async (job) => {
-  console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
-  return { sent: true };
-}, { embedded: true });
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    console.log(`Sending "${job.data.subject}" to ${job.data.to}`);
+    return { sent: true };
+  },
+  { embedded: true }
+);
 
 // Add a job
 await queue.add('welcome', { to: 'user@example.com', subject: 'Welcome!' });
@@ -178,8 +188,9 @@ const worker = new Worker('tasks', handler, { embedded: true });
 
 // ❌ Mixed modes = timeout error
 const queue = new Queue('tasks', { embedded: true });
-const worker = new Worker('tasks', handler);  // Missing embedded: true!
+const worker = new Worker('tasks', handler); // Missing embedded: true!
 ```
+
 :::
 
 ## Add jobs with options
@@ -196,12 +207,16 @@ interface EmailJob {
 const emailQueue = new Queue<EmailJob>('emails', { embedded: true });
 
 // Priority, delay, retries
-await emailQueue.add('send-email', { to: 'a@test.com', subject: 'Hi' }, {
-  priority: 10,   // Higher = processed first
-  delay: 5000,    // Wait 5 seconds before processing
-  attempts: 3,    // Retry up to 3 times if the processor throws
-  backoff: 1000,  // Wait 1 second between retries (grows on each attempt)
-});
+await emailQueue.add(
+  'send-email',
+  { to: 'a@test.com', subject: 'Hi' },
+  {
+    priority: 10, // Higher = processed first
+    delay: 5000, // Wait 5 seconds before processing
+    attempts: 3, // Retry up to 3 times if the processor throws
+    backoff: 1000, // Wait 1 second between retries (grows on each attempt)
+  }
+);
 
 // Many jobs at once (one optimized batch)
 await emailQueue.addBulk([
@@ -222,12 +237,16 @@ interface EmailJob {
 const emailQueue = new Queue<EmailJob>('emails');
 
 // Priority, delay, retries
-await emailQueue.add('send-email', { to: 'a@test.com', subject: 'Hi' }, {
-  priority: 10,   // Higher = processed first
-  delay: 5000,    // Wait 5 seconds before processing
-  attempts: 3,    // Retry up to 3 times if the processor throws
-  backoff: 1000,  // Wait 1 second between retries (grows on each attempt)
-});
+await emailQueue.add(
+  'send-email',
+  { to: 'a@test.com', subject: 'Hi' },
+  {
+    priority: 10, // Higher = processed first
+    delay: 5000, // Wait 5 seconds before processing
+    attempts: 3, // Retry up to 3 times if the processor throws
+    backoff: 1000, // Wait 1 second between retries (grows on each attempt)
+  }
+);
 
 // Many jobs at once (one optimized batch)
 await emailQueue.addBulk([
@@ -353,29 +372,37 @@ All options are in the [Queue guide](/guide/queue/).
 <TabItem label="Bun">
 
 ```typescript
-const worker = new Worker<EmailJob>('emails', async (job) => {
-  await job.updateProgress(50, 'Sending email...');  // Report progress
-  await sendEmail(job.data);                          // Do the work
-  await job.log('Email sent successfully');           // Attach a log line
-  return { sent: true, timestamp: Date.now() };       // Result, stored and queryable
-}, {
-  embedded: true,
-  concurrency: 5,  // Process 5 jobs in parallel
-});
+const worker = new Worker<EmailJob>(
+  'emails',
+  async (job) => {
+    await job.updateProgress(50, 'Sending email...'); // Report progress
+    await sendEmail(job.data); // Do the work
+    await job.log('Email sent successfully'); // Attach a log line
+    return { sent: true, timestamp: Date.now() }; // Result, stored and queryable
+  },
+  {
+    embedded: true,
+    concurrency: 5, // Process 5 jobs in parallel
+  }
+);
 ```
 
 </TabItem>
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const worker = new Worker<EmailJob>('emails', async (job) => {
-  await job.updateProgress(50, 'Sending email...');  // Report progress
-  await sendEmail(job.data);                          // Do the work
-  await job.log('Email sent successfully');           // Attach a log line
-  return { sent: true, timestamp: Date.now() };       // Result, stored and queryable
-}, {
-  concurrency: 5,  // Process 5 jobs in parallel
-});
+const worker = new Worker<EmailJob>(
+  'emails',
+  async (job) => {
+    await job.updateProgress(50, 'Sending email...'); // Report progress
+    await sendEmail(job.data); // Do the work
+    await job.log('Email sent successfully'); // Attach a log line
+    return { sent: true, timestamp: Date.now() }; // Result, stored and queryable
+  },
+  {
+    concurrency: 5, // Process 5 jobs in parallel
+  }
+);
 ```
 
 </TabItem>
@@ -533,7 +560,7 @@ worker.On("failed", func(args ...any) {
 </TabItem>
 </Tabs>
 
-*Rust and Elixir have no worker event emitter: use the structured telemetry callback for transport lifecycle and normal language control flow for per-job outcomes (see the [SDK guide](/guide/sdks/)).*
+_Rust and Elixir have no worker event emitter: use the structured telemetry callback for transport lifecycle and normal language control flow for per-job outcomes (see the [SDK guide](/guide/sdks/))._
 
 The full event list is in the [Worker guide](/guide/worker/).
 
@@ -550,7 +577,7 @@ const worker = new Worker('tasks', processor, { embedded: true, dataPath: './dat
 // DATA_PATH=./data/bunqueue.db bun run app.ts
 ```
 
-*`dataPath` applies to embedded (Bun) mode only. In server mode, persistence is configured on the server (`bunx bunqueue start --data-path ./data/bunq.db`); clients in every language need no changes.*
+_`dataPath` applies to embedded (Bun) mode only. In server mode, persistence is configured on the server (`bunx bunqueue start --data-path ./data/bunq.db`); clients in every language need no changes._
 
 ## Shut down cleanly
 
@@ -561,8 +588,8 @@ const worker = new Worker('tasks', processor, { embedded: true, dataPath: './dat
 import { shutdownManager } from 'bunqueue/client';
 
 process.on('SIGINT', async () => {
-  await worker.close();   // Finish active jobs
-  shutdownManager();      // Flush pending writes, close SQLite
+  await worker.close(); // Finish active jobs
+  shutdownManager(); // Flush pending writes, close SQLite
   process.exit(0);
 });
 ```
@@ -572,8 +599,8 @@ process.on('SIGINT', async () => {
 
 ```typescript
 process.on('SIGINT', async () => {
-  await worker.close();   // Stop pulling, drain in-flight jobs
-  queue.close();          // Close the connection
+  await worker.close(); // Stop pulling, drain in-flight jobs
+  queue.close(); // Close the connection
   process.exit(0);
 });
 ```
@@ -628,13 +655,15 @@ Bunqueue.Worker.stop(worker)
 
 The Bun examples above run in a single process. When multiple services need to share one queue, run bunqueue as a standalone server instead:
 
-| | Embedded mode | Server mode |
-|---|---------------|-------------|
-| **Best for** | Single-process apps, serverless | Multi-process, microservices |
-| **Setup** | `embedded: true` | Run `bunqueue start`, drop the option |
-| **Clients** | Bun only (in process) | Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir, Cloudflare Workers |
+|              | Embedded mode                   | Server mode                                                           |
+| ------------ | ------------------------------- | --------------------------------------------------------------------- |
+| **Best for** | Single-process apps, serverless | Multi-process, microservices                                          |
+| **Setup**    | `embedded: true`                | Run `bunqueue start`, drop the option                                 |
+| **Clients**  | Bun only (in process)           | Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir, Cloudflare Workers |
 
 See the [Server guide](/guide/server/). All six official client SDKs speak the same protocol against the same queues, see the [SDK guide](/guide/sdks/).
+The server uses memory/SQLite by default; for several active brokers sharing one
+queue, configure the [PostgreSQL 18.6 backend](/guide/databases/).
 
 ## Where to go next
 
@@ -699,7 +728,7 @@ app.cron("daily-report", "0 9 * * *", {"type": "summary"})
 </TabItem>
 </Tabs>
 
-*Simple Mode is available in TypeScript and Python. In PHP, Go, Rust and Elixir, compose `Queue` and `Worker` directly.*
+_Simple Mode is available in TypeScript and Python. In PHP, Go, Rust and Elixir, compose `Queue` and `Worker` directly._
 
 See the [Simple Mode guide](/guide/simple-mode/).
 
@@ -728,7 +757,7 @@ import { Workflow, Engine } from 'bunqueue/workflow';
 const flow = new Workflow('order')
   .step('validate', async (ctx) => ({ ok: true }))
   .step('charge', async (ctx) => ({ txId: 'tx_123' }))
-  .waitFor('manager-approval')  // Pauses until you send a signal
+  .waitFor('manager-approval') // Pauses until you send a signal
   .step('ship', async (ctx) => ({ shipped: true }));
 
 const engine = new Engine({ embedded: true });

@@ -133,14 +133,14 @@ Full definitions in [data-model](../data-model.md). The key shape (`src/domain/t
 
 ```typescript
 interface DlqEntry {
-  readonly job: Job;              // original job (data + options preserved)
-  readonly enteredAt: number;     // when first moved to DLQ
+  readonly job: Job; // original job (data + options preserved)
+  readonly enteredAt: number; // when first moved to DLQ
   readonly reason: FailureReason; // last failure reason
   readonly error: string | null;
   readonly attempts: AttemptRecord[]; // attempt history
-  retryCount: number;             // times retried *from* the DLQ (auto-retry)
+  retryCount: number; // times retried *from* the DLQ (auto-retry)
   lastRetryAt: number | null;
-  nextRetryAt: number | null;     // null = no auto-retry scheduled
+  nextRetryAt: number | null; // null = no auto-retry scheduled
   readonly expiresAt: number | null; // null = never auto-purge
 }
 ```
@@ -237,12 +237,30 @@ memory-only, persisted embedded, and TCP deployments.
   No `await` occurs inside that critical section.
 - The maintenance task and `getDlq*` reads are not lock-protected, consistent with the cooperative single-thread model; auto-retry mutates entries it owns before removing them.
 
+In PostgreSQL, DLQ eviction, expiry, removal, purge, and retry use the shared
+dependency-safe destructive lock plan. Limit/expiry enforcement runs in its own
+canonical transaction after the terminal transition commits; this avoids
+acquiring a dependency advisory lock while already holding a terminal job row.
+The revalidated cleanup skips a producer with an external live consumer, and a
+later maintenance pass can enforce the bound after that consumer is gone.
+Automatic retry first discovers candidate consumers and dependency edges without
+row locks. Its transaction then locks current queue policies, all consumer and
+dependency identities in sorted order, and finally the candidate rows. It
+rechecks dependency edges and skips any late unprotected edge before consulting
+completion evidence. This ordering serializes completion-tombstone retirement
+with custom-ID generation reuse and lets multiple brokers converge on exactly
+one retry without a row/advisory lock inversion.
+
 ## Edge Cases & Failure Modes
 
 - **`maxEntries` overflow** — normalized to a positive integer (minimum 1), default 10,000. `add()`, `restoreEntry()`, and lowering the configured cap evict oldest-first FIFO. Each eviction updates the counter, clears terminal index/result/log ownership, and deletes durable DLQ/job/result rows, so memory and SQLite stay bounded across restarts.
 - **Orphan `jobs` row / UNIQUE on retry (#97)** — every DLQ-entry path must persist the terminal entry and delete the live row. `lockManager.ts` documents this explicitly: if the lock-expiry path skipped these writes, the `jobs` row survived in SQLite while the DLQ entry lived only in memory, and a later retry re-inserted the surviving row → `UNIQUE constraint failed: jobs.id`. Symmetrically, retry paths call `requeueDlqJob`, whose SQLite transaction deletes the terminal row and inserts the live row together (`persistence/sqlite/jobs.ts`).
 - **`deleteJob` does not cascade the DLQ** — by design (`persistence/sqlite/mutations.ts`): `moveFailedJobToDlq` writes the DLQ row then drops the `jobs` row; cleanup callers that genuinely want the DLQ gone must call `deleteDlqEntry` explicitly.
 - **Purge is a full terminal deletion** — clearing only `DlqShard`/the `dlq` table leaves a dangling `jobIndex` location, so `GetState` still reports `failed`. `purgeDlqJobs` and `purgeExpiredDlq` share the same cleanup path and transactionally remove durable job/result rows plus pending buffered inserts before dropping the global indexes. Repeating expiry cleanup is a no-op, and purging one queue cannot delete another queue's entries.
+- **PostgreSQL protected producers** — manual removal returns `false`, while
+  bulk purge, expiry, and `maxEntries` enforcement skip a DLQ job that still has
+  a live dependency consumer outside the same deletion set. The DLQ row and its
+  counters remain coherent until deletion becomes legal.
 - **Recovery double-count avoidance** — `recover` loads `loadDlqJobIds()` and `recoverActiveJobs` skips stale `active` rows already present in the DLQ (legacy DBs predate the failJob fix), dropping the orphan row (`background/recovery/active.ts`). `quarantineCorruptDependsOn` persists the entry and drops the row but deliberately does **not** add to in-memory DLQ — the later `restoreDlq` pass restores it exactly once (`background/recovery/shared.ts`, `restore.ts`).
 - **`job_id` is not UNIQUE in the `dlq` table** — `insertDlq` is a plain `INSERT`; `deleteDlqEntry` deletes every matching row and `loadDlq` orders by `entered_at`. Selective permanent removal therefore drops every matching recovered row in one pass and decrements the in-memory counter by that exact number.
 - **Choose the async remote surface** — `getDlq` and `getDlqStats` retain synchronous embedded return types, so their TCP forms cannot return broker results. Synchronous `retryDlqByFilter` does send the filtered mutation over TCP, but returns the non-authoritative value `0`. Use `getDlqAsync`, `getDlqStatsAsync`, and `retryDlqByFilterAsync`; they round-trip full entries, statistics, and filtered retry counts. `getDlqConfig` returns the client-side TCP cache or `{}`, while `getDlqConfigAsync` reads the broker.
@@ -262,13 +280,13 @@ same retry/retention policy that was active before the crash. Resetting every
 field to its default removes the control-state row when no other persisted
 queue control needs it; `obliterate` removes it unconditionally.
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `autoRetry` | `false` | Enable background auto-retry from DLQ |
-| `autoRetryInterval` | `3_600_000` (1h) | Base interval before first auto-retry; backoff multiplies it |
-| `maxAutoRetries` | `3` | Auto-retries before `nextRetryAt` becomes `null` |
-| `maxAge` | `604_800_000` (7d) | Age before auto-purge; `null` = never |
-| `maxEntries` | `10000` | Per-queue cap; oldest evicted FIFO |
+| Field               | Default            | Meaning                                                      |
+| ------------------- | ------------------ | ------------------------------------------------------------ |
+| `autoRetry`         | `false`            | Enable background auto-retry from DLQ                        |
+| `autoRetryInterval` | `3_600_000` (1h)   | Base interval before first auto-retry; backoff multiplies it |
+| `maxAutoRetries`    | `3`                | Auto-retries before `nextRetryAt` becomes `null`             |
+| `maxAge`            | `604_800_000` (7d) | Age before auto-purge; `null` = never                        |
+| `maxEntries`        | `10000`            | Per-queue cap; oldest evicted FIFO                           |
 
 Numeric configuration is normalized at the domain boundary: intervals, retry counts and ages are finite non-negative integers; `maxEntries` is a finite positive integer with minimum 1. The same rule applies to embedded calls and sanitized TCP/HTTP commands.
 

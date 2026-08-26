@@ -30,7 +30,7 @@ export function routeQueueControlCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'Pause':
       return handlePause(command, context, requestId);
@@ -55,7 +55,7 @@ export function routeDlqCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'Dlq':
       return handleDlq(command, context, requestId);
@@ -78,7 +78,7 @@ export function routeRateLimitCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'RateLimit':
       return handleRateLimit(command, context, requestId);
@@ -97,7 +97,7 @@ export function routeCronCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'Cron':
       return handleCron(command, context, requestId);
@@ -116,7 +116,7 @@ export function routeConfigCommand(
   command: Command,
   context: HandlerContext,
   requestId?: string
-): Response | null {
+): Response | Promise<Response> | null {
   switch (command.cmd) {
     case 'SetStallConfig':
       return handleSetStallConfig(command, context, requestId);

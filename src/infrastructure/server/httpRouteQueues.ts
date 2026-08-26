@@ -1,4 +1,5 @@
 import { handleCommand } from './handler';
+import type { Worker } from '../../domain/types/worker';
 import { routeQueueJobOperations } from './http-routes/queueJobs';
 import { jsonResponse, parseJsonBody } from './httpEndpoints';
 import type { HandlerContext } from './types';
@@ -15,6 +16,11 @@ const RE_QUEUE_CLEAN = /^\/queues\/([^/]+)\/clean$/;
 const RE_QUEUE_PROMOTE_JOBS = /^\/queues\/([^/]+)\/promote-jobs$/;
 const RE_QUEUE_RETRY_COMPLETED = /^\/queues\/([^/]+)\/retry-completed$/;
 const RE_QUEUE_WORKERS = /^\/queues\/([^/]+)\/workers$/;
+const WORKER_TIMEOUT_MS = parseInt(Bun.env.WORKER_TIMEOUT_MS ?? '30000', 10);
+
+type DurableWorkerManager = HandlerContext['queueManager'] & {
+  listWorkersDurable?: () => Promise<Worker[]>;
+};
 
 export async function routeQueueRoutes(
   request: Request,
@@ -36,7 +42,17 @@ export async function routeQueueRoutes(
   const queueWorkersMatch = path.match(RE_QUEUE_WORKERS);
   if (queueWorkersMatch && method === 'GET') {
     const queue = decodeURIComponent(queueWorkersMatch[1]);
-    const workers = context.queueManager.workerManager.getForQueue(queue);
+    const manager = context.queueManager as DurableWorkerManager;
+    let workers: Worker[];
+    if (manager.listWorkersDurable) {
+      const durableWorkers = await manager.listWorkersDurable();
+      const now = Date.now();
+      workers = durableWorkers.filter(
+        (worker) => worker.queues.includes(queue) && now - worker.lastSeen < WORKER_TIMEOUT_MS
+      );
+    } else {
+      workers = manager.workerManager.getForQueue(queue);
+    }
     return jsonResponse(
       {
         ok: true,

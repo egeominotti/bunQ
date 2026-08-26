@@ -3,6 +3,7 @@ import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
+import { sanitizeServerError } from '../errors';
 
 /** Commit the whole graph in one broker operation; validation happens pre-mutation. */
 export async function handlePushFlow(
@@ -18,6 +19,6 @@ export async function handlePushFlow(
     const result = await ctx.queueManager.pushFlow({ jobs });
     return resp.data(result, reqId);
   } catch (error) {
-    return resp.error(error instanceof Error ? error.message : String(error), reqId);
+    return resp.error(sanitizeServerError(error), reqId);
   }
 }

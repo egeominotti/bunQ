@@ -9,6 +9,7 @@ import type { QueueManager } from '../../application/queueManager';
 import { throughputTracker } from '../../application/throughputTracker';
 import { latencyTracker } from '../../application/latencyTracker';
 import { VERSION } from '../../shared/version';
+import { clientStorageStatus } from '../../shared/storageHealth';
 
 /** Cached hostname — computed once */
 const HOST = hostname();
@@ -27,7 +28,7 @@ export function buildStatsRefresh(qm: QueueManager) {
   const rates = throughputTracker.getRates();
   const percentiles = latencyTracker.getPercentiles();
   const averages = latencyTracker.getAverages();
-  const storage = qm.getStorageStatus();
+  const storage = clientStorageStatus(qm.getStorageStatus());
   const mem = process.memoryUsage();
   const workerStats = qm.workerManager.getStats();
 

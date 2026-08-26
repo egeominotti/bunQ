@@ -22,6 +22,7 @@ import {
 } from './httpEndpoints';
 import { loadTlsOptions, type TlsServerOptions } from './tls';
 import { routeHttpRequest } from './httpRouter';
+import { sanitizeServerError } from './errors';
 
 /**
  * Validate auth token against valid tokens set
@@ -210,8 +211,7 @@ export function createHttpServer(queueManager: QueueManager, config: HttpServerC
     try {
       return await routeHttpRequest(req, path, ctx, corsOrigins);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Internal error';
-      return jsonResponse({ ok: false, error: message }, 500);
+      return jsonResponse({ ok: false, error: sanitizeServerError(err) }, 500);
     }
   };
 

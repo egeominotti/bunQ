@@ -1,6 +1,6 @@
 ---
-title: "bunqueue.config.ts: Typed Server Configuration File"
-description: "Centralize every bunqueue server setting in one typed bunqueue.config.ts: ports, auth tokens, storage, CORS, S3 backups, and timeouts with full IntelliSense."
+title: 'bunqueue.config.ts: Typed Server Configuration File'
+description: 'Centralize every bunqueue server setting in one typed bunqueue.config.ts: ports, auth, SQLite or PostgreSQL 18.6 storage, CORS, backups, and timeouts.'
 head:
   - tag: meta
     attrs:
@@ -74,13 +74,13 @@ TCP and HTTP server settings.
 ```typescript
 defineConfig({
   server: {
-    tcpPort: 6789,            // TCP server port (default: 6789)
-    httpPort: 6790,           // HTTP/REST API port (default: 6790)
-    host: '0.0.0.0',          // Bind address (default: 0.0.0.0)
+    tcpPort: 6789, // TCP server port (default: 6789)
+    httpPort: 6790, // HTTP/REST API port (default: 6790)
+    host: '0.0.0.0', // Bind address (default: 0.0.0.0)
     tcpSocketPath: undefined, // Reserved, not applied yet: TCP always binds host:port
     httpSocketPath: undefined, // Unix socket for HTTP (overrides host/port)
-    tlsCertFile: undefined,   // PEM certificate, enables native TLS on TCP + HTTP (with tlsKeyFile)
-    tlsKeyFile: undefined,    // PEM private key (set both or neither, partial config is a startup error)
+    tlsCertFile: undefined, // PEM certificate, enables native TLS on TCP + HTTP (with tlsKeyFile)
+    tlsKeyFile: undefined, // PEM private key (set both or neither, partial config is a startup error)
   },
 });
 ```
@@ -92,8 +92,8 @@ Authentication tokens for clients. Set this on any server reachable from a netwo
 ```typescript
 defineConfig({
   auth: {
-    tokens: ['my-secret-token'],    // Auth tokens for TCP/HTTP
-    requireAuthForMetrics: false,   // Require auth for /prometheus (env: METRICS_AUTH)
+    tokens: ['my-secret-token'], // Auth tokens for TCP/HTTP
+    requireAuthForMetrics: false, // Require auth for /prometheus (env: METRICS_AUTH)
   },
 });
 ```
@@ -104,15 +104,38 @@ The config file is code, don't hardcode secrets that get committed to git. Use `
 
 ### `storage`
 
-Where jobs persist. Without `dataPath`, everything is in-memory and lost on restart.
+Where jobs persist. Memory and SQLite remain the defaults; PostgreSQL is an
+optional standalone-server backend for multiple active brokers.
 
 ```typescript
 defineConfig({
   storage: {
-    dataPath: './data/queue.db',  // SQLite database path (undefined = in-memory)
+    driver: 'sqlite', // 'memory' | 'sqlite' | 'postgres'
+    dataPath: './data/queue.db', // required for explicit SQLite
   },
 });
 ```
+
+Without `driver`, a PostgreSQL URL selects PostgreSQL, a data path selects
+SQLite, and neither selects in-memory storage. PostgreSQL configuration:
+
+```typescript
+defineConfig({
+  storage: {
+    driver: 'postgres',
+    url: process.env.BUNQUEUE_POSTGRES_URL!,
+    namespace: 'production', // isolates installations sharing one database
+    brokerId: process.env.HOSTNAME, // unique per active broker; auto-generated if omitted
+    poolSize: 10, // default 10, runtime minimum 2
+    leaseDurationMs: 30_000, // default 30s, runtime minimum 1s
+    pollIntervalMs: 250, // durable event/cron fallback, minimum 25ms
+  },
+});
+```
+
+Do not combine `url` with `dataPath`. PostgreSQL support is server-only and is
+validated against PostgreSQL 18.6; embedded queues continue to use
+memory/SQLite. MySQL is not supported. See [Storage backends](/guide/databases/).
 
 ### `telemetry`
 
@@ -153,28 +176,28 @@ defineConfig({
     accessKeyId: process.env.S3_ACCESS_KEY_ID,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     sessionToken: process.env.S3_SESSION_TOKEN, // Temporary credentials
-    region: 'eu-west-1',              // Default: us-east-1
-    endpoint: undefined,              // Custom S3 endpoint (MinIO, R2, etc.)
-    virtualHostedStyle: undefined,     // Force bucket-in-host addressing
-    interval: 6 * 60 * 60 * 1000,    // Backup interval in ms (default: 6h)
-    retention: 7,                     // Backups to keep (default: 7)
-    prefix: 'backups/',               // S3 key prefix (default: 'backups/')
+    region: 'eu-west-1', // Default: us-east-1
+    endpoint: undefined, // Custom S3 endpoint (MinIO, R2, etc.)
+    virtualHostedStyle: undefined, // Force bucket-in-host addressing
+    interval: 6 * 60 * 60 * 1000, // Backup interval in ms (default: 6h)
+    retention: 7, // Backups to keep (default: 7)
+    prefix: 'backups/', // S3 key prefix (default: 'backups/')
   },
 });
 ```
 
 The server also needs `storage.dataPath` (or a data-path environment variable);
-automatic backup is unavailable in in-memory mode.
+automatic backup is unavailable in in-memory and PostgreSQL modes.
 
 ### `timeouts`
 
 ```typescript
 defineConfig({
   timeouts: {
-    shutdown: 30000,   // Graceful shutdown timeout in ms (default: 30000)
-    stats: 300000,     // Stats logging interval in ms (default: 300000)
-    worker: 30000,     // Worker timeout (default: 30000)
-    lock: 5000,        // Lock timeout (default: 5000)
+    shutdown: 30000, // Graceful shutdown timeout in ms (default: 30000)
+    stats: 300000, // Stats logging interval in ms (default: 300000)
+    worker: 30000, // Worker timeout (default: 30000)
+    lock: 5000, // Lock timeout (default: 5000)
   },
 });
 ```
@@ -186,8 +209,8 @@ Delivery retries for [webhooks](/guide/webhooks/).
 ```typescript
 defineConfig({
   webhooks: {
-    maxRetries: 3,       // Max delivery retries (default: 3)
-    retryDelay: 1000,    // Retry delay in ms (default: 1000)
+    maxRetries: 3, // Max delivery retries (default: 3)
+    retryDelay: 1000, // Retry delay in ms (default: 1000)
   },
 });
 ```
@@ -197,8 +220,8 @@ defineConfig({
 ```typescript
 defineConfig({
   logging: {
-    level: 'info',     // 'debug' | 'info' | 'warn' | 'error'
-    format: 'json',    // 'text' | 'json'
+    level: 'info', // 'debug' | 'info' | 'warn' | 'error'
+    format: 'json', // 'text' | 'json'
   },
 });
 ```
@@ -236,7 +259,7 @@ export default defineConfig({
     accessKeyId: process.env.S3_ACCESS_KEY_ID,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     region: 'eu-west-1',
-    interval: 3600000,  // Every hour
+    interval: 3600000, // Every hour
     retention: 30,
   },
   logging: { level: 'info', format: 'json' },
@@ -296,7 +319,8 @@ defineConfig({
 ```
 
 :::tip[Related Guides]
+
 - [Environment Variables](/guide/env-vars/), full env var reference (still supported as fallback)
 - [Running the Server](/guide/server/), server startup guide
 - [S3 Backup](/guide/backup/), backup configuration details
-:::
+  :::

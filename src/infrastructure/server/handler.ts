@@ -8,6 +8,7 @@ import type { Response } from '../../domain/types/response';
 import * as resp from '../../domain/types/response';
 import { constantTimeEqual } from '../../shared/hash';
 import type { HandlerContext } from './types';
+import { sanitizeServerError } from './errors';
 import {
   routeCoreCommand,
   routeQueryCommand,
@@ -71,33 +72,29 @@ export async function handleCommand(cmd: Command, ctx: HandlerContext): Promise<
     result = await routeManagementCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeQueueControlCommand(cmd, ctx, reqId);
+    result = await routeQueueControlCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeDlqCommand(cmd, ctx, reqId);
+    result = await routeDlqCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeRateLimitCommand(cmd, ctx, reqId);
+    result = await routeRateLimitCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeConfigCommand(cmd, ctx, reqId);
+    result = await routeConfigCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeCronCommand(cmd, ctx, reqId);
+    result = await routeCronCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeMonitoringCommand(cmd, ctx, reqId);
+    result = await routeMonitoringCommand(cmd, ctx, reqId);
     if (result) return result;
 
-    result = routeDashboardCommand(cmd, ctx, reqId);
+    result = await routeDashboardCommand(cmd, ctx, reqId);
     if (result) return result;
 
     return resp.error(`Unknown command: ${cmd.cmd}`, reqId);
   } catch (err) {
-    // Sanitize error messages to avoid leaking internal details to clients
-    const raw = err instanceof Error ? err.message : 'Unknown error';
-    const message =
-      raw.includes('SQLITE') || raw.includes('database') ? 'Internal server error' : raw;
-    return resp.error(message, reqId);
+    return resp.error(sanitizeServerError(err), reqId);
   }
 }

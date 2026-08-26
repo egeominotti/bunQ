@@ -5,6 +5,7 @@ import { tcpLog } from '../../shared/logger';
 import { decodeMessagePack } from '../../shared/msgpack';
 import { withSemaphore } from '../../shared/semaphore';
 import { handleCommand } from './handler';
+import { sanitizeServerError } from './errors';
 import { FrameSizeError } from './protocol';
 import { getRateLimiter } from './rateLimiter';
 import { TcpConnectionRegistry } from './tcp/connections';
@@ -91,10 +92,7 @@ export function createTcpServer(queueManager: QueueManager, config: TcpServerCon
             writeQueue.write(socket, serializeTcpResponse(response));
             registry.dropForWriteOverflow(socket);
           } catch (error) {
-            const raw = error instanceof Error ? error.message : 'Unknown error';
-            const message =
-              raw.includes('SQLITE') || raw.includes('database') ? 'Internal server error' : raw;
-            writeQueue.write(socket, tcpErrorResponse(message, command.reqId));
+            writeQueue.write(socket, tcpErrorResponse(sanitizeServerError(error), command.reqId));
             registry.dropForWriteOverflow(socket);
           }
         });

@@ -1,21 +1,23 @@
+import { DEFAULT_DLQ_CONFIG } from '../../../domain/types/dlq';
+import { DEFAULT_STALL_CONFIG } from '../../../domain/types/stall';
 import type { CloudCommandHandler } from '../types/command';
 import { mapCloudCommandJob } from './jobMapper';
 
 export const QUEUE_COMMANDS: Partial<Record<string, CloudCommandHandler>> = {
-  'queue:pause': (queueManager, command) => {
-    queueManager.pause(command.queue ?? '');
+  'queue:pause': async (adapter, command) => {
+    await adapter.pause(command.queue ?? '', true);
     return { queue: command.queue, paused: true };
   },
-  'queue:resume': (queueManager, command) => {
-    queueManager.resume(command.queue ?? '');
+  'queue:resume': async (adapter, command) => {
+    await adapter.pause(command.queue ?? '', false);
     return { queue: command.queue, paused: false };
   },
-  'queue:drain': (queueManager, command) => {
-    const count = queueManager.drain(command.queue ?? '');
+  'queue:drain': async (adapter, command) => {
+    const count = await adapter.drain(command.queue ?? '');
     return { queue: command.queue, drained: count };
   },
-  'queue:clean': (queueManager, command) => {
-    const ids = queueManager.clean(
+  'queue:clean': async (adapter, command) => {
+    const ids = await adapter.clean(
       command.queue ?? '',
       command.graceMs ?? 0,
       command.state,
@@ -23,78 +25,77 @@ export const QUEUE_COMMANDS: Partial<Record<string, CloudCommandHandler>> = {
     );
     return { queue: command.queue, cleaned: ids.length, ids };
   },
-  'queue:obliterate': (queueManager, command) => {
-    queueManager.obliterate(command.queue ?? '');
+  'queue:obliterate': async (adapter, command) => {
+    await adapter.obliterate(command.queue ?? '');
     return { queue: command.queue, obliterated: true };
   },
-  'queue:promoteAll': async (queueManager, command) => {
+  'queue:promoteAll': async (adapter, command) => {
     const limit = command.limit ?? 1000;
-    const jobs = queueManager.getJobs(command.queue ?? '', {
-      state: ['delayed'],
-      start: 0,
-      end: limit - 1,
-    });
-    let promoted = 0;
-    for (const job of jobs) {
-      try {
-        await queueManager.promote(job.id);
-        promoted++;
-      } catch {
-        // Skip jobs that can no longer be promoted.
-      }
-    }
+    const promoted = await adapter.promoteAll(command.queue ?? '', limit);
     return { queue: command.queue, promoted };
   },
-  'queue:retryCompleted': (queueManager, command) => {
-    const count = queueManager.retryCompleted(command.queue ?? '');
+  'queue:retryCompleted': async (adapter, command) => {
+    const count = await adapter.retryCompleted(command.queue ?? '');
     return { queue: command.queue, retried: count };
   },
-  'queue:rateLimit': (queueManager, command) => {
-    queueManager.setRateLimit(command.queue ?? '', command.max ?? 100);
+  'queue:rateLimit': async (adapter, command) => {
+    await adapter.setRateLimit(command.queue ?? '', command.max ?? 100);
     return { queue: command.queue, rateLimit: command.max ?? 100 };
   },
-  'queue:clearRateLimit': (queueManager, command) => {
-    queueManager.clearRateLimit(command.queue ?? '');
+  'queue:clearRateLimit': async (adapter, command) => {
+    await adapter.setRateLimit(command.queue ?? '', null);
     return { queue: command.queue, rateLimit: null };
   },
-  'queue:concurrency': (queueManager, command) => {
-    queueManager.setConcurrency(command.queue ?? '', command.concurrency ?? 10);
+  'queue:concurrency': async (adapter, command) => {
+    await adapter.setConcurrency(command.queue ?? '', command.concurrency ?? 10);
     return { queue: command.queue, concurrency: command.concurrency ?? 10 };
   },
-  'queue:clearConcurrency': (queueManager, command) => {
-    queueManager.clearConcurrency(command.queue ?? '');
+  'queue:clearConcurrency': async (adapter, command) => {
+    await adapter.setConcurrency(command.queue ?? '', null);
     return { queue: command.queue, concurrency: null };
   },
-  'queue:stallConfig': (queueManager, command) => {
-    queueManager.setStallConfig(command.queue ?? '', command.config ?? {});
+  'queue:stallConfig': async (adapter, command) => {
+    await adapter.setStallConfig(command.queue ?? '', command.config ?? {});
     return { queue: command.queue, stallConfig: command.config };
   },
-  'queue:dlqConfig': (queueManager, command) => {
-    queueManager.setDlqConfig(command.queue ?? '', command.config ?? {});
+  'queue:dlqConfig': async (adapter, command) => {
+    await adapter.setDlqConfig(command.queue ?? '', command.config ?? {});
     return { queue: command.queue, dlqConfig: command.config };
   },
-  'queue:detail': (queueManager, command) => {
+  'queue:detail': async (adapter, command) => {
     const queue = command.queue ?? '';
-    const counts = queueManager.getQueueJobCounts(queue);
-    const paused = queueManager.isPaused(queue);
-    const stallConfig = queueManager.getStallConfig(queue);
-    const dlqConfig = queueManager.getDlqConfig(queue);
-    const dlqEntries = queueManager.getDlqEntries(queue).slice(0, 50);
-    const jobs = queueManager.getJobs(queue, {
+    const source = await adapter.readSnapshotSource([queue]);
+    const view = source.queues.find(({ name }) => name === queue);
+    const counts = view?.counts ?? {
+      waiting: 0,
+      prioritized: 0,
+      delayed: 0,
+      active: 0,
+      completed: 0,
+      failed: 0,
+      'waiting-children': 0,
+      totalCompleted: 0,
+      totalFailed: 0,
+    };
+    const dlqEntries = source.dlqEntries.filter((entry) => entry.job.queue === queue).slice(0, 50);
+    const jobs = await adapter.listJobs(queue, {
       state: ['waiting', 'active', 'delayed', 'completed', 'failed'],
       start: 0,
-      end: 49,
+      end: 50,
     });
     return {
       queue,
-      paused,
+      paused: view?.paused ?? false,
       counts,
       stallConfig: {
-        enabled: stallConfig.enabled,
-        stallInterval: stallConfig.stallInterval,
-        maxStalls: stallConfig.maxStalls,
+        enabled: view?.stallConfig.enabled ?? DEFAULT_STALL_CONFIG.enabled,
+        stallInterval: view?.stallConfig.stallInterval ?? DEFAULT_STALL_CONFIG.stallInterval,
+        maxStalls: view?.stallConfig.maxStalls ?? DEFAULT_STALL_CONFIG.maxStalls,
       },
-      dlqConfig: { maxRetries: dlqConfig.maxAutoRetries, maxAge: dlqConfig.maxAge ?? 0 },
+      dlqConfig: {
+        maxRetries: view?.dlqConfig.maxAutoRetries ?? DEFAULT_DLQ_CONFIG.maxAutoRetries,
+        maxAge: view?.dlqConfig.maxAge ?? DEFAULT_DLQ_CONFIG.maxAge ?? 0,
+      },
       dlqEntries: dlqEntries.map((entry) => ({
         jobId: String(entry.job.id),
         reason: entry.reason,
@@ -105,27 +106,14 @@ export const QUEUE_COMMANDS: Partial<Record<string, CloudCommandHandler>> = {
       jobs: jobs.map(mapCloudCommandJob),
     };
   },
-  'queue:list': (queueManager) => {
-    const queueNames = queueManager.listQueues();
-    const countsByQueue = queueManager.getAllQueueJobCounts();
-    const queues = queueNames.flatMap((name) => {
-      const counts = countsByQueue.get(name);
-      if (!counts) return [];
-      return {
-        name,
-        waiting: counts.waiting,
-        prioritized: counts.prioritized,
-        delayed: counts.delayed,
-        active: counts.active,
-        completed: counts.completed,
-        failed: counts.failed,
-        'waiting-children': counts['waiting-children'],
-        paused: queueManager.isPaused(name),
-        totalCompleted: counts.totalCompleted,
-        totalFailed: counts.totalFailed,
-      };
-    });
+  'queue:list': async (adapter) => {
+    const source = await adapter.readSnapshotSource();
+    const queues = source.queues.map(({ name, counts, paused }) => ({
+      name,
+      ...counts,
+      paused,
+    }));
     return { queues };
   },
-  'stats:refresh': (queueManager) => queueManager.getStats(),
+  'stats:refresh': async (adapter) => (await adapter.readSnapshotSource()).stats,
 };

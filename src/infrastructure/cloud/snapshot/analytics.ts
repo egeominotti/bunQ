@@ -1,5 +1,6 @@
 import type { QueueManager } from '../../../application/queueManager';
 import type { CloudSnapshot } from '../types';
+import type { CloudSnapshotSource } from '../queueAdapter/types';
 
 const previousQueueTotals = new Map<
   string,
@@ -42,6 +43,17 @@ export function collectWorkerUtilization(
   queueManager: QueueManager
 ): CloudSnapshot['workerUtilization'] {
   return queueManager.workerManager.list().map((worker) => ({
+    id: worker.id,
+    name: worker.name,
+    utilization:
+      worker.concurrency > 0 ? Math.round((worker.activeJobs / worker.concurrency) * 100) / 100 : 0,
+  }));
+}
+
+export function mapSnapshotWorkerUtilization(
+  workers: CloudSnapshotSource['workers']
+): CloudSnapshot['workerUtilization'] {
+  return workers.map((worker) => ({
     id: worker.id,
     name: worker.name,
     utilization:

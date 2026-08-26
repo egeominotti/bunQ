@@ -15,6 +15,9 @@ file to snapshot, so enabling S3 backup without `BUNQUEUE_DATA_PATH`,
 `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`, or `storage.dataPath` is a startup
 configuration error. `bootServer` exits with code 1 before binding TCP/HTTP;
 it does not keep running with backup silently disabled.
+The PostgreSQL driver is also rejected: this module cannot snapshot a remote
+database, so operators must use PostgreSQL-native backup and point-in-time
+recovery tooling.
 
 ## Module Map
 
@@ -63,21 +66,21 @@ interface S3BackupConfig {
 }
 ```
 
-| Environment | Field | Default / rule |
-| --- | --- | --- |
-| `S3_BACKUP_ENABLED` | `enabled` | `false`; `1` or `true` enables |
-| `S3_ACCESS_KEY_ID` / `AWS_ACCESS_KEY_ID` | `accessKeyId` | required |
-| `S3_SECRET_ACCESS_KEY` / `AWS_SECRET_ACCESS_KEY` | `secretAccessKey` | required |
-| `S3_SESSION_TOKEN` / `AWS_SESSION_TOKEN` | `sessionToken` | optional temporary-credential token |
-| `S3_BUCKET` / `AWS_BUCKET` | `bucket` | required |
-| `S3_ENDPOINT` / `AWS_ENDPOINT` | `endpoint` | unset for AWS |
-| `S3_VIRTUAL_HOSTED_STYLE` | `virtualHostedStyle` | provider/client default; `1` or `true` forces bucket-in-host requests |
-| `S3_REGION` / `AWS_REGION` | `region` | `us-east-1` |
-| `S3_BACKUP_INTERVAL` | `intervalMs` | `21600000`; minimum 60000 ms |
-| `S3_BACKUP_RETENTION` | `retention` | `7`; minimum 1 |
-| `S3_BACKUP_PREFIX` | `prefix` | `backups/` |
-| data-path aliases above | `databasePath` | required |
-| constructor only | `timeoutMs` | 30000 ms per S3 attempt |
+| Environment                                      | Field                | Default / rule                                                        |
+| ------------------------------------------------ | -------------------- | --------------------------------------------------------------------- |
+| `S3_BACKUP_ENABLED`                              | `enabled`            | `false`; `1` or `true` enables                                        |
+| `S3_ACCESS_KEY_ID` / `AWS_ACCESS_KEY_ID`         | `accessKeyId`        | required                                                              |
+| `S3_SECRET_ACCESS_KEY` / `AWS_SECRET_ACCESS_KEY` | `secretAccessKey`    | required                                                              |
+| `S3_SESSION_TOKEN` / `AWS_SESSION_TOKEN`         | `sessionToken`       | optional temporary-credential token                                   |
+| `S3_BUCKET` / `AWS_BUCKET`                       | `bucket`             | required                                                              |
+| `S3_ENDPOINT` / `AWS_ENDPOINT`                   | `endpoint`           | unset for AWS                                                         |
+| `S3_VIRTUAL_HOSTED_STYLE`                        | `virtualHostedStyle` | provider/client default; `1` or `true` forces bucket-in-host requests |
+| `S3_REGION` / `AWS_REGION`                       | `region`             | `us-east-1`                                                           |
+| `S3_BACKUP_INTERVAL`                             | `intervalMs`         | `21600000`; minimum 60000 ms                                          |
+| `S3_BACKUP_RETENTION`                            | `retention`          | `7`; minimum 1                                                        |
+| `S3_BACKUP_PREFIX`                               | `prefix`             | `backups/`                                                            |
+| data-path aliases above                          | `databasePath`       | required                                                              |
+| constructor only                                 | `timeoutMs`          | 30000 ms per S3 attempt                                               |
 
 `validateConfig` rejects missing credentials, bucket or database path,
 retention below one, and intervals shorter than one minute. File configuration
@@ -138,9 +141,9 @@ The metadata shape is:
 interface BackupMetadata {
   timestamp: string;
   version: string;
-  size: number;            // uncompressed bytes
-  compressedSize: number;  // uploaded bytes
-  checksum: string;        // SHA-256 of uncompressed bytes
+  size: number; // uncompressed bytes
+  compressedSize: number; // uploaded bytes
+  checksum: string; // SHA-256 of uncompressed bytes
   compressed: true;
 }
 ```

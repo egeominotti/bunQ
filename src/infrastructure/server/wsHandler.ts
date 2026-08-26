@@ -16,6 +16,7 @@ import type { ServerWebSocket } from 'bun';
 import type { QueueManager } from '../../application/queueManager';
 import type { JobEvent } from '../../domain/types/queue';
 import { handleCommand, type HandlerContext } from './handler';
+import { sanitizeServerError } from './errors';
 import { parseCommand, serializeResponse, errorResponse } from './protocol';
 import { QueueCountsScheduler } from './queueCountsScheduler';
 import type { WsData } from './types/ws';
@@ -78,7 +79,7 @@ export class WsHandler {
     });
 
     this.statsInterval ??= setInterval(() => {
-      if (this.clients.size > 0) this.broadcastStats(qm);
+      if (this.clients.size > 0) void this.broadcastStats(qm);
     }, 5000);
 
     this.healthInterval ??= setInterval(() => {
@@ -110,8 +111,12 @@ export class WsHandler {
 
   // ── Periodic broadcasts ──────────────────────────────────
 
-  private broadcastStats(qm: QueueManager): void {
-    this.emit('stats:snapshot', buildStatsSnapshot(qm));
+  private async broadcastStats(qm: QueueManager): Promise<void> {
+    try {
+      this.emit('stats:snapshot', await buildStatsSnapshot(qm));
+    } catch {
+      // A failed durable read must not be replaced by a stale local snapshot.
+    }
   }
 
   private broadcastHealth(qm: QueueManager): void {
@@ -231,8 +236,7 @@ export class WsHandler {
       if (cmd.cmd === 'Auth' && response.ok) ws.data.authenticated = true;
       ws.send(serializeResponse(response));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      ws.send(errorResponse(msg, cmd.reqId));
+      ws.send(errorResponse(sanitizeServerError(err), cmd.reqId));
     }
   }
 

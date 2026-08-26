@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Prevents duplicate jobs from entering a queue. Two independent mechanisms cover different needs: **custom job IDs** (`jobId`) make a re-add idempotent — while the prior job is unfinished (waiting / waiting-children / **active**) the add is a no-op that returns the existing job, and once it has *completed* the deterministic id is recycled for a fresh job (#92) — and **unique keys** (`deduplication.id`) suppress / extend / replace pending jobs within an optional TTL window. Both checks run inside the shard write lock during `pushJob` so concurrent adds of the same key cannot race. This is how store-and-forward edges, cron `preventOverlap`, and BullMQ-style `deduplication`/`debounce` options avoid creating redundant work.
+Prevents duplicate jobs from entering a queue. Two independent mechanisms cover different needs: **custom job IDs** (`jobId`) make a re-add idempotent — while the prior job is unfinished (waiting / waiting-children / **active**) the add is a no-op that returns the existing job, and once it has _completed_ the deterministic id is recycled for a fresh job (#92) — and **unique keys** (`deduplication.id`) suppress / extend / replace pending jobs within an optional TTL window. Both checks run inside the shard write lock during `pushJob` so concurrent adds of the same key cannot race. This is how store-and-forward edges, cron `preventOverlap`, and BullMQ-style `deduplication`/`debounce` options avoid creating redundant work.
 
 ## Responsibilities & Scope
 
@@ -43,16 +43,16 @@ External / runtime: Bun + SQLite (the `jobs` table, partial index `idx_jobs_uniq
 
 ```typescript
 class UniqueKeyManager {
-  isAvailable(queue: string, key: string): boolean;                          // :18
-  getEntry(queue: string, key: string): UniqueKeyEntry | null;               // :29
-  register(queue: string, key: string, jobId: JobId): void;                  // :40  (legacy, no TTL)
+  isAvailable(queue: string, key: string): boolean; // :18
+  getEntry(queue: string, key: string): UniqueKeyEntry | null; // :29
+  register(queue: string, key: string, jobId: JobId): void; // :40  (legacy, no TTL)
   registerWithTtl(queue: string, key: string, jobId: JobId, ttl?: number): void; // :45
-  extendTtl(queue: string, key: string, ttl: number): boolean;               // :60
+  extendTtl(queue: string, key: string, ttl: number): boolean; // :60
   release(queue: string, key: string): boolean;
   releaseIfOwned(queue: string, key: string, ownerId: JobId): boolean;
-  cleanExpired(): number;                                                     // :73
-  clearQueue(queue: string): void;                                            // :88
-  getMap(): Map<string, Map<string, UniqueKeyEntry>>;                         // :93
+  cleanExpired(): number; // :73
+  clearQueue(queue: string): void; // :88
+  getMap(): Map<string, Map<string, UniqueKeyEntry>>; // :93
 }
 ```
 
@@ -109,17 +109,17 @@ class DedupDebounceMerger {
 
 Wire/job fields relevant here (full definitions in [data-model](../data-model.md)):
 
-| Field | Source | Meaning |
-| ----- | ------ | ------- |
-| `JobOptions.jobId` | `src/client/types/options.ts:49` | Custom idempotency id → becomes `job.customId` and the job's primary key |
-| `JobOptions.deduplication` | `src/client/types/options.ts:66` | `{ id, ttl?, extend?, replace? }` (BullMQ v5 compatible) |
-| `JobOptions.debounce` | `src/client/types/options.ts:67` | `{ id, ttl }` (stored only — see gotcha below) |
-| `Job.uniqueKey` | `src/domain/types/jobs/model.ts:58` | `= deduplication.id`; drives unique-key dedup |
-| `Job.customId` | `src/domain/types/jobs/model.ts:59` | `= jobId` (explicit custom id only); mapped via `customIdMap` |
-| `Job.deduplicationTtl/Extend/Replace` | `src/domain/types/jobs/model.ts:82-84` | persisted dedup strategy/TTL |
-| `UniqueKeyEntry` | `domain/types/deduplication.ts:28` | in-memory `{ jobId, expiresAt, registeredAt }` |
+| Field                                 | Source                                 | Meaning                                                                  |
+| ------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| `JobOptions.jobId`                    | `src/client/types/options.ts:49`       | Custom idempotency id → becomes `job.customId` and the job's primary key |
+| `JobOptions.deduplication`            | `src/client/types/options.ts:66`       | `{ id, ttl?, extend?, replace? }` (BullMQ v5 compatible)                 |
+| `JobOptions.debounce`                 | `src/client/types/options.ts:67`       | `{ id, ttl }` (stored only — see gotcha below)                           |
+| `Job.uniqueKey`                       | `src/domain/types/jobs/model.ts:58`    | `= deduplication.id`; drives unique-key dedup                            |
+| `Job.customId`                        | `src/domain/types/jobs/model.ts:59`    | `= jobId` (explicit custom id only); mapped via `customIdMap`            |
+| `Job.deduplicationTtl/Extend/Replace` | `src/domain/types/jobs/model.ts:82-84` | persisted dedup strategy/TTL                                             |
+| `UniqueKeyEntry`                      | `domain/types/deduplication.ts:28`     | in-memory `{ jobId, expiresAt, registeredAt }`                           |
 
-Client → wire mapping (`src/client/queue/operations/add/payload.ts:34-81`): `uniqueKey = deduplication?.id`, `customId = jobId` (only an **explicit** `jobId`), `dedup = { ttl, extend, replace }`. The dedup id is carried solely by `uniqueKey` into `handleDeduplication` and is deliberately **not** mirrored into `customId`: doing so made `handleCustomId` short-circuit a same-key re-add as an idempotent no-op *before* `handleDeduplication`'s suppress/replace/extend logic could run — silently dropping `replace`/`extend` in **embedded** mode. The TCP single-push (`core.ts:69` → `customId: cmd.jobId`) and bulk paths already send `customId = jobId` only, so this aligns embedded with the (correct) TCP behavior.
+Client → wire mapping (`src/client/queue/operations/add/payload.ts:34-81`): `uniqueKey = deduplication?.id`, `customId = jobId` (only an **explicit** `jobId`), `dedup = { ttl, extend, replace }`. The dedup id is carried solely by `uniqueKey` into `handleDeduplication` and is deliberately **not** mirrored into `customId`: doing so made `handleCustomId` short-circuit a same-key re-add as an idempotent no-op _before_ `handleDeduplication`'s suppress/replace/extend logic could run — silently dropping `replace`/`extend` in **embedded** mode. The TCP single-push (`core.ts:69` → `customId: cmd.jobId`) and bulk paths already send `customId = jobId` only, so this aligns embedded with the (correct) TCP behavior.
 
 SQLite columns: `jobs.unique_key`, `jobs.custom_id` (`schema.ts:34-35`). Note `idx_jobs_unique ON jobs(queue, unique_key) WHERE unique_key IS NOT NULL` (`schema.ts:58-59`) is a **non-unique** index for lookup speed — uniqueness is enforced in memory, not by the database. Custom-id idempotency is backstopped by the `jobs.id` PRIMARY KEY (the custom id becomes the row id).
 
@@ -135,11 +135,11 @@ Single push: `pushJob` takes the required write locks and runs both checks insid
 ### 1. Custom-ID idempotency — `handleCustomId` (`customId.ts`)
 
 1. No `customId` → return a fresh generated id.
-2. `id = jobId(input.customId)` (the custom id *is* the job id). Look up `customIdMap`. If the prior job is still **unfinished** (and not in `completedJobs`), the re-add is an idempotent no-op (BullMQ parity) — never a second insert of the same deterministic id, which would otherwise collide on the `jobs.id` PRIMARY KEY. Three unfinished states are covered:
+2. `id = jobId(input.customId)` (the custom id _is_ the job id). Look up `customIdMap`. If the prior job is still **unfinished** (and not in `completedJobs`), the re-add is an idempotent no-op (BullMQ parity) — never a second insert of the same deterministic id, which would otherwise collide on the `jobs.id` PRIMARY KEY. Three unfinished states are covered:
    - **waiting / delayed / prioritized** — `jobIndex` type `queue` and present in the PriorityQueue → return the existing job.
-   - **waiting-children** — `jobIndex` type `queue` but held in `shard.waitingDeps` (its row is already persisted, so it is *not* in the PriorityQueue) → idempotent skip via the existing id.
+   - **waiting-children** — `jobIndex` type `queue` but held in `shard.waitingDeps` (its row is already persisted, so it is _not_ in the PriorityQueue) → idempotent skip via the existing id.
    - **active (processing)** — `jobIndex` type `processing`; the job was popped from the queue and is still running on a worker, with its row still on disk → idempotent skip via the existing id.
-   For the latter two, `PushContext` has no `processingShards`, so it cannot fetch the live `Job`; `pushJob` / `pushJobBatch` rebuild a placeholder `{ ...job, id }` after `createJob` (mirrors `handleDeduplication`'s active path) and insert nothing. **Completed (#92) and DLQ jobs are terminal** and fall through to the reuse path below.
+     For the latter two, `PushContext` has no `processingShards`, so it cannot fetch the live `Job`; `pushJob` / `pushJobBatch` rebuild a placeholder `{ ...job, id }` after `createJob` (mirrors `handleDeduplication`'s active path) and insert nothing. **Completed (#92) and DLQ jobs are terminal** and fall through to the reuse path below.
 3. **Terminal reuse is planned, not applied.** Completed, DLQ, and unreferenced
    payload-free dependency-completion generations produce a
    `CustomIdRetirement`. The inspection phase does not remove the old job,
@@ -214,6 +214,16 @@ Both `handleCustomId` and `handleDeduplication` execute inside write locks acqui
 
 Lock order follows the global hierarchy (`jobIndex` → `completedJobs` → `shards[N]`); the unique-key registry is private state of the held shard, so no extra lock is needed. See [Concurrency & Locking](./concurrency-and-locking.md).
 
+The PostgreSQL engine uses the database-authoritative equivalent. Admission
+locks custom-ID and unique-key identities in canonical order before inspecting
+the current generation. A replacement that discovers a different owner after
+the unique-key lock probes that owner's dependency identity without waiting: it
+returns the existing generation as a duplicate when concurrent dependency
+admission owns the identity, and otherwise rejects replacement while a committed
+live consumer exists. This prevents a replace/delete race without introducing a
+row-lock-to-advisory-lock deadlock. See
+[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+
 Lifecycle / release:
 
 - On successful ack and on terminal fail, `Shard.releaseJobResources(queue, uniqueKey, groupId, ownerId)` releases the key only if the terminating generation still owns it. The default-reject path intentionally holds the key for active jobs until ack.
@@ -244,6 +254,10 @@ Lifecycle / release:
   live job consumes that id. The owner, incoming custom-id reservation and
   dependency topology remain unchanged; use an explicit flow migration instead
   of replacing a dependency node.
+- **PostgreSQL custom-ID generations:** reusing a terminal custom ID retires its
+  prior completion proof before the new row becomes visible. Serial batch and
+  flow admission retire the complete planned ID set first, so a reverse-order
+  child binds to the new parent generation rather than a stale tombstone.
 - **Post-commit cleanup errors:** releasing obsolete dependency-completion pins
   happens after the replacement commit. If that cleanup fails, the accepted
   single job or batch prefix is still persisted, counted, announced and
@@ -263,14 +277,14 @@ Lifecycle / release:
 
 ## Configuration
 
-| Option / Env | Default | Effect |
-| ------------ | ------- | ------ |
-| `maxCustomIds` (QueueManager config, `application/types/config.ts`) | `50_000` | LRU cap for `customIdMap` |
-| per-queue unique-key trim threshold (`cleanupTasks.ts:105`) | `1000` | force half-trim above this size |
-| `JobOptions.jobId` | — | custom idempotency id |
-| `JobOptions.deduplication.{id,ttl,extend,replace}` | `ttl` none / no expiry | unique-key dedup + strategy |
-| `Bunqueue` `deduplication.ttl` (`dedupDebounce.ts:28`) | `3600000` ms | default dedup TTL for auto-injected keys |
-| `JobOptions.debounce.{id,ttl}` | — | persisted debounce metadata (no push suppression on its own) |
+| Option / Env                                                        | Default                | Effect                                                       |
+| ------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------ |
+| `maxCustomIds` (QueueManager config, `application/types/config.ts`) | `50_000`               | LRU cap for `customIdMap`                                    |
+| per-queue unique-key trim threshold (`cleanupTasks.ts:105`)         | `1000`                 | force half-trim above this size                              |
+| `JobOptions.jobId`                                                  | —                      | custom idempotency id                                        |
+| `JobOptions.deduplication.{id,ttl,extend,replace}`                  | `ttl` none / no expiry | unique-key dedup + strategy                                  |
+| `Bunqueue` `deduplication.ttl` (`dedupDebounce.ts:28`)              | `3600000` ms           | default dedup TTL for auto-injected keys                     |
+| `JobOptions.debounce.{id,ttl}`                                      | —                      | persisted debounce metadata (no push suppression on its own) |
 
 No dedicated environment variables; the unique-key cleanup runs on the shared cleanup task (~10s — see [Background Tasks](./background-tasks.md)).
 

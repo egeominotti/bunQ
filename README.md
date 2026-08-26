@@ -14,7 +14,7 @@
 
 <p align="center">
   High-performance job queue for Bun. Built for AI agents and automation.<br/>
-  Zero external infrastructure. MCP-native. TypeScript-first.
+  SQLite by default. PostgreSQL 18.6 multi-broker when needed. MCP-native.
 </p>
 
 <p align="center">
@@ -54,8 +54,8 @@ built-ins.
 
 ### Not on Bun? Run the server, connect from anywhere
 
-The queue also runs as a standalone server — one command, nothing else to
-operate:
+The queue also runs as a standalone server. SQLite remains the zero-infrastructure
+default:
 
 ```bash
 # in-memory without --data-path; pass it to persist jobs to SQLite
@@ -66,6 +66,21 @@ docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
   ghcr.io/egeominotti/bunqueue:latest
 ```
+
+For multiple active brokers, the repository includes a topology pinned to
+PostgreSQL 18.6:
+
+```bash
+POSTGRES_PASSWORD='replace-me' \
+  BUNQUEUE_POSTGRES_URL='postgres://bunqueue:replace-me@postgres:5432/bunqueue' \
+  docker compose -f docker-compose.postgres.yml up --build -d
+```
+
+It starts two brokers against one database/namespace. PostgreSQL is server-only;
+embedded mode keeps using memory/SQLite. Supply both Compose values when the
+password changes, percent-encoding reserved characters in the URL only. MySQL
+is not supported. See the
+[storage guide](https://bunqueue.dev/guide/databases/).
 
 Release images also carry the exact package version. For reproducible
 deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.61`; `latest` points to the
@@ -80,7 +95,7 @@ npm install bunqueue-client    # Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Wor
 ```typescript
 import { Queue, Worker } from 'bunqueue-client';
 
-const queue = new Queue('emails');                       // localhost:6789 by default
+const queue = new Queue('emails'); // localhost:6789 by default
 await queue.add('welcome', { to: 'user@example.com' });
 
 new Worker('emails', async (job) => ({ sent: true }), { concurrency: 10 });
@@ -96,14 +111,16 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 
 ## Why bunqueue?
 
-| Library      | Requires    | AI-native |
-| ------------ | ----------- | --------- |
-| BullMQ       | Redis       | No        |
-| Agenda       | MongoDB     | No        |
-| pg-boss      | PostgreSQL  | No        |
-| **bunqueue** | **Nothing** | **Yes**   |
+| Library      | Requires                                   | AI-native |
+| ------------ | ------------------------------------------ | --------- |
+| BullMQ       | Redis                                      | No        |
+| Agenda       | MongoDB                                    | No        |
+| pg-boss      | PostgreSQL                                 | No        |
+| **bunqueue** | **Nothing (SQLite) · PostgreSQL optional** | **Yes**   |
 
-- **Zero external infrastructure** — one process, one SQLite file. `cp` to back up
+- **Zero external infrastructure by default** — one process, one SQLite file
+- **PostgreSQL 18.6 multi-broker mode** — database-authoritative claims, fenced
+  leases, shared limits, cron, workers, metrics, and failover state
 - **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
 - **Everything server-side** — retries with backoff, priorities, cron, rate limits, dead letter queue
@@ -111,24 +128,24 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
   in-memory batch push, 186K jobs/sec public on-disk Embedded `addBulk`, and
   159K jobs/sec TCP `PUSHB`; [methodology and distributions](https://bunqueue.dev/guide/benchmarks/)
 
-**Great for:** single-server deployments, AI agents that need a scheduler,
-prototypes and MVPs, embedded use cases (CLI tools, edge, serverless), teams
+**Great for:** embedded and single-server deployments, PostgreSQL-backed broker
+fleets, AI agents that need a scheduler, edge/serverless spooling, and teams
 that don't want to operate Redis.
 
-**Not ideal for:** multi-region distributed systems requiring HA or automatic
-failover today. If you already run Redis and BullMQ works for you, keep it.
+**Not ideal for:** multi-region consensus or deployments that require MySQL as
+the queue store. If you already run Redis and BullMQ works for you, keep it.
 
 [When to choose bunqueue →](https://bunqueue.dev/guide/comparison/)
 
 ## Two Modes
 
-|                  | Embedded                              | Server (TCP)                                 |
-| ---------------- | ------------------------------------- | -------------------------------------------- |
-| **How it works** | Queue runs inside your process        | Standalone server, clients connect via TCP   |
-| **Setup**        | `bun add bunqueue`                    | `docker run` or `bunqueue start`             |
-| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain |
-| **Best for**     | Single-process apps, CLIs, serverless | Multiple workers, separate producer/consumer |
-| **Scaling**      | Same process only                     | Multiple clients across machines             |
+|                  | Embedded                                                       | Server (TCP)                                            |
+| ---------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
+| **How it works** | Queue runs inside your process                                 | Standalone server, clients connect via TCP              |
+| **Setup**        | `bun add bunqueue`                                             | `docker run` or `bunqueue start`                        |
+| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain    |
+| **Best for**     | Single-process apps, CLIs, serverless                          | Multiple workers, separate producer/consumer            |
+| **Scaling**      | Same process only                                              | Multiple clients; multiple brokers with PostgreSQL 18.6 |
 
 ### Embedded
 
@@ -184,14 +201,14 @@ The server does all the heavy lifting. Official client SDKs speak the native
 TCP protocol with full feature parity, so producers and workers can live
 anywhere in your stack — add a job from TypeScript, process it from Python:
 
-| Where your code runs | Install |
-| -------------------- | ------- |
-| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client) |
-| **Python ≥ 3.9** | [`pip install bunqueue-client`](https://pypi.org/project/bunqueue-client/) |
-| **PHP ≥ 8.1** | [`composer require bunqueue/client`](https://packagist.org/packages/bunqueue/client) |
-| **Go ≥ 1.26.5** | `go get github.com/egeominotti/bunqueue/sdk/go` |
-| **Rust ≥ 1.85** | [`cargo add bunqueue-client`](https://crates.io/crates/bunqueue-client) |
-| **Elixir ≥ 1.15** | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency |
+| Where your code runs                                | Install                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client)       |
+| **Python ≥ 3.9**                                    | [`pip install bunqueue-client`](https://pypi.org/project/bunqueue-client/)           |
+| **PHP ≥ 8.1**                                       | [`composer require bunqueue/client`](https://packagist.org/packages/bunqueue/client) |
+| **Go ≥ 1.26.5**                                     | `go get github.com/egeominotti/bunqueue/sdk/go`                                      |
+| **Rust ≥ 1.85**                                     | [`cargo add bunqueue-client`](https://crates.io/crates/bunqueue-client)              |
+| **Elixir ≥ 1.15**                                   | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency       |
 
 ```typescript
 // Node.js / Deno / Cloudflare Workers
@@ -237,21 +254,24 @@ const root = await flows.add({
   ],
 });
 
-console.log(root.job.id, root.children?.map(({ job }) => job.id));
+console.log(
+  root.job.id,
+  root.children?.map(({ job }) => job.id)
+);
 await flows.close();
 ```
 
 The repository records the contracts and the test strategy beside each
 implementation:
 
-| SDK | Runtime invariants | Generated tests | Mutation engine |
-| --- | --- | --- | --- |
-| [TypeScript](./sdk/typescript/README.md) | [contract](./sdk/typescript/INVARIANTS.md) | fast-check | none¹ |
-| [Python](./sdk/python/README.md) | [contract](./sdk/python/INVARIANTS.md) | Hypothesis | mutmut |
-| [PHP](./sdk/php/README.md) | [contract](./sdk/php/INVARIANTS.md) | Eris | Infection |
-| [Go](./sdk/go/README.md) | [contract](./sdk/go/INVARIANTS.md) | Rapid | Gremlins |
-| [Rust](./sdk/rust/README.md) | [contract](./sdk/rust/INVARIANTS.md) | proptest | cargo-mutants |
-| [Elixir](./sdk/elixir/README.md) | [contract](./sdk/elixir/INVARIANTS.md) | StreamData | Muex |
+| SDK                                      | Runtime invariants                         | Generated tests | Mutation engine |
+| ---------------------------------------- | ------------------------------------------ | --------------- | --------------- |
+| [TypeScript](./sdk/typescript/README.md) | [contract](./sdk/typescript/INVARIANTS.md) | fast-check      | none¹           |
+| [Python](./sdk/python/README.md)         | [contract](./sdk/python/INVARIANTS.md)     | Hypothesis      | mutmut          |
+| [PHP](./sdk/php/README.md)               | [contract](./sdk/php/INVARIANTS.md)        | Eris            | Infection       |
+| [Go](./sdk/go/README.md)                 | [contract](./sdk/go/INVARIANTS.md)         | Rapid           | Gremlins        |
+| [Rust](./sdk/rust/README.md)             | [contract](./sdk/rust/INVARIANTS.md)       | proptest        | cargo-mutants   |
+| [Elixir](./sdk/elixir/README.md)         | [contract](./sdk/elixir/INVARIANTS.md)     | StreamData      | Muex            |
 
 ¹ The TypeScript SDK has no mutation engine. StrykerJS was removed because its
 dependency graph produced every advisory the weekly audit had to answer for,
@@ -314,17 +334,25 @@ human-in-the-loop signals — built on bunqueue, no new infrastructure:
 import { Workflow, Engine } from 'bunqueue/workflow';
 
 const orderFlow = new Workflow('order-pipeline')
-  .step('reserve-stock', async () => {
-    await inventory.reserve();
-    return { reserved: true };
-  }, {
-    compensate: async () => await inventory.release(), // auto-rollback on failure
-  })
-  .step('charge', async () => {
-    return { txId: await payments.charge() };
-  }, {
-    compensate: async () => await payments.refund(),
-  })
+  .step(
+    'reserve-stock',
+    async () => {
+      await inventory.reserve();
+      return { reserved: true };
+    },
+    {
+      compensate: async () => await inventory.release(), // auto-rollback on failure
+    }
+  )
+  .step(
+    'charge',
+    async () => {
+      return { txId: await payments.charge() };
+    },
+    {
+      compensate: async () => await payments.refund(),
+    }
+  )
   .waitFor('manager-approval', { timeout: 86_400_000 }) // human-in-the-loop
   .step('confirm', async (ctx) => {
     return { txId: (ctx.steps['charge'] as { txId: string }).txId };
@@ -336,13 +364,13 @@ const run = await engine.start('order-pipeline', { orderId: 'ORD-1' });
 await engine.signal(run.id, 'manager-approval', { approved: true });
 ```
 
-| | **bunqueue** | **Temporal** | **Inngest** | **Trigger.dev** |
-|---|---|---|---|---|
-| **Infrastructure** | None (embedded) | PostgreSQL + 7 services | Cloud-only | Redis + PostgreSQL |
-| **Saga compensation** | Built-in | Manual | Manual | Manual |
-| **Human-in-the-loop** | `.waitFor()` | Signals API | `step.waitForEvent()` | Waitpoint tokens |
-| **Self-hosted** | Zero-config | Complex | No | Complex |
-| **Pricing** | Free (MIT) | Free / Cloud $$ | Per-execution | Free tier, then $50/mo+ |
+|                       | **bunqueue**    | **Temporal**            | **Inngest**           | **Trigger.dev**         |
+| --------------------- | --------------- | ----------------------- | --------------------- | ----------------------- |
+| **Infrastructure**    | None (embedded) | PostgreSQL + 7 services | Cloud-only            | Redis + PostgreSQL      |
+| **Saga compensation** | Built-in        | Manual                  | Manual                | Manual                  |
+| **Human-in-the-loop** | `.waitFor()`    | Signals API             | `step.waitForEvent()` | Waitpoint tokens        |
+| **Self-hosted**       | Zero-config     | Complex                 | No                    | Complex                 |
+| **Pricing**           | Free (MIT)      | Free / Cloud $$         | Per-execution         | Free tier, then $50/mo+ |
 
 Also included: nested workflows, `doUntil`/`doWhile` loops, `forEach` over
 dynamic lists, schema validation (Zod, ArkType, Valibot or any `.parse()`),
@@ -374,8 +402,8 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 }
 ```
 
-Then just ask: *"Schedule a cleanup job every day at 3 AM"* · *"Show me all
-failed jobs and retry them"* · *"Set rate limit to 50/sec on api-calls"*.
+Then just ask: _"Schedule a cleanup job every day at 3 AM"_ · _"Show me all
+failed jobs and retry them"_ · _"Set rate limit to 50/sec on api-calls"_.
 
 [MCP guide →](https://bunqueue.dev/guide/mcp/)
 
@@ -399,13 +427,13 @@ https://github.com/user-attachments/assets/e8a8d38e-b4a6-4dc8-8360-876c0f24d116
 
 Native Ryzen 9 9950X3D, Bun 1.3.14; medians from repeated fresh processes:
 
-| Workload | Mode | Median | Persistence |
-| --- | --- | ---: | --- |
-| Internal batched push, 1M jobs | Embedded | 729,395 jobs/sec | In-memory, no `dataPath` |
-| Public sustained `addBulk`, 50K cell | Embedded | 186,384 jobs/sec | On-disk buffered SQLite |
-| `PUSHB`, fresh 50K sample | TCP | 158,779 jobs/sec | On-disk buffered SQLite |
-| No-work worker drain, concurrency 50 | TCP | 17,256 jobs/sec | Full pull/process/ACK |
-| Linear Workflow Engine | Embedded / TCP | 2,700 / 3,187 workflows/sec | Workflow SQLite + 3 queue nodes |
+| Workload                             | Mode           |                      Median | Persistence                     |
+| ------------------------------------ | -------------- | --------------------------: | ------------------------------- |
+| Internal batched push, 1M jobs       | Embedded       |            729,395 jobs/sec | In-memory, no `dataPath`        |
+| Public sustained `addBulk`, 50K cell | Embedded       |            186,384 jobs/sec | On-disk buffered SQLite         |
+| `PUSHB`, fresh 50K sample            | TCP            |            158,779 jobs/sec | On-disk buffered SQLite         |
+| No-work worker drain, concurrency 50 | TCP            |             17,256 jobs/sec | Full pull/process/ACK           |
+| Linear Workflow Engine               | Embedded / TCP | 2,700 / 3,187 workflows/sec | Workflow SQLite + 3 queue nodes |
 
 These operations do different work; the internal in-memory result is not an
 SQLite or public-API claim. Run `bun run bench`, `bun run bench:tcp`, or

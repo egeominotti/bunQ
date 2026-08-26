@@ -55,7 +55,7 @@ async function runScript(
     stderr: 'pipe',
   });
 
-  const timeout = setTimeout(() => proc.kill(), timeoutMs);
+  const timeout = setTimeout(() => proc.kill('SIGKILL'), timeoutMs);
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -73,6 +73,39 @@ async function runScript(
 }
 
 describe('Uncaught Exception & Unhandled Rejection Handlers', () => {
+  test('retries a transient storage shutdown rejection instead of stranding cleanup', async () => {
+    const result = await runScript(
+      'test-storage-shutdown-retry',
+      `
+import { resolveServerConfig } from '../../src/config';
+import { bootServer } from '../../src/infrastructure/server/bootstrap';
+import { serverStorageManager } from '../../src/infrastructure/server/storageManager';
+
+const fileConfig = {
+  server: { tcpPort: 0, httpPort: 0, host: '127.0.0.1' },
+  storage: { driver: 'memory' as const },
+  timeouts: { shutdown: 0, stats: 60_000 },
+};
+const originalShutdown = serverStorageManager.shutdown.bind(serverStorageManager);
+let attempts = 0;
+serverStorageManager.shutdown = async (manager) => {
+  attempts++;
+  console.log(JSON.stringify({ storageShutdownAttempt: attempts }));
+  if (attempts === 1) throw new Error('transient storage shutdown failure');
+  return await originalShutdown(manager);
+};
+
+await bootServer(fileConfig, resolveServerConfig(fileConfig));
+process.kill(process.pid, 'SIGTERM');
+`,
+      3_000
+    );
+
+    expect(result.stdout).toContain('"storageShutdownAttempt":1');
+    expect(result.stdout).toContain('"storageShutdownAttempt":2');
+    expect(result.exitCode).toBe(0);
+  });
+
   test('uncaughtException triggers graceful shutdown', async () => {
     const result = await runScript(
       'test-uncaught',

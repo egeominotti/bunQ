@@ -20,6 +20,13 @@ export interface ResolvedConfig {
   tlsKeyFile: string | undefined;
   authTokens: string[];
   dataPath: string | undefined;
+  storageDriver: 'memory' | 'sqlite' | 'postgres';
+  postgresUrl: string | undefined;
+  postgresNamespace: string;
+  postgresBrokerId: string | undefined;
+  postgresPoolSize: number;
+  postgresLeaseDurationMs: number;
+  postgresPollIntervalMs: number;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
   maxPrometheusQueues: number;
@@ -33,6 +40,20 @@ export interface ResolvedConfig {
 /** Resolve server config: config file > env vars > defaults */
 export function resolveServerConfig(fileConfig: BunqueueConfig | null): ResolvedConfig {
   const fc = fileConfig;
+  const dataPath =
+    fc?.storage?.dataPath ??
+    Bun.env.BUNQUEUE_DATA_PATH ??
+    Bun.env.BQ_DATA_PATH ??
+    Bun.env.DATA_PATH ??
+    Bun.env.SQLITE_PATH;
+  const postgresUrl = fc?.storage?.url ?? Bun.env.BUNQUEUE_POSTGRES_URL;
+  const storageDriver = fc?.storage?.driver
+    ? resolveStorageDriver(fc.storage.driver, postgresUrl, dataPath)
+    : fc?.storage?.url
+      ? 'postgres'
+      : fc?.storage?.dataPath
+        ? 'sqlite'
+        : resolveStorageDriver(Bun.env.BUNQUEUE_STORAGE_DRIVER, postgresUrl, dataPath);
   return {
     tcpPort: fc?.server?.tcpPort ?? parseInt(Bun.env.TCP_PORT ?? '6789', 10),
     httpPort: fc?.server?.httpPort ?? parseInt(Bun.env.HTTP_PORT ?? '6790', 10),
@@ -42,12 +63,25 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
     tlsCertFile: fc?.server?.tlsCertFile ?? Bun.env.TLS_CERT_FILE,
     tlsKeyFile: fc?.server?.tlsKeyFile ?? Bun.env.TLS_KEY_FILE,
     authTokens: fc?.auth?.tokens ?? Bun.env.AUTH_TOKENS?.split(',').filter(Boolean) ?? [],
-    dataPath:
-      fc?.storage?.dataPath ??
-      Bun.env.BUNQUEUE_DATA_PATH ??
-      Bun.env.BQ_DATA_PATH ??
-      Bun.env.DATA_PATH ??
-      Bun.env.SQLITE_PATH,
+    dataPath,
+    storageDriver,
+    postgresUrl,
+    postgresNamespace: fc?.storage?.namespace ?? Bun.env.BUNQUEUE_POSTGRES_NAMESPACE ?? 'default',
+    postgresBrokerId: fc?.storage?.brokerId ?? Bun.env.BUNQUEUE_BROKER_ID,
+    postgresPoolSize: positiveInteger(
+      fc?.storage?.poolSize ?? parseInt(Bun.env.BUNQUEUE_POSTGRES_POOL_SIZE ?? '10', 10),
+      10
+    ),
+    postgresLeaseDurationMs: positiveInteger(
+      fc?.storage?.leaseDurationMs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_LEASE_DURATION_MS ?? '30000', 10),
+      30_000
+    ),
+    postgresPollIntervalMs: positiveInteger(
+      fc?.storage?.pollIntervalMs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_POLL_INTERVAL_MS ?? '250', 10),
+      250
+    ),
     corsOrigins: fc?.cors?.origins ?? Bun.env.CORS_ALLOW_ORIGIN?.split(',').filter(Boolean) ?? [],
     requireAuthForMetrics: fc?.auth?.requireAuthForMetrics ?? Bun.env.METRICS_AUTH === 'true',
     maxPrometheusQueues: nonNegativeInteger(
@@ -63,8 +97,25 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
   };
 }
 
+function resolveStorageDriver(
+  configured: string | undefined,
+  postgresUrl: string | undefined,
+  dataPath: string | undefined
+): 'memory' | 'sqlite' | 'postgres' {
+  if (configured === 'memory' || configured === 'sqlite' || configured === 'postgres') {
+    return configured;
+  }
+  if (configured) throw new Error(`Unsupported storage driver: ${configured}`);
+  if (postgresUrl) return 'postgres';
+  return dataPath ? 'sqlite' : 'memory';
+}
+
 function nonNegativeInteger(value: number, fallback: number): number {
   return Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+}
+
+function positiveInteger(value: number, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 /**

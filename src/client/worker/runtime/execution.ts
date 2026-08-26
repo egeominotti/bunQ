@@ -37,16 +37,10 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
       this.activeJobs--;
       this.finishDelivery(delivery);
       if (this.groupLimiter) this.groupLimiter.decrement(job);
-      if (this.running && !this._closing) this.poll();
+      if (this.running && !this._closing) this.scheduleProcessing();
     });
 
-    if (this.activeJobs < this.opts.concurrency && !this._closing && !this.processingScheduled) {
-      this.processingScheduled = true;
-      setImmediate(() => {
-        this.processingScheduled = false;
-        void this.tryProcess();
-      });
-    }
+    if (this.activeJobs < this.opts.concurrency && !this._closing) this.scheduleProcessing();
     return true;
   }
 

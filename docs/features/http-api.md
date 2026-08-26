@@ -9,6 +9,7 @@ This module is the HTTP-side transport for bunqueue, served on port `6790` by de
 ## Responsibilities & Scope
 
 Owns:
+
 - Bun HTTP server creation, binding (TCP port or Unix socket), and optional TLS termination (`createHttpServer`, `http.ts:74`).
 - Request routing: URL/method → internal `Command`, via pre-compiled regexes and four sub-routers (jobs, queues, queue-config, resources).
 - Auth gate, CORS headers/preflight, and per-IP rate limiting on the HTTP edge.
@@ -16,6 +17,7 @@ Owns:
 - SSE and WebSocket lifecycle: connection limits, subscriptions, event fan-out, heartbeats, periodic broadcasts, ring-buffer replay, backpressure handling, and client-job release on disconnect.
 
 Does NOT own (delegated):
+
 - Actual command execution and queue mutations — delegated to `handleCommand` / `QueueManager` ([Core Queue Engine](./core-queue-engine.md), [TCP Server Command Handlers](./tcp-server-handlers.md)).
 - Command parsing for the WS typed-command path — delegated to `parseCommand`/`serializeResponse` from the [TCP Wire Protocol & Framing](./tcp-protocol.md) module.
 - TLS file loading/validation — delegated to `loadTlsOptions` ([Security: TLS, Auth, CORS](./security-tls-auth.md)).
@@ -25,6 +27,7 @@ Does NOT own (delegated):
 ## Dependencies
 
 Internal:
+
 - `handleCommand`, `HandlerContext` (`handler.ts` / `types.ts`) — the command dispatcher and per-request context.
 - `QueueManager` — `subscribe`, `setDashboardEmit`, `emitDashboardEvent`, `getStats`, `getQueueJobCounts`, `getPerQueueStats`, `getDlqEntries`, `getDlqStats`, `getStorageStatus`, `getMemoryStats`, `getPrometheusMetrics`, `releaseClientJobs`, `unregisterWorkersByClientId`, `workerManager`, `listCrons`.
 - `parseCommand`, `serializeResponse`, `errorResponse`, `validateQueueName` (`protocol.ts`).
@@ -32,11 +35,13 @@ Internal:
 - `loadTlsOptions` (`tls.ts`); `constantTimeEqual`, `uuid` (`shared/hash.ts`); `throughputTracker`, `latencyTracker`; `pausedView` (`shared/pausedView.ts`); `VERSION`.
 
 External/runtime:
+
 - `Bun.serve` (server + native WebSocket), `Bun.gc`, `bun:jsc` `heapStats` (dynamic import in `heapStatsEndpoint`), `ReadableStream`/`TextEncoder` (SSE), `process.memoryUsage`/`process.uptime`. Zero third-party deps.
 
 ## Public Interface
 
 Exported symbols:
+
 - `createHttpServer(queueManager: QueueManager, config: HttpServerConfig)` — `http.ts:65`. Returns `{ server, wsClients, sseClients, getWsClientCount(), getSseClientCount(), stop() }`. `stop()` unsubscribes from the event bus, stops WS broadcasts, closes all SSE streams, and stops the Bun server.
 - `interface HttpServerConfig` — `http.ts`: `port?`, `hostname?`,
   `socketPath?`, `authTokens?: string[]`, `corsOrigins?: string[]`,
@@ -54,96 +59,105 @@ Exported symbols:
 
 Diagnostics / observability (handled in `fetch`/`routeRequest`, `http.ts`):
 
-| Method · Path | Auth | Notes |
-|---|---|---|
-| `OPTIONS *` | no | CORS preflight (`http.ts:116`) |
-| `GET /health` | no | health JSON + real TCP/WS/SSE counts; 503 when storage is degraded |
-| `GET /healthz`, `GET /live` | no | `200 "OK"` liveness (`http.ts:124`) |
-| `GET /ready` | no | `{ ok, ready }`; 503 with storage detail when disk is full |
-| `POST /gc` | yes | force `Bun.gc(true)` + `compactMemory` (`http.ts:132`) |
-| `GET /heapstats` | yes | `bun:jsc` heap breakdown (`http.ts:137`) |
-| `GET /prometheus` | conditional | text exposition; auth only if `requireAuthForMetrics` (`http.ts:179`) |
-| `GET /stats` | yes | full stats + memory + per-sec rates (`httpRouter.ts:31`) |
-| `GET /metrics` | yes | JSON totals only (`httpRouter.ts:34`) |
-| `GET /dashboard` | yes | aggregated overview (`httpRouter.ts:37`) |
-| `GET /dashboard/queues?limit&offset` | yes | paginated queue list, limit clamped 1–500 (`httpRouter.ts:40-47`) |
-| `GET /dashboard/queues/:queue?includeJobs=true` | yes | single-queue detail (`httpRouter.ts:50-56`) |
+| Method · Path                                   | Auth        | Notes                                                                 |
+| ----------------------------------------------- | ----------- | --------------------------------------------------------------------- |
+| `OPTIONS *`                                     | no          | CORS preflight (`http.ts:116`)                                        |
+| `GET /health`                                   | no          | health JSON + real TCP/WS/SSE counts; 503 when storage is degraded    |
+| `GET /healthz`, `GET /live`                     | no          | `200 "OK"` liveness (`http.ts:124`)                                   |
+| `GET /ready`                                    | no          | `{ ok, ready }`; 503 for disk-full or any persistent storage error    |
+| `POST /gc`                                      | yes         | force `Bun.gc(true)` + `compactMemory` (`http.ts:132`)                |
+| `GET /heapstats`                                | yes         | `bun:jsc` heap breakdown (`http.ts:137`)                              |
+| `GET /prometheus`                               | conditional | text exposition; auth only if `requireAuthForMetrics` (`http.ts:179`) |
+| `GET /stats`                                    | yes         | full stats + memory + per-sec rates (`httpRouter.ts:31`)              |
+| `GET /metrics`                                  | yes         | JSON totals only (`httpRouter.ts:34`)                                 |
+| `GET /dashboard`                                | yes         | aggregated overview (`httpRouter.ts:37`)                              |
+| `GET /dashboard/queues?limit&offset`            | yes         | paginated queue list, limit clamped 1–500 (`httpRouter.ts:40-47`)     |
+| `GET /dashboard/queues/:queue?includeJobs=true` | yes         | single-queue detail (`httpRouter.ts:50-56`)                           |
 
 Jobs (`routeJobRoutes`, `httpRouteJobs.ts:12-117`) — batch routes matched before generic `/jobs/:id`:
 
-| Method · Path | Command |
-|---|---|
-| `POST /jobs/ack-batch` | `ACKB` |
-| `POST /jobs/extend-locks` | `ExtendLocks` |
-| `POST /jobs/heartbeat-batch` | `JobHeartbeatB` |
-| `GET /jobs/custom/:customId` | `GetJobByCustomId` |
-| `GET /jobs/:id` · `DELETE /jobs/:id` | `GetJob` · `Cancel` |
-| `POST /jobs/:id/ack` · `POST /jobs/:id/fail` | `ACK` · `FAIL` |
-| `POST /jobs/:id/promote` | `Promote` |
-| `PUT /jobs/:id/data` | `Update` |
-| `GET /jobs/:id/state` · `/result` · `/progress` | `GetState` · `GetResult` · `GetProgress` |
-| `POST /jobs/:id/progress` | `Progress` |
-| `PUT /jobs/:id/priority` | `ChangePriority` |
-| `POST /jobs/:id/discard` | `Discard` |
-| `POST /jobs/:id/move-to-delayed` · `PUT /jobs/:id/delay` | `MoveToDelayed` · `ChangeDelay` |
-| `GET /jobs/:id/children` | `GetChildrenValues` |
-| `GET/POST/DELETE /jobs/:id/logs` | `GetLogs` · `AddLog` · `ClearLogs` |
-| `POST /jobs/:id/heartbeat` | `JobHeartbeat` |
-| `POST /jobs/:id/wait` | `WaitJob` |
-| `POST /jobs/:id/extend-lock` | `ExtendLock` |
-| `POST /jobs/:id/move-to-wait` | `MoveToWait` |
+| Method · Path                                            | Command                                  |
+| -------------------------------------------------------- | ---------------------------------------- |
+| `POST /jobs/ack-batch`                                   | `ACKB`                                   |
+| `POST /jobs/extend-locks`                                | `ExtendLocks`                            |
+| `POST /jobs/heartbeat-batch`                             | `JobHeartbeatB`                          |
+| `GET /jobs/custom/:customId`                             | `GetJobByCustomId`                       |
+| `GET /jobs/:id` · `DELETE /jobs/:id`                     | `GetJob` · `Cancel`                      |
+| `POST /jobs/:id/ack` · `POST /jobs/:id/fail`             | `ACK` · `FAIL`                           |
+| `POST /jobs/:id/promote`                                 | `Promote`                                |
+| `PUT /jobs/:id/data`                                     | `Update`                                 |
+| `GET /jobs/:id/state` · `/result` · `/progress`          | `GetState` · `GetResult` · `GetProgress` |
+| `POST /jobs/:id/progress`                                | `Progress`                               |
+| `PUT /jobs/:id/priority`                                 | `ChangePriority`                         |
+| `POST /jobs/:id/discard`                                 | `Discard`                                |
+| `POST /jobs/:id/move-to-delayed` · `PUT /jobs/:id/delay` | `MoveToDelayed` · `ChangeDelay`          |
+| `GET /jobs/:id/children`                                 | `GetChildrenValues`                      |
+| `GET/POST/DELETE /jobs/:id/logs`                         | `GetLogs` · `AddLog` · `ClearLogs`       |
+| `POST /jobs/:id/heartbeat`                               | `JobHeartbeat`                           |
+| `POST /jobs/:id/wait`                                    | `WaitJob`                                |
+| `POST /jobs/:id/extend-lock`                             | `ExtendLock`                             |
+| `POST /jobs/:id/move-to-wait`                            | `MoveToWait`                             |
 
 Queues (`routeQueueRoutes`, `httpRouteQueues.ts:19-143`):
 
-| Method · Path | Command / action |
-|---|---|
-| `GET /queues` · `GET /queues/summary` | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array** of `{ name, paused, counts: { waiting, prioritized, delayed, active, completed, failed } }`, no `ok` wrapper, `httpRouteQueues.ts:26-30`) |
-| `POST /queues/:queue/jobs` | `PUSH` |
-| `GET /queues/:queue/jobs?timeout=` | `PULL` (long-poll) |
-| `POST /queues/:queue/jobs/bulk` | `PUSHB` |
-| `POST /queues/:queue/jobs/pull-batch` | `PULLB` |
-| `GET /queues/:queue/jobs/list?state|status|states&limit&offset` | `GetJobs` |
-| `GET /queues/:queue/workers` | `workerManager.getForQueue` |
-| `GET /queues/:queue/counts` · `/count` · `/priority-counts` · `/paused` | `GetJobCounts` · `Count` · `GetCountsPerPriority` · `IsPaused` |
-| `POST /queues/:queue/pause` · `/resume` · `/drain` · `/obliterate` | `Pause` · `Resume` · `Drain` · `Obliterate` |
-| `POST /queues/:queue/clean` | `Clean` |
-| `POST /queues/:queue/promote-jobs` · `/retry-completed` | `PromoteJobs` · `RetryCompleted` |
+| Method · Path                                                           | Command / action                                                                                                                                                                                                |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /queues` · `GET /queues/summary`                                   | `ListQueues` · `getQueuesSummary()` (summary is a **bare JSON array** of `{ name, paused, counts: { waiting, prioritized, delayed, active, completed, failed } }`, no `ok` wrapper, `httpRouteQueues.ts:26-30`) |
+| `POST /queues/:queue/jobs`                                              | `PUSH`                                                                                                                                                                                                          |
+| `GET /queues/:queue/jobs?timeout=`                                      | `PULL` (long-poll)                                                                                                                                                                                              |
+| `POST /queues/:queue/jobs/bulk`                                         | `PUSHB`                                                                                                                                                                                                         |
+| `POST /queues/:queue/jobs/pull-batch`                                   | `PULLB`                                                                                                                                                                                                         |
+| `GET /queues/:queue/jobs/list?state                                     | status                                                                                                                                                                                                          | states&limit&offset` | `GetJobs` |
+| `GET /queues/:queue/workers`                                            | local `workerManager.getForQueue` for memory/SQLite; durable filtered registry for PostgreSQL                                                                                                                   |
+| `GET /queues/:queue/counts` · `/count` · `/priority-counts` · `/paused` | `GetJobCounts` · `Count` · `GetCountsPerPriority` · `IsPaused`                                                                                                                                                  |
+| `POST /queues/:queue/pause` · `/resume` · `/drain` · `/obliterate`      | `Pause` · `Resume` · `Drain` · `Obliterate`                                                                                                                                                                     |
+| `POST /queues/:queue/clean`                                             | `Clean`                                                                                                                                                                                                         |
+| `POST /queues/:queue/promote-jobs` · `/retry-completed`                 | `PromoteJobs` · `RetryCompleted`                                                                                                                                                                                |
 
 Queue config / DLQ / limits (`routeQueueConfigRoutes`, `httpRouteQueueConfig.ts:21`):
 
-| Method · Path | Command / action |
-|---|---|
-| `GET /queues/:queue/dlq/stats` | `getDlqStats` |
-| `GET /queues/:queue/dlq?limit&offset` | `getDlqEntries` (paginated slice) |
-| `POST /queues/:queue/dlq/retry` · `/dlq/purge` | `RetryDlq` · `PurgeDlq` |
-| `PUT/DELETE /queues/:queue/rate-limit` | `RateLimit` · `RateLimitClear` |
-| `PUT/DELETE /queues/:queue/concurrency` | `SetConcurrency` (accepts `concurrency` or `limit`) · `ClearConcurrency` |
-| `GET/PUT /queues/:queue/stall-config` | `GetStallConfig` · `SetStallConfig` |
-| `GET/PUT /queues/:queue/dlq-config` | `GetDlqConfig` · `SetDlqConfig` |
+| Method · Path                                  | Command / action                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `GET /queues/:queue/dlq/stats`                 | `getDlqStats`                                                            |
+| `GET /queues/:queue/dlq?limit&offset`          | `getDlqEntries` (paginated slice)                                        |
+| `POST /queues/:queue/dlq/retry` · `/dlq/purge` | `RetryDlq` · `PurgeDlq`                                                  |
+| `PUT/DELETE /queues/:queue/rate-limit`         | `RateLimit` · `RateLimitClear`                                           |
+| `PUT/DELETE /queues/:queue/concurrency`        | `SetConcurrency` (accepts `concurrency` or `limit`) · `ClearConcurrency` |
+| `GET/PUT /queues/:queue/stall-config`          | `GetStallConfig` · `SetStallConfig`                                      |
+| `GET/PUT /queues/:queue/dlq-config`            | `GetDlqConfig` · `SetDlqConfig`                                          |
 
 Resources (`routeResourceRoutes`, `httpRouteResources.ts:21`):
 
-| Method · Path | Command |
-|---|---|
-| `GET/POST /crons`, `GET/DELETE /crons/:name` | `CronList` · `Cron` · `CronGet` · `CronDelete` |
+| Method · Path                                                             | Command                                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET/POST /crons`, `GET/DELETE /crons/:name`                              | `CronList` · `Cron` · `CronGet` · `CronDelete`                        |
 | `GET/POST /webhooks`, `DELETE /webhooks/:id`, `PUT /webhooks/:id/enabled` | `ListWebhooks` · `AddWebhook` · `RemoveWebhook` · `SetWebhookEnabled` |
-| `GET/POST /workers`, `DELETE /workers/:id`, `POST /workers/:id/heartbeat` | `ListWorkers` · `RegisterWorker` · `UnregisterWorker` · `Heartbeat` |
-| `GET /ping` · `GET /storage` | `Ping` · `StorageStatus` |
+| `GET/POST /workers`, `DELETE /workers/:id`, `POST /workers/:id/heartbeat` | `ListWorkers` · `RegisterWorker` · `UnregisterWorker` · `Heartbeat`   |
+| `GET /ping` · `GET /storage`                                              | `Ping` · `StorageStatus`                                              |
 
 ### Streaming endpoints
 
 - `GET /events` and `GET /events/queues/:queue` — SSE stream; optional `Last-Event-ID` header for replay (`http.ts:168`).
 - `GET /ws` and `GET /ws/queues/:queue` — WebSocket upgrade (`http.ts:154`).
 
+The periodic `stats:snapshot` payload is synchronous and process-local for
+memory/SQLite. PostgreSQL awaits its durable worker and cron registries, so the
+snapshot and `GET /dashboard` expose namespace-wide registrations. If either
+durable read fails, that interval is skipped rather than publishing a stale
+local substitute. Health snapshots use the same disk-full-or-error degraded
+predicate as `/health` and `/ready`.
+
 ### WebSocket protocol
 
 Frame format (server → client): `{ event, ts, data }` (`wsHandler.ts:132-143`). Client commands over the socket:
+
 - `{ cmd: "Subscribe", events: [...] }` / `{ cmd: "Unsubscribe", events: [...] }` — managed in `onMessage` before typed parsing (`wsHandler.ts:207-217`). Patterns validated against `VALID_WS_PATTERNS` (`ws/constants.ts:20-127`): exact names, prefix wildcards (`job:*`, `queue:*`, …), or `*`.
 - Any other JSON is parsed as a normal `Command` and routed through `handleCommand`; an `Auth` command that succeeds flips `ws.data.authenticated` (`wsHandler.ts:223-235`).
 
 ## Data Models
 
 See [data-model](../data-model.md) for full definitions. Key shapes here:
+
 - `HandlerContext` (`types.ts:8`): `{ queueManager, authTokens: Set<string>, authenticated: boolean, clientId? }`. For HTTP, `clientId` is intentionally absent (stateless; `http.ts:201`). For WS, `clientId = ws.data.id`.
 - `WsData` (`types/ws.ts:1-6`): `{ id, authenticated, queueFilter: string | null, subscriptions: Set<string> | null }`. `subscriptions === null` = legacy mode (receives every job event in the raw `JobEvent` shape).
 - `SseClient` (`types/sse.ts:1-5`): `{ id, controller, queueFilter }`. `BufferedSseEvent` (`types/sse.ts:7-12`): `{ id, event, data, queue }` in the replay ring buffer.
@@ -152,6 +166,7 @@ See [data-model](../data-model.md) for full definitions. Key shapes here:
 ## Business Logic / Control Flow
 
 `fetch(req, server)` request pipeline (`http.ts:102-216`), short-circuiting in this order:
+
 1. `OPTIONS` → `corsResponse` preflight (`http.ts:106-109`).
 2. Unauthenticated liveness: `/health`, `/healthz`, `/live`, `/ready` (`http.ts:111-127`). These skip both auth and rate limiting.
 3. Debug endpoints `POST /gc`, `GET /heapstats` → `checkAuth` then run (`http.ts:129-139`).
@@ -175,6 +190,7 @@ WS broadcast (`wsHandler.broadcast`): for each client, skips on `queueFilter` mi
 ## Concurrency & Locking
 
 The HTTP layer holds no shard locks itself; all locking happens inside `handleCommand`/`QueueManager` (see [Concurrency & Locking](./concurrency-and-locking.md)). Relevant connection-lifecycle behavior:
+
 - **Stateless HTTP, no job ownership**: HTTP requests carry no `clientId`, so jobs pulled over REST are not tracked to a connection; orphaned/in-flight jobs are recovered only by stall detection (`http.ts:206-208`, see [Background Tasks](./background-tasks.md)).
 - **WS/SSE own their pulled jobs**: on WS `close` (`http.ts:237-250`) and SSE stream `cancel` (`sseHandler.ts:255-260`), the handler calls `unregisterWorkersByClientId(clientId)` and `releaseClientJobs(clientId)` so jobs leased through that persistent connection are returned to the queue. WS additionally calls `getRateLimiter().removeClient(clientId)`.
 - **WS idle/keepalive**: Bun auto-pings with a `120s` idle timeout and `maxPayloadLength` of 1 MiB (`http.ts:218-224`). SSE sends a `:heartbeat` comment every 30 s and prunes clients that error on write (`sseHandler.ts:111-125`).
@@ -183,13 +199,17 @@ The HTTP layer holds no shard locks itself; all locking happens inside `handleCo
 
 - **0-client early return** (perf invariant): both transport broadcast and typed-emit paths return immediately with no clients. With clients present, queue counts are batch-aggregated after a 10 ms coalescing window, so an event burst pays one shared O(total live jobs) pass rather than one queue/global scan per event.
 - **Connection limits**: SSE caps at `MAX_SSE_CLIENTS = 1000` → `503 "Too many SSE connections"` (`sseHandler.ts:230-233`, `sse/constants.ts:2`); WS caps at `MAX_WS_CLIENTS = 1000` via `canAccept()` → `503` (`wsHandler.ts:46-49`, `http.ts:151-162`). WS upgrade failure → `400`.
-- **WS backpressure**: `safeSend` (`wsHandler.ts:51-64`) checks `ws.getBufferedAmount()`; above `WS_BACKPRESSURE_BYTES` (1 MiB) it increments `droppedMessages` and *skips* the message (treats the client as alive but slow, does not disconnect). A `send` throw marks the client dead and removes it.
+- **WS backpressure**: `safeSend` (`wsHandler.ts:51-64`) checks `ws.getBufferedAmount()`; above `WS_BACKPRESSURE_BYTES` (1 MiB) it increments `droppedMessages` and _skips_ the message (treats the client as alive but slow, does not disconnect). A `send` throw marks the client dead and removes it.
 - **SSE replay bounds**: ring buffer holds the last `EVENT_BUFFER_SIZE = 1000` events; reconnects requesting older IDs silently miss the gap. Heartbeat = 30 s, advertised `retry: 3000` ms.
 - **Body parsing**: routes using `parseJsonBody` treat empty body as `{}` (backward compat for optional-body routes); malformed JSON → `400 "Invalid JSON body"`. Routes using `req.json()` directly (PUSH, bulk, cron/webhook/worker create) also catch and return `400`. Worker heartbeat tolerates a missing/invalid body (`httpRouteResources.ts:189`).
 - **State-filter aliasing (#95)**: `GET /queues/:queue/jobs/list` reads `state`, `status`, and `states`, each repeatable and comma-separated; previously only `state` was honored, so `?status=failed` silently returned the whole queue (`http-routes/queueJobs.ts:99-123`).
 - **Paused-queue count consistency (#92)**: `dashboardQueueDetailEndpoint` runs `pausedView` so a paused queue reports ready jobs under `paused` (not `waiting`/`prioritized`), matching the per-state job lists (`httpDashboardEndpoints.ts:142-156`).
 - **DLQ pagination robustness**: non-numeric `limit`/`offset` are ignored rather than producing an empty slice (`httpRouteQueueConfig.ts:44`).
 - **Dashboard truncation**: workers and crons lists are capped at 100 items with a `truncated` flag (`httpDashboardEndpoints.ts:53-100`).
+- **Storage diagnostic redaction**: non-disk storage failures remain visible as
+  degraded state but their SQLSTATE/constraint/host/driver detail is replaced by
+  `Internal server error` in health, readiness, dashboard, and command
+  responses. SQLite disk-full keeps its existing actionable message.
 - **CORS injection on out-of-pipeline responses**: `withCors` (`http.ts:87-99`) adds `Access-Control-Allow-Origin` to health/ready/prometheus/debug responses only if not already set, never overwriting (audit #16–20).
 - **CORS default gotcha**: `HttpServerConfig.corsOrigins` defaults to `['*']` inside `createHttpServer` (`http.ts:65-68`), but the server entrypoint always passes the env-resolved array, which defaults to `[]` when `CORS_ALLOW_ORIGIN` is unset (`config/resolve.ts:51`). With `[]`, `getCorsOrigin()` yields an empty `Access-Control-Allow-Origin` string rather than `*`. See [Security: TLS, Auth, CORS](./security-tls-auth.md).
 - **Metrics auth asymmetry**: `/metrics` and `/stats` always require auth (when
@@ -204,16 +224,16 @@ The HTTP layer holds no shard locks itself; all locking happens inside `handleCo
 
 Resolved in `config/resolve.ts` (config file > env > default) and passed into `HttpServerConfig`:
 
-| Env var | Field | Default |
-|---|---|---|
-| `HTTP_PORT` | `port` | `6790` |
-| `HOST` | `hostname` | `0.0.0.0` |
-| `HTTP_SOCKET_PATH` | `socketPath` | unset (overrides host/port → Unix socket bind, `http.ts:257-263`) |
-| `AUTH_TOKENS` (comma-sep) | `authTokens` | `[]` (auth disabled) |
-| `CORS_ALLOW_ORIGIN` (comma-sep) | `corsOrigins` | `[]` (see CORS gotcha above) |
-| `METRICS_AUTH` | `requireAuthForMetrics` | `false` |
-| `TLS_CERT_FILE` + `TLS_KEY_FILE` | `tls` | unset (both required together) |
-| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_CLEANUP_MS` | rate limiter | `60000` / `10000` / `60000` (`rateLimiter.ts`) |
+| Env var                                                                      | Field                   | Default                                                           |
+| ---------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------- |
+| `HTTP_PORT`                                                                  | `port`                  | `6790`                                                            |
+| `HOST`                                                                       | `hostname`              | `0.0.0.0`                                                         |
+| `HTTP_SOCKET_PATH`                                                           | `socketPath`            | unset (overrides host/port → Unix socket bind, `http.ts:257-263`) |
+| `AUTH_TOKENS` (comma-sep)                                                    | `authTokens`            | `[]` (auth disabled)                                              |
+| `CORS_ALLOW_ORIGIN` (comma-sep)                                              | `corsOrigins`           | `[]` (see CORS gotcha above)                                      |
+| `METRICS_AUTH`                                                               | `requireAuthForMetrics` | `false`                                                           |
+| `TLS_CERT_FILE` + `TLS_KEY_FILE`                                             | `tls`                   | unset (both required together)                                    |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_CLEANUP_MS` | rate limiter            | `60000` / `10000` / `60000` (`rateLimiter.ts`)                    |
 
 WS/SSE tuning constants are compile-time, not env-configurable: SSE `MAX_CLIENTS=1000`, `HEARTBEAT_MS=30000`, `RETRY_MS=3000`, `EVENT_BUFFER_SIZE=1000`; WS `MAX_WS_CLIENTS=1000`, `BACKPRESSURE_BYTES=1048576`, idle `120s`, `maxPayloadLength=1 MiB`.
 

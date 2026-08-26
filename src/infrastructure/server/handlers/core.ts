@@ -5,13 +5,14 @@ import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { jobId, normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
+import { sanitizeServerError } from '../errors';
 import {
   validateQueueName,
   validateJobData,
   validateJobOptions,
   validateNumericField,
 } from '../protocol';
-import { validatePushBatchJobs } from './pushBatchValidation';
+import { validatePushBatchJobs, validatePushDependencies } from './pushBatchValidation';
 
 /** Handle PUSH command */
 export async function handlePush(
@@ -36,25 +37,10 @@ export async function handlePush(
   });
   if (optionsError) return resp.error(optionsError, reqId);
 
-  // Validate dependsOn references exist
-  if (cmd.dependsOn && cmd.dependsOn.length > 0) {
-    for (const depId of cmd.dependsOn) {
-      const depJobId = jobId(depId);
-      const exists =
-        ctx.queueManager.getJobIndex().has(depJobId) ||
-        ctx.queueManager.getCompletedJobs().has(depJobId) ||
-        // A removeOnComplete parent that completed is recorded only here (its row
-        // is deleted and it leaves jobIndex/completedJobs). The readiness path and
-        // dependency processor already honor depCompletions; the gate must too, or
-        // a late dependent is wrongly rejected with "Dependency job not found".
-        ctx.queueManager.getDepCompletions().has(depJobId);
-      if (!exists) {
-        return resp.error(`Dependency job not found: ${depId}`, reqId);
-      }
-    }
-  }
-
   try {
+    const dependencyError = await validatePushDependencies(cmd.dependsOn, ctx);
+    if (dependencyError) return resp.error(dependencyError, reqId);
+
     const payload = normalizeLegacyJobPayload(cmd);
     const job = await ctx.queueManager.push(cmd.queue, {
       name: payload.name,
@@ -93,8 +79,7 @@ export async function handlePush(
 
     return resp.ok(job.id, reqId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return resp.error(message, reqId);
+    return resp.error(sanitizeServerError(err), reqId);
   }
 }
 
@@ -109,15 +94,19 @@ export async function handlePushBatch(
 
   // PUSH parity: per-job data/option bounds + dependsOn existence gate
   // (extended to earlier same-batch custom ids for intra-batch chains).
-  const jobsError = validatePushBatchJobs(cmd.jobs, ctx);
-  if (jobsError) return resp.error(jobsError, reqId);
+  try {
+    const jobsError = await validatePushBatchJobs(cmd.jobs, ctx);
+    if (jobsError) return resp.error(jobsError, reqId);
 
-  const inputs = cmd.jobs.map((job) => {
-    const payload = normalizeLegacyJobPayload(job);
-    return { ...job, name: payload.name, data: payload.data };
-  });
-  const ids = await ctx.queueManager.pushBatch(cmd.queue, inputs);
-  return resp.batch(ids, reqId);
+    const inputs = cmd.jobs.map((job) => {
+      const payload = normalizeLegacyJobPayload(job);
+      return { ...job, name: payload.name, data: payload.data };
+    });
+    const ids = await ctx.queueManager.pushBatch(cmd.queue, inputs);
+    return resp.batch(ids, reqId);
+  } catch (error) {
+    return resp.error(sanitizeServerError(error), reqId);
+  }
 }
 
 /** Handle PULL command */
@@ -218,7 +207,7 @@ export async function handleAck(
     if (!outcome) ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
     return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
-    return resp.error(err instanceof Error ? err.message : String(err), reqId);
+    return resp.error(sanitizeServerError(err), reqId);
   }
 }
 
@@ -262,7 +251,7 @@ export async function handleAckBatch(
     }
     return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
-    return resp.error(err instanceof Error ? err.message : String(err), reqId);
+    return resp.error(sanitizeServerError(err), reqId);
   }
 }
 
@@ -291,6 +280,6 @@ export async function handleFail(
     if (!outcome) ctx.queueManager.unregisterClientJob(ctx.clientId, jid);
     return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
-    return resp.error(err instanceof Error ? err.message : String(err), reqId);
+    return resp.error(sanitizeServerError(err), reqId);
   }
 }

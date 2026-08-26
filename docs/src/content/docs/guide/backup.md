@@ -1,5 +1,5 @@
 ---
-title: "S3 Backup: Automatic Off-Site Copies of Your Queue"
+title: 'S3 Backup: Automatic Off-Site Copies of Your Queue'
 description: Automated S3 backups for the bunqueue SQLite database. Works with AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces.
 head:
   - tag: meta
@@ -33,8 +33,9 @@ S3_BACKUP_PREFIX=backups/     # key prefix (default)
 ```
 
 `BUNQUEUE_DATA_PATH` (or `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) is required:
-an in-memory queue has no SQLite file to back up. If backup is enabled without
-a data path, server startup fails explicitly before opening its network ports.
+an in-memory queue has no SQLite file to back up. The PostgreSQL driver is also
+outside this file-snapshot facility; use database-native backup/PITR. If backup
+is enabled without persistent SQLite, server startup fails before opening ports.
 
 Or configure it in `bunqueue.config.ts`:
 
@@ -79,12 +80,12 @@ Restore requires the `--force` (`-f`) flag and **overwrites** the current databa
 
 Any S3-compatible storage works. Set `S3_ENDPOINT` for non-AWS providers:
 
-| Provider | Endpoint |
-|----------|----------|
-| AWS S3 | (default) |
-| Cloudflare R2 | `https://<account>.r2.cloudflarestorage.com` |
-| MinIO | `http://localhost:9000` |
-| DigitalOcean Spaces | `https://<region>.digitaloceanspaces.com` |
+| Provider            | Endpoint                                     |
+| ------------------- | -------------------------------------------- |
+| AWS S3              | (default)                                    |
+| Cloudflare R2       | `https://<account>.r2.cloudflarestorage.com` |
+| MinIO               | `http://localhost:9000`                      |
+| DigitalOcean Spaces | `https://<region>.digitaloceanspaces.com`    |
 
 ## How It Works
 

@@ -1,6 +1,6 @@
 ---
-title: "Deploy to Production: Docker, systemd and PM2"
-description: "Production deployment guide for bunqueue with Docker, systemd, and PM2. Health checks, resource limits, backups, and monitoring for Bun."
+title: 'Deploy to Production: Docker, systemd and PM2'
+description: 'Production deployment guide for bunqueue with Docker, systemd, and PM2. Health checks, resource limits, backups, and monitoring for Bun.'
 head:
   - tag: meta
     attrs:
@@ -13,20 +13,32 @@ head:
   - tag: meta
     attrs:
       property: article:published_time
-      content: "2026-02-09"
+      content: '2026-02-09'
   - tag: meta
     attrs:
       name: keywords
-      content: "bunqueue production deployment, docker job queue, systemd job queue, job queue monitoring, bun production, sqlite queue deployment, health check queue"
+      content: 'bunqueue production deployment, docker job queue, systemd job queue, job queue monitoring, bun production, sqlite queue deployment, health check queue'
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · operations</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One instance, deployed <em>properly.</em></h1>
-  <p class="bq-hero-sub">bunqueue is a single-instance queue by design: no clustering, no leader election, no split-brain. That makes deployment simple, and this guide covers doing it reliably with Docker, systemd, and PM2.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    One instance, deployed <em>properly.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    This article covers bunqueue's default single-instance SQLite deployment with Docker, systemd,
+    and PM2. PostgreSQL 18.6 multi-broker mode is now also available; follow the current deployment
+    guide for that topology.
+  </p>
 </div>
+
+:::note[Storage update]
+This article's commands and backup advice are for SQLite. For multiple active
+brokers, see the current [deployment guide](/guide/deployment/) and
+[storage guide](/guide/databases/).
+:::
 
 ## Docker Deployment
 
@@ -68,7 +80,8 @@ docker run -d \
 ```
 
 <Aside type="caution">
-  Always mount the data directory as a Docker volume. Without it, your SQLite database (and all jobs) are lost when the container restarts.
+  Always mount the data directory as a Docker volume. Without it, your SQLite database (and all
+  jobs) are lost when the container restarts.
 </Aside>
 
 ## systemd Service
@@ -169,11 +182,8 @@ Use the HTTP health endpoint for load balancer checks, Docker HEALTHCHECK, and K
 bunqueue handles SIGTERM for graceful shutdown:
 
 <Steps>
-1. Stop accepting new connections
-2. Wait for active jobs to complete (up to `SHUTDOWN_TIMEOUT_MS`)
-3. Flush the write buffer to SQLite
-4. Close the database
-5. Exit cleanly
+  1. Stop accepting new connections 2. Wait for active jobs to complete (up to
+  `SHUTDOWN_TIMEOUT_MS`) 3. Flush the write buffer to SQLite 4. Close the database 5. Exit cleanly
 </Steps>
 
 ```bash
@@ -185,7 +195,8 @@ docker stop -t 60 bunqueue
 ```
 
 <Aside type="tip">
-  Set `SHUTDOWN_TIMEOUT_MS` to match your longest-running job. If a payment processing job takes up to 60 seconds, set the timeout to at least 65000ms.
+  Set `SHUTDOWN_TIMEOUT_MS` to match your longest-running job. If a payment processing job takes up
+  to 60 seconds, set the timeout to at least 65000ms.
 </Aside>
 
 ## Resource Sizing
@@ -193,11 +204,11 @@ docker stop -t 60 bunqueue
 bunqueue's memory usage scales with the number of in-flight jobs:
 
 | In-Flight Jobs | Approximate RAM |
-|---------------|-----------------|
-| 1,000 | ~50 MB |
-| 10,000 | ~200 MB |
-| 100,000 | ~800 MB |
-| 1,000,000 | ~3 GB |
+| -------------- | --------------- |
+| 1,000          | ~50 MB          |
+| 10,000         | ~200 MB         |
+| 100,000        | ~800 MB         |
+| 1,000,000      | ~3 GB           |
 
 The SQLite database size depends on job data size and retention settings. A typical deployment with `removeOnComplete: true` stays compact.
 
@@ -214,6 +225,7 @@ curl http://localhost:6790/prometheus
 ```
 
 Key metrics to alert on:
+
 - **DLQ size growing** - indicates systematic failures
 - **Active jobs count > expected** - jobs may be stalled
 - **Memory usage approaching limit** - adjust `maxEntries` settings
@@ -230,6 +242,7 @@ S3_BACKUP_RETENTION=7         # Keep the last 7 backups
 ```
 
 For critical deployments, also consider:
+
 - Filesystem-level snapshots (LVM, ZFS, or cloud provider snapshots)
 - Replicating the SQLite file to a secondary location
 - Monitoring backup success/failure with alerts

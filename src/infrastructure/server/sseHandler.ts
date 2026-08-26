@@ -65,7 +65,7 @@ export class SseHandler {
     }, SSE_HEARTBEAT_MS);
 
     this.statsInterval ??= setInterval(() => {
-      if (this.clients.size > 0) this.broadcastStats(qm);
+      if (this.clients.size > 0) void this.broadcastStats(qm);
     }, 5000);
 
     this.healthInterval ??= setInterval(() => {
@@ -201,8 +201,12 @@ export class SseHandler {
 
   // ── Periodic broadcasts ────────────────────────────────────
 
-  private broadcastStats(qm: QueueManager): void {
-    this.sendTypedEvent('stats:snapshot', buildStatsSnapshot(qm));
+  private async broadcastStats(qm: QueueManager): Promise<void> {
+    try {
+      this.sendTypedEvent('stats:snapshot', await buildStatsSnapshot(qm));
+    } catch {
+      // A failed durable read must not be replaced by a stale local snapshot.
+    }
   }
 
   private broadcastHealth(qm: QueueManager): void {

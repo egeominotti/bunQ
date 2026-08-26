@@ -1,6 +1,6 @@
 ---
-title: "Deploy bunqueue: Docker, systemd & PM2"
-description: The smallest way to run bunqueue in production, then tight configs for Docker, systemd, and PM2, plus health checks, backups, and restore steps.
+title: 'Deploy bunqueue: SQLite or PostgreSQL 18.6'
+description: Deploy bunqueue with embedded or single-broker SQLite, or a PostgreSQL 18.6 multi-broker topology, including Docker, health, and backups.
 head:
   - tag: meta
     attrs:
@@ -12,11 +12,19 @@ import { Aside } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · deployment</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">From laptop to <em>production.</em></h1>
-  <p class="bq-hero-sub">This page shows the smallest working way to run bunqueue in production, then ready-to-paste configs for Docker, systemd, and PM2, plus health checks and backups.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    From laptop to <em>production.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    This page shows the smallest working way to run bunqueue in production, then ready-to-paste
+    configs for Docker, systemd, and PM2, plus health checks and backups.
+  </p>
 </div>
 
-bunqueue runs as a **single process** that stores everything in one SQLite file. There is no clustering and no multi-node setup to plan. Deploying it means answering one question: does the queue live inside your app process, or in its own process?
+bunqueue uses one process and memory/SQLite by default. Server mode may instead
+use PostgreSQL 18.6 as the authoritative store for multiple active broker
+processes. Start by deciding whether the queue is embedded, a single SQLite
+server, or a PostgreSQL-backed broker fleet.
 
 ## The smallest deploy: embedded mode
 
@@ -33,16 +41,21 @@ const queue = new Queue('emails', {
 
 await queue.add('send', { to: 'user@example.com' });
 
-new Worker('emails', async (job) => {
-  await sendEmail(job.data);
-  return { sent: true };
-}, { embedded: true, dataPath: './data/bunq.db', concurrency: 5 });
+new Worker(
+  'emails',
+  async (job) => {
+    await sendEmail(job.data);
+    return { sent: true };
+  },
+  { embedded: true, dataPath: './data/bunq.db', concurrency: 5 }
+);
 ```
 
 Deploy your app the way you already deploy it. The queue ships with it. Done.
 
 <Aside type="caution">
-Without `dataPath` (or the `BUNQUEUE_DATA_PATH` environment variable), the embedded queue keeps jobs **in memory only** and loses them on restart.
+  Without `dataPath` (or the `BUNQUEUE_DATA_PATH` environment variable), the embedded queue keeps
+  jobs **in memory only** and loses them on restart.
 </Aside>
 
 <Aside type="tip" title="Prefer a config file?">
@@ -59,9 +72,10 @@ export default defineConfig({
 ```
 
 See [Configuration File](/guide/configuration/).
+
 </Aside>
 
-## More than one process? Run the server
+## Separate apps and workers? Run the server
 
 The moment your API and your workers are separate processes (or separate containers), run the bunqueue server. One server owns the SQLite file; every other process talks to it over TCP:
 
@@ -79,9 +93,13 @@ await queue.add('process', { data: '...' });
 ```typescript
 // worker.ts, a separate process, restart and scale it independently
 import { Worker } from 'bunqueue/client';
-new Worker('tasks', async (job) => {
-  return { done: true };
-}, { concurrency: 10 });
+new Worker(
+  'tasks',
+  async (job) => {
+    return { done: true };
+  },
+  { concurrency: 10 }
+);
 ```
 
 You can also push jobs without any SDK, via CLI or HTTP:
@@ -95,8 +113,41 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 ```
 
 <Aside type="danger" title="Never share one SQLite file between two embedded processes">
-Two processes with `embedded: true` pointing at the same file do **not** work. Each keeps its own in-memory state and reads the file only at startup, so they never see each other's jobs and both write to the same file. Multiple processes always go through the server.
+  Two processes with `embedded: true` pointing at the same file do **not** work. Each keeps its own
+  in-memory state and reads the file only at startup, so they never see each other's jobs and both
+  write to the same file. Multiple clients always go through a server; multiple active servers
+  require PostgreSQL mode.
 </Aside>
+
+## Multiple active brokers: PostgreSQL 18.6
+
+Use the repository's pinned Compose topology when one broker is not enough:
+
+```bash
+POSTGRES_PASSWORD='replace-me' \
+  BUNQUEUE_POSTGRES_URL='postgres://bunqueue:replace-me@postgres:5432/bunqueue' \
+  docker compose -f docker-compose.postgres.yml up --build -d
+```
+
+This starts `postgres:18.6-alpine`, `broker-a` on TCP/HTTP `6789`/`6790`, and
+`broker-b` on `7789`/`7790`. Both brokers share one URL and namespace and have
+different IDs. Configure the equivalent deployment with:
+
+```bash
+BUNQUEUE_STORAGE_DRIVER=postgres
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:percent-encoded-password@postgres:5432/bunqueue'
+BUNQUEUE_POSTGRES_NAMESPACE=production
+BUNQUEUE_BROKER_ID=broker-a # unique for every active process
+```
+
+Compose passes `BUNQUEUE_POSTGRES_URL` directly instead of placing the raw
+`POSTGRES_PASSWORD` inside a URI. Set both values when overriding the default;
+percent-encode reserved characters only in the URL password component.
+
+PostgreSQL mode is standalone-server only. Do not set `BUNQUEUE_DATA_PATH`, and
+do not enable bunqueue's SQLite S3 snapshot feature. Use PostgreSQL-native
+backups/PITR and put a TCP load balancer or service in front of the brokers. See
+[Storage backends](/guide/databases/) for the lease and consistency model.
 
 ## Docker
 
@@ -126,8 +177,8 @@ services:
   bunqueue:
     build: .
     ports:
-      - "6789:6789"  # TCP (SDK clients)
-      - "6790:6790"  # HTTP (health, metrics, REST)
+      - '6789:6789' # TCP (SDK clients)
+      - '6790:6790' # HTTP (health, metrics, REST)
     volumes:
       - bunqueue-data:/app/data
     environment:
@@ -197,21 +248,23 @@ Build the standalone binary first (`bun run build` in the repo produces `dist/bu
 ```javascript
 // ecosystem.config.js
 module.exports = {
-  apps: [{
-    name: 'bunqueue',
-    script: '/usr/local/bin/bunqueue',
-    args: 'start',
-    instances: 1,          // single instance only, no cluster mode
-    exec_mode: 'fork',
-    autorestart: true,
-    max_memory_restart: '512M',
-    env: {
-      NODE_ENV: 'production',
-      DATA_PATH: '/var/lib/bunqueue/bunq.db',
-      TCP_PORT: 6789,
-      HTTP_PORT: 6790,
+  apps: [
+    {
+      name: 'bunqueue',
+      script: '/usr/local/bin/bunqueue',
+      args: 'start',
+      instances: 1, // required for SQLite; PostgreSQL brokers use unique IDs
+      exec_mode: 'fork',
+      autorestart: true,
+      max_memory_restart: '512M',
+      env: {
+        NODE_ENV: 'production',
+        DATA_PATH: '/var/lib/bunqueue/bunq.db',
+        TCP_PORT: 6789,
+        HTTP_PORT: 6790,
+      },
     },
-  }]
+  ],
 };
 ```
 
@@ -221,7 +274,9 @@ pm2 save && pm2 startup   # survive reboots
 ```
 
 <Aside type="caution">
-Never use PM2 cluster mode (`instances > 1`). bunqueue is a single-instance queue; multiple instances writing the same file will corrupt data.
+  Never use PM2 cluster mode with SQLite. Multiple processes writing the same file are unsupported.
+  PostgreSQL mode can run multiple brokers, but configure a unique `BUNQUEUE_BROKER_ID` per instance
+  rather than cloning one static ID.
 </Aside>
 
 ## Health checks
@@ -235,8 +290,12 @@ curl http://localhost:6790/ready     # readiness
 curl http://localhost:6790/prometheus # metrics in Prometheus text format
 ```
 
-`/health` and `/ready` return 503 when persistent storage reports a full disk;
-`/healthz` remains a pure process-liveness check. If `METRICS_AUTH=true`, also
+`/health` and `/ready` return 503 when persistent storage is degraded (including
+SQLite disk-full and PostgreSQL runtime errors); `/healthz` remains a pure
+process-liveness check. PostgreSQL SQLSTATE, constraint, host, driver, and
+network details stay in local diagnostics: client-facing health payloads use
+`Internal server error`, while SQLite disk-full retains its actionable message.
+If `METRICS_AUTH=true`, also
 configure `AUTH_TOKENS` and the scraper bearer token; otherwise `/prometheus`
 fails closed with 503.
 
@@ -254,7 +313,7 @@ readinessProbe:
 
 Alerting thresholds and dashboards are covered in [Monitoring](/guide/monitoring/) and [Production Operations](/guide/production/).
 
-## Backups and restore
+## SQLite backups and restore
 
 The whole queue is one SQLite file, so back up that one file. The built-in S3 backup uploads periodic snapshots (works with AWS S3, Cloudflare R2, MinIO):
 
@@ -285,17 +344,25 @@ Provider-specific setup (R2, MinIO, Spaces) and how restore verifies SHA-256,
 checks SQLite integrity, and quarantines stale sidecars before replacing
 anything: [S3 Backup guide](/guide/backup/).
 
+For PostgreSQL, use the database provider's backup, replication, and
+point-in-time-recovery facilities. `S3_BACKUP_ENABLED=1` with the PostgreSQL
+driver is rejected at startup.
+
 ## Reference: key environment variables
 
-| Variable | What it does | Default |
-|----------|--------------|---------|
-| `BUNQUEUE_DATA_PATH` | SQLite file path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`) | in-memory |
-| `TCP_PORT` | Port for SDK clients | `6789` |
-| `HTTP_PORT` | Port for health, metrics, REST | `6790` |
-| `AUTH_TOKENS` | Comma-separated tokens clients must present | none (open) |
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` | PEM cert and key for native TLS on TCP and HTTP. Set both or neither; setting only one is a startup error | off |
-| `S3_BACKUP_ENABLED` | Turn on S3 snapshots | `0` |
-| `SHUTDOWN_TIMEOUT_MS` | How long a graceful shutdown waits for active jobs | `30000` |
+| Variable                         | What it does                                                                                              | Default     |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
+| `BUNQUEUE_STORAGE_DRIVER`        | `memory`, `sqlite`, or `postgres`                                                                         | inferred    |
+| `BUNQUEUE_DATA_PATH`             | SQLite file path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`)                 | in-memory   |
+| `BUNQUEUE_POSTGRES_URL`          | PostgreSQL server connection URL                                                                          | none        |
+| `BUNQUEUE_POSTGRES_NAMESPACE`    | Shared installation namespace                                                                             | `default`   |
+| `BUNQUEUE_BROKER_ID`             | Unique PostgreSQL broker identity                                                                         | generated   |
+| `TCP_PORT`                       | Port for SDK clients                                                                                      | `6789`      |
+| `HTTP_PORT`                      | Port for health, metrics, REST                                                                            | `6790`      |
+| `AUTH_TOKENS`                    | Comma-separated tokens clients must present                                                               | none (open) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | PEM cert and key for native TLS on TCP and HTTP. Set both or neither; setting only one is a startup error | off         |
+| `S3_BACKUP_ENABLED`              | Turn on S3 snapshots                                                                                      | `0`         |
+| `SHUTDOWN_TIMEOUT_MS`            | How long a graceful shutdown waits for active jobs                                                        | `30000`     |
 
 The full list, including all S3 and cloud variables, lives in [Environment Variables](/guide/env-vars/). The same options are available as CLI flags: `bunqueue start --tcp-port --http-port --data-path --auth-tokens --tls-cert --tls-key`.
 
@@ -303,17 +370,19 @@ The full list, including all S3 and cloud variables, lives in [Environment Varia
 
 bunqueue is I/O bound, not CPU bound; one core handles most workloads.
 
-| Jobs per day | RAM |
-|--------------|-----|
-| under 10k | 128-256 MB |
-| 10k-100k | 512 MB |
-| over 100k | 1 GB+ |
+| Jobs per day | RAM        |
+| ------------ | ---------- |
+| under 10k    | 128-256 MB |
+| 10k-100k     | 512 MB     |
+| over 100k    | 1 GB+      |
 
 Disk grows with retained jobs. Set `removeOnComplete: true` in job options to drop completed jobs, and keep `removeOnFail: false` so failures stay inspectable. Scale vertically: more RAM, faster disk (NVMe), higher worker `concurrency`.
 
 ## Gotchas
 
-- **No horizontal scaling.** No multi-node, no failover, no distributed processing. If you need those, reach for Redis + BullMQ with Sentinel, Kafka, or a managed queue like SQS. Multiple worker *processes* on one machine are fine, through the TCP server.
+- **SQLite is single-broker.** Horizontal broker scaling requires PostgreSQL
+  18.6 mode. PostgreSQL/database HA, routing, and backup remain operational
+  responsibilities; bunqueue is not a multi-region consensus system.
 - **Two embedded processes, one file, is silent corruption.** See the warning above; always go through the server for multi-process.
 - **Copying the database while the server runs can produce a torn copy.** SQLite runs in WAL mode (writes go to a `.db-wal` sidecar file first). Stop the server, then copy `bunq.db` and `bunq.db-wal` together, or just use the built-in S3 backup, which snapshots safely while live.
 - **`AUTH_TOKENS` is not set by default.** Anyone who can reach the ports can push and pull jobs. Set tokens (`openssl rand -hex 32`) and either enable [native TLS](/guide/tls/) or keep the ports on a private network. See [Security](/security/).

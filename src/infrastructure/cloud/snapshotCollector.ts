@@ -10,33 +10,35 @@ import { throughputTracker } from '../../application/throughputTracker';
 import { latencyTracker } from '../../application/latencyTracker';
 import { getTaskErrorStats } from '../../application/backgroundTasks';
 import { VERSION } from '../../shared/version';
+import { clientStorageStatus } from '../../shared/storageHealth';
 import type { CloudSnapshot } from './types';
 import { cloudLog } from './logger';
 import {
   SNAPSHOT_HOST,
   SNAPSHOT_RUNTIME,
-  collectCrons,
-  collectJobArtifacts,
-  collectWorkerDetails,
   enrichFailedJobDurations,
+  mapSnapshotCrons,
+  mapSnapshotJobArtifacts,
+  mapSnapshotWorkers,
   resolveRedaction,
 } from './snapshot/collector';
 import {
-  collectLiveJobs,
-  collectDlqEntries,
-  collectTopErrors,
-  collectQueueConfigs,
   collectWebhooks,
   collectQueueThroughput,
-  collectWorkerUtilization,
   collectDurationHistogram,
   collectQueueWaitTime,
   collectQueueRetryRate,
   collectBacklogVelocity,
   collectStallDetails,
   collectPriorityDistribution,
+  mapSnapshotDlqEntries,
+  mapSnapshotJobs,
+  mapSnapshotQueueConfigs,
+  mapSnapshotTopErrors,
+  mapSnapshotWorkerUtilization,
 } from './snapshotHelpers';
 import type { CollectSnapshotParams } from './types/collector';
+import { resolveCloudQueueAdapter } from './queueAdapter/registry';
 
 export type { CollectSnapshotParams, ServerHandles } from './types/collector';
 
@@ -45,71 +47,45 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
   const t0 = performance.now();
   const { queueManager, instanceId, instanceName, startedAt, sequenceId, serverHandles } = params;
   const { redactFields, includeJobData } = resolveRedaction(params);
+  const source = await resolveCloudQueueAdapter(queueManager).readSnapshotSource();
 
   // ─── MCP operations (drain buffer into snapshot) ───
   const mcpData = serverHandles?.getMcpOperations?.();
 
   // ─── Light data (O(SHARD_COUNT), every snapshot) ───
-  const stats = queueManager.getStats();
+  const stats = source.stats;
   const memStats = queueManager.getMemoryStats();
-  const workerStats = queueManager.workerManager.getStats();
+  const workerStats = source.workerStats;
   const rates = throughputTracker.getRates();
   const percentiles = latencyTracker.getPercentiles();
   const averages = latencyTracker.getAverages();
-  const storage = queueManager.getStorageStatus();
+  const storage = clientStorageStatus(queueManager.getStorageStatus());
   const mem = process.memoryUsage();
 
-  const queueNames = queueManager.listQueues();
-  const countsByQueue = queueManager.getAllQueueJobCounts();
-  const queues = queueNames.flatMap((name) => {
-    const counts = countsByQueue.get(name);
-    if (!counts) return [];
-    return {
-      name,
-      waiting: counts.waiting,
-      prioritized: counts.prioritized,
-      delayed: counts.delayed,
-      active: counts.active,
-      completed: counts.completed,
-      failed: counts.failed,
-      'waiting-children': counts['waiting-children'],
-      paused: queueManager.isPaused(name),
-      totalCompleted: counts.totalCompleted,
-      totalFailed: counts.totalFailed,
-    };
-  });
-
-  const crons = collectCrons(queueManager);
+  const queues = source.queues.map(({ name, counts, paused }) => ({ name, ...counts, paused }));
+  const crons = mapSnapshotCrons(source.crons);
 
   // ─── Full data (every snapshot) ───
   const allQueueNames = queues.map((q) => q.name);
-  const dlqQueues = queues.filter((q) => q.failed > 0);
-
-  // Live jobs: waiting/active/delayed/failed — bounded by processing capacity
-  const recentJobs = collectLiveJobs(queueManager, allQueueNames, {
+  const recentJobs = mapSnapshotJobs(source.jobs, {
+    redactFields,
+    includeJobData,
+  });
+  const dlqEntries = mapSnapshotDlqEntries(source.dlqEntries, {
     redactFields,
     includeJobData,
   });
 
-  const dlqEntries = collectDlqEntries(
-    queueManager,
-    dlqQueues.map((q) => q.name),
-    { redactFields, includeJobData }
-  );
-
   enrichFailedJobDurations(recentJobs, dlqEntries);
 
-  const topErrors = collectTopErrors(
-    queueManager,
-    dlqQueues.map((q) => q.name)
-  );
-  const workerDetails = collectWorkerDetails(queueManager, Date.now());
-  const queueConfigs = collectQueueConfigs(queueManager, new Set(queueNames));
+  const topErrors = mapSnapshotTopErrors(source.dlqEntries);
+  const workerDetails = mapSnapshotWorkers(source.workers, Date.now());
+  const queueConfigs = mapSnapshotQueueConfigs(source.queues);
   const webhooks = collectWebhooks(queueManager);
   const s3Backup = serverHandles?.getBackupStatus?.() ?? null;
   const telemetry = queueManager.getCloudTelemetry(allQueueNames);
 
-  const { jobResults, jobLogEntries, activeLocks } = collectJobArtifacts(queueManager);
+  const { jobResults, jobLogEntries, activeLocks } = mapSnapshotJobArtifacts(source);
 
   const result: CloudSnapshot = {
     instanceId,
@@ -178,7 +154,7 @@ export async function collectSnapshot(params: CollectSnapshotParams): Promise<Cl
     // Analytics
     queueThroughput: collectQueueThroughput(queues),
     durationHistogram: collectDurationHistogram(recentJobs),
-    workerUtilization: collectWorkerUtilization(queueManager),
+    workerUtilization: mapSnapshotWorkerUtilization(source.workers),
     sqliteStats: serverHandles?.getSqliteStats?.() ?? null,
     runtime: SNAPSHOT_RUNTIME,
     queueWaitTime: collectQueueWaitTime(recentJobs),

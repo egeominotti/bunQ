@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This module implements the four primitive operations that move a job through its life: **push** (enqueue), **pull** (dequeue into processing), **ack** (complete), and **fail** (retry / DLQ). It is the lowest pure-logic layer beneath the TCP/HTTP servers and the embedded SDK — each operation takes a queue/job id, a typed context object (`PushContext`, `PullContext`, `AckContext`) holding the shard arrays, locks, and in-memory indexes, and mutates the in-memory state plus the SQLite write path. The `QueueManager` (`src/application/queueManager.ts`) wires these functions to contexts via its `contextFactory` and exposes `push`/`pull`/`ack`/`fail` plus their batch and lock-aware variants.
+This module implements the four primitive operations that move a job through its life: **push** (enqueue), **pull** (dequeue into processing), **ack** (complete), and **fail** (retry / DLQ) for the memory/SQLite engine. It is the lowest pure-logic layer beneath the TCP/HTTP servers and embedded SDK. The optional PostgreSQL server manager exposes the same transport contract through separate async, database-authoritative transaction modules; it does not insert `await` into these synchronous shard critical sections. See [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ## Responsibilities & Scope
 
@@ -53,22 +53,59 @@ Exported operation functions (real signatures):
 export async function pushJob(queue: string, input: JobInput, ctx: PushContext): Promise<Job>;
 
 // pushBatch.ts (re-exported by push.ts)
-export async function pushJobBatch(queue: string, inputs: JobInput[], ctx: PushContext): Promise<JobId[]>;
+export async function pushJobBatch(
+  queue: string,
+  inputs: JobInput[],
+  ctx: PushContext
+): Promise<JobId[]>;
 
 // pull.ts
-export async function pullJob(queue: string, timeoutMs: number, ctx: PullContext): Promise<Job | null>;
-export async function pullJobBatch(queue: string, count: number, timeoutMs: number, ctx: PullContext): Promise<Job[]>;
+export async function pullJob(
+  queue: string,
+  timeoutMs: number,
+  ctx: PullContext
+): Promise<Job | null>;
+export async function pullJobBatch(
+  queue: string,
+  count: number,
+  timeoutMs: number,
+  ctx: PullContext
+): Promise<Job[]>;
 
 // ack/completion.ts, ack/failure.ts, ack/batch.ts
-export async function ackJob(jobId: JobId, result: unknown, ctx: AckContext, options?: CompletionOptions): Promise<boolean>;
-export async function failJob(jobId: JobId, error: string | undefined, ctx: AckContext, options?: FailJobOptions): Promise<void>;
-export async function ackJobBatch(jobIds: JobId[], ctx: AckContext, leaseTokens?: Array<string | undefined>): Promise<boolean[]>;
-export async function ackJobBatchWithResults(items: Array<{ id: JobId; result: unknown; token?: string } & CompletionOptions>, ctx: AckContext): Promise<boolean[]>;
+export async function ackJob(
+  jobId: JobId,
+  result: unknown,
+  ctx: AckContext,
+  options?: CompletionOptions
+): Promise<boolean>;
+export async function failJob(
+  jobId: JobId,
+  error: string | undefined,
+  ctx: AckContext,
+  options?: FailJobOptions
+): Promise<void>;
+export async function ackJobBatch(
+  jobIds: JobId[],
+  ctx: AckContext,
+  leaseTokens?: Array<string | undefined>
+): Promise<boolean[]>;
+export async function ackJobBatchWithResults(
+  items: Array<{ id: JobId; result: unknown; token?: string } & CompletionOptions>,
+  ctx: AckContext
+): Promise<boolean[]>;
 
 // jobStateTransitions.ts
 export async function moveActiveToWait(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
-export async function changeWaitingDelay(jobId: JobId, delay: number, ctx: JobManagementContext): Promise<boolean>;
-export async function moveToWaitingChildren(jobId: JobId, ctx: JobManagementContext): Promise<boolean>;
+export async function changeWaitingDelay(
+  jobId: JobId,
+  delay: number,
+  ctx: JobManagementContext
+): Promise<boolean>;
+export async function moveToWaitingChildren(
+  jobId: JobId,
+  ctx: JobManagementContext
+): Promise<boolean>;
 ```
 
 Exported context interfaces: `PushContext` (`pushContext.ts`, re-exported by `push.ts`), `PullContext`
@@ -211,9 +248,7 @@ DLQ insert and live-row deletion remain synchronous while the destination shard
 lock is held, so a concurrent `RemoveDlqJob` cannot delete the visible entry
 before a late SQLite insert. Selective permanent removal then transitions
 `failed` to absent without retrying and releases terminal indexes, custom-ID,
-dependency-result, result/log, and parent flow-failure ownership.
-4. Broadcast `failed`; if retried, also broadcast `Retried` (prev `failed`).
-5. Flow propagation when NOT retried: `failParentOnFailure` → `onChildTerminalFailure`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure`/`continueParentOnFailure` → `onChildDependencyOption`.
+dependency-result, result/log, and parent flow-failure ownership. 4. Broadcast `failed`; if retried, also broadcast `Retried` (prev `failed`). 5. Flow propagation when NOT retried: `failParentOnFailure` → `onChildTerminalFailure`; `removeDependencyOnFailure`/`ignoreDependencyOnFailure`/`continueParentOnFailure` → `onChildDependencyOption`.
 
 `calculateBackoff` (`src/domain/job/state.ts:37-54`): fixed = `delay * (0.8 + rand*0.4)` (±20% jitter); exponential / default = `base * 2^attempts * (0.5 + rand)` (±50% jitter), capped at `backoffConfig.maxDelay ?? DEFAULT_MAX_BACKOFF` (1 h).
 
@@ -307,27 +342,33 @@ detached CLI, and durable recovery paths.
   `waitingDeps` stay pinned even when a batch is larger than
   `maxCompletedJobs`; after the last reverse edge is durably resolved or
   removed, the proof becomes recent and ordinary FIFO pruning applies.
+- **PostgreSQL completion generations:** a `removeOnComplete` proof is tied to
+  one custom-ID generation. Reuse retires the old proof only when it has no live
+  consumer. Unreferenced tombstones are retained newest-first up to
+  `maxCompletedJobs`; referenced proofs remain pinned outside that cap. The
+  result snapshot is bounded independently by `maxJobResults`, while durable
+  child-value reads still resolve from PostgreSQL after local eviction.
 - **Repeatable jobs**: re-scheduled via `onRepeat` only while `repeat.limit` is undefined or `repeat.count < limit`.
 
 ## Configuration
 
 These operations read no environment variables directly; behavior is driven by per-job `JobInput` options and constants:
 
-| Option / constant | Default | Effect |
-| --- | --- | --- |
-| `JobInput.maxAttempts` | `3` (`JOB_DEFAULTS`) | Retry ceiling (`canRetry`). |
-| `JobInput.backoff` | `1000` ms | Base retry delay; object form selects `fixed`/`exponential`. |
-| `JobInput.priority` | `0` | Higher = dequeued sooner; >0 sets `prioritized` timeline state. |
-| `JobInput.delay` | `0` | Adds to `runAt`; >0 → `delayed`. |
-| `JobInput.ttl` | `null` | Expiry; expired jobs skipped on pull. |
-| `JobInput.timeout` | `null` | Processing timeout enforced by the next-deadline scheduler. |
-| `JobInput.removeOnComplete` / `removeOnFail` | `false` | Drop job on success / failure. |
-| `JobInput.durable` | `false` | Bypass the ~10 ms write buffer (immediate disk write). |
-| `JobInput.stackTraceLimit` | `10` | Max stored stack lines. |
-| `DEFAULT_MAX_BACKOFF` | `3_600_000` ms | Backoff cap. |
-| `MAX_TIMELINE_ENTRIES` | `20` | Timeline cap. |
-| `pullJob` `timeoutMs` | `0` (no wait) | Long-poll deadline; Worker `pollTimeout` max 30 000 ms. |
-| `DEFAULT_LOCK_TTL` | `30_000` ms | Lock duration (used by `pullWithLock`, not the raw pull). |
+| Option / constant                            | Default              | Effect                                                          |
+| -------------------------------------------- | -------------------- | --------------------------------------------------------------- |
+| `JobInput.maxAttempts`                       | `3` (`JOB_DEFAULTS`) | Retry ceiling (`canRetry`).                                     |
+| `JobInput.backoff`                           | `1000` ms            | Base retry delay; object form selects `fixed`/`exponential`.    |
+| `JobInput.priority`                          | `0`                  | Higher = dequeued sooner; >0 sets `prioritized` timeline state. |
+| `JobInput.delay`                             | `0`                  | Adds to `runAt`; >0 → `delayed`.                                |
+| `JobInput.ttl`                               | `null`               | Expiry; expired jobs skipped on pull.                           |
+| `JobInput.timeout`                           | `null`               | Processing timeout enforced by the next-deadline scheduler.     |
+| `JobInput.removeOnComplete` / `removeOnFail` | `false`              | Drop job on success / failure.                                  |
+| `JobInput.durable`                           | `false`              | Bypass the ~10 ms write buffer (immediate disk write).          |
+| `JobInput.stackTraceLimit`                   | `10`                 | Max stored stack lines.                                         |
+| `DEFAULT_MAX_BACKOFF`                        | `3_600_000` ms       | Backoff cap.                                                    |
+| `MAX_TIMELINE_ENTRIES`                       | `20`                 | Timeline cap.                                                   |
+| `pullJob` `timeoutMs`                        | `0` (no wait)        | Long-poll deadline; Worker `pollTimeout` max 30 000 ms.         |
+| `DEFAULT_LOCK_TTL`                           | `30_000` ms          | Lock duration (used by `pullWithLock`, not the raw pull).       |
 
 ## Related Docs
 
@@ -335,6 +376,8 @@ These operations read no environment variables directly; behavior is driven by p
 - [Data Structures](./data-structures.md) — PriorityQueue, heaps, indexes.
 - [Concurrency & Locking](./concurrency-and-locking.md) — RWLock, lock hierarchy, grace window.
 - [Persistence](./persistence.md) — WriteBuffer, durable writes, recovery.
+- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — async
+  server lifecycle parity, row locks, leases, fencing, and recovery.
 - [Dead Letter Queue](./dead-letter-queue.md) — terminal failure handling.
 - [Deduplication & Unique Jobs](./deduplication-and-unique.md) — uniqueKey / customId.
 - [FlowProducer & Job Dependencies](./flow-producer.md) — `dependsOn`, `waiting-children`, parent propagation.

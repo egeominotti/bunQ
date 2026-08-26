@@ -10,6 +10,8 @@ import type { QueueManager } from '../../application/queueManager';
 import { cloudLog } from './logger';
 import { COMMANDS } from './commands';
 import type { CloudCommand, CloudCommandResult, CommandContext } from './types/command';
+import { resolveCloudQueueAdapter } from './queueAdapter/registry';
+import { sanitizeServerError } from '../server/errors';
 
 export type { CloudCommand, CloudCommandResult, CommandContext } from './types/command';
 
@@ -62,7 +64,7 @@ export async function handleCommand(
         type: 'command_result',
         id: cmd.id,
         success: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: sanitizeServerError(err),
       };
     }
   }
@@ -80,7 +82,7 @@ export async function handleCommand(
   }
 
   try {
-    const raw = await handler(queueManager, cmd, context);
+    const raw = await handler(resolveCloudQueueAdapter(queueManager), cmd, context);
     const data = camelKeys(raw);
     cloudLog.info('Remote command executed', { action: cmd.action, id: cmd.id });
     return { type: 'command_result', id: cmd.id, success: true, data };
@@ -94,7 +96,7 @@ export async function handleCommand(
       type: 'command_result',
       id: cmd.id,
       success: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: sanitizeServerError(err),
     };
   }
 }

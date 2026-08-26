@@ -552,7 +552,10 @@ fixed-point transaction in
 [`postgres/removeUnprocessedChildren.ts`](../src/infrastructure/persistence/postgres/removeUnprocessedChildren.ts).
 Manager snapshot views are pure
 functions in `postgres-queue-manager/snapshotViews.ts`; the mutable Snapshot
-owns only state transitions and bounds. `postgres/eventRetention.ts` centralizes
+owns only state transitions and bounds. `postgres/readModels.ts` loads coherent
+manager and per-queue projections in `REPEATABLE READ READ ONLY` transactions,
+while `postgres-queue-manager/projectionRefreshes.ts` coalesces authoritative
+per-job repair with generation fencing. `postgres/eventRetention.ts` centralizes
 the indexed journal cutoff, non-blocking inline lock, ordered candidate plan,
 and blocking single-queue sweep used by manual trim and crash recovery.
 `postgres/dlqMaintenance.ts` composes normal DLQ upkeep with an authoritative
@@ -591,7 +594,9 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   broker/client release is an optimization, not the correctness boundary.
   Shutdown stops all new database-backed operation admission, drains every
   accepted admission, claim attempt, mutation, query, startup hydration, and
-  deferred write, then closes post-commit maintenance and the SQL pool. Nested
+  deferred write, stops projection retries, awaits in-flight projection and
+  keyed maintenance flights, then releases broker resources and closes the SQL
+  pool. Nested
   async scopes are reentrant, while an empty long-poll owns no admission between
   claim attempts. Late disconnect cleanup clears local ownership without
   touching a closed pool.
@@ -622,12 +627,18 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   candidate tuples are locked by ascending ID, and a commit-aware autonomous
   sweep recalculates the cutoff under one per-queue advisory lock. Cumulative
   per-queue prune frontiers refresh only a broker behind discarded history.
-  A 256-event startup accumulator retries the authoritative snapshot when it
-  overflows, while per-job/queue version fences prevent hydration or an in-flight
-  query from overwriting a newer replayed state. Failed authoritative refreshes
-  retain their coalesced dirty marker and retry with bounded backoff, so pruning
-  cannot strand a broker on only the retained event subset. Per-queue failures
-  participate in storage health until recovery, and shutdown stops retry loops.
+  A 256-event startup accumulator permits one authoritative retry when it
+  overflows; a second overflow cannot starve readiness because affected queues
+  retain coalesced dirty markers. Bootstrap and queue projections each
+  use one repeatable-read MVCC snapshot. Journal payloads schedule current-row
+  repair instead of mutating job or token state directly, and a direct claim
+  supersedes its job generation before local publication. Projection flights use
+  unique identities and reclaim settled generation entries, preventing stale
+  reads without retaining one marker per historical job. Failed authoritative
+  refreshes retain their coalesced dirty marker and retry with bounded backoff,
+  so pruning cannot strand a broker on only the retained event subset. Per-queue
+  failures participate in storage health until recovery, and shutdown stops
+  retry loops.
 - **Distributed control state.** Pause, limits, cron schedules, worker and broker
   heartbeats, logs, and queue metric totals are namespace-scoped database rows.
 
@@ -639,7 +650,8 @@ it through the Facade; SQL and lock boundaries stay explicit rather than hidden
 behind a generic repository or ORM. Strategy fakes, explicit contexts, and
 separate startup-accumulator, deferred-write, and event-health components keep
 lifecycle and failure paths testable without coupling every test to a complete
-server. The reentrant operation gate and atomic deferred-write admission make
+server. The projection scheduler and keyed maintenance flights expose explicit
+start/close/drain boundaries. The reentrant operation gate and atomic deferred-write admission make
 shutdown races deterministic at the manager boundary. Concurrent drains share
 an immutable sequence checkpoint, making error observation deterministic without
 exposing queue internals.

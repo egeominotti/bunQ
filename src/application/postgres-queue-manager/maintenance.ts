@@ -42,7 +42,7 @@ export class PostgresQueueManagerMaintenance extends PostgresQueueManagerRelatio
       for (const entry of entries) {
         if (await this.postgresStore.retry(entry.job.id)) retried++;
       }
-      if (retried > 0) await this.refreshQueue(queue);
+      if (retried > 0) await this.refreshQueueAfterCommit(queue);
       return retried;
     });
   }
@@ -51,7 +51,7 @@ export class PostgresQueueManagerMaintenance extends PostgresQueueManagerRelatio
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       const ids = await this.postgresStore.purgeDlq(queue);
-      if (ids.length > 0) await this.refreshQueue(queue);
+      if (ids.length > 0) await this.refreshQueueAfterCommit(queue);
       return ids.length;
     });
   }
@@ -88,7 +88,7 @@ export class PostgresQueueManagerMaintenance extends PostgresQueueManagerRelatio
       for (const row of rows.slice(0, limit)) {
         if (await this.postgresStore.retry(row.job.id)) retried++;
       }
-      if (retried > 0) await this.refreshQueue(queue);
+      if (retried > 0) await this.refreshQueueAfterCommit(queue);
       return retried;
     });
   }
@@ -102,7 +102,7 @@ export class PostgresQueueManagerMaintenance extends PostgresQueueManagerRelatio
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       const ids = await this.postgresStore.clean(queue, graceMs, state, limit);
-      if (ids.length > 0) await this.refreshQueue(queue);
+      if (ids.length > 0) await this.refreshQueueAfterCommit(queue);
       return ids;
     });
   }

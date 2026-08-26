@@ -214,19 +214,32 @@ The PostgreSQL multi-broker adapter applies the same generation rule across its
 asynchronous boundary: both awaited and fire-and-forget disconnect cleanup
 capture every `(jobId, token)` before the first await/enqueue. The SQL release is
 fenced by that immutable token, and local token removal is conditional on the
-same value still being current. A deferred callback from an old custom-ID
+same value still being current. Release progress is retained as a per-client
+session: a transient SQL error leaves the current and unprocessed tokens pending,
+retries return the cumulative definitive release count, and concurrent cleanup
+callers share one in-flight attempt. A deferred callback from an old custom-ID
 generation therefore cannot release or erase a newer lease. This does not
 change the synchronous memory/SQLite lock implementation described above.
 
 The PostgreSQL manager also places a reentrant lifecycle gate around every
 database-backed public operation. Once shutdown closes admission, late work is
 rejected before it can reach the SQL pool; work accepted earlier retains its
-scope through the post-commit snapshot refresh. Nested manager calls reuse that
+scope through the authoritative database transition and any bounded immediate
+queue reconciliation. Nested manager calls reuse that
 scope, synchronous compatibility mutations atomically reserve their deferred
 write slot, and escaped async descendants cannot borrow a scope after it has
 settled. A long-poll owns admission only during each actual claim transaction,
 so an empty pull cannot hold shutdown open. Disconnect cleanup that arrives
 after the boundary is local-only and idempotent.
+
+Journal delivery and local claim delivery use different authority boundaries.
+An event only schedules a current-row projection; it never clears a token from
+its historical payload. A direct claim increments that job's projection
+generation before publishing the token locally, so a read already in flight is
+discarded. Only a later authoritative row that is non-active or carries another
+token may remove local ownership. Queue projections and manager bootstrap views
+are read-only repeatable-read transactions, avoiding mixed snapshots across
+jobs, results, queue policy, and queue existence.
 
 PostgreSQL DLQ auto-retry follows the distributed lock order even though it
 must read completion evidence. It discovers the bounded candidate/dependency

@@ -1,7 +1,15 @@
 import type { JobId } from '../../domain/types/job';
 import { PostgresQueueManagerCloud } from './cloud';
 
+interface ClientReleaseSession {
+  readonly leases: Map<JobId, string>;
+  released: number;
+  inFlight: Promise<number> | null;
+}
+
 export class PostgresQueueManagerOperations extends PostgresQueueManagerCloud {
+  private readonly clientReleaseSessions = new Map<string, ClientReleaseSession>();
+
   override async cancel(id: JobId): Promise<boolean> {
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
@@ -51,7 +59,7 @@ export class PostgresQueueManagerOperations extends PostgresQueueManagerCloud {
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       const promoted = await this.postgresStore.promoteMany(queue, count);
-      if (promoted.length > 0) await this.refreshQueue(queue);
+      if (promoted.length > 0) await this.refreshQueueAfterCommit(queue);
       return promoted.length;
     });
   }
@@ -149,49 +157,60 @@ export class PostgresQueueManagerOperations extends PostgresQueueManagerCloud {
   }
 
   override async releaseClientJobs(clientId: string): Promise<number> {
-    return await this.runPostgresOperation(async () => {
-      const leases = [...(this.clientJobs.get(clientId) ?? [])].map((id) => ({
-        id,
-        token: this.tokenFor(id),
-      }));
-      this.clientJobs.delete(clientId);
-      let released = 0;
-      for (const { id, token } of leases) {
-        if (token && (await this.postgresStore.releaseClientLease(id, token))) {
-          if (this.activeTokens.get(id) === token) this.activeTokens.delete(id);
-          await this.refreshJob(id);
-          released++;
-        }
-      }
-      return released;
-    });
+    return await this.runPostgresOperation(() => this.runClientRelease(clientId));
   }
 
   override forceReleaseClientJobs(clientId: string): number {
     const admitted = this.operations.tryRunSync(() => {
-      const leases = [...(this.clientJobs.get(clientId) ?? [])].map((id) => ({
-        id,
-        token: this.tokenFor(id),
-      }));
-      this.clientJobs.delete(clientId);
-      const releasable = leases.filter(
-        (lease): lease is { id: JobId; token: string } => lease.token !== null
-      );
-      if (releasable.length > 0) {
-        this.enqueueWrite(async () => {
-          for (const { id, token } of releasable) {
-            if (!(await this.postgresStore.releaseClientLease(id, token))) continue;
-            if (this.activeTokens.get(id) === token) this.activeTokens.delete(id);
-            await this.refreshJob(id);
-          }
-        });
-      }
-      return leases.length;
+      const session = this.getClientReleaseSession(clientId);
+      const tracked = session.leases.size;
+      if (tracked > 0)
+        this.enqueueWrite(() => this.runClientRelease(clientId).then(() => undefined));
+      return tracked;
     });
     if (admitted.accepted) return admitted.value;
+    return this.clientReleaseSessions.get(clientId)?.leases.size ?? 0;
+  }
 
-    const tracked = this.clientJobs.get(clientId)?.size ?? 0;
-    this.clientJobs.delete(clientId);
-    return tracked;
+  private getClientReleaseSession(clientId: string): ClientReleaseSession {
+    const current = this.clientReleaseSessions.get(clientId);
+    if (current) return current;
+    const leases = new Map<JobId, string>();
+    for (const id of this.clientJobs.get(clientId) ?? []) {
+      const token = this.tokenFor(id);
+      if (token) leases.set(id, token);
+      else this.clientJobs.get(clientId)?.delete(id);
+    }
+    if (this.clientJobs.get(clientId)?.size === 0) this.clientJobs.delete(clientId);
+    const session: ClientReleaseSession = { leases, released: 0, inFlight: null };
+    this.clientReleaseSessions.set(clientId, session);
+    return session;
+  }
+
+  private async runClientRelease(clientId: string): Promise<number> {
+    const session = this.getClientReleaseSession(clientId);
+    if (session.inFlight) return await session.inFlight;
+    const attempt = this.releaseClientSession(clientId, session).finally(() => {
+      if (session.inFlight === attempt) session.inFlight = null;
+    });
+    session.inFlight = attempt;
+    return await attempt;
+  }
+
+  private async releaseClientSession(
+    clientId: string,
+    session: ClientReleaseSession
+  ): Promise<number> {
+    for (const [id, token] of [...session.leases]) {
+      const released = await this.postgresStore.releaseClientLease(id, token);
+      session.leases.delete(id);
+      this.clientJobs.get(clientId)?.delete(id);
+      if (this.clientJobs.get(clientId)?.size === 0) this.clientJobs.delete(clientId);
+      if (this.activeTokens.get(id) === token) this.activeTokens.delete(id);
+      if (released) session.released++;
+      await this.refreshJob(id);
+    }
+    if (session.leases.size === 0) this.clientReleaseSessions.delete(clientId);
+    return session.released;
   }
 }

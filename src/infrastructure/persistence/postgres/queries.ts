@@ -3,6 +3,7 @@ import type { Job, JobId } from '../../../domain/types/job';
 import { jobId } from '../../../domain/types/job';
 import { decodePostgresJob, decodePostgresValue, numeric } from './codec';
 import type { PostgresContext } from './context';
+import type { PostgresReadSql } from './context';
 import type { PostgresCounts, PostgresJobRow, PostgresJobState, PostgresStoredJob } from './types';
 
 export async function getPostgresJob(
@@ -18,13 +19,14 @@ export async function getPostgresJob(
 
 export async function getPostgresJobs(
   ctx: PostgresContext,
-  ids: readonly JobId[]
+  ids: readonly JobId[],
+  sql: PostgresReadSql = ctx.sql
 ): Promise<PostgresStoredJob[]> {
   if (ids.length === 0) return [];
-  const rows = await ctx.sql<PostgresJobRow[]>`
+  const rows = await sql<PostgresJobRow[]>`
     SELECT * FROM bunqueue_jobs
     WHERE namespace = ${ctx.config.namespace}
-      AND id = ANY(${ctx.sql.array([...new Set(ids.map(String))], 'TEXT')})
+      AND id = ANY(${sql.array([...new Set(ids.map(String))], 'TEXT')})
   `;
   return rows.map(decodePostgresJob);
 }
@@ -65,7 +67,8 @@ export interface ListPostgresJobsOptions {
 export async function listPostgresJobs(
   ctx: PostgresContext,
   queue: string,
-  options: ListPostgresJobsOptions = {}
+  options: ListPostgresJobsOptions = {},
+  sql: PostgresReadSql = ctx.sql
 ): Promise<PostgresStoredJob[]> {
   const states = options.states ?? [
     'waiting',
@@ -81,7 +84,7 @@ export async function listPostgresJobs(
   const limit = Math.max(0, options.limit ?? 1000);
   const offset = Math.max(0, options.offset ?? 0);
   const rows = options.asc
-    ? await ctx.sql<PostgresJobRow[]>`
+    ? await sql<PostgresJobRow[]>`
         SELECT * FROM bunqueue_jobs
         WHERE namespace = ${ctx.config.namespace}
           AND queue = ${queue}
@@ -89,7 +92,7 @@ export async function listPostgresJobs(
         ORDER BY created_at ASC, id ASC
         LIMIT ${limit} OFFSET ${offset}
       `
-    : await ctx.sql<PostgresJobRow[]>`
+    : await sql<PostgresJobRow[]>`
         SELECT * FROM bunqueue_jobs
         WHERE namespace = ${ctx.config.namespace}
           AND queue = ${queue}
@@ -100,8 +103,11 @@ export async function listPostgresJobs(
   return rows.map(decodePostgresJob);
 }
 
-export async function loadAllPostgresJobs(ctx: PostgresContext): Promise<PostgresStoredJob[]> {
-  const rows = await ctx.sql<PostgresJobRow[]>`
+export async function loadAllPostgresJobs(
+  ctx: PostgresContext,
+  sql: PostgresReadSql = ctx.sql
+): Promise<PostgresStoredJob[]> {
+  const rows = await sql<PostgresJobRow[]>`
     WITH retained_completed AS MATERIALIZED (
       SELECT * FROM bunqueue_jobs
       WHERE namespace = ${ctx.config.namespace} AND state = 'completed'
@@ -148,8 +154,11 @@ export async function getPostgresCounts(
   };
 }
 
-export async function listPostgresQueues(ctx: PostgresContext): Promise<string[]> {
-  const rows = await ctx.sql<{ queue: string }[]>`
+export async function listPostgresQueues(
+  ctx: PostgresContext,
+  sql: PostgresReadSql = ctx.sql
+): Promise<string[]> {
+  const rows = await sql<{ queue: string }[]>`
     SELECT queue FROM bunqueue_jobs WHERE namespace = ${ctx.config.namespace}
     UNION
     SELECT queue FROM bunqueue_queue_state WHERE namespace = ${ctx.config.namespace}

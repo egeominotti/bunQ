@@ -4,7 +4,12 @@ import { jobId } from '../../../domain/types/job';
 import { DEFAULT_STALL_CONFIG, type StallConfig } from '../../../domain/types/stall';
 import { decodePostgresValue, encodePostgresValue } from './codec';
 import { enforcePostgresDlqLimit } from './dlqLifecycle';
-import { databaseNow, recordPostgresEvent, type PostgresContext } from './context';
+import {
+  databaseNow,
+  recordPostgresEvent,
+  type PostgresContext,
+  type PostgresReadSql,
+} from './context';
 import { normalizePostgresRateLimit } from './rateLimit';
 import type { PostgresQueueState } from './types';
 
@@ -64,9 +69,10 @@ async function recordQueueInvalidation(
 
 export async function getPostgresQueueState(
   ctx: PostgresContext,
-  queue: string
+  queue: string,
+  sql: PostgresReadSql = ctx.sql
 ): Promise<PostgresQueueState> {
-  const rows = await ctx.sql<PostgresQueueStateRow[]>`
+  const rows = await sql<PostgresQueueStateRow[]>`
     SELECT queue, paused, rate_limit, rate_duration_ms, rate_window_started_at, rate_expires_at,
            rate_count, concurrency_limit, stall_config, dlq_config
     FROM bunqueue_queue_state

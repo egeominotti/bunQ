@@ -20,7 +20,7 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
       const admitted = await this.postgresStore.insert(
         createJob(id, queue, input, await this.postgresStore.now())
       );
-      await this.refreshJob(admitted.job.id);
+      await this.refreshJob(admitted.job.id, queue);
       return admitted.job;
     });
   }
@@ -34,7 +34,10 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
         createJob(input.customId ? jobId(input.customId) : generateJobId(), queue, input, now)
       );
       const stored = await this.postgresStore.insertMany(jobs);
-      await this.refreshJobs(stored.map((job) => job.id));
+      await this.refreshJobs(
+        stored.map((job) => job.id),
+        queue
+      );
       return stored.map((job) => job.id);
     });
   }
@@ -44,7 +47,9 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
       await this.postgresReady;
       const jobs = await this.postgresStore.insertFlow(batch);
       await Promise.all(
-        new Set(jobs.map((job) => job.queue)).values().map((queue) => this.refreshQueue(queue))
+        new Set(jobs.map((job) => job.queue))
+          .values()
+          .map((queue) => this.refreshQueueAfterCommit(queue))
       );
       return { jobs };
     });
@@ -123,8 +128,7 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
       const claims = await this.runPostgresOperation(async () => {
         const admitted = await this.postgresStore.claim(queue, count, owner, leaseDurationMs);
         for (const claim of admitted) {
-          this.activeTokens.set(claim.job.id, claim.token);
-          this.postgresSnapshot.claim(claim);
+          this.applyPostgresClaim(claim);
         }
         return admitted;
       });

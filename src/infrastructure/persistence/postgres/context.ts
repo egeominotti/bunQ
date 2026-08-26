@@ -10,6 +10,8 @@ import { prunePostgresQueueEvents, tryLockPostgresEventRetention } from './event
 import { POSTGRES_EVENT_CHANNEL } from './schema';
 import type { PostgresJobState, ResolvedPostgresStorageConfig } from './types';
 
+export type PostgresReadSql = SQL | TransactionSQL;
+
 export interface PostgresContext {
   readonly sql: SQL;
   readonly config: ResolvedPostgresStorageConfig;

@@ -124,11 +124,11 @@ describe('PostgreSQL shutdown admission boundaries', () => {
     const hydrationEntered = deferred<undefined>();
     const releaseHydration = deferred<undefined>();
     const brokerStore = postgresManagerStore(broker);
-    const loadAll = brokerStore.loadAll.bind(brokerStore);
-    brokerStore.loadAll = async () => {
+    const loadManagerSnapshot = brokerStore.loadManagerSnapshot.bind(brokerStore);
+    brokerStore.loadManagerSnapshot = async () => {
       hydrationEntered.resolve(undefined);
       await releaseHydration.promise;
-      return await loadAll();
+      return await loadManagerSnapshot();
     };
     let shutdown: Promise<void> | null = null;
     let shutdownComplete = false;

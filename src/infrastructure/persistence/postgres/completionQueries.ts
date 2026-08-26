@@ -1,6 +1,7 @@
 import { jobId, type Job, type JobId } from '../../../domain/types/job';
 import { decodePostgresValue } from './codec';
 import type { PostgresContext } from './context';
+import type { PostgresReadSql } from './context';
 import type { PostgresCompletionResult } from './types';
 
 interface CompletionRow {
@@ -33,9 +34,13 @@ export async function getPostgresCompletionResult(
   };
 }
 
-async function loadCompletionRows(ctx: PostgresContext, queue?: string): Promise<CompletionRow[]> {
+async function loadCompletionRows(
+  ctx: PostgresContext,
+  queue?: string,
+  sql: PostgresReadSql = ctx.sql
+): Promise<CompletionRow[]> {
   const queueFilter = queue === undefined ? null : queue;
-  return await ctx.sql<CompletionRow[]>`
+  return await sql<CompletionRow[]>`
     WITH pinned AS MATERIALIZED (
       SELECT DISTINCT dependency.dependency_id AS job_id
       FROM bunqueue_dependencies AS dependency
@@ -69,9 +74,10 @@ async function loadCompletionRows(ctx: PostgresContext, queue?: string): Promise
 
 export async function loadPostgresCompletionResults(
   ctx: PostgresContext,
-  queue?: string
+  queue?: string,
+  sql: PostgresReadSql = ctx.sql
 ): Promise<PostgresCompletionResult[]> {
-  const rows = await loadCompletionRows(ctx, queue);
+  const rows = await loadCompletionRows(ctx, queue, sql);
   return rows.map((row) => ({
     jobId: jobId(row.job_id),
     queue: row.queue,

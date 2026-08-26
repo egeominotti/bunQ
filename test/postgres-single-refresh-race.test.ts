@@ -28,24 +28,25 @@ function namespace(label: string): string {
 }
 
 function delayNextGetJob(store: PostgresQueueStore): DelayedGetJob {
-  const original = store.getJob;
+  const original = store.loadJobProjections;
   const captured = deferred<PostgresStoredJob | null>();
   const release = deferred<undefined>();
   let armed = true;
-  store.getJob = async (...args) => {
-    const row = await original(...args);
+  store.loadJobProjections = async (...args) => {
+    const projections = await original(...args);
+    const row = projections.get(args[0][0].id)?.row ?? null;
     if (armed) {
       armed = false;
       captured.resolve(row);
       await release.promise;
     }
-    return row;
+    return projections;
   };
   return {
     captured: captured.promise,
     release: () => release.resolve(undefined),
     restore: () => {
-      store.getJob = original;
+      store.loadJobProjections = original;
     },
   };
 }

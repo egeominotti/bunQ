@@ -99,10 +99,12 @@ abstraction:
 - **transactional outbox + deferred commit sequencer + Observer** use
   `bunqueue_events` as the durable record, assign namespace-local order at
   pre-commit, and use LISTEN/NOTIFY only as a wake-up;
-- **Snapshot read model** isolates synchronous compatibility reads from the
-  database-authoritative write model; a bounded startup event accumulator and a
-  deferred-write checkpoint are separate stateful components with deterministic
-  unit tests; and
+- **Snapshot read model + projection reconciler** isolate synchronous
+  compatibility reads from the database-authoritative write model. Manager and
+  queue snapshots use `REPEATABLE READ READ ONLY`; journal events request
+  generation-fenced authoritative projections instead of mutating cached job
+  state from an unversioned payload. The bounded startup accumulator, projection
+  scheduler, and deferred-write checkpoint remain separately testable; and
 - **reentrant lifecycle gate** gives every database-backed manager operation one
   shutdown admission boundary. Nested calls reuse their admitted scope, while
   deferred synchronous writes and late cleanup have explicit acceptance rules.
@@ -158,11 +160,23 @@ Queue refresh, terminal retry, removal, and custom-ID generation reuse clear an
 obsolete cached completion result before a non-completed generation becomes
 visible.
 Events observed during initial snapshot loading are captured by a dedicated
-256-event accumulator and replayed after hydration. If it overflows, the partial
-capture is discarded and the manager repeats the complete authoritative load;
-memory remains bounded while no committed event is skipped. Point and batch
-refreshes share a per-job version fence, including stale null reads, so an
-in-flight query cannot overwrite a newer event. Deferred compatibility writes
+256-event accumulator and replayed after hydration. Manager hydration reads
+jobs, completion results, crons, queue policies, and lifetime metrics from one
+`REPEATABLE READ READ ONLY` snapshot. If the accumulator overflows, the partial
+capture is discarded and hydration retries once from durable state; a second
+overflow cannot starve readiness because every affected queue retains one dirty
+marker for authoritative projection repair. Queue refreshes likewise read jobs,
+results, existence, and policy from one MVCC snapshot.
+
+After readiness, durable journal events never directly overwrite local job or
+lease state. A coalescing projection scheduler reloads the current job and, for
+removed rows, its completion tombstone. Per-job generations discard an older
+in-flight read when a direct local claim wins. Generation identities are unique
+for each flight and their map entries are reclaimed as soon as refresh or local
+supersession settles, so fencing metadata does not grow with historical job IDs.
+A failed projection is reported through storage health and retried, while the
+already committed public operation keeps its database-defined success result.
+Deferred compatibility writes
 use a dedicated serial queue that retains failures until an observed flush.
 Concurrent flush callers at the same sequence share one checkpoint and observe
 the same failure set; shutdown drains that queue and remains coalesced but
@@ -171,15 +185,21 @@ retries with bounded exponential backoff. This prevents a transient read error
 after journal pruning from leaving only the retained event subset in the local
 snapshot. Per-queue refresh failures remain visible through storage health until
 that queue succeeds; shutdown cancels pending retries before closing the pool.
+Periodic maintenance is single-flight per subsystem, while unrelated subsystems
+may proceed concurrently. Store shutdown closes timer admission and awaits every
+admitted maintenance flight before releasing broker leases or the SQL pool.
 Keyed post-commit maintenance identity-fences every scheduled entry. A late
 success or failure can neither delete nor report for a newer entry, including
 when the key became empty and was reused between the two settlements; current
 failures therefore remain visible and retryable without an ABA generation race.
 Shutdown closes maintenance admission before the SQL pool, skips work submitted
-after that boundary, and ignores stale in-flight outcomes. A dedicated
+after that boundary, and drains stale in-flight outcomes without allowing them
+to replace a newer generation. A dedicated
 reentrant lifecycle gate rejects every new database-backed manager operation
 once shutdown starts and drains operations admitted earlier through their final
-snapshot refresh, so a committed admission, claim, mutation, or query cannot be
+database transition. Projection retries stop before this drain and any
+already-running projection is awaited before the store closes, so a committed
+admission, claim, mutation, or query cannot be
 surfaced as a connection failure. An async scope can call another gated manager
 method without deadlocking, but descendants that escape the admitted scope are
 rejected after it settles. Claims hold admission only for each database attempt,
@@ -202,6 +222,13 @@ to one retry and one event.
 The base memory/SQLite maintenance timers are stopped immediately; only the
 PostgreSQL runtime owns lease recovery, DLQ, cron, broker, and worker maintenance
 for this manager.
+
+Client disconnect release is a retryable generation session. It snapshots each
+`(jobId, token)` once, removes an item only after PostgreSQL has returned a
+definitive result, and preserves both pending entries and the cumulative release
+count across transport retries. Concurrent callers share the same in-flight
+session. A transient failure therefore cannot turn the next retry into a false
+zero-success response or orphan the remaining active jobs.
 
 Cloud commands and snapshots use a second Strategy/Registry boundary under
 `infrastructure/cloud/queueAdapter/`. The PostgreSQL Strategy never falls back

@@ -71,12 +71,12 @@ describe('PostgreSQL startup snapshot consistency', () => {
           postgres: { url: postgresUrl!, namespace, brokerId: 'remote', pollIntervalMs: 25 },
         });
         const store = postgresManagerStore(remote);
-        const originalLoadAll = store.loadAll;
-        store.loadAll = async () => {
-          const rows = await originalLoadAll();
-          rowsCaptured.resolve(rows.length);
+        const originalLoadSnapshot = store.loadManagerSnapshot;
+        store.loadManagerSnapshot = async () => {
+          const snapshot = await originalLoadSnapshot();
+          rowsCaptured.resolve(snapshot.rows.length);
           await releaseSnapshot.promise;
-          return rows;
+          return snapshot;
         };
 
         expect(await rowsCaptured.promise).toBe(0);
@@ -124,15 +124,15 @@ describe('PostgreSQL startup snapshot consistency', () => {
           },
         });
         const store = postgresManagerStore(remote);
-        const originalLoadAll = store.loadAll;
-        store.loadAll = async () => {
+        const originalLoadSnapshot = store.loadManagerSnapshot;
+        store.loadManagerSnapshot = async () => {
           loadCalls++;
-          const rows = await originalLoadAll();
+          const snapshot = await originalLoadSnapshot();
           if (loadCalls === 1) {
-            rowsCaptured.resolve(rows.length);
+            rowsCaptured.resolve(snapshot.rows.length);
             await releaseSnapshot.promise;
           }
-          return rows;
+          return snapshot;
         };
 
         expect(await rowsCaptured.promise).toBe(0);

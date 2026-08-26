@@ -476,6 +476,13 @@ hydration between durable commit and local refresh, start shutdown, and assert
 that the accepted operation settles before the pool closes. Companion cases
 prove that a 60-second empty long-poll does not own lifecycle admission, late
 synchronous writes fail at the gate, and disconnect cleanup remains harmless.
+Projection regressions inject failures after a durable push or ACK and assert
+both that public success is preserved and that bounded background repair
+restores a healthy local snapshot. Additional deterministic cases keep a direct
+claim token across delayed journal replay, retry every captured client lease
+after a transient release error, bound repeated startup-buffer overflow, stop
+queue refresh under continuous event-version churn, serialize each maintenance
+subsystem, and prove store close awaits admitted maintenance.
 Direct-child removal tests exercise two managers against one database and assert
 pending-state coverage, exact event emission, idempotence, active/terminal lease
 and result retention, plus fixed-point protection for shared dependency graphs.

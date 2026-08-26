@@ -16,6 +16,7 @@ import {
 import { PostgresQueueSnapshot } from './snapshot';
 import { PostgresStartupEventBuffer } from './startupEventBuffer';
 import { PostgresOperationGate } from './operationGate';
+import { applyPostgresJobProjection, PostgresProjectionRefreshes } from './projectionRefreshes';
 
 export abstract class PostgresQueueManagerState extends QueueManager {
   protected readonly postgresStore: PostgresQueueStore;
@@ -25,12 +26,12 @@ export abstract class PostgresQueueManagerState extends QueueManager {
   private readonly refreshes = new Map<string, Promise<void>>();
   private readonly dirtyQueues = new Set<string>();
   private readonly queueEventVersions = new Map<string, number>();
-  private readonly jobRefreshWatches = new Map<JobId, { version: number; watchers: number }>();
   private snapshotEventBuffer: PostgresStartupEventBuffer | null = new PostgresStartupEventBuffer();
   private readonly unsubscribeEvent: () => void;
   private readonly unsubscribeInvalidation: () => void;
   private readonly writes = new PostgresDeferredWriteQueue();
   protected readonly operations = new PostgresOperationGate();
+  private readonly projectionRefreshes: PostgresProjectionRefreshes;
   private shutdownPromise: Promise<void> | null = null;
   private shutdownComplete = false;
   private baseStopped = false;
@@ -51,6 +52,13 @@ export abstract class PostgresQueueManagerState extends QueueManager {
       maxCompletedJobs: this.config.maxCompletedJobs,
       maxJobResults: this.config.maxJobResults,
     });
+    this.projectionRefreshes = new PostgresProjectionRefreshes(
+      (requests) => this.postgresStore.loadJobProjections(requests),
+      (id, projection) =>
+        applyPostgresJobProjection(this.postgresSnapshot, this.activeTokens, id, projection),
+      (queue, id, error) => this.postgresStore.reportProjectionRefresh(queue, id, error),
+      this.postgresStore.config.pollIntervalMs
+    );
     this.unsubscribeEvent = this.postgresStore.onEvent((event) => this.onStoreEvent(event));
     this.unsubscribeInvalidation = this.postgresStore.onInvalidation((queue) => {
       this.scheduleQueueRefresh(queue);
@@ -88,20 +96,21 @@ export abstract class PostgresQueueManagerState extends QueueManager {
   }
 
   private async performPostgresShutdown(): Promise<void> {
-    const operationDrain = this.operations.closeAndDrain();
-    this.stopBaseRuntime();
-    await operationDrain;
-    this.unsubscribeEvent();
-    this.unsubscribeInvalidation();
     this.stopQueueRefreshes = true;
     this.dirtyQueues.clear();
+    this.projectionRefreshes.close();
+    const operationDrain = this.operations.closeAndDrain();
+    await operationDrain;
+    this.stopBaseRuntime();
+    this.unsubscribeEvent();
+    this.unsubscribeInvalidation();
     const errors = await this.writes.closeAndDrain();
     try {
       await this.postgresReady;
     } catch (error) {
       errors.push(error);
     }
-    await Promise.allSettled(this.refreshes.values());
+    await Promise.allSettled([...this.refreshes.values(), this.projectionRefreshes.drain()]);
     try {
       await this.postgresStore.close();
     } catch (error) {
@@ -122,57 +131,54 @@ export abstract class PostgresQueueManagerState extends QueueManager {
     return this.operations.run(operation);
   }
 
-  protected async refreshJob(id: JobId): Promise<void> {
-    await this.fetchPostgresJob(id);
+  protected async refreshJob(id: JobId, queue?: string): Promise<void> {
+    const targetQueue = queue ?? this.postgresSnapshot.get(id)?.job.queue ?? '';
+    try {
+      await this.projectionRefreshes.refreshNow(id, targetQueue);
+    } catch {
+      this.projectionRefreshes.request(id, targetQueue);
+    }
   }
 
   protected async fetchPostgresJob(id: JobId): Promise<PostgresStoredJob | null> {
-    const version = this.startJobRefresh(id);
+    const queue = this.postgresSnapshot.get(id)?.job.queue ?? '';
+    return (await this.projectionRefreshes.refreshNow(id, queue)).row;
+  }
+
+  protected async refreshJobs(ids: readonly JobId[], queue?: string): Promise<void> {
+    const requests = [...new Set(ids)].map((id) => ({
+      id,
+      queue: queue ?? this.postgresSnapshot.get(id)?.job.queue ?? '',
+    }));
     try {
-      const row = await this.postgresStore.getJob(id);
-      this.applyJobRefresh(id, row, version);
-      return row;
-    } finally {
-      this.finishJobRefresh(id);
+      await this.projectionRefreshes.refreshManyNow(requests);
+    } catch {
+      for (const request of requests) this.projectionRefreshes.request(request.id, request.queue);
     }
   }
 
-  protected async refreshJobs(ids: readonly JobId[]): Promise<void> {
-    const uniqueIds = [...new Set(ids)];
-    const versions = new Map<JobId, number>();
-    for (const id of uniqueIds) versions.set(id, this.startJobRefresh(id));
-    try {
-      const rows = await this.postgresStore.getJobs(uniqueIds);
-      const found = new Set(rows.map((row) => row.job.id));
-      for (const row of rows) {
-        const version = versions.get(row.job.id);
-        if (version !== undefined) this.applyJobRefresh(row.job.id, row, version);
-      }
-      for (const id of uniqueIds) {
-        const version = versions.get(id);
-        if (!found.has(id) && version !== undefined) this.applyJobRefresh(id, null, version);
-      }
-    } finally {
-      for (const id of uniqueIds) this.finishJobRefresh(id);
+  protected async refreshQueue(queue: string): Promise<boolean> {
+    const eventVersion = this.queueEventVersions.get(queue) ?? 0;
+    const { rows, state, exists, results } = await this.postgresStore.loadQueueReadModel(queue);
+    if (eventVersion !== (this.queueEventVersions.get(queue) ?? 0)) {
+      this.dirtyQueues.add(queue);
+      return false;
     }
+    if (!exists) {
+      for (const id of this.postgresSnapshot.removeQueue(queue)) this.activeTokens.delete(id);
+      return true;
+    }
+    this.postgresSnapshot.replaceQueue(queue, rows, state, results);
+    return true;
   }
 
-  protected async refreshQueue(queue: string): Promise<void> {
-    while (true) {
-      const eventVersion = this.queueEventVersions.get(queue) ?? 0;
-      const [rows, state, queues, completions] = await Promise.all([
-        this.postgresStore.list(queue, { limit: 2_147_483_647, asc: true }),
-        this.postgresStore.getQueueState(queue),
-        this.postgresStore.getQueues(),
-        this.postgresStore.loadResults(queue),
-      ]);
-      if (eventVersion !== (this.queueEventVersions.get(queue) ?? 0)) continue;
-      if (rows.length === 0 && !queues.includes(queue)) {
-        for (const id of this.postgresSnapshot.removeQueue(queue)) this.activeTokens.delete(id);
-        return;
-      }
-      this.postgresSnapshot.replaceQueue(queue, rows, state, completions);
-      return;
+  protected async refreshQueueAfterCommit(queue: string): Promise<void> {
+    try {
+      if (!(await this.refreshQueue(queue))) this.scheduleQueueRefresh(queue);
+      else this.postgresStore.reportQueueRefresh(queue, null);
+    } catch (error) {
+      this.postgresStore.reportQueueRefresh(queue, error);
+      this.scheduleQueueRefresh(queue);
     }
   }
 
@@ -182,27 +188,21 @@ export abstract class PostgresQueueManagerState extends QueueManager {
 
   private async initializePostgres(): Promise<void> {
     await this.postgresStore.initialize();
-    while (this.snapshotEventBuffer) {
-      this.snapshotEventBuffer.reset();
-      const [rows, results, crons, queues, lifetimeMetrics] = await Promise.all([
-        this.postgresStore.loadAll(),
-        this.postgresStore.loadResults(),
-        this.postgresStore.listCrons(),
-        this.postgresStore.getQueues(),
-        this.postgresStore.loadLifetimeMetrics(),
-      ]);
-      const states = await Promise.all(
-        queues.map((queue) => this.postgresStore.getQueueState(queue))
-      );
-      const events = this.snapshotEventBuffer.take();
-      if (!events) continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const buffer = this.snapshotEventBuffer;
+      if (!buffer) return;
+      buffer.reset();
+      const { rows, results, crons, states, lifetimeMetrics } =
+        await this.postgresStore.loadManagerSnapshot();
+      const events = buffer.take();
+      if (!events && attempt === 0) continue;
       this.snapshotEventBuffer = null;
       this.postgresSnapshot.hydrate(rows);
       this.postgresSnapshot.hydrateResults(results);
       hydratePostgresLifetimeMetrics(this.metrics, this.perQueueMetrics, lifetimeMetrics);
-      this.cronScheduler.load(crons);
+      this.cronScheduler.load([...crons]);
       for (const state of states) this.postgresSnapshot.setQueueState(state);
-      for (const event of events) {
+      for (const event of events ?? []) {
         this.postgresSnapshot.apply(event);
         applyPostgresEventMetrics(
           this.metrics,
@@ -211,27 +211,9 @@ export abstract class PostgresQueueManagerState extends QueueManager {
           event.id > lifetimeMetrics.baselineEventId
         );
       }
+      this.projectionRefreshes.start();
+      return;
     }
-  }
-
-  private startJobRefresh(id: JobId): number {
-    const watch = this.jobRefreshWatches.get(id) ?? { version: 0, watchers: 0 };
-    watch.watchers++;
-    this.jobRefreshWatches.set(id, watch);
-    return watch.version;
-  }
-
-  private applyJobRefresh(id: JobId, row: PostgresStoredJob | null, version: number): void {
-    const watch = this.jobRefreshWatches.get(id);
-    if (!watch || watch.version !== version) return;
-    if (row) this.postgresSnapshot.put(row);
-    else this.postgresSnapshot.remove(id);
-    watch.version++;
-  }
-
-  private finishJobRefresh(id: JobId): void {
-    const watch = this.jobRefreshWatches.get(id);
-    if (!watch || --watch.watchers === 0) this.jobRefreshWatches.delete(id);
   }
 
   private scheduleQueueRefresh(queue: string): void {
@@ -254,7 +236,10 @@ export abstract class PostgresQueueManagerState extends QueueManager {
     let retryDelay = this.postgresStore.config.pollIntervalMs;
     while (!this.stopQueueRefreshes && this.dirtyQueues.delete(queue)) {
       try {
-        await this.refreshQueue(queue);
+        const applied = await this.refreshQueue(queue);
+        if (!applied && !this.stopQueueRefreshes) {
+          await Bun.sleep(this.postgresStore.config.pollIntervalMs);
+        }
         this.postgresStore.reportQueueRefresh(queue, null);
         retryDelay = this.postgresStore.config.pollIntervalMs;
       } catch (error) {
@@ -269,12 +254,11 @@ export abstract class PostgresQueueManagerState extends QueueManager {
 
   private onStoreEvent(event: PostgresStoreEvent): void {
     this.queueEventVersions.set(event.queue, (this.queueEventVersions.get(event.queue) ?? 0) + 1);
-    const refreshWatch = this.jobRefreshWatches.get(event.jobId);
-    if (refreshWatch) refreshWatch.version++;
-    this.postgresSnapshot.apply(event);
     const startupBuffer = this.snapshotEventBuffer;
     startupBuffer?.capture(event);
-    if (event.state !== 'active') this.activeTokens.delete(event.jobId);
+    if (startupBuffer) this.postgresSnapshot.apply(event);
+    if (startupBuffer?.overflowed) this.scheduleQueueRefresh(event.queue);
+    else this.projectionRefreshes.request(event.jobId, event.queue);
     const mapped = postgresEventType(event.type);
     if (!mapped) return;
     if (!startupBuffer) {
@@ -289,6 +273,12 @@ export abstract class PostgresQueueManagerState extends QueueManager {
       ...(event.error !== undefined && { error: event.error }),
       ...(mapped === 'failed' && { terminal: event.state === 'failed' }),
     });
+  }
+
+  protected applyPostgresClaim(claim: Parameters<PostgresQueueSnapshot['claim']>[0]): void {
+    this.projectionRefreshes.supersede(claim.job.id);
+    this.activeTokens.set(claim.job.id, claim.token);
+    this.postgresSnapshot.claim(claim);
   }
 
   private stopBaseRuntime(): void {

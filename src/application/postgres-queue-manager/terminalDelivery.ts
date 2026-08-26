@@ -113,7 +113,7 @@ export class PostgresQueueManagerTerminalDelivery extends PostgresQueueManagerQu
       }
       await Promise.all([
         ...ignoredIds.map((id) => this.refreshJob(id)),
-        ...[...repeatQueues].map((queue) => this.refreshQueue(queue)),
+        ...[...repeatQueues].map((queue) => this.refreshQueueAfterCommit(queue)),
       ]);
       return ignoredIndices.length === 0
         ? undefined

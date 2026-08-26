@@ -1,4 +1,4 @@
-import type { PostgresContext } from './context';
+import type { PostgresContext, PostgresReadSql } from './context';
 
 export interface PostgresQueueLifetimeTotals {
   readonly queue: string;
@@ -21,14 +21,15 @@ interface MetricTotalRow {
 
 /** Load terminal lifetime counters and their matching event boundary atomically. */
 export async function loadPostgresLifetimeMetrics(
-  ctx: PostgresContext
+  ctx: PostgresContext,
+  sql?: PostgresReadSql
 ): Promise<PostgresLifetimeMetricsSnapshot> {
-  return await ctx.sql.begin('isolation level repeatable read read only', async (tx) => {
+  const load = async (readSql: PostgresReadSql) => {
     const [[event], rows] = await Promise.all([
-      tx<{ id: number | string | bigint | null }[]>`
+      readSql<{ id: number | string | bigint | null }[]>`
         SELECT MAX(id) AS id FROM bunqueue_events WHERE namespace = ${ctx.config.namespace}
       `,
-      tx<MetricTotalRow[]>`
+      readSql<MetricTotalRow[]>`
         SELECT queue, metric_type, total_count
         FROM bunqueue_metric_totals
         WHERE namespace = ${ctx.config.namespace}
@@ -56,5 +57,7 @@ export async function loadPostgresLifetimeMetrics(
       totalFailed,
       queues: [...queues].map(([queue, totals]) => ({ queue, ...totals })),
     };
-  });
+  };
+  if (sql) return await load(sql);
+  return await ctx.sql.begin('isolation level repeatable read read only', load);
 }

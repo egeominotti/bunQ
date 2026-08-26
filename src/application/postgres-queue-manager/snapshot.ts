@@ -114,6 +114,19 @@ export class PostgresQueueSnapshot {
     this.results.delete(id);
   }
 
+  reconcile(
+    id: JobId,
+    row: PostgresStoredJob | null,
+    completion: PostgresCompletionResult | null
+  ): void {
+    if (row) {
+      this.put(row);
+      return;
+    }
+    this.remove(id);
+    if (completion) this.putCompletion(completion);
+  }
+
   setQueueState(state: PostgresQueueState): void {
     this.queues.set(state.queue, state);
     this.knownQueues.add(state.queue);

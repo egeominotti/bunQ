@@ -204,6 +204,21 @@ head:
 
 ### Fixed
 
+- PostgreSQL lifecycle and asynchronous concurrency now separate committed
+  database outcomes from fallible local projections. Push, flow, ACK/fail,
+  queue control, maintenance, and relationship mutations keep their committed
+  result while a generation-fenced projection scheduler reports and retries a
+  failed read. Historical journal payloads no longer overwrite a newer local
+  claim or clear its token; only an authoritative current row can do so. Unique
+  projection-flight identities preserve stale-read fencing while settled
+  generation entries are reclaimed instead of growing once per historical job.
+  Bootstrap and per-queue views use coherent `REPEATABLE READ READ ONLY`
+  snapshots, startup overflow retries are bounded, and queue refresh cannot
+  keep shutdown in an unbounded quiet-window loop. Client lease release retains
+  exact token sessions and cumulative progress across retries. Periodic work is
+  single-flight per subsystem, and store shutdown drains all admitted periodic
+  and post-commit maintenance before releasing broker resources or closing the
+  SQL pool. Memory and SQLite code paths are unchanged.
 - PostgreSQL shutdown now uses one reentrant lifecycle gate for database-backed
   admissions, batch/flow pushes, individual claim attempts, durable mutations
   and reads, startup hydration, and synchronous deferred writes. Operations

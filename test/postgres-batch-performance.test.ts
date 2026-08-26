@@ -179,7 +179,7 @@ test.skipIf(!postgresUrl)(
 );
 
 test.skipIf(!postgresUrl)(
-  'does not let an affected-ID refresh overwrite a newer queue event',
+  'keeps an affected-ID refresh database-authoritative across a newer event payload',
   async () => {
     const manager = new PostgresQueueManager({
       postgres: {
@@ -200,14 +200,14 @@ test.skipIf(!postgresUrl)(
         refreshJobs(ids: typeof ids): Promise<void>;
         onStoreEvent(event: PostgresStoreEvent): void;
       };
-      const originalGetJobs = internals.postgresStore.getJobs;
+      const originalLoadProjections = internals.postgresStore.loadJobProjections;
       let reads = 0;
       let removedId = ids[0];
-      internals.postgresStore.getJobs = async (...args) => {
-        const rows = await originalGetJobs(...args);
+      internals.postgresStore.loadJobProjections = async (...args) => {
+        const projections = await originalLoadProjections(...args);
         reads++;
         if (reads === 1) {
-          removedId = rows[0].job.id;
+          removedId = args[0][0].id;
           internals.onStoreEvent({
             id: Number.MAX_SAFE_INTEGER,
             queue: 'batch-refresh-race',
@@ -219,14 +219,14 @@ test.skipIf(!postgresUrl)(
             removed: true,
           });
         }
-        return rows;
+        return projections;
       };
 
       await internals.refreshJobs(ids);
 
-      expect(reads).toBe(1);
-      expect(manager.getJobs('batch-refresh-race').some((job) => job.id === removedId)).toBe(false);
-      expect(manager.getQueueJobCounts('batch-refresh-race')).toMatchObject({ waiting: 99 });
+      expect(reads).toBe(2);
+      expect(manager.getJobs('batch-refresh-race').some((job) => job.id === removedId)).toBe(true);
+      expect(manager.getQueueJobCounts('batch-refresh-race')).toMatchObject({ waiting: 100 });
     } finally {
       await manager.shutdownPostgres();
     }

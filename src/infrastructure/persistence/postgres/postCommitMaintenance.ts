@@ -7,6 +7,7 @@ type MaintenanceReporter = (subsystem: string, error: unknown) => void;
 /** Coalesce and retry idempotent work that follows an already committed transition. */
 export class PostgresPostCommitMaintenance {
   private readonly pending = new Map<string, PendingMaintenance>();
+  private readonly active = new Set<Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
@@ -19,7 +20,13 @@ export class PostgresPostCommitMaintenance {
     if (this.closed) return;
     const pending = { operation };
     this.pending.set(subsystem, pending);
-    await this.attempt(subsystem, pending);
+    const attempt = this.attempt(subsystem, pending);
+    this.active.add(attempt);
+    try {
+      await attempt;
+    } finally {
+      this.active.delete(attempt);
+    }
   }
 
   close(): void {
@@ -27,6 +34,10 @@ export class PostgresPostCommitMaintenance {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.pending.clear();
+  }
+
+  async drain(): Promise<void> {
+    await Promise.all([...this.active]);
   }
 
   private async attempt(subsystem: string, pending: PendingMaintenance): Promise<void> {

@@ -45,7 +45,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       await this.postgresStore.pause(queue, paused);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 
@@ -54,7 +54,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
       const count = this.postgresSnapshot.removeStates(queue, PENDING_STATES);
       this.enqueueWrite(async () => {
         await this.postgresStore.drain(queue);
-        await this.refreshQueue(queue);
+        await this.refreshQueueAfterCommit(queue);
       });
       return count;
     });
@@ -64,7 +64,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       const count = await this.postgresStore.drain(queue);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
       return count;
     });
   }
@@ -79,7 +79,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
       ]);
       this.enqueueWrite(async () => {
         await this.postgresStore.obliterate(queue);
-        await this.refreshQueue(queue);
+        await this.refreshQueueAfterCommit(queue);
       });
     });
   }
@@ -88,7 +88,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       await this.postgresStore.obliterate(queue);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 
@@ -141,7 +141,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
       await this.postgresReady;
       const normalized = normalizePostgresRateLimit(durationMs, ttlMs);
       await this.postgresStore.setRateLimit(queue, limit, normalized.durationMs, normalized.ttlMs);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 
@@ -149,7 +149,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
       await this.postgresStore.setConcurrency(queue, limit);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 
@@ -171,7 +171,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
       const state = await this.postgresStore.getQueueState(queue);
       const config = { ...state.stallConfig, ...patch } as StallConfig;
       await this.postgresStore.setStallConfig(queue, config);
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 
@@ -192,7 +192,7 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
       await this.postgresReady;
       const state = await this.postgresStore.getQueueState(queue);
       await this.postgresStore.setDlqConfig(queue, normalizeDlq(state.dlqConfig, patch));
-      await this.refreshQueue(queue);
+      await this.refreshQueueAfterCommit(queue);
     });
   }
 

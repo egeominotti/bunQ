@@ -109,14 +109,14 @@ describe('PostgreSQL event catch-up regressions', () => {
       try {
         await Promise.all([active.waitUntilReady(), remote.waitUntilReady()]);
         const store = managerStore(remote);
-        const originalList = store.list;
+        const originalLoadQueue = store.loadQueueReadModel;
         const retryGate = Promise.withResolvers<undefined>();
         let refreshAttempts = 0;
-        store.list = async (...args) => {
+        store.loadQueueReadModel = async (...args) => {
           refreshAttempts++;
           if (refreshAttempts === 2) await retryGate.promise;
           if (refreshAttempts <= 3) throw new Error('injected queue refresh failure');
-          return await originalList(...args);
+          return await originalLoadQueue(...args);
         };
         try {
           const queue = 'refresh-retry';
@@ -146,7 +146,7 @@ describe('PostgreSQL event catch-up regressions', () => {
           ).toBe(true);
         } finally {
           retryGate.resolve(undefined);
-          store.list = originalList;
+          store.loadQueueReadModel = originalLoadQueue;
         }
       } finally {
         await Promise.allSettled([active.shutdownPostgres(), remote.shutdownPostgres()]);
@@ -162,9 +162,9 @@ describe('PostgreSQL event catch-up regressions', () => {
     try {
       await Promise.all([active.waitUntilReady(), remote.waitUntilReady()]);
       const store = managerStore(remote);
-      const originalList = store.list;
+      const originalLoadQueue = store.loadQueueReadModel;
       let refreshAttempts = 0;
-      store.list = () => {
+      store.loadQueueReadModel = () => {
         refreshAttempts++;
         return Promise.reject(new Error('persistent queue refresh failure'));
       };
@@ -185,7 +185,7 @@ describe('PostgreSQL event catch-up regressions', () => {
         await Bun.sleep(100);
         expect(refreshAttempts).toBe(attemptsAfterShutdown);
       } finally {
-        store.list = originalList;
+        store.loadQueueReadModel = originalLoadQueue;
       }
     } finally {
       await Promise.allSettled([

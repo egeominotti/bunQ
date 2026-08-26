@@ -1,4 +1,3 @@
-import { hostname } from 'node:os';
 import { SQL } from 'bun';
 import {
   heartbeatPostgresBroker,
@@ -17,29 +16,8 @@ import type { PostgresStorageConfig, PostgresStorageHealth, PostgresStoreEvent }
 import { PostgresPostCommitMaintenance } from './postCommitMaintenance';
 import { sweepPostgresEventRetention } from './telemetry';
 import { prunePostgresCompletionTombstones } from './completionLifecycle';
-
-function resolveConfig(config: PostgresStorageConfig) {
-  const url = new URL(config.url);
-  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
-    throw new Error('PostgreSQL storage requires a postgres:// or postgresql:// URL');
-  }
-  if (config.maxQueueEvents !== undefined && config.maxQueueEvents < 1) {
-    throw new Error('PostgreSQL storage requires maxQueueEvents to be at least 1');
-  }
-  return {
-    url: config.url,
-    namespace: config.namespace?.trim() || 'default',
-    brokerId:
-      config.brokerId?.trim() || `${hostname()}:${process.pid}:${Bun.randomUUIDv7().slice(-12)}`,
-    poolSize: Math.max(2, config.poolSize ?? 10),
-    leaseDurationMs: Math.max(1000, config.leaseDurationMs ?? 30_000),
-    pollIntervalMs: Math.max(25, config.pollIntervalMs ?? 250),
-    maxQueueEvents: Math.max(1, Math.floor(config.maxQueueEvents ?? 10_000)),
-    maxMetricDataPoints: Math.max(0, Math.floor(config.maxMetricDataPoints ?? 20_160)),
-    maxCompletedJobs: Math.max(1, Math.floor(config.maxCompletedJobs ?? 50_000)),
-    maxJobResults: Math.max(0, Math.floor(config.maxJobResults ?? 10_000)),
-  };
-}
+import { PostgresMaintenanceFlights } from './maintenanceFlights';
+import { resolvePostgresRuntimeConfig } from './runtimeConfig';
 
 /** Connection, schema, event stream, health, and maintenance lifecycle. */
 export class PostgresQueueStoreRuntime {
@@ -62,9 +40,10 @@ export class PostgresQueueStoreRuntime {
   private readonly healthErrors = new Map<string, { message: string; since: number }>();
   private readonly unsubscribeEventStatus: () => void;
   private readonly postCommitMaintenance: PostgresPostCommitMaintenance;
+  private readonly maintenanceFlights: PostgresMaintenanceFlights;
 
   constructor(config: PostgresStorageConfig) {
-    const resolved = resolveConfig(config);
+    const resolved = resolvePostgresRuntimeConfig(config);
     const sql = new SQL(resolved.url, {
       max: resolved.poolSize,
       connectionTimeout: 10,
@@ -74,6 +53,9 @@ export class PostgresQueueStoreRuntime {
     this.postCommitMaintenance = new PostgresPostCommitMaintenance(
       (subsystem, error) => this.reportMaintenance(subsystem, error),
       Math.max(25, resolved.pollIntervalMs)
+    );
+    this.maintenanceFlights = new PostgresMaintenanceFlights((subsystem, error) =>
+      this.reportMaintenance(subsystem, error)
     );
     this.context = {
       sql,
@@ -111,6 +93,7 @@ export class PostgresQueueStoreRuntime {
 
   private stopMaintenance(): void {
     this.postCommitMaintenance.close();
+    this.maintenanceFlights.close();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.recoveryTimer) clearInterval(this.recoveryTimer);
     if (this.dlqTimer) clearInterval(this.dlqTimer);
@@ -131,6 +114,8 @@ export class PostgresQueueStoreRuntime {
       errors.push(error);
     }
     if (initialized) {
+      await this.maintenanceFlights.drain();
+      await this.postCommitMaintenance.drain();
       this.leasesReleased = await this.tryCloseStep(
         this.leasesReleased,
         () => releasePostgresBrokerLeases(this.context),
@@ -211,6 +196,15 @@ export class PostgresQueueStoreRuntime {
     this.recordHealthError(key, error, `Queue refresh ${queue}: `);
   }
 
+  reportProjectionRefresh(queue: string, id: string, error: unknown): void {
+    const key = `projection-refresh:${id}`;
+    if (error === null) {
+      this.clearHealthError(key);
+      return;
+    }
+    this.recordHealthError(key, error, `Projection refresh ${queue}/${id}: `);
+  }
+
   private reportMaintenance(subsystem: string, error: unknown): void {
     const key = `maintenance:${subsystem}`;
     if (error === null) this.clearHealthError(key);
@@ -280,12 +274,7 @@ export class PostgresQueueStoreRuntime {
     operation: () => Promise<unknown>,
     subsystem = 'maintenance'
   ): Promise<void> {
-    try {
-      await operation();
-      this.reportMaintenance(subsystem, null);
-    } catch (error) {
-      this.reportMaintenance(subsystem, error);
-    }
+    await this.maintenanceFlights.run(subsystem, operation);
   }
 
   private recordHealthError(key: string, error: unknown, prefix = ''): void {

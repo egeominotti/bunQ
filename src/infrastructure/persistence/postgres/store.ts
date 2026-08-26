@@ -74,6 +74,11 @@ import { prunePostgresCompletionTombstones } from './completionLifecycle';
 import { loadPostgresLifetimeMetrics } from './lifetimeMetrics';
 import { loadPostgresCloudReadModel } from './cloudReadModel';
 import { removePostgresUnprocessedChildren } from './removeUnprocessedChildren';
+import {
+  loadPostgresJobProjections,
+  loadPostgresManagerSnapshot,
+  loadPostgresQueueReadModel,
+} from './readModels';
 /** Database-authoritative PostgreSQL queue store safe for concurrent brokers. */
 export class PostgresQueueStore extends PostgresAdmissionStore {
   async now(): Promise<number> {
@@ -179,6 +184,10 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
   latestEventId = () => latestPostgresEventId(this.context);
   loadLifetimeMetrics = () => loadPostgresLifetimeMetrics(this.context);
   loadCloudReadModel = () => loadPostgresCloudReadModel(this.context);
+  loadManagerSnapshot = () => loadPostgresManagerSnapshot(this.context);
+  loadQueueReadModel = (queue: string) => loadPostgresQueueReadModel(this.context, queue);
+  loadJobProjections = (requests: Parameters<typeof loadPostgresJobProjections>[1]) =>
+    loadPostgresJobProjections(this.context, requests);
   updateData = (id: JobId, data: unknown) => updatePostgresJobData(this.context, id, data);
   updateProgress = (id: JobId, value: number, message?: string) =>
     updatePostgresProgress(this.context, id, value, message);

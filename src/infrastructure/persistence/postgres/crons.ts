@@ -9,7 +9,7 @@ import {
 } from '../../scheduler/cronParser';
 import { admitPostgresJob } from './admission';
 import { decodePostgresValue, encodePostgresValue } from './codec';
-import { databaseNow, type PostgresContext } from './context';
+import { databaseNow, type PostgresContext, type PostgresReadSql } from './context';
 import { hasActivePostgresWorker } from './workers';
 
 export interface PostgresCronRow {
@@ -92,8 +92,11 @@ export async function getPostgresCron(
   return rows[0] ? decodePostgresCron(rows[0]) : undefined;
 }
 
-export async function listPostgresCrons(ctx: PostgresContext): Promise<CronJob[]> {
-  const rows = await ctx.sql<PostgresCronRow[]>`
+export async function listPostgresCrons(
+  ctx: PostgresContext,
+  sql: PostgresReadSql = ctx.sql
+): Promise<CronJob[]> {
+  const rows = await sql<PostgresCronRow[]>`
     SELECT name, payload, next_run, executions, max_limit
     FROM bunqueue_crons
     WHERE namespace = ${ctx.config.namespace}

@@ -95,6 +95,29 @@ head:
 
 ### Performance
 
+- PostgreSQL multi-broker hot paths now bound journal catch-up reads at 4,096
+  events and authoritative projection repairs at 1,000 IDs, remove a redundant
+  autonomous queue-state insert from claims, and update exact metric buckets
+  plus lifetime totals through a focused canonical-order CTE writer. Concurrent
+  older transactions can no longer move metric `prevTS` or its latest-minute
+  count backward. TTL expiry remains autonomous to preserve lock order, and
+  SQLite behavior is unchanged.
+- The native PostgreSQL runner now records broker pool size, polling interval,
+  server `work_mem`, and dirty runtime-source status. A PostgreSQL 18 bottleneck
+  report documents controlled code A/B evidence, 100,000-job activity sampling,
+  batch/pool/`work_mem` sweeps, rejected optimizations, exact integrity totals,
+  and raw artifact hashes. Batch 250 raised the four-broker lifecycle median
+  from 7,478 to 8,362 jobs/s versus batch 100 with 41.7% fewer commits, while
+  explicitly reporting higher command tails, WAL/job, and temporary spill.
+- Added a reproducible native PostgreSQL 15–18 benchmark harness and a dated
+  engineering report covering PostgreSQL 15.19, 16.15, 17.11, and 18.6 across
+  one, two, and four independent broker processes. The campaign ran 84 measured
+  10,000-job samples after 12 discarded warm-ups, retained exact accepted,
+  invoked, and completed ID sets with zero duplicates/deadlocks/temp spill, and
+  reports admission/processing/lifecycle medians, CV, Student-t CI95, command
+  p95 latency, WAL per job, and broker fairness. PostgreSQL lifecycle medians
+  were 6,550–6,945 jobs/s with one broker, 8,004–8,494 with two, and
+  7,168–7,788 with four on the native M1 Max host.
 - PostgreSQL bulk admission, claims, unique-ID ACK batches, durable events, and
   completion metrics now use set-based statements. New custom IDs and
   deduplication keys share the bulk fast path; ID/key conflicts roll the whole

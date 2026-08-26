@@ -680,3 +680,38 @@ Never reuse a developer Redis database or a long-lived bunqueue server.
 Docker Compose is reserved for functional tests that genuinely need external
 services. Use a unique Compose project name and disposable volumes; never run a
 repository-wide `down -v` against an unrelated project.
+
+### PostgreSQL 15–18 native matrix
+
+`bun run bench:postgres:versions` compares native PostgreSQL 15 through 18
+across one, two, and four independent broker processes. It must not be run in a
+container or VM for documentation figures. By default it submits 10,000 jobs
+per sample with four producers, 16 fixed consumers, batch size 100, one
+discarded warm-up, and seven measured samples per version/topology cell.
+
+Every sample owns a new `initdb` data directory, database, PostgreSQL process,
+broker processes, dynamic ports, namespace, and queue. The runner keeps
+`fsync`, `synchronous_commit`, and `full_page_writes` enabled, rotates version
+and topology order between rounds, and rejects missing/duplicate IDs,
+nonterminal rows, command failures, PostgreSQL deadlocks, or process failures.
+Raw JSON is written under `artifacts/benchmarks/`.
+
+| Environment variable                 | Default         | Meaning                                    |
+| ------------------------------------ | --------------- | ------------------------------------------ |
+| `BUNQUEUE_PG_BENCH_VERSIONS`         | `15,16,17,18`   | Native PostgreSQL majors                   |
+| `BUNQUEUE_PG_BENCH_BROKERS`          | `1,2,4`         | Independent broker processes per database  |
+| `BUNQUEUE_PG_BENCH_JOBS`             | `10000`         | Jobs per fresh sample                      |
+| `BUNQUEUE_PG_BENCH_BATCH_SIZE`       | `100`           | `PUSHB`, `PULLB`, and `ACKB` batch bound   |
+| `BUNQUEUE_PG_BENCH_PRODUCERS`        | `4`             | Fixed producer connection count            |
+| `BUNQUEUE_PG_BENCH_CONSUMERS`        | `16`            | Fixed consumer connection count            |
+| `BUNQUEUE_PG_BENCH_POOL_SIZE`        | `10`            | PostgreSQL connections per broker          |
+| `BUNQUEUE_PG_BENCH_POLL_INTERVAL_MS` | `250`           | Durable event polling interval in ms       |
+| `BUNQUEUE_PG_BENCH_WORK_MEM`         | `4MB`           | PostgreSQL `work_mem` for the fresh server |
+| `BUNQUEUE_PG_BENCH_WARMUPS`          | `1`             | Fresh discarded samples per cell           |
+| `BUNQUEUE_PG_BENCH_RUNS`             | `7`             | Fresh measured samples per cell            |
+| `BUNQUEUE_PG_BIN_<major>`            | Homebrew prefix | Override for a native installation prefix  |
+
+The dated reference campaign and its interpretation are in
+[Native PostgreSQL 15–18 Engineering Benchmark — 2026-08-26](./benchmarks/postgres-versions-2026-08-26.md).
+The PostgreSQL 18 bottleneck, batch, pool, and `work_mem` investigation is in
+[PostgreSQL 18 Multi-Broker Performance Analysis — 2026-08-26](./benchmarks/postgres-performance-analysis-2026-08-26.md).

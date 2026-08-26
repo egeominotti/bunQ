@@ -8,6 +8,7 @@ import {
 } from './eventPruneWatermarks';
 import { prunePostgresQueueEvents, tryLockPostgresEventRetention } from './eventRetention';
 import { POSTGRES_EVENT_CHANNEL } from './schema';
+import { recordPostgresMetricAdditions } from './metricWrites';
 import type { PostgresJobState, ResolvedPostgresStorageConfig } from './types';
 
 export type PostgresReadSql = SQL | TransactionSQL;
@@ -101,40 +102,13 @@ export async function recordPostgresEvent(
         ? 'failed'
         : null;
   if (metricType) {
-    const minute = Math.floor(input.occurredAt / 60_000);
-    const [bucket] = await tx<{ count: number }[]>`
-      INSERT INTO bunqueue_metric_buckets
-        (namespace, queue, metric_type, minute, count)
-      VALUES (${ctx.config.namespace}, ${input.queue}, ${metricType}, ${minute}, 1)
-      ON CONFLICT (namespace, queue, metric_type, minute)
-      DO UPDATE SET count = bunqueue_metric_buckets.count + 1
-      RETURNING count
-    `;
-    await tx`
-      INSERT INTO bunqueue_metric_totals
-        (namespace, queue, metric_type, total_count, prev_ts, prev_count)
-      VALUES
-        (${ctx.config.namespace}, ${input.queue}, ${metricType}, 1, ${input.occurredAt},
-         ${bucket.count})
-      ON CONFLICT (namespace, queue, metric_type) DO UPDATE SET
-        total_count = bunqueue_metric_totals.total_count + 1,
-        prev_ts = excluded.prev_ts,
-        prev_count = excluded.prev_count
-    `;
-    const metricLimit = ctx.config.maxMetricDataPoints;
-    if (metricLimit === 0) {
-      await tx`
-        DELETE FROM bunqueue_metric_buckets
-        WHERE namespace = ${ctx.config.namespace} AND queue = ${input.queue}
-          AND metric_type = ${metricType}
-      `;
-    } else {
-      await tx`
-        DELETE FROM bunqueue_metric_buckets
-        WHERE namespace = ${ctx.config.namespace} AND queue = ${input.queue}
-          AND metric_type = ${metricType} AND minute < ${minute - metricLimit + 1}
-      `;
-    }
+    await recordPostgresMetricAdditions(
+      tx,
+      ctx,
+      metricType,
+      [{ queue: input.queue, count: 1 }],
+      input.occurredAt
+    );
   }
   await tx.notify(
     POSTGRES_EVENT_CHANNEL,

@@ -15,13 +15,19 @@ export interface PostgresProcessBroker {
   released: boolean;
 }
 
+export interface PostgresProcessClusterOptions {
+  readonly pollIntervalMs?: number;
+  readonly poolSize?: number;
+}
+
 export async function startPostgresProcessCluster(
   url: string,
   namespace: string,
-  size: number
+  size: number,
+  options: PostgresProcessClusterOptions = {}
 ): Promise<PostgresProcessBroker[]> {
   const starts = Array.from({ length: size }, (_, index) =>
-    startPostgresProcessBroker(url, namespace, `process-${index + 1}`)
+    startPostgresProcessBroker(url, namespace, `process-${index + 1}`, options)
   );
   const results = await Promise.allSettled(starts);
   const brokers = results.flatMap((result) =>
@@ -78,7 +84,8 @@ export async function cleanupPostgresNamespace(url: string, namespace: string): 
 async function startPostgresProcessBroker(
   url: string,
   namespace: string,
-  brokerId: string
+  brokerId: string,
+  options: PostgresProcessClusterOptions
 ): Promise<PostgresProcessBroker> {
   const port = reservePortPair();
   const process = Bun.spawn([globalThis.process.execPath, 'run', 'src/main.ts'], {
@@ -90,8 +97,8 @@ async function startPostgresProcessBroker(
       BUNQUEUE_EMBEDDED: '',
       BUNQUEUE_POSTGRES_LEASE_DURATION_MS: '1000',
       BUNQUEUE_POSTGRES_NAMESPACE: namespace,
-      BUNQUEUE_POSTGRES_POLL_INTERVAL_MS: '25',
-      BUNQUEUE_POSTGRES_POOL_SIZE: '12',
+      BUNQUEUE_POSTGRES_POLL_INTERVAL_MS: String(options.pollIntervalMs ?? 25),
+      BUNQUEUE_POSTGRES_POOL_SIZE: String(options.poolSize ?? 12),
       BUNQUEUE_POSTGRES_URL: url,
       BUNQUEUE_STORAGE_DRIVER: 'postgres',
       BQ_DATA_PATH: '',

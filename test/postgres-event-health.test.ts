@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { SQL } from 'bun';
 import { PostgresQueueStore } from '../src/infrastructure/persistence/postgres';
 import type { PostgresContext } from '../src/infrastructure/persistence/postgres/context';
-import { PostgresEventStream } from '../src/infrastructure/persistence/postgres/events';
+import {
+  PostgresEventStream,
+  postgresEventDrainBatchSize,
+} from '../src/infrastructure/persistence/postgres/events';
 
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
 
@@ -32,6 +35,13 @@ function fakeContext(execute: () => Promise<unknown[]>): PostgresContext {
 }
 
 describe('PostgreSQL event stream health', () => {
+  test('scales catch-up reads to the retained window within a bounded memory budget', () => {
+    expect(postgresEventDrainBatchSize(1)).toBe(1_000);
+    expect(postgresEventDrainBatchSize(4_096)).toBe(4_096);
+    expect(postgresEventDrainBatchSize(10_000)).toBe(4_096);
+    expect(postgresEventDrainBatchSize(1_000_000)).toBe(4_096);
+  });
+
   test('reports a failed durable drain and recovery after a complete retry', async () => {
     const failure = new Error('synthetic journal query failure');
     let nextFailure: Error | null = failure;

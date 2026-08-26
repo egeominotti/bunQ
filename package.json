@@ -120,6 +120,7 @@
     "bench": "bun run bench/comprehensive.ts",
     "bench:tcp": "bun run bench/tcp-bench.ts",
     "bench:autobatch": "bun run bench/local-autobatch.ts",
+    "bench:postgres:versions": "bun run bench/postgres-versions.ts",
     "bench:pushbulk": "bun run bench/pushbulk-delta.ts",
     "bench:workflow": "bun run bench/workflow-engine.ts",
     "bench:workflow:scale": "bun run bench/workflow-engine/scale.ts",

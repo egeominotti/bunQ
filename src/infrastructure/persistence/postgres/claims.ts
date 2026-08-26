@@ -37,14 +37,6 @@ function toQueueState(row: QueueStateRow): PostgresQueueState {
   };
 }
 
-async function ensureQueueState(ctx: PostgresContext, queue: string): Promise<void> {
-  await ctx.sql`
-    INSERT INTO bunqueue_queue_state (namespace, queue)
-    VALUES (${ctx.config.namespace}, ${queue})
-    ON CONFLICT DO NOTHING
-  `;
-}
-
 async function lockQueueState(
   tx: TransactionSQL,
   ctx: PostgresContext,
@@ -141,7 +133,6 @@ export async function claimPostgresJobs(
   leaseDurationMs: number
 ): Promise<ClaimedPostgresJob[]> {
   if (count <= 0) return [];
-  await ensureQueueState(ctx, queue);
   await expirePendingPostgresJobs(ctx, queue);
 
   const claimWithLock = async (

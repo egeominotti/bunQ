@@ -538,7 +538,7 @@ and
 reconciles the final dependency generation without reordering its original
 outbox event. The bulk implementation is split across `postgres/batchAdmission.ts`,
 `postgres/claimSelection.ts`, `postgres/claimBatch.ts`, `postgres/batchCompletion.ts`,
-`postgres/batchEvents.ts`, `postgres/completionEvents.ts`,
+`postgres/batchEvents.ts`, `postgres/completionEvents.ts`, `postgres/metricWrites.ts`,
 `postgres/dependencyPromotion.ts`, and the manager-side
 `postgres-queue-manager/batchSnapshot.ts`. Terminal ACK/failure delivery and its
 shutdown drain live in `postgres-queue-manager/terminalDelivery.ts`; the
@@ -623,6 +623,9 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   `CACHE 1` sequence, and stamps a compact commit envelope plus any watermark.
   Immutable event rows join that envelope through `transaction_id`; brokers
   replay by `(commit_seq, event_id)`, while `pg_notify` is only a wake-up hint.
+  Catch-up reads are bounded at 4,096 events, while affected-job projection
+  repair is independently bounded at 1,000 IDs per query so a burst does not
+  become one unbounded `ANY(...)` read.
   Inline retention never waits for a second queue lock after job locks are held;
   candidate tuples are locked by ascending ID, and a commit-aware autonomous
   sweep recalculates the cutoff under one per-queue advisory lock. Cumulative

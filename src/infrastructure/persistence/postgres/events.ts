@@ -16,6 +16,13 @@ type InvalidationListener = (queue: string) => void;
 type DrainStatusListener = (error: Error | null) => void;
 type WakeResolver = () => void;
 
+const MIN_EVENT_DRAIN_BATCH = 1_000;
+const MAX_EVENT_DRAIN_BATCH = 4_096;
+
+export function postgresEventDrainBatchSize(maxQueueEvents: number): number {
+  return Math.max(MIN_EVENT_DRAIN_BATCH, Math.min(MAX_EVENT_DRAIN_BATCH, maxQueueEvents));
+}
+
 function requiresQueueInvalidation(event: PostgresStoreEvent): boolean {
   return event.type.startsWith('queue-') || (!event.job && event.state === null);
 }
@@ -186,14 +193,15 @@ export class PostgresEventStream {
   }
 
   private async drainLoop(): Promise<void> {
+    const batchSize = postgresEventDrainBatchSize(this.ctx.config.maxQueueEvents);
     while (!this.closed) {
       this.drainRequested = false;
       await this.convergeEventRetention();
       await this.scanPruneWatermarks();
-      const entries = await loadPostgresJournalEventsAfter(this.ctx, this.journalCursor);
+      const entries = await loadPostgresJournalEventsAfter(this.ctx, this.journalCursor, batchSize);
       await this.scanPruneWatermarks();
       for (const entry of entries) this.applyEvent(entry);
-      if (entries.length >= 1000 || this.drainRequested) continue;
+      if (entries.length >= batchSize || this.drainRequested) continue;
       return;
     }
   }

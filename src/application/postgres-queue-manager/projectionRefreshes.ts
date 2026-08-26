@@ -31,6 +31,7 @@ type ProjectionReporter = (queue: string, id: JobId, error: unknown) => void;
 /** Coalesced, generation-fenced repair of the local PostgreSQL read model. */
 export class PostgresProjectionRefreshes {
   private static readonly MAX_ACTIVE_BATCHES = 2;
+  private static readonly MAX_REQUESTS_PER_BATCH = 1_000;
   private readonly generations = new Map<JobId, symbol>();
   private readonly pending = new Map<JobId, PendingProjection>();
   private readonly active = new Set<Promise<boolean>>();
@@ -144,8 +145,11 @@ export class PostgresProjectionRefreshes {
   }
 
   private async runBatch(): Promise<boolean> {
-    const batch = [...this.pending.entries()];
-    this.pending.clear();
+    const batch = [...this.pending.entries()].slice(
+      0,
+      PostgresProjectionRefreshes.MAX_REQUESTS_PER_BATCH
+    );
+    for (const [id] of batch) this.pending.delete(id);
     if (batch.length === 0) return false;
     try {
       const projections = await this.load(batch.map(([id, { queue }]) => ({ id, queue })));

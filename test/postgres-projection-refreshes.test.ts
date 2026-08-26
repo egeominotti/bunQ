@@ -130,8 +130,12 @@ describe('PostgreSQL projection refresh lifecycle', () => {
 
   test('releases generation fences after unique refreshes and local mutations settle', async () => {
     let applied = 0;
+    const batchSizes: number[] = [];
     const refreshes = new PostgresProjectionRefreshes(
-      async (requests) => new Map(requests.map(({ id }) => [id, emptyProjection])),
+      async (requests) => {
+        batchSizes.push(requests.length);
+        return new Map(requests.map(({ id }) => [id, emptyProjection]));
+      },
       () => applied++,
       () => undefined,
       1
@@ -144,6 +148,8 @@ describe('PostgreSQL projection refresh lifecycle', () => {
     }
 
     expect(await eventually(() => applied === 10_000)).toBe(true);
+    expect(batchSizes).toHaveLength(10);
+    expect(Math.max(...batchSizes)).toBe(1_000);
     const generations = Reflect.get(refreshes, 'generations') as Map<JobId, symbol>;
     expect(generations.size).toBe(0);
 

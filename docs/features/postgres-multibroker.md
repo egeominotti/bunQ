@@ -72,7 +72,11 @@ separate terminal writes, generation retention, and reads; and
 The high-volume path is split further: `batchAdmission.ts`, `claimSelection.ts`,
 `claimBatch.ts`, `batchCompletion.ts`, `batchEvents.ts`, and
 `completionEvents.ts` keep candidate selection, bulk SQL, event retention, and
-metric aggregation out of the single-job implementations.
+metric aggregation out of the single-job implementations. `metricWrites.ts`
+owns canonical-order exact bucket and lifetime-total updates for both single
+and batch terminal paths. Its upserts keep `prevTS` monotonic when an older
+transaction reaches the shared row after a newer one, and retain the matching
+latest-minute `prevCount` even when bucket history is disabled.
 
 `rateLimit.ts` is the single PostgreSQL normalization policy for both the
 manager snapshot and durable queue state: a non-positive or non-finite duration
@@ -874,6 +878,55 @@ both PostgreSQL brokers participated in every two-broker sample. Each sample
 used a fresh native PostgreSQL 18.6 cluster, broker process set, ports,
 namespace, and queue with full durability. These remain local non-quiesced
 engineering diagnostics, not publishable cross-project claims.
+
+### Native PostgreSQL 15–18 compatibility benchmark
+
+The 2026-08-26 compatibility campaign ran PostgreSQL 15.19, 16.15, 17.11,
+and 18.6 natively on the same host. It used fresh clusters and independent
+one/two/four-process broker topologies for every sample, one discarded warm-up
+and seven measured 10,000-job samples per cell. All 840,000 measured IDs were
+accepted, invoked, and completed exactly once with zero duplicate invocations,
+deadlocks, or PostgreSQL temporary spill.
+
+Lifecycle medians ranged from 6,550–6,945 jobs/s with one broker,
+8,004–8,494 with two, and 7,168–7,788 with four. PostgreSQL 18.6 led the
+one- and four-broker medians; PostgreSQL 15.19 led the two-broker median by
+0.7%, within overlapping confidence intervals. The topology effect was larger
+than the version spread: two brokers improved every major by 18.2–23.9%, while
+four brokers were 7.6–12.8% slower than two at a fixed 16 consumers.
+
+See the complete
+[Native PostgreSQL 15–18 Engineering Benchmark](../benchmarks/postgres-versions-2026-08-26.md)
+for methodology, CV and Student-t CI95, command-tail latency, WAL per job,
+broker fairness, integrity totals, limits, reproduction controls, and the raw
+artifact digest.
+
+### PostgreSQL 18 bottleneck tuning
+
+The follow-up PostgreSQL 18 analysis retained four narrow hot-path changes.
+Journal catch-up reads scale from 1,000 to a bounded maximum of 4,096 events;
+authoritative projection repair issues at most 1,000 IDs per query; and exact
+completion metrics use one canonical queue order and one CTE for bucket plus
+lifetime-total updates. Claim no longer performs an autonomous queue-state
+sentinel insert because the locked claim transaction already creates a missing
+row. TTL expiry remains autonomous to preserve destruction/job versus
+queue-state lock order.
+
+At four brokers and batch 100, the code candidate did not establish a
+throughput win: lifecycle medians were 6,740 and 6,776 jobs/s with overlapping
+CI95 intervals. It did reduce median-of-sample `ACKB` p95 from 165.8 to
+108.9 ms and transaction count by 4.7%, while `PULLB` p95 and WAL/job increased.
+The strongest throughput result came from configuration: at pool 4 and 250 ms
+polling, batch 250 improved the four-broker lifecycle median from 7,478 to
+8,362 jobs/s (+11.8%) versus batch 100, with non-overlapping CI95 intervals and
+41.7% fewer commits. Larger commands increased p95 latency, WAL/job, and
+temporary spill, so batch 100 remains a latency-oriented option.
+
+See
+[PostgreSQL 18 Multi-Broker Performance Analysis](../benchmarks/postgres-performance-analysis-2026-08-26.md)
+for the `pg_stat_activity` bottleneck evidence, 100,000-job diagnostics, batch
+and pool sweeps, `work_mem` comparison, rejected changes, exact integrity
+totals, caveats, and raw artifact hashes.
 
 ## Related docs
 

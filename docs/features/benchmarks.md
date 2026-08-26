@@ -2,7 +2,7 @@
 
 > **Category:** Engineering tooling · **Primary runners:**
 > `bench/workflow-engine.ts`, `bench/workflow-engine/scale.ts`,
-> `bench/tcp-bench.ts`, `bench/fix-impact.ts`,
+> `bench/postgres-versions.ts`, `bench/tcp-bench.ts`, `bench/fix-impact.ts`,
 > `src/benchmark/million-jobs.bench.ts`
 
 ## Purpose
@@ -18,14 +18,26 @@ The final v2.8.56 native host campaign is documented in
 It covers every maintained queue, transport, Workflow, Flow, dependency,
 event, stress, and million-job runner in Embedded and TCP modes.
 
+The native PostgreSQL compatibility campaign is documented in
+[Native PostgreSQL 15–18 Engineering Benchmark — 2026-08-26](../benchmarks/postgres-versions-2026-08-26.md).
+It compares one, two, and four independent brokers on fresh PostgreSQL 15.19,
+16.15, 17.11, and 18.6 clusters with seven measured samples per cell.
+
+The follow-up
+[PostgreSQL 18 Multi-Broker Performance Analysis — 2026-08-26](../benchmarks/postgres-performance-analysis-2026-08-26.md)
+profiles ACK metric contention, event catch-up, queue refreshes, transaction
+count, batch size, pool size, and `work_mem`. It records both retained and
+rejected optimizations and separates throughput from latency, WAL, and spill
+trade-offs.
+
 ## Evidence levels
 
-| Level | Required properties | Intended use |
-| --- | --- | --- |
+| Level       | Required properties                                                                                                                                                   | Intended use                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Publication | Fresh process and state per sample; warm-up discarded; repeated samples; median plus tails/variance; native host; exact integrity checks; raw machine-readable output | Documentation, release notes, capacity planning |
-| Engineering | Controlled fresh state and correctness checks, but fewer samples or a narrowly targeted harness | Regression analysis and tuning |
-| Diagnostic | One process, accumulated state, fixed ports, timing-only output, or no distribution | Locating a bottleneck; never a headline number |
-| Functional | A feature exercise that prints timings incidentally | Correctness only |
+| Engineering | Controlled fresh state and correctness checks, but fewer samples or a narrowly targeted harness                                                                       | Regression analysis and tuning                  |
+| Diagnostic  | One process, accumulated state, fixed ports, timing-only output, or no distribution                                                                                   | Locating a bottleneck; never a headline number  |
+| Functional  | A feature exercise that prints timings incidentally                                                                                                                   | Correctness only                                |
 
 Docker results are never published as performance figures. Containers remain
 the authoritative functional isolation boundary, but share the host kernel,
@@ -82,12 +94,12 @@ explicit data path or the July 30 campaign for on-disk public-API figures.
 
 `bun run bench:workflow` drives four scenarios:
 
-| Scenario | Graph | Terminal invariant | Primary metric |
-| --- | --- | --- | --- |
-| `linear` | Three top-level no-op steps | `completed`, 3 step completions | End-to-end workflow throughput/latency |
-| `parallel` | Prepare → 3 inline parallel steps → join | `completed`, 5 step completions | Parallel bookkeeping and join |
-| `compensation` | Two compensatable steps → intentional failure | `failed`, rollback `completed`, 2 compensation outcomes | Forward failure plus reverse unwind |
-| `signal` | Request → `waitFor('approved')` → finish | waiting and signal counts exact, then `completed` | Total, park, and resume throughput/latency |
+| Scenario       | Graph                                         | Terminal invariant                                      | Primary metric                             |
+| -------------- | --------------------------------------------- | ------------------------------------------------------- | ------------------------------------------ |
+| `linear`       | Three top-level no-op steps                   | `completed`, 3 step completions                         | End-to-end workflow throughput/latency     |
+| `parallel`     | Prepare → 3 inline parallel steps → join      | `completed`, 5 step completions                         | Parallel bookkeeping and join              |
+| `compensation` | Two compensatable steps → intentional failure | `failed`, rollback `completed`, 2 compensation outcomes | Forward failure plus reverse unwind        |
+| `signal`       | Request → `waitFor('approved')` → finish      | waiting and signal counts exact, then `completed`       | Total, park, and resume throughput/latency |
 
 The coordinator launches each sample in a new process and temporary directory.
 TCP samples also launch a new broker on dynamic TCP/HTTP ports. The measured
@@ -97,21 +109,21 @@ that interval. Signal resume latency begins immediately before `Engine.signal`.
 
 Key controls:
 
-| Environment variable | Default | Meaning |
-| --- | ---: | --- |
-| `BENCH_MODE` | `all` | `embedded`, `tcp`, or both |
-| `BENCH_SCENARIOS` | all four | Comma-separated scenario list |
-| `BENCH_RUNS` | `7` | Measured fresh processes per scenario |
-| `BENCH_RUNS_LINEAR` | `BENCH_RUNS` | Scenario-specific run override |
-| `BENCH_WARMUPS` | `1` | Discarded fresh processes |
-| `BENCH_N_LINEAR` | `1000` | Executions per linear sample |
-| `BENCH_N_PARALLEL` | `500` | Executions per parallel sample |
-| `BENCH_N_COMPENSATION` | `200` | Executions per rollback sample |
-| `BENCH_N_SIGNAL` | `200` | Executions per wait/signal sample |
-| `BENCH_CONCURRENCY` | `32` | Internal Workflow worker concurrency |
-| `BENCH_START_BATCH` | `100` | Concurrent `Engine.start`/`signal` calls per producer batch |
-| `BENCH_OUTPUT` | unset | JSON output path |
-| `BENCH_COMMAND_TIMEOUT` | `30000` | TCP client command timeout, milliseconds |
+| Environment variable    |      Default | Meaning                                                     |
+| ----------------------- | -----------: | ----------------------------------------------------------- |
+| `BENCH_MODE`            |        `all` | `embedded`, `tcp`, or both                                  |
+| `BENCH_SCENARIOS`       |     all four | Comma-separated scenario list                               |
+| `BENCH_RUNS`            |          `7` | Measured fresh processes per scenario                       |
+| `BENCH_RUNS_LINEAR`     | `BENCH_RUNS` | Scenario-specific run override                              |
+| `BENCH_WARMUPS`         |          `1` | Discarded fresh processes                                   |
+| `BENCH_N_LINEAR`        |       `1000` | Executions per linear sample                                |
+| `BENCH_N_PARALLEL`      |        `500` | Executions per parallel sample                              |
+| `BENCH_N_COMPENSATION`  |        `200` | Executions per rollback sample                              |
+| `BENCH_N_SIGNAL`        |        `200` | Executions per wait/signal sample                           |
+| `BENCH_CONCURRENCY`     |         `32` | Internal Workflow worker concurrency                        |
+| `BENCH_START_BATCH`     |        `100` | Concurrent `Engine.start`/`signal` calls per producer batch |
+| `BENCH_OUTPUT`          |        unset | JSON output path                                            |
+| `BENCH_COMMAND_TIMEOUT` |      `30000` | TCP client command timeout, milliseconds                    |
 
 Any sample that exits non-zero, fails conservation, ends in the wrong state, or
 writes to stderr—including its TCP broker—aborts the campaign.
@@ -147,31 +159,32 @@ separately; raising the limit is not a correction to a default-topology result.
 
 ### Maintained performance runners
 
-| Runner | Scope | Status and caveat |
-| --- | --- | --- |
-| `bench/workflow-engine.ts` + `workflow-engine/sample.ts` | Embedded/TCP workflow throughput, latency, signals, rollback | Publication-grade; fresh process/state and JSON |
-| `bench/workflow-engine/scale.ts` | Horizontal Workflow Engine scale curve | Publication-grade when the protocol cap and resource sampling are reported |
-| `bench/fix-impact.ts` + `fix-impact/*` | Before/after recovery, queries, scheduling, indexes, waiters, heap retention | Publication-grade cross-revision harness; correctness travels with timing |
-| `bench/tcp-bench.ts` | Pipelined push, `PUSHB`, sequential RTT | Engineering runner; fresh broker/database per operation, derived and reported non-bottlenecking protocol cap, explicit process shutdown, and database/WAL/SHM cleanup |
-| `src/benchmark/million-jobs.bench.ts` | Internal batched push/process lifecycle with two integrity sets | Engineering runner; in-memory internal API, not public Queue or SQLite throughput |
-| `bench/comparison/run.ts` + `comparison/*` | bunqueue TCP/SQLite versus BullMQ/Redis | Comparative campaign; isolated endpoints and run ID; both processing samples require exact accepted/invoked ID equality, zero duplicate delivery, zero failed/nonterminal jobs, and authoritative broker completion before timing ends |
+| Runner                                                   | Scope                                                                            | Status and caveat                                                                                                                                                                                                                      |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bench/postgres-versions.ts` + `postgres-versions/*`     | Native PostgreSQL 15–18, one/two/four process brokers, durable batched lifecycle | Publication-grade local engineering harness; fresh cluster and broker processes per sample, rotated order, exact ID/database/deadlock/spill evidence, explicit pool/poll/`work_mem`, and dirty-runtime identity in JSON                |
+| `bench/workflow-engine.ts` + `workflow-engine/sample.ts` | Embedded/TCP workflow throughput, latency, signals, rollback                     | Publication-grade; fresh process/state and JSON                                                                                                                                                                                        |
+| `bench/workflow-engine/scale.ts`                         | Horizontal Workflow Engine scale curve                                           | Publication-grade when the protocol cap and resource sampling are reported                                                                                                                                                             |
+| `bench/fix-impact.ts` + `fix-impact/*`                   | Before/after recovery, queries, scheduling, indexes, waiters, heap retention     | Publication-grade cross-revision harness; correctness travels with timing                                                                                                                                                              |
+| `bench/tcp-bench.ts`                                     | Pipelined push, `PUSHB`, sequential RTT                                          | Engineering runner; fresh broker/database per operation, derived and reported non-bottlenecking protocol cap, explicit process shutdown, and database/WAL/SHM cleanup                                                                  |
+| `src/benchmark/million-jobs.bench.ts`                    | Internal batched push/process lifecycle with two integrity sets                  | Engineering runner; in-memory internal API, not public Queue or SQLite throughput                                                                                                                                                      |
+| `bench/comparison/run.ts` + `comparison/*`               | bunqueue TCP/SQLite versus BullMQ/Redis                                          | Comparative campaign; isolated endpoints and run ID; both processing samples require exact accepted/invoked ID equality, zero duplicate delivery, zero failed/nonterminal jobs, and authoritative broker completion before timing ends |
 
 ### Targeted diagnostics
 
-| Runner | Measures | Important limitation |
-| --- | --- | --- |
-| `bench/comprehensive.ts` | Legacy Embedded/TCP curves | Embedded is in-memory and resets its shared manager per scale; TCP uses the `BENCH_HOST`/`BENCH_PORT` endpoint and grows broker/database state across scales; processing reconciles IDs and authoritative terminal counts before its deadline |
-| `bench/pushbulk-delta.ts` | Public `add`/`addBulk` before/after deltas | Embedded is in-memory; TCP uses the configured external endpoint; three repetitions per cell and campaign state grows across scales; always shuts down the shared manager after reporting or errors |
-| `bench/tcp-process-sweep.ts` | Worker concurrency/batch-size knee | External fresh broker; explicitly forces TCP even under the test preload; configurable host/port/scale/cases; rejects missing or invalid direct-call ports instead of falling back to `6789`; its self-hosted integrity gate resolves the actual dynamic listener port; active lease renewal, accepted/invoked ID equality, authoritative terminal counts and Worker errors fail the sample |
-| `bench/local-autobatch.ts` | Sequential/concurrent add with batching toggle | Fixed port and local server lifecycle |
-| `bench/job-list-perf.ts` | `getJobs` pages across queue sizes | In-process accumulated state; timing diagnostic |
-| `scripts/bench-tcp-batch-notify.ts` | Wakeup latency, drain, worker fairness | Self-hosted dynamic port; retains all 100k terminal rows needed by its largest sample; accepted/invoked ID and authoritative terminal reconciliation; deterministic cleanup |
-| `scripts/tcp/bench-flow-parallel.ts` | Flow sibling creation sequential versus parallel | Existing TCP server; small sample |
-| `src/benchmark/dependency-latency.bench.ts` | Parent ACK → child eligible latency | Internal QueueManager microbenchmark |
-| `src/benchmark/algorithm-optimizations.bench.ts` | Algorithmic hot paths | Microbenchmark; mixed operations and legacy claims |
-| `src/benchmark/throughput.bench.ts` | Sequential internal push/pull/ack | Warm-up and timing utility, not isolated publication evidence |
-| `src/benchmark/worker.bench.ts` | Internal push → pull → ack → events | Functional performance smoke |
-| `src/benchmark/stress.bench.ts` | Volume, latency, memory observations | Stress diagnostic; not repeated fresh-process statistics |
+| Runner                                           | Measures                                         | Important limitation                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bench/comprehensive.ts`                         | Legacy Embedded/TCP curves                       | Embedded is in-memory and resets its shared manager per scale; TCP uses the `BENCH_HOST`/`BENCH_PORT` endpoint and grows broker/database state across scales; processing reconciles IDs and authoritative terminal counts before its deadline                                                                                                                                               |
+| `bench/pushbulk-delta.ts`                        | Public `add`/`addBulk` before/after deltas       | Embedded is in-memory; TCP uses the configured external endpoint; three repetitions per cell and campaign state grows across scales; always shuts down the shared manager after reporting or errors                                                                                                                                                                                         |
+| `bench/tcp-process-sweep.ts`                     | Worker concurrency/batch-size knee               | External fresh broker; explicitly forces TCP even under the test preload; configurable host/port/scale/cases; rejects missing or invalid direct-call ports instead of falling back to `6789`; its self-hosted integrity gate resolves the actual dynamic listener port; active lease renewal, accepted/invoked ID equality, authoritative terminal counts and Worker errors fail the sample |
+| `bench/local-autobatch.ts`                       | Sequential/concurrent add with batching toggle   | Fixed port and local server lifecycle                                                                                                                                                                                                                                                                                                                                                       |
+| `bench/job-list-perf.ts`                         | `getJobs` pages across queue sizes               | In-process accumulated state; timing diagnostic                                                                                                                                                                                                                                                                                                                                             |
+| `scripts/bench-tcp-batch-notify.ts`              | Wakeup latency, drain, worker fairness           | Self-hosted dynamic port; retains all 100k terminal rows needed by its largest sample; accepted/invoked ID and authoritative terminal reconciliation; deterministic cleanup                                                                                                                                                                                                                 |
+| `scripts/tcp/bench-flow-parallel.ts`             | Flow sibling creation sequential versus parallel | Existing TCP server; small sample                                                                                                                                                                                                                                                                                                                                                           |
+| `src/benchmark/dependency-latency.bench.ts`      | Parent ACK → child eligible latency              | Internal QueueManager microbenchmark                                                                                                                                                                                                                                                                                                                                                        |
+| `src/benchmark/algorithm-optimizations.bench.ts` | Algorithmic hot paths                            | Microbenchmark; mixed operations and legacy claims                                                                                                                                                                                                                                                                                                                                          |
+| `src/benchmark/throughput.bench.ts`              | Sequential internal push/pull/ack                | Warm-up and timing utility, not isolated publication evidence                                                                                                                                                                                                                                                                                                                               |
+| `src/benchmark/worker.bench.ts`                  | Internal push → pull → ack → events              | Functional performance smoke                                                                                                                                                                                                                                                                                                                                                                |
+| `src/benchmark/stress.bench.ts`                  | Volume, latency, memory observations             | Stress diagnostic; not repeated fresh-process statistics                                                                                                                                                                                                                                                                                                                                    |
 
 ### Functional scripts with incidental timing
 
@@ -237,6 +250,8 @@ Before updating a number in README or the public site:
 
 ## Related documents
 
+- [Native PostgreSQL 15–18 Engineering Benchmark — 2026-08-26](../benchmarks/postgres-versions-2026-08-26.md)
+- [PostgreSQL 18 Multi-Broker Performance Analysis — 2026-08-26](../benchmarks/postgres-performance-analysis-2026-08-26.md)
 - [Native Engineering Benchmark — 2026-08-03](../benchmarks/native-engineering-2026-08-03.md)
 - [Native Engineering Benchmark — 2026-08-02](../benchmarks/native-engineering-2026-08-02.md)
 - [Native Engineering Benchmark — 2026-07-30](../benchmarks/native-engineering-2026-07-30.md)

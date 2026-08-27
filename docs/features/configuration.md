@@ -163,10 +163,10 @@ Every field follows **config file > env var > default**. Key cases:
   unsupported value throws. Without an explicit driver, `storage.url` /
   `BUNQUEUE_POSTGRES_URL` selects PostgreSQL, otherwise a data path selects
   SQLite, otherwise memory.
-- PostgreSQL settings resolve from `storage.url`, `namespace`, `brokerId`,
-  `poolSize`, `leaseDurationMs`, and `pollIntervalMs`, with their
-  `BUNQUEUE_POSTGRES_*` environment equivalents. Numeric values are normalized
-  to positive integers before the runtime applies its safety minimums.
+- PostgreSQL settings resolve from `storage.url`, `namespace`, `brokerId`, pool,
+  lease/poll timing, SQL deadlines, operation admission bounds, and snapshot
+  budgets, with their `BUNQUEUE_POSTGRES_*` environment equivalents. Numeric
+  values are normalized before the runtime applies its safety minimums.
 - `authTokens` / `corsOrigins`: comma-split env, `.filter(Boolean)`, default `[]` (`resolve.ts:43`, `:50`).
 - `s3BackupEnabled`: `S3_BACKUP_ENABLED` accepts `'1'` or `'true'` (`resolve.ts:52-54`).
 - `requireAuthForMetrics`: `METRICS_AUTH === 'true'` (`resolve.ts:51`).
@@ -256,9 +256,16 @@ Resolved by `resolveServerConfig` (defaults in parentheses):
 | `BUNQUEUE_POSTGRES_URL`                                             | `storage.url`                   | `undefined`                  |
 | `BUNQUEUE_POSTGRES_NAMESPACE`                                       | `storage.namespace`             | `default`                    |
 | `BUNQUEUE_BROKER_ID`                                                | `storage.brokerId`              | generated host/PID/random ID |
-| `BUNQUEUE_POSTGRES_POOL_SIZE`                                       | `storage.poolSize`              | `10`                         |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`                                       | `storage.poolSize`              | `4`                          |
 | `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`                               | `storage.leaseDurationMs`       | `30000`                      |
 | `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`                                | `storage.pollIntervalMs`        | `250`                        |
+| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`                            | `storage.statementTimeoutMs`    | `30000`                      |
+| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`                                 | `storage.lockTimeoutMs`         | `5000`                       |
+| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS`                     | `storage.idleTransactionTimeoutMs` | `30000`                   |
+| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`                       | `storage.maxConcurrentOperations` | `16`                       |
+| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`                           | `storage.maxQueuedOperations`   | `128`                        |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS`                               | `storage.maxSnapshotJobs`       | `100000`                     |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES`                      | `storage.maxSnapshotPayloadBytes` | `268435456`                |
 | `CORS_ALLOW_ORIGIN` (comma-split)                                   | `cors.origins`                  | `[]`                         |
 | `METRICS_AUTH` (`=== 'true'`)                                       | `auth.requireAuthForMetrics`    | `false`                      |
 | `METRICS_MAX_QUEUES`                                                | `telemetry.maxPrometheusQueues` | `100`                        |

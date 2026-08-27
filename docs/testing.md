@@ -641,7 +641,7 @@ language jobs even when an earlier one failed or was cancelled. A root
 `quality-gate` similarly checks the public-API E2E job plus every other core,
 docs, SDK, and PostgreSQL compatibility result. `test-postgres` is both a
 declared `needs` dependency and an explicitly checked result, so a failed or
-cancelled PostgreSQL 18.6/17/16 matrix cannot leave the release DAG green.
+cancelled PostgreSQL 18.6/17/16/15 matrix cannot leave the release DAG green.
 Expiry boundary cases derive timestamps from the PostgreSQL clock so
 host/container clock skew cannot turn lifecycle coverage into a timing-only
 failure. The version gate, binary matrix, container publication, and GitHub release are all

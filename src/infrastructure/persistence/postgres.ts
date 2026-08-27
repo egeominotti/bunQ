@@ -3,6 +3,7 @@ export type {
   ClaimedPostgresJob,
   PostgresCompletionResult,
   PostgresCounts,
+  PostgresDeliveredStoreEvent,
   PostgresFailureInput,
   PostgresQueueState,
   PostgresStorageConfig,

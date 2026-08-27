@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { jobId } from '../src/domain/types/job';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
 import { PostgresStartupEventBuffer } from '../src/application/postgres-queue-manager/startupEventBuffer';
-import type { PostgresStoreEvent } from '../src/infrastructure/persistence/postgres';
+import type { PostgresDeliveredStoreEvent } from '../src/infrastructure/persistence/postgres';
 import {
   cleanupPostgresNamespace,
   deferred,
@@ -15,9 +15,10 @@ import {
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
 const namespaces: string[] = [];
 
-function storeEvent(id: number): PostgresStoreEvent {
+function storeEvent(id: number): PostgresDeliveredStoreEvent {
   return {
     id,
+    commitSeq: id,
     queue: 'startup-buffer',
     type: 'removed',
     jobId: jobId(String(id)),

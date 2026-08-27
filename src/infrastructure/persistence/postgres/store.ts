@@ -72,6 +72,7 @@ import { databaseNow, runPostgresPostCommitMaintenance } from './context';
 import { completePostgresJobs } from './batchCompletion';
 import { prunePostgresCompletionTombstones } from './completionLifecycle';
 import { loadPostgresLifetimeMetrics } from './lifetimeMetrics';
+import { finalizePostgresLifetimeMetrics } from './lifetimeMetricsFinalizer';
 import { loadPostgresCloudReadModel } from './cloudReadModel';
 import { removePostgresUnprocessedChildren } from './removeUnprocessedChildren';
 import {
@@ -183,6 +184,8 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
   loadResults = (queue?: string) => loadPostgresCompletionResults(this.context, queue);
   latestEventId = () => latestPostgresEventId(this.context);
   loadLifetimeMetrics = () => loadPostgresLifetimeMetrics(this.context);
+  finalizeLifetimeMetrics = (apply: Parameters<typeof finalizePostgresLifetimeMetrics>[1]) =>
+    finalizePostgresLifetimeMetrics(this.context, apply);
   loadCloudReadModel = () => loadPostgresCloudReadModel(this.context);
   loadManagerSnapshot = () => loadPostgresManagerSnapshot(this.context);
   loadQueueReadModel = (queue: string) => loadPostgresQueueReadModel(this.context, queue);

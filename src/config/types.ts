@@ -33,6 +33,13 @@ export interface BunqueueConfig {
     poolSize?: number;
     leaseDurationMs?: number;
     pollIntervalMs?: number;
+    statementTimeoutMs?: number;
+    lockTimeoutMs?: number;
+    idleTransactionTimeoutMs?: number;
+    maxConcurrentOperations?: number;
+    maxQueuedOperations?: number;
+    maxSnapshotJobs?: number;
+    maxSnapshotPayloadBytes?: number;
   };
   telemetry?: {
     /** Maximum queue label values exposed to Prometheus; zero disables per-queue series. */

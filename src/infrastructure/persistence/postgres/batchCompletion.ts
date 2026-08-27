@@ -133,7 +133,7 @@ async function updateRetainedJobs(
         result = decode(batch.result_base64, 'base64'),
         lease_owner = NULL,
         lease_token = NULL,
-        lease_broker_id = NULL,
+        lease_broker_id = NULL, lease_broker_session_id = NULL,
         lease_until = NULL,
         dlq_retry_state = NULL,
         version = job.version + 1

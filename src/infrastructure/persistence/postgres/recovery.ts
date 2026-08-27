@@ -37,7 +37,8 @@ async function retryExpiredLease(
     UPDATE bunqueue_jobs
     SET payload = ${encodePostgresValue(job)}, state = ${state}, attempts = ${job.attempts},
         run_at = ${job.runAt}, started_at = NULL, lease_owner = NULL, lease_token = NULL,
-        lease_broker_id = NULL, lease_until = NULL, error = NULL, failure_reason = NULL,
+        lease_broker_id = NULL, lease_broker_session_id = NULL,
+        lease_until = NULL, error = NULL, failure_reason = NULL,
         dlq_entry = NULL,
         dlq_retry_state = ${encodePostgresValue(getDlqRetryState(job))},
         version = version + 1
@@ -64,7 +65,7 @@ async function failExpiredLease(
   const { job, now, reason, error } = input;
   job.completedAt = now;
   const { dlq } = await getPostgresQueuePolicies(tx, ctx, job.queue);
-  const entry = createDlqEntry(job, reason, error, dlq);
+  const entry = createDlqEntry(job, reason, error, dlq, now);
   const { protectedIds } = job.removeOnFail
     ? await partitionPostgresDestructionCandidates(tx, ctx, [job.id], [job.id])
     : { protectedIds: [] };
@@ -87,7 +88,7 @@ async function failExpiredLease(
       UPDATE bunqueue_jobs
       SET payload = ${encodePostgresValue(job)}, state = 'failed', attempts = ${job.attempts},
           completed_at = ${now}, lease_owner = NULL, lease_token = NULL, lease_until = NULL,
-          lease_broker_id = NULL,
+          lease_broker_id = NULL, lease_broker_session_id = NULL,
           error = ${error}, failure_reason = ${reason},
           dlq_entry = ${encodePostgresValue(entry)}, dlq_retry_state = NULL,
           version = version + 1
@@ -210,20 +211,4 @@ export async function recoverExpiredPostgresLeases(
     await enforcePostgresDlqLimit(ctx, queue, maxEntries);
   }
   return result.count;
-}
-
-export async function heartbeatPostgresBroker(ctx: PostgresContext): Promise<void> {
-  const now = await databaseNow(ctx.sql);
-  await ctx.sql`
-    INSERT INTO bunqueue_brokers (namespace, broker_id, started_at, heartbeat_at)
-    VALUES (${ctx.config.namespace}, ${ctx.config.brokerId}, ${now}, ${now})
-    ON CONFLICT (namespace, broker_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at
-  `;
-}
-
-export async function unregisterPostgresBroker(ctx: PostgresContext): Promise<void> {
-  await ctx.sql`
-    DELETE FROM bunqueue_brokers
-    WHERE namespace = ${ctx.config.namespace} AND broker_id = ${ctx.config.brokerId}
-  `;
 }

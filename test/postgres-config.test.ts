@@ -45,6 +45,13 @@ describe('PostgreSQL server configuration', () => {
         poolSize: 20,
         leaseDurationMs: 45_000,
         pollIntervalMs: 50,
+        statementTimeoutMs: 20_000,
+        lockTimeoutMs: 2_000,
+        idleTransactionTimeoutMs: 25_000,
+        maxConcurrentOperations: 24,
+        maxQueuedOperations: 96,
+        maxSnapshotJobs: 75_000,
+        maxSnapshotPayloadBytes: 134_217_728,
       },
     });
     expect(config).toMatchObject({
@@ -55,6 +62,13 @@ describe('PostgreSQL server configuration', () => {
       postgresPoolSize: 20,
       postgresLeaseDurationMs: 45_000,
       postgresPollIntervalMs: 50,
+      postgresStatementTimeoutMs: 20_000,
+      postgresLockTimeoutMs: 2_000,
+      postgresIdleTransactionTimeoutMs: 25_000,
+      postgresMaxConcurrentOperations: 24,
+      postgresMaxQueuedOperations: 96,
+      postgresMaxSnapshotJobs: 75_000,
+      postgresMaxSnapshotPayloadBytes: 134_217_728,
     });
     expect(storageStartupError(config)).toBeNull();
   });

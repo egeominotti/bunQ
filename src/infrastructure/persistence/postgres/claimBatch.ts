@@ -50,6 +50,7 @@ async function persistClaims(
         started_at = ${now},
         lease_owner = ${claimed[0].owner},
         lease_broker_id = ${ctx.config.brokerId},
+        lease_broker_session_id = ${ctx.config.brokerSessionId},
         lease_token = batch.token,
         lease_until = batch.lease_until,
         lease_renewals = 0,

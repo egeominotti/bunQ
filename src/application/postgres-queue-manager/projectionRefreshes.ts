@@ -33,6 +33,7 @@ export class PostgresProjectionRefreshes {
   private static readonly MAX_ACTIVE_BATCHES = 2;
   private static readonly MAX_REQUESTS_PER_BATCH = 1_000;
   private readonly generations = new Map<JobId, symbol>();
+  private readonly generationQueues = new Map<JobId, string>();
   private readonly pending = new Map<JobId, PendingProjection>();
   private readonly active = new Set<Promise<boolean>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -48,7 +49,7 @@ export class PostgresProjectionRefreshes {
 
   request(id: JobId, queue: string): void {
     if (!this.accepting) return;
-    const generation = this.beginGeneration(id);
+    const generation = this.beginGeneration(id, queue);
     this.pending.set(id, { queue, generation });
     this.schedule(0);
   }
@@ -56,6 +57,13 @@ export class PostgresProjectionRefreshes {
   supersede(id: JobId): void {
     this.pending.delete(id);
     this.generations.delete(id);
+    this.generationQueues.delete(id);
+  }
+
+  supersedeQueue(queue: string): void {
+    for (const [id, generationQueue] of this.generationQueues) {
+      if (generationQueue === queue) this.supersede(id);
+    }
   }
 
   async refreshNow(id: JobId, queue: string): Promise<PostgresJobProjection> {
@@ -70,8 +78,8 @@ export class PostgresProjectionRefreshes {
     const loaded = new Map<JobId, PostgresJobProjection>();
     for (let attempt = 0; attempt < 2 && remaining.length > 0; attempt++) {
       const generations = new Map<JobId, symbol>();
-      for (const { id } of remaining) {
-        const generation = this.beginGeneration(id);
+      for (const { id, queue } of remaining) {
+        const generation = this.beginGeneration(id, queue);
         this.pending.delete(id);
         generations.set(id, generation);
       }
@@ -115,6 +123,7 @@ export class PostgresProjectionRefreshes {
     this.accepting = false;
     this.pending.clear();
     this.generations.clear();
+    this.generationQueues.clear();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -173,15 +182,17 @@ export class PostgresProjectionRefreshes {
     }
   }
 
-  private beginGeneration(id: JobId): symbol {
+  private beginGeneration(id: JobId, queue: string): symbol {
     const generation = Symbol();
     this.generations.set(id, generation);
+    this.generationQueues.set(id, queue);
     return generation;
   }
 
   private endGeneration(id: JobId, generation: symbol | undefined): void {
     if (generation && this.generations.get(id) === generation && !this.pending.has(id)) {
       this.generations.delete(id);
+      this.generationQueues.delete(id);
     }
   }
 }

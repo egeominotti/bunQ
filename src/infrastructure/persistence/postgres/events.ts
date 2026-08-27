@@ -9,9 +9,9 @@ import { loadPostgresEventPruneWatermarks } from './eventPruneWatermarks';
 import { POSTGRES_EVENT_CHANNEL } from './schema';
 import { trimPostgresQueueEvents } from './telemetry';
 import type { PostgresContext } from './context';
-import type { PostgresStoreEvent } from './types';
+import type { PostgresDeliveredStoreEvent, PostgresStoreEvent } from './types';
 
-type EventListener = (event: PostgresStoreEvent) => void;
+type EventListener = (event: PostgresDeliveredStoreEvent) => void;
 type InvalidationListener = (queue: string) => void;
 type DrainStatusListener = (error: Error | null) => void;
 type WakeResolver = () => void;
@@ -228,9 +228,10 @@ export class PostgresEventStream {
       Math.max(this.queueEventCursors.get(event.queue) ?? this.baselineCursor, commitSeq)
     );
     if (requiresQueueInvalidation(event)) this.invalidateQueue(event.queue);
+    const delivered = { ...event, commitSeq };
     for (const listener of this.listeners) {
       try {
-        listener(event);
+        listener(delivered);
       } catch {
         // Listener isolation: one observer cannot stop durable cursor progress.
       }

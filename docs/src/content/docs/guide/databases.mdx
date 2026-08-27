@@ -95,14 +95,23 @@ export default defineConfig({
     url: process.env.BUNQUEUE_POSTGRES_URL!,
     namespace: 'production',
     brokerId: process.env.HOSTNAME,
-    poolSize: 10,
+    poolSize: 4,
     leaseDurationMs: 30_000,
     pollIntervalMs: 250,
+    statementTimeoutMs: 30_000,
+    lockTimeoutMs: 5_000,
+    idleTransactionTimeoutMs: 30_000,
+    maxConcurrentOperations: 16,
+    maxQueuedOperations: 128,
+    maxSnapshotJobs: 100_000,
+    maxSnapshotPayloadBytes: 256 * 1024 * 1024,
   },
 });
 ```
 
-Every active broker needs a unique `brokerId` and the same URL/namespace.
+Every active broker needs a unique `brokerId` and the same URL/namespace. A live
+duplicate fails startup. Each process also owns an internal random session fence,
+so a stale process cannot release leases or workers belonging to its successor.
 Credentials should come from a secret manager. Do not also set a SQLite data
 path: ambiguous PostgreSQL + SQLite configuration fails startup. The built-in
 S3 snapshot feature is SQLite-only; use normal PostgreSQL backup/PITR tooling for
@@ -166,6 +175,40 @@ the same two-manager/16-loop shape measured 11,318 admission, 10,064 processing,
 and 5,327 lifecycle jobs/s. Moving the commit token to a compact envelope removed
 the second event-row rewrite and its roughly 49 MiB of profiled WAL per 10,000-job
 run. These remain local engineering diagnostics, not production sizing claims.
+
+### Connection security and deadlines
+
+Use a PostgreSQL URL with the SSL mode required by your provider, for example
+`?sslmode=verify-full`; install the provider CA in the host trust store and do
+not downgrade certificate verification in production. Bun passes PostgreSQL
+runtime parameters when each pooled connection opens: bunqueue defaults to a
+30-second statement timeout, 5-second lock timeout, and 30-second idle
+transaction timeout. Set stricter values only after measuring the longest valid
+queue maintenance operation. Schema migration uses the same lock deadline, so a
+busy rollout fails safely instead of waiting indefinitely and can be retried.
+
+The default pool is four connections per broker. Budget total database
+connections as `brokers × poolSize`, plus administration, monitoring, and
+failover headroom. bunqueue also admits 16 active and 128 queued PostgreSQL
+operations per broker by default. Once that bounded queue is full, commands fail
+fast and callers may retry with jitter instead of consuming unbounded process
+memory during an outage.
+
+### Vacuum, failover, and recovery drills
+
+Queue churn creates dead tuples in jobs, events, commit envelopes, completions,
+metrics, and logs. Keep autovacuum enabled, monitor `n_dead_tup`, vacuum lag,
+table/index growth, transaction age, WAL generation, and replica replay lag, and
+tune per-table autovacuum thresholds from observed churn. Adaptive journal GC
+does not replace vacuum.
+
+Use PostgreSQL physical or managed-service backups with PITR. Test restores and
+primary promotion regularly: restore to a fresh cluster, start one broker,
+verify schema/health and authoritative counts, then add the remaining brokers.
+DNS or proxy failover must preserve the same database and namespace. A database
+restored to an earlier point can legitimately replay jobs whose later ACK was
+not part of that recovery point, so processors must remain idempotent and use
+application-level deduplication for external effects.
 
 The rest of this page covers hosts where the disk does not survive restarts.
 

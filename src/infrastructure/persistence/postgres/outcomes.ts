@@ -104,7 +104,8 @@ async function persistRetry(
     UPDATE bunqueue_jobs
     SET payload = ${encodePostgresValue(job)}, state = ${state}, attempts = ${job.attempts},
         run_at = ${job.runAt}, started_at = NULL, lease_owner = NULL, lease_token = NULL,
-        lease_broker_id = NULL, lease_until = NULL, error = NULL, failure_reason = NULL,
+        lease_broker_id = NULL, lease_broker_session_id = NULL,
+        lease_until = NULL, error = NULL, failure_reason = NULL,
         dlq_entry = NULL,
         dlq_retry_state = ${encodePostgresValue(getDlqRetryState(job))},
         version = version + 1
@@ -136,7 +137,7 @@ async function persistTerminalFailure(
 ): Promise<{ dlqEntry: DlqEntry | null; maxEntries: number | null; removed: boolean }> {
   const { job, reason, error, now, remove } = input;
   const { dlq } = await getPostgresQueuePolicies(tx, ctx, job.queue);
-  const entry = createDlqEntry(job, reason, error ?? null, dlq);
+  const entry = createDlqEntry(job, reason, error ?? null, dlq, now);
   const { protectedIds } = remove
     ? await partitionPostgresDestructionCandidates(tx, ctx, [job.id], [job.id])
     : { protectedIds: [] };
@@ -148,7 +149,7 @@ async function persistTerminalFailure(
       UPDATE bunqueue_jobs
       SET payload = ${encodePostgresValue(job)}, state = 'failed', attempts = ${job.attempts},
           completed_at = ${now}, lease_owner = NULL, lease_token = NULL, lease_until = NULL,
-          lease_broker_id = NULL,
+          lease_broker_id = NULL, lease_broker_session_id = NULL,
           error = ${error ?? null}, failure_reason = ${reason},
           dlq_entry = ${encodePostgresValue(entry)}, dlq_retry_state = NULL,
           version = version + 1

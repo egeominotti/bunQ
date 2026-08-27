@@ -18,6 +18,13 @@ export interface PostgresStorageConfig {
   readonly poolSize?: number;
   readonly leaseDurationMs?: number;
   readonly pollIntervalMs?: number;
+  readonly statementTimeoutMs?: number;
+  readonly lockTimeoutMs?: number;
+  readonly idleTransactionTimeoutMs?: number;
+  readonly maxConcurrentOperations?: number;
+  readonly maxQueuedOperations?: number;
+  readonly maxSnapshotJobs?: number;
+  readonly maxSnapshotPayloadBytes?: number;
   readonly maxQueueEvents?: number;
   readonly maxMetricDataPoints?: number;
   readonly maxCompletedJobs?: number;
@@ -28,9 +35,17 @@ export interface ResolvedPostgresStorageConfig {
   readonly url: string;
   readonly namespace: string;
   readonly brokerId: string;
+  readonly brokerSessionId: string;
   readonly poolSize: number;
   readonly leaseDurationMs: number;
   readonly pollIntervalMs: number;
+  readonly statementTimeoutMs: number;
+  readonly lockTimeoutMs: number;
+  readonly idleTransactionTimeoutMs: number;
+  readonly maxConcurrentOperations: number;
+  readonly maxQueuedOperations: number;
+  readonly maxSnapshotJobs: number;
+  readonly maxSnapshotPayloadBytes: number;
   readonly maxQueueEvents: number;
   readonly maxMetricDataPoints: number;
   readonly maxCompletedJobs: number;
@@ -60,6 +75,7 @@ export interface PostgresJobRow {
   parent_id: string | null;
   lease_owner: string | null;
   lease_broker_id: string | null;
+  lease_broker_session_id: string | null;
   lease_token: string | null;
   lease_until: number | string | bigint | null;
   lease_renewals: number;
@@ -165,6 +181,11 @@ export interface PostgresStoreEvent {
   readonly removed?: boolean;
   readonly dlqEntry?: DlqEntry | null;
   readonly dlqRetryState?: DlqRetryState | null;
+}
+
+/** Event delivered from the durable journal after its transaction commit is sequenced. */
+export interface PostgresDeliveredStoreEvent extends PostgresStoreEvent {
+  readonly commitSeq: number;
 }
 
 export interface PostgresStorageHealth {

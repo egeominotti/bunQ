@@ -1,7 +1,13 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
-import { cleanupPostgresNamespace } from './support/postgres-event-race';
+import { jobId } from '../src/domain/types/job';
+import {
+  cleanupPostgresNamespace,
+  eventually,
+  postgresEventStream,
+  postgresManagerStore,
+} from './support/postgres-event-race';
 
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
 const namespaces: string[] = [];
@@ -109,6 +115,10 @@ describe('PostgreSQL completion tombstone lifecycle', () => {
       try {
         await Promise.all([first.waitUntilReady(), second.waitUntilReady()]);
         await completeRemoved(first, second, 'source', 'removed', { stale: true });
+        const projection = await postgresManagerStore(second).loadJobProjections([
+          { id: jobId('removed'), queue: '' },
+        ]);
+        expect(projection.get(jobId('removed'))?.completion?.queue).toBe('source');
 
         await first.obliterateDurable('source');
         const [row] = await sql<{ count: number }[]>`
@@ -118,7 +128,9 @@ describe('PostgreSQL completion tombstone lifecycle', () => {
         `;
 
         expect(row.count).toBe(0);
-        expect(second.getResult('removed')).toBeUndefined();
+        const stream = postgresEventStream(second);
+        await stream.drain();
+        expect(await eventually(() => second.getResult('removed') === undefined)).toBe(true);
         await expect(second.push('consumer', { data: {}, dependsOn: ['removed'] })).rejects.toThrow(
           'Dependency job not found: removed'
         );

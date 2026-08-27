@@ -554,8 +554,18 @@ Manager snapshot views are pure
 functions in `postgres-queue-manager/snapshotViews.ts`; the mutable Snapshot
 owns only state transitions and bounds. `postgres/readModels.ts` loads coherent
 manager and per-queue projections in `REPEATABLE READ READ ONLY` transactions,
+`postgres/snapshotBudget.ts` rejects an oversized compatibility view before
+decoding it, and `postgres/lifetimeMetricsFinalizer.ts` fences terminal counters
+against the commit-ordered journal. `postgres/brokerSessions.ts` owns duplicate
+ID detection, stale takeover, session locks, heartbeat, and exact-session
+cleanup; lease and worker writers depend on that boundary. The Bun connection
+factory applies PostgreSQL-native statement, lock, idle-transaction, and
+application-name parameters. `postgres/eventCommitGc.ts` adaptively drains
+orphaned commit envelopes in bounded database turns,
 while `postgres-queue-manager/projectionRefreshes.ts` coalesces authoritative
-per-job repair with generation fencing. `postgres/eventRetention.ts` centralizes
+per-job repair with job- and queue-scoped generation fencing; completion
+projections retain the queue identity read from PostgreSQL so queue-wide
+replacement cannot miss or resurrect a result. `postgres/eventRetention.ts` centralizes
 the indexed journal cutoff, non-blocking inline lock, ordered candidate plan,
 and blocking single-queue sweep used by manual trim and crash recovery.
 `postgres/dlqMaintenance.ts` composes normal DLQ upkeep with an authoritative
@@ -583,7 +593,9 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   only rows inserted by that transaction and corrects their already-ordered
   `pushed` payload before commit. Parent attachment/failure/recovery reuse the
   child dependency key, re-read the current parent, then acquire sorted parent
-  keys before rows.
+  keys before rows. Every PostgreSQL terminal path supplies its database
+  transition timestamp to DLQ construction, keeping attempt, retry, and expiry
+  comparisons on the same clock without changing SQLite's host-clock path.
 - **Claims.** Default-policy claimers hold compatible queue-state share locks;
   configured rate/concurrency decisions retain an exclusive row lock. Indexed
   FIFO, mixed-order, and grouped selection paths apply `FOR UPDATE SKIP LOCKED`

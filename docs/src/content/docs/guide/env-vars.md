@@ -30,9 +30,16 @@ A typed `bunqueue.config.ts` can replace most of these, with IntelliSense and ev
 | `BUNQUEUE_POSTGRES_URL`               | string           | (none)      | PostgreSQL connection URL; implies the `postgres` driver when no driver is set |
 | `BUNQUEUE_POSTGRES_NAMESPACE`         | string           | `default`   | Isolates independent bunqueue installations in one PostgreSQL database         |
 | `BUNQUEUE_BROKER_ID`                  | string           | generated   | Stable unique ID for this PostgreSQL broker process                            |
-| `BUNQUEUE_POSTGRES_POOL_SIZE`         | positive integer | `10`        | PostgreSQL pool size (runtime minimum `2`)                                     |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`         | positive integer | `4`         | PostgreSQL pool size (runtime minimum `2`)                                      |
 | `BUNQUEUE_POSTGRES_LEASE_DURATION_MS` | positive integer | `30000`     | Default database-clock lease duration (runtime minimum `1000`)                 |
 | `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`  | positive integer | `250`       | Event/cron fallback polling interval (runtime minimum `25`)                    |
+| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS` | positive integer | `30000` | Maximum PostgreSQL statement duration                                           |
+| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS` | positive integer | `5000` | Maximum wait for a PostgreSQL lock                                               |
+| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS` | positive integer | `30000` | Maximum idle time inside a transaction                              |
+| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS` | positive integer | `16` | Active PostgreSQL manager operations per broker                         |
+| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS` | non-negative integer | `128` | Waiting PostgreSQL manager operations before fail-fast saturation      |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS` | positive integer | `100000` | Maximum job/result entities in one compatibility snapshot                       |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES` | positive integer | `268435456` | Maximum encoded bytes in one compatibility snapshot               |
 | `HTTP_SOCKET_PATH`                    | string           | (none)      | Unix socket for the HTTP server, replaces `HTTP_PORT`                          |
 | `TCP_SOCKET_PATH`                     | string           | (none)      | **Reserved, not functional yet** (see below)                                   |
 | `TLS_CERT_FILE`                       | string           | (none)      | PEM certificate, enables native TLS on TCP + HTTP                              |

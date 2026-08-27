@@ -4,6 +4,10 @@ interface PostgresOperationScope {
   active: boolean;
 }
 
+interface QueuedAdmission {
+  readonly resolve: () => void;
+}
+
 export type PostgresSyncAdmission<T> =
   | { readonly accepted: true; readonly value: T }
   | { readonly accepted: false };
@@ -13,24 +17,34 @@ export class PostgresOperationGate {
   private readonly scopes = new AsyncLocalStorage<PostgresOperationScope>();
   private accepting = true;
   private active = 0;
+  private running = 0;
+  private readonly queued: QueuedAdmission[] = [];
   private drainPromise: Promise<void> | null = null;
   private resolveDrain: (() => void) | null = null;
 
+  constructor(
+    private readonly maxConcurrent = Number.POSITIVE_INFINITY,
+    private readonly maxQueued = Number.POSITIVE_INFINITY
+  ) {}
+
   async run<T>(operation: () => Promise<T>): Promise<T> {
-    const scope = this.enter();
+    const parent = this.scopes.getStore();
+    const nested = parent?.active === true;
+    await this.admit(nested);
+    const scope = { active: true };
     try {
       return await this.scopes.run(scope, operation);
     } finally {
-      this.finish(scope);
+      this.finish(scope, nested);
     }
   }
 
   runSync<T>(operation: () => T): T {
-    const scope = this.enter();
+    const scope = this.enterSync();
     try {
       return this.scopes.run(scope, operation);
     } finally {
-      this.finish(scope);
+      this.finish(scope, true);
     }
   }
 
@@ -51,7 +65,27 @@ export class PostgresOperationGate {
     return this.drainPromise;
   }
 
-  private enter(): PostgresOperationScope {
+  private async admit(nested: boolean): Promise<void> {
+    if (!this.accepting && !this.scopes.getStore()?.active) {
+      throw new Error('PostgreSQL queue manager is shutting down');
+    }
+    if (nested) {
+      this.active++;
+      return;
+    }
+    if (this.running < this.maxConcurrent) {
+      this.running++;
+      this.active++;
+      return;
+    }
+    if (this.queued.length >= this.maxQueued) {
+      throw new Error('PostgreSQL operation queue is saturated');
+    }
+    this.active++;
+    await new Promise<void>((resolve) => this.queued.push({ resolve }));
+  }
+
+  private enterSync(): PostgresOperationScope {
     if (!this.accepting && !this.scopes.getStore()?.active) {
       throw new Error('PostgreSQL queue manager is shutting down');
     }
@@ -59,9 +93,14 @@ export class PostgresOperationGate {
     return { active: true };
   }
 
-  private finish(scope: PostgresOperationScope): void {
+  private finish(scope: PostgresOperationScope, nested: boolean): void {
     scope.active = false;
     this.active--;
+    if (!nested) {
+      const next = this.queued.shift();
+      if (next) next.resolve();
+      else this.running--;
+    }
     if (this.active !== 0) return;
     this.resolveDrain?.();
     this.resolveDrain = null;

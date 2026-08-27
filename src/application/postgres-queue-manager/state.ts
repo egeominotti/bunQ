@@ -1,8 +1,8 @@
 import type { JobId } from '../../domain/types/job';
 import {
   PostgresQueueStore,
+  type PostgresDeliveredStoreEvent,
   type PostgresStoredJob,
-  type PostgresStoreEvent,
 } from '../../infrastructure/persistence/postgres';
 import { QueueManager } from '../queueManager';
 import { stopBackgroundTasks } from '../backgroundTasks';
@@ -27,10 +27,11 @@ export abstract class PostgresQueueManagerState extends QueueManager {
   private readonly dirtyQueues = new Set<string>();
   private readonly queueEventVersions = new Map<string, number>();
   private snapshotEventBuffer: PostgresStartupEventBuffer | null = new PostgresStartupEventBuffer();
+  private terminalMetricBaselineCommitSeq = 0;
   private readonly unsubscribeEvent: () => void;
   private readonly unsubscribeInvalidation: () => void;
   private readonly writes = new PostgresDeferredWriteQueue();
-  protected readonly operations = new PostgresOperationGate();
+  protected readonly operations: PostgresOperationGate;
   private readonly projectionRefreshes: PostgresProjectionRefreshes;
   private shutdownPromise: Promise<void> | null = null;
   private shutdownComplete = false;
@@ -52,6 +53,10 @@ export abstract class PostgresQueueManagerState extends QueueManager {
       maxCompletedJobs: this.config.maxCompletedJobs,
       maxJobResults: this.config.maxJobResults,
     });
+    this.operations = new PostgresOperationGate(
+      this.postgresStore.config.maxConcurrentOperations,
+      this.postgresStore.config.maxQueuedOperations
+    );
     this.projectionRefreshes = new PostgresProjectionRefreshes(
       (requests) => this.postgresStore.loadJobProjections(requests),
       (id, projection) =>
@@ -164,6 +169,7 @@ export abstract class PostgresQueueManagerState extends QueueManager {
       this.dirtyQueues.add(queue);
       return false;
     }
+    this.projectionRefreshes.supersedeQueue(queue);
     if (!exists) {
       for (const id of this.postgresSnapshot.removeQueue(queue)) this.activeTokens.delete(id);
       return true;
@@ -192,26 +198,23 @@ export abstract class PostgresQueueManagerState extends QueueManager {
       const buffer = this.snapshotEventBuffer;
       if (!buffer) return;
       buffer.reset();
-      const { rows, results, crons, states, lifetimeMetrics } =
-        await this.postgresStore.loadManagerSnapshot();
+      const { rows, results, crons, states } = await this.postgresStore.loadManagerSnapshot();
       const events = buffer.take();
       if (!events && attempt === 0) continue;
-      this.snapshotEventBuffer = null;
       this.postgresSnapshot.hydrate(rows);
       this.postgresSnapshot.hydrateResults(results);
-      hydratePostgresLifetimeMetrics(this.metrics, this.perQueueMetrics, lifetimeMetrics);
       this.cronScheduler.load([...crons]);
       for (const state of states) this.postgresSnapshot.setQueueState(state);
       for (const event of events ?? []) {
         this.postgresSnapshot.apply(event);
-        applyPostgresEventMetrics(
-          this.metrics,
-          this.perQueueMetrics,
-          event,
-          event.id > lifetimeMetrics.baselineEventId
-        );
+        applyPostgresEventMetrics(this.metrics, this.perQueueMetrics, event, false);
       }
-      this.projectionRefreshes.start();
+      await this.postgresStore.finalizeLifetimeMetrics((lifetimeMetrics) => {
+        hydratePostgresLifetimeMetrics(this.metrics, this.perQueueMetrics, lifetimeMetrics);
+        this.terminalMetricBaselineCommitSeq = lifetimeMetrics.baselineCommitSeq;
+        this.snapshotEventBuffer = null;
+        this.projectionRefreshes.start();
+      });
       return;
     }
   }
@@ -252,7 +255,7 @@ export abstract class PostgresQueueManagerState extends QueueManager {
     }
   }
 
-  private onStoreEvent(event: PostgresStoreEvent): void {
+  private onStoreEvent(event: PostgresDeliveredStoreEvent): void {
     this.queueEventVersions.set(event.queue, (this.queueEventVersions.get(event.queue) ?? 0) + 1);
     const startupBuffer = this.snapshotEventBuffer;
     startupBuffer?.capture(event);
@@ -262,7 +265,12 @@ export abstract class PostgresQueueManagerState extends QueueManager {
     const mapped = postgresEventType(event.type);
     if (!mapped) return;
     if (!startupBuffer) {
-      applyPostgresEventMetrics(this.metrics, this.perQueueMetrics, event, true);
+      applyPostgresEventMetrics(
+        this.metrics,
+        this.perQueueMetrics,
+        event,
+        event.commitSeq > this.terminalMetricBaselineCommitSeq
+      );
     }
     this.eventsManager.broadcast({
       eventType: mapped,

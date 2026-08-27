@@ -3,7 +3,7 @@ import { SQL } from 'bun';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
 import type {
   PostgresQueueStore,
-  PostgresStoreEvent,
+  PostgresDeliveredStoreEvent,
 } from '../src/infrastructure/persistence/postgres';
 
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
@@ -198,7 +198,7 @@ test.skipIf(!postgresUrl)(
       const internals = manager as unknown as {
         postgresStore: PostgresQueueStore;
         refreshJobs(ids: typeof ids): Promise<void>;
-        onStoreEvent(event: PostgresStoreEvent): void;
+        onStoreEvent(event: PostgresDeliveredStoreEvent): void;
       };
       const originalLoadProjections = internals.postgresStore.loadJobProjections;
       let reads = 0;
@@ -210,6 +210,7 @@ test.skipIf(!postgresUrl)(
           removedId = args[0][0].id;
           internals.onStoreEvent({
             id: Number.MAX_SAFE_INTEGER,
+            commitSeq: Number.MAX_SAFE_INTEGER,
             queue: 'batch-refresh-race',
             type: 'removed',
             jobId: removedId,

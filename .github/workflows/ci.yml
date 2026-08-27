@@ -96,6 +96,9 @@ jobs:
           - label: '16.x'
             image: 'postgres:16-alpine'
             expected: '16'
+          - label: '15.x'
+            image: 'postgres:15-alpine'
+            expected: '15'
     services:
       postgres:
         image: ${{ matrix.postgres.image }}

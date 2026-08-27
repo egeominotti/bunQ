@@ -1,9 +1,4 @@
-import { SQL } from 'bun';
-import {
-  heartbeatPostgresBroker,
-  recoverExpiredPostgresLeases,
-  unregisterPostgresBroker,
-} from './recovery';
+import { recoverExpiredPostgresLeases } from './recovery';
 import { releasePostgresBrokerLeases } from './leaseRelease';
 import { PostgresEventStream } from './events';
 import { prunePostgresEventCommits } from './eventJournal';
@@ -12,12 +7,26 @@ import { processPostgresCrons, reconcilePostgresCronsOnStartup } from './crons';
 import { purgeStalePostgresWorkers, removePostgresBrokerWorkers } from './workers';
 import { initializePostgresSchema } from './schemaInitialization';
 import type { PostgresContext } from './context';
-import type { PostgresStorageConfig, PostgresStorageHealth, PostgresStoreEvent } from './types';
+import type {
+  PostgresDeliveredStoreEvent,
+  PostgresStorageConfig,
+  PostgresStorageHealth,
+} from './types';
 import { PostgresPostCommitMaintenance } from './postCommitMaintenance';
 import { sweepPostgresEventRetention } from './telemetry';
 import { prunePostgresCompletionTombstones } from './completionLifecycle';
 import { PostgresMaintenanceFlights } from './maintenanceFlights';
 import { resolvePostgresRuntimeConfig } from './runtimeConfig';
+import { PostgresEventCommitGc } from './eventCommitGc';
+import { createPostgresConnection } from './connection';
+import { PostgresStorageHealthTracker } from './storageHealth';
+import {
+  heartbeatPostgresBroker,
+  PostgresBrokerSessionFencedError,
+  purgeStalePostgresBrokers,
+  registerPostgresBroker,
+  unregisterPostgresBroker,
+} from './brokerSessions';
 
 /** Connection, schema, event stream, health, and maintenance lifecycle. */
 export class PostgresQueueStoreRuntime {
@@ -37,19 +46,17 @@ export class PostgresQueueStoreRuntime {
   private eventsClosed = false;
   private eventStatusUnsubscribed = false;
   private sqlClosed = false;
-  private readonly healthErrors = new Map<string, { message: string; since: number }>();
+  private brokerRegistrationStarted = false;
+  private readonly healthTracker: PostgresStorageHealthTracker;
   private readonly unsubscribeEventStatus: () => void;
   private readonly postCommitMaintenance: PostgresPostCommitMaintenance;
   private readonly maintenanceFlights: PostgresMaintenanceFlights;
+  private readonly eventCommitGc: PostgresEventCommitGc;
 
   constructor(config: PostgresStorageConfig) {
     const resolved = resolvePostgresRuntimeConfig(config);
-    const sql = new SQL(resolved.url, {
-      max: resolved.poolSize,
-      connectionTimeout: 10,
-      idleTimeout: 30,
-      maxLifetime: 3600,
-    });
+    const sql = createPostgresConnection(resolved);
+    this.healthTracker = new PostgresStorageHealthTracker(resolved);
     this.postCommitMaintenance = new PostgresPostCommitMaintenance(
       (subsystem, error) => this.reportMaintenance(subsystem, error),
       Math.max(25, resolved.pollIntervalMs)
@@ -63,10 +70,14 @@ export class PostgresQueueStoreRuntime {
       postCommitMaintenance: (subsystem, operation) =>
         this.postCommitMaintenance.run(subsystem, operation),
     };
+    this.eventCommitGc = new PostgresEventCommitGc(
+      (batchSize, maxBatches) => prunePostgresEventCommits(this.context, batchSize, maxBatches),
+      (subsystem, error) => this.reportMaintenance(subsystem, error)
+    );
     this.events = new PostgresEventStream(this.context);
     this.unsubscribeEventStatus = this.events.subscribeDrainStatus((error) => {
-      if (error === null) this.clearHealthError('event-stream');
-      else this.recordHealthError('event-stream', error);
+      if (error === null) this.healthTracker.clear('event-stream');
+      else this.healthTracker.record('event-stream', error);
     });
   }
 
@@ -94,6 +105,7 @@ export class PostgresQueueStoreRuntime {
   private stopMaintenance(): void {
     this.postCommitMaintenance.close();
     this.maintenanceFlights.close();
+    this.eventCommitGc.close();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.recoveryTimer) clearInterval(this.recoveryTimer);
     if (this.dlqTimer) clearInterval(this.dlqTimer);
@@ -113,8 +125,9 @@ export class PostgresQueueStoreRuntime {
       initialized = false;
       errors.push(error);
     }
-    if (initialized) {
+    if (initialized || this.brokerRegistrationStarted) {
       await this.maintenanceFlights.drain();
+      await this.eventCommitGc.drain();
       await this.postCommitMaintenance.drain();
       this.leasesReleased = await this.tryCloseStep(
         this.leasesReleased,
@@ -128,7 +141,9 @@ export class PostgresQueueStoreRuntime {
       );
       this.brokerUnregistered = await this.tryCloseStep(
         this.brokerUnregistered,
-        () => unregisterPostgresBroker(this.context),
+        async () => {
+          await unregisterPostgresBroker(this.context);
+        },
         errors
       );
     }
@@ -141,8 +156,10 @@ export class PostgresQueueStoreRuntime {
       this.unsubscribeEventStatus();
       this.eventStatusUnsubscribed = true;
     }
-    const databaseClosed = this.leasesReleased && this.workersRemoved && this.brokerUnregistered;
-    if (!initialized || databaseClosed) {
+    const databaseClosed =
+      !this.brokerRegistrationStarted ||
+      (this.leasesReleased && this.workersRemoved && this.brokerUnregistered);
+    if (databaseClosed) {
       this.sqlClosed = await this.tryCloseStep(
         this.sqlClosed,
         () => this.context.sql.close({ timeout: 5 }),
@@ -172,46 +189,34 @@ export class PostgresQueueStoreRuntime {
   }
 
   health(): PostgresStorageHealth {
-    const errors = [...this.healthErrors.entries()].sort(([left], [right]) =>
-      left.localeCompare(right)
-    );
-    const messages = errors.map(([, { message }]) => message);
-    const sinceValues = errors.map(([, { since }]) => since);
-    return {
-      ok: messages.length === 0,
-      error: messages.length > 0 ? messages.join('; ') : null,
-      since: sinceValues.length > 0 ? Math.min(...sinceValues) : null,
-      backend: 'postgres',
-      brokerId: this.config.brokerId,
-      namespace: this.config.namespace,
-    };
+    return this.healthTracker.snapshot();
   }
 
   reportQueueRefresh(queue: string, error: unknown): void {
     const key = `queue-refresh:${queue}`;
     if (error === null) {
-      this.clearHealthError(key);
+      this.healthTracker.clear(key);
       return;
     }
-    this.recordHealthError(key, error, `Queue refresh ${queue}: `);
+    this.healthTracker.record(key, error, `Queue refresh ${queue}: `);
   }
 
   reportProjectionRefresh(queue: string, id: string, error: unknown): void {
     const key = `projection-refresh:${id}`;
     if (error === null) {
-      this.clearHealthError(key);
+      this.healthTracker.clear(key);
       return;
     }
-    this.recordHealthError(key, error, `Projection refresh ${queue}/${id}: `);
+    this.healthTracker.record(key, error, `Projection refresh ${queue}/${id}: `);
   }
 
   private reportMaintenance(subsystem: string, error: unknown): void {
     const key = `maintenance:${subsystem}`;
-    if (error === null) this.clearHealthError(key);
-    else this.recordHealthError(key, error);
+    if (error === null) this.healthTracker.clear(key);
+    else this.healthTracker.record(key, error);
   }
 
-  onEvent(listener: (event: PostgresStoreEvent) => void): () => void {
+  onEvent(listener: (event: PostgresDeliveredStoreEvent) => void): () => void {
     return this.events.subscribe(listener);
   }
 
@@ -227,8 +232,9 @@ export class PostgresQueueStoreRuntime {
     try {
       await this.context.sql.connect();
       await initializePostgresSchema(this.context);
+      await registerPostgresBroker(this.context);
+      this.brokerRegistrationStarted = true;
       await reconcilePostgresCronsOnStartup(this.context);
-      await heartbeatPostgresBroker(this.context);
       await recoverExpiredPostgresLeases(this.context);
       await repairPostgresDlq(this.context);
       await prunePostgresCompletionTombstones(this.context);
@@ -236,17 +242,18 @@ export class PostgresQueueStoreRuntime {
       await prunePostgresEventCommits(this.context);
       await this.events.start();
       if (!this.closing) this.startMaintenance();
-      this.clearHealthError('lifecycle');
+      this.healthTracker.clear('lifecycle');
     } catch (error) {
-      this.recordHealthError('lifecycle', error);
+      this.healthTracker.record('lifecycle', error);
       throw error;
     }
   }
 
   private startMaintenance(): void {
+    this.eventCommitGc.start();
     const heartbeatMs = Math.max(1000, Math.floor(this.config.leaseDurationMs / 3));
     this.heartbeatTimer = setInterval(
-      () => void this.runMaintenance(() => heartbeatPostgresBroker(this.context), 'heartbeat'),
+      () => void this.runMaintenance(() => this.heartbeatBroker(), 'heartbeat'),
       heartbeatMs
     );
     this.recoveryTimer = setInterval(
@@ -257,7 +264,7 @@ export class PostgresQueueStoreRuntime {
       void this.runMaintenance(async () => {
         await maintainPostgresDlq(this.context);
         await purgeStalePostgresWorkers(this.context);
-        await prunePostgresEventCommits(this.context);
+        await purgeStalePostgresBrokers(this.context);
       }, 'dlq');
       void this.runMaintenance(() => sweepPostgresEventRetention(this.context), 'event-retention');
       void this.postCommitMaintenance.run('completion-retention', () =>
@@ -277,13 +284,12 @@ export class PostgresQueueStoreRuntime {
     await this.maintenanceFlights.run(subsystem, operation);
   }
 
-  private recordHealthError(key: string, error: unknown, prefix = ''): void {
-    const message = error instanceof Error ? error.message : String(error);
-    const since = this.healthErrors.get(key)?.since ?? Date.now();
-    this.healthErrors.set(key, { message: `${prefix}${message}`, since });
-  }
-
-  private clearHealthError(key: string): void {
-    this.healthErrors.delete(key);
+  private async heartbeatBroker(): Promise<void> {
+    try {
+      await heartbeatPostgresBroker(this.context);
+    } catch (error) {
+      if (error instanceof PostgresBrokerSessionFencedError) this.stopMaintenance();
+      throw error;
+    }
   }
 }

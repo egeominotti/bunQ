@@ -8,6 +8,7 @@ export interface PostgresQueueLifetimeTotals {
 
 export interface PostgresLifetimeMetricsSnapshot {
   readonly baselineEventId: number;
+  readonly baselineCommitSeq: number;
   readonly totalCompleted: bigint;
   readonly totalFailed: bigint;
   readonly queues: readonly PostgresQueueLifetimeTotals[];
@@ -25,9 +26,18 @@ export async function loadPostgresLifetimeMetrics(
   sql?: PostgresReadSql
 ): Promise<PostgresLifetimeMetricsSnapshot> {
   const load = async (readSql: PostgresReadSql) => {
-    const [[event], rows] = await Promise.all([
-      readSql<{ id: number | string | bigint | null }[]>`
-        SELECT MAX(id) AS id FROM bunqueue_events WHERE namespace = ${ctx.config.namespace}
+    const [[baseline], rows] = await Promise.all([
+      readSql<
+        Array<{
+          event_id: number | string | bigint | null;
+          commit_seq: number | string | bigint | null;
+        }>
+      >`
+        SELECT
+          (SELECT MAX(id) FROM bunqueue_events
+           WHERE namespace = ${ctx.config.namespace}) AS event_id,
+          (SELECT MAX(commit_seq) FROM bunqueue_event_commits
+           WHERE namespace = ${ctx.config.namespace}) AS commit_seq
       `,
       readSql<MetricTotalRow[]>`
         SELECT queue, metric_type, total_count
@@ -52,7 +62,8 @@ export async function loadPostgresLifetimeMetrics(
       queues.set(row.queue, totals);
     }
     return {
-      baselineEventId: Number(event.id ?? 0),
+      baselineEventId: Number(baseline.event_id ?? 0),
+      baselineCommitSeq: Number(baseline.commit_seq ?? 0),
       totalCompleted,
       totalFailed,
       queues: [...queues].map(([queue, totals]) => ({ queue, ...totals })),

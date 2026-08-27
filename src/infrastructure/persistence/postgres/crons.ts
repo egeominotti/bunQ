@@ -11,6 +11,7 @@ import { admitPostgresJob } from './admission';
 import { decodePostgresValue, encodePostgresValue } from './codec';
 import { databaseNow, type PostgresContext, type PostgresReadSql } from './context';
 import { hasActivePostgresWorker } from './workers';
+import { postgresBrokerStaleMs } from './brokerSessions';
 
 export interface PostgresCronRow {
   name: string;
@@ -142,24 +143,26 @@ function followingRun(cron: CronJob, now: number): number {
   return scheduled <= now ? getNextIntervalRun(interval, now) : scheduled;
 }
 
-/** Recalculate missed rows only when no other live broker is scheduling this namespace. */
+/** Recalculate missed rows only on the oldest live broker for this namespace. */
 export async function reconcilePostgresCronsOnStartup(ctx: PostgresContext): Promise<number> {
   return await ctx.sql.begin(async (tx) => {
-    const now = await databaseNow(tx);
     await tx`
       SELECT pg_advisory_xact_lock(
         hashtext(${`${ctx.config.namespace}:cron-startup`})
       )
     `;
-    const [active] = await tx<{ found: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1 FROM bunqueue_brokers
-        WHERE namespace = ${ctx.config.namespace}
-          AND broker_id <> ${ctx.config.brokerId}
-          AND heartbeat_at > ${now - ctx.config.leaseDurationMs}
-      ) AS found
+    const now = await databaseNow(tx);
+    const [leader] = await tx<{ elected: boolean }[]>`
+      SELECT
+        broker_id = ${ctx.config.brokerId}
+          AND session_id IS NOT DISTINCT FROM ${ctx.config.brokerSessionId} AS elected
+      FROM bunqueue_brokers
+      WHERE namespace = ${ctx.config.namespace}
+        AND heartbeat_at > ${now - postgresBrokerStaleMs(ctx)}
+      ORDER BY started_at, broker_id, session_id NULLS FIRST
+      LIMIT 1
     `;
-    if (active.found) return 0;
+    if (!leader?.elected) return 0;
     const rows = await tx<PostgresCronRow[]>`
       SELECT name, payload, next_run, executions, max_limit
       FROM bunqueue_crons

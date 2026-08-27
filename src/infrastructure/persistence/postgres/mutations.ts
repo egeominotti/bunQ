@@ -38,6 +38,9 @@ async function saveJob(
         completed_at = ${job.completedAt}, attempts = ${job.attempts},
         lease_owner = CASE WHEN ${state} = 'active' THEN lease_owner ELSE NULL END,
         lease_broker_id = CASE WHEN ${state} = 'active' THEN lease_broker_id ELSE NULL END,
+        lease_broker_session_id = CASE
+          WHEN ${state} = 'active' THEN lease_broker_session_id ELSE NULL
+        END,
         lease_token = CASE WHEN ${state} = 'active' THEN lease_token ELSE NULL END,
         lease_until = CASE WHEN ${state} = 'active' THEN lease_until ELSE NULL END,
         version = version + 1

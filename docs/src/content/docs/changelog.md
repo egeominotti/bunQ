@@ -25,7 +25,7 @@ head:
   repeat successors, and DLQ lifecycle state. A pinned two-broker
   `docker-compose.postgres.yml` topology and dedicated real-PostgreSQL
   integration suites cover the distributed path. CI now runs those suites
-  against PostgreSQL 18.6, the current 17.x image, and the current 16.x image;
+  against PostgreSQL 18.6 and the current 17.x, 16.x, and 15.x images;
   explicit version assertions guard every matrix entry. An additional topology
   test launches four independent bunqueue processes against one database,
   verifies exact delivery and shared policies through all endpoints, then kills
@@ -227,6 +227,36 @@ head:
 
 ### Fixed
 
+- PostgreSQL DLQ creation now derives entry, attempt, retry, and expiry
+  timestamps from the transaction's database clock. Age maintenance no longer
+  compares a broker-host timestamp with PostgreSQL time, which could delay a
+  short `maxAge` purge when the broker clock was ahead. A deterministic
+  multi-broker regression advances the broker clock by 60 seconds and proves
+  exact purge plus invalidation convergence; memory and SQLite keep their
+  existing clock behavior.
+- PostgreSQL authoritative queue refreshes now fence older in-flight per-job
+  projections immediately before replacing the local read model. Completion
+  projections retain the queue identity stored in PostgreSQL instead of an
+  optional caller hint, so a remove-on-complete result cannot be assigned to an
+  empty queue and survive or reappear after a concurrent multi-broker
+  `obliterate`. Deterministic generation tests and repeated PostgreSQL 16
+  regressions cover both the stale-read ordering and queue ownership. Memory and
+  SQLite behavior remain unchanged.
+- PostgreSQL production hardening now session-fences every broker process.
+  Duplicate live `brokerId` values fail startup; stale takeover installs a new
+  internal session, and old shutdown/heartbeat/claim/renew/worker operations
+  cannot affect successor leases or rows. Schema v16 adds session columns and
+  exact cleanup indexes. Bun SQL connections now set statement, lock, and idle
+  transaction deadlines; the manager bounds active/queued operations and fails
+  fast on saturation. Manager/queue snapshots reject explicit job or payload
+  budgets before decoding instead of risking an unbounded allocation. Startup
+  lifetime metrics finalize against the durable commit sequence, adaptive
+  journal GC drains sustained envelope backlogs, and same-key post-commit
+  maintenance is serialized and coalesced without overlap. The default pool is
+  four connections per broker, CI covers PostgreSQL 15–18, and SQLite behavior
+  remains unchanged. Concurrent broker startup now elects one oldest live
+  session under the cron advisory lock, so every broker cannot simultaneously
+  skip missed-schedule reconciliation.
 - PostgreSQL lifecycle and asynchronous concurrency now separate committed
   database outcomes from fallible local projections. Push, flow, ACK/fail,
   queue control, maintenance, and relationship mutations keep their committed
@@ -345,7 +375,7 @@ head:
   retaining the synchronous SQLite path. PostgreSQL dashboard commands, HTTP
   dashboard and per-queue worker routes, and WebSocket/SSE stats snapshots now
   read the shared worker and cron registries instead of one broker's local maps.
-- The root CI quality gate now explicitly requires the PostgreSQL 18.6/17/16
+- The root CI quality gate now explicitly requires the PostgreSQL 18.6/17/16/15
   compatibility job, preventing build and release jobs from proceeding after a
   failed or cancelled database matrix.
 - PostgreSQL single and bulk admission now lock the complete custom-ID and

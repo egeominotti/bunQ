@@ -7,6 +7,7 @@ import { databaseNow, type PostgresContext } from './context';
 import { expirePendingPostgresJobs } from './expiry';
 import { repairResolvedPostgresDependencyConsumers } from './dependencyPromotion';
 import type { ClaimedPostgresJob, PostgresQueueState } from './types';
+import { lockPostgresBrokerSession } from './brokerSessions';
 
 interface QueueStateRow {
   queue: string;
@@ -139,6 +140,7 @@ export async function claimPostgresJobs(
     exclusive: boolean
   ): Promise<{ claimed: ClaimedPostgresJob[]; retryExclusive: boolean }> =>
     await ctx.sql.begin(async (tx) => {
+      await lockPostgresBrokerSession(tx, ctx);
       const now = await databaseNow(tx);
       let state = await lockQueueState(tx, ctx, queue, exclusive);
       if (!exclusive && (state.rateLimit !== null || state.concurrencyLimit !== null)) {

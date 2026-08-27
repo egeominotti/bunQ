@@ -56,7 +56,10 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         ('bunqueue_event_prune_watermarks', 'transaction_id', 'bigint', TRUE, 'transaction'),
         ('bunqueue_event_prune_watermarks', 'commit_seq', 'bigint', FALSE, 'none'),
         ('bunqueue_event_prune_watermarks', 'pruned_commit_seq', 'bigint', TRUE, 'zero'),
-        ('bunqueue_event_prune_watermarks', 'prunes_current_transaction', 'boolean', TRUE, 'false')
+        ('bunqueue_event_prune_watermarks', 'prunes_current_transaction', 'boolean', TRUE, 'false'),
+        ('bunqueue_brokers', 'session_id', 'text', FALSE, 'none'),
+        ('bunqueue_jobs', 'lease_broker_session_id', 'text', FALSE, 'none'),
+        ('bunqueue_workers', 'broker_session_id', 'text', FALSE, 'none')
     ), expected_indexes(index_name, table_name, columns, descending, predicate) AS (
       VALUES
         ('bunqueue_events_transaction_idx', 'bunqueue_events',
@@ -72,7 +75,13 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
          ARRAY[FALSE, FALSE], 'commit_seqisnull'),
         ('bunqueue_event_prune_watermarks_transaction_idx',
          'bunqueue_event_prune_watermarks', ARRAY['namespace', 'transaction_id'],
-         ARRAY[FALSE, FALSE], '')
+         ARRAY[FALSE, FALSE], ''),
+        ('bunqueue_jobs_broker_session_lease_idx', 'bunqueue_jobs',
+         ARRAY['namespace', 'lease_broker_id', 'lease_broker_session_id', 'id'],
+         ARRAY[FALSE, FALSE, FALSE, FALSE], 'state=''active''::text'),
+        ('bunqueue_workers_broker_session_idx', 'bunqueue_workers',
+         ARRAY['namespace', 'broker_id', 'broker_session_id', 'client_id'],
+         ARRAY[FALSE, FALSE, FALSE, FALSE], '')
     ), expected_triggers(
       trigger_name, table_name, function_name, trigger_type, new_table,
       is_constraint, is_deferrable

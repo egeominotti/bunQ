@@ -3,6 +3,27 @@ import { PostgresPostCommitMaintenance } from '../src/infrastructure/persistence
 import { deferred } from './support/postgres-event-race';
 
 describe('PostgreSQL post-commit maintenance shutdown', () => {
+  test('drains queued work admitted before close without overlap', async () => {
+    const maintenance = new PostgresPostCommitMaintenance(() => undefined, 10_000);
+    const entered = deferred<undefined>();
+    const release = deferred<undefined>();
+    const completed: string[] = [];
+    const first = maintenance.run('retention', async () => {
+      entered.resolve(undefined);
+      await release.promise;
+      completed.push('first');
+    });
+    await entered.promise;
+    const second = maintenance.run('retention', async () => {
+      completed.push('second');
+    });
+
+    maintenance.close();
+    release.resolve(undefined);
+    await Promise.all([first, second, maintenance.drain()]);
+    expect(completed).toEqual(['first', 'second']);
+  });
+
   test('does not invoke newly submitted work after close', async () => {
     const reports: Array<{ subsystem: string; error: unknown }> = [];
     const maintenance = new PostgresPostCommitMaintenance(

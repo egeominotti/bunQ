@@ -75,9 +75,14 @@ export async function loadPostgresJournalEventsAfter(
 /** Remove commit envelopes after every referenced event and watermark is gone. */
 export async function prunePostgresEventCommits(
   ctx: PostgresContext,
-  limit = 10_000
+  limit = 10_000,
+  maxBatches = 8
 ): Promise<number> {
-  const deleted = await ctx.sql<{ transaction_id: number | string | bigint }[]>`
+  const batchSize = Math.max(1, limit);
+  const batchLimit = Math.max(1, maxBatches);
+  let total = 0;
+  for (let batch = 0; batch < batchLimit; batch++) {
+    const deleted = await ctx.sql<{ transaction_id: number | string | bigint }[]>`
     WITH candidates AS MATERIALIZED (
       SELECT journal.namespace, journal.transaction_id
       FROM bunqueue_event_commits AS journal
@@ -94,7 +99,7 @@ export async function prunePostgresEventCommits(
             AND watermark.transaction_id = journal.transaction_id
         )
       ORDER BY journal.commit_seq
-      LIMIT ${Math.max(1, limit)}
+      LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
     )
     DELETE FROM bunqueue_event_commits AS journal
@@ -103,5 +108,8 @@ export async function prunePostgresEventCommits(
       AND journal.transaction_id = candidates.transaction_id
     RETURNING journal.transaction_id
   `;
-  return deleted.length;
+    total += deleted.length;
+    if (deleted.length < batchSize) break;
+  }
+  return total;
 }

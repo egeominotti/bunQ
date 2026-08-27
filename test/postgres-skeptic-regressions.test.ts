@@ -270,7 +270,16 @@ describe('PostgreSQL concurrency and snapshot regressions', () => {
       const queue = 'expiring';
       await first.setDlqConfigDurable(queue, { maxAge: 1, maxEntries: 10 });
       expect(await eventually(() => second.getDlqConfig(queue).maxAge === 1)).toBe(true);
-      const id = await failTerminal(first, second, queue, 0);
+      const job = await first.push(queue, { data: { index: 0 }, maxAttempts: 1 });
+      const claimed = await second.pullWithLock(queue, 'worker-clock-skew');
+      const systemNow = Date.now;
+      try {
+        Date.now = () => systemNow() + 60_000;
+        await second.fail(job.id, 'clock-skew-failure', claimed.token ?? undefined);
+      } finally {
+        Date.now = systemNow;
+      }
+      const id = job.id;
       expect(
         await eventually(() => first.getDlqCount(queue) === 1 && second.getDlqCount(queue) === 1)
       ).toBe(true);

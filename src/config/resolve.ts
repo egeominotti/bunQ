@@ -27,6 +27,13 @@ export interface ResolvedConfig {
   postgresPoolSize: number;
   postgresLeaseDurationMs: number;
   postgresPollIntervalMs: number;
+  postgresStatementTimeoutMs: number;
+  postgresLockTimeoutMs: number;
+  postgresIdleTransactionTimeoutMs: number;
+  postgresMaxConcurrentOperations: number;
+  postgresMaxQueuedOperations: number;
+  postgresMaxSnapshotJobs: number;
+  postgresMaxSnapshotPayloadBytes: number;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
   maxPrometheusQueues: number;
@@ -69,8 +76,8 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
     postgresNamespace: fc?.storage?.namespace ?? Bun.env.BUNQUEUE_POSTGRES_NAMESPACE ?? 'default',
     postgresBrokerId: fc?.storage?.brokerId ?? Bun.env.BUNQUEUE_BROKER_ID,
     postgresPoolSize: positiveInteger(
-      fc?.storage?.poolSize ?? parseInt(Bun.env.BUNQUEUE_POSTGRES_POOL_SIZE ?? '10', 10),
-      10
+      fc?.storage?.poolSize ?? parseInt(Bun.env.BUNQUEUE_POSTGRES_POOL_SIZE ?? '4', 10),
+      4
     ),
     postgresLeaseDurationMs: positiveInteger(
       fc?.storage?.leaseDurationMs ??
@@ -81,6 +88,41 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
       fc?.storage?.pollIntervalMs ??
         parseInt(Bun.env.BUNQUEUE_POSTGRES_POLL_INTERVAL_MS ?? '250', 10),
       250
+    ),
+    postgresStatementTimeoutMs: positiveInteger(
+      fc?.storage?.statementTimeoutMs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS ?? '30000', 10),
+      30_000
+    ),
+    postgresLockTimeoutMs: positiveInteger(
+      fc?.storage?.lockTimeoutMs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS ?? '5000', 10),
+      5_000
+    ),
+    postgresIdleTransactionTimeoutMs: positiveInteger(
+      fc?.storage?.idleTransactionTimeoutMs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS ?? '30000', 10),
+      30_000
+    ),
+    postgresMaxConcurrentOperations: positiveInteger(
+      fc?.storage?.maxConcurrentOperations ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS ?? '16', 10),
+      16
+    ),
+    postgresMaxQueuedOperations: nonNegativeInteger(
+      fc?.storage?.maxQueuedOperations ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS ?? '128', 10),
+      128
+    ),
+    postgresMaxSnapshotJobs: positiveInteger(
+      fc?.storage?.maxSnapshotJobs ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS ?? '100000', 10),
+      100_000
+    ),
+    postgresMaxSnapshotPayloadBytes: positiveInteger(
+      fc?.storage?.maxSnapshotPayloadBytes ??
+        parseInt(Bun.env.BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES ?? '268435456', 10),
+      256 * 1024 * 1024
     ),
     corsOrigins: fc?.cors?.origins ?? Bun.env.CORS_ALLOW_ORIGIN?.split(',').filter(Boolean) ?? [],
     requireAuthForMetrics: fc?.auth?.requireAuthForMetrics ?? Bun.env.METRICS_AUTH === 'true',

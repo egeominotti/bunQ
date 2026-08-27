@@ -3,6 +3,26 @@ import { PostgresOperationGate } from '../src/application/postgres-queue-manager
 import { deferred } from './support/postgres-event-race';
 
 describe('PostgreSQL operation shutdown gate', () => {
+  test('bounds queued PostgreSQL operations and fails fast when saturated', async () => {
+    const BoundedGate = PostgresOperationGate as unknown as new (
+      maxConcurrent: number,
+      maxQueued: number
+    ) => PostgresOperationGate;
+    const gate = new BoundedGate(1, 1);
+    const release = deferred<undefined>();
+    const first = gate.run(async () => {
+      await release.promise;
+      return 'first';
+    });
+    const second = gate.run(async () => 'second');
+
+    await expect(gate.run(async () => 'overflow')).rejects.toThrow(
+      'PostgreSQL operation queue is saturated'
+    );
+    release.resolve(undefined);
+    await expect(Promise.all([first, second])).resolves.toEqual(['first', 'second']);
+  });
+
   test('drains admitted work and rejects operations submitted after close', async () => {
     const gate = new PostgresOperationGate();
     const release = deferred<undefined>();

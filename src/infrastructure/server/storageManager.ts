@@ -53,6 +53,13 @@ const postgresAdapter: ServerStorageAdapter = {
         poolSize: config.postgresPoolSize,
         leaseDurationMs: config.postgresLeaseDurationMs,
         pollIntervalMs: config.postgresPollIntervalMs,
+        statementTimeoutMs: config.postgresStatementTimeoutMs,
+        lockTimeoutMs: config.postgresLockTimeoutMs,
+        idleTransactionTimeoutMs: config.postgresIdleTransactionTimeoutMs,
+        maxConcurrentOperations: config.postgresMaxConcurrentOperations,
+        maxQueuedOperations: config.postgresMaxQueuedOperations,
+        maxSnapshotJobs: config.postgresMaxSnapshotJobs,
+        maxSnapshotPayloadBytes: config.postgresMaxSnapshotPayloadBytes,
         ...(config.postgresBrokerId && { brokerId: config.postgresBrokerId }),
       },
     });

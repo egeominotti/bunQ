@@ -89,7 +89,7 @@ async function failParent(input: FlowFailureMutation): Promise<PostgresDlqLimitR
     parent.timeline.push({ state: 'failed', timestamp: now, error: message });
   }
   const { dlq } = await getPostgresQueuePolicies(tx, ctx, parent.queue);
-  const entry = createDlqEntry(parent, FailureReason.Unknown, message, dlq);
+  const entry = createDlqEntry(parent, FailureReason.Unknown, message, dlq, now);
   await tx`
     DELETE FROM bunqueue_dependencies
     WHERE namespace = ${ctx.config.namespace} AND job_id = ${String(parent.id)}

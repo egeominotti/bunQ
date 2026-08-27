@@ -108,7 +108,8 @@ export async function retryPostgresTerminalJob(
       SET payload = ${encodePostgresValue(job)}, state = ${state}, run_at = ${timestamp},
           started_at = NULL, completed_at = NULL, result = NULL, dlq_entry = NULL,
           error = NULL, failure_reason = NULL, lease_owner = NULL, lease_token = NULL,
-          lease_broker_id = NULL, lease_until = NULL, unique_key = NULL,
+          lease_broker_id = NULL, lease_broker_session_id = NULL,
+          lease_until = NULL, unique_key = NULL,
           unique_expires_at = NULL, dlq_retry_state = NULL, version = version + 1
       WHERE namespace = ${ctx.config.namespace} AND id = ${String(id)}
     `;

@@ -1,6 +1,6 @@
 import { POSTGRES_EVENT_JOURNAL_SCHEMA } from './eventJournalSchema';
 
-export const POSTGRES_SCHEMA_VERSION = 15;
+export const POSTGRES_SCHEMA_VERSION = 16;
 
 /** PostgreSQL schema for the database-authoritative distributed queue engine. */
 export const POSTGRES_SCHEMA = `
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS bunqueue_jobs (
   parent_id TEXT,
   lease_owner TEXT,
   lease_broker_id TEXT,
+  lease_broker_session_id TEXT,
   lease_token TEXT,
   lease_until BIGINT,
   lease_renewals INTEGER NOT NULL DEFAULT 0,
@@ -80,9 +81,14 @@ ALTER TABLE bunqueue_jobs
 ALTER TABLE bunqueue_jobs
   ADD COLUMN IF NOT EXISTS lease_broker_id TEXT;
 ALTER TABLE bunqueue_jobs
+  ADD COLUMN IF NOT EXISTS lease_broker_session_id TEXT;
+ALTER TABLE bunqueue_jobs
   ADD COLUMN IF NOT EXISTS lease_renewals INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE bunqueue_jobs
   ADD COLUMN IF NOT EXISTS dlq_retry_state BYTEA;
+CREATE INDEX IF NOT EXISTS bunqueue_jobs_broker_session_lease_idx
+  ON bunqueue_jobs(namespace, lease_broker_id, lease_broker_session_id, id)
+  WHERE state = 'active';
 
 CREATE TABLE IF NOT EXISTS bunqueue_dependencies (
   namespace TEXT NOT NULL,
@@ -143,6 +149,7 @@ CREATE TABLE IF NOT EXISTS bunqueue_workers (
   namespace TEXT NOT NULL,
   id TEXT NOT NULL,
   broker_id TEXT NOT NULL,
+  broker_session_id TEXT,
   client_id TEXT,
   queues TEXT[] NOT NULL,
   payload BYTEA NOT NULL,
@@ -153,6 +160,10 @@ CREATE INDEX IF NOT EXISTS bunqueue_workers_queue_idx
   ON bunqueue_workers USING GIN(queues);
 CREATE INDEX IF NOT EXISTS bunqueue_workers_broker_idx
   ON bunqueue_workers(namespace, broker_id, client_id);
+ALTER TABLE bunqueue_workers
+  ADD COLUMN IF NOT EXISTS broker_session_id TEXT;
+CREATE INDEX IF NOT EXISTS bunqueue_workers_broker_session_idx
+  ON bunqueue_workers(namespace, broker_id, broker_session_id, client_id);
 
 CREATE TABLE IF NOT EXISTS bunqueue_metric_buckets (
   namespace TEXT NOT NULL,
@@ -236,10 +247,13 @@ ${POSTGRES_EVENT_JOURNAL_SCHEMA}
 CREATE TABLE IF NOT EXISTS bunqueue_brokers (
   namespace TEXT NOT NULL,
   broker_id TEXT NOT NULL,
+  session_id TEXT,
   started_at BIGINT NOT NULL,
   heartbeat_at BIGINT NOT NULL,
   PRIMARY KEY (namespace, broker_id)
 );
+ALTER TABLE bunqueue_brokers
+  ADD COLUMN IF NOT EXISTS session_id TEXT;
 `;
 
 export const POSTGRES_EVENT_CHANNEL = 'bunqueue_jobs_changed';

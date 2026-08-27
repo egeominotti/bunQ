@@ -126,16 +126,24 @@ defineConfig({
     url: process.env.BUNQUEUE_POSTGRES_URL!,
     namespace: 'production', // isolates installations sharing one database
     brokerId: process.env.HOSTNAME, // unique per active broker; auto-generated if omitted
-    poolSize: 10, // default 10, runtime minimum 2
+    poolSize: 4, // default 4, runtime minimum 2
     leaseDurationMs: 30_000, // default 30s, runtime minimum 1s
     pollIntervalMs: 250, // durable event/cron fallback, minimum 25ms
+    statementTimeoutMs: 30_000,
+    lockTimeoutMs: 5_000,
+    idleTransactionTimeoutMs: 30_000,
+    maxConcurrentOperations: 16,
+    maxQueuedOperations: 128,
+    maxSnapshotJobs: 100_000,
+    maxSnapshotPayloadBytes: 256 * 1024 * 1024,
   },
 });
 ```
 
 Do not combine `url` with `dataPath`. PostgreSQL support is server-only and is
-validated against PostgreSQL 18.6; embedded queues continue to use
-memory/SQLite. MySQL is not supported. See [Storage backends](/guide/databases/).
+validated against PostgreSQL 15, 16, 17, and 18.6; embedded queues continue to
+use memory/SQLite. MySQL is not supported. See
+[Storage backends](/guide/databases/).
 
 ### `telemetry`
 

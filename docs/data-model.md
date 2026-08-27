@@ -1120,9 +1120,10 @@ namespace.
 
 Schema initialization runs inside a transaction guarded by
 `pg_advisory_xact_lock(hashtext('bunqueue:schema'))`. The current
-`POSTGRES_SCHEMA_VERSION` is **15**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+`POSTGRES_SCHEMA_VERSION` is **16**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
 EXISTS` statements upgrade earlier development schemas before version insertion.
-The v15 migration also backfills `bunqueue_queue_state(namespace, queue)` from
+The v16 migration adds broker session columns and exact-session lease/worker
+indexes. The v15 migration also backfills `bunqueue_queue_state(namespace, queue)` from
 distinct existing job rows so an empty-but-still-registered queue remains
 discoverable after its last job is removed.
 
@@ -1138,7 +1139,7 @@ Primary key: `(namespace, id)`. One row is the authoritative job generation.
 | Ordering       | `priority`, `lifo`, `group_id`                                                                                         |
 | Idempotency    | `unique_key`, `unique_expires_at`, `custom_id`                                                                         |
 | Relationships  | `parent_id`                                                                                                            |
-| Lease fence    | `lease_owner`, `lease_broker_id`, `lease_token`, `lease_until`, `lease_renewals`                                       |
+| Lease fence    | `lease_owner`, `lease_broker_id`, `lease_broker_session_id`, `lease_token`, `lease_until`, `lease_renewals`             |
 | Terminal state | `result`, `dlq_entry`, `dlq_retry_state`, `error`, `failure_reason`                                                    |
 
 `state` is constrained to `waiting`, `prioritized`, `delayed`,
@@ -1153,6 +1154,7 @@ Indexes:
   pending rows;
 - `bunqueue_jobs_state_idx(namespace, queue, state, created_at, id)`;
 - partial `bunqueue_jobs_lease_idx(namespace, lease_until)` for active rows;
+- partial `bunqueue_jobs_broker_session_lease_idx(namespace, lease_broker_id, lease_broker_session_id, id)` for exact-session shutdown cleanup;
 - partial `bunqueue_jobs_parent_idx(namespace, parent_id)`;
 - partial `bunqueue_jobs_group_ready_idx` and
   `bunqueue_jobs_group_active_idx` for grouped candidate/head ownership;
@@ -1232,8 +1234,8 @@ non-positive/non-finite TTL is stored as `NULL` and does not expire.
 | Table              | Primary key              | Stored data                                                                                                                                  |
 | ------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bunqueue_crons`   | `(namespace, name)`      | MessagePack cron payload, `next_run`, execution count, optional limit, update time; due index `(namespace, next_run, name)`.                 |
-| `bunqueue_workers` | `(namespace, id)`        | Owning `broker_id`, optional TCP `client_id`, queue array, MessagePack worker, `last_seen`; GIN queue index and broker/client cleanup index. |
-| `bunqueue_brokers` | `(namespace, broker_id)` | Broker `started_at` and `heartbeat_at` used for liveness and singleton startup reconciliation.                                               |
+| `bunqueue_workers` | `(namespace, id)`        | Owning `broker_id` + `broker_session_id`, optional TCP `client_id`, queue array, MessagePack worker, `last_seen`; GIN queue and session cleanup indexes. |
+| `bunqueue_brokers` | `(namespace, broker_id)` | Internal `session_id`, `started_at`, and `heartbeat_at` used for fail-fast duplicate detection, stale takeover, and deterministic oldest-live-session startup reconciliation. |
 
 Cron slots and heartbeats use PostgreSQL time. `skipIfNoWorker` reads the shared
 worker table. `preventOverlap` cron jobs are never resurrected as ordinary work
@@ -1268,7 +1270,8 @@ when their protected lease expires or their broker shuts down.
   The deferred trigger stamps only this compact row and any prune watermark;
   event rows remain immutable and replay joins through the envelope's indexed
   `commit_seq`. Envelopes with no remaining event or watermark reference are
-  collected at startup and during maintenance.
+  collected in bounded batches at startup and by adaptive maintenance that
+  retries rapidly while a backlog remains.
 - `bunqueue_job_logs`: `BIGSERIAL id`, namespace/job ID, timestamp, constrained
   level (`info`, `warn`, `error`), and message; indexed by namespace/job/id.
   Writers and retention/clear operations lock the owning `bunqueue_jobs` row,
@@ -1296,9 +1299,9 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v15
-backfills durable queue registry rows, v14 adds bounded-completion query indexes,
-and v13 adds the commit-ordered journal.
+namespaces share the same physical tables. PostgreSQL engine schema v16 adds
+broker-session fencing, v15 backfills durable queue registry rows, v14 adds
+bounded-completion query indexes, and v13 adds the commit-ordered journal.
 Initialization rejects a recorded version newer than the runtime and verifies
 the journal tables, columns, indexes, functions, and
 enabled triggers before skipping DDL. The guard verifies definitions rather than

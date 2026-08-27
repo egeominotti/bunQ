@@ -7,6 +7,7 @@ import {
   lockPostgresDestructionIdentities,
   partitionPostgresDestructionCandidates,
 } from './dependencyDestruction';
+import { lockPostgresBrokerSession } from './brokerSessions';
 
 function isProtectedCron(row: PostgresJobRow): boolean {
   return decodePostgresJob(row).job.uniqueKey?.startsWith('cron:') === true;
@@ -66,7 +67,8 @@ async function releaseLeaseRow(
     UPDATE bunqueue_jobs
     SET payload = ${encodePostgresValue(job)}, state = ${state}, run_at = ${job.runAt},
         started_at = NULL, lease_owner = NULL, lease_token = NULL, lease_until = NULL,
-        lease_broker_id = NULL, lease_renewals = 0, version = version + 1
+        lease_broker_id = NULL, lease_broker_session_id = NULL,
+        lease_renewals = 0, version = version + 1
     WHERE namespace = ${ctx.config.namespace} AND id = ${row.id}
   `;
   await recordPostgresEvent(tx, ctx, {
@@ -86,6 +88,7 @@ export async function releasePostgresClientLease(
   token: string
 ): Promise<boolean> {
   return await ctx.sql.begin(async (tx) => {
+    await lockPostgresBrokerSession(tx, ctx);
     await lockPostgresDestructionIdentities(tx, ctx, [id]);
     const now = await databaseNow(tx);
     const rows = await tx<PostgresJobRow[]>`
@@ -114,7 +117,9 @@ export async function releasePostgresBrokerLeases(ctx: PostgresContext): Promise
     const candidates = await tx<{ id: string }[]>`
       SELECT id FROM bunqueue_jobs
       WHERE namespace = ${ctx.config.namespace}
-        AND state = 'active' AND lease_broker_id = ${ctx.config.brokerId}
+        AND state = 'active'
+        AND lease_broker_id = ${ctx.config.brokerId}
+        AND lease_broker_session_id = ${ctx.config.brokerSessionId}
       ORDER BY id
     `;
     const ids = candidates.map((row) => jobId(row.id));
@@ -125,6 +130,7 @@ export async function releasePostgresBrokerLeases(ctx: PostgresContext): Promise
       WHERE namespace = ${ctx.config.namespace}
         AND state = 'active'
         AND lease_broker_id = ${ctx.config.brokerId}
+        AND lease_broker_session_id = ${ctx.config.brokerSessionId}
         AND id = ANY(${tx.array(ids.map(String), 'TEXT')})
       ORDER BY id
       FOR UPDATE

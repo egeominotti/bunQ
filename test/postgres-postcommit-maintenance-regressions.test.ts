@@ -92,6 +92,34 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL post-commit maintenance regressions', () => {
+  test('serializes repeated work for the same subsystem', async () => {
+    const maintenance = new PostgresPostCommitMaintenance(() => undefined, 10_000);
+    const firstEntered = deferred<undefined>();
+    const releaseFirst = deferred<undefined>();
+    let active = 0;
+    let maximumActive = 0;
+    const operation = async () => {
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      if (maximumActive === 1) {
+        firstEntered.resolve(undefined);
+        await releaseFirst.promise;
+      }
+      active--;
+    };
+
+    const first = maintenance.run('retention', operation);
+    await firstEntered.promise;
+    const second = maintenance.run('retention', operation);
+    await Bun.sleep(20);
+    expect(maximumActive).toBe(1);
+
+    releaseFirst.resolve(undefined);
+    await Promise.all([first, second]);
+    maintenance.close();
+    expect(maximumActive).toBe(1);
+  });
+
   test('does not let an older failed generation overwrite newer maintenance success', async () => {
     const reports: Array<{ subsystem: string; error: unknown }> = [];
     const maintenance = new PostgresPostCommitMaintenance(
@@ -100,9 +128,9 @@ describe('PostgreSQL post-commit maintenance regressions', () => {
     );
     const oldAttempt = deferred<undefined>();
     const first = maintenance.run('retention', () => oldAttempt.promise);
-    await maintenance.run('retention', async () => undefined);
+    const second = maintenance.run('retention', async () => undefined);
     oldAttempt.reject(new Error('stale failure'));
-    await first;
+    await Promise.all([first, second]);
     maintenance.close();
 
     expect(reports).toEqual([{ subsystem: 'retention', error: null }]);
@@ -117,20 +145,17 @@ describe('PostgreSQL post-commit maintenance regressions', () => {
     const oldAttempt = deferred<undefined>();
     const currentAttempt = deferred<undefined>();
     const old = maintenance.run('completion-retention', () => oldAttempt.promise);
-    await maintenance.run('completion-retention', async () => undefined);
+    const superseded = maintenance.run('completion-retention', async () => undefined);
     const current = maintenance.run('completion-retention', () => currentAttempt.promise);
 
     oldAttempt.resolve(undefined);
     await old;
     const currentError = new Error('current maintenance failure');
     currentAttempt.reject(currentError);
-    await current;
+    await Promise.all([superseded, current]);
     maintenance.close();
 
-    expect(reports).toEqual([
-      { subsystem: 'completion-retention', error: null },
-      { subsystem: 'completion-retention', error: currentError },
-    ]);
+    expect(reports).toEqual([{ subsystem: 'completion-retention', error: currentError }]);
   });
 
   test.skipIf(!postgresUrl)(

@@ -3,6 +3,7 @@ import type { Worker } from '../../../domain/types/worker';
 import { decodePostgresValue, encodePostgresValue } from './codec';
 import type { PostgresContext } from './context';
 import { databaseNow } from './context';
+import { lockPostgresBrokerSession } from './brokerSessions';
 
 interface WorkerRow {
   id: string;
@@ -11,15 +12,18 @@ interface WorkerRow {
 
 export async function savePostgresWorker(ctx: PostgresContext, worker: Worker): Promise<void> {
   await ctx.sql.begin(async (tx) => {
+    await lockPostgresBrokerSession(tx, ctx);
     worker.lastSeen = await databaseNow(tx);
     await tx`
       INSERT INTO bunqueue_workers
-        (namespace, id, broker_id, client_id, queues, payload, last_seen)
+        (namespace, id, broker_id, broker_session_id, client_id, queues, payload, last_seen)
       VALUES
-        (${ctx.config.namespace}, ${worker.id}, ${ctx.config.brokerId}, ${worker.clientId},
+        (${ctx.config.namespace}, ${worker.id}, ${ctx.config.brokerId},
+         ${ctx.config.brokerSessionId}, ${worker.clientId},
          ${tx.array(worker.queues, 'TEXT')}, ${encodePostgresValue(worker)}, ${worker.lastSeen})
       ON CONFLICT (namespace, id) DO UPDATE SET
         broker_id = excluded.broker_id,
+        broker_session_id = excluded.broker_session_id,
         client_id = excluded.client_id,
         queues = excluded.queues,
         payload = excluded.payload,
@@ -38,6 +42,7 @@ export async function removePostgresWorker(
     DELETE FROM bunqueue_workers
     WHERE namespace = ${ctx.config.namespace} AND id = ${id}
       AND broker_id = ${ctx.config.brokerId}
+      AND broker_session_id = ${ctx.config.brokerSessionId}
       AND (${expectedClientId}::text IS NULL OR client_id IS NOT DISTINCT FROM ${expectedClientId})
     RETURNING id
   `;
@@ -51,11 +56,13 @@ export async function heartbeatPostgresWorker(
   clientId?: string
 ): Promise<boolean> {
   return await ctx.sql.begin(async (tx) => {
+    await lockPostgresBrokerSession(tx, ctx);
     const expectedClientId = clientId ?? null;
     const rows = await tx<WorkerRow[]>`
       SELECT id, payload FROM bunqueue_workers
       WHERE namespace = ${ctx.config.namespace} AND id = ${id}
         AND broker_id = ${ctx.config.brokerId}
+        AND broker_session_id = ${ctx.config.brokerSessionId}
         AND (${expectedClientId}::text IS NULL OR client_id IS NOT DISTINCT FROM ${expectedClientId})
       FOR UPDATE
     `;
@@ -74,10 +81,12 @@ export async function heartbeatPostgresWorker(
     if (clientId !== undefined) worker.clientId = clientId;
     await tx`
       UPDATE bunqueue_workers
-      SET broker_id = ${ctx.config.brokerId}, client_id = ${worker.clientId},
+      SET broker_id = ${ctx.config.brokerId},
+          broker_session_id = ${ctx.config.brokerSessionId}, client_id = ${worker.clientId},
           payload = ${encodePostgresValue(worker)}, last_seen = ${worker.lastSeen}
       WHERE namespace = ${ctx.config.namespace} AND id = ${id}
         AND broker_id = ${ctx.config.brokerId}
+        AND broker_session_id = ${ctx.config.brokerSessionId}
         AND (${expectedClientId}::text IS NULL OR client_id IS NOT DISTINCT FROM ${expectedClientId})
     `;
     return true;
@@ -92,6 +101,7 @@ export async function removePostgresClientWorkers(
     DELETE FROM bunqueue_workers
     WHERE namespace = ${ctx.config.namespace}
       AND broker_id = ${ctx.config.brokerId} AND client_id = ${clientId}
+      AND broker_session_id = ${ctx.config.brokerSessionId}
     RETURNING id
   `;
   return rows.length;
@@ -101,6 +111,7 @@ export async function removePostgresBrokerWorkers(ctx: PostgresContext): Promise
   const rows = await ctx.sql<{ id: string }[]>`
     DELETE FROM bunqueue_workers
     WHERE namespace = ${ctx.config.namespace} AND broker_id = ${ctx.config.brokerId}
+      AND broker_session_id = ${ctx.config.brokerSessionId}
     RETURNING id
   `;
   return rows.length;

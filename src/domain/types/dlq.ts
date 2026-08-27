@@ -167,9 +167,9 @@ export function createDlqEntry(
   job: Job,
   reason: FailureReason,
   error: string | null,
-  config: DlqConfig = DEFAULT_DLQ_CONFIG
+  config: DlqConfig = DEFAULT_DLQ_CONFIG,
+  now: number = Date.now()
 ): DlqEntry {
-  const now = Date.now();
   const retained = getDlqRetryState(job);
   const alreadyEntered = retained?.enteredAt !== null && retained?.enteredAt !== undefined;
   const attemptRecord = createAttemptRecord(job, reason, error, now);

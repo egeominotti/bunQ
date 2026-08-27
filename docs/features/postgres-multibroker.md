@@ -43,15 +43,22 @@ registry rejects duplicate or unsupported drivers, while the strategies reject:
 
 The supported server settings are:
 
-| Config path               | Environment variable                  | Default                                      |
-| ------------------------- | ------------------------------------- | -------------------------------------------- |
-| `storage.driver`          | `BUNQUEUE_STORAGE_DRIVER`             | inferred (`memory`, `sqlite`, or `postgres`) |
-| `storage.url`             | `BUNQUEUE_POSTGRES_URL`               | none                                         |
-| `storage.namespace`       | `BUNQUEUE_POSTGRES_NAMESPACE`         | `default`                                    |
-| `storage.brokerId`        | `BUNQUEUE_BROKER_ID`                  | host/PID/random ID                           |
-| `storage.poolSize`        | `BUNQUEUE_POSTGRES_POOL_SIZE`         | `10` (runtime minimum `2`)                   |
-| `storage.leaseDurationMs` | `BUNQUEUE_POSTGRES_LEASE_DURATION_MS` | `30000` (runtime minimum `1000`)             |
-| `storage.pollIntervalMs`  | `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`  | `250` (runtime minimum `25`)                 |
+| Config path                        | Environment variable                            | Default                                      |
+| ---------------------------------- | ----------------------------------------------- | -------------------------------------------- |
+| `storage.driver`                   | `BUNQUEUE_STORAGE_DRIVER`                       | inferred (`memory`, `sqlite`, or `postgres`) |
+| `storage.url`                      | `BUNQUEUE_POSTGRES_URL`                         | none                                         |
+| `storage.namespace`                | `BUNQUEUE_POSTGRES_NAMESPACE`                   | `default`                                    |
+| `storage.brokerId`                 | `BUNQUEUE_BROKER_ID`                            | host/PID/random ID                           |
+| `storage.poolSize`                 | `BUNQUEUE_POSTGRES_POOL_SIZE`                   | `4` (runtime minimum `2`)                    |
+| `storage.leaseDurationMs`          | `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`           | `30000` (runtime minimum `1000`)             |
+| `storage.pollIntervalMs`           | `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`            | `250` (runtime minimum `25`)                 |
+| `storage.statementTimeoutMs`       | `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`        | `30000`                                      |
+| `storage.lockTimeoutMs`            | `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`             | `5000`                                       |
+| `storage.idleTransactionTimeoutMs` | `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS` | `30000`                                      |
+| `storage.maxConcurrentOperations`  | `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`   | `16`                                         |
+| `storage.maxQueuedOperations`      | `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`       | `128`                                        |
+| `storage.maxSnapshotJobs`          | `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS`           | `100000`                                     |
+| `storage.maxSnapshotPayloadBytes`  | `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES`  | `268435456`                                  |
 
 ## Components
 
@@ -126,9 +133,10 @@ refresh, heartbeat, recovery, DLQ/worker/event pruning, and cron subsystem. A
 success clears only its own key, so an unrelated timer cannot make a persistently
 failed subsystem appear healthy. Schema creation is serialized with the
 transaction-scoped advisory lock `hashtext('bunqueue:schema')`. While holding that lock, a broker first checks
-`bunqueue_schema_migrations` and skips all DDL when version 15 is already present,
+`bunqueue_schema_migrations` and skips all DDL when version 16 is already present,
 so a broker joining a live cluster does not request locks on active job tables.
-The additive v15 migration backfills durable queue identity; the prior v14
+The additive v16 migration adds broker-session fencing to broker, lease, and
+worker rows. The v15 migration backfills durable queue identity; the prior v14
 migration adds queue/recent completion indexes, and the v13 journal migration
 still upgrades v12 in place. Initialization rejects a
 newer recorded version and verifies every correctness-critical journal table,
@@ -148,6 +156,11 @@ statement can express them; dependent read-modify-write steps stay inside
 `SQL.begin()` so automatic rollback preserves atomicity. PostgreSQL 18 AIO is a
 server setting mainly relevant to scans and maintenance, so bunqueue does not
 override it or other cluster-wide durability settings.
+Each pooled connection receives PostgreSQL-native `application_name`,
+`statement_timeout`, `lock_timeout`, and
+`idle_in_transaction_session_timeout` startup parameters through Bun's
+`connection` option. A blocked query therefore fails within an operator-visible
+deadline and the same pool remains usable after the blocker ends.
 
 ### Manager adapter
 
@@ -169,15 +182,32 @@ jobs, completion results, crons, queue policies, and lifetime metrics from one
 `REPEATABLE READ READ ONLY` snapshot. If the accumulator overflows, the partial
 capture is discarded and hydration retries once from durable state; a second
 overflow cannot starve readiness because every affected queue retains one dirty
-marker for authoritative projection repair. Queue refreshes likewise read jobs,
-results, existence, and policy from one MVCC snapshot.
+marker for authoritative projection repair. Terminal lifetime counters are
+finalized under the journal's namespace commit lock. The finalizer records the
+durable `commit_seq` baseline before detaching the startup buffer, so a
+pre-fence event delivered late is ignored and a post-fence commit is counted
+exactly once. Queue refreshes likewise read jobs, results, existence, and policy
+from one MVCC snapshot.
+
+Before decoding a manager or queue read model, `snapshotBudget.ts` weighs the
+exact rows visible to that same `REPEATABLE READ` transaction. It includes job,
+completion, cron, policy, result, DLQ, and retry payloads. Exceeding
+`maxSnapshotJobs` or `maxSnapshotPayloadBytes` rejects startup/refresh with an
+explicit health error; no partial projection is installed and no data is
+silently truncated. This is a fail-safe for the synchronous compatibility view,
+not a retention policy for authoritative PostgreSQL rows.
 
 After readiness, durable journal events never directly overwrite local job or
 lease state. A coalescing projection scheduler reloads the current job and, for
 removed rows, its completion tombstone. Per-job generations discard an older
-in-flight read when a direct local claim wins. Generation identities are unique
-for each flight and their map entries are reclaimed as soon as refresh or local
-supersession settles, so fencing metadata does not grow with historical job IDs.
+in-flight read when a direct local claim wins. An authoritative queue refresh
+also supersedes every older per-job projection for that queue immediately before
+installing its MVCC snapshot, so a read started before `obliterate` cannot
+restore a deleted completion result afterward. Completion projections obtain
+their owning queue from the durable completion row rather than trusting an
+optional request hint. Generation identities are unique for each flight and
+their map entries are reclaimed as soon as refresh or local supersession
+settles, so fencing metadata does not grow with historical job IDs.
 A failed projection is reported through storage health and retried, while the
 already committed public operation keeps its database-defined success result.
 Deferred compatibility writes
@@ -192,10 +222,10 @@ that queue succeeds; shutdown cancels pending retries before closing the pool.
 Periodic maintenance is single-flight per subsystem, while unrelated subsystems
 may proceed concurrently. Store shutdown closes timer admission and awaits every
 admitted maintenance flight before releasing broker leases or the SQL pool.
-Keyed post-commit maintenance identity-fences every scheduled entry. A late
-success or failure can neither delete nor report for a newer entry, including
-when the key became empty and was reused between the two settlements; current
-failures therefore remain visible and retryable without an ABA generation race.
+Keyed post-commit maintenance serializes each subsystem and coalesces only work
+that has not started. A late success or failure can neither overlap nor report
+for a newer entry; current failures therefore remain visible and retryable
+without an ABA generation race. Unrelated subsystems may still run in parallel.
 Shutdown closes maintenance admission before the SQL pool, skips work submitted
 after that boundary, and drains stale in-flight outcomes without allowing them
 to replace a newer generation. A dedicated
@@ -210,7 +240,11 @@ rejected after it settles. Claims hold admission only for each database attempt,
 not for the surrounding long-poll wait, so an empty 60-second pull never delays
 shutdown. Synchronous compatibility mutations acquire admission together with
 their deferred SQL enqueue; after shutdown, disconnect cleanup may clear only
-its local tracking state. Startup hydration and every accepted deferred write
+its local tracking state. The same gate permits 16 active and 128 queued
+PostgreSQL operations by default. Saturation fails fast instead of growing an
+unbounded waiter list while the database is slow or unavailable; nested work
+retains its admitted scope and cannot deadlock behind its own capacity slot.
+Startup hydration and every accepted deferred write
 are drained before the pool closes. Completion retention is
 reconciled at startup and periodically. DLQ maintenance likewise performs a
 set-based overage scan, re-reads each current policy under a queue-state share
@@ -453,15 +487,16 @@ configuration reduction. Every batch rechecks live dependency consumers after
 its ordered identity locks, so pinned proofs remain outside the bound.
 
 Lease renewal increments `lease_renewals`, updates the payload heartbeat, and
-transfers `lease_broker_id` to the broker that received the heartbeat. This
+transfers both `lease_broker_id` and `lease_broker_session_id` to the broker
+session that received the heartbeat. This
 matters when a pooled worker pulls through one broker and renews through another.
 Disconnect cleanup releases only a never-renewed lease owned by that exact client;
 a remotely renewed lease remains fenced. Both awaited and deferred disconnect
 paths snapshot every `(jobId, leaseToken)` before their first await or queued
 write. A callback for an old custom-ID generation can therefore never discover
 and release the token of a reused generation; local token cleanup also uses an
-exact-token comparison. Graceful broker shutdown releases its remaining leases
-so another broker can claim them immediately.
+exact-token comparison. Graceful broker shutdown releases only leases owned by
+its exact internal session, so it cannot release a successor process's work.
 
 ### Recovery
 
@@ -472,7 +507,11 @@ dies, preserving `preventOverlap`. Recovery first locks candidate child
 relationship keys, re-reads their current parents, locks the sorted parent set,
 and then revalidates the active rows with `FOR UPDATE SKIP LOCKED`. All scheduling
 and lease comparisons use the PostgreSQL clock so broker clock skew cannot cause
-early cleanup or stale ACKs.
+early cleanup or stale ACKs. PostgreSQL DLQ entry, attempt, retry, and expiry
+timestamps are also derived from the transition's database timestamp. Age-based
+maintenance therefore compares values from one clock even when brokers and the
+database have different wall-clock offsets; the memory and SQLite constructors
+retain their existing host-clock behavior.
 
 ## Distributed coordination
 
@@ -484,7 +523,10 @@ early cleanup or stale ACKs.
   joins through `transaction_id`. The lock orders same-namespace commits without
   a hot event-row rewrite; a rollback removes the envelope and may leave only a
   harmless sequence gap. Startup and periodic maintenance collect envelopes
-  after their final event and watermark references disappear.
+  after their final event and watermark references disappear. GC deletes up to
+  eight 10,000-row batches per database turn and reschedules after 25 ms while
+  every batch remains full, instead of waiting another minute with a growing
+  commit-envelope backlog.
 - `bunqueue_event_prune_watermarks` records, in the pruning transaction, the
   highest removed physical event ID and a cumulative, monotonic pruned-commit
   frontier per affected queue. Brokers compare that frontier with a per-queue
@@ -526,9 +568,19 @@ early cleanup or stale ACKs.
 - DLQ `maxEntries` eviction and `maxAge` expiry publish one transactional queue
   invalidation per affected queue, regardless of the number of rows removed.
   Every broker then replaces its compatibility snapshot from PostgreSQL instead
-  of retaining locally stale failed jobs.
-- `bunqueue_brokers` heartbeats identify active brokers in a namespace. Startup
-  cron reconciliation runs only when no other live broker exists.
+  of retaining locally stale failed jobs. DLQ creation and expiry use the same
+  database clock, so a broker whose host clock is ahead cannot postpone purge or
+  auto-retry decisions for the other brokers.
+- `bunqueue_brokers` heartbeats identify active broker sessions in a namespace.
+  A user-facing `brokerId` is stable, while every process owns a random internal
+  session UUID. A second live process with the same ID fails startup. After the
+  heartbeat is stale, takeover atomically installs a new session; the old
+  process can no longer claim, renew, register workers, resurrect its heartbeat,
+  delete the successor row, or release successor leases. Session locks serialize
+  an in-flight old operation before takeover. Under a namespace advisory lock,
+  startup cron reconciliation deterministically elects the oldest live
+  `(started_at, broker_id, session_id)` session. Simultaneous broker startup
+  therefore cannot make every process skip missed-schedule reconciliation.
 - `bunqueue_workers` makes worker registration and heartbeat state visible to
   every broker. `skipIfNoWorker` therefore evaluates the shared registry rather
   than one process's memory.
@@ -609,8 +661,8 @@ Intentional boundaries:
   transient failure retains ownership so the next attempt can finish cleanup.
 - A dead broker is not trusted to release anything; lease expiry plus fencing is
   the correctness boundary.
-- Broker IDs must be unique within a namespace. An explicit duplicate makes
-  operational ownership ambiguous even though job tokens still fence outcomes.
+- Broker IDs must be unique within a namespace. A live duplicate fails fast;
+  stale takeover is session-fenced and automatic after the liveness window.
 - PostgreSQL URL and credentials are secrets and must be injected, not committed.
 
 ## Validation
@@ -624,7 +676,7 @@ BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:fast-check
 ```
 
 The primary tests assert PostgreSQL reports version `18.6`; the same complete
-suite also runs against the current PostgreSQL 17 and 16 Alpine images, with the
+suite also runs against the current PostgreSQL 17, 16, and 15 Alpine images, with the
 expected major supplied through `BUNQUEUE_TEST_POSTGRES_VERSION_PREFIX`.
 Concurrent brokers claim each job once under both ordinary and 16-consumer
 high-contention campaigns, stale owners are fenced, broker/client shutdown is safe, remotely
@@ -696,7 +748,8 @@ then sends `SIGKILL` to a broker holding 24 leases: the three survivors must
 recover and complete all 120 jobs exactly once, while PostgreSQL fencing rejects
 the crashed generation's stale batch ACK. The dedicated GitHub Actions matrix
 runs the complete `test/postgres-*.test.ts` set against
-`postgres:18.6-alpine`, `postgres:17-alpine`, and `postgres:16-alpine`.
+`postgres:18.6-alpine`, `postgres:17-alpine`, `postgres:16-alpine`, and
+`postgres:15-alpine`.
 
 ### Native diagnostic benchmark
 

@@ -104,13 +104,14 @@ export async function discardPostgresJob(
     const job = decodePostgresJob(row).job;
     job.completedAt = now;
     const { dlq } = await getPostgresQueuePolicies(tx, ctx, job.queue);
-    const entry = createDlqEntry(job, FailureReason.Unknown, null, dlq);
+    const entry = createDlqEntry(job, FailureReason.Unknown, null, dlq, now);
     await deleteJobDependencies(tx, ctx, id);
     await deleteParentFailureValues(tx, ctx, id);
     await tx`
       UPDATE bunqueue_jobs
       SET payload = ${encodePostgresValue(job)}, state = 'failed', completed_at = ${now},
-          lease_owner = NULL, lease_broker_id = NULL, lease_token = NULL, lease_until = NULL,
+          lease_owner = NULL, lease_broker_id = NULL, lease_broker_session_id = NULL,
+          lease_token = NULL, lease_until = NULL,
           error = NULL, failure_reason = ${FailureReason.Unknown},
           dlq_entry = ${encodePostgresValue(entry)}, dlq_retry_state = NULL,
           version = version + 1

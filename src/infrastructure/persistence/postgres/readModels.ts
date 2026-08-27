@@ -16,6 +16,7 @@ import {
   loadAllPostgresJobs,
 } from './queries';
 import type { PostgresCompletionResult, PostgresQueueState, PostgresStoredJob } from './types';
+import { assertPostgresSnapshotBudget } from './snapshotBudget';
 
 export interface PostgresManagerSnapshot {
   readonly rows: readonly PostgresStoredJob[];
@@ -47,6 +48,7 @@ export async function loadPostgresManagerSnapshot(
   ctx: PostgresContext
 ): Promise<PostgresManagerSnapshot> {
   return await ctx.sql.begin('isolation level repeatable read read only', async (tx) => {
+    await assertPostgresSnapshotBudget(ctx, tx);
     const [rows, results, crons, queues, lifetimeMetrics] = await Promise.all([
       loadAllPostgresJobs(ctx, tx),
       loadPostgresCompletionResults(ctx, undefined, tx),
@@ -65,6 +67,7 @@ export async function loadPostgresQueueReadModel(
   queue: string
 ): Promise<PostgresQueueReadModel> {
   return await ctx.sql.begin('isolation level repeatable read read only', async (tx) => {
+    await assertPostgresSnapshotBudget(ctx, tx, queue);
     const [rows, results, state, [presence]] = await Promise.all([
       listPostgresJobs(ctx, queue, { limit: 2_147_483_647, asc: true }, tx),
       loadPostgresCompletionResults(ctx, queue, tx),
@@ -98,25 +101,29 @@ export async function loadPostgresJobProjections(
   const completions =
     missing.length === 0
       ? []
-      : await ctx.sql<{ job_id: string; result: Uint8Array | null }[]>`
-          SELECT job_id, result FROM bunqueue_completions
+      : await ctx.sql<{ job_id: string; queue: string; result: Uint8Array | null }[]>`
+          SELECT job_id, queue, result FROM bunqueue_completions
           WHERE namespace = ${ctx.config.namespace}
             AND job_id = ANY(${ctx.sql.array(
               missing.map(({ id }) => String(id)),
               'TEXT'
             )})
         `;
-  const completionById = new Map(completions.map((row) => [row.job_id, row.result]));
+  const completionById = new Map(completions.map((row) => [row.job_id, row]));
   return new Map(
-    requests.map(({ id, queue }) => {
+    requests.map(({ id }) => {
       const row = byId.get(id) ?? null;
-      const encoded = completionById.get(String(id));
+      const completionRow = completionById.get(String(id));
       const completion =
-        !row && encoded !== undefined
+        !row && completionRow !== undefined
           ? {
               jobId: id,
-              queue,
-              result: decodePostgresValue(encoded, null, `postgresCompletion:${String(id)}`),
+              queue: completionRow.queue,
+              result: decodePostgresValue(
+                completionRow.result,
+                null,
+                `postgresCompletion:${String(id)}`
+              ),
               pinned: false,
             }
           : null;

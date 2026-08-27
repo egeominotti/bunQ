@@ -6,6 +6,7 @@ import { releaseClientJobsWithRetry } from '../src/infrastructure/server/tcp/cli
 import {
   cleanupPostgresNamespace,
   deferred,
+  pausePostgresEventStream,
   postgresManagerStore,
 } from './support/postgres-event-race';
 
@@ -219,6 +220,78 @@ describe('PostgreSQL asynchronous lifecycle regressions', () => {
         expect(becameReady).toBe(true);
       } finally {
         inject = false;
+        await Promise.allSettled([producer.shutdownPostgres(), joining?.shutdownPostgres()]);
+      }
+    }
+  );
+
+  test.skipIf(!postgresUrl)(
+    'reconciles lifetime metrics after a second startup buffer overflow',
+    async () => {
+      const value = namespace('startup-metric-overflow');
+      const producer = manager(value, 'startup-metric-producer');
+      let joining: PostgresQueueManager | null = null;
+      let loadCalls = 0;
+      try {
+        await producer.waitUntilReady();
+        joining = manager(value, 'startup-metric-joining');
+        const internals = joining as unknown as {
+          snapshotEventBuffer: PostgresStartupEventBuffer;
+        };
+        internals.snapshotEventBuffer = new PostgresStartupEventBuffer(1);
+        const store = postgresManagerStore(joining);
+        const loadSnapshot = store.loadManagerSnapshot.bind(store);
+        store.loadManagerSnapshot = async () => {
+          const snapshot = await loadSnapshot();
+          loadCalls++;
+          const queue = `startup-metric-${loadCalls}`;
+          const ids = await producer.pushBatch(queue, [{ data: {} }, { data: {} }]);
+          const claims = await producer.pullBatchWithLock(queue, 2, 'startup-metric-worker');
+          const tokens = new Map(claims.jobs.map((job, index) => [job.id, claims.tokens[index]!]));
+          await Promise.all(ids.map((id) => producer.ack(id, undefined, tokens.get(id)!)));
+          await (store.events as unknown as { drain(): Promise<void> }).drain();
+          return snapshot;
+        };
+
+        await joining.waitUntilReady();
+        expect(loadCalls).toBe(2);
+        expect(joining.getStats().totalCompleted).toBe(4n);
+      } finally {
+        await Promise.allSettled([producer.shutdownPostgres(), joining?.shutdownPostgres()]);
+      }
+    }
+  );
+
+  test.skipIf(!postgresUrl)(
+    'does not double count a terminal event delivered after the startup metric fence',
+    async () => {
+      const value = namespace('startup-metric-late-delivery');
+      const producer = manager(value, 'startup-metric-late-producer');
+      let joining: PostgresQueueManager | null = null;
+      let paused: { drain(): Promise<void> } | null = null;
+      let injected = false;
+      try {
+        await producer.waitUntilReady();
+        joining = manager(value, 'startup-metric-late-joining');
+        const store = postgresManagerStore(joining);
+        const loadSnapshot = store.loadManagerSnapshot.bind(store);
+        store.loadManagerSnapshot = async () => {
+          const snapshot = await loadSnapshot();
+          if (!injected) {
+            injected = true;
+            paused = await pausePostgresEventStream(joining!);
+            const job = await producer.push('late-terminal', { data: {} });
+            const claim = await producer.pullWithLock('late-terminal', 'late-worker');
+            await producer.ack(job.id, undefined, claim.token!);
+          }
+          return snapshot;
+        };
+
+        await joining.waitUntilReady();
+        expect(joining.getStats().totalCompleted).toBe(1n);
+        await paused!.drain();
+        expect(joining.getStats().totalCompleted).toBe(1n);
+      } finally {
         await Promise.allSettled([producer.shutdownPostgres(), joining?.shutdownPostgres()]);
       }
     }

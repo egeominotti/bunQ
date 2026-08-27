@@ -158,6 +158,7 @@ async function retryEntry(
         run_at = ${now}, started_at = NULL, completed_at = NULL, result = NULL,
         dlq_entry = NULL, dlq_retry_state = ${encodePostgresValue(getDlqRetryState(job))},
         error = NULL, failure_reason = NULL, lease_owner = NULL, lease_broker_id = NULL,
+        lease_broker_session_id = NULL,
         lease_token = NULL, lease_until = NULL, unique_key = NULL,
         unique_expires_at = NULL, version = version + 1
     WHERE namespace = ${ctx.config.namespace} AND id = ${row.id}

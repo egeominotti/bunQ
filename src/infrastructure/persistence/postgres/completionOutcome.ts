@@ -91,7 +91,8 @@ export async function completePostgresJob(
         UPDATE bunqueue_jobs
         SET payload = ${encodePostgresValue(job)}, state = 'completed', completed_at = ${now},
             result = ${resultPayload}, lease_owner = NULL, lease_token = NULL,
-            lease_broker_id = NULL, lease_until = NULL, dlq_retry_state = NULL,
+            lease_broker_id = NULL, lease_broker_session_id = NULL,
+            lease_until = NULL, dlq_retry_state = NULL,
             version = version + 1
         WHERE namespace = ${ctx.config.namespace} AND id = ${String(id)}
       `;

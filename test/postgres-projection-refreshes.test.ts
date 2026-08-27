@@ -68,6 +68,44 @@ describe('PostgreSQL projection refresh lifecycle', () => {
     expect(applied).toEqual([]);
   });
 
+  test('discards in-flight projections superseded by an authoritative queue refresh', async () => {
+    const entered = deferred<undefined>();
+    const release = deferred<PostgresJobProjection>();
+    const applied: JobId[] = [];
+    const refreshes = new PostgresProjectionRefreshes(
+      async (requests) => {
+        entered.resolve(undefined);
+        const projection = await release.promise;
+        return new Map(requests.map(({ id }) => [id, projection]));
+      },
+      (id) => applied.push(id),
+      () => undefined,
+      1
+    );
+    active.push(refreshes);
+    const stale = jobId('stale-queue-projection');
+    const retained = jobId('retained-queue-projection');
+
+    refreshes.start();
+    refreshes.request(stale, 'obliterated');
+    refreshes.request(retained, 'retained');
+    await entered.promise;
+    try {
+      const supersedeQueue = Reflect.get(refreshes, 'supersedeQueue') as unknown;
+      expect(supersedeQueue).toBeFunction();
+      (supersedeQueue as (queue: string) => void).call(refreshes, 'obliterated');
+    } finally {
+      release.resolve(emptyProjection);
+    }
+    await refreshes.drain();
+
+    expect(applied).toEqual([retained]);
+
+    refreshes.request(stale, 'obliterated');
+    expect(await eventually(() => applied.length === 2)).toBe(true);
+    expect(applied).toEqual([retained, stale]);
+  });
+
   test('retains a failed projection until a bounded retry succeeds', async () => {
     const reports: unknown[] = [];
     const applied: PostgresJobProjection[] = [];
@@ -151,12 +189,15 @@ describe('PostgreSQL projection refresh lifecycle', () => {
     expect(batchSizes).toHaveLength(10);
     expect(Math.max(...batchSizes)).toBe(1_000);
     const generations = Reflect.get(refreshes, 'generations') as Map<JobId, symbol>;
+    const generationQueues = Reflect.get(refreshes, 'generationQueues') as Map<JobId, string>;
     expect(generations.size).toBe(0);
+    expect(generationQueues.size).toBe(0);
 
     for (let index = 0; index < 10_000; index++) {
       refreshes.supersede(jobId(`settled-${index}`));
     }
 
     expect(generations.size).toBe(0);
+    expect(generationQueues.size).toBe(0);
   });
 });

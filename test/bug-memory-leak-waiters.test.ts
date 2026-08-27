@@ -6,8 +6,8 @@
  * but never removed from the completionWaiters map. If the job never completed,
  * the cancelled waiter would stay in memory forever.
  *
- * FIX: The timeout handler now removes the waiter from the array and cleans up
- * empty arrays from the map.
+ * FIX: The timeout handler now removes the waiter from the set and cleans up
+ * empty sets from the map.
  *
  * These tests verify the fix works correctly by:
  * 1. Creating multiple waiters that timeout
@@ -19,6 +19,18 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 import { EventsManager } from '../src/application/eventsManager';
 import { WebhookManager } from '../src/application/webhookManager';
+
+type CompletionWaiterState = { cancelled: boolean };
+type CompletionWaiterRegistry = Map<string, Set<CompletionWaiterState>>;
+
+function getCompletionWaiters(target: QueueManager | EventsManager): CompletionWaiterRegistry {
+  const state = target as unknown as {
+    eventsManager?: EventsManager;
+    completionWaiters?: CompletionWaiterRegistry;
+  };
+  const manager = state.eventsManager ?? target;
+  return (manager as unknown as { completionWaiters: CompletionWaiterRegistry }).completionWaiters;
+}
 
 describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => {
   let qm: QueueManager;
@@ -33,8 +45,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
 
   test('FIXED: cancelled waiters are removed from map on timeout', async () => {
     // Access internal eventsManager via reflection to check state
-    const eventsManager = (qm as any).eventsManager as EventsManager;
-    const completionWaiters = (eventsManager as any).completionWaiters as Map<string, any[]>;
+    const completionWaiters = getCompletionWaiters(qm);
 
     // Push jobs but DON'T complete them
     const jobs = [];
@@ -49,9 +60,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
 
     // Create waiters that will timeout
     const TIMEOUT_MS = 50;
-    const waitPromises = jobs.map(job =>
-      qm.waitForJobCompletion(job.id, TIMEOUT_MS)
-    );
+    const waitPromises = jobs.map((job) => qm.waitForJobCompletion(job.id, TIMEOUT_MS));
 
     console.log('\n--- After Creating Waiters ---');
     console.log(`Waiters map size: ${completionWaiters.size}`);
@@ -59,14 +68,14 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     // Count total waiter entries
     let totalWaiters = 0;
     for (const [key, waiters] of completionWaiters) {
-      totalWaiters += waiters.length;
-      console.log(`  Job ${key}: ${waiters.length} waiter(s)`);
+      totalWaiters += waiters.size;
+      console.log(`  Job ${key}: ${waiters.size} waiter(s)`);
     }
     console.log(`Total waiter entries: ${totalWaiters}`);
 
     // Wait for all timeouts
     const results = await Promise.all(waitPromises);
-    const timedOut = results.filter(r => r === false).length;
+    const timedOut = results.filter((r) => r === false).length;
 
     console.log('\n--- After Timeouts ---');
     console.log(`Timed out: ${timedOut}/${jobs.length}`);
@@ -76,7 +85,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
 
     let cancelledWaiters = 0;
     let activeWaiters = 0;
-    for (const [key, waiters] of completionWaiters) {
+    for (const [, waiters] of completionWaiters) {
       for (const waiter of waiters) {
         if (waiter.cancelled) {
           cancelledWaiters++;
@@ -100,8 +109,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
   });
 
   test('FIXED: no memory leak with orphaned jobs', async () => {
-    const eventsManager = (qm as any).eventsManager as EventsManager;
-    const completionWaiters = (eventsManager as any).completionWaiters as Map<string, any[]>;
+    const completionWaiters = getCompletionWaiters(qm);
 
     const ORPHAN_COUNT = 100;
     const TIMEOUT_MS = 10;
@@ -116,9 +124,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     }
 
     // Create waiters for non-existent jobs
-    const waitPromises = fakeJobIds.map(jobId =>
-      qm.waitForJobCompletion(jobId, TIMEOUT_MS)
-    );
+    const waitPromises = fakeJobIds.map((jobId) => qm.waitForJobCompletion(jobId, TIMEOUT_MS));
 
     const mapSizeBefore = completionWaiters.size;
     console.log(`Map size during wait: ${mapSizeBefore}`);
@@ -133,7 +139,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     // Count any remaining entries (should be 0 after fix)
     let remainingEntries = 0;
     for (const [, waiters] of completionWaiters) {
-      remainingEntries += waiters.length;
+      remainingEntries += waiters.size;
     }
 
     console.log(`Remaining entries: ${remainingEntries}`);
@@ -149,8 +155,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
   });
 
   test('SHOWS CLEANUP ONLY ON COMPLETION: jobs that complete are cleaned', async () => {
-    const eventsManager = (qm as any).eventsManager as EventsManager;
-    const completionWaiters = (eventsManager as any).completionWaiters as Map<string, any[]>;
+    const completionWaiters = getCompletionWaiters(qm);
 
     // Push a job that WILL complete
     const job = await qm.push('complete-test', { data: {} });
@@ -159,7 +164,9 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     const waitPromise = qm.waitForJobCompletion(job.id, 5000);
 
     console.log('\n--- Cleanup on Completion ---');
-    console.log(`Waiters for job before completion: ${completionWaiters.get(String(job.id))?.length ?? 0}`);
+    console.log(
+      `Waiters for job before completion: ${completionWaiters.get(String(job.id))?.size ?? 0}`
+    );
 
     // Complete the job
     const pulledJob = await qm.pull('complete-test');
@@ -169,7 +176,9 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     const completed = await waitPromise;
 
     console.log(`Wait result: ${completed ? 'completed' : 'timed out'}`);
-    console.log(`Waiters for job after completion: ${completionWaiters.get(String(job.id))?.length ?? 0}`);
+    console.log(
+      `Waiters for job after completion: ${completionWaiters.get(String(job.id))?.size ?? 0}`
+    );
     console.log(`Map has key: ${completionWaiters.has(String(job.id))}`);
 
     // Completion DOES clean up - the key is deleted entirely
@@ -181,8 +190,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
   });
 
   test('FIXED: no memory growth in production simulation', async () => {
-    const eventsManager = (qm as any).eventsManager as EventsManager;
-    const completionWaiters = (eventsManager as any).completionWaiters as Map<string, any[]>;
+    const completionWaiters = getCompletionWaiters(qm);
 
     const ITERATIONS = 10;
     const WAITERS_PER_ITERATION = 20;
@@ -204,10 +212,12 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
       // Check memory stays stable
       let totalEntries = 0;
       for (const [, waiters] of completionWaiters) {
-        totalEntries += waiters.length;
+        totalEntries += waiters.size;
       }
 
-      console.log(`Iteration ${iter + 1}: Map size=${completionWaiters.size}, Total entries=${totalEntries}`);
+      console.log(
+        `Iteration ${iter + 1}: Map size=${completionWaiters.size}, Total entries=${totalEntries}`
+      );
 
       // After each iteration, memory should be clean
       expect(totalEntries).toBe(0);
@@ -217,7 +227,7 @@ describe('Fix Verified: Memory Leak in Waiters (eventsManager.ts:56-82)', () => 
     // Final count
     let finalEntries = 0;
     for (const [, waiters] of completionWaiters) {
-      finalEntries += waiters.length;
+      finalEntries += waiters.size;
     }
 
     console.log(`\nFinal entries: ${finalEntries}`);
@@ -232,7 +242,7 @@ describe('EventsManager Isolated Tests', () => {
   test('UNIT: waitForJobCompletion properly cleans up on timeout', async () => {
     const webhookManager = new WebhookManager();
     const eventsManager = new EventsManager(webhookManager);
-    const completionWaiters = (eventsManager as any).completionWaiters as Map<string, any[]>;
+    const completionWaiters = getCompletionWaiters(eventsManager);
 
     const fakeJobId = BigInt(123456);
     const TIMEOUT_MS = 10;
@@ -243,19 +253,19 @@ describe('EventsManager Isolated Tests', () => {
     expect(result).toBe(false); // Timed out
 
     // Check internal state - should be cleaned up
-    const waitersArray = completionWaiters.get(String(fakeJobId));
+    const waitersSet = completionWaiters.get(String(fakeJobId));
 
     console.log('\n--- Unit Test Results ---');
     console.log(`Result: ${result ? 'completed' : 'timed out'}`);
-    console.log(`Waiters array exists: ${waitersArray !== undefined}`);
+    console.log(`Waiters set exists: ${waitersSet !== undefined}`);
     console.log(`Map size: ${completionWaiters.size}`);
 
-    if (!waitersArray) {
+    if (!waitersSet) {
       console.log('*** FIX VERIFIED: Waiter entry cleaned up on timeout');
     }
 
     // FIX VERIFIED: waiter is removed from map after timeout
-    expect(waitersArray).toBeUndefined();
+    expect(waitersSet).toBeUndefined();
     expect(completionWaiters.size).toBe(0);
 
     // Cleanup

@@ -15,6 +15,7 @@ export type EventSubscriber = (event: JobEvent) => void;
 /** Waiter entry with cancellation flag for O(1) cleanup */
 interface CompletionWaiter {
   resolve: () => void;
+  cancel: () => void;
   cancelled: boolean;
 }
 
@@ -23,7 +24,7 @@ export class EventsManager {
   /** Use Set for O(1) subscribe/unsubscribe instead of indexOf+splice */
   private readonly subscribers = new Set<EventSubscriber>();
   /** Waiters for specific job completions - for efficient WaitJob implementation */
-  private readonly completionWaiters = new Map<string, CompletionWaiter[]>();
+  private readonly completionWaiters = new Map<string, Set<CompletionWaiter>>();
 
   constructor(private readonly webhookManager: WebhookManager) {}
 
@@ -51,9 +52,7 @@ export class EventsManager {
     // Clear all waiters
     for (const waiters of this.completionWaiters.values()) {
       for (const waiter of waiters) {
-        if (!waiter.cancelled) {
-          waiter.resolve();
-        }
+        if (!waiter.cancelled) waiter.resolve();
       }
     }
     this.completionWaiters.clear();
@@ -63,45 +62,43 @@ export class EventsManager {
    * Wait for a specific job to complete - event-driven, no polling
    * Returns true if job completed, false if timeout
    */
-  waitForJobCompletion(jobId: JobId, timeoutMs: number): Promise<boolean> {
+  waitForJobCompletion(jobId: JobId, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
     const jobKey = String(jobId);
+    if (signal?.aborted) return Promise.resolve(false);
 
     return new Promise((resolve) => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        const waiters = this.completionWaiters.get(jobKey);
+        waiters?.delete(waiter);
+        if (waiters?.size === 0) this.completionWaiters.delete(jobKey);
+      };
+      const finish = (completed: boolean) => {
+        if (settled) return;
+        settled = true;
+        waiter.cancelled = !completed;
+        cleanup();
+        resolve(completed);
+      };
+      const onAbort = () => finish(false);
       const waiter: CompletionWaiter = {
-        resolve: () => {
-          clearTimeout(timer);
-          resolve(true);
-        },
+        resolve: () => finish(true),
+        cancel: () => finish(false),
         cancelled: false,
       };
-
-      const timer = setTimeout(() => {
-        // Timeout - mark as cancelled and remove from map to prevent memory leak
-        waiter.cancelled = true;
-
-        // Remove the waiter from the array
-        const waiters = this.completionWaiters.get(jobKey);
-        if (waiters) {
-          const index = waiters.indexOf(waiter);
-          if (index !== -1) {
-            waiters.splice(index, 1);
-          }
-          // Clean up empty arrays to free memory
-          if (waiters.length === 0) {
-            this.completionWaiters.delete(jobKey);
-          }
-        }
-
-        resolve(false);
-      }, timeoutMs);
 
       // Add to waiters
       let waiters = this.completionWaiters.get(jobKey);
       if (!waiters) {
-        waiters = [];
+        waiters = new Set();
         this.completionWaiters.set(jobKey, waiters);
       }
-      waiters.push(waiter);
+      waiters.add(waiter);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 

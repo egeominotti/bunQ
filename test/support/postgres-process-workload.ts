@@ -8,6 +8,12 @@ export interface PostgresClaims {
   readonly tokens: string[];
 }
 
+export interface PostgresDatabaseStats {
+  readonly deadlocks: number | string | bigint;
+  readonly temp_bytes: number | string | bigint;
+  readonly wal_bytes: number | string | bigint;
+}
+
 export async function pushAcrossBrokers(
   clients: readonly TcpClient[],
   queue: string,
@@ -133,12 +139,13 @@ export async function expectDatabaseCompleted(
   queue: string,
   expected: number
 ): Promise<void> {
-  const rows = await sql<{ count: number; state: string }[]>`
-    SELECT state, COUNT(*)::int AS count FROM bunqueue_jobs
+  const rows = await sql<{ count: number; distinct_ids: number; state: string }[]>`
+    SELECT state, COUNT(*)::int AS count, COUNT(DISTINCT id)::int AS distinct_ids
+    FROM bunqueue_jobs
     WHERE namespace = ${namespace} AND queue = ${queue}
     GROUP BY state
   `;
-  expect(rows).toEqual([{ state: 'completed', count: expected }]);
+  expect(rows).toEqual([{ state: 'completed', count: expected, distinct_ids: expected }]);
 }
 
 export async function waitFor(
@@ -152,4 +159,25 @@ export async function waitFor(
     await Bun.sleep(25);
   }
   throw new Error(`timed out waiting for ${description}`);
+}
+
+export async function readPostgresDatabaseStats(sql: SQL): Promise<PostgresDatabaseStats> {
+  const [database] = await sql<Omit<PostgresDatabaseStats, 'wal_bytes'>[]>`
+    SELECT deadlocks, temp_bytes FROM pg_stat_database WHERE datname = current_database()
+  `;
+  const [wal] = await sql<{ wal_bytes: number | string | bigint }[]>`
+    SELECT wal_bytes::text AS wal_bytes FROM pg_stat_wal
+  `;
+  return { ...database, wal_bytes: wal.wal_bytes };
+}
+
+export function subtractPostgresDatabaseStats(
+  before: PostgresDatabaseStats,
+  after: PostgresDatabaseStats
+): Record<string, number> {
+  return {
+    deadlocks: Number(after.deadlocks) - Number(before.deadlocks),
+    tempBytes: Number(after.temp_bytes) - Number(before.temp_bytes),
+    walBytes: Number(after.wal_bytes) - Number(before.wal_bytes),
+  };
 }

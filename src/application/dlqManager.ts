@@ -18,7 +18,11 @@ export interface DlqContext {
   jobIndex: Map<JobId, JobLocation>;
   jobResults: { delete(id: JobId): boolean };
   dependencyResults: { releaseConsumer(id: JobId): void };
-  customIdMap: { get(id: string): JobId | undefined; delete(id: string): boolean };
+  customIdMap: {
+    get(id: string): JobId | undefined;
+    set(id: string, jobId: JobId): void;
+    delete(id: string): boolean;
+  };
   jobLogs: { delete(id: JobId): boolean };
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
@@ -240,6 +244,12 @@ export function retryCompletedJobs(
 
 /** Requeue a single completed job */
 function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
+  const currentLocation = ctx.jobIndex.get(job.id);
+  if (currentLocation?.type !== 'completed' || currentLocation.queueName !== job.queue) return 0;
+  const shard = ctx.shards[shardIndex(job.queue)];
+  const keyOwner = job.uniqueKey ? shard.getUniqueKeyEntry(job.queue, job.uniqueKey) : null;
+  if (keyOwner && keyOwner.jobId !== job.id) return 0;
+
   const now = Date.now();
   const timeline = [...job.timeline];
   if (timeline.length < MAX_TIMELINE_ENTRIES) {
@@ -263,7 +273,6 @@ function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
   ctx.storage?.requeueCompletedJob(requeued);
 
   const idx = shardIndex(requeued.queue);
-  const shard = ctx.shards[idx];
   shard.getQueue(requeued.queue).push(requeued);
   shard.incrementQueued(requeued.id, false, requeued.createdAt, requeued.queue, requeued.runAt);
   ctx.jobIndex.set(requeued.id, {
@@ -274,6 +283,15 @@ function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
   ctx.completedJobs.delete(requeued.id);
   ctx.completedJobsData.delete(requeued.id);
   ctx.jobResults.delete(requeued.id);
+  if (requeued.customId) ctx.customIdMap.set(requeued.customId, requeued.id);
+  if (requeued.uniqueKey) {
+    shard.registerUniqueKeyWithTtl(
+      requeued.queue,
+      requeued.uniqueKey,
+      requeued.id,
+      requeued.deduplicationTtl ?? undefined
+    );
+  }
   shard.notify(requeued.queue);
   return 1;
 }

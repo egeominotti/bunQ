@@ -185,7 +185,27 @@ round trip.
 
 ### Manual retry
 
-`retryDlqJob` (`dlqRetry.ts`) removes the entry, clears its automatic-retry generation, resets `attempts`, `runAt`, `startedAt`, `stallCount`, and `lastHeartbeat`, appends a `waiting` timeline entry, re-enqueues it, restores counters/index ownership, then calls `storage.requeueDlqJob(job)`. That persistence method atomically deletes the old DLQ row and inserts the waiting job; the `jobs` row was deleted on DLQ entry, so the re-insert is essential for restart safety. `retryDlqJobs` with no id clears the whole queue's DLQ in one pass, then re-queues every entry. With an optional `limit` (the `RetryDlq` command's `count`, surfaced client-side as `queue.retryJobs({ state:'failed', count })`) it instead retries only the first `limit` entries by looping the per-entry transition, leaving the remainder in the DLQ — before this the client's `count` was silently dropped and the whole DLQ was drained (a #111-class silent-loss). `retryDlqByFilter` applies the same transition to the filtered entries.
+`retryDlqJob` (`dlqRetry.ts`) first verifies that the job is still the selected
+DLQ generation and that neither its custom ID nor its unique key belongs to a
+different live job. A conflict returns `0` and leaves the terminal entry
+unchanged. It then creates a waiting snapshot, clears its automatic-retry
+generation, resets `attempts`, `runAt`, `startedAt`, `stallCount`, and
+`lastHeartbeat`, and appends a bounded `waiting` timeline entry.
+
+SQLite commits `requeueDlqJob(job)` before RAM is changed. That transaction
+atomically deletes the old DLQ row and inserts the waiting job; only after it
+succeeds does the application remove the in-memory entry and publish the heap,
+counter, `jobIndex`, custom-ID ownership, unique-key ownership, and notification.
+A rejected write therefore leaves both memory and disk terminal. The `jobs` row
+was deleted on DLQ entry, so the re-insert is essential for restart safety.
+
+Every single, bounded, all-entry, filtered, and automatic retry uses this same
+per-entry transition. An all-entry retry deliberately does not clear the DLQ
+up front: a later conflict or storage error cannot lose entries that were not
+committed. With an optional `limit` (the `RetryDlq` command's `count`, surfaced
+client-side as `queue.retryJobs({ state:'failed', count })`) it retries only the
+first `limit` entries, leaving the remainder in the DLQ. `retryDlqByFilter`
+applies the same transition to the filtered entries.
 
 ### Permanent selective removal
 
@@ -201,7 +221,13 @@ throws and leaves the entry authoritative.
 
 ### Auto-retry (background, opt-in)
 
-`processAutoRetry` (`dlqRetry.ts`) runs only if `config.autoRetry`. It removes each due entry, calls `scheduleNextRetry` to advance `retryCount`/`lastRetryAt` and the backoff, and carries that state on the live job. SQLite `requeueDlqJob` atomically deletes the DLQ row and inserts the waiting job, so a crash cannot restore a stale DLQ copy beside it. A terminal re-failure reconstructs the same chain instead of resetting it. Backoff is `autoRetryInterval * 2^(retryCount-1)`; `nextRetryAt` becomes `null` at `maxAutoRetries`.
+`processAutoRetry` (`dlqRetry.ts`) runs only if `config.autoRetry`. For each due
+entry it advances a cloned retry schedule, persists the waiting snapshot, and
+only then replaces the terminal in-memory generation. A failed write cannot
+mutate the DLQ entry's retry metadata. A terminal re-failure reconstructs the
+same chain instead of resetting it. Backoff is
+`autoRetryInterval * 2^(retryCount-1)`; `nextRetryAt` becomes `null` at
+`maxAutoRetries`.
 
 ### Auto-purge + maintenance loop
 
@@ -217,11 +243,13 @@ while preserving the diagnostic stacktrace and bounded timeline before appending
 the new `waiting` entry. `SqliteStorage.requeueCompletedJob` changes the durable
 state and deletes the prior `job_results` row in one synchronous transaction;
 only after that succeeds are completed/result ownership, the heap, `jobIndex`,
-and counters changed in memory. A rejected SQLite write therefore leaves the
-completed generation authoritative, and a successful retry cannot expose the
-old `returnvalue` or recover completed metadata after restart. Selection is
-stable and accepts an optional job id, non-negative `limit`, and terminal
-`timestamp` cutoff. This keeps
+custom-ID ownership, unique-key ownership, and counters changed in memory. The
+same generation and ownership preflight used by DLQ retry rejects a retry when
+another live job owns the unique key. A rejected SQLite write therefore leaves
+the completed generation authoritative, and a successful retry cannot expose
+the old `returnvalue`, accept a duplicate custom ID as new work, or recover
+completed metadata after restart. Selection is stable and accepts an optional
+job id, non-negative `limit`, and terminal `timestamp` cutoff. This keeps
 `queue.retryJobs({ state: 'completed', count, timestamp })` consistent in
 memory-only, persisted embedded, and TCP deployments.
 

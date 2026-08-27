@@ -26,6 +26,17 @@ export class QueueManagerQueries extends QueueManagerLocks {
     return queryOps.getJobResult(jobId, this.contextFactory.getQueryContext());
   }
 
+  /** Distinguish a completed generation from a valid undefined result. */
+  async getCompletionAsync(jobId: JobId): Promise<{ found: boolean; result: unknown }> {
+    const found = this.completedJobs.has(jobId);
+    return { found, result: found ? this.getResult(jobId) : undefined };
+  }
+
+  /** Async result port used by transports; memory and SQLite remain synchronous internally. */
+  async getResultAsync(jobId: JobId): Promise<unknown> {
+    return (await this.getCompletionAsync(jobId)).result;
+  }
+
   async getChildrenValues(parentJobId: JobId): Promise<Record<string, unknown>> {
     const job = await this.getJob(parentJobId);
     if (!job?.childrenIds || job.childrenIds.length === 0) return {};

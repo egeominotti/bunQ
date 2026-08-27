@@ -16,8 +16,10 @@ export interface PostgresProcessBroker {
 }
 
 export interface PostgresProcessClusterOptions {
+  readonly leaseDurationMs?: number;
   readonly pollIntervalMs?: number;
   readonly poolSize?: number;
+  readonly shutdownTimeoutMs?: number;
 }
 
 export async function startPostgresProcessCluster(
@@ -95,7 +97,7 @@ async function startPostgresProcessBroker(
       BUNQUEUE_BROKER_ID: brokerId,
       BUNQUEUE_DATA_PATH: '',
       BUNQUEUE_EMBEDDED: '',
-      BUNQUEUE_POSTGRES_LEASE_DURATION_MS: '1000',
+      BUNQUEUE_POSTGRES_LEASE_DURATION_MS: String(options.leaseDurationMs ?? 1000),
       BUNQUEUE_POSTGRES_NAMESPACE: namespace,
       BUNQUEUE_POSTGRES_POLL_INTERVAL_MS: String(options.pollIntervalMs ?? 25),
       BUNQUEUE_POSTGRES_POOL_SIZE: String(options.poolSize ?? 12),
@@ -106,7 +108,7 @@ async function startPostgresProcessBroker(
       HOST: '127.0.0.1',
       HTTP_PORT: String(port + 1),
       LOG_LEVEL: 'error',
-      SHUTDOWN_TIMEOUT_MS: '1500',
+      SHUTDOWN_TIMEOUT_MS: String(options.shutdownTimeoutMs ?? 1500),
       S3_BACKUP_ENABLED: '',
       SQLITE_PATH: '',
       STATS_INTERVAL_MS: '600000',

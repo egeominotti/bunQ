@@ -30,6 +30,32 @@ head:
   test launches four independent bunqueue processes against one database,
   verifies exact delivery and shared policies through all endpoints, then kills
   one lease owner and proves survivor recovery plus stale-token fencing.
+  An opt-in ten-process soak adds 40 concurrent consumers, 25,000-job mixed
+  traffic, simultaneous loss of two lease owners, production lease timing,
+  exact recovery, stale-token fencing, and PostgreSQL deadlock/WAL/temp
+  accounting. Its emitted timings remain diagnostic until raw native-host
+  records and integrity hashes are retained for publication.
+  Two standard public-API suites additionally connect `Queue`, `Worker`,
+  `QueueEvents`, and `FlowProducer` to different members of a four-process
+  cluster. They cover lifecycle/results/logs, pause, custom-ID idempotency,
+  DLQ retry, `removeOnComplete` result retention, zero-cache authoritative
+  reads, and a three-level cross-queue flow in every PostgreSQL 15–18 CI matrix
+  entry. An extreme public-API campaign adds a 256-request custom-ID collision,
+  256 concurrent remote completion waiters, 32 simultaneous eight-way flows,
+  and active-Worker recovery after the owning broker is killed.
+- The shared SDK conformance harness can now start isolated SQLite or PostgreSQL
+  brokers. TypeScript, Python, PHP, Go, Rust, and Elixir each run all 18 public
+  protocol checks against both backends in CI and in the SDK sandbox. The
+  sandbox provisions one disposable PostgreSQL 18.6 service on a private
+  Docker-internal network and gives each broker an independently cleaned
+  namespace. A case-insensitive driver policy now removes bunqueue,
+  PostgreSQL/libpq, AWS/S3, storage/TLS, and delimiter-named credential
+  variables while collision tests preserve non-secret toolchain settings. The
+  harness observes broker exit, escalates to `SIGKILL` when required, and only
+  then cleans SQLite or the PostgreSQL namespace. Startup failures follow the
+  same ownership rule; every started suite settles before aggregate cleanup,
+  unconfirmed container names are never force-removed, and Docker teardown
+  failures remain retryable and are reported together with startup errors.
 - Added `Queue.removeDlqJob(id)` and `removeDlqJobAsync(id)` for permanently
   deleting one failed job without retrying it. Both methods await the selected
   embedded or TCP broker and return whether an entry existed.
@@ -62,6 +88,15 @@ head:
   snapshots, and does not imply MySQL support. Explicit `memory` construction
   ignores an inherited SQLite data path; the SQLite Strategy and hot path remain
   unchanged.
+- PostgreSQL `WaitJob` now recognizes durable completion-only generations when
+  a queued request reaches the broker after `removeOnComplete` deleted the live
+  row. A discriminated asynchronous completion port preserves valid
+  `undefined` results, performs one authoritative PostgreSQL read, and leaves
+  the existing memory/SQLite missing-row behavior unchanged.
+- PostgreSQL `IsPaused` now reads durable queue state after pause/resume instead
+  of relying on the eventually consistent local projection. This closes the
+  commit-to-LISTEN read-your-write window seen by every network SDK while
+  preserving the existing synchronous memory and SQLite path.
 - Server persistence selection now uses explicit Strategy, immutable Registry,
   and lifecycle Facade boundaries. Fake adapters unit-test validation, creation,
   display, concurrent shutdown coalescing, and retry after transient shutdown
@@ -234,6 +269,18 @@ head:
 
 ### Fixed
 
+- SQLite DLQ and completed retries now restore live custom-ID and unique-key
+  ownership. Every DLQ retry variant persists before publishing RAM, rejects a
+  key owned by another generation without dropping terminal work, and leaves
+  memory plus disk unchanged after a storage failure. The minimized model seed
+  that exposed the bug is retained as a deterministic regression.
+- PostgreSQL `GetResult` and `WaitJob` now read completion results through an
+  asynchronous authoritative result port. A broker waiting on work completed
+  by another broker can no longer return `completed: true` with an undefined
+  result before its local projection refreshes. PostgreSQL waits register a
+  cancellable event waiter before rechecking the completion table, closing the
+  check-before-subscribe race without polling; memory and SQLite retain their
+  existing synchronous result behavior.
 - PostgreSQL DLQ creation now derives entry, attempt, retry, and expiry
   timestamps from the transaction's database clock. Age maintenance no longer
   compares a broker-host timestamp with PostgreSQL time, which could delay a

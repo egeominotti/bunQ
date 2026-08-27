@@ -58,6 +58,28 @@ export class PostgresQueueManagerQueries extends PostgresQueueManagerState {
     return this.postgresSnapshot.getResult(jobId);
   }
 
+  override async getCompletionAsync(jobId: JobId): Promise<{ found: boolean; result: unknown }> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.getResult(jobId);
+    });
+  }
+
+  override async getResultAsync(jobId: JobId): Promise<unknown> {
+    return (await this.getCompletionAsync(jobId)).result;
+  }
+
+  override async waitForJobCompletion(jobId: JobId, timeoutMs: number): Promise<boolean> {
+    const controller = new AbortController();
+    const waiting = super.waitForJobCompletion(jobId, timeoutMs, controller.signal);
+    try {
+      const completed = (await this.getCompletionAsync(jobId)).found;
+      return completed || (await waiting);
+    } finally {
+      controller.abort();
+    }
+  }
+
   override async getChildrenValues(parentJobId: JobId): Promise<Record<string, unknown>> {
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
@@ -139,6 +161,13 @@ export class PostgresQueueManagerQueries extends PostgresQueueManagerState {
 
   override isPaused(queue: string): boolean {
     return this.postgresSnapshot.queueState(queue)?.paused ?? false;
+  }
+
+  async isPausedDurable(queue: string): Promise<boolean> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return (await this.postgresStore.getQueueState(queue)).paused;
+    });
   }
 
   override getQueueLimits(queue: string): {

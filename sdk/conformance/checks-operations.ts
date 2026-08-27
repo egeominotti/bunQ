@@ -211,4 +211,56 @@ export const OPERATION_CHECKS: Check[] = [
       }
     },
   },
+  {
+    id: 'C17',
+    title: 'atomic FlowProducer tree runs child before parent',
+    run: async (d, w) => {
+      const queue = q('c17');
+      const parentId = q('flow-parent');
+      const childId = q('flow-child');
+      const created = await d.must('addFlow', { queue, parentId, childId });
+      assert(created.parentId === parentId, `flow parent id changed to ${created.parentId}`);
+      assert(created.childId === childId, `flow child id changed to ${created.childId}`);
+
+      const parent = (await w.call({ cmd: 'GetJob', id: parentId })).job as {
+        childrenIds?: unknown[];
+      };
+      const child = (await w.call({ cmd: 'GetJob', id: childId })).job as {
+        parentId?: unknown;
+      };
+      assert(parent.childrenIds?.includes(childId) === true, 'parent lost its child edge');
+      assert(child.parentId === parentId, 'child lost its parent edge');
+      assert(
+        (await w.call({ cmd: 'GetState', id: parentId })).state === 'waiting-children',
+        'parent must wait for its child'
+      );
+      assert(
+        (await w.call({ cmd: 'GetState', id: childId })).state === 'waiting',
+        'child must be runnable first'
+      );
+
+      const result = { source: 'conformance-flow' };
+      await d.must(
+        'process',
+        { queue, behavior: 'ok', result, until: { completed: 2 }, timeoutMs: 20_000 },
+        30_000
+      );
+      assert(
+        (await w.call({ cmd: 'GetState', id: parentId })).state === 'completed',
+        'parent did not complete after its child'
+      );
+      assert(
+        (await w.call({ cmd: 'GetState', id: childId })).state === 'completed',
+        'child did not complete'
+      );
+      const values = (await w.call({ cmd: 'GetChildrenValues', id: parentId })).data as {
+        values?: Record<string, unknown>;
+      };
+      const childValues = Object.values(values.values ?? {});
+      assert(
+        childValues.length === 1 && isDeepStrictEqual(childValues[0], result),
+        `parent cannot read the persisted child result: ${JSON.stringify(values)}`
+      );
+    },
+  },
 ];

@@ -737,7 +737,7 @@ describe('Query Handlers', () => {
       await handlePull({ cmd: 'PULL', queue: 'emails' }, ctx);
       await handleAck({ cmd: 'ACK', id: jobId, result: { sent: true } }, ctx);
 
-      const res = handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
+      const res = await handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
       expect(res.ok).toBe(true);
       expect((res as any).result).toEqual({ sent: true });
     });
@@ -749,7 +749,7 @@ describe('Query Handlers', () => {
       );
       const jobId = (pushRes as any).id;
 
-      const res = handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
+      const res = await handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
       expect(res.ok).toBe(true);
       expect((res as any).result).toBeUndefined();
     });
@@ -759,7 +759,7 @@ describe('Query Handlers', () => {
         { cmd: 'PUSH', queue: 'emails', data: {} },
         ctx
       );
-      const res = handleGetResult(
+      const res = await handleGetResult(
         { cmd: 'GetResult', id: (pushRes as any).id, reqId: 'req-result' },
         ctx,
         'req-result'
@@ -1614,7 +1614,7 @@ describe('End-to-End Flows', () => {
     expect((state3 as any).state).toBe('completed');
 
     // Get result
-    const resultRes = handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
+    const resultRes = await handleGetResult({ cmd: 'GetResult', id: jobId }, ctx);
     expect((resultRes as any).result).toEqual({ sent: true, timestamp: 12345 });
   });
 

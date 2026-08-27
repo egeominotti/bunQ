@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-/** Run each official language SDK in its own disposable image. */
-
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { finished } from 'node:stream/promises';
 import { suitePassed, writeRunReport, writeSuiteArtifacts } from './test-sandbox-report';
@@ -10,6 +8,13 @@ import {
   previousReport,
   type SuiteTelemetry,
 } from './test-sandbox-telemetry';
+import {
+  startSdkPostgresInfrastructure,
+  type SdkPostgresInfrastructure,
+} from './sdk-sandbox-postgres';
+import { cleanupSdkResources, removeSdkContainer } from './sdk-sandbox-cleanup';
+import { runSdkSuitesSettled } from './sdk-sandbox-orchestration';
+import { sdkSandboxSuites as suites, type SdkSandboxSuite } from './sdk-sandbox-suites';
 
 const ROOT = `${import.meta.dir}/..`;
 const RUN_ID = new Date().toISOString().replaceAll(':', '-');
@@ -18,57 +23,34 @@ const LOG_DIR = `${LOG_ROOT}/${RUN_ID}`;
 const MEMORY = Bun.env.BUNQUEUE_SDK_TEST_MEMORY ?? '4g';
 const CPUS = Bun.env.BUNQUEUE_SDK_TEST_CPUS;
 const SEQUENTIAL = Bun.env.BUNQUEUE_SDK_TEST_SEQUENTIAL === '1';
-const suites = [
-  {
-    name: 'typescript',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/typescript && bun run build && bun run check && bun run test:property && mkdir -p /tmp/typescript-package && bun pm pack --destination /tmp/typescript-package && bun tests/integration.ts && bun tests/e2e.ts && bun run test:workers && cd ../conformance && bun runner.ts --driver 'bun drivers/typescript.ts'",
-    ],
-  },
-  {
-    name: 'python',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/python && python -m compileall -q bunqueue tests && python -m pytest tests/test_flow_plan_property.py -q && python -m build --no-isolation --outdir /tmp/python-package && python tests/test_integration.py && python tests/run_e2e.py && cd ../conformance && bun runner.ts --driver 'python drivers/python.py'",
-    ],
-  },
-  {
-    name: 'php',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/php && composer validate --strict --no-check-publish && find src tests -name '*.php' -print0 | xargs -0 -n1 php -l && composer test:property && php tests/run-e2e.php && cd ../conformance && bun runner.ts --driver 'php drivers/php.php'",
-    ],
-  },
-  {
-    name: 'go',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/go && test -z \"$(gofmt -l .)\" && go vet ./... && go list ./... && go test -v ./... && go test -race -run 'Hardening|Regression|Worker' ./... && cd ../conformance && bun runner.ts --driver './drivers/go-driver'",
-    ],
-  },
-  {
-    name: 'rust',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/rust && cargo fmt --check && cargo clippy --locked --offline --all-targets -- -D warnings && cargo test --locked --offline && cargo package --locked --offline --allow-dirty --no-verify && cd ../conformance && bun runner.ts --driver 'cargo run --locked --offline --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver'",
-    ],
-  },
-  {
-    name: 'elixir',
-    command: [
-      'bash',
-      '-c',
-      "cd sdk/elixir && mix format --check-formatted && mix compile --warnings-as-errors && mix test --slowest 20 && mix hex.build && cd ../conformance && bun runner.ts --driver 'cd ../elixir && mix run ../conformance/drivers/elixir.exs'",
-    ],
-  },
-] as const;
 const active = new Set<string>();
+let postgres: SdkPostgresInfrastructure | null = null;
+const teardownErrors: Error[] = [];
+
+async function failedSuiteTelemetry(
+  suite: SdkSandboxSuite,
+  error: unknown
+): Promise<SuiteTelemetry> {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  teardownErrors.push(failure);
+  const logPath = `${LOG_DIR}/${suite.name}.log`;
+  await Bun.write(logPath, `SDK suite orchestration failed: ${failure.message}\n`);
+  const now = new Date().toISOString();
+  const telemetry = await createSuiteTelemetry({
+    suite: suite.name,
+    command: suite.command,
+    container: `bunqueue-sdk-${suite.name}-${process.pid}`.slice(0, 63),
+    logPath,
+    startedAt: now,
+    finishedAt: now,
+    exitCode: 1,
+    oomKilled: false,
+    samples: [],
+  });
+  telemetry.anomalies.push(`orchestration failure: ${failure.message}`);
+  await writeSuiteArtifacts(LOG_DIR, telemetry, []);
+  return telemetry;
+}
 
 async function relay(
   stream: ReadableStream<Uint8Array>,
@@ -95,16 +77,25 @@ async function logged(command: string[], path: string): Promise<number> {
 }
 
 function remove(name: string): void {
-  Bun.spawnSync(['docker', 'rm', '--force', name], {
-    cwd: ROOT,
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-  active.delete(name);
+  removeSdkContainer(active, name, ROOT);
 }
 
 function cleanup(): void {
-  for (const name of active) remove(name);
+  cleanupSdkResources(active, postgres, ROOT);
+  postgres = null;
+}
+
+function handleSignal(signal: string, exitCode: number): void {
+  try {
+    cleanup();
+  } catch (error) {
+    console.error(
+      `${signal} cleanup failed; owned Docker resources were retained for retry`,
+      error
+    );
+    process.exit(1);
+  }
+  process.exit(exitCode);
 }
 
 function dockerAvailable(): boolean {
@@ -128,14 +119,8 @@ function wasOomKilled(container: string): boolean {
   return result.exitCode === 0 && result.stdout.toString().trim() === 'true';
 }
 
-process.on('SIGINT', () => {
-  cleanup();
-  process.exit(130);
-});
-process.on('SIGTERM', () => {
-  cleanup();
-  process.exit(130);
-});
+process.on('SIGINT', () => handleSignal('SIGINT', 130));
+process.on('SIGTERM', () => handleSignal('SIGTERM', 143));
 
 if (!dockerAvailable()) process.exit(1);
 mkdirSync(LOG_DIR, { recursive: true });
@@ -184,7 +169,9 @@ for (const suite of suites) {
   }
 }
 
-async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry> {
+postgres = await startSdkPostgresInfrastructure(ROOT);
+
+async function runSuite(suite: SdkSandboxSuite): Promise<SuiteTelemetry> {
   const container = `bunqueue-sdk-${suite.name}-${process.pid}`.slice(0, 63);
   active.add(container);
   console.log(`Running SDK suite ${suite.name} in ${container}...`);
@@ -199,7 +186,7 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
     container,
     '--init',
     '--network',
-    'none',
+    postgres.network,
     '--cap-drop',
     'ALL',
     '--security-opt',
@@ -223,6 +210,8 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
     'WRANGLER_SEND_METRICS=false',
     '--env',
     'CLOUDFLARE_CF_FETCH_ENABLED=false',
+    '--env',
+    `BUNQUEUE_CONFORMANCE_POSTGRES_URL=${postgres.url}`,
     `bunqueue-sdk-test:${suite.name}`,
     ...suite.command,
   ];
@@ -246,8 +235,16 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
   // aggregate verdict already refuses an empty result; the retention decision has to
   // agree with it or the evidence is gone by the time anyone reads the summary.
   if (suitePassed(telemetry)) {
-    remove(container);
-    console.log(`SDK suite passed: ${suite.name}`);
+    try {
+      remove(container);
+      console.log(`SDK suite passed: ${suite.name}`);
+    } catch (error) {
+      const cleanupError = error instanceof Error ? error : new Error(String(error));
+      teardownErrors.push(cleanupError);
+      telemetry.exitCode = 1;
+      telemetry.anomalies.push(`container cleanup failed: ${cleanupError.message}`);
+      console.error(`SDK suite cleanup failed: ${suite.name}`, cleanupError);
+    }
   } else {
     active.delete(container);
     const counted = telemetry.tests.passed + telemetry.tests.failed + telemetry.tests.skipped;
@@ -259,11 +256,25 @@ async function runSuite(suite: (typeof suites)[number]): Promise<SuiteTelemetry>
   return telemetry;
 }
 
-const results: SuiteTelemetry[] = [];
-if (SEQUENTIAL) {
-  for (const suite of suites) results.push(await runSuite(suite));
-} else {
-  results.push(...(await Promise.all(suites.map(runSuite))));
+const settled = await runSdkSuitesSettled(
+  suites,
+  async (suite) => {
+    try {
+      return await runSuite(suite);
+    } catch (error) {
+      return failedSuiteTelemetry(suite, error);
+    }
+  },
+  SEQUENTIAL
+);
+const results = settled.results;
+const orchestrationErrors = [...settled.errors, ...teardownErrors];
+if (orchestrationErrors.length > 0) {
+  try {
+    cleanup();
+  } catch (error) {
+    orchestrationErrors.push(error instanceof Error ? error : new Error(String(error)));
+  }
 }
 const baselinePath = await previousReport(LOG_ROOT, RUN_ID);
 const report = await writeRunReport({
@@ -274,5 +285,16 @@ const report = await writeRunReport({
   baselinePath,
 });
 console.log(`SDK telemetry: ${LOG_DIR}/summary.md`);
-if (!report.passed) process.exit(1);
+if (!report.passed || orchestrationErrors.length > 0) {
+  if (orchestrationErrors.length > 0)
+    console.error(new AggregateError(orchestrationErrors, 'SDK sandbox orchestration failed'));
+  if (postgres)
+    console.error(
+      `Retained PostgreSQL infrastructure: ${postgres.container} on network ${postgres.network}`
+    );
+  else console.error('PostgreSQL infrastructure cleanup completed.');
+  process.exit(1);
+}
+postgres.stop();
+postgres = null;
 console.log(`All SDK sandbox suites passed in ${(report.durationMs / 1000).toFixed(1)}s.`);

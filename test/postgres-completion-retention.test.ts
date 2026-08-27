@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
+import { jobId } from '../src/domain/types/job';
 import { cleanupPostgresNamespace } from './support/postgres-event-race';
 
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
@@ -214,6 +215,9 @@ describe('PostgreSQL completion retention', () => {
         });
 
         expect(first.getResult('producer')).toBeUndefined();
+        expect(second.getResult('producer')).toBeUndefined();
+        expect(await second.getResultAsync(jobId('producer'))).toEqual({ id: 'producer' });
+        expect(await first.waitForJobCompletion(jobId('producer'), 100)).toBe(true);
         expect(await second.getChildrenValues(consumer.id)).toEqual({
           'source:producer': { id: 'producer' },
         });

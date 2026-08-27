@@ -164,7 +164,22 @@ Notable management/advanced flows:
 - The introspection handlers return live queue-limit status and owner-aware deduplication lookup/removal through `DataResponse` payloads.
 - `handleDlq` returns both jobs and full filtered entries; `handleGetDlqStats` returns the authoritative aggregate. Filtered retries and completed retries pass their `count`/`timestamp` selectors to the manager instead of dropping them. `handleRemoveDlqJob` returns `data.removed` from the durable, idempotent selective deletion; thrown persistence errors are converted by the top-level handler into an error response rather than a false miss.
 - `handleProgress` / `handleGetProgress` / `handleMoveToDelayed`: on failure they re-query `getJobState` to disambiguate "Job not found" (state `unknown`) from "not active" (`management.ts:36-42`, `management.ts:61-65`, `src/infrastructure/server/handlers/advanced/jobs.ts:69-85`).
-- `handleWaitJob` (`src/infrastructure/server/handlers/advanced/jobs.ts:98-132`): caps `timeout` to `[0, 600000]` (default 30s); returns immediately if `job.completedAt` is set, otherwise awaits `waitForJobCompletion` (event-driven, no polling).
+- `handleWaitJob` (`src/infrastructure/server/handlers/advanced/jobs.ts`): caps
+  `timeout` to `[0, 600000]` (default 30s); returns immediately if
+  `job.completedAt` is set, otherwise awaits `waitForJobCompletion`. If a late
+  request arrives after `removeOnComplete` deleted the live row, the handler
+  checks the discriminated completion port before reporting `Job not found`.
+  Successful branches use the manager's asynchronous result port. On PostgreSQL
+  this reads the durable completion row instead of an eventually consistent
+  broker projection, and the manager registers a cancellable event waiter
+  before its durable completion recheck so a remote completion cannot be lost
+  between check and subscribe. Memory and SQLite retain their existing
+  in-process result lookup and missing-row behavior.
+- `handleIsPaused` prefers the PostgreSQL manager's asynchronous durable point
+  read when that optional port exists. A successful `Pause` or `Resume` is
+  therefore immediately visible to the requesting or another SDK connection,
+  even before LISTEN-driven projection refresh completes. Memory and SQLite use
+  the existing synchronous `isPaused` method without an extra persistence read.
 - Config setters (`handleSetStallConfig`, `handleSetDlqConfig`): run `sanitizeConfigNumbers` (`handlers/advanced/configNumbers.ts:7-27`) to coerce numeric strings and drop non-numeric garbage so the manager's merge never stores `NaN` (a string `stallInterval` would otherwise silently disable stall detection).
 
 Query/dashboard count handling: `handleGetJobCounts` and

@@ -52,12 +52,12 @@ export async function handleGetState(
 }
 
 /** Handle GetResult command */
-export function handleGetResult(
+export async function handleGetResult(
   cmd: Extract<Command, { cmd: 'GetResult' }>,
   ctx: HandlerContext,
   reqId?: string
-): Response {
-  const result = ctx.queueManager.getResult(jobId(cmd.id));
+): Promise<Response> {
+  const result = await ctx.queueManager.getResultAsync(jobId(cmd.id));
   return { ok: true, id: cmd.id, result, reqId };
 }
 

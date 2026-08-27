@@ -70,6 +70,13 @@ stored `null` from a missing row. This normalization happens at the
 QueueManager boundary and is shared by embedded calls, TCP `GetResult`,
 `Queue.waitJobUntilFinished`, and FlowProducer result helpers. No truthiness
 check is allowed because `0`, `false`, and `''` are valid results.
+The transport-facing discriminated `getCompletionAsync` port returns
+`{ found, result }`, so a valid `undefined` result remains distinct from a
+missing completion. `getResultAsync` delegates to it. Memory and SQLite derive
+`found` from the unchanged retained-completion set and keep their synchronous
+lookup. PostgreSQL overrides the port with one direct completion-table read, so
+`GetResult` and late `WaitJob` requests do not depend on the receiving broker's
+eventually consistent result projection or a live job row.
 
 `jobManagement.ts`:
 

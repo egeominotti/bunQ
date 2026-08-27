@@ -56,4 +56,4 @@ batch size.
 The test harness reserves distinct TCP and HTTP ports together and serializes
 server startup through readiness, preventing parallel tests from stealing one
 another's ports. The runner starts clean normal and auth-enabled servers and
-independently verifies the Rust driver's answers; all 17 checks pass.
+independently verifies the Rust driver's answers; all 18 checks pass.

@@ -811,7 +811,19 @@ TCP, and embedded suites in three disposable non-root containers without host
 mounts or external networking. CI provides an equivalent fresh VM per suite.
 The companion `bun run test:sandbox:sdk` gate builds six language-specific
 images and runs TypeScript, Python, PHP, Go, Rust, and Elixir
-native/conformance suites with the same containment and telemetry format.
+native suites with the same containment and telemetry format. Each SDK runs the
+18 shared protocol checks against both a temporary SQLite broker and an
+isolated namespace on one disposable PostgreSQL 18.6 service. The containers
+share only a dedicated Docker-internal network with no external route. The
+harness strips bunqueue, PostgreSQL/libpq, AWS/S3, storage/TLS, and
+delimiter-named credential variables from driver environments while preserving
+non-secret toolchain names. Endpoint and per-check authentication are sent over
+the driver protocol. This limits accidental environment exposure rather than
+sandboxing an untrusted driver. Broker exit is observed, with `SIGKILL`
+escalation, before SQLite or namespace cleanup begins. Suite settlement waits
+for every started peer before aggregate cleanup. Docker teardown failures remain
+owned and retryable, startup plus cleanup errors are aggregated, and PostgreSQL
+containers are removed only after Docker confirms their creation.
 Those suites include independent-connection lease/idempotency races,
 native property-based flow planners with reproducible seeds and shrinking,
 malformed-input fuzz corpora, bounded spikes, and durable SIGKILL/restart

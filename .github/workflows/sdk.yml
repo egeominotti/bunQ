@@ -26,6 +26,7 @@ on:
 env:
   RUN_SOAK: ${{ github.event_name == 'schedule' || inputs.run_soak }}
   RATE_LIMIT_MAX_REQUESTS: ${{ (github.event_name == 'schedule' || inputs.run_soak) && '1000000' || '10000' }}
+  SDK_POSTGRES_URL: postgres://bunqueue_sdk:bunqueue_sdk@127.0.0.1:5432/bunqueue_sdk
 
 jobs:
   typescript:
@@ -35,6 +36,20 @@ jobs:
     # broker that never binds, a hung conformance driver — which would
     # otherwise burn the 360-minute runner default. Fits the 15m soak.
     timeout-minutes: 45
+    services: &postgres-service
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: bunqueue_sdk
+          POSTGRES_PASSWORD: bunqueue_sdk
+          POSTGRES_DB: bunqueue_sdk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bunqueue_sdk -d bunqueue_sdk"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     strategy:
       fail-fast: false
       matrix:
@@ -90,7 +105,11 @@ jobs:
       - name: Protocol conformance
         if: matrix.runtime == 'bun'
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "bun drivers/typescript.ts"
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "bun drivers/typescript.ts"
+          bun runner.ts --driver "bun drivers/typescript.ts"
       - name: Cloudflare Workers package e2e
         if: matrix.runtime == 'bun'
         working-directory: sdk/typescript
@@ -110,6 +129,7 @@ jobs:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services: *postgres-service
     strategy:
       fail-fast: false
       matrix:
@@ -142,7 +162,11 @@ jobs:
           .venv/bin/python tests/run_e2e.py
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"
+          bun runner.ts --driver "../python/.venv/bin/python drivers/python.py"
       - name: Weekly sustained SDK soak
         if: env.RUN_SOAK == 'true' && matrix.python == '3.13'
         working-directory: sdk/python
@@ -155,6 +179,7 @@ jobs:
     name: PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services: *postgres-service
     strategy:
       fail-fast: false
       matrix:
@@ -182,7 +207,11 @@ jobs:
           php tests/run-e2e.php
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "php drivers/php.php"
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "php drivers/php.php"
+          bun runner.ts --driver "php drivers/php.php"
       - name: Weekly sustained SDK soak
         if: env.RUN_SOAK == 'true' && matrix.php == '8.4'
         working-directory: sdk/php
@@ -196,6 +225,7 @@ jobs:
     runs-on: ubuntu-latest
     # Soak (15m) + 60s fuzzing on top of the suite.
     timeout-minutes: 50
+    services: *postgres-service
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -217,7 +247,11 @@ jobs:
           go test -race -run 'Hardening|Regression|Worker' ./...
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "go -C drivers/go run ."
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "go -C drivers/go run ."
+          bun runner.ts --driver "go -C drivers/go run ."
       - name: Weekly sustained SDK soak
         if: env.RUN_SOAK == 'true'
         working-directory: sdk/go
@@ -247,6 +281,7 @@ jobs:
     name: Rust
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    services: *postgres-service
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -266,9 +301,11 @@ jobs:
           cargo package --locked --allow-dirty --no-verify
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: >-
-          bun runner.ts --driver
-          "cargo run --locked --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "cargo run --locked --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
+          bun runner.ts --driver "cargo run --locked --quiet --manifest-path ../rust/Cargo.toml --example conformance-driver"
       - name: Weekly sustained SDK soak
         if: env.RUN_SOAK == 'true'
         working-directory: sdk/rust
@@ -281,6 +318,7 @@ jobs:
     name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services: *postgres-service
     strategy:
       fail-fast: false
       matrix:
@@ -313,7 +351,11 @@ jobs:
           mix hex.build
       - name: Protocol conformance
         working-directory: sdk/conformance
-        run: bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"
+        env:
+          BUNQUEUE_CONFORMANCE_POSTGRES_URL: ${{ env.SDK_POSTGRES_URL }}
+        run: |
+          env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"
+          bun runner.ts --driver "cd ../elixir && mix run ../conformance/drivers/elixir.exs"
       - name: Weekly sustained SDK soak
         if: env.RUN_SOAK == 'true' && matrix.elixir == '1.20.1'
         working-directory: sdk/elixir

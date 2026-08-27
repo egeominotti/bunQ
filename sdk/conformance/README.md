@@ -53,6 +53,34 @@ the same driver and pass `./drivers/go-driver`.
 Output: one `PASS`/`FAIL` line per check and a final verdict. Exit code 0 =
 conformant.
 
+By default the spawned broker uses a unique temporary SQLite database. Set
+`BUNQUEUE_CONFORMANCE_POSTGRES_URL` to exercise the identical client driver
+against PostgreSQL instead:
+
+```bash
+BUNQUEUE_CONFORMANCE_POSTGRES_URL='postgres://bunqueue:secret@localhost:5432/bunqueue' \
+  bun runner.ts --driver "bun drivers/typescript.ts"
+```
+
+The harness passes the URL only to the broker child. Driver processes inherit
+the normal toolchain environment, but a case-insensitive policy removes `BQ_`,
+`BUNQUEUE_`, `AWS_`, `S3_`, `POSTGRES_`, libpq `PG*`, known storage/TLS handles,
+and delimiter-separated credential names such as `TOKEN`, `PASSWORD`,
+`API_KEY`, and `PRIVATE_KEY`. Collision regressions preserve non-secret names
+such as `TOKENIZERS_PARALLELISM` and `AUTHORITY_URL`. The TCP endpoint and
+optional authentication token are delivered through the driver protocol.
+This reduces accidental environment disclosure; it is not a security sandbox
+for an untrusted driver, which still runs as repository code inside the SDK
+container. The harness creates a unique PostgreSQL namespace for each spawned
+broker, confirms process exit with `SIGKILL` escalation when necessary, and
+only then deletes every row in the namespace. Startup failures use the same
+ordered cleanup and also remove the temporary SQLite directory. The outer SDK
+sandbox waits for every started suite, checks every Docker teardown result,
+retains failed ownership for a retry, never force-removes an unconfirmed
+container name, and reports startup plus cleanup failures together.
+Official SDK CI and `bun run test:sandbox:sdk` execute all 18 checks on both
+SQLite and PostgreSQL 18.6 for TypeScript, Python, PHP, Go, Rust, and Elixir.
+
 ## Driver contract
 
 A driver is any executable that reads one JSON object per line on stdin and
@@ -64,6 +92,7 @@ it: `{"id": 1, "ok": true, ...result}` or `{"id": 1, "ok": false, "error": "..."
 | `connect` | `host`, `port`, `token?` | — |
 | `add` | `queue`, `name`, `data?`, `opts?` | `jobId` |
 | `addBulk` | `queue`, `entries: [{name, data?, opts?}]` | `ids` |
+| `addFlow` | `queue`, `parentId`, `childId` | `parentId`, `childId` |
 | `getJob` | `jobId` | `job` (`{id, name, data, stacktrace?}`) or `null` for missing — **not an error** |
 | `getJobByCustomId` | `queue`, `customId` | `job` or `null` |
 | `getState` | `jobId` | `state` |
@@ -113,7 +142,8 @@ erroring forever).
 | C14 | Worker batch size clamped to the server max (1000) | §6.3 |
 | C15 | Pause / isPaused / resume / drain | §6.4 |
 | C16 | Unicode payload integrity through msgpack | §4 |
-| C17 | Auth handshake on a token-protected server | §2 |
+| C17 | Atomic FlowProducer tree, dependency order, and child-result visibility | §6.5 |
+| C18 | Auth handshake on a token-protected server | §2 |
 
 ## Adding a new language
 

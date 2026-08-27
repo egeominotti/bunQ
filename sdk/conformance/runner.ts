@@ -11,20 +11,25 @@
 import { assertCondition as assert, queueName as q } from './check-support';
 import { OPERATION_CHECKS } from './checks-operations';
 import { PROTOCOL_CHECKS } from './checks-protocol';
-import { Driver, startServer } from './harness';
+import { type ConformanceServer, disposeServer, Driver, startServer } from './harness';
 
 const CHECKS = [...PROTOCOL_CHECKS, ...OPERATION_CHECKS];
 
-async function stopServer(
-  driver: Driver,
-  server: Awaited<ReturnType<typeof startServer>>
-): Promise<void> {
-  driver.kill();
-  server.wire.close();
-  server.proc.kill();
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  const { rmSync } = await import('node:fs');
-  rmSync(server.dataDir, { recursive: true, force: true });
+async function stopServer(driver: Driver | null, server: ConformanceServer): Promise<void> {
+  const errors: unknown[] = [];
+  if (driver) {
+    try {
+      await driver.terminate();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    await disposeServer(server);
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'conformance shutdown failed');
 }
 
 async function main(): Promise<number> {
@@ -35,10 +40,15 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  console.log(
+    `Backend: ${process.env.BUNQUEUE_CONFORMANCE_POSTGRES_URL ? 'PostgreSQL' : 'SQLite'}`
+  );
+
   let failed = 0;
   const server = await startServer();
-  const driver = new Driver(driverCommand);
+  let driver: Driver | null = null;
   try {
+    driver = new Driver(driverCommand);
     await driver.must('connect', { host: '127.0.0.1', port: server.port });
     for (const check of CHECKS) {
       try {
@@ -59,8 +69,9 @@ async function main(): Promise<number> {
   }
 
   const authServer = await startServer({ AUTH_TOKENS: 'conformance-secret' });
-  const authDriver = new Driver(driverCommand);
+  let authDriver: Driver | null = null;
   try {
+    authDriver = new Driver(driverCommand);
     await authDriver.must('connect', {
       host: '127.0.0.1',
       port: authServer.port,
@@ -70,16 +81,18 @@ async function main(): Promise<number> {
     await authDriver.must('add', { queue, name: 't', data: { x: 1 } });
     const count = await authServer.wire.call({ cmd: 'Count', queue });
     assert(count.count === 1, 'authenticated add must work');
-    console.log('PASS C17 auth handshake on a token-protected server');
+    console.log('PASS C18 auth handshake on a token-protected server');
   } catch (error) {
     failed++;
     console.log(
-      `FAIL C17 auth handshake: ${error instanceof Error ? error.message : String(error)}`
+      `FAIL C18 auth handshake: ${error instanceof Error ? error.message : String(error)}`
     );
   } finally {
-    await authDriver.op('close', {}, 5000).catch(() => {
-      /* the driver may already be closed */
-    });
+    if (authDriver) {
+      await authDriver.op('close', {}, 5000).catch(() => {
+        /* the driver may already be closed */
+      });
+    }
     await stopServer(authDriver, authServer);
   }
 

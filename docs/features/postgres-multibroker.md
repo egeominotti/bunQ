@@ -177,6 +177,14 @@ The Bun SQL pool uses a 10-second connection timeout, a 30-second idle timeout,
 and a 3,600-second maximum connection lifetime. These fixed lifecycle guards are
 not public configuration fields.
 
+The storage choice is entirely server-side. TypeScript, Python, PHP, Go, Rust,
+and Elixir clients continue to use the same TCP protocol and require no database
+driver or PostgreSQL credentials. CI and the isolated SDK gate run all 18 shared
+conformance checks for every official SDK against both the unchanged SQLite
+backend and PostgreSQL 18.6. Each PostgreSQL run receives an isolated namespace,
+and the harness strips storage/auth variables from each driver, proves broker
+exit, and only then removes its rows.
+
 ### Manager adapter
 
 `PostgresQueueManager` subclasses the normal manager surface so the unchanged TCP
@@ -188,6 +196,19 @@ mutable manager state. A local snapshot serves synchronous compatibility reads
 and is refreshed from durable events; point reads and handler paths that require
 current distributed state use the durable methods exposed by the PostgreSQL
 manager.
+That includes `IsPaused`: after `Pause` or `Resume` returns, the TCP handler
+reads `queue_state` from PostgreSQL instead of consulting the eventually
+consistent compatibility snapshot. This provides read-your-write behavior to
+all network SDKs even when the local broker is concurrently replaying its own
+notification. Memory and SQLite retain the original synchronous lookup.
+TCP `GetResult` and both branches of `WaitJob` use an asynchronous result port.
+The PostgreSQL implementation reads the indexed completion record directly,
+while memory and SQLite delegate to their existing synchronous result lookup.
+For a live PostgreSQL wait, the manager registers its cancellable event waiter
+before rechecking the completion table. This prevents both a result-cache race
+after a remote broker completes the job and the check-before-subscribe gap; the
+waiter is cancelled immediately when the durable recheck already finds the
+completion.
 Queue refresh, terminal retry, removal, and custom-ID generation reuse clear an
 obsolete cached completion result before a non-completed generation becomes
 visible.
@@ -694,11 +715,30 @@ per case:
 ```bash
 BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres
 BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:fast-check
+BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:ten-broker
 ```
 
 The primary tests assert PostgreSQL reports version `18.6`; the same complete
 suite also runs against the current PostgreSQL 17, 16, and 15 Alpine images, with the
 expected major supplied through `BUNQUEUE_TEST_POSTGRES_VERSION_PREFIX`.
+`postgres-public-api-queue-worker.test.ts` and
+`postgres-public-api-flow.test.ts`, and
+`postgres-public-api-extreme.test.ts` launch four independent bunqueue processes
+on one namespace and deliberately connect each public surface to a different
+broker. They prove `Queue` admission, pagination, state and counts; `Worker`
+execution, progress, results and logs; `QueueEvents`; cross-broker pause,
+custom-ID idempotency, DLQ inspection/retry; and durable cross-queue
+`FlowProducer` graphs with exact-once execution, dependency ordering, child
+results, tree reads, and parent-result reads. The extreme campaign additionally
+linearizes 256 simultaneous admissions for one custom ID, resolves 256 late
+remote waiters after one `removeOnComplete` transaction, executes 32 concurrent
+eight-way flows (288 jobs), and kills the broker owning an active public Worker
+job before proving survivor recovery. A remote wait plus `GetResult` retains
+the result when `removeOnComplete` deletes the job row, and the
+completion-retention suite repeats the authoritative lookup with a zero-sized
+local result cache. These files are part of the
+normal `test:postgres` command and therefore run in every PostgreSQL 15–18 CI
+matrix entry; they are not an opt-in soak.
 Concurrent brokers claim each job once under both ordinary and 16-consumer
 high-contention campaigns, stale owners are fenced, broker/client shutdown is safe, remotely
 renewed leases survive disconnect, shared limits and workers work, missed cron
@@ -771,6 +811,18 @@ the crashed generation's stale batch ACK. The dedicated GitHub Actions matrix
 runs the complete `test/postgres-*.test.ts` set against
 `postgres:18.6-alpine`, `postgres:17-alpine`, `postgres:16-alpine`, and
 `postgres:15-alpine`.
+
+`test/postgres-ten-processes.test.ts` is the opt-in scale and failure campaign.
+It launches ten independent broker OS processes with private TCP/HTTP ports and
+four SQL pool slots each, then connects 40 TCP consumers to one PostgreSQL
+database. The steady phase streams 20,000 jobs with 512-byte payloads from ten
+producers while every consumer drains concurrently. The failure phase holds 200
+leases across two brokers, pauses the queue globally, sends `SIGKILL` to both
+owners, waits for the eight survivors to recover every lease, proves both stale
+token sets are fenced, resumes through another broker, and completes all 5,000
+jobs. The explicit `BUNQUEUE_POSTGRES_TEN_BROKER_SOAK=1` gate keeps this
+minute-long production-timing campaign out of the normal version-matrix job;
+the package command above sets the gate.
 
 ### Native diagnostic benchmark
 
@@ -1001,6 +1053,27 @@ See
 for the `pg_stat_activity` bottleneck evidence, 100,000-job diagnostics, batch
 and pool sweeps, `work_mem` comparison, rejected changes, exact integrity
 totals, caveats, and raw artifact hashes.
+
+### PostgreSQL 18 ten-broker functional diagnostic
+
+The opt-in native test extends the functional topology to ten bunqueue
+processes sharing one PostgreSQL 18.6 database. Its checked workload uses four
+consumer connections per broker, 20,000 steady-state jobs, 5,000 recovery jobs,
+250-job batches, a four-connection broker pool, 250 ms polling, and the
+production 30-second lease. It kills two owners holding 200 active leases and
+asserts exact ID conservation, exclusive delivery, stale-token rejection,
+survivor health, eventual database completion, one retry per recovered lease,
+and zero new PostgreSQL deadlocks.
+
+The test emits a `POSTGRES_TEN_BROKER_SOAK` JSON record containing timings,
+per-broker claims, and database-stat deltas. Exploratory 2026-08-27 samples
+informed the test shape, but their raw native-host records were not retained;
+their numerical throughput, RTO, WAL, temporary-I/O, and statement-attribution
+values are therefore deliberately excluded from published evidence. A future
+performance publication must retain the raw JSON, environment manifest,
+PostgreSQL settings/stat snapshots, sample order, integrity totals, and hashes
+before quoting measurements. Until then this suite is functional/fault
+evidence, not a capacity benchmark.
 
 ## Related docs
 

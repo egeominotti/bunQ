@@ -105,6 +105,20 @@ docker compose up -d
 ```
 
 </TabItem>
+<TabItem label="PostgreSQL">
+
+```bash
+BUNQUEUE_STORAGE_DRIVER=postgres \
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:secret@localhost:5432/bunqueue' \
+  bunx bunqueue start
+```
+
+PostgreSQL 15–18 are supported and tested; 18.6 is recommended. Storage is
+configured only on the bunqueue server. Every SDK still connects to port 6789
+and does not need a PostgreSQL driver, URL, or database credentials. Multiple
+server instances may share that one database and namespace.
+
+</TabItem>
 <TabItem label="Binary">
 
 ```bash
@@ -1496,6 +1510,13 @@ and certify it with the
 [conformance suite](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance):
 point its runner at your client and it tells you exactly what to fix. The
 official SDKs are built and certified the same way.
+
+CI and the isolated release gate execute all 18 conformance checks for every
+official SDK against both SQLite and PostgreSQL 18.6. The matrix therefore
+proves the real producer, worker, retry/DLQ, scheduler, wait-for-result,
+pause/resume, bulk, Unicode, authentication, and atomic FlowProducer paths
+through each language driver; it does not infer PostgreSQL compatibility from
+the TypeScript client alone.
 
 Two environments are out of scope today. Browsers have no raw-TCP API, so
 route through your own backend instead of connecting directly. WebAssembly

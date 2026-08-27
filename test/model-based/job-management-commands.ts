@@ -184,7 +184,12 @@ class RemoveCommand extends QueueCommand {
 
   async run(model: QueueModel, real: RealQueue): Promise<void> {
     const id = MODEL_JOB_IDS[this.slot]!;
-    const response = await real.send({ cmd: this.discard ? 'Discard' : 'Cancel', id });
+    const previousState = model.jobs.get(id)!.state;
+    const response = await real.send({
+      cmd: this.discard ? 'Discard' : 'Cancel',
+      id,
+      ...(this.discard ? activeLease(previousState, real, id) : {}),
+    });
     expect(response.ok).toBe(true);
     if (this.discard) {
       model.jobs.get(id)!.state = 'failed';

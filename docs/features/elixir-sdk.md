@@ -46,7 +46,7 @@ single-lease contention, fixed-seed generated payloads, malformed-term
 mutations, a 512-job spike, and SIGKILL/restart visibility for a durable job.
 The tagged `:soak` profile is excluded from the bounded suite and sustains one
 OTP-owned connection for a configurable duration. The Elixir conformance driver
-must pass all 17 shared protocol checks.
+must pass all 18 shared protocol checks.
 
 ```bash
 cd sdk/elixir

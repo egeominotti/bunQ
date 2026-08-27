@@ -30,7 +30,11 @@ const parsedWorkflow = Bun.YAML.parse(workflow) as {
   env: Record<string, string>;
   jobs: Record<
     string,
-    { 'timeout-minutes'?: number; steps: { name?: string; if?: string; run?: string }[] }
+    {
+      'timeout-minutes'?: number;
+      services?: Record<string, { image?: string }>;
+      steps: { name?: string; if?: string; run?: string }[];
+    }
   >;
 };
 const soakSteps = Object.entries(parsedWorkflow.jobs).flatMap(([job, { steps }]) =>
@@ -85,6 +89,16 @@ test('every SDK job bounds its own runtime instead of inheriting 360 minutes', (
   for (const [job, { 'timeout-minutes': bound }] of Object.entries(parsedWorkflow.jobs)) {
     expect(bound, job).toBeGreaterThanOrEqual(30);
     expect(bound, job).toBeLessThanOrEqual(60);
+  }
+});
+
+test('every official SDK runs conformance against SQLite and PostgreSQL 18.6', () => {
+  for (const name of ['typescript', 'python', 'php', 'go', 'rust', 'elixir']) {
+    const job = parsedWorkflow.jobs[name];
+    expect(job?.services?.postgres?.image, name).toBe('postgres:18.6-alpine');
+    const step = job?.steps.find(({ name: stepName }) => stepName === 'Protocol conformance');
+    expect(step?.run, name).toContain('env -u BUNQUEUE_CONFORMANCE_POSTGRES_URL');
+    expect(step?.run?.match(/bun runner\.ts --driver/g)?.length, name).toBe(2);
   }
 });
 

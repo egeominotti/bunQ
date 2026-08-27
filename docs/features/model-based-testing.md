@@ -134,6 +134,13 @@ heartbeats, parent/child dependency release and failure policies, and actual
 crash/restart. Focused contract commands also cover FIFO/LIFO priority ties,
 delays, TTL expiry, FIFO groups, unique keys, exclusive leases, and
 rate-limit/concurrency token rollback.
+Generated discard commands carry the captured lease token when the modeled job
+is active, matching the same fencing contract as ACK, FAIL, delay, and retry
+transitions; waiting and delayed administrative discards remain tokenless.
+The minimized seed `676055362` is also preserved as a deterministic SQLite
+regression: DLQ and completed retries must restore custom-ID and unique-key
+ownership, reject ownership conflicts without removing terminal work, and
+leave RAM plus disk unchanged when persistence fails.
 
 `cross-queue-invariants.ts` adds a second generated history over four queues.
 Names are selected at runtime so two queues share an owning shard and, when the
@@ -300,39 +307,39 @@ that can be checked deterministically after each generated command; focused
 state machines and integration suites own wall-clock, protocol, cron,
 migration, and worker-runtime contracts.
 
-| IDs | Category | Primary verification |
-| --- | --- | --- |
-| 1-8 | Core safety | lifecycle command model after every command |
-| 9-13 | Ordering and scheduling | model contract commands plus scheduling regressions |
-| 14-16 | Limits and expiry | model limiter/TTL commands plus concurrency races |
-| 17-18 | Counters and indexes | model `/stats`, API, heap, and SQLite oracle |
-| 19-20 | Crash loop and DLQ exactly-once | real `SIGKILL` model commands and crash regressions |
-| 21-23 | Cron | focused cron, overlap, removal, and restart suites |
-| 24-27 | Flow and parent/child | model dependency policies plus focused workflow suites |
-| 28-29 | Active DLQ behavior | model retry/purge commands plus DLQ retention suites |
-| 30-32 | Pause, resume, drain, obliterate | lifecycle model and dependency-cleanup regressions |
-| 33-34 | Backoff and recovery time | retry/backoff and persisted-recovery suites |
-| 35-37 | Timeout, heartbeat, stall fencing | worker/lock integration and duplicate-execution suites |
-| 38-39 | Results and cleanup | dependency/result retention and removal suites |
-| 40-42 | TCP/HTTP/serialization | protocol integration, batch, and MessagePack property coverage |
-| 43-45 | Storage, migrations, WAL | SQLite migration, integrity, restart, and checkpoint suites |
-| 46 | Quiescent equivalence | clean-restart snapshot comparisons in model and recovery tests |
-| 47 | Same-shard queue isolation | generated four-queue TCP/SQLite campaign |
-| 48 | Cross-shard queue isolation | runtime shard-aware queue selection and generated campaign |
-| 49 | Global multi-queue conservation | per-queue model vs complete SQLite table and `/stats` |
-| 50 | Queue ownership immutability | every ID and payload stays owned by its admitting queue |
-| 51 | Maintenance non-interference | `CompactMemory` preserves every modeled observation |
-| 52 | Queue-local control persistence | pause/resume affects only its queue and survives restart |
-| 53 | Durable retention boundary | low-cap eviction/restart regression over state, payload, result, and SQLite membership |
-| 54 | Correlated overload response | real TCP limiter regression requires the triggering `reqId` |
-| 55 | Complete stale-dependency GC | shard, reverse index, ownership, write buffer, and SQLite regression |
-| 56 | Live dependency result retention and durable completion evidence | low-cap fan-in/fan-out, ACK/ACKB, `removeOnComplete`, live-edge pinning, eviction, restart, and transaction-fault regressions |
-| 57 | Durable progress mutation | model oracle plus active-job restart regression |
-| 58 | Durable per-queue DLQ policy | queue-state restart regression |
-| 59 | Durable manual active-to-waiting transition | generated lifecycle model plus restart regression |
-| 60-69 | CLI determinism and complete surface | generated argv/flag properties, exact command/MessagePack fixtures, real CLI/API/SQLite parity, interruption recovery, and full E2E command matrices |
-| 70 | Backup telemetry conservation | generated attempt/success/failure/overlap model, including scheduler and last-outcome fidelity |
-| 71 | Prometheus queue-cardinality bound | generated selection/subset/exported-plus-omitted model |
+| IDs   | Category                                                         | Primary verification                                                                                                                                 |
+| ----- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1-8   | Core safety                                                      | lifecycle command model after every command                                                                                                          |
+| 9-13  | Ordering and scheduling                                          | model contract commands plus scheduling regressions                                                                                                  |
+| 14-16 | Limits and expiry                                                | model limiter/TTL commands plus concurrency races                                                                                                    |
+| 17-18 | Counters and indexes                                             | model `/stats`, API, heap, and SQLite oracle                                                                                                         |
+| 19-20 | Crash loop and DLQ exactly-once                                  | real `SIGKILL` model commands and crash regressions                                                                                                  |
+| 21-23 | Cron                                                             | focused cron, overlap, removal, and restart suites                                                                                                   |
+| 24-27 | Flow and parent/child                                            | model dependency policies plus focused workflow suites                                                                                               |
+| 28-29 | Active DLQ behavior                                              | model retry/purge commands plus DLQ retention suites                                                                                                 |
+| 30-32 | Pause, resume, drain, obliterate                                 | lifecycle model and dependency-cleanup regressions                                                                                                   |
+| 33-34 | Backoff and recovery time                                        | retry/backoff and persisted-recovery suites                                                                                                          |
+| 35-37 | Timeout, heartbeat, stall fencing                                | worker/lock integration and duplicate-execution suites                                                                                               |
+| 38-39 | Results and cleanup                                              | dependency/result retention and removal suites                                                                                                       |
+| 40-42 | TCP/HTTP/serialization                                           | protocol integration, batch, and MessagePack property coverage                                                                                       |
+| 43-45 | Storage, migrations, WAL                                         | SQLite migration, integrity, restart, and checkpoint suites                                                                                          |
+| 46    | Quiescent equivalence                                            | clean-restart snapshot comparisons in model and recovery tests                                                                                       |
+| 47    | Same-shard queue isolation                                       | generated four-queue TCP/SQLite campaign                                                                                                             |
+| 48    | Cross-shard queue isolation                                      | runtime shard-aware queue selection and generated campaign                                                                                           |
+| 49    | Global multi-queue conservation                                  | per-queue model vs complete SQLite table and `/stats`                                                                                                |
+| 50    | Queue ownership immutability                                     | every ID and payload stays owned by its admitting queue                                                                                              |
+| 51    | Maintenance non-interference                                     | `CompactMemory` preserves every modeled observation                                                                                                  |
+| 52    | Queue-local control persistence                                  | pause/resume affects only its queue and survives restart                                                                                             |
+| 53    | Durable retention boundary                                       | low-cap eviction/restart regression over state, payload, result, and SQLite membership                                                               |
+| 54    | Correlated overload response                                     | real TCP limiter regression requires the triggering `reqId`                                                                                          |
+| 55    | Complete stale-dependency GC                                     | shard, reverse index, ownership, write buffer, and SQLite regression                                                                                 |
+| 56    | Live dependency result retention and durable completion evidence | low-cap fan-in/fan-out, ACK/ACKB, `removeOnComplete`, live-edge pinning, eviction, restart, and transaction-fault regressions                        |
+| 57    | Durable progress mutation                                        | model oracle plus active-job restart regression                                                                                                      |
+| 58    | Durable per-queue DLQ policy                                     | queue-state restart regression                                                                                                                       |
+| 59    | Durable manual active-to-waiting transition                      | generated lifecycle model plus restart regression                                                                                                    |
+| 60-69 | CLI determinism and complete surface                             | generated argv/flag properties, exact command/MessagePack fixtures, real CLI/API/SQLite parity, interruption recovery, and full E2E command matrices |
+| 70    | Backup telemetry conservation                                    | generated attempt/success/failure/overlap model, including scheduler and last-outcome fidelity                                                       |
+| 71    | Prometheus queue-cardinality bound                               | generated selection/subset/exported-plus-omitted model                                                                                               |
 
 Adding an invariant to this register requires an executable assertion and a
 named owning suite. Specialist coverage is not silently presented as part of
@@ -366,13 +373,13 @@ creating its proof.
 The audit does not count a desired property as covered when current behavior
 violates it or the required state is not observable.
 
-| Candidate | Desired invariant | Current blocker |
-| --- | --- | --- |
-| C6 | Every persisted lifecycle transition is atomic under injected I/O failure | Existing failure tests are examples, not a transition-by-transition storage fault model |
-| C7 | Pagination has a no-duplicate/no-skip contract under concurrent mutation | Static ordering is deterministic, but no snapshot/cursor contract exists for mutating result sets |
-| C8 | Strong custom-ID/unique-key idempotency holds for every live job | Bounded LRU/registry trimming intentionally weakens the guarantee after eviction |
-| C9 | Internal resource conservation is directly observable for unique keys, groups, limiter tokens, temporal reverse indexes, and dependency reverse edges | `/stats` exposes aggregate subsets, so exact independent cardinality oracles need diagnostic counters |
-| C10 | JSON monitoring totals remain exact across the full `bigint` range | TCP/HTTP stats convert to `number` and lose precision above 2^53 |
+| Candidate | Desired invariant                                                                                                                                     | Current blocker                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| C6        | Every persisted lifecycle transition is atomic under injected I/O failure                                                                             | Existing failure tests are examples, not a transition-by-transition storage fault model               |
+| C7        | Pagination has a no-duplicate/no-skip contract under concurrent mutation                                                                              | Static ordering is deterministic, but no snapshot/cursor contract exists for mutating result sets     |
+| C8        | Strong custom-ID/unique-key idempotency holds for every live job                                                                                      | Bounded LRU/registry trimming intentionally weakens the guarantee after eviction                      |
+| C9        | Internal resource conservation is directly observable for unique keys, groups, limiter tokens, temporal reverse indexes, and dependency reverse edges | `/stats` exposes aggregate subsets, so exact independent cardinality oracles need diagnostic counters |
+| C10       | JSON monitoring totals remain exact across the full `bigint` range                                                                                    | TCP/HTTP stats convert to `number` and lose precision above 2^53                                      |
 
 C1-C3 are now executable invariants 54-56. C4-C10 require a core contract decision, new observability, or a
 fault-injection seam before a non-flaky invariant can be mandatory. None is

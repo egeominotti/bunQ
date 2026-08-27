@@ -4,7 +4,7 @@
  */
 
 import { createInterface } from 'node:readline';
-import { Queue, UnrecoverableError, Worker } from '../../typescript/dist/index.js';
+import { FlowProducer, Queue, UnrecoverableError, Worker } from '../../typescript/dist/index.js';
 
 type Req = { id: number; op: string } & Record<string, unknown>;
 
@@ -35,7 +35,7 @@ async function processUntil(req: Req): Promise<void> {
 
   const worker = new Worker(
     queueName,
-    async (job: { id: string }) => {
+    (job: { id: string }) => {
       if (behavior === 'unrecoverable') throw new UnrecoverableError('conformance poison');
       if (behavior === 'deepThrow') deepThrow(25);
       if (behavior === 'failOnce' && !failedOnce.has(job.id)) {
@@ -101,6 +101,31 @@ async function handle(req: Req): Promise<Record<string, unknown>> {
       );
       const jobs = await queueFor(String(req.queue)).addBulk(entries);
       return { ids: jobs.map((j) => j.id) };
+    }
+    case 'addFlow': {
+      const parentId = String(req.parentId);
+      const childId = String(req.childId);
+      const queue = String(req.queue);
+      const producer = new FlowProducer(connection);
+      try {
+        const node = await producer.add({
+          name: 'parent',
+          queueName: queue,
+          data: { kind: 'parent' },
+          opts: { jobId: parentId },
+          children: [
+            {
+              name: 'child',
+              queueName: queue,
+              data: { kind: 'child' },
+              opts: { jobId: childId },
+            },
+          ],
+        });
+        return { parentId: node.job.id, childId: node.children?.[0]?.job.id };
+      } finally {
+        producer.close();
+      }
     }
     case 'getJob': {
       // Any queue handle can look a job up by id; jobs are not queue-scoped here.

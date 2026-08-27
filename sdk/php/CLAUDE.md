@@ -19,7 +19,7 @@ both are mandatory for every change here. The correctness checklist is
    `declare(strict_types=1)` everywhere.
 5. Every public method → e2e test in `tests/e2e-*.php`; suites spawn a real
    server. Conformance driver: `../conformance/drivers/php.php` must stay
-   at 17/17.
+   at 18/18.
 6. Everything in English.
 
 ## Module map

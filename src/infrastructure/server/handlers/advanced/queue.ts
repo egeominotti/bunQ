@@ -8,10 +8,20 @@ export function handleIsPaused(
   command: Extract<Command, { cmd: 'IsPaused' }>,
   context: HandlerContext,
   requestId?: string
-): Response {
+): Response | Promise<Response> {
+  const manager = context.queueManager as typeof context.queueManager & {
+    isPausedDurable?: (queue: string) => Promise<boolean>;
+  };
+  if (manager.isPausedDurable) {
+    return manager.isPausedDurable(command.queue).then((paused) => ({
+      ok: true,
+      paused,
+      reqId: requestId,
+    }));
+  }
   return {
     ok: true,
-    paused: context.queueManager.isPaused(command.queue),
+    paused: manager.isPaused(command.queue),
     reqId: requestId,
   } as Response;
 }

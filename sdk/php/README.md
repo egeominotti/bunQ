@@ -195,7 +195,7 @@ composer install
 composer test:property                              # Eris + PHPUnit, shrinking
 php tests/run-e2e.php                               # property tests, then e2e
 BUNQUEUE_SDK_SOAK_SECONDS=3600 php tests/soak.php   # sustained profile
-cd ../conformance && bun runner.ts --driver "php drivers/php.php"   # 17/17
+cd ../conformance && bun runner.ts --driver "php drivers/php.php"   # 18/18
 cd ../.. && bun run test:sandbox:sdk
 ```
 

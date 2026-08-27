@@ -63,8 +63,8 @@ export class QueueManagerServices extends QueueManagerObservability {
     return this.eventsManager.subscribe(callback);
   }
 
-  waitForJobCompletion(jobId: JobId, timeoutMs: number): Promise<boolean> {
-    return this.eventsManager.waitForJobCompletion(jobId, timeoutMs);
+  waitForJobCompletion(jobId: JobId, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    return this.eventsManager.waitForJobCompletion(jobId, timeoutMs, signal);
   }
 
   registerWorker(

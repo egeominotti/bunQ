@@ -33,6 +33,7 @@ COPY --chown=bun:bun .github/workflows/sdk.yml ./.github/workflows/sdk.yml
 COPY --chown=bun:bun .github/workflows/sdk-release.yml ./.github/workflows/sdk-release.yml
 COPY --chown=bun:bun .github/workflows/sdk-security.yml ./.github/workflows/sdk-security.yml
 COPY --chown=bun:bun .github/workflows/sdk-mutation.yml ./.github/workflows/sdk-mutation.yml
+COPY --chown=bun:bun sdk/conformance/harness.ts sdk/conformance/process-lifecycle.ts sdk/conformance/wire.ts ./sdk/conformance/
 COPY --chown=bun:bun sdk/typescript/package.json ./sdk/typescript/
 COPY --chown=bun:bun sdk/typescript/tests/harness.ts sdk/typescript/tests/e2e-edge.ts ./sdk/typescript/tests/
 COPY --chown=bun:bun sdk/typescript/tests/workers/run.mjs ./sdk/typescript/tests/workers/run.mjs

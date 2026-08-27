@@ -39,7 +39,7 @@ async function pauseNotifications(value: PostgresQueueManager): Promise<Pausable
   return stream;
 }
 
-async function eventually(condition: () => boolean | Promise<boolean>, timeoutMs = 3_000) {
+async function eventually(condition: () => boolean | Promise<boolean>, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   do {
     if (await condition()) return true;

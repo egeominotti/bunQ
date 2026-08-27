@@ -45,6 +45,29 @@ func handle(req map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 		return map[string]any{"ids": ids}, nil
+	case "addFlow":
+		queue := str(req["queue"])
+		producer := bunqueue.NewFlowProducer(connection)
+		defer producer.Close()
+		node, err := producer.Add(bunqueue.FlowJob{
+			Name:      "parent",
+			QueueName: queue,
+			Data:      map[string]any{"kind": "parent"},
+			Opts:      bunqueue.JobOptions{"jobId": str(req["parentId"])},
+			Children: []bunqueue.FlowJob{{
+				Name:      "child",
+				QueueName: queue,
+				Data:      map[string]any{"kind": "child"},
+				Opts:      bunqueue.JobOptions{"jobId": str(req["childId"])},
+			}},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"parentId": node.Job.ID(),
+			"childId":  node.Children[0].Job.ID(),
+		}, nil
 	case "getJob":
 		job, err := lookup().GetJob(str(req["jobId"]))
 		if err != nil {

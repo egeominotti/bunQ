@@ -1,4 +1,4 @@
-alias Bunqueue.{Job, Queue, UnrecoverableError, Worker}
+alias Bunqueue.{FlowProducer, Job, Queue, UnrecoverableError, Worker}
 
 defmodule Bunqueue.Conformance.ElixirDriver do
   def run do
@@ -45,6 +45,34 @@ defmodule Bunqueue.Conformance.ElixirDriver do
   defp handle(%{"op" => "addBulk"} = request, state) do
     {queue, state} = queue_for(state, request["queue"])
     {%{"ids" => ok!(Queue.add_bulk(queue, request["entries"]))}, state}
+  end
+
+  defp handle(%{"op" => "addFlow"} = request, state) do
+    producer = FlowProducer.new(state.connection)
+
+    try do
+      node =
+        ok!(
+          FlowProducer.add(producer, %{
+            name: "parent",
+            queue: request["queue"],
+            data: %{"kind" => "parent"},
+            options: [jobId: request["parentId"]],
+            children: [
+              %{
+                name: "child",
+                queue: request["queue"],
+                data: %{"kind" => "child"},
+                options: [jobId: request["childId"]]
+              }
+            ]
+          })
+        )
+
+      {%{"parentId" => node.job.id, "childId" => hd(node.children).job.id}, state}
+    after
+      FlowProducer.close(producer)
+    end
   end
 
   defp handle(%{"op" => "getJob"} = request, state) do

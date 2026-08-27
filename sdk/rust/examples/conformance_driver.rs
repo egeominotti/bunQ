@@ -10,6 +10,9 @@ use bunqueue_client::{
 };
 use serde_json::{Map, Value as Json, json};
 
+#[path = "conformance_driver/flow.rs"]
+mod conformance_flow;
+
 struct Driver {
     options: ConnectionOptions,
     queues: HashMap<String, Queue>,
@@ -61,6 +64,12 @@ impl Driver {
                 let ids = self.queue(text(request, "queue")).add_bulk(entries)?;
                 Ok(json!({"ids": ids}))
             }
+            "addFlow" => conformance_flow::add(
+                self.options.clone(),
+                text(request, "queue"),
+                text(request, "parentId"),
+                text(request, "childId"),
+            ),
             "getJob" => Ok(
                 json!({"job": job_view(self.queue("conf-lookup").get_job(text(request, "jobId"))?)}),
             ),

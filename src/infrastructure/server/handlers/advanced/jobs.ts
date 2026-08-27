@@ -106,12 +106,21 @@ export async function handleWaitJob(
   if (timeoutError) return response.error(timeoutError, requestId);
   const timeout = command.timeout ?? 30000;
   const job = await context.queueManager.getJob(id);
-  if (!job) return response.error('Job not found', requestId);
+  if (!job) {
+    const completion = await context.queueManager.getCompletionAsync(id);
+    if (!completion.found) return response.error('Job not found', requestId);
+    return {
+      ok: true,
+      completed: true,
+      result: completion.result,
+      reqId: requestId,
+    } as Response;
+  }
   if (job.completedAt) {
     return {
       ok: true,
       completed: true,
-      result: context.queueManager.getResult(id),
+      result: await context.queueManager.getResultAsync(id),
       reqId: requestId,
     } as Response;
   }
@@ -121,7 +130,7 @@ export async function handleWaitJob(
     return {
       ok: true,
       completed: true,
-      result: context.queueManager.getResult(id),
+      result: await context.queueManager.getResultAsync(id),
       reqId: requestId,
     } as Response;
   }

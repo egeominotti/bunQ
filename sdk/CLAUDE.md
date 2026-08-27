@@ -52,7 +52,7 @@ sdk/
 5. Every public method needs an e2e test against a real spawned server, in
    the SDK's own suite (mirror `php/tests/` if starting fresh).
 6. Write the conformance driver (100-200 lines, references in
-   `conformance/drivers/`) and iterate until 17/17.
+   `conformance/drivers/`) and iterate until 18/18.
 7. Docs: SDK README with the standard header (logo, badges, link row),
    SDK-local `CLAUDE.md`, a section in `docs/src/content/docs/guide/sdks.mdx`.
 

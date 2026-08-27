@@ -39,6 +39,10 @@
 !.github/workflows/sdk-mutation.yml
 !.github/workflows/sdk.yml
 !sdk/
+!sdk/conformance/
+!sdk/conformance/harness.ts
+!sdk/conformance/process-lifecycle.ts
+!sdk/conformance/wire.ts
 !sdk/typescript/
 !sdk/typescript/tests/
 !sdk/typescript/tests/harness.ts

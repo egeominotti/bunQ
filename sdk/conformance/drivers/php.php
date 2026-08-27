@@ -10,6 +10,7 @@ declare(strict_types=1);
 require __DIR__ . '/../../php/vendor/autoload.php';
 
 use Bunqueue\Job;
+use Bunqueue\FlowProducer;
 use Bunqueue\Queue;
 use Bunqueue\UnrecoverableError;
 use Bunqueue\Worker;
@@ -124,6 +125,29 @@ function handle(array $req): array
                 $req['entries']
             );
             return ['ids' => queueFor((string) $req['queue'])->addBulk($entries)];
+        }
+        case 'addFlow': {
+            $producer = new FlowProducer($connection);
+            try {
+                $node = $producer->add([
+                    'name' => 'parent',
+                    'queueName' => (string) $req['queue'],
+                    'data' => ['kind' => 'parent'],
+                    'opts' => ['jobId' => (string) $req['parentId']],
+                    'children' => [[
+                        'name' => 'child',
+                        'queueName' => (string) $req['queue'],
+                        'data' => ['kind' => 'child'],
+                        'opts' => ['jobId' => (string) $req['childId']],
+                    ]],
+                ]);
+                return [
+                    'parentId' => $node->job->id(),
+                    'childId' => $node->children[0]->job->id(),
+                ];
+            } finally {
+                $producer->close();
+            }
         }
         case 'getJob':
             return ['job' => jobView(queueFor('conf-lookup')->getJob((string) $req['jobId']))];

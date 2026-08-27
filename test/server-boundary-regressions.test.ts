@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { QueueManager } from '../src/application/queueManager';
+import { EventsManager } from '../src/application/eventsManager';
+import { WebhookManager } from '../src/application/webhookManager';
 import { createJob, jobId } from '../src/domain/types/job';
 import { handleCommand } from '../src/infrastructure/server/handler';
 import { createHttpServer } from '../src/infrastructure/server/http';
@@ -38,6 +40,111 @@ function expectRedacted(response: unknown): void {
 }
 
 describe('server infrastructure-error boundaries', () => {
+  test('cancels a completion waiter without retaining broadcast work', async () => {
+    const events = new EventsManager(new WebhookManager());
+    const controller = new AbortController();
+    const waiting = events.waitForJobCompletion(
+      jobId('cancelled-waiter'),
+      30_000,
+      controller.signal
+    );
+    expect(events.completionWaiterCount).toBe(1);
+
+    controller.abort();
+
+    expect(await waiting).toBe(false);
+    expect(events.completionWaiterCount).toBe(0);
+    expect(events.needsBroadcast()).toBe(false);
+  });
+
+  test('reads completed results through the async authoritative transport port', async () => {
+    const completed = createJob(jobId('completed-result'), 'results', { data: {} });
+    completed.completedAt = Date.now();
+    const manager = managerWith({
+      getJob: async () => completed,
+      getResult: () => undefined,
+      getResultAsync: async () => 15,
+      waitForJobCompletion: async () => true,
+    });
+
+    expect(
+      await handleCommand({ cmd: 'GetResult', id: String(completed.id) }, context(manager))
+    ).toMatchObject({ ok: true, result: 15 });
+    expect(
+      await handleCommand(
+        { cmd: 'WaitJob', id: String(completed.id), timeout: 100 },
+        context(manager)
+      )
+    ).toMatchObject({ ok: true, completed: true, result: 15 });
+
+    completed.completedAt = undefined;
+    expect(
+      await handleCommand(
+        { cmd: 'WaitJob', id: String(completed.id), timeout: 100 },
+        context(manager)
+      )
+    ).toMatchObject({ ok: true, completed: true, result: 15 });
+  });
+
+  test('recognizes completion-only jobs after removeOnComplete deletes the live row', async () => {
+    const completionReads: string[] = [];
+    const manager = managerWith({
+      getJob: async () => null,
+      getCompletionAsync: async (id: unknown) => {
+        completionReads.push(String(id));
+        return { found: true, result: undefined };
+      },
+    });
+
+    const response = await handleCommand(
+      { cmd: 'WaitJob', id: 'removed-completion', timeout: 30_000 },
+      context(manager)
+    );
+
+    expect(response).toMatchObject({ ok: true, completed: true });
+    expect(response).toHaveProperty('result', undefined);
+    expect(completionReads).toEqual(['removed-completion']);
+  });
+
+  test('keeps a missing job unknown when no durable completion exists', async () => {
+    const manager = managerWith({
+      getJob: async () => null,
+      getCompletionAsync: async () => ({ found: false, result: undefined }),
+    });
+
+    expect(
+      await handleCommand(
+        { cmd: 'WaitJob', id: 'never-existed', timeout: 30_000 },
+        context(manager)
+      )
+    ).toMatchObject({ ok: false, error: 'Job not found' });
+  });
+
+  test('uses authoritative pause state when available and preserves the local fallback', async () => {
+    let localReads = 0;
+    let durableReads = 0;
+    const durable = managerWith({
+      isPaused: () => {
+        localReads++;
+        return false;
+      },
+      isPausedDurable: async () => {
+        durableReads++;
+        return true;
+      },
+    });
+    expect(
+      await handleCommand({ cmd: 'IsPaused', queue: 'durable' }, context(durable))
+    ).toMatchObject({ ok: true, paused: true });
+    expect({ localReads, durableReads }).toEqual({ localReads: 0, durableReads: 1 });
+
+    const local = managerWith({ isPaused: () => false });
+    expect(await handleCommand({ cmd: 'IsPaused', queue: 'local' }, context(local))).toMatchObject({
+      ok: true,
+      paused: false,
+    });
+  });
+
   test('recognizes relation, driver-host, and network diagnostics without losing string domains', () => {
     expect(
       sanitizeServerError(

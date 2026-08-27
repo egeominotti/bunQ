@@ -277,8 +277,20 @@ mix format --check-formatted && mix compile --warnings-as-errors
 mix test --slowest 20 && mix hex.build
 ```
 
-Every suite then runs its language driver through all 17 shared conformance
-checks against a fresh real broker.
+Every suite then runs its language driver through all 18 shared conformance
+checks against two fresh real brokers: one uses an isolated temporary SQLite
+database and one uses an isolated namespace in the gate's shared disposable
+PostgreSQL 18.6 container. The broker alone receives database credentials.
+Drivers retain the toolchain environment required by their language, but a
+case-insensitive policy removes bunqueue, PostgreSQL/libpq, AWS/S3, storage/TLS,
+and delimiter-named credential variables before startup. Collision tests prove
+that non-secret names such as `TOKENIZERS_PARALLELISM` remain available. This is
+environment redaction for repository-owned drivers, not an untrusted-code
+sandbox. The harness proves broker exit with bounded `SIGTERM`/`SIGKILL`
+handling before deleting SQLite data or namespace rows; failed startups use the
+same ownership order. The sandbox waits for all started suites, validates Docker
+teardown exit codes, keeps failed ownership retryable, never force-removes an
+unconfirmed container name, and aggregates startup and cleanup errors.
 
 The conformance runner starts every driver command with `sdk/conformance` as
 its working directory. Commands for nested language modules must select their
@@ -521,6 +533,14 @@ Each container has:
 - PID and memory limits, plus the Docker daemon's CPU ceiling;
 - an isolated executable `/tmp` tmpfs for SQLite files and sandboxed workers;
 - `--init`, a stop timeout, signal cleanup, and automatic removal after success.
+
+The separate SDK sandbox keeps the same no-mount, dropped-capability, resource,
+and credential boundaries. Its six suite containers join a unique
+Docker-internal network solely to reach one disposable PostgreSQL 18.6 service;
+the network has no external route. Each language's conformance runner exercises
+SQLite and PostgreSQL sequentially with distinct broker storage, while the six
+languages still run in parallel. Successful completion removes the service and
+network; a failed run retains them with the logs for diagnosis.
 
 Every run writes the complete, untruncated output of each suite below
 `artifacts/test-sandbox/<timestamp>/`. The directory is ignored by Git. On

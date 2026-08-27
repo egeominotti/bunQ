@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "python"))
 
-from bunqueue import Queue, UnrecoverableError, Worker  # noqa: E402
+from bunqueue import FlowProducer, Queue, UnrecoverableError, Worker  # noqa: E402
 
 CONNECTION: dict = {"host": "127.0.0.1", "port": 6789}
 QUEUES: dict = {}
@@ -112,6 +112,27 @@ def handle(req: dict) -> dict:
             for e in req["entries"]
         ]
         return {"ids": queue_for(req["queue"]).add_bulk(entries)}
+    if op == "addFlow":
+        parent_id = req["parentId"]
+        child_id = req["childId"]
+        with FlowProducer(**CONNECTION) as producer:
+            node = producer.add(
+                {
+                    "name": "parent",
+                    "queueName": req["queue"],
+                    "data": {"kind": "parent"},
+                    "opts": {"job_id": parent_id},
+                    "children": [
+                        {
+                            "name": "child",
+                            "queueName": req["queue"],
+                            "data": {"kind": "child"},
+                            "opts": {"job_id": child_id},
+                        }
+                    ],
+                }
+            )
+            return {"parentId": node.job.id, "childId": node.children[0].job.id}
     if op == "getJob":
         job = queue_for("conf-lookup").get_job(req["jobId"])
         return {"job": job_view(job) if job else None}

@@ -159,11 +159,25 @@ Native regression suites cover protocol encoding, option mapping, failure
 classification, timeout/reconnect behavior, authentication, TLS verification,
 worker concurrency/lease behavior, atomic flow rejection, and telemetry
 isolation.
-The shared conformance suite then validates 17 public protocol behaviors
-against a fresh broker through each SDK's real driver. Its thin CLI runner,
-server/driver harness, independent wire verifier, shared check support, and two
-check groups are separate TypeScript modules so process orchestration cannot
-silently become part of the verification oracle.
+The shared conformance suite then validates 18 public protocol behaviors
+against a fresh broker through each SDK's real driver. Every official SDK must
+pass the same checks twice: once with the unchanged SQLite backend and once with
+PostgreSQL 18.6. Storage remains a broker concern. Driver processes retain their
+language toolchain environment, while a case-insensitive policy removes
+bunqueue, PostgreSQL/libpq, AWS/S3, storage/TLS, and delimiter-named credential
+variables; endpoints and optional tokens arrive only through the driver
+protocol. Collision tests keep non-secret toolchain names available. This
+reduces accidental disclosure but does not turn repository-owned driver code
+into an untrusted-code sandbox. The PostgreSQL harness assigns every broker an
+isolated namespace, confirms exit with bounded `SIGTERM`/`SIGKILL` handling,
+and only then deletes its rows. Startup failures follow the same ownership
+order. The gate waits for every started SDK suite before aggregate cleanup.
+Docker teardown checks exit status, retains failed resources for retry, never
+claims a container name before successful creation, and aggregates startup plus
+cleanup errors. Its thin CLI runner, server/driver
+harness, independent wire verifier, shared check support, and two check groups
+are separate TypeScript modules so process orchestration cannot silently become
+part of the verification oracle.
 
 Each native suite also exercises realistic broker-backed business flows. The
 common invoice-reconciliation scenario bulk-enqueues distinct payloads, drains
@@ -223,13 +237,16 @@ registry credentials are used.
 Each SDK also owns an opt-in sustained profile that reuses one connection while
 repeatedly adding, querying, and resetting configurable batches. Weekly CI runs
 these profiles for 15 minutes, runs the compatibility matrix, and checks live
-dependency advisories. The normal sandbox remains bounded, reproducible, and
-offline.
+dependency advisories. The normal sandbox remains bounded and reproducible.
 
 `bun run test:sandbox:sdk` is the authoritative gate. It builds six pinned
 toolchain images and runs format/static checks, package-manifest builds, native
-tests, and conformance in parallel, without network access or host mounts. It
-emits complete logs, container resource samples, per-suite JSON, and aggregate
+tests, and conformance in parallel. Suite containers and one disposable
+PostgreSQL 18.6 container share a dedicated Docker-internal network with no
+external route; there are no host mounts, credentials, home directories, or
+Docker sockets. Each suite runs conformance first with SQLite and then with its
+isolated PostgreSQL namespace. The gate emits complete logs, container resource
+samples, per-suite JSON, and aggregate
 `summary.json`/`summary.md` under `artifacts/test-sandbox-sdk/<timestamp>/`.
 
 Any change below `sdk/` must pass this gate in addition to the core

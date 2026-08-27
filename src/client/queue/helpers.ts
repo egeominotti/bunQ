@@ -21,7 +21,11 @@ interface ManagerInternals {
   storage: SqliteStorage | null;
   jobResults: { delete(id: string): boolean };
   dependencyResults: { releaseConsumer(id: string): void };
-  customIdMap: { get(id: string): JobId | undefined; delete(id: string): boolean };
+  customIdMap: {
+    get(id: string): JobId | undefined;
+    set(id: string, jobId: JobId): void;
+    delete(id: string): boolean;
+  };
   jobLogs: { delete(id: string): boolean };
 }
 

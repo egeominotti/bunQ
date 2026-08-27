@@ -222,7 +222,7 @@ returns the existing generation as a duplicate when concurrent dependency
 admission owns the identity, and otherwise rejects replacement while a committed
 live consumer exists. This prevents a replace/delete race without introducing a
 row-lock-to-advisory-lock deadlock. See
-[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md).
 
 Lifecycle / release:
 

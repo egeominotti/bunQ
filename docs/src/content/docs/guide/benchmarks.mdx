@@ -1,5 +1,5 @@
 ---
-title: "Engineering Benchmarks: Queue and Workflow Engine"
+title: 'Engineering Benchmarks: Queue and Workflow Engine'
 description: Native, reproducible bunqueue benchmarks for embedded and TCP queue operations, durable writes, worker drain, workflow orchestration and latency.
 template: splash
 head:
@@ -24,9 +24,9 @@ import { Aside } from '@astrojs/starlight/components';
 </div>
 
 <Aside type="tip">
-Looking for language-by-language producer and worker results? See the
-[SDK performance benchmark](/guide/sdk-benchmarks/). This page measures the
-core TypeScript/Bun runtime and Workflow Engine.
+  Looking for language-by-language producer and worker results? See the [SDK performance
+  benchmark](/guide/sdk-benchmarks/). This page measures the core TypeScript/Bun runtime and
+  Workflow Engine.
 </Aside>
 
 ## Read the label before the number
@@ -39,20 +39,19 @@ functional sandbox and was stopped before performance measurement.
 
 These labels are not interchangeable:
 
-| Label | What it means |
-| --- | --- |
-| Internal in-memory | Direct `QueueManager` batch API, no `dataPath`, no SQLite write |
-| Embedded on-disk | Public `Queue` API and a fresh SQLite `dataPath` |
-| TCP on-disk | Public client over localhost MessagePack to a broker with its own SQLite file |
-| Buffered | Normal write-behind persistence, with the documented ≤10 ms hard-crash window |
-| Durable | `durable:true`; the timed call waits for synchronous persistence |
-| Workflow | A complete multi-node execution, not one queue operation |
+| Label              | What it means                                                                 |
+| ------------------ | ----------------------------------------------------------------------------- |
+| Internal in-memory | Direct `QueueManager` batch API, no `dataPath`, no SQLite write               |
+| Embedded on-disk   | Public `Queue` API and a fresh SQLite `dataPath`                              |
+| TCP on-disk        | Public client over localhost MessagePack to a broker with its own SQLite file |
+| Buffered           | Normal write-behind persistence, with the documented ≤10 ms hard-crash window |
+| Durable (SQLite)   | `durable:true`; the timed call waits for synchronous SQLite persistence       |
+| Workflow           | A complete multi-node execution, not one queue operation                      |
 
 <Aside type="caution">
-The historical 630K Embedded chart used `bench/comprehensive.ts`, which does
-not pass a `dataPath`. It measured an in-memory Embedded queue. Older copy
-called that “Direct SQLite”; that description was wrong. The current tables
-separate in-memory and on-disk results.
+  The historical 630K Embedded chart used `bench/comprehensive.ts`, which does not pass a
+  `dataPath`. It measured an in-memory Embedded queue. Older copy called that “Direct SQLite”; that
+  description was wrong. The current tables separate in-memory and on-disk results.
 </Aside>
 
 ## Queue engine
@@ -62,14 +61,14 @@ separate in-memory and on-disk results.
 All rows below are medians. They describe different workloads and should not be
 divided into an “Embedded is N× TCP” claim.
 
-| Operation | Samples | Median | Variability / tail | Integrity |
-| --- | ---: | ---: | ---: | --- |
-| Internal in-memory batched push, 1M jobs | 21 | **729,395 jobs/s** | 693,001–747,943; CV 1.94% | 21M/21M IDs and payloads |
-| Internal in-memory batched process, 1M jobs | 21 | **541,712 jobs/s** | 523,286–558,036; CV 1.40% | pull + completed event |
-| Internal in-memory full lifecycle, 1M jobs | 21 | **311,915 jobs/s** | 303,674–316,556; CV 1.21% | clean final state |
-| TCP pipelined individual push | 21 | **80,978 ops/s** | 78,331–83,806; CV 2.06% | fresh broker/database |
-| TCP `PUSHB`, 50K jobs | 21 | **158,779 jobs/s** | 146,496–163,501; CV 3.25% | fresh broker/database |
-| TCP no-work worker drain, concurrency 50 | 21 | **17,256 jobs/s** | p05 16,455; p95 17,864; CV 2.86% | 420K/420K exactly once |
+| Operation                                   | Samples |             Median |               Variability / tail | Integrity                |
+| ------------------------------------------- | ------: | -----------------: | -------------------------------: | ------------------------ |
+| Internal in-memory batched push, 1M jobs    |      21 | **729,395 jobs/s** |        693,001–747,943; CV 1.94% | 21M/21M IDs and payloads |
+| Internal in-memory batched process, 1M jobs |      21 | **541,712 jobs/s** |        523,286–558,036; CV 1.40% | pull + completed event   |
+| Internal in-memory full lifecycle, 1M jobs  |      21 | **311,915 jobs/s** |        303,674–316,556; CV 1.21% | clean final state        |
+| TCP pipelined individual push               |      21 |   **80,978 ops/s** |          78,331–83,806; CV 2.06% | fresh broker/database    |
+| TCP `PUSHB`, 50K jobs                       |      21 | **158,779 jobs/s** |        146,496–163,501; CV 3.25% | fresh broker/database    |
+| TCP no-work worker drain, concurrency 50    |      21 |  **17,256 jobs/s** | p05 16,455; p95 17,864; CV 2.86% | 420K/420K exactly once   |
 
 The 1M-job runner uses 16 queues and workers, removes completed jobs, and checks
 the complete ID set both when pulled and on the completed event. It is the
@@ -81,10 +80,10 @@ engine's maximum-throughput path, not the public Queue API.
 is already a median of three repetitions. This is the median of seven campaign
 medians for the final 50K cell:
 
-| Mode | `add()` | `addBulk()` |
-| --- | ---: | ---: |
+| Mode              |            `add()` |        `addBulk()` |
+| ----------------- | -----------------: | -----------------: |
 | Embedded, on-disk | **147,818 jobs/s** | **186,384 jobs/s** |
-| TCP, on-disk | **127,476 jobs/s** | **87,319 jobs/s** |
+| TCP, on-disk      | **127,476 jobs/s** |  **87,319 jobs/s** |
 
 This runner grows one database through 1K, 5K, 10K and 50K cells. The 50K row
 is deliberately a sustained/grown-database result. The isolated 159K TCP
@@ -95,13 +94,13 @@ is deliberately a sustained/grown-database result. The isolated 159K TCP
 After the TCP throughput campaign, 5,000 sequential localhost adds measured
 **14 µs p50 / 292 µs p99**.
 
-For `durable:true`, every fresh process timed 2,000 sequential operations after
+For SQLite `durable:true`, every fresh process timed 2,000 sequential operations after
 50 warm-ups:
 
-| Mode | Runs | Throughput median | p05 / p95 | Latency p50 / p95 / p99 |
-| --- | ---: | ---: | ---: | ---: |
-| Embedded | 21 | **60,835 ops/s** | 53,698 / 63,002 | 15 / 25 / 59 µs |
-| TCP | 21 | **27,191 ops/s** | 21,590 / 29,089 | 30 / 57 / 120 µs |
+| Mode     | Runs | Throughput median |       p05 / p95 | Latency p50 / p95 / p99 |
+| -------- | ---: | ----------------: | --------------: | ----------------------: |
+| Embedded |   21 |  **60,835 ops/s** | 53,698 / 63,002 |         15 / 25 / 59 µs |
+| TCP      |   21 |  **27,191 ops/s** | 21,590 / 29,089 |        30 / 57 / 120 µs |
 
 All 43,050 operations per mode, including warm-ups, were present in queue
 counts.
@@ -111,29 +110,67 @@ counts.
 A single TCP worker drained 10K preloaded jobs from a fresh broker/database in
 each sample:
 
-| Concurrency | Median drain |
-| ---: | ---: |
-| 32 | **17,607 jobs/s** |
-| 48 | 17,541 jobs/s |
-| 64 | 17,191 jobs/s |
-| 96 | 15,830 jobs/s |
-| 128 | 15,094 jobs/s |
-| 192 | 14,081 jobs/s |
+| Concurrency |      Median drain |
+| ----------: | ----------------: |
+|          32 | **17,607 jobs/s** |
+|          48 |     17,541 jobs/s |
+|          64 |     17,191 jobs/s |
+|          96 |     15,830 jobs/s |
+|         128 |     15,094 jobs/s |
+|         192 |     14,081 jobs/s |
 
 The useful knee for this localhost no-work processor is 32–48. More
 concurrency is slower. Producer ingestion and worker drain are separate
 capacity limits.
 
+## PostgreSQL 15–18 multi-broker
+
+The 2026-08-26 compatibility campaign ran natively on an Apple M1 Max with Bun
+1.4.0 and PostgreSQL 15.19, 16.15, 17.11, and 18.6. Each of the 12
+version/topology cells used one discarded warm-up and seven measured samples,
+with a fresh cluster, database, broker set, ports, namespace, and queue per
+sample. The campaign accepted, invoked, and completed all 840,000 measured IDs
+exactly once, with zero duplicate invocations, deadlocks, failed samples, or
+temporary-file spills.
+
+| Fixed 16-consumer topology | Lifecycle median range across PostgreSQL 15–18 |
+| -------------------------- | ---------------------------------------------: |
+| One broker                 |                             6,550–6,945 jobs/s |
+| Two brokers                |                             8,004–8,494 jobs/s |
+| Four brokers               |                             7,168–7,788 jobs/s |
+
+PostgreSQL 18.6 led admission in every topology and the one/four-broker
+lifecycle medians. PostgreSQL 15.19 led the two-broker lifecycle median by 0.7%,
+inside overlapping 95% confidence intervals. Topology had a larger effect than
+server major: two brokers beat one on every version, while four added broker
+availability but introduced enough shared-database contention to trail two on
+this fixed workload.
+
+A separate PostgreSQL 18.6 bottleneck campaign found that four brokers with
+batch 250, pool size four, and 250 ms polling raised lifecycle median from 7,478
+to 8,362 jobs/s versus batch 100. The gain came with higher per-command p95, 31.9%
+more WAL per job, and temporary spill in every measured batch-250 sample. It is
+a throughput/latency/resource trade-off, not a universal default.
+
+- [Full PostgreSQL 15–18 methodology and results](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/postgres-versions-2026-08-26.md)
+- [PostgreSQL 18 bottleneck, pool, batch, WAL and `work_mem` analysis](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/postgres-performance-analysis-2026-08-26.md)
+- [Machine-readable evidence manifest](/benchmarks/postgres/2026-08-26/manifest.json)
+- [Raw 15–18 compatibility samples](/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T18-13-50.637Z.json)
+
+The manifest publishes all seven exact JSON artifacts and their SHA-256 hashes.
+These are native engineering measurements, not capacity guarantees: reproduce
+them on the production CPU, storage, network, payload, retention, and broker mix.
+
 ## Workflow Engine
 
 `bun run bench:workflow` uses the public `Engine` facade and four graphs:
 
-| Scenario | Graph | Required terminal state |
-| --- | --- | --- |
-| Linear | validate → transform → persist | completed; 3 steps |
-| Parallel | prepare → 3 inline parallel steps → join | completed; 5 steps |
-| Compensation | reserve → charge → intentional failure | failed; rollback completed; 2 reversals |
-| Signal | request → wait for approval → finish | waited and signalled exactly once; completed |
+| Scenario     | Graph                                    | Required terminal state                      |
+| ------------ | ---------------------------------------- | -------------------------------------------- |
+| Linear       | validate → transform → persist           | completed; 3 steps                           |
+| Parallel     | prepare → 3 inline parallel steps → join | completed; 5 steps                           |
+| Compensation | reserve → charge → intentional failure   | failed; rollback completed; 2 reversals      |
+| Signal       | request → wait for approval → finish     | waited and signalled exactly once; completed |
 
 Every sample has a new process, queue, workflow SQLite file, and name. TCP adds
 a new broker process, broker database, and dynamic ports. The final tuning sweep
@@ -141,16 +178,16 @@ selected Embedded concurrency 128 and TCP concurrency 64.
 
 ### Single-engine saturation
 
-| Mode / scenario | Runs × executions | Median | p05 / p95 | CV | Run-median p95 latency |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Embedded linear | 21 × 1,000 | **2,700 wf/s** | 2,570 / 2,792 | 2.86% | 342.8 ms |
-| Embedded parallel | 7 × 500 | **2,118 wf/s** | 1,997 / 2,173 | 2.70% | 219.8 ms |
-| Embedded compensation | 7 × 500 | **2,055 wf/s** | 2,005 / 2,118 | 2.05% | 225.6 ms |
-| Embedded signal | 7 × 500 | **1,928 wf/s** | 1,883 / 1,961 | 1.39% | 84.7 ms resume |
-| TCP linear | 21 × 1,000 | **3,187 wf/s** | 3,075 / 3,261 | 1.77% | 284.3 ms |
-| TCP parallel | 7 × 500 | **2,456 wf/s** | 2,368 / 2,528 | 2.48% | 186.4 ms |
-| TCP compensation | 7 × 500 | **2,239 wf/s** | 2,218 / 2,384 | 2.87% | 200.9 ms |
-| TCP signal | 7 × 500 | **2,234 wf/s** | 2,204 / 2,306 | 1.72% | 64.9 ms resume |
+| Mode / scenario       | Runs × executions |         Median |     p05 / p95 |    CV | Run-median p95 latency |
+| --------------------- | ----------------: | -------------: | ------------: | ----: | ---------------------: |
+| Embedded linear       |        21 × 1,000 | **2,700 wf/s** | 2,570 / 2,792 | 2.86% |               342.8 ms |
+| Embedded parallel     |           7 × 500 | **2,118 wf/s** | 1,997 / 2,173 | 2.70% |               219.8 ms |
+| Embedded compensation |           7 × 500 | **2,055 wf/s** | 2,005 / 2,118 | 2.05% |               225.6 ms |
+| Embedded signal       |           7 × 500 | **1,928 wf/s** | 1,883 / 1,961 | 1.39% |         84.7 ms resume |
+| TCP linear            |        21 × 1,000 | **3,187 wf/s** | 3,075 / 3,261 | 1.77% |               284.3 ms |
+| TCP parallel          |           7 × 500 | **2,456 wf/s** | 2,368 / 2,528 | 2.48% |               186.4 ms |
+| TCP compensation      |           7 × 500 | **2,239 wf/s** | 2,218 / 2,384 | 2.87% |               200.9 ms |
+| TCP signal            |           7 × 500 | **2,234 wf/s** | 2,204 / 2,306 | 1.72% |         64.9 ms resume |
 
 These are saturated-batch `workflow:started`-event-to-terminal latencies,
 including time behind other executions after the lifecycle event begins.
@@ -163,10 +200,10 @@ file. The result does not say that network transport is cheaper.
 
 Signal phase medians:
 
-| Mode | Park | Resume | Park p95 | Resume p95 |
-| --- | ---: | ---: | ---: | ---: |
-| Embedded | 3,205 wf/s | 4,837 wf/s | 139.1 ms | 84.7 ms |
-| TCP | 3,518 wf/s | 6,149 wf/s | 123.0 ms | 64.9 ms |
+| Mode     |       Park |     Resume | Park p95 | Resume p95 |
+| -------- | ---------: | ---------: | -------: | ---------: |
+| Embedded | 3,205 wf/s | 4,837 wf/s | 139.1 ms |    84.7 ms |
+| TCP      | 3,518 wf/s | 6,149 wf/s | 123.0 ms |    64.9 ms |
 
 Across both modes the measured single-engine campaign reconciled 63,000
 executions, 189,000 step completions, 56,000 successful workflows, 7,000
@@ -177,10 +214,10 @@ intentional failures and 14,000 compensation outcomes.
 The broker protects each protocol client with a default 10,000-request,
 60-second sliding window. A workflow expands into multiple queue commands:
 
-| Linear executions | Default result |
-| ---: | ---: |
-| 3,000 | 4,005 wf/s; 0.749 s |
-| 3,500 | 58 wf/s; 60.159 s; p95 60.088 s |
+| Linear executions |                  Default result |
+| ----------------: | ------------------------------: |
+|             3,000 |             4,005 wf/s; 0.749 s |
+|             3,500 | 58 wf/s; 60.159 s; p95 60.088 s |
 
 At the plateau, persisted state showed 896 workflows waiting for their last
 node, 896 broker jobs waiting and 34 active. At window turnover, ACK batches
@@ -198,16 +235,16 @@ The scale runner launched independent engines behind a sub-millisecond common
 barrier: 5,000 executions per instance, one discarded warm-up and three
 measured campaigns. TCP used `RATE_LIMIT_MAX_REQUESTS=1000000`.
 
-| Mode / instances | Median | Speedup | Efficiency | Peak sampled CPU / RSS |
-| --- | ---: | ---: | ---: | ---: |
-| Embedded ×1 | 3,194 wf/s | 1.00× | 100% | 77% / 233 MiB |
-| Embedded ×4 | 10,579 wf/s | 3.31× | 82.8% | 317% / 894 MiB |
-| Embedded ×8 | 19,379 wf/s | 6.07× | 75.8% | 652% / 1,745 MiB |
-| Embedded ×12 | **25,873 wf/s** | 8.10× | 67.5% | 1,028% / 2,549 MiB |
-| TCP ×1 | 4,207 wf/s | 1.00× | 100% | 156% / 352 MiB |
-| TCP ×4 | 11,738 wf/s | 2.79× | 69.8% | 671% / 1,371 MiB |
-| TCP ×8 | 17,407 wf/s | 4.14× | 51.7% | 1,497% / 2,626 MiB |
-| TCP ×12 | **17,496 wf/s** | 4.16× | 34.7% | 2,415% / 3,861 MiB |
+| Mode / instances |          Median | Speedup | Efficiency | Peak sampled CPU / RSS |
+| ---------------- | --------------: | ------: | ---------: | ---------------------: |
+| Embedded ×1      |      3,194 wf/s |   1.00× |       100% |          77% / 233 MiB |
+| Embedded ×4      |     10,579 wf/s |   3.31× |      82.8% |         317% / 894 MiB |
+| Embedded ×8      |     19,379 wf/s |   6.07× |      75.8% |       652% / 1,745 MiB |
+| Embedded ×12     | **25,873 wf/s** |   8.10× |      67.5% |     1,028% / 2,549 MiB |
+| TCP ×1           |      4,207 wf/s |   1.00× |       100% |         156% / 352 MiB |
+| TCP ×4           |     11,738 wf/s |   2.79× |      69.8% |       671% / 1,371 MiB |
+| TCP ×8           |     17,407 wf/s |   4.14× |      51.7% |     1,497% / 2,626 MiB |
+| TCP ×12          | **17,496 wf/s** |   4.16× |      34.7% |     2,415% / 3,861 MiB |
 
 TCP is effectively saturated at ×8 on this shared host. The runner checked
 750,000 measured plus 250,000 warm-up workflow executions; every child passed
@@ -217,10 +254,10 @@ the same integrity scan.
 
 The separate queue-engine scale test used much larger internal workloads:
 
-| Topology | Median aggregate | Correctness | Peak resources |
-| --- | ---: | ---: | --- |
-| 12 Embedded instances × 1M jobs | **2,008,704 jobs/s** lifecycle | 36M / 36M | ~2,513% CPU; 37.4 GiB RSS; no swap |
-| 12 TCP broker/client pairs × 50K | **46,937 jobs/s** drain | 1.8M / 1.8M | ~2,249% CPU; 5.2 GiB RSS |
+| Topology                         |               Median aggregate | Correctness | Peak resources                     |
+| -------------------------------- | -----------------------------: | ----------: | ---------------------------------- |
+| 12 Embedded instances × 1M jobs  | **2,008,704 jobs/s** lifecycle |   36M / 36M | ~2,513% CPU; 37.4 GiB RSS; no swap |
+| 12 TCP broker/client pairs × 50K |        **46,937 jobs/s** drain | 1.8M / 1.8M | ~2,249% CPU; 5.2 GiB RSS           |
 
 The Embedded integrity sets intentionally retain 12 million IDs at once and
 dominate RSS. TCP gained about 2.7× over one pair, not 12×, because every pair
@@ -236,6 +273,12 @@ bun install
 # Core queue runners
 bun run src/benchmark/million-jobs.bench.ts
 BENCH_N=50000 BENCH_RUNS=21 bun run bench:tcp
+
+# PostgreSQL 15–18, using native installations resolved by the runner
+BUNQUEUE_PG_BENCH_POOL_SIZE=12 \
+BUNQUEUE_PG_BENCH_POLL_INTERVAL_MS=25 \
+BUNQUEUE_PG_BENCH_WORK_MEM=4MB \
+bun run bench:postgres:versions
 
 # The published push/bulk Embedded row is on-disk. Use a fresh path and point
 # BENCH_HOST/BENCH_PORT at a separately started fresh SQLite broker.
@@ -267,6 +310,9 @@ The runners and report are in the repository:
 - [`bench/workflow-engine/scale.ts`](https://github.com/egeominotti/bunqueue/blob/main/bench/workflow-engine/scale.ts)
 - [`docs/benchmarks/native-engineering-2026-07-30.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/native-engineering-2026-07-30.md)
 - [`docs/benchmarks/native-engineering-2026-08-02.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/native-engineering-2026-08-02.md)
+- [`docs/benchmarks/postgres-versions-2026-08-26.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/postgres-versions-2026-08-26.md)
+- [`docs/benchmarks/postgres-performance-analysis-2026-08-26.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/benchmarks/postgres-performance-analysis-2026-08-26.md)
+- [Published PostgreSQL raw-evidence manifest](/benchmarks/postgres/2026-08-26/manifest.json)
 - [`docs/features/benchmarks.md`](https://github.com/egeominotti/bunqueue/blob/main/docs/features/benchmarks.md)
 
 ## Functional evidence
@@ -278,9 +324,9 @@ chaos soaks: 90K jobs, 81 worker kill/reconnect cycles, flat post-cold p99,
 bounded 4.1–4.3 MB WAL and post-GC collection bounds all passed.
 
 <Aside>
-Benchmarks quantify this host and revision; they are not an SLA. Real network
-latency, payloads, handler work, durability requirements and contention change
-the result. Run the same scripts on the deployment hardware you intend to use.
+  Benchmarks quantify this host and revision; they are not an SLA. Real network latency, payloads,
+  handler work, durability requirements and contention change the result. Run the same scripts on
+  the deployment hardware you intend to use.
 </Aside>
 
 ## Historical BullMQ comparison

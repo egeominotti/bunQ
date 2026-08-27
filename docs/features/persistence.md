@@ -13,7 +13,7 @@ contracts are isolated in `persistence/types/`. It wraps Bun's native
 payloads with MessagePack, and exposes recovery queries used to rebuild state
 after restart. The optional server-only, database-authoritative backend is
 documented separately in
-[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ## Responsibilities & Scope
 
@@ -37,7 +37,7 @@ Owns:
 Does NOT own (delegated elsewhere):
 
 - PostgreSQL transactions, schema, leases, or event replay — see
-  [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md). Selecting
+  [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md). Selecting
   PostgreSQL does not instantiate this SQLite store.
 - The recovery orchestration / re-enqueue logic — `recover()` in
   `application/background/recovery/index.ts` consumes these read APIs and decides
@@ -431,7 +431,7 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 
 ## Related Docs
 
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — optional
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md) — optional
   server backend; intentionally separate from this synchronous SQLite path.
 - [architecture](../architecture.md) — where persistence sits in the request/recovery flow.
 - [data-model](../data-model.md) — full `Job`, `CronJob`, `DlqEntry` definitions.

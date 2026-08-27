@@ -240,7 +240,7 @@ auth, telemetry, timeout, SQLite path, TLS, Cloud, and S3 fields plus
 `storageDriver`, `postgresUrl`, `postgresNamespace`, `postgresBrokerId`,
 `postgresPoolSize`, `postgresLeaseDurationMs`, and
 `postgresPollIntervalMs`. See [Configuration & Entrypoint](./configuration.md),
-[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md), and
+[PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md), and
 [Security: TLS, Auth, CORS](./security-tls-auth.md).
 
 Input-validation limits enforced by the handlers (from `protocol.ts`): queue name ≤256 chars and `^[a-zA-Z0-9_\-.:]+$`; job data ≤10MB; `PULL`/`PULLB` timeout `[0,60000]`; `PULLB` count `[1,1000]`; `WaitJob` timeout `[0,600000]`; option bounds for `priority` `[-1e6,1e6]`, `delay`/`ttl` ≤1yr, `timeout`/`backoff`/`stallTimeout` ≤1day, `maxAttempts` `[1,1000]`. `backoff` accepts either a number (ms) or the object form `{ type: 'fixed'|'exponential', delay }` (`validateBackoffField`) — `type` must be `fixed`/`exponential` and `delay` ≤1day, matching embedded parity; `PUSH`, `PUSHB` (per job, via `validatePushBatchJobs`) and `PUSHF` validate the applicable bounds. `PUSHF` additionally caps the full graph as described above.

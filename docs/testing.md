@@ -694,7 +694,10 @@ broker processes, dynamic ports, namespace, and queue. The runner keeps
 `fsync`, `synchronous_commit`, and `full_page_writes` enabled, rotates version
 and topology order between rounds, and rejects missing/duplicate IDs,
 nonterminal rows, command failures, PostgreSQL deadlocks, or process failures.
-Raw JSON is written under `artifacts/benchmarks/`.
+Raw JSON is written under `artifacts/benchmarks/`. Artifacts used by a published
+PostgreSQL report are copied byte-for-byte into
+`docs/public/benchmarks/postgres/<campaign-date>/`, indexed by a tracked manifest,
+and verified against their documented SHA-256 hashes.
 
 | Environment variable                 | Default         | Meaning                                    |
 | ------------------------------------ | --------------- | ------------------------------------------ |

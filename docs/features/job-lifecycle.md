@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This module implements the four primitive operations that move a job through its life: **push** (enqueue), **pull** (dequeue into processing), **ack** (complete), and **fail** (retry / DLQ) for the memory/SQLite engine. It is the lowest pure-logic layer beneath the TCP/HTTP servers and embedded SDK. The optional PostgreSQL server manager exposes the same transport contract through separate async, database-authoritative transaction modules; it does not insert `await` into these synchronous shard critical sections. See [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+This module implements the four primitive operations that move a job through its life: **push** (enqueue), **pull** (dequeue into processing), **ack** (complete), and **fail** (retry / DLQ) for the memory/SQLite engine. It is the lowest pure-logic layer beneath the TCP/HTTP servers and embedded SDK. The optional PostgreSQL server manager exposes the same transport contract through separate async, database-authoritative transaction modules; it does not insert `await` into these synchronous shard critical sections. See [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ## Responsibilities & Scope
 
@@ -376,7 +376,7 @@ These operations read no environment variables directly; behavior is driven by p
 - [Data Structures](./data-structures.md) — PriorityQueue, heaps, indexes.
 - [Concurrency & Locking](./concurrency-and-locking.md) — RWLock, lock hierarchy, grace window.
 - [Persistence](./persistence.md) — WriteBuffer, durable writes, recovery.
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — async
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md) — async
   server lifecycle parity, row locks, leases, fencing, and recovery.
 - [Dead Letter Queue](./dead-letter-queue.md) — terminal failure handling.
 - [Deduplication & Unique Jobs](./deduplication-and-unique.md) — uniqueKey / customId.

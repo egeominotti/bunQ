@@ -1,6 +1,6 @@
 ---
 title: 'bunqueue.config.ts: Typed Server Configuration File'
-description: 'Centralize every bunqueue server setting in one typed bunqueue.config.ts: ports, auth, SQLite or PostgreSQL 18.6 storage, CORS, backups, and timeouts.'
+description: 'Centralize every bunqueue server setting in one typed bunqueue.config.ts: ports, auth, SQLite or PostgreSQL 15–18 storage, CORS, backups, and timeouts.'
 head:
   - tag: meta
     attrs:

@@ -3,9 +3,9 @@
 bunqueue is a high-performance job queue for the [Bun](https://bun.sh) runtime.
 Its default engine embeds **sharded in-memory priority queues** for hot-path job
 movement and an **SQLite write-behind store** (WAL + MessagePack) for durability.
-An optional server-only **PostgreSQL 18.6** engine makes the database
+An optional server-only **PostgreSQL 15–18** engine makes the database
 authoritative and coordinates multiple brokers with transactions and fenced
-leases. Both server engines expose a binary **TCP** protocol on port `6789` and
+leases; 18.6 is pinned and recommended. Both server engines expose a binary **TCP** protocol on port `6789` and
 an **HTTP / REST / SSE / WebSocket** API on port `6790`. The SQLite engine can
 also run fully **in-process** (no sockets) behind a BullMQ-style SDK, drive a
 **workflow/saga engine**, or expose itself to AI agents over a native **MCP
@@ -13,7 +13,7 @@ server**.
 
 Zero external runtime infrastructure remains the default: memory/SQLite needs no
 Redis, database server, broker, or companion service. Multi-broker mode opts into
-PostgreSQL 18.6. The only npm runtime dependencies remain `croner` (cron parsing)
+PostgreSQL 15–18. The only npm runtime dependencies remain `croner` (cron parsing)
 and `msgpackr` (MessagePack); PostgreSQL access uses Bun's built-in `SQL` client
 ([`package.json`](../package.json)). Everything else — hashing, heaps,
 skip-lists, locks, the wire protocol, TLS — is built on Bun primitives.
@@ -47,7 +47,7 @@ Producers ──add()──┐                          ┌──process()──
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Bun runtime** (`>=1.4.0`)              | [`package.json:164`](../package.json)                                                                                                                                                                              | Native, fast TCP/TLS sockets (`Bun.listen`), bundled SQLite, `Bun.randomUUIDv7()` for time-ordered IDs, `Bun.s3` for backups, single-binary `bun build --compile`. The codebase is Bun-only and guards against Node at import (`src/require-bun.ts`, `src/bun-only.ts`). |
 | **`bun:sqlite`**                         | [`src/infrastructure/persistence/sqlite/state.ts`](../src/infrastructure/persistence/sqlite/state.ts)                                                                                                              | Embedded, zero-config, ACID durability with no separate process. WAL mode lets readers and the writer run concurrently. Avoids the operational weight of Redis/Postgres for a single-node queue.                                                                         |
-| **Bun `SQL` + PostgreSQL 18.6**          | [`src/infrastructure/persistence/postgres/`](../src/infrastructure/persistence/postgres)                                                                                                                           | Optional server-only multi-broker coordination. PostgreSQL is the source of truth; row/advisory locks, `SKIP LOCKED`, database-clock leases, and durable events provide distributed ownership without adding a JavaScript database dependency.                           |
+| **Bun `SQL` + PostgreSQL 15–18**         | [`src/infrastructure/persistence/postgres/`](../src/infrastructure/persistence/postgres)                                                                                                                           | Optional server-only multi-broker coordination. PostgreSQL is the source of truth; row/advisory locks, `SKIP LOCKED`, database-clock leases, and durable events provide distributed ownership without adding a JavaScript database dependency.                           |
 | **MessagePack** (`msgpackr`)             | [`src/shared/msgpack.ts`](../src/shared/msgpack.ts), [`src/infrastructure/persistence/sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts)                                                 | Compact binary storage and wire format. The shared hybrid decoder keeps the fast common path while preserving dangerous-looking JSON keys as safe own properties.                                                                                                        |
 | **Native TCP + TLS**                     | [`src/infrastructure/server/tcp.ts`](../src/infrastructure/server/tcp.ts), [`src/config/resolve.ts:75`](../src/config/resolve.ts)                                                                                  | Length-prefixed binary frames over `Bun.listen` give ~100k+ ops/s without an HTTP/serialization tax. TLS is the same socket with `tls: { certFile, keyFile }`; partial cert/key fails fast at startup rather than silently serving plaintext.                            |
 | **Two runtime npm deps**                 | [`package.json`](../package.json)                                                                                                                                                                                  | Only `croner` + `msgpackr` ship at runtime; `@modelcontextprotocol/sdk` is an **optional** peer (only needed for the MCP binary). PostgreSQL support uses Bun's built-in client.                                                                                         |
@@ -260,7 +260,7 @@ the in-memory-authoritative manager and SQLite write-behind boundary for one
 
 ```
 Clients ──► Broker A (TCP/HTTP) ──┐
-                                  ├──► PostgreSQL 18.6
+                                  ├──► PostgreSQL 15–18
 Clients ──► Broker B (TCP/HTTP) ──┘    jobs · leases · limits · cron · events
                  ▲                         │
                  └──── LISTEN/NOTIFY + durable event cursor ────┘
@@ -268,7 +268,7 @@ Clients ──► Broker B (TCP/HTTP) ──┘    jobs · leases · limits · c
 
 PostgreSQL transactions own correctness; each broker's local snapshot is a read
 cache and event projection, never the distributed lock authority. See
-[PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md).
 
 The TCP and HTTP servers are thin adapters: both decode a request into a command
 and call the shared `handleCommand` dispatcher against the single `QueueManager`
@@ -305,7 +305,7 @@ msgpack encode/decode per op, but a single source of truth and full observabilit
 
 **(c) Multi-broker PostgreSQL server.** Two or more `bunqueue start` processes
 select `storage.driver: 'postgres'`, use unique broker IDs, and share one
-PostgreSQL 18.6 URL and namespace. Transactions, row locks, `SKIP LOCKED`, and
+PostgreSQL 15–18 URL and namespace. Transactions, row locks, `SKIP LOCKED`, and
 lease tokens coordinate claims and outcomes. Trade-off: an external database
 and async storage hop in exchange for horizontally scalable brokers and shared
 failover state. Embedded mode does not use this driver.
@@ -673,7 +673,7 @@ exposing queue internals.
 
 The normalized table/index reference is in [Data Model](./data-model.md); the
 algorithms and failure boundaries are in
-[PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md).
 
 ### Workflow execution path
 
@@ -898,7 +898,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 ### Persistence & scheduling
 
 - [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, queue control-state, and the bounded per-queue event/metric journal, and serves batched recovery reads on restart.
-- [PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md) — Optional database-authoritative server backend with transactional lifecycle updates, `SKIP LOCKED` claims, lease fencing/recovery, shared policies/cron/workers/metrics, and durable LISTEN/NOTIFY replay across brokers.
+- [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md) — Optional database-authoritative server backend with transactional lifecycle updates, `SKIP LOCKED` claims, lease fencing/recovery, shared policies/cron/workers/metrics, and durable LISTEN/NOTIFY replay across brokers.
 - [Scheduler & Cron](./features/scheduler-and-cron.md) — Event-driven server engine that fires recurring cron/interval jobs onto queues, persisting next-run/execution state for crash-safe at-most-once-per-slot scheduling.
 - [Background Tasks](./features/background-tasks.md) — Periodic server-side maintenance: timers for timeouts, stall/lock recovery, DLQ upkeep, dependency resolution, memory-bound cleanup, monitoring, plus startup recovery from SQLite.
 

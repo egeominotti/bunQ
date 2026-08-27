@@ -274,7 +274,7 @@ slot, preventing a newly added broker from consuming another broker's schedule.
 Due rows are locked with `SKIP LOCKED`; `skipIfNoWorker` reads the shared worker
 table, and expired/shutdown `preventOverlap` generations are discarded instead
 of requeued. See
-[PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md).
 
 ### Client upsert mapping (`upsertJobScheduler`, `scheduler.ts`)
 
@@ -336,7 +336,7 @@ schedules as 60-second intervals.
 - [Job Lifecycle (push / pull / ack / fail)](./job-lifecycle.md)
 - [Core Queue Engine (QueueManager & Shards)](./core-queue-engine.md)
 - [Persistence (SQLite, WriteBuffer, ReadThrough)](./persistence.md)
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md)
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md)
 - [Deduplication & Unique Jobs](./deduplication-and-unique.md)
 - [Worker Registry & Management](./workers-management.md)
 - [Background Tasks](./background-tasks.md)

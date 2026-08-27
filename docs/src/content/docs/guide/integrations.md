@@ -59,7 +59,7 @@ Using another framework? The smallest example above works as is; only the routin
 ## Databases
 
 bunqueue needs no external database in its default memory/SQLite modes. For a
-standalone fleet, PostgreSQL 18.6 is an optional database-authoritative backend
+standalone fleet, PostgreSQL 15–18 is an optional database-authoritative backend
 that coordinates multiple brokers; MySQL is not supported. See
 [Storage backends](/guide/databases/) for both topologies and ephemeral-host
 patterns.

@@ -1,6 +1,6 @@
 ---
 title: 'bunqueue Environment Variables Reference'
-description: Complete environment variable reference for bunqueue, including SQLite and PostgreSQL 18.6 storage, ports, auth, backups, timeouts, and logging.
+description: Complete environment variable reference for bunqueue, including SQLite and PostgreSQL 15–18 storage, ports, auth, backups, timeouts, and logging.
 head:
   - tag: meta
     attrs:
@@ -20,30 +20,30 @@ A typed `bunqueue.config.ts` can replace most of these, with IntelliSense and ev
 
 ## Server & storage
 
-| Variable                              | Type             | Default     | Description                                                                    |
-| ------------------------------------- | ---------------- | ----------- | ------------------------------------------------------------------------------ |
-| `TCP_PORT`                            | number           | `6789`      | TCP server port for client connections                                         |
-| `HTTP_PORT`                           | number           | `6790`      | HTTP server port for REST API and metrics                                      |
-| `HOST`                                | string           | `0.0.0.0`   | Bind address (`127.0.0.1` for local-only)                                      |
-| `BUNQUEUE_STORAGE_DRIVER`             | string           | inferred    | `memory`, `sqlite`, or `postgres`                                              |
-| `BUNQUEUE_DATA_PATH`                  | string           | (in-memory) | SQLite database path. Without it or a PostgreSQL URL, jobs are lost on restart |
-| `BUNQUEUE_POSTGRES_URL`               | string           | (none)      | PostgreSQL connection URL; implies the `postgres` driver when no driver is set |
-| `BUNQUEUE_POSTGRES_NAMESPACE`         | string           | `default`   | Isolates independent bunqueue installations in one PostgreSQL database         |
-| `BUNQUEUE_BROKER_ID`                  | string           | generated   | Stable unique ID for this PostgreSQL broker process                            |
-| `BUNQUEUE_POSTGRES_POOL_SIZE`         | positive integer | `4`         | PostgreSQL pool size (runtime minimum `2`)                                      |
-| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS` | positive integer | `30000`     | Default database-clock lease duration (runtime minimum `1000`)                 |
-| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`  | positive integer | `250`       | Event/cron fallback polling interval (runtime minimum `25`)                    |
-| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS` | positive integer | `30000` | Maximum PostgreSQL statement duration                                           |
-| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS` | positive integer | `5000` | Maximum wait for a PostgreSQL lock                                               |
-| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS` | positive integer | `30000` | Maximum idle time inside a transaction                              |
-| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS` | positive integer | `16` | Active PostgreSQL manager operations per broker                         |
-| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS` | non-negative integer | `128` | Waiting PostgreSQL manager operations before fail-fast saturation      |
-| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS` | positive integer | `100000` | Maximum job/result entities in one compatibility snapshot                       |
-| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES` | positive integer | `268435456` | Maximum encoded bytes in one compatibility snapshot               |
-| `HTTP_SOCKET_PATH`                    | string           | (none)      | Unix socket for the HTTP server, replaces `HTTP_PORT`                          |
-| `TCP_SOCKET_PATH`                     | string           | (none)      | **Reserved, not functional yet** (see below)                                   |
-| `TLS_CERT_FILE`                       | string           | (none)      | PEM certificate, enables native TLS on TCP + HTTP                              |
-| `TLS_KEY_FILE`                        | string           | (none)      | PEM private key matching `TLS_CERT_FILE`                                       |
+| Variable                                        | Type                 | Default     | Description                                                                    |
+| ----------------------------------------------- | -------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `TCP_PORT`                                      | number               | `6789`      | TCP server port for client connections                                         |
+| `HTTP_PORT`                                     | number               | `6790`      | HTTP server port for REST API and metrics                                      |
+| `HOST`                                          | string               | `0.0.0.0`   | Bind address (`127.0.0.1` for local-only)                                      |
+| `BUNQUEUE_STORAGE_DRIVER`                       | string               | inferred    | `memory`, `sqlite`, or `postgres`                                              |
+| `BUNQUEUE_DATA_PATH`                            | string               | (in-memory) | SQLite database path. Without it or a PostgreSQL URL, jobs are lost on restart |
+| `BUNQUEUE_POSTGRES_URL`                         | string               | (none)      | PostgreSQL connection URL; implies the `postgres` driver when no driver is set |
+| `BUNQUEUE_POSTGRES_NAMESPACE`                   | string               | `default`   | Isolates independent bunqueue installations in one PostgreSQL database         |
+| `BUNQUEUE_BROKER_ID`                            | string               | generated   | Stable unique ID for this PostgreSQL broker process                            |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`                   | positive integer     | `4`         | PostgreSQL pool size (runtime minimum `2`)                                     |
+| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`           | positive integer     | `30000`     | Default database-clock lease duration (runtime minimum `1000`)                 |
+| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`            | positive integer     | `250`       | Event/cron fallback polling interval (runtime minimum `25`)                    |
+| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`        | positive integer     | `30000`     | Maximum PostgreSQL statement duration                                          |
+| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`             | positive integer     | `5000`      | Maximum wait for a PostgreSQL lock                                             |
+| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS` | positive integer     | `30000`     | Maximum idle time inside a transaction                                         |
+| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`   | positive integer     | `16`        | Active PostgreSQL manager operations per broker                                |
+| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`       | non-negative integer | `128`       | Waiting PostgreSQL manager operations before fail-fast saturation              |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS`           | positive integer     | `100000`    | Maximum job/result entities in one compatibility snapshot                      |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES`  | positive integer     | `268435456` | Maximum encoded bytes in one compatibility snapshot                            |
+| `HTTP_SOCKET_PATH`                              | string               | (none)      | Unix socket for the HTTP server, replaces `HTTP_PORT`                          |
+| `TCP_SOCKET_PATH`                               | string               | (none)      | **Reserved, not functional yet** (see below)                                   |
+| `TLS_CERT_FILE`                                 | string               | (none)      | PEM certificate, enables native TLS on TCP + HTTP                              |
+| `TLS_KEY_FILE`                                  | string               | (none)      | PEM private key matching `TLS_CERT_FILE`                                       |
 
 ```bash
 BUNQUEUE_DATA_PATH=/var/lib/queue.db TCP_PORT=6789 bunqueue start
@@ -54,8 +54,9 @@ BUNQUEUE_DATA_PATH=/var/lib/queue.db TCP_PORT=6789 bunqueue start
 **Storage selection.** An explicit driver wins. Otherwise a PostgreSQL URL
 selects PostgreSQL, a data path selects SQLite, and neither selects memory.
 PostgreSQL and a SQLite data path cannot be combined. PostgreSQL is server-only,
-validated against version 18.6, and every active broker sharing a namespace must
-have a unique broker ID. MySQL is not supported. In the repository Compose
+tested in CI against majors 15, 16, 17, and the pinned/recommended 18.6 release,
+and every active broker sharing a namespace must have a unique broker ID. MySQL
+is not supported. In the repository Compose
 topology, `POSTGRES_PASSWORD` configures the database and
 `BUNQUEUE_POSTGRES_URL` configures brokers; if the secret contains URI-reserved
 characters, percent-encode its password component in the URL.

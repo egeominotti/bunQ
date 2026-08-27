@@ -1109,7 +1109,7 @@ See [Persistence](./features/persistence.md).
 
 ---
 
-## PostgreSQL 18.6 Schema
+## PostgreSQL 15–18 Schema
 
 Source: `src/infrastructure/persistence/postgres/schema.ts`. This normalized
 schema belongs to the optional server-only multi-broker engine. It is separate
@@ -1117,6 +1117,10 @@ from the SQLite schema above: selecting PostgreSQL never opens or migrates a
 SQLite file. Every tenant-visible primary/unique key includes `namespace`, whose
 default is `default`; all brokers intended to share work must use the same
 namespace.
+
+CI validates this schema on PostgreSQL 15, 16, 17, and the pinned/recommended
+18.6 release. The bunqueue schema version below is independent from the
+PostgreSQL server major.
 
 Schema initialization runs inside a transaction guarded by
 `pg_advisory_xact_lock(hashtext('bunqueue:schema'))`. The current
@@ -1139,7 +1143,7 @@ Primary key: `(namespace, id)`. One row is the authoritative job generation.
 | Ordering       | `priority`, `lifo`, `group_id`                                                                                         |
 | Idempotency    | `unique_key`, `unique_expires_at`, `custom_id`                                                                         |
 | Relationships  | `parent_id`                                                                                                            |
-| Lease fence    | `lease_owner`, `lease_broker_id`, `lease_broker_session_id`, `lease_token`, `lease_until`, `lease_renewals`             |
+| Lease fence    | `lease_owner`, `lease_broker_id`, `lease_broker_session_id`, `lease_token`, `lease_until`, `lease_renewals`            |
 | Terminal state | `result`, `dlq_entry`, `dlq_retry_state`, `error`, `failure_reason`                                                    |
 
 `state` is constrained to `waiting`, `prioritized`, `delayed`,
@@ -1231,10 +1235,10 @@ non-positive/non-finite TTL is stored as `NULL` and does not expire.
 
 ### Cron, worker, and broker coordination
 
-| Table              | Primary key              | Stored data                                                                                                                                  |
-| ------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bunqueue_crons`   | `(namespace, name)`      | MessagePack cron payload, `next_run`, execution count, optional limit, update time; due index `(namespace, next_run, name)`.                 |
-| `bunqueue_workers` | `(namespace, id)`        | Owning `broker_id` + `broker_session_id`, optional TCP `client_id`, queue array, MessagePack worker, `last_seen`; GIN queue and session cleanup indexes. |
+| Table              | Primary key              | Stored data                                                                                                                                                                   |
+| ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bunqueue_crons`   | `(namespace, name)`      | MessagePack cron payload, `next_run`, execution count, optional limit, update time; due index `(namespace, next_run, name)`.                                                  |
+| `bunqueue_workers` | `(namespace, id)`        | Owning `broker_id` + `broker_session_id`, optional TCP `client_id`, queue array, MessagePack worker, `last_seen`; GIN queue and session cleanup indexes.                      |
 | `bunqueue_brokers` | `(namespace, broker_id)` | Internal `session_id`, `started_at`, and `heartbeat_at` used for fail-fast duplicate detection, stale takeover, and deterministic oldest-live-session startup reconciliation. |
 
 Cron slots and heartbeats use PostgreSQL time. `skipIfNoWorker` reads the shared
@@ -1311,7 +1315,7 @@ timing/transition tables/function bindings, and normalized PL/pgSQL bodies. A
 semantically unchanged schema stays on the no-DDL path; drift is repaired under
 the migration lock.
 
-See [PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md)
+See [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md)
 for transaction boundaries, lease fencing, recovery, runtime configuration, and
 the dedicated PostgreSQL validation suite.
 

@@ -1,4 +1,4 @@
-# PostgreSQL 18.6 Multi-Broker Persistence
+# PostgreSQL 15–18 Multi-Broker Persistence
 
 > **Category:** Persistence · **Source:** `src/infrastructure/persistence/postgres.ts`, `src/infrastructure/persistence/postgres/`, `src/application/postgresQueueManager.ts`, `src/application/postgres-queue-manager/`, `src/infrastructure/server/storageAdapter.ts`, `src/infrastructure/server/storageManager.ts`, `src/infrastructure/cloud/queueAdapter/`, `docker-compose.postgres.yml`
 
@@ -6,7 +6,8 @@
 
 The PostgreSQL backend is an optional, database-authoritative server runtime for
 deployments that need more than one bunqueue broker. Every broker connects to the
-same PostgreSQL 18.6 database and namespace. PostgreSQL transactions, row locks,
+same PostgreSQL database and namespace. CI validates majors 15, 16, 17, and the
+pinned/recommended 18.6 release. PostgreSQL transactions, row locks,
 advisory locks, lease fencing, and `FOR UPDATE SKIP LOCKED` coordinate job
 admission and delivery so one job generation is owned by at most one live lease.
 
@@ -147,8 +148,19 @@ keys and predicates, trigger transition-table bindings, and normalized function
 bodies. An unchanged schema keeps the no-DDL path and preserves existing index
 object IDs.
 
-The validated client/runtime pair is Bun 1.4.0 with its built-in `SQL` API and
-PostgreSQL 18.6. There is no additional JavaScript PostgreSQL SDK: tagged
+Schema migration is an automatic one-way compatibility boundary, not permission
+to keep mixed bunqueue binary versions running. The safe production procedure is
+to verify backup/PITR, stop every old broker, start and verify one new broker,
+then start the remaining brokers at the same version. Because initialization
+rejects a recorded schema version newer than the binary supports, an old binary
+may not restart after migration. Rollback therefore means roll-forward or a
+coordinated restore of the pre-upgrade database and old binaries. Any
+zero-downtime mixed-version rollout needs explicit compatibility evidence for
+the exact source/target pair.
+
+The primary client/runtime pair is Bun 1.4.0 with its built-in `SQL` API and
+PostgreSQL 18.6; the same integration suite also validates PostgreSQL 15, 16,
+and 17. There is no additional JavaScript PostgreSQL SDK: tagged
 templates, binary protocol, prepared statements, connection pooling,
 transaction-reserved connections, and the dedicated reconnecting LISTEN
 connection come from Bun itself. Queue mutations remain set-based when one SQL
@@ -161,6 +173,9 @@ Each pooled connection receives PostgreSQL-native `application_name`,
 `idle_in_transaction_session_timeout` startup parameters through Bun's
 `connection` option. A blocked query therefore fails within an operator-visible
 deadline and the same pool remains usable after the blocker ends.
+The Bun SQL pool uses a 10-second connection timeout, a 30-second idle timeout,
+and a 3,600-second maximum connection lifetime. These fixed lifecycle guards are
+not public configuration fields.
 
 ### Manager adapter
 
@@ -581,6 +596,12 @@ retain their existing host-clock behavior.
   startup cron reconciliation deterministically elects the oldest live
   `(started_at, broker_id, session_id)` session. Simultaneous broker startup
   therefore cannot make every process skip missed-schedule reconciliation.
+  Heartbeats run every `max(1000, floor(leaseDurationMs / 3))` milliseconds;
+  stale takeover uses
+  `max(leaseDurationMs, 3 × heartbeatInterval)` (10 seconds and 30 seconds at
+  defaults). Expired processing leases are scanned every
+  `max(500, floor(leaseDurationMs / 2))` milliseconds (15 seconds by default),
+  in addition to the worker generation's own `lockDuration` expiry.
 - `bunqueue_workers` makes worker registration and heartbeat state visible to
   every broker. `skipIfNoWorker` therefore evaluates the shared registry rather
   than one process's memory.

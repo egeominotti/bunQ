@@ -290,17 +290,18 @@ above. This validation is correctness evidence, not benchmark evidence.
 
 ## Raw evidence
 
-Raw JSON is intentionally ignored by Git and retained locally under
-`artifacts/benchmarks/`:
+The exact raw JSON used by this report is tracked under
+[`docs/public/benchmarks/postgres/2026-08-26/`](../public/benchmarks/postgres/2026-08-26/manifest.json)
+and published with the documentation site:
 
-| Campaign                               | Artifact                                                     | SHA-256                                                            |
-| -------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Clean control, four brokers, batch 100 | `postgres-performance-control-2026-08-26T18-55-08.011Z.json` | `223bf8b9339385a11f3fa48d66c7ce5d0f909f31735936519f3b71221eab0f67` |
-| Tuned 1/2/4 brokers, batch 250, 4 MB   | `postgres-versions-2026-08-26T19-30-11.032Z.json`            | `7a054d8d4547751736619f6776addc8010ddf5c55d69ddc0278967c000ec5208` |
-| Four brokers, batch 100, 4 MB          | `postgres-versions-2026-08-26T19-33-37.614Z.json`            | `0d35a1059e84734e0085200fa745ea1f93c5bf3b76b5c5896ab41288547e5c54` |
-| Four brokers, batch 250, 8 MB          | `postgres-versions-2026-08-26T19-38-55.634Z.json`            | `9ef5a812ad6ea81ff7ba0bb802d603df1fa5d269ad5211f54701fce2687e12ed` |
-| Four brokers, batch 250, 32 MB         | `postgres-versions-2026-08-26T19-37-36.903Z.json`            | `bb84f1074826fb1a418f502855c2611ff608b502be2f5692337393a2668722de` |
-| Final batch-100 code candidate         | `postgres-versions-2026-08-26T19-41-48.946Z.json`            | `35cf6b415d78391c61db7b9f406ebe15d663fc3b5d20e22f6a4a29112cf756cb` |
+| Campaign                               | Artifact                                                                                                                                                            | SHA-256                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Clean control, four brokers, batch 100 | [`postgres-performance-control-2026-08-26T18-55-08.011Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-performance-control-2026-08-26T18-55-08.011Z.json) | `223bf8b9339385a11f3fa48d66c7ce5d0f909f31735936519f3b71221eab0f67` |
+| Tuned 1/2/4 brokers, batch 250, 4 MB   | [`postgres-versions-2026-08-26T19-30-11.032Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T19-30-11.032Z.json)                       | `7a054d8d4547751736619f6776addc8010ddf5c55d69ddc0278967c000ec5208` |
+| Four brokers, batch 100, 4 MB          | [`postgres-versions-2026-08-26T19-33-37.614Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T19-33-37.614Z.json)                       | `0d35a1059e84734e0085200fa745ea1f93c5bf3b76b5c5896ab41288547e5c54` |
+| Four brokers, batch 250, 8 MB          | [`postgres-versions-2026-08-26T19-38-55.634Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T19-38-55.634Z.json)                       | `9ef5a812ad6ea81ff7ba0bb802d603df1fa5d269ad5211f54701fce2687e12ed` |
+| Four brokers, batch 250, 32 MB         | [`postgres-versions-2026-08-26T19-37-36.903Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T19-37-36.903Z.json)                       | `bb84f1074826fb1a418f502855c2611ff608b502be2f5692337393a2668722de` |
+| Final batch-100 code candidate         | [`postgres-versions-2026-08-26T19-41-48.946Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T19-41-48.946Z.json)                       | `35cf6b415d78391c61db7b9f406ebe15d663fc3b5d20e22f6a4a29112cf756cb` |
 
 The runner now records `runtimeWorktreeStatus` and configured `workMem` so a
 dirty performance candidate cannot be mistaken for its committed `HEAD:src`

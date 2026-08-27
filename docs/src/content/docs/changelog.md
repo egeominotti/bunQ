@@ -44,6 +44,13 @@ head:
 
 ### Changed
 
+- PostgreSQL documentation now distinguishes the CI-tested 15–18 compatibility
+  range from the pinned/recommended 18.6 deployment, documents broker
+  heartbeat/takeover/recovery timing, Bun SQL pool lifecycle deadlines, safe
+  schema upgrade and rollback boundaries, backend-specific durability/health
+  semantics, and separate SQLite/PostgreSQL sizing. The public benchmark guide
+  now includes the multi-broker version and tuning campaigns, and publishes the
+  seven exact raw JSON artifacts with a SHA-256 manifest.
 - PostgreSQL uses Bun 1.4.0's built-in `SQL` client directly; no ORM or external
   PostgreSQL compatibility driver sits on the queue hot path. The implementation
   uses its native pool, binary protocol, prepared tagged templates,

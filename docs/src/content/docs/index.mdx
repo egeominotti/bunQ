@@ -1,6 +1,6 @@
 ---
 title: 'The Bun Job Queue: SQLite or PostgreSQL, No Redis'
-description: 'A complete Bun job queue: zero-infrastructure SQLite by default or PostgreSQL 18.6 multi-broker mode, with priorities, retries, cron, DLQ, and six SDKs.'
+description: 'A complete Bun job queue: zero-infrastructure SQLite by default or PostgreSQL 15–18 multi-broker mode, with priorities, retries, cron, DLQ, and six SDKs.'
 template: splash
 head:
   - tag: meta
@@ -22,7 +22,7 @@ head:
   - tag: meta
     attrs:
       name: 'twitter:description'
-      content: 'A complete Bun job queue with SQLite by default and optional PostgreSQL 18.6 multi-broker persistence. No Redis required.'
+      content: 'A complete Bun job queue with SQLite by default and optional PostgreSQL 15–18 multi-broker persistence. No Redis required.'
   - tag: meta
     attrs:
       name: 'keywords'
@@ -43,7 +43,7 @@ import BqIcon from '@components/BqIcon.astro';
     <div class="bq-hero-left">
       <VersionPill />
       <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
-      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work by default</strong>: priorities, retries, cron, a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a>, and a native <a href="/guide/mcp/">MCP server</a>. Use one process and SQLite, or opt into PostgreSQL 18.6 when several brokers must share one authoritative queue. No Redis required. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
+      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work by default</strong>: priorities, retries, cron, a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a>, and a native <a href="/guide/mcp/">MCP server</a>. Use one process and SQLite, or opt into PostgreSQL 15–18 when several brokers must share one authoritative queue; 18.6 is recommended. No Redis required. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
 
       <div class="bq-hero-steps">
         <div class="bq-hero-step">
@@ -733,7 +733,7 @@ mix run app.exs
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">trade-offs</span>
   <h2 class="bq-h2">Where bunqueue stops.</h2>
-  <p class="bq-lede">SQLite keeps the smallest topology; PostgreSQL 18.6 adds a multi-broker topology. Each has a clear operational boundary. Read this before you adopt.</p>
+  <p class="bq-lede">SQLite keeps the smallest topology; PostgreSQL 15–18 adds a multi-broker topology, with 18.6 recommended. Each has a clear operational boundary. Read this before you adopt.</p>
 
   <div class="bq-trust">
     <div class="bq-trust-card">
@@ -749,7 +749,7 @@ mix run app.exs
     <div class="bq-trust-card">
       <span class="bq-tag">scaling</span>
       <h3>Workers and brokers can scale</h3>
-      <p>Any number of workers connect over TCP. The SQLite server stays single; PostgreSQL 18.6 coordinates multiple broker processes through transactional claims and fenced leases. Edge queues can still drain with <a href="/guide/iot-edge/">forward()</a>.</p>
+      <p>Any number of workers connect over TCP. The SQLite server stays single; PostgreSQL 15–18 coordinates multiple broker processes through transactional claims and fenced leases. Edge queues can still drain with <a href="/guide/iot-edge/">forward()</a>.</p>
     </div>
   </div>
 </div>

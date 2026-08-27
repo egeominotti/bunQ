@@ -1,0 +1,1853 @@
+{
+  "completedAt": "2026-08-26T19:33:08.325Z",
+  "configuration": {
+    "batchSize": 250,
+    "brokers": [
+      1,
+      2,
+      4
+    ],
+    "consumerConnections": 16,
+    "jobs": 10000,
+    "pollIntervalMs": 250,
+    "producerConnections": 4,
+    "poolSize": 4,
+    "runs": 7,
+    "versions": [
+      18
+    ],
+    "warmups": 1
+  },
+  "durationSeconds": 177.3,
+  "host": {
+    "architecture": "arm64",
+    "bun": "1.4.0",
+    "cpu": "Apple M1 Max",
+    "cpuCount": 10,
+    "loadAverage1mEnd": 5.15234375,
+    "loadAverage1mStart": 7.02001953125,
+    "os": "darwin 25.6.0",
+    "repositoryCommit": "fd29bbcf6b780cdcc49a8dfc84f4e52c1db20f42",
+    "runtimeTree": "dcd0d727cd2413f38d26a5517ed8cd990c8f2906",
+    "postgres18": "postgres (PostgreSQL) 18.6 (Homebrew)"
+  },
+  "observations": [
+    {
+      "measured": false,
+      "round": -1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 54.808,
+          "p50": 130.883,
+          "p95": 154.269,
+          "p99": 157.778,
+          "max": 158.768
+        },
+        "admissionJobsPerSecond": 18895.79,
+        "admissionMs": 529.218292,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1146687,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 84475964,
+          "xactCommit": 279
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 7907.75,
+        "lifecycleMs": 1264.5817920000002,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 13598.75,
+        "processingMs": 735.3615,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 47.859,
+          "p50": 122.349,
+          "p95": 150.634,
+          "p99": 159.81,
+          "max": 164.564
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 27.546,
+          "p50": 50.77,
+          "p95": 72.821,
+          "p99": 76.236,
+          "max": 77.129
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": false,
+      "round": -1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 43.742,
+          "p50": 92.695,
+          "p95": 123.49,
+          "p99": 160.647,
+          "max": 165.484
+        },
+        "admissionJobsPerSecond": 25306.58,
+        "admissionMs": 395.1541249999999,
+        "batchSize": 250,
+        "brokerClaims": [
+          5500,
+          4500
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1221666,
+          "blksRead": 13,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 72817081,
+          "xactCommit": 255
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 10047.48,
+        "lifecycleMs": 995.2746669999999,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 16663.37,
+        "processingMs": 600.118625,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 35.604,
+          "p50": 86.147,
+          "p95": 115.37,
+          "p99": 117.14,
+          "max": 118.084
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.871,
+          "p50": 36.302,
+          "p95": 60.763,
+          "p99": 64.556,
+          "max": 64.752
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": false,
+      "round": -1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 56.626,
+          "p50": 117.259,
+          "p95": 162.348,
+          "p99": 190.854,
+          "max": 205.889
+        },
+        "admissionJobsPerSecond": 24981.21,
+        "admissionMs": 400.300833,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2500,
+          2750,
+          2250
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1837171,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 45760512,
+          "walBytes": 110944432,
+          "xactCommit": 628
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8333.71,
+        "lifecycleMs": 1199.9453330000001,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 12505.58,
+        "processingMs": 799.642916,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 44.902,
+          "p50": 118.526,
+          "p95": 192.026,
+          "p99": 198.602,
+          "max": 199.127
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.684,
+          "p50": 37.559,
+          "p95": 59.067,
+          "p99": 61.823,
+          "max": 63.271
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 0,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 53.078,
+          "p50": 111.467,
+          "p95": 198.884,
+          "p99": 265.101,
+          "max": 291.081
+        },
+        "admissionJobsPerSecond": 24725.58,
+        "admissionMs": 404.43937500000004,
+        "batchSize": 250,
+        "brokerClaims": [
+          2750,
+          2500,
+          2500,
+          2250
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1927979,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 30547968,
+          "walBytes": 113792947,
+          "xactCommit": 643
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8195.56,
+        "lifecycleMs": 1220.1727919999998,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 12258.94,
+        "processingMs": 815.731125,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 52.524,
+          "p50": 106.608,
+          "p95": 151.866,
+          "p99": 163.783,
+          "max": 165.885
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.191,
+          "p50": 37.099,
+          "p95": 60.489,
+          "p99": 63.151,
+          "max": 63.662
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 0,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 41,
+          "min": 22.161,
+          "p50": 94.023,
+          "p95": 165.997,
+          "p99": 180.126,
+          "max": 188.934
+        },
+        "admissionJobsPerSecond": 24984.13,
+        "admissionMs": 400.25404199999997,
+        "batchSize": 250,
+        "brokerClaims": [
+          4834,
+          5166
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1778876,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 118312835,
+          "xactCommit": 436
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 10074.63,
+        "lifecycleMs": 992.592375,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 16882.3,
+        "processingMs": 592.3362079999999,
+        "pullLatencyMs": {
+          "count": 41,
+          "min": 49.11,
+          "p50": 87.674,
+          "p95": 124.237,
+          "p99": 136.653,
+          "max": 141.684
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 22.918,
+          "p50": 36.612,
+          "p95": 60.405,
+          "p99": 71.025,
+          "max": 72.812
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 0,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 54.063,
+          "p50": 126.163,
+          "p95": 156.424,
+          "p99": 158.488,
+          "max": 158.528
+        },
+        "admissionJobsPerSecond": 19170.83,
+        "admissionMs": 521.62575,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1150459,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 82414966,
+          "xactCommit": 274
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8112.27,
+        "lifecycleMs": 1232.701083,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 14063.32,
+        "processingMs": 711.069583,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 45.24,
+          "p50": 117.818,
+          "p95": 150.094,
+          "p99": 158.202,
+          "max": 162.561
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 26.565,
+          "p50": 47.905,
+          "p95": 83.312,
+          "p99": 89.838,
+          "max": 92.245
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 41,
+          "min": 52.223,
+          "p50": 126.249,
+          "p95": 145.893,
+          "p99": 151.836,
+          "max": 153.287
+        },
+        "admissionJobsPerSecond": 19998.74,
+        "admissionMs": 500.03158399999995,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1224576,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 87929993,
+          "xactCommit": 283
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8205.29,
+        "lifecycleMs": 1218.7265419999999,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 13914.15,
+        "processingMs": 718.69275,
+        "pullLatencyMs": {
+          "count": 41,
+          "min": 56.616,
+          "p50": 120.414,
+          "p95": 145.484,
+          "p99": 166.547,
+          "max": 171.021
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 31.461,
+          "p50": 46.27,
+          "p95": 68.351,
+          "p99": 70.958,
+          "max": 72.237
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 37.517,
+          "p50": 83.747,
+          "p95": 114.734,
+          "p99": 186.626,
+          "max": 205.004
+        },
+        "admissionJobsPerSecond": 24644.61,
+        "admissionMs": 405.76824999999997,
+        "batchSize": 250,
+        "brokerClaims": [
+          5000,
+          5000
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1897817,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 23052288,
+          "walBytes": 119158730,
+          "xactCommit": 452
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 9809.3,
+        "lifecycleMs": 1019.441125,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 16295.38,
+        "processingMs": 613.6707080000001,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 57.82,
+          "p50": 84.556,
+          "p95": 130.111,
+          "p99": 132.715,
+          "max": 133.299
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 24.611,
+          "p50": 35.895,
+          "p95": 63.156,
+          "p99": 70.236,
+          "max": 73.261
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 1,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 43.192,
+          "p50": 115.263,
+          "p95": 176.849,
+          "p99": 240.803,
+          "max": 253.166
+        },
+        "admissionJobsPerSecond": 24232.13,
+        "admissionMs": 412.675292,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2750,
+          2250,
+          2500
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1964169,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 11304960,
+          "walBytes": 111990129,
+          "xactCommit": 627
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8621.03,
+        "lifecycleMs": 1159.9537500000001,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 13381.93,
+        "processingMs": 747.276625,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 51.675,
+          "p50": 113.38,
+          "p95": 186.307,
+          "p99": 214.917,
+          "max": 232.302
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 18.743,
+          "p50": 37.566,
+          "p95": 66.165,
+          "p99": 74.317,
+          "max": 77.433
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 2,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 63.596,
+          "p50": 123.143,
+          "p95": 183.523,
+          "p99": 193.146,
+          "max": 198.418
+        },
+        "admissionJobsPerSecond": 22903.43,
+        "admissionMs": 436.61591699999997,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2750,
+          2750,
+          2000
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1729127,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 31236096,
+          "walBytes": 105969584,
+          "xactCommit": 627
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8784.73,
+        "lifecycleMs": 1138.3392920000001,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 14250.67,
+        "processingMs": 701.7215829999999,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 58.361,
+          "p50": 109.072,
+          "p95": 155.821,
+          "p99": 165.635,
+          "max": 171.339
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.988,
+          "p50": 38.455,
+          "p95": 64.332,
+          "p99": 68.904,
+          "max": 71.422
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 2,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 42.696,
+          "p50": 92.133,
+          "p95": 211.708,
+          "p99": 215.407,
+          "max": 216.22
+        },
+        "admissionJobsPerSecond": 24590.42,
+        "admissionMs": 406.66249999999997,
+        "batchSize": 250,
+        "brokerClaims": [
+          5500,
+          4500
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1657475,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 20250624,
+          "walBytes": 105177577,
+          "xactCommit": 368
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 9553.95,
+        "lifecycleMs": 1046.68725,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 15624.45,
+        "processingMs": 640.0224579999999,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 45.504,
+          "p50": 73.608,
+          "p95": 112.39,
+          "p99": 113.593,
+          "max": 114.189
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.054,
+          "p50": 38.164,
+          "p95": 65.778,
+          "p99": 67.859,
+          "max": 68.523
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 2,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 54.24,
+          "p50": 135.71,
+          "p95": 170.895,
+          "p99": 171.491,
+          "max": 171.761
+        },
+        "admissionJobsPerSecond": 18861.87,
+        "admissionMs": 530.170042,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1143652,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 79661703,
+          "xactCommit": 274
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8137.24,
+        "lifecycleMs": 1228.91725,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 14311.36,
+        "processingMs": 698.745417,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 50.48,
+          "p50": 122.001,
+          "p95": 148.41,
+          "p99": 148.684,
+          "max": 148.716
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 29.857,
+          "p50": 49.596,
+          "p95": 77.155,
+          "p99": 86.1,
+          "max": 88.821
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 3,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 60.574,
+          "p50": 130.294,
+          "p95": 162.224,
+          "p99": 177.528,
+          "max": 184.038
+        },
+        "admissionJobsPerSecond": 20268.63,
+        "admissionMs": 493.37316699999997,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1195560,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 88979554,
+          "xactCommit": 286
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8468.51,
+        "lifecycleMs": 1180.845042,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 14546.09,
+        "processingMs": 687.470166,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 47.837,
+          "p50": 123.475,
+          "p95": 147.313,
+          "p99": 152.836,
+          "max": 154.772
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 31.842,
+          "p50": 47.788,
+          "p95": 65.256,
+          "p99": 83.988,
+          "max": 94.126
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 3,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 29.782,
+          "p50": 93.483,
+          "p95": 135.427,
+          "p99": 138.508,
+          "max": 139.021
+        },
+        "admissionJobsPerSecond": 19610.11,
+        "admissionMs": 509.941041,
+        "batchSize": 250,
+        "brokerClaims": [
+          5000,
+          5000
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1568399,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 103543261,
+          "xactCommit": 392
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 9339.01,
+        "lifecycleMs": 1070.777875,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 17830.56,
+        "processingMs": 560.83475,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 55.264,
+          "p50": 82.796,
+          "p95": 114.111,
+          "p99": 116.537,
+          "max": 117.131
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 26.85,
+          "p50": 47.433,
+          "p95": 94.21,
+          "p99": 107.305,
+          "max": 108.55
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 3,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 52.687,
+          "p50": 123.013,
+          "p95": 176.876,
+          "p99": 201.865,
+          "max": 214.199
+        },
+        "admissionJobsPerSecond": 23153.35,
+        "admissionMs": 431.902917,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2500,
+          2500,
+          2500
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1818886,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 40845312,
+          "walBytes": 106728189,
+          "xactCommit": 617
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8251.95,
+        "lifecycleMs": 1211.835167,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 12821.67,
+        "processingMs": 779.929875,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 66.549,
+          "p50": 115.713,
+          "p95": 157.34,
+          "p99": 166.296,
+          "max": 169.907
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 29.019,
+          "p50": 40.184,
+          "p95": 64.092,
+          "p99": 73.486,
+          "max": 74.75
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 4,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 69.833,
+          "p50": 125.756,
+          "p95": 189.397,
+          "p99": 194.052,
+          "max": 195.696
+        },
+        "admissionJobsPerSecond": 24058.12,
+        "admissionMs": 415.66,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2750,
+          2250,
+          2500
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1718534,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 24100864,
+          "walBytes": 104657435,
+          "xactCommit": 616
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8390.97,
+        "lifecycleMs": 1191.757709,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 12885.01,
+        "processingMs": 776.0955829999999,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 59.765,
+          "p50": 118.377,
+          "p95": 155.784,
+          "p99": 194.677,
+          "max": 195.719
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 24.958,
+          "p50": 39.186,
+          "p95": 64.924,
+          "p99": 65.756,
+          "max": 66.242
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 4,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 33.825,
+          "p50": 89.154,
+          "p95": 128.988,
+          "p99": 138.996,
+          "max": 144.409
+        },
+        "admissionJobsPerSecond": 23101.94,
+        "admissionMs": 432.8639999999999,
+        "batchSize": 250,
+        "brokerClaims": [
+          5000,
+          5000
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 2018046,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 117400291,
+          "xactCommit": 422
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 10638.6,
+        "lifecycleMs": 939.972875,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 19719.7,
+        "processingMs": 507.10699999999986,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 68.063,
+          "p50": 91.146,
+          "p95": 132.638,
+          "p99": 135.515,
+          "max": 136.354
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 22.955,
+          "p50": 38.395,
+          "p95": 64.613,
+          "p99": 68.646,
+          "max": 69.556
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 4,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 41,
+          "min": 56.856,
+          "p50": 150.14,
+          "p95": 185.267,
+          "p99": 200.149,
+          "max": 200.444
+        },
+        "admissionJobsPerSecond": 16623.06,
+        "admissionMs": 601.5738329999999,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 850263,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 67223810,
+          "xactCommit": 257
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 6728.77,
+        "lifecycleMs": 1486.1560829999999,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 11304.8,
+        "processingMs": 884.580167,
+        "pullLatencyMs": {
+          "count": 41,
+          "min": 51.698,
+          "p50": 132.539,
+          "p95": 166.343,
+          "p99": 169.646,
+          "max": 170.77
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 27.362,
+          "p50": 55.869,
+          "p95": 80.201,
+          "p99": 103.224,
+          "max": 108.633
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 5,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 59.125,
+          "p50": 137.055,
+          "p95": 160.267,
+          "p99": 167.184,
+          "max": 168.767
+        },
+        "admissionJobsPerSecond": 19554.72,
+        "admissionMs": 511.3855,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1170580,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 85344508,
+          "xactCommit": 289
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 7997.22,
+        "lifecycleMs": 1250.4339590000002,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 13530.95,
+        "processingMs": 739.0466660000001,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 44.513,
+          "p50": 120.504,
+          "p95": 148.494,
+          "p99": 150.641,
+          "max": 151.381
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 28.258,
+          "p50": 46.97,
+          "p95": 71.126,
+          "p99": 83.968,
+          "max": 85.378
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 5,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 40.376,
+          "p50": 83.234,
+          "p95": 100.845,
+          "p99": 113.406,
+          "max": 114.853
+        },
+        "admissionJobsPerSecond": 24970.66,
+        "admissionMs": 400.47004200000003,
+        "batchSize": 250,
+        "brokerClaims": [
+          5000,
+          5000
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 946335,
+          "blksRead": 29,
+          "deadlocks": 0,
+          "tempBytes": 10911744,
+          "walBytes": 59156217,
+          "xactCommit": 205
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 10978.67,
+        "lifecycleMs": 910.8573329999999,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 19593.04,
+        "processingMs": 510.38520800000003,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 64.652,
+          "p50": 83.221,
+          "p95": 123.108,
+          "p99": 127.946,
+          "max": 130.183
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 23.574,
+          "p50": 36.761,
+          "p95": 60.823,
+          "p99": 66.486,
+          "max": 67.997
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 5,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 41,
+          "min": 65.078,
+          "p50": 158.26,
+          "p95": 262.273,
+          "p99": 266.165,
+          "max": 268.258
+        },
+        "admissionJobsPerSecond": 24149.55,
+        "admissionMs": 414.086459,
+        "batchSize": 250,
+        "brokerClaims": [
+          2500,
+          2500,
+          2500,
+          2500
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1751093,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 11476992,
+          "walBytes": 101413108,
+          "xactCommit": 636
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 7500.2,
+        "lifecycleMs": 1333.2974590000001,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 10878.94,
+        "processingMs": 919.2070829999999,
+        "pullLatencyMs": {
+          "count": 41,
+          "min": 51.555,
+          "p50": 119.847,
+          "p95": 156.592,
+          "p99": 166.269,
+          "max": 171.736
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 25.026,
+          "p50": 38.007,
+          "p95": 62.043,
+          "p99": 64.647,
+          "max": 65.591
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 6,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 56.458,
+          "p50": 130.931,
+          "p95": 171.793,
+          "p99": 199.435,
+          "max": 207.566
+        },
+        "admissionJobsPerSecond": 24798.25,
+        "admissionMs": 403.25420799999995,
+        "batchSize": 250,
+        "brokerClaims": [
+          2750,
+          2500,
+          2000,
+          2750
+        ],
+        "brokers": 4,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1792802,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 14114816,
+          "walBytes": 106490786,
+          "xactCommit": 636
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 8362,
+        "lifecycleMs": 1195.886375,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 12616.23,
+        "processingMs": 792.6300409999999,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 62.394,
+          "p50": 111.617,
+          "p95": 146.626,
+          "p99": 161.181,
+          "max": 165.105
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 19.355,
+          "p50": 39.116,
+          "p95": 63.862,
+          "p99": 64.181,
+          "max": 64.19
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 6,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 40.824,
+          "p50": 96.679,
+          "p95": 129.833,
+          "p99": 133.533,
+          "max": 135.118
+        },
+        "admissionJobsPerSecond": 23337.25,
+        "admissionMs": 428.49958300000003,
+        "batchSize": 250,
+        "brokerClaims": [
+          4750,
+          5250
+        ],
+        "brokers": 2,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1953752,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 10838016,
+          "walBytes": 119311616,
+          "xactCommit": 419
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 10348.59,
+        "lifecycleMs": 966.3151670000001,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 18593.8,
+        "processingMs": 537.8137079999999,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 54.606,
+          "p50": 84.992,
+          "p95": 116.738,
+          "p99": 119.188,
+          "max": 119.819
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 26.236,
+          "p50": 37.319,
+          "p95": 64.925,
+          "p99": 67.124,
+          "max": 68.418
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    },
+    {
+      "measured": true,
+      "round": 6,
+      "sample": {
+        "accepted": 10000,
+        "ackLatencyMs": {
+          "count": 40,
+          "min": 62.439,
+          "p50": 129.44,
+          "p95": 159.941,
+          "p99": 164.933,
+          "max": 166.566
+        },
+        "admissionJobsPerSecond": 19243.74,
+        "admissionMs": 519.6494580000001,
+        "batchSize": 250,
+        "brokerClaims": [
+          10000
+        ],
+        "brokers": 1,
+        "completed": 10000,
+        "consumerConnections": 16,
+        "databaseDelta": {
+          "blksHit": 1127904,
+          "blksRead": 35,
+          "deadlocks": 0,
+          "tempBytes": 0,
+          "walBytes": 81385581,
+          "xactCommit": 276
+        },
+        "duplicateInvocations": 0,
+        "jobs": 10000,
+        "lifecycleJobsPerSecond": 7798.16,
+        "lifecycleMs": 1282.353083,
+        "postgresMajor": 18,
+        "pollIntervalMs": 250,
+        "postgresSettings": {
+          "server_version": "18.6 (Homebrew)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "shared_buffers": "128MB",
+          "max_connections": "100"
+        },
+        "postgresVersion": "18.6 (Homebrew)",
+        "producerConnections": 4,
+        "poolSize": 4,
+        "processingJobsPerSecond": 13111.28,
+        "processingMs": 762.7017500000001,
+        "pullLatencyMs": {
+          "count": 40,
+          "min": 54.981,
+          "p50": 132.118,
+          "p95": 160.461,
+          "p99": 175.051,
+          "max": 184.17
+        },
+        "pushLatencyMs": {
+          "count": 40,
+          "min": 27.913,
+          "p50": 49.104,
+          "p95": 73.867,
+          "p99": 86.341,
+          "max": 88.316
+        },
+        "uniqueAccepted": 10000,
+        "uniqueInvoked": 10000
+      }
+    }
+  ],
+  "startedAt": "2026-08-26T19:30:11.032Z",
+  "summaries": [
+    {
+      "admissionJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 6.27,
+        "max": 20268.63,
+        "mean": 19103.08,
+        "meanCi95High": 20210.22,
+        "meanCi95Low": 17995.95,
+        "median": 19243.74,
+        "min": 16623.06,
+        "p05": 17294.7,
+        "p95": 20187.66
+      },
+      "brokers": 1,
+      "lifecycleJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 7.12,
+        "max": 8468.51,
+        "mean": 7921.07,
+        "meanCi95High": 8442.38,
+        "meanCi95Low": 7399.75,
+        "median": 8112.27,
+        "min": 6728.77,
+        "p05": 7049.59,
+        "p95": 8389.54
+      },
+      "postgresMajor": 18,
+      "postgresVersion": "18.6 (Homebrew)",
+      "processingJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 8.09,
+        "max": 14546.09,
+        "mean": 13540.28,
+        "meanCi95High": 14553.51,
+        "meanCi95Low": 12527.05,
+        "median": 13914.15,
+        "min": 11304.8,
+        "p05": 11846.74,
+        "p95": 14475.67
+      },
+      "samples": 7
+    },
+    {
+      "admissionJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 8.13,
+        "max": 24984.13,
+        "mean": 23605.59,
+        "meanCi95High": 25380.73,
+        "meanCi95Low": 21830.45,
+        "median": 24590.42,
+        "min": 19610.11,
+        "p05": 20657.66,
+        "p95": 24980.09
+      },
+      "brokers": 2,
+      "lifecycleJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 5.83,
+        "max": 10978.67,
+        "mean": 10106.11,
+        "meanCi95High": 10651.46,
+        "meanCi95Low": 9560.75,
+        "median": 10074.63,
+        "min": 9339.01,
+        "p05": 9403.49,
+        "p95": 10876.65
+      },
+      "postgresMajor": 18,
+      "postgresVersion": "18.6 (Homebrew)",
+      "processingJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 9,
+        "max": 19719.7,
+        "mean": 17791.32,
+        "meanCi95High": 19271.6,
+        "meanCi95Low": 16311.04,
+        "median": 17830.56,
+        "min": 15624.45,
+        "p05": 15825.73,
+        "p95": 19681.7
+      },
+      "samples": 7
+    },
+    {
+      "admissionJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 3.02,
+        "max": 24798.25,
+        "mean": 24002.92,
+        "meanCi95High": 24674.38,
+        "meanCi95Low": 23331.45,
+        "median": 24149.55,
+        "min": 22903.43,
+        "p05": 22978.41,
+        "p95": 24776.45
+      },
+      "brokers": 4,
+      "lifecycleJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 4.93,
+        "max": 8784.73,
+        "mean": 8300.92,
+        "meanCi95High": 8679.07,
+        "meanCi95Low": 7922.77,
+        "median": 8362,
+        "min": 7500.2,
+        "p05": 7708.81,
+        "p95": 8735.62
+      },
+      "postgresMajor": 18,
+      "postgresVersion": "18.6 (Homebrew)",
+      "processingJobsPerSecond": {
+        "count": 7,
+        "cvPercent": 8.13,
+        "max": 14250.67,
+        "mean": 12727.63,
+        "meanCi95High": 13685.16,
+        "meanCi95Low": 11770.1,
+        "median": 12821.67,
+        "min": 10878.94,
+        "p05": 11292.94,
+        "p95": 13990.05
+      },
+      "samples": 7
+    }
+  ]
+}

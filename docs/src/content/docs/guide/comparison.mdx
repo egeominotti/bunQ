@@ -27,7 +27,7 @@ This page helps you decide between bunqueue and BullMQ. Short version first, the
 ## Quick answer
 
 Pick **bunqueue** if you run on Bun and want embedded/single-broker SQLite or a
-PostgreSQL 18.6 multi-broker server without Redis. You get the same Queue and
+PostgreSQL 15–18 multi-broker server without Redis; 18.6 is recommended. You get the same Queue and
 Worker API across these server backends.
 
 Pick **BullMQ** if Redis/Redis Cluster is already your operational standard, you
@@ -176,20 +176,20 @@ to the multi-broker backend.
 
 ## Feature comparison
 
-| Feature                                                           | bunqueue                                           | BullMQ                               |
-| ----------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------ |
-| Queue types (standard, priority, LIFO)                            | ✅                                                 | ✅                                   |
-| Delayed jobs, retries with backoff                                | ✅                                                 | ✅                                   |
-| Dead letter queue (holding area for jobs that failed all retries) | ✅ Built-in, with auto-retry and expiration        | ⚠️ Failed set, no dedicated DLQ      |
-| Rate limiting                                                     | ✅ Per-worker and per-queue                        | ✅ Per-worker                        |
-| Cron / repeatable jobs                                            | ✅ Built-in                                        | ✅ Via Job Scheduler                 |
-| Parent-child flows                                                | ✅                                                 | ✅                                   |
-| Persistence                                                       | Memory/SQLite by default; PostgreSQL 18.6 optional | Redis server                         |
-| Horizontal broker scaling                                         | ✅ PostgreSQL mode                                 | ✅ Redis Cluster                     |
-| External infrastructure                                           | ✅ None with SQLite; PostgreSQL optional           | ❌ Redis required                    |
-| Built-in S3 backup                                                | ✅ SQLite mode                                     | ❌ Manual                            |
-| MCP server for AI agents                                          | ✅ Built-in                                        | ❌                                   |
-| Client languages                                                  | TypeScript, Python                                 | Node.js, Python, and community ports |
+| Feature                                                           | bunqueue                                            | BullMQ                               |
+| ----------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------ |
+| Queue types (standard, priority, LIFO)                            | ✅                                                  | ✅                                   |
+| Delayed jobs, retries with backoff                                | ✅                                                  | ✅                                   |
+| Dead letter queue (holding area for jobs that failed all retries) | ✅ Built-in, with auto-retry and expiration         | ⚠️ Failed set, no dedicated DLQ      |
+| Rate limiting                                                     | ✅ Per-worker and per-queue                         | ✅ Per-worker                        |
+| Cron / repeatable jobs                                            | ✅ Built-in                                         | ✅ Via Job Scheduler                 |
+| Parent-child flows                                                | ✅                                                  | ✅                                   |
+| Persistence                                                       | Memory/SQLite by default; PostgreSQL 15–18 optional | Redis server                         |
+| Horizontal broker scaling                                         | ✅ PostgreSQL mode                                  | ✅ Redis Cluster                     |
+| External infrastructure                                           | ✅ None with SQLite; PostgreSQL optional            | ❌ Redis required                    |
+| Built-in S3 backup                                                | ✅ SQLite mode                                      | ❌ Manual                            |
+| MCP server for AI agents                                          | ✅ Built-in                                         | ❌                                   |
+| Client languages                                                  | TypeScript, Python                                  | Node.js, Python, and community ports |
 
 ## When to Use BullMQ Instead
 

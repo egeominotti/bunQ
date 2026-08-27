@@ -6,8 +6,9 @@ This folder is the **internal engineering reference** for bunqueue: a deep, code
 
 bunqueue is a high-performance job queue for [Bun](https://bun.sh): the default
 single-process engine uses sharded in-memory priority queues backed by a
-write-behind SQLite store, while an optional PostgreSQL 18.6 server engine uses
-database-authoritative transactions and leases for multi-broker deployments.
+write-behind SQLite store, while an optional PostgreSQL 15–18 server engine uses
+database-authoritative transactions and leases for multi-broker deployments;
+18.6 is the pinned and recommended release.
 Both are fronted by binary-TCP and HTTP transports; the project also includes an
 embedded SDK (`Queue`/`Worker`), a saga workflow engine, and a native MCP server
 for AI agents.
@@ -89,12 +90,12 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 ### Persistence & operations
 
-| Document                                                                       | Purpose                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Persistence](./features/persistence.md)                                       | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer), including atomic admission metadata for terminal-ID retirement and dependency pins, plus batched recovery reads.                                                                                             |
-| [PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md) | Optional database-authoritative server backend: focused admission/completion/destruction modules, generation-safe dependency locking and bounded proofs, atomic shared-child removal, lifecycle admission/drain, set-based claim/ACK, lease fencing/recovery, and commit-ordered durable replay. |
-| [S3 Backup](./features/backup-s3.md)                                           | Periodic gzip-compressed, SHA-256-checksummed SQLite snapshots to S3-compatible storage with retention pruning and validate-before-replace restore.                                                                                                                                              |
-| [Configuration & Entrypoint](./features/configuration.md)                      | Config layer and process entrypoint: resolves config-file/env/default precedence into typed config, dispatches the executable, and provides the Logger, VERSION, and Bun-only runtime guards.                                                                                                    |
+| Document                                                                        | Purpose                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [Persistence](./features/persistence.md)                                        | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer), including atomic admission metadata for terminal-ID retirement and dependency pins, plus batched recovery reads.                                                                                             |
+| [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md) | Optional database-authoritative server backend: focused admission/completion/destruction modules, generation-safe dependency locking and bounded proofs, atomic shared-child removal, lifecycle admission/drain, set-based claim/ACK, lease fencing/recovery, and commit-ordered durable replay. |
+| [S3 Backup](./features/backup-s3.md)                                            | Periodic gzip-compressed, SHA-256-checksummed SQLite snapshots to S3-compatible storage with retention pruning and validate-before-replace restore.                                                                                                                                              |
+| [Configuration & Entrypoint](./features/configuration.md)                       | Config layer and process entrypoint: resolves config-file/env/default precedence into typed config, dispatches the executable, and provides the Logger, VERSION, and Bun-only runtime guards.                                                                                                    |
 
 ### Client SDK
 
@@ -162,7 +163,7 @@ is documented in [Job Lifecycle](./features/job-lifecycle.md), with its
 The optional server-only PostgreSQL runtime lives under
 `persistence/postgres/`, with its manager adapter under
 `application/postgres-queue-manager/`; see
-[PostgreSQL 18.6 Multi-Broker Persistence](./features/postgres-multibroker.md).
+[PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md).
 That feature reference covers the `admissionStore`, its typed
 [`admissionResult.ts`](../src/infrastructure/persistence/postgres/admissionResult.ts)
 contract and

@@ -182,9 +182,11 @@ therefore an error, not a result.
 
 ## Raw evidence
 
-The complete machine-readable report is retained locally at
-`artifacts/benchmarks/postgres-versions-2026-08-26T18-13-50.637Z.json` with
-SHA-256
+The complete machine-readable report is published at
+[`docs/public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T18-13-50.637Z.json`](../public/benchmarks/postgres/2026-08-26/postgres-versions-2026-08-26T18-13-50.637Z.json)
+with SHA-256
 `ff462590ca80856a94418bd57220a6df97d6a91c7a8f1ca060668898197eaeaa`.
-Generated artifacts are intentionally excluded from repository commits. The
-tracked harness emits the same raw schema and all derived rate summaries.
+The public [evidence manifest](../public/benchmarks/postgres/2026-08-26/manifest.json)
+indexes this artifact and every PostgreSQL 18 tuning artifact used by the
+companion report. The tracked harness emits the same raw schema and all derived
+rate summaries.

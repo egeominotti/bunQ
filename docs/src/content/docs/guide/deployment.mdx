@@ -1,6 +1,6 @@
 ---
-title: 'Deploy bunqueue: SQLite or PostgreSQL 18.6'
-description: Deploy bunqueue with embedded or single-broker SQLite, or a PostgreSQL 18.6 multi-broker topology, including Docker, health, and backups.
+title: 'Deploy bunqueue: SQLite or PostgreSQL 15–18'
+description: Deploy bunqueue with embedded or single-broker SQLite, or a PostgreSQL 15–18 multi-broker topology, including Docker, health, and backups.
 head:
   - tag: meta
     attrs:
@@ -22,9 +22,10 @@ import { Aside } from '@astrojs/starlight/components';
 </div>
 
 bunqueue uses one process and memory/SQLite by default. Server mode may instead
-use PostgreSQL 18.6 as the authoritative store for multiple active broker
-processes. Start by deciding whether the queue is embedded, a single SQLite
-server, or a PostgreSQL-backed broker fleet.
+use PostgreSQL 15–18 as the authoritative store for multiple active broker
+processes. PostgreSQL 18.6 is the recommended release and is pinned by the
+repository Compose topology. Start by deciding whether the queue is embedded, a
+single SQLite server, or a PostgreSQL-backed broker fleet.
 
 ## The smallest deploy: embedded mode
 
@@ -119,7 +120,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
   require PostgreSQL mode.
 </Aside>
 
-## Multiple active brokers: PostgreSQL 18.6
+## Multiple active brokers: PostgreSQL 15–18
 
 Use the repository's pinned Compose topology when one broker is not enough:
 
@@ -131,7 +132,10 @@ POSTGRES_PASSWORD='replace-me' \
 
 This starts `postgres:18.6-alpine`, `broker-a` on TCP/HTTP `6789`/`6790`, and
 `broker-b` on `7789`/`7790`. Both brokers share one URL and namespace and have
-different IDs. Configure the equivalent deployment with:
+different IDs. CI runs the complete PostgreSQL integration suite against majors
+15, 16, 17, and the pinned 18.6 release; use 18.6 for new deployments unless a
+provider constraint requires another tested major. Configure the equivalent
+deployment with:
 
 ```bash
 BUNQUEUE_STORAGE_DRIVER=postgres
@@ -350,40 +354,68 @@ driver is rejected at startup.
 
 ## Reference: key environment variables
 
-| Variable                         | What it does                                                                                              | Default     |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
-| `BUNQUEUE_STORAGE_DRIVER`        | `memory`, `sqlite`, or `postgres`                                                                         | inferred    |
-| `BUNQUEUE_DATA_PATH`             | SQLite file path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`)                 | in-memory   |
-| `BUNQUEUE_POSTGRES_URL`          | PostgreSQL server connection URL                                                                          | none        |
-| `BUNQUEUE_POSTGRES_NAMESPACE`    | Shared installation namespace                                                                             | `default`   |
-| `BUNQUEUE_BROKER_ID`             | Unique PostgreSQL broker identity                                                                         | generated   |
-| `TCP_PORT`                       | Port for SDK clients                                                                                      | `6789`      |
-| `HTTP_PORT`                      | Port for health, metrics, REST                                                                            | `6790`      |
-| `AUTH_TOKENS`                    | Comma-separated tokens clients must present                                                               | none (open) |
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` | PEM cert and key for native TLS on TCP and HTTP. Set both or neither; setting only one is a startup error | off         |
-| `S3_BACKUP_ENABLED`              | Turn on S3 snapshots                                                                                      | `0`         |
-| `SHUTDOWN_TIMEOUT_MS`            | How long a graceful shutdown waits for active jobs                                                        | `30000`     |
+| Variable                                        | What it does                                                                                              | Default     |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
+| `BUNQUEUE_STORAGE_DRIVER`                       | `memory`, `sqlite`, or `postgres`                                                                         | inferred    |
+| `BUNQUEUE_DATA_PATH`                            | SQLite file path (aliases, in priority order: `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH`)                 | in-memory   |
+| `BUNQUEUE_POSTGRES_URL`                         | PostgreSQL server connection URL                                                                          | none        |
+| `BUNQUEUE_POSTGRES_NAMESPACE`                   | Shared installation namespace                                                                             | `default`   |
+| `BUNQUEUE_BROKER_ID`                            | Unique PostgreSQL broker identity                                                                         | generated   |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`                   | SQL connections per broker; budget `brokers × poolSize` plus operational headroom                         | `4`         |
+| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`           | Broker coordination and recovery cadence input                                                            | `30000`     |
+| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`            | Durable-event and cron fallback polling interval                                                          | `250`       |
+| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`        | Maximum SQL statement duration                                                                            | `30000`     |
+| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`             | Maximum wait for a PostgreSQL lock                                                                        | `5000`      |
+| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS` | Maximum idle time inside a transaction                                                                    | `30000`     |
+| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`   | Active PostgreSQL manager operations per broker                                                           | `16`        |
+| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`       | Waiting operations before fail-fast saturation                                                            | `128`       |
+| `TCP_PORT`                                      | Port for SDK clients                                                                                      | `6789`      |
+| `HTTP_PORT`                                     | Port for health, metrics, REST                                                                            | `6790`      |
+| `AUTH_TOKENS`                                   | Comma-separated tokens clients must present                                                               | none (open) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE`                | PEM cert and key for native TLS on TCP and HTTP. Set both or neither; setting only one is a startup error | off         |
+| `S3_BACKUP_ENABLED`                             | Turn on S3 snapshots                                                                                      | `0`         |
+| `SHUTDOWN_TIMEOUT_MS`                           | How long a graceful shutdown waits for active jobs                                                        | `30000`     |
 
 The full list, including all S3 and cloud variables, lives in [Environment Variables](/guide/env-vars/). The same options are available as CLI flags: `bunqueue start --tcp-port --http-port --data-path --auth-tokens --tls-cert --tls-key`.
 
-## Sizing
+## Sizing by backend
 
-bunqueue is I/O bound, not CPU bound; one core handles most workloads.
+There is no backend-independent CPU/RAM table: retained payload size, command
+batching, worker concurrency, journal retention, database latency, and
+observability history all change the resource curve. Measure admission,
+processing, and complete lifecycle separately with production-shaped payloads.
 
-| Jobs per day | RAM        |
-| ------------ | ---------- |
-| under 10k    | 128-256 MB |
-| 10k-100k     | 512 MB     |
-| over 100k    | 1 GB+      |
+For memory/SQLite, size the bunqueue process for its in-memory indexes and
+retained jobs, and place the database on durable low-latency storage. Set
+`removeOnComplete: true` when completed rows do not need to remain queryable, and
+keep enough failed jobs for diagnosis. One SQLite file still has exactly one
+broker owner; adding broker processes is not a scaling mechanism.
 
-Disk grows with retained jobs. Set `removeOnComplete: true` in job options to drop completed jobs, and keep `removeOnFail: false` so failures stay inspectable. Scale vertically: more RAM, faster disk (NVMe), higher worker `concurrency`.
+For PostgreSQL, budget two layers independently:
+
+- **Bun brokers:** memory for bounded compatibility snapshots, active workers,
+  connections, and command batches. Start with the default pool of four per
+  broker and the default 16 active/128 queued operation admission limits.
+- **Database:** `brokers × poolSize` application connections plus administration,
+  monitoring, replication, and failover headroom. Size CPU, `shared_buffers`,
+  WAL, storage IOPS, autovacuum, and replica replay capacity from measured churn.
+
+The native engineering campaign found two brokers faster than one for its fixed
+16-consumer workload, while four brokers added availability but not linear
+throughput. Treat that as a contention warning, not a universal broker-count
+recommendation. See [PostgreSQL benchmark evidence](/guide/benchmarks/#postgresql-1518-multi-broker).
 
 ## Gotchas
 
 - **SQLite is single-broker.** Horizontal broker scaling requires PostgreSQL
-  18.6 mode. PostgreSQL/database HA, routing, and backup remain operational
+  15–18 mode; 18.6 is recommended. PostgreSQL/database HA, routing, and backup remain operational
   responsibilities; bunqueue is not a multi-region consensus system.
 - **Two embedded processes, one file, is silent corruption.** See the warning above; always go through the server for multi-process.
 - **Copying the database while the server runs can produce a torn copy.** SQLite runs in WAL mode (writes go to a `.db-wal` sidecar file first). Stop the server, then copy `bunq.db` and `bunq.db-wal` together, or just use the built-in S3 backup, which snapshots safely while live.
 - **`AUTH_TOKENS` is not set by default.** Anyone who can reach the ports can push and pull jobs. Set tokens (`openssl rand -hex 32`) and either enable [native TLS](/guide/tls/) or keep the ports on a private network. See [Security](/security/).
-- **Jobs you cannot afford to lose in a hard crash should be `durable: true`.** By default writes are buffered for up to 10 ms for throughput; `durable` writes hit disk before the add returns. Details in [Production Operations](/guide/production/).
+- **SQLite jobs you cannot afford to lose in a hard crash should be `durable: true`.** SQLite buffers ordinary writes for up to 10 ms; `durable` writes hit disk before the add returns. PostgreSQL mutations are already transactional and do not use this buffer. Details in [Production Operations](/guide/production/).
+- **Do not improvise a mixed-version PostgreSQL rollout.** Stop the old broker
+  fleet before the first new binary migrates the schema, verify one new broker,
+  then start the rest at the same version. An old binary may reject the newer
+  recorded schema; use roll-forward or a coordinated database/PITR restore for
+  rollback. See [PostgreSQL upgrades](/guide/production/#postgresql-schema-upgrades).

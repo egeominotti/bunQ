@@ -63,7 +63,9 @@ Every publishable native campaign follows these rules:
 7. Close every `Engine`, `Queue`, `Worker`, manager, server, and database, then
    remove the database, `-wal`, and `-shm` files.
 8. Retain raw JSON/logs alongside the derived report. Never reconstruct raw
-   samples from a rounded table.
+   samples from a rounded table. Publish the exact raw artifacts behind a public
+   PostgreSQL report under `docs/public/benchmarks/postgres/<campaign-date>/`
+   with a manifest and SHA-256 hashes.
 
 Throughput values from different operations are not ratios. Internal
 `QueueManager.pushBatch`, public `Queue.addBulk`, TCP `PUSHB`, durable sequential

@@ -18,8 +18,8 @@ import { Aside } from '@astrojs/starlight/components';
   </h1>
   <p class="bq-hero-sub">
     Run the default engine as one process plus SQLite, or run multiple brokers against PostgreSQL
-    18.6. This page explains crash behavior, monitoring, and the storage-specific checks before
-    go-live.
+    15–18. PostgreSQL 18.6 is the pinned and recommended release. This page explains crash behavior,
+    monitoring, and the storage-specific checks before go-live.
   </p>
 </div>
 
@@ -39,7 +39,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 </div>
 
-<Aside title="PostgreSQL 18.6 multi-broker failures">
+<Aside title="PostgreSQL 15–18 multi-broker failures">
   PostgreSQL mutations are transactional and do not use SQLite's 10 ms write buffer. If a broker
   dies mid-job, another broker recovers the database-clock lease and stale ACK/FAIL tokens are
   fenced. Protect the PostgreSQL service with database-native backups/PITR and HA; bunqueue's S3
@@ -78,7 +78,8 @@ The guarantee is **at-least-once**: a job is never lost, but it can run more tha
       Set a custom <code>jobId</code> wherever the producer might retry an add.
     </li>
     <li>
-      Mark jobs you cannot afford to lose as <code>durable: true</code>.
+      In SQLite mode, mark jobs you cannot afford to lose as <code>durable: true</code>.
+      PostgreSQL writes are already transactional and do not use the SQLite write buffer.
     </li>
   </ul>
 </Aside>
@@ -141,7 +142,7 @@ Restore validates before it replaces: it verifies sizes and checksum, runs an in
 
 | Endpoint                | What it gives you                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`           | `healthy` or `degraded`, uptime, version, job counts per state, memory, and a `storage.diskFull` flag when the disk is full                 |
+| `GET /health`           | `healthy` or `degraded`, uptime, version, job counts, memory, and persistent-storage health; SQLite also exposes `storage.diskFull`         |
 | `GET /healthz`, `/live` | Bare liveness probes; remain 200 while the process responds                                                                                 |
 | `GET /ready`            | Readiness; returns 503 when persistent storage is degraded                                                                                  |
 | `GET /prometheus`       | Metrics in Prometheus text format: job counts, totals, latency, bounded per-queue gauges, process/connections, storage and backup freshness |
@@ -151,12 +152,61 @@ Set `METRICS_AUTH=true` to require an `AUTH_TOKENS` bearer token on `/prometheus
 
 - **DLQ growth**: `bunqueue_jobs_dlq` climbing means handlers are failing terminally.
 - **Queue depth**: `bunqueue_jobs_waiting + bunqueue_jobs_prioritized` growing steadily means workers cannot keep up.
-- **`/health` reporting `degraded`**: the disk is full.
+- **`/health` reporting `degraded`**: inspect persistent-storage health. SQLite
+  commonly reports a full disk; PostgreSQL may report connection, lifecycle,
+  event-stream, projection-refresh, heartbeat, recovery, retention, or cron
+  failures. `/ready` returns 503 until the affected subsystem recovers.
 - **Backup freshness**: an enabled scheduler that is stopped, failing, or has no success within two intervals puts recovery objectives at risk.
 - **Telemetry truncation**: `bunqueue_queue_metrics_omitted > 0` means per-queue drill-down is incomplete; review cardinality before raising the cap.
 - **Memory drift**: RSS should plateau once the workload does; internal caches are hard-capped.
 
 Dashboards and webhook alerting are covered in [Monitoring](/guide/monitoring/).
+
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">postgresql failover</span>
+  <h2 class="bq-h2">Know the recovery clock.</h2>
+  <p class="bq-lede">PostgreSQL uses the database clock for leases and broker ownership, so host clock skew cannot create two valid owners.</p>
+
+`BUNQUEUE_POSTGRES_LEASE_DURATION_MS` defaults to 30 seconds. It controls the
+background coordination cadence as follows:
+
+| Operation                          | Formula                                        | Default |
+| ---------------------------------- | ---------------------------------------------- | ------: |
+| Broker heartbeat                   | `max(1s, floor(leaseDurationMs / 3))`          |    10 s |
+| Duplicate broker-ID stale takeover | `max(leaseDurationMs, 3 × heartbeat interval)` |    30 s |
+| Expired processing-lease scan      | `max(500ms, floor(leaseDurationMs / 2))`       |    15 s |
+
+The processing lease itself is still determined by the worker's
+`lockDuration` and renewed by heartbeats. After that lease expires, a surviving
+broker discovers it on the next recovery scan, so the normal recovery bound is
+the remaining job lease plus up to one scan interval, database/query scheduling
+not included. Do not lower these values merely to make failover look faster:
+measure database latency and pause behavior first, and alert when heartbeat or
+recovery health becomes degraded. See [Storage backends](/guide/databases/#broker-failover-timing).
+
+</div>
+
+<div class="bq-wrap bq-section">
+  <span class="bq-eyebrow">postgresql upgrades</span>
+  <h2 id="postgresql-schema-upgrades" class="bq-h2">Treat the schema as a one-way boundary.</h2>
+  <p class="bq-lede">Schema initialization is automatic, but mixed bunqueue versions are not a supported steady state.</p>
+
+For the safest PostgreSQL upgrade:
+
+1. Verify database backups/PITR and rehearse the target version against a restored clone.
+2. Drain or stop every old broker before allowing the first new broker to initialize the schema.
+3. Start one new broker, wait for `/ready`, and verify the schema and authoritative queue counts.
+4. Start the remaining brokers at the same bunqueue version, then update clients.
+
+Do not assume an application-only rollback is safe after a schema migration. A
+binary that supports an older schema version refuses to start against a newer
+recorded version. If the new broker has migrated the database, roll forward or
+restore the pre-upgrade database/PITR point together with the old binaries.
+Zero-downtime mixed-version rollout requires explicit compatibility evidence for
+the exact source and target versions; it is not implied by the additive shape of
+the current migration.
 
 </div>
 
@@ -177,7 +227,8 @@ Jobs still running when the deadline hits are not lost either: they are already 
 
 <ul class="bq-checks">
   <li>
-    <code>durable: true</code> on every job you cannot re-derive
+    SQLite only: <code>durable: true</code> on every job you cannot re-derive; PostgreSQL writes are
+    transactional without this option
   </li>
   <li>idempotency keys in every handler side effect</li>
   <li>
@@ -209,7 +260,7 @@ Jobs still running when the deadline hits are not lost either: they are already 
 </ul>
 
   <Aside title="Honest limits">
-  In SQLite mode, buffered jobs can lose up to ~10 ms of writes on a hard crash; `durable: true` closes that per job, and losing the single host means restoring a snapshot. PostgreSQL mode removes that buffer and supports several brokers, but database availability and recovery are still your responsibility. Both modes provide at-least-once processing, so handlers must tolerate duplicates. Watch SQLite WAL growth or PostgreSQL storage/connection health as appropriate. When upgrading, roll brokers only after the storage schema initializes successfully, then update clients.
+  In SQLite mode, buffered jobs can lose up to ~10 ms of writes on a hard crash; `durable: true` closes that per job, and losing the single host means restoring a snapshot. PostgreSQL mode removes that buffer and supports several brokers, but database availability and recovery are still your responsibility. Both modes provide at-least-once processing, so handlers must tolerate duplicates. Watch SQLite WAL growth or PostgreSQL storage/connection health as appropriate. For a PostgreSQL schema upgrade, stop the old broker fleet, initialize and verify one new broker, then start the rest at the same version; do not rely on an application-only downgrade after migration.
   </Aside>
 </div>
 

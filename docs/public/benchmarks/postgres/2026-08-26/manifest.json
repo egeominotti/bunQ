@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "publishedAt": "2026-08-27",
+  "campaignDate": "2026-08-26",
+  "reports": [
+    "docs/benchmarks/postgres-versions-2026-08-26.md",
+    "docs/benchmarks/postgres-performance-analysis-2026-08-26.md"
+  ],
+  "artifacts": [
+    {
+      "campaign": "PostgreSQL 15.19/16.15/17.11/18.6 compatibility matrix",
+      "file": "postgres-versions-2026-08-26T18-13-50.637Z.json",
+      "sha256": "ff462590ca80856a94418bd57220a6df97d6a91c7a8f1ca060668898197eaeaa"
+    },
+    {
+      "campaign": "Clean control, four brokers, batch 100",
+      "file": "postgres-performance-control-2026-08-26T18-55-08.011Z.json",
+      "sha256": "223bf8b9339385a11f3fa48d66c7ce5d0f909f31735936519f3b71221eab0f67"
+    },
+    {
+      "campaign": "Tuned one/two/four brokers, batch 250, work_mem 4 MB",
+      "file": "postgres-versions-2026-08-26T19-30-11.032Z.json",
+      "sha256": "7a054d8d4547751736619f6776addc8010ddf5c55d69ddc0278967c000ec5208"
+    },
+    {
+      "campaign": "Four brokers, batch 100, work_mem 4 MB",
+      "file": "postgres-versions-2026-08-26T19-33-37.614Z.json",
+      "sha256": "0d35a1059e84734e0085200fa745ea1f93c5bf3b76b5c5896ab41288547e5c54"
+    },
+    {
+      "campaign": "Four brokers, batch 250, work_mem 8 MB",
+      "file": "postgres-versions-2026-08-26T19-38-55.634Z.json",
+      "sha256": "9ef5a812ad6ea81ff7ba0bb802d603df1fa5d269ad5211f54701fce2687e12ed"
+    },
+    {
+      "campaign": "Four brokers, batch 250, work_mem 32 MB",
+      "file": "postgres-versions-2026-08-26T19-37-36.903Z.json",
+      "sha256": "bb84f1074826fb1a418f502855c2611ff608b502be2f5692337393a2668722de"
+    },
+    {
+      "campaign": "Final batch-100 code candidate",
+      "file": "postgres-versions-2026-08-26T19-41-48.946Z.json",
+      "sha256": "35cf6b415d78391c61db7b9f406ebe15d663fc3b5d20e22f6a4a29112cf756cb"
+    }
+  ]
+}

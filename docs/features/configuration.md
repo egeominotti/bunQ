@@ -10,7 +10,7 @@ environment variables and built-in defaults (config file wins), and produces
 strongly-typed resolved config objects (`ResolvedConfig`, `CloudConfig`,
 `S3BackupConfig`, TLS options) consumed by the server bootstrap. Storage
 resolution keeps memory/SQLite as the default and selects the optional
-PostgreSQL 18.6 multi-broker manager only from an explicit driver or URL. It
+PostgreSQL 15–18 multi-broker manager only from an explicit driver or URL. It
 also owns the `bunqueue` executable's top-level dispatch (bare invocation →
 server, anything else → CLI), the structured `Logger`, the package `VERSION`,
 and the Bun-only runtime guards that fail fast under Node.
@@ -118,6 +118,13 @@ interface ResolvedConfig {
   postgresPoolSize: number;
   postgresLeaseDurationMs: number;
   postgresPollIntervalMs: number;
+  postgresStatementTimeoutMs: number;
+  postgresLockTimeoutMs: number;
+  postgresIdleTransactionTimeoutMs: number;
+  postgresMaxConcurrentOperations: number;
+  postgresMaxQueuedOperations: number;
+  postgresMaxSnapshotJobs: number;
+  postgresMaxSnapshotPayloadBytes: number;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
   maxPrometheusQueues: number;
@@ -241,37 +248,37 @@ storage gets two bounded close attempts before the coordinator exits 0 or 1.
 
 Resolved by `resolveServerConfig` (defaults in parentheses):
 
-| Env var                                                             | Config-file path                | Default                      |
-| ------------------------------------------------------------------- | ------------------------------- | ---------------------------- |
-| `TCP_PORT`                                                          | `server.tcpPort`                | `6789`                       |
-| `HTTP_PORT`                                                         | `server.httpPort`               | `6790`                       |
-| `HOST`                                                              | `server.host`                   | `0.0.0.0`                    |
-| `TCP_SOCKET_PATH`                                                   | `server.tcpSocketPath`          | `undefined`                  |
-| `HTTP_SOCKET_PATH`                                                  | `server.httpSocketPath`         | `undefined`                  |
-| `TLS_CERT_FILE`                                                     | `server.tlsCertFile`            | `undefined`                  |
-| `TLS_KEY_FILE`                                                      | `server.tlsKeyFile`             | `undefined`                  |
-| `AUTH_TOKENS` (comma-split)                                         | `auth.tokens`                   | `[]`                         |
-| `BUNQUEUE_STORAGE_DRIVER`                                           | `storage.driver`                | inferred from URL/data path  |
-| `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH` | `storage.dataPath`              | `undefined` (in-memory)      |
-| `BUNQUEUE_POSTGRES_URL`                                             | `storage.url`                   | `undefined`                  |
-| `BUNQUEUE_POSTGRES_NAMESPACE`                                       | `storage.namespace`             | `default`                    |
-| `BUNQUEUE_BROKER_ID`                                                | `storage.brokerId`              | generated host/PID/random ID |
-| `BUNQUEUE_POSTGRES_POOL_SIZE`                                       | `storage.poolSize`              | `4`                          |
-| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`                               | `storage.leaseDurationMs`       | `30000`                      |
-| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`                                | `storage.pollIntervalMs`        | `250`                        |
-| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`                            | `storage.statementTimeoutMs`    | `30000`                      |
-| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`                                 | `storage.lockTimeoutMs`         | `5000`                       |
-| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS`                     | `storage.idleTransactionTimeoutMs` | `30000`                   |
-| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`                       | `storage.maxConcurrentOperations` | `16`                       |
-| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`                           | `storage.maxQueuedOperations`   | `128`                        |
-| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS`                               | `storage.maxSnapshotJobs`       | `100000`                     |
-| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES`                      | `storage.maxSnapshotPayloadBytes` | `268435456`                |
-| `CORS_ALLOW_ORIGIN` (comma-split)                                   | `cors.origins`                  | `[]`                         |
-| `METRICS_AUTH` (`=== 'true'`)                                       | `auth.requireAuthForMetrics`    | `false`                      |
-| `METRICS_MAX_QUEUES`                                                | `telemetry.maxPrometheusQueues` | `100`                        |
-| `S3_BACKUP_ENABLED` (`1`/`true`)                                    | `backup.enabled`                | `false`                      |
-| `SHUTDOWN_TIMEOUT_MS`                                               | `timeouts.shutdown`             | `30000`                      |
-| `STATS_INTERVAL_MS`                                                 | `timeouts.stats`                | `300000`                     |
+| Env var                                                             | Config-file path                   | Default                      |
+| ------------------------------------------------------------------- | ---------------------------------- | ---------------------------- |
+| `TCP_PORT`                                                          | `server.tcpPort`                   | `6789`                       |
+| `HTTP_PORT`                                                         | `server.httpPort`                  | `6790`                       |
+| `HOST`                                                              | `server.host`                      | `0.0.0.0`                    |
+| `TCP_SOCKET_PATH`                                                   | `server.tcpSocketPath`             | `undefined`                  |
+| `HTTP_SOCKET_PATH`                                                  | `server.httpSocketPath`            | `undefined`                  |
+| `TLS_CERT_FILE`                                                     | `server.tlsCertFile`               | `undefined`                  |
+| `TLS_KEY_FILE`                                                      | `server.tlsKeyFile`                | `undefined`                  |
+| `AUTH_TOKENS` (comma-split)                                         | `auth.tokens`                      | `[]`                         |
+| `BUNQUEUE_STORAGE_DRIVER`                                           | `storage.driver`                   | inferred from URL/data path  |
+| `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH` | `storage.dataPath`                 | `undefined` (in-memory)      |
+| `BUNQUEUE_POSTGRES_URL`                                             | `storage.url`                      | `undefined`                  |
+| `BUNQUEUE_POSTGRES_NAMESPACE`                                       | `storage.namespace`                | `default`                    |
+| `BUNQUEUE_BROKER_ID`                                                | `storage.brokerId`                 | generated host/PID/random ID |
+| `BUNQUEUE_POSTGRES_POOL_SIZE`                                       | `storage.poolSize`                 | `4`                          |
+| `BUNQUEUE_POSTGRES_LEASE_DURATION_MS`                               | `storage.leaseDurationMs`          | `30000`                      |
+| `BUNQUEUE_POSTGRES_POLL_INTERVAL_MS`                                | `storage.pollIntervalMs`           | `250`                        |
+| `BUNQUEUE_POSTGRES_STATEMENT_TIMEOUT_MS`                            | `storage.statementTimeoutMs`       | `30000`                      |
+| `BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS`                                 | `storage.lockTimeoutMs`            | `5000`                       |
+| `BUNQUEUE_POSTGRES_IDLE_TRANSACTION_TIMEOUT_MS`                     | `storage.idleTransactionTimeoutMs` | `30000`                      |
+| `BUNQUEUE_POSTGRES_MAX_CONCURRENT_OPERATIONS`                       | `storage.maxConcurrentOperations`  | `16`                         |
+| `BUNQUEUE_POSTGRES_MAX_QUEUED_OPERATIONS`                           | `storage.maxQueuedOperations`      | `128`                        |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_JOBS`                               | `storage.maxSnapshotJobs`          | `100000`                     |
+| `BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES`                      | `storage.maxSnapshotPayloadBytes`  | `268435456`                  |
+| `CORS_ALLOW_ORIGIN` (comma-split)                                   | `cors.origins`                     | `[]`                         |
+| `METRICS_AUTH` (`=== 'true'`)                                       | `auth.requireAuthForMetrics`       | `false`                      |
+| `METRICS_MAX_QUEUES`                                                | `telemetry.maxPrometheusQueues`    | `100`                        |
+| `S3_BACKUP_ENABLED` (`1`/`true`)                                    | `backup.enabled`                   | `false`                      |
+| `SHUTDOWN_TIMEOUT_MS`                                               | `timeouts.shutdown`                | `30000`                      |
+| `STATS_INTERVAL_MS`                                                 | `timeouts.stats`                   | `300000`                     |
 
 Logging (applied in `main.ts` and re-applied in `bootServer`): `LOG_FORMAT=json` (file: `logging.format`) enables JSON mode; `LOG_LEVEL=debug|info|warn|error` (file: `logging.level`) sets the floor (`info` default). Cloud and S3 env vars resolved by `resolveCloudConfig`/`resolveBackupConfig` — see [bunqueue Cloud Dashboard Integration](./cloud-integration.md) and [S3 Backup](./backup-s3.md).
 
@@ -280,9 +287,9 @@ Logging (applied in `main.ts` and re-applied in `bootServer`): `LOG_FORMAT=json`
 - [CLI](./cli.md) — the other entrypoint path; reuses `loadConfigFile`/`resolveServerConfig` and the shared `bootServer`.
 - [Security: TLS, Auth, CORS](./security-tls-auth.md) — consumers of the TLS/auth/CORS resolution.
 - [S3 Backup](./backup-s3.md), [bunqueue Cloud Dashboard Integration](./cloud-integration.md) — consumers of `resolveBackupConfig`/`resolveCloudConfig`.
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — consumer
-  of the resolved PostgreSQL driver, URL, namespace, broker, pool, lease, and
-  polling fields.
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md) — consumer
+  of every resolved PostgreSQL driver, identity, pool, deadline, admission, and
+  snapshot-budget field.
 - [Core Queue Engine (QueueManager & Shards)](./core-queue-engine.md) — `bootServer` wiring and the `dataPath` consumer.
 - [Stats, Metrics & Monitoring](./stats-and-monitoring.md) — the periodic stats interval driven off `statsIntervalMs`.
 - [architecture](../architecture.md), [data-model](../data-model.md).

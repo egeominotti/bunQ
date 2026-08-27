@@ -1,6 +1,6 @@
 ---
-title: 'Storage: SQLite or PostgreSQL 18.6'
-description: 'Use SQLite by default for a zero-infrastructure bunqueue, or PostgreSQL 18.6 for a database-authoritative multi-broker server deployment.'
+title: 'Storage: SQLite or PostgreSQL 15–18'
+description: 'Use SQLite by default for a zero-infrastructure bunqueue, or PostgreSQL 15–18 for a database-authoritative multi-broker server deployment.'
 head:
   - tag: meta
     attrs:
@@ -17,7 +17,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   </h1>
   <p class="bq-hero-sub">
     Keep the zero-infrastructure SQLite engine for embedded and single-broker deployments, or opt
-    into PostgreSQL 18.6 when several bunqueue servers must share one authoritative queue.
+    into PostgreSQL 15–18 when several bunqueue servers must share one authoritative queue.
   </p>
 </div>
 
@@ -47,10 +47,13 @@ database-authoritative: claims, leases, ACK/FAIL, queue limits, cron schedules,
 worker registrations, metrics, and events are coordinated in PostgreSQL rather
 than independent in-memory queues.
 
-## PostgreSQL 18.6 multi-broker mode
+## PostgreSQL 15–18 multi-broker mode
 
 PostgreSQL is available in **standalone server mode**. Embedded `Queue` and
-`Worker` continue to use memory/SQLite.
+`Worker` continue to use memory/SQLite. CI runs the complete integration suite
+against majors 15, 16, 17, and PostgreSQL 18.6. Version 18.6 is recommended for
+new deployments and pinned by the repository Compose topology; the other three
+majors remain tested compatibility targets.
 
 The repository Compose file pins the requested PostgreSQL version exactly:
 
@@ -143,6 +146,27 @@ as admission, so drain, clean, TTL/DLQ pruning, and obliterate cannot strand a
 event per queue; its runtime rejects `maxQueueEvents: 0`. SQLite and in-memory
 retention behavior is unchanged.
 
+### Broker failover timing
+
+PostgreSQL uses the database clock for processing leases, broker heartbeats, and
+stale-session takeover. `leaseDurationMs` defaults to 30,000 ms and drives the
+background coordination cadence:
+
+| Operation                          | Formula                                        | Default |
+| ---------------------------------- | ---------------------------------------------- | ------: |
+| Broker heartbeat                   | `max(1000, floor(leaseDurationMs / 3))`        |    10 s |
+| Duplicate broker-ID stale takeover | `max(leaseDurationMs, 3 × heartbeat interval)` |    30 s |
+| Expired processing-lease scan      | `max(500, floor(leaseDurationMs / 2))`         |    15 s |
+
+A worker's `lockDuration` still determines when its processing generation
+expires. A surviving broker normally recovers that generation on the next
+recovery scan, so detection can take the remaining processing lease plus up to
+one scan interval, before database and scheduler latency. A replacement process
+reusing the same `brokerId` must wait for the stale-takeover window; a different
+unique broker ID can start immediately. Lowering the coordination duration also
+increases heartbeat and recovery traffic, so tune it from measured database
+latency and pause behavior rather than desired failover time alone.
+
 ### PostgreSQL 18 performance settings
 
 bunqueue does not override server-wide PostgreSQL settings. PostgreSQL 18 uses
@@ -187,12 +211,38 @@ transaction timeout. Set stricter values only after measuring the longest valid
 queue maintenance operation. Schema migration uses the same lock deadline, so a
 busy rollout fails safely instead of waiting indefinitely and can be retried.
 
+The Bun SQL pool also uses a 10-second connection timeout, closes connections
+after 30 seconds idle, and rotates connections after a maximum lifetime of 3,600
+seconds. These lifecycle values are fixed runtime safeguards rather than public
+configuration fields. Include the connection timeout in failover expectations
+and ensure the provider, proxy, and DNS behavior can reconnect within the
+application's retry policy.
+
 The default pool is four connections per broker. Budget total database
 connections as `brokers × poolSize`, plus administration, monitoring, and
 failover headroom. bunqueue also admits 16 active and 128 queued PostgreSQL
 operations per broker by default. Once that bounded queue is full, commands fail
 fast and callers may retry with jitter instead of consuming unbounded process
 memory during an outage.
+
+### Schema upgrades, mixed versions, and rollback
+
+Schema initialization is automatic and protected by a PostgreSQL advisory lock,
+but mixed bunqueue binary versions are not a supported steady state. The safe
+upgrade procedure is:
+
+1. Verify backup/PITR and test the target bunqueue version against a restored clone.
+2. Drain or stop all old brokers before the first new binary initializes the database.
+3. Start one new broker and wait for `/ready`; verify schema health and authoritative counts.
+4. Start the remaining brokers at the same bunqueue version, then update clients.
+
+The initializer refuses a database whose recorded schema version is newer than
+the binary supports. Consequently, after a migration, restarting an old binary
+may fail and an application-only downgrade is not a rollback plan. Roll forward,
+or restore the pre-upgrade database/PITR point together with the old binaries.
+The current migrations are additive, but that does not by itself certify every
+pair of releases for zero-downtime mixed-version operation; validate the exact
+source/target pair on a clone if continuous availability is mandatory.
 
 ### Vacuum, failover, and recovery drills
 
@@ -343,11 +393,11 @@ Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare W
 | Container with an attachable disk                    | Persistent volume (Option 1)  |
 | Scale-to-zero instances, want local durability first | Store-and-forward (Option 2)  |
 | Many stateless workers, one durable host             | Central TCP server (Option 3) |
-| Multiple active bunqueue brokers sharing state       | PostgreSQL 18.6 backend       |
+| Multiple active bunqueue brokers sharing state       | PostgreSQL 15–18 backend      |
 
 ## Guarantees and boundaries
 
-| Capability                       | Memory / SQLite                             | PostgreSQL 18.6           |
+| Capability                       | Memory / SQLite                             | PostgreSQL 15–18          |
 | -------------------------------- | ------------------------------------------- | ------------------------- |
 | Embedded mode                    | Yes                                         | No                        |
 | Standalone server                | Yes                                         | Yes                       |

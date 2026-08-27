@@ -200,7 +200,7 @@ bunqueue does not win everywhere, and we would rather say so than publish a char
 
 These measurements describe bunqueue's memory/SQLite single-broker path, while
 BullMQ can leverage Redis clustering. bunqueue now also offers a separate
-PostgreSQL 18.6 multi-broker backend, but this benchmark did not measure it and
+PostgreSQL 15–18 multi-broker backend, but this benchmark did not measure it and
 must not be quoted as PostgreSQL performance. For applications that fit on one
 SQLite server, the measured path retains the lower operational complexity shown
 here.

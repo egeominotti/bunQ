@@ -31,7 +31,7 @@ metrics.
 - Persistence — webhooks and job logs are in-memory only in the memory/SQLite
   engine. PostgreSQL mode persists job logs and lifecycle events, but webhook
   definitions/delivery remain process-local. See [Persistence](./persistence.md)
-  and [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md).
+  and [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md).
 - Stall recovery — `clientTracking` only _triggers_ recovery (resets heartbeats); the stall detector in [Background Tasks](./background-tasks.md) reclaims orphaned jobs.
 
 ## Dependencies
@@ -255,7 +255,7 @@ Options (not env): `WebhookManager({ validateUrls })` — defaults ON; wired fro
 - [Background Tasks](./background-tasks.md) — stall detector that completes `clientTracking`'s force-release recovery.
 - [Concurrency & Locking](./concurrency-and-locking.md) — the shard→processing lock order used by `releaseClientJobs`.
 - [Rate Limiting & Concurrency Control](./rate-limiting-and-concurrency.md) — the resources released on disconnect.
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md) — durable
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md) — durable
   events/logs and cross-broker lease release/fencing.
 - [bunqueue Cloud Dashboard Integration](./cloud-integration.md) — consumer of `setDashboardEmit` events.
 - [architecture](../architecture.md) · [data-model](../data-model.md)

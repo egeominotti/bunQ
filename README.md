@@ -14,7 +14,7 @@
 
 <p align="center">
   High-performance job queue for Bun. Built for AI agents and automation.<br/>
-  SQLite by default. PostgreSQL 18.6 multi-broker when needed. MCP-native.
+  SQLite by default. PostgreSQL 15–18 multi-broker when needed; 18.6 recommended. MCP-native.
 </p>
 
 <p align="center">
@@ -79,7 +79,8 @@ POSTGRES_PASSWORD='replace-me' \
 It starts two brokers against one database/namespace. PostgreSQL is server-only;
 embedded mode keeps using memory/SQLite. Supply both Compose values when the
 password changes, percent-encoding reserved characters in the URL only. MySQL
-is not supported. See the
+is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
+18.6 release. See the
 [storage guide](https://bunqueue.dev/guide/databases/).
 
 Release images also carry the exact package version. For reproducible
@@ -119,7 +120,8 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 | **bunqueue** | **Nothing (SQLite) · PostgreSQL optional** | **Yes**   |
 
 - **Zero external infrastructure by default** — one process, one SQLite file
-- **PostgreSQL 18.6 multi-broker mode** — database-authoritative claims, fenced
+- **PostgreSQL 15–18 multi-broker mode** — PostgreSQL 18.6 is recommended;
+  database-authoritative claims, fenced
   leases, shared limits, cron, workers, metrics, and failover state
 - **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
@@ -139,13 +141,13 @@ the queue store. If you already run Redis and BullMQ works for you, keep it.
 
 ## Two Modes
 
-|                  | Embedded                                                       | Server (TCP)                                            |
-| ---------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
-| **How it works** | Queue runs inside your process                                 | Standalone server, clients connect via TCP              |
-| **Setup**        | `bun add bunqueue`                                             | `docker run` or `bunqueue start`                        |
-| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain    |
-| **Best for**     | Single-process apps, CLIs, serverless                          | Multiple workers, separate producer/consumer            |
-| **Scaling**      | Same process only                                              | Multiple clients; multiple brokers with PostgreSQL 18.6 |
+|                  | Embedded                                                       | Server (TCP)                                             |
+| ---------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| **How it works** | Queue runs inside your process                                 | Standalone server, clients connect via TCP               |
+| **Setup**        | `bun add bunqueue`                                             | `docker run` or `bunqueue start`                         |
+| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain     |
+| **Best for**     | Single-process apps, CLIs, serverless                          | Multiple workers, separate producer/consumer             |
+| **Scaling**      | Same process only                                              | Multiple clients; multiple brokers with PostgreSQL 15–18 |
 
 ### Embedded
 

@@ -274,4 +274,4 @@ low enough for the Prometheus retention and fleet size.
 - [Worker management](./workers-management.md)
 - [Configuration](./configuration.md)
 - [Production readiness testing](./production-readiness-testing.md)
-- [PostgreSQL 18.6 Multi-Broker Persistence](./postgres-multibroker.md)
+- [PostgreSQL 15–18 Multi-Broker Persistence](./postgres-multibroker.md)

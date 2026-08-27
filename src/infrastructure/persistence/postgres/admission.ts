@@ -137,6 +137,8 @@ export interface AdmitPostgresJobOptions {
   readonly queueLifecycleLocksHeld?: boolean;
   readonly dependencyExistenceCheckDeferred?: boolean;
   readonly completionConsumerExemptions?: readonly JobId[];
+  /** Flow caller already holds identity locks and batches completion, queue, and event writes. */
+  readonly preparedFlow?: { readonly now: number };
 }
 
 /** Insert one job inside the caller's transaction and return its authoritative generation. */
@@ -154,13 +156,15 @@ export async function admitPostgresJob(
     await lockPostgresDependencyCompletions(tx, ctx, [job.id, ...job.dependsOn]);
   }
   if (parentQueue) await lockPostgresAdmissionParent(tx, ctx, job, parentQueue);
-  await lockPostgresAdmissionKeys(tx, ctx, [job]);
-  const now = await databaseNow(tx);
+  if (!options.preparedFlow) await lockPostgresAdmissionKeys(tx, ctx, [job]);
+  const now = options.preparedFlow?.now ?? (await databaseNow(tx));
 
   const existingById = await findById(tx, ctx, String(job.id));
   if (existingById) {
     if (options.rejectExisting) throw new Error(`Flow job ${String(job.id)} already exists`);
-    if (isLive(existingById.state)) return { job: existingById.job, inserted: false };
+    if (isLive(existingById.state)) {
+      return { job: existingById.job, inserted: false, state: existingById.state };
+    }
   }
 
   let existingByKeyRow = await findByUniqueKey(tx, ctx, job);
@@ -190,7 +194,7 @@ export async function admitPostgresJob(
             job: existingByKey.job,
             state: existingByKey.state,
           });
-          return { job: existingByKey.job, inserted: false };
+          return { job: existingByKey.job, inserted: false, state: existingByKey.state };
         }
         await assertNoLivePostgresCompletionConsumers(tx, ctx, [existingByKey.job.id]);
         await deleteTerminalGeneration(tx, ctx, existingByKeyRow.id);
@@ -214,7 +218,7 @@ export async function admitPostgresJob(
         job: existingByKey.job,
         state: existingByKey.state,
       });
-      return { job: existingByKey.job, inserted: false };
+      return { job: existingByKey.job, inserted: false, state: existingByKey.state };
     }
   }
 
@@ -226,7 +230,7 @@ export async function admitPostgresJob(
       options.completionConsumerExemptions
     );
     await deleteTerminalGeneration(tx, ctx, String(job.id));
-  } else {
+  } else if (!options.preparedFlow) {
     await retirePostgresCompletionGenerations(
       tx,
       ctx,
@@ -248,17 +252,19 @@ export async function admitPostgresJob(
     job.timeline.length < MAX_TIMELINE_ENTRIES ? job.timeline.length : undefined;
   if (timelineIndex !== undefined) job.timeline.push({ state, timestamp: now });
   await insertRow(tx, ctx, job, state, now);
-  await registerPostgresAdmissionQueues(tx, ctx, [job.queue]);
-  const pushedEventId = await recordPostgresEvent(tx, ctx, {
-    queue: job.queue,
-    type: 'pushed',
-    jobId: job.id,
-    occurredAt: now,
-    job,
-    state,
-  });
+  if (!options.preparedFlow) await registerPostgresAdmissionQueues(tx, ctx, [job.queue]);
+  const pushedEventId = options.preparedFlow
+    ? undefined
+    : await recordPostgresEvent(tx, ctx, {
+        queue: job.queue,
+        type: 'pushed',
+        jobId: job.id,
+        occurredAt: now,
+        job,
+        state,
+      });
   if (parentQueue && job.parentId) {
     await updatePostgresJobParentInTransaction(tx, ctx, job.id, job.parentId, true);
   }
-  return { job, inserted: true, pushedEventId, timelineIndex };
+  return { job, inserted: true, state, pushedEventId, timelineIndex };
 }

@@ -30,6 +30,7 @@ import { enforcePostgresDlqLimit } from './dlqLifecycle';
 import { getPostgresQueuePolicies } from './policies';
 import type { PostgresFailureInput, PostgresJobRow, PostgresTransitionResult } from './types';
 import { partitionPostgresDestructionCandidates } from './dependencyDestruction';
+import { runPostgresTransactionWithRetry } from './transactionRetry';
 
 export { completePostgresJob } from './completionOutcome';
 
@@ -167,7 +168,7 @@ export async function failPostgresJob(
   ctx: PostgresContext,
   input: PostgresFailureInput
 ): Promise<PostgresTransitionResult> {
-  const result = await ctx.sql.begin(async (tx) => {
+  const result = await runPostgresTransactionWithRetry(ctx, async (tx) => {
     await lockPostgresJobFlowParent(tx, ctx, input.id);
     const row = await lockActiveJob(tx, ctx, input.id);
     const now = await databaseNow(tx);

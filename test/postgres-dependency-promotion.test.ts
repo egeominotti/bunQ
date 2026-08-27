@@ -3,6 +3,7 @@ import { SQL, type TransactionSQL } from 'bun';
 import { createJob, generateJobId, jobId, type Job } from '../src/domain/types/job';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
 import { admitPostgresJob } from '../src/infrastructure/persistence/postgres/admission';
+import { postgresAdvisoryLockName } from '../src/infrastructure/persistence/postgres/advisoryLocks';
 import { decodePostgresValue } from '../src/infrastructure/persistence/postgres/codec';
 import type { PostgresContext } from '../src/infrastructure/persistence/postgres/context';
 import { lockPostgresDependencyCompletions } from '../src/infrastructure/persistence/postgres/dependencyPromotion';
@@ -89,7 +90,7 @@ async function runAdmissionCompletionRace(
   const admissionSql = new SQL(postgresUrl!, { max: 1 });
   const completionSql = new SQL(postgresUrl!, { max: 1 });
   const inspector = new SQL(postgresUrl!, { max: 1 });
-  const lockName = `${namespace}:dependency-completion:${String(child.id)}`;
+  const lockName = postgresAdvisoryLockName('dependency-completion', namespace, String(child.id));
   const order: string[] = [];
   const operations: Promise<unknown>[] = [];
   let locked = false;
@@ -100,7 +101,7 @@ async function runAdmissionCompletionRace(
     const [completionBackend] = await completionSql<{ pid: number }[]>`
       SELECT pg_backend_pid() AS pid
     `;
-    await blocker`SELECT pg_advisory_lock(hashtext(${lockName}))`;
+    await blocker`SELECT pg_advisory_lock(hashtextextended(${lockName}, 0))`;
     locked = true;
     const admission = () =>
       admissionSql
@@ -125,7 +126,7 @@ async function runAdmissionCompletionRace(
       inspector,
       first === 'admission' ? completionBackend.pid : admissionBackend.pid
     );
-    await blocker`SELECT pg_advisory_unlock(hashtext(${lockName}))`;
+    await blocker`SELECT pg_advisory_unlock(hashtextextended(${lockName}, 0))`;
     locked = false;
     await Promise.all([firstOperation, secondOperation]);
 
@@ -152,7 +153,9 @@ async function runAdmissionCompletionRace(
       first === 'admission' ? ['pushed', 'retried'] : ['pushed']
     );
   } finally {
-    if (locked) await blocker`SELECT pg_advisory_unlock(hashtext(${lockName}))`.catch(() => []);
+    if (locked) {
+      await blocker`SELECT pg_advisory_unlock(hashtextextended(${lockName}, 0))`.catch(() => []);
+    }
     await Promise.allSettled(operations);
     await Promise.allSettled([
       blocker.close({ timeout: 5 }),
@@ -190,7 +193,10 @@ describe('PostgreSQL dependency promotion', () => {
     expect(queryCount).toBe(0);
     await lockPostgresDependencyCompletions(tx, context, [jobId('z'), jobId('a'), jobId('z')]);
     expect(queryCount).toBe(1);
-    expect(plannedIds).toEqual(['a', 'z']);
+    expect(plannedIds).toEqual([
+      postgresAdvisoryLockName('dependency-completion', 'lock-plan', 'a'),
+      postgresAdvisoryLockName('dependency-completion', 'lock-plan', 'z'),
+    ]);
   });
 
   test.skipIf(!postgresUrl)(

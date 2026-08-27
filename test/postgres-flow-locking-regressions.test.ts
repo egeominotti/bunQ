@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SQL, type TransactionSQL } from 'bun';
 import { PostgresQueueManager } from '../src/application/postgresQueueManager';
+import { postgresAdvisoryLockName } from '../src/infrastructure/persistence/postgres/advisoryLocks';
 import type { PostgresContext } from '../src/infrastructure/persistence/postgres/context';
 import { failPostgresJob } from '../src/infrastructure/persistence/postgres/outcomes';
 import { recoverExpiredPostgresLeases } from '../src/infrastructure/persistence/postgres/recovery';
@@ -73,6 +74,7 @@ function pauseRecoveryAfterCandidateRead(
 
 async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
   const namespace = `test-flow-lock-${path}-${Date.now()}-${crypto.randomUUID()}`;
+  const commitLockName = postgresAdvisoryLockName('event-commit', namespace);
   namespaces.push(namespace);
   const queue = `flow-lock-${path}`;
   const manager = new PostgresQueueManager({
@@ -99,7 +101,7 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
       data: { role: 'parent', path },
       delay: 60_000,
     });
-    flowLockName = `${namespace}:flow:${String(parent.id)}`;
+    flowLockName = postgresAdvisoryLockName('flow', namespace, String(parent.id));
     const child = await manager.push(queue, {
       data: { role: 'child', path },
       failParentOnFailure: true,
@@ -126,7 +128,7 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
     `;
 
     await commitBlocker`
-      SELECT pg_advisory_lock(hashtextextended(${namespace}, 0))
+      SELECT pg_advisory_lock(hashtextextended(${commitLockName}, 0))
     `;
     commitHeld = true;
 
@@ -170,7 +172,7 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
     else await recoveryCandidatesRead.promise;
 
     const flowLock = flowBlocker`
-      SELECT pg_advisory_lock(hashtext(${flowLockName}))
+      SELECT pg_advisory_lock(hashtextextended(${flowLockName}, 0))
     `.then(() => {
       flowHeld = true;
     });
@@ -179,7 +181,7 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
     await waitForLock(inspector, flowBackend.pid);
 
     await commitBlocker`
-      SELECT pg_advisory_unlock(hashtextextended(${namespace}, 0))
+      SELECT pg_advisory_unlock(hashtextextended(${commitLockName}, 0))
     `;
     commitHeld = false;
     await attachment;
@@ -190,7 +192,7 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
     expect(terminalSettled).toBe(false);
 
     await flowBlocker`
-      SELECT pg_advisory_unlock(hashtext(${flowLockName}))
+      SELECT pg_advisory_unlock(hashtextextended(${flowLockName}, 0))
     `;
     flowHeld = false;
     await terminal;
@@ -200,14 +202,14 @@ async function runParentAttachmentRace(path: TerminalPath): Promise<void> {
     resumeRecovery.resolve(undefined);
     if (commitHeld) {
       await commitBlocker`
-        SELECT pg_advisory_unlock(hashtextextended(${namespace}, 0))
+        SELECT pg_advisory_unlock(hashtextextended(${commitLockName}, 0))
       `.catch(() => []);
     }
     if (attachmentOperation) await Promise.allSettled([attachmentOperation]);
     if (flowLockOperation) await Promise.allSettled([flowLockOperation]);
     if (flowHeld && flowLockName) {
       await flowBlocker`
-        SELECT pg_advisory_unlock(hashtext(${flowLockName}))
+        SELECT pg_advisory_unlock(hashtextextended(${flowLockName}, 0))
       `.catch(() => []);
     }
     if (terminalOperation) await Promise.allSettled([terminalOperation]);

@@ -4,6 +4,7 @@ import { TcpClient } from '../src/client/tcp/client';
 import {
   cleanupPostgresNamespace,
   crashPostgresProcessBroker,
+  postgresProcessRetryDiagnostics,
   startPostgresProcessCluster,
   stopPostgresProcessCluster,
   type PostgresProcessBroker,
@@ -47,6 +48,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} ten-process soak topology`
       try {
         brokers = await startPostgresProcessCluster(postgresUrl!, namespace, BROKERS, {
           leaseDurationMs: LEASE_DURATION_MS,
+          logLevel: 'warn',
           pollIntervalMs: 250,
           poolSize: 4,
           shutdownTimeoutMs: 10_000,
@@ -142,12 +144,17 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} ten-process soak topology`
         const databaseDelta = subtractPostgresDatabaseStats(before, after);
         expect(databaseDelta.deadlocks).toBe(0);
         expect(brokers.slice(2).every(({ process }) => process.exitCode === null)).toBe(true);
+        for (const client of extraClients) client.close();
+        await stopPostgresProcessCluster(brokers);
+        const retryDiagnostics = await postgresProcessRetryDiagnostics(brokers);
+        expect(retryDiagnostics.ackbFailures).toBe(0);
         console.log(
           `POSTGRES_TEN_BROKER_SOAK ${JSON.stringify({
             brokerProcesses: BROKERS,
             consumerConnections: consumers.length,
             databaseDelta,
             postgresVersion: version.version,
+            retryDiagnostics,
             recovery: {
               brokerClaims: recoveryDrain.brokerClaims,
               crashedBrokers: 2,

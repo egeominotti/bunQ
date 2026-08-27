@@ -539,7 +539,8 @@ reconciles the final dependency generation without reordering its original
 outbox event. The bulk implementation is split across `postgres/batchAdmission.ts`,
 `postgres/claimSelection.ts`, `postgres/claimBatch.ts`, `postgres/batchCompletion.ts`,
 `postgres/batchEvents.ts`, `postgres/completionEvents.ts`, `postgres/metricWrites.ts`,
-`postgres/dependencyPromotion.ts`, and the manager-side
+`postgres/dependencyPromotion.ts`, `postgres/advisoryLocks.ts`,
+`postgres/transactionRetry.ts`, and the manager-side
 `postgres-queue-manager/batchSnapshot.ts`. Terminal ACK/failure delivery and its
 shutdown drain live in `postgres-queue-manager/terminalDelivery.ts`; the
 reentrant lifecycle boundary in `postgres-queue-manager/operationGate.ts` covers
@@ -593,7 +594,15 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   only rows inserted by that transaction and corrects their already-ordered
   `pushed` payload before commit. Parent attachment/failure/recovery reuse the
   child dependency key, re-read the current parent, then acquire sorted parent
-  keys before rows. Every PostgreSQL terminal path supplies its database
+  keys before rows. High-cardinality advisory identities are length-prefixed,
+  domain-separated, hashed to 64 bits, deduplicated, and acquired by physical
+  lock key order. Core admission, claim, ACK, ACKB, and FAIL transactions replay
+  once with jitter only after PostgreSQL reports a rollback-certain SQLSTATE;
+  ambiguous connection failures are never replayed. Validated `PUSHF` graphs
+  reuse their complete outer lock plan, retire completion generations once, and
+  batch queue registration plus ordered `pushed` events per transaction rather
+  than repeating that work for each node. Every PostgreSQL terminal
+  path supplies its database
   transition timestamp to DLQ construction, keeping attempt, retry, and expiry
   comparisons on the same clock without changing SQLite's host-clock path.
 - **Claims.** Default-policy claimers hold compatible queue-state share locks;

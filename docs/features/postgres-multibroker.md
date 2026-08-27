@@ -133,10 +133,13 @@ maintenance. Health failures are keyed by lifecycle, event stream, queue
 refresh, heartbeat, recovery, DLQ/worker/event pruning, and cron subsystem. A
 success clears only its own key, so an unrelated timer cannot make a persistently
 failed subsystem appear healthy. Schema creation is serialized with the
-transaction-scoped advisory lock `hashtext('bunqueue:schema')`. While holding that lock, a broker first checks
-`bunqueue_schema_migrations` and skips all DDL when version 16 is already present,
+transaction-scoped 64-bit advisory identity `bunqueue:schema`. While holding
+that lock, a broker first checks `bunqueue_schema_migrations` and skips all DDL
+when version 17 is already present,
 so a broker joining a live cluster does not request locks on active job tables.
-The additive v16 migration adds broker-session fencing to broker, lease, and
+The v17 migration upgrades the shared commit sequencer to the same
+domain-separated lock encoding as runtime writers. The additive v16 migration
+adds broker-session fencing to broker, lease, and
 worker rows. The v15 migration backfills durable queue identity; the prior v14
 migration adds queue/recent completion indexes, and the v13 journal migration
 still upgrades v12 in place. Initialization rejects a
@@ -145,8 +148,14 @@ column, index, function, and enabled trigger before taking the fast path;
 detected drift is repaired under the same advisory lock. Verification compares
 sequence type and settings, column types/defaults/nullability, ordered index
 keys and predicates, trigger transition-table bindings, and normalized function
-bodies. An unchanged schema keeps the no-DDL path and preserves existing index
-object IDs.
+bodies. The guard also verifies that `bunqueue_jobs_live_unique_key_idx` is a
+valid, ready, non-expression, three-column `btree` with the exact live-state
+predicate and unique enforcement. Same-name semantic drift is repaired by a
+transactional drop/recreate at the end of the migration. If live duplicate keys
+already exist, unique-index creation fails closed: the transaction restores the
+previous index and data, records no new migration, and startup remains blocked
+until an operator resolves the inconsistency. An unchanged schema keeps the
+no-DDL path and preserves existing index object IDs.
 
 Schema migration is an automatic one-way compatibility boundary, not permission
 to keep mixed bunqueue binary versions running. The safe production procedure is
@@ -173,6 +182,12 @@ Each pooled connection receives PostgreSQL-native `application_name`,
 `idle_in_transaction_session_timeout` startup parameters through Bun's
 `connection` option. A blocked query therefore fails within an operator-visible
 deadline and the same pool remains usable after the blocker ends.
+Core admission, claim, ACK, ACKB, and FAIL transactions replay the complete
+callback at most once, with jitter, only for PostgreSQL SQLSTATE `40001`,
+`40P01`, or `55P03`, which guarantee rollback. Connection failures, constraint
+errors, statement cancellation, and message-only matches are never replayed
+because their commit outcome or repeatability is not safe to infer. Admission
+uses a fresh job/timeline copy for every attempt.
 The Bun SQL pool uses a 10-second connection timeout, a 30-second idle timeout,
 and a 3,600-second maximum connection lifetime. These fixed lifecycle guards are
 not public configuration fields.
@@ -396,7 +411,14 @@ serial admission rules. The retry
 preserves custom-ID generation reuse and deduplication reject/extend/replace
 semantics without partial rows, duplicate timeline entries, or duplicate events.
 Duplicate input IDs, dependencies, and parent links use the serial path directly.
-Flow admission validates the complete graph before writing it.
+Flow admission validates the complete graph before writing it. After acquiring
+the complete queue, dependency, parent, and admission lock plan, it samples one
+post-lock database timestamp and does not reacquire those per job. Completion
+generations are retired once for the full planned set, queue identities are
+registered once, and all ordered `pushed` records use the set-based event writer
+with retention and wakeups amortized per queue. The graph remains one
+all-or-nothing transaction; a retry recreates every job and timeline before the
+batched durable writes.
 
 After a batch commits, the manager fetches only the distinct affected job IDs in
 one set query and merges those authoritative rows into its compatibility
@@ -499,6 +521,13 @@ rare per-job step inside the same transaction. The manager applies returned
 completion rows directly to its local snapshot; it does not reload the complete
 queue after every ACK batch.
 
+If the deferred event sequencer exceeds `lock_timeout`, PostgreSQL aborts the
+transaction with `55P03`; the bounded core replay uses the same IDs and lease
+tokens. Exhaustion returns the error with the job still active and no completion,
+completed event, or metric increment. Local ACKB logs retain bounded `name`,
+`code`, SQLSTATE, `where`, `routine`, request ID, and batch size diagnostics while
+the protocol response remains redacted.
+
 Repeat ACKs discover the successor queue only after they already own completion
 locks. They therefore use a sorted non-blocking shared lifecycle try-lock rather
 than waiting behind `obliterate`. A conflict rolls back the entire ACK for safe
@@ -551,6 +580,12 @@ retain their existing host-clock behavior.
 
 ## Distributed coordination
 
+- Every runtime advisory identity is length-prefixed and domain-separated before
+  `hashtextextended(..., 0)`. Batch admission, dependency completion, flow parent,
+  and queue lifecycle plans deduplicate and sort the resulting physical `BIGINT`
+  keys before acquiring blocking, try, shared, or exclusive locks. Distinct
+  client-controlled IDs, deduplication keys, and queue names therefore cannot
+  alias merely because their legacy 32-bit `hashtext` values collide.
 - `bunqueue_events` is the transactional outbox. Statement triggers register one
   `(namespace, transaction_id)` commit envelope, and a deferred constraint trigger
   takes a namespace transaction advisory lock and allocates from the global
@@ -698,6 +733,15 @@ Intentional boundaries:
 - Lost or malformed NOTIFY messages only delay a wake-up. Durable
   `(commit_seq, id)` polling catches every committed transaction, including a
   lower physical ID that commits after a higher one.
+- Bun reconnects the SQL pool, LISTEN subscription, and durable polling after
+  backend termination. A command already using a terminated connection may
+  still fail because its commit outcome is not safe to guess; the store never
+  blindly replays such a write. Bounded internal replay is restricted to
+  PostgreSQL's rollback-certain transaction SQLSTATEs. Callers retry ambiguous
+  failures with the same custom ID or
+  deduplication identity. A transaction interrupted after its job row write but
+  before its event/commit rolls back every row and can then be retried exactly
+  once.
 - Shutdown attempts close broker rows, workers, leases, the event subscription,
   and the SQL pool independently. Concurrent callers share one attempt; a
   transient failure retains ownership so the next attempt can finish cleanup.
@@ -714,9 +758,35 @@ per case:
 
 ```bash
 BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres
+BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:smoke
+BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:destruction
+BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:pressure
+BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:battle
 BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:fast-check
 BUNQUEUE_TEST_POSTGRES_URL=postgres://... bun run test:postgres:ten-broker
 ```
+
+The dedicated commands fail before launching Bun Test when the URL is absent or
+blank, so they cannot report a false pass made entirely of skipped integration
+cases. The ordinary repository-wide `bun test` command still skips PostgreSQL
+cases when no database was requested. `smoke` exercises startup, schema,
+lifecycle, multi-broker, and public Queue/Worker/Flow paths. `destruction`
+combines connection/transaction termination, destructive dependency and queue
+races, bounded core-transition rollback/replay, shutdown boundaries, schema
+corruption, generated destructive histories, and broker `SIGKILL`. `pressure`
+enables the ten-broker soak and combines it with batch, contention, 32-bit
+collision fixtures, four-process, event, metric, and extreme public-API load.
+`battle` runs the complete PostgreSQL suite with the ten-broker soak enabled and
+raises every Fast Check campaign to 100 runs. Pressure/soak timings remain
+functional diagnostics, never publishable benchmarks. Process-backed pressure
+fixtures drain both broker output streams, prefix every line, retain bounded
+head/tail diagnostics, and classify human or JSON log records incrementally.
+The ten-broker campaign stops the processes and waits for stream EOF before it
+reports bounded transaction retries or treats any ACKB failure as a failed
+invariant, so the assertion cannot race the final log chunk or ignore JSON logs
+written to stdout. A stream read error or missing EOF makes the diagnostic gate
+fail closed after best-effort pipe cancellation; an incomplete capture can never
+be reported as an authoritative zero-failure result.
 
 The primary tests assert PostgreSQL reports version `18.6`; the same complete
 suite also runs against the current PostgreSQL 17, 16, and 15 Alpine images, with the
@@ -777,6 +847,22 @@ completion-versus-admission race. Startup tests force more than 256 captured
 events and prove a bounded authoritative retry; adapter tests prove explicit
 memory ignores an inherited data path. `test/postgres-config.test.ts` separately proves SQLite remains
 the inferred default and rejects ambiguous storage/backup configuration.
+`test/postgres-connection-recovery.test.ts` terminates every pooled backend for
+two live brokers, retries stable custom IDs through reconnect, and requires both
+event projections to converge. Its transaction-reset case blocks event insert
+after the job row has been written, terminates that exact backend, proves the
+entire admission rolled back, and then admits the same generation once.
+`test/postgres-schema-dedup-guard.test.ts` replaces the live-key index with
+same-name weaker definitions and proves exact repair; duplicate live rows must
+instead preserve data and fail every retry without partially applying DDL.
+`test/postgres-core-transaction-retry.test.ts` holds the exact deferred commit
+sequencer beyond one `lock_timeout` and proves single admission, batch claim,
+single ACK, and terminal FAIL replay once with exact durable state. The companion
+ACKB regression proves retry exhaustion is bounded and leaves no partial job,
+completion, event, or metric transition. `test/postgres-advisory-lock-collisions.test.ts`
+uses dependency-ID and queue-name pairs whose legacy hashes collide on every
+supported PostgreSQL major; same logical identities still coordinate while the
+distinct colliding identities remain independent.
 
 Six dedicated fast-check files add 24 property campaigns over arbitrary JSON,
 batch admission, custom-ID and deduplication races, ordering, dependency fan-in,

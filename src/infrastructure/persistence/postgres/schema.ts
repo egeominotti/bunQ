@@ -1,6 +1,6 @@
 import { POSTGRES_EVENT_JOURNAL_SCHEMA } from './eventJournalSchema';
 
-export const POSTGRES_SCHEMA_VERSION = 16;
+export const POSTGRES_SCHEMA_VERSION = 17;
 
 /** PostgreSQL schema for the database-authoritative distributed queue engine. */
 export const POSTGRES_SCHEMA = `
@@ -71,11 +71,6 @@ CREATE INDEX IF NOT EXISTS bunqueue_jobs_lifo_ready_idx
 CREATE INDEX IF NOT EXISTS bunqueue_jobs_ttl_pending_idx
   ON bunqueue_jobs(namespace, queue, created_at, id)
   WHERE ttl IS NOT NULL AND state IN ('waiting', 'prioritized', 'delayed');
-CREATE UNIQUE INDEX IF NOT EXISTS bunqueue_jobs_live_unique_key_idx
-  ON bunqueue_jobs(namespace, queue, unique_key)
-  WHERE unique_key IS NOT NULL
-    AND state IN ('waiting', 'prioritized', 'delayed', 'waiting-children', 'active');
-
 ALTER TABLE bunqueue_jobs
   ADD COLUMN IF NOT EXISTS unique_expires_at BIGINT;
 ALTER TABLE bunqueue_jobs
@@ -254,6 +249,12 @@ CREATE TABLE IF NOT EXISTS bunqueue_brokers (
 );
 ALTER TABLE bunqueue_brokers
   ADD COLUMN IF NOT EXISTS session_id TEXT;
+
+DROP INDEX IF EXISTS bunqueue_jobs_live_unique_key_idx;
+CREATE UNIQUE INDEX bunqueue_jobs_live_unique_key_idx
+  ON bunqueue_jobs(namespace, queue, unique_key)
+  WHERE unique_key IS NOT NULL
+    AND state IN ('waiting', 'prioritized', 'delayed', 'waiting-children', 'active');
 `;
 
 export const POSTGRES_EVENT_CHANNEL = 'bunqueue_jobs_changed';

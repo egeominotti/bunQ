@@ -1,5 +1,10 @@
 import { SQL } from 'bun';
 import { TcpClient } from '../../src/client/tcp/client';
+import {
+  capturePostgresProcessOutput,
+  type PostgresProcessOutput,
+  type PostgresProcessRetryDiagnostics,
+} from './postgres-process-output';
 
 type BrokerProcess = ReturnType<typeof Bun.spawn>;
 
@@ -9,14 +14,19 @@ const leasedPorts = new Set<number>();
 export interface PostgresProcessBroker {
   readonly brokerId: string;
   readonly client: TcpClient;
+  readonly output: PostgresProcessOutput;
   readonly port: number;
   readonly process: BrokerProcess;
-  readonly stderr: Promise<string>;
   released: boolean;
+  terminated: boolean;
+  termination?: Promise<void>;
 }
 
 export interface PostgresProcessClusterOptions {
   readonly leaseDurationMs?: number;
+  readonly lockTimeoutMs?: number;
+  readonly logFormat?: 'human' | 'json';
+  readonly logLevel?: 'error' | 'warn';
   readonly pollIntervalMs?: number;
   readonly poolSize?: number;
   readonly shutdownTimeoutMs?: number;
@@ -46,16 +56,13 @@ export async function startPostgresProcessCluster(
 export async function stopPostgresProcessCluster(
   brokers: readonly PostgresProcessBroker[]
 ): Promise<void> {
+  // Teardown stays best-effort so every broker is stopped; diagnostics is the strict output barrier.
   await Promise.allSettled(brokers.map((broker) => stopPostgresProcessBroker(broker)));
 }
 
 export async function crashPostgresProcessBroker(broker: PostgresProcessBroker): Promise<void> {
-  if (broker.process.exitCode === null) {
-    broker.process.kill('SIGKILL');
-    await broker.process.exited;
-  }
-  broker.client.close();
-  releaseBrokerPort(broker);
+  broker.termination ??= terminatePostgresProcessBroker(broker, true);
+  await broker.termination;
 }
 
 export async function cleanupPostgresNamespace(url: string, namespace: string): Promise<void> {
@@ -98,6 +105,7 @@ async function startPostgresProcessBroker(
       BUNQUEUE_DATA_PATH: '',
       BUNQUEUE_EMBEDDED: '',
       BUNQUEUE_POSTGRES_LEASE_DURATION_MS: String(options.leaseDurationMs ?? 1000),
+      BUNQUEUE_POSTGRES_LOCK_TIMEOUT_MS: String(options.lockTimeoutMs ?? 5000),
       BUNQUEUE_POSTGRES_NAMESPACE: namespace,
       BUNQUEUE_POSTGRES_POLL_INTERVAL_MS: String(options.pollIntervalMs ?? 25),
       BUNQUEUE_POSTGRES_POOL_SIZE: String(options.poolSize ?? 12),
@@ -107,7 +115,8 @@ async function startPostgresProcessBroker(
       DATA_PATH: '',
       HOST: '127.0.0.1',
       HTTP_PORT: String(port + 1),
-      LOG_LEVEL: 'error',
+      LOG_FORMAT: options.logFormat === 'json' ? 'json' : '',
+      LOG_LEVEL: options.logLevel ?? 'error',
       SHUTDOWN_TIMEOUT_MS: String(options.shutdownTimeoutMs ?? 1500),
       S3_BACKUP_ENABLED: '',
       SQLITE_PATH: '',
@@ -115,9 +124,9 @@ async function startPostgresProcessBroker(
       TCP_PORT: String(port),
     },
     stderr: 'pipe',
-    stdout: 'ignore',
+    stdout: 'pipe',
   });
-  const stderr = new Response(process.stderr).text();
+  const output = capturePostgresProcessOutput(brokerId, process.stdout, process.stderr);
   try {
     await waitUntilReady(process, port + 1);
     const client = new TcpClient({
@@ -133,31 +142,90 @@ async function startPostgresProcessBroker(
     if (hello.ok !== true || hello.server !== 'bunqueue') {
       throw new Error(`unexpected broker handshake: ${JSON.stringify(hello)}`);
     }
-    return { brokerId, client, port, process, stderr, released: false };
+    return {
+      brokerId,
+      client,
+      output,
+      port,
+      process,
+      released: false,
+      terminated: false,
+    };
   } catch (error) {
     if (process.exitCode === null) process.kill('SIGKILL');
     await process.exited;
+    const outputError = await output.settle().then(
+      () => '',
+      (settleError: unknown) => `\n${String(settleError)}`
+    );
     leasedPorts.delete(port);
     leasedPorts.delete(port + 1);
-    const detail = await stderr.catch(() => 'unable to read broker stderr');
-    throw new Error(`${String(error)}\n${detail}`.trim());
+    throw new Error(`${String(error)}\n${output.snapshot()}${outputError}`.trim());
   }
 }
 
-async function stopPostgresProcessBroker(broker: PostgresProcessBroker): Promise<void> {
-  broker.client.close();
-  if (broker.process.exitCode === null) {
-    broker.process.kill('SIGTERM');
-    const exited = await Promise.race([
-      broker.process.exited.then(() => true),
-      Bun.sleep(5000).then(() => false),
-    ]);
-    if (!exited && broker.process.exitCode === null) {
-      broker.process.kill('SIGKILL');
-      await broker.process.exited;
-    }
+export async function postgresProcessRetryDiagnostics(
+  brokers: readonly PostgresProcessBroker[]
+): Promise<PostgresProcessRetryDiagnostics> {
+  const live = brokers.filter(({ terminated }) => !terminated);
+  if (live.length > 0) {
+    throw new Error(`cannot collect PostgreSQL diagnostics from ${live.length} live broker(s)`);
   }
-  releaseBrokerPort(broker);
+  const settlements = await Promise.allSettled(brokers.map(({ output }) => output.settle()));
+  const failures = settlements.flatMap((result) =>
+    result.status === 'rejected' ? [result.reason] : []
+  );
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `${failures.length} broker output captures were incomplete`);
+  }
+  return brokers.reduce<PostgresProcessRetryDiagnostics>(
+    (total, { output }) => {
+      const current = output.diagnostics();
+      return {
+        ackbFailures: total.ackbFailures + current.ackbFailures,
+        transactionRetries: total.transactionRetries + current.transactionRetries,
+      };
+    },
+    { ackbFailures: 0, transactionRetries: 0 }
+  );
+}
+
+async function stopPostgresProcessBroker(broker: PostgresProcessBroker): Promise<void> {
+  broker.termination ??= terminatePostgresProcessBroker(broker, false);
+  await broker.termination;
+}
+
+async function terminatePostgresProcessBroker(
+  broker: PostgresProcessBroker,
+  crash: boolean
+): Promise<void> {
+  try {
+    try {
+      broker.client.close();
+    } catch {
+      // Client cleanup must not prevent process termination and output draining.
+    }
+    if (broker.process.exitCode === null) {
+      broker.process.kill(crash ? 'SIGKILL' : 'SIGTERM');
+      if (crash) {
+        await broker.process.exited;
+      } else if (
+        !(await Promise.race([
+          broker.process.exited.then(() => true),
+          Bun.sleep(5000).then(() => false),
+        ])) &&
+        broker.process.exitCode === null
+      ) {
+        broker.process.kill('SIGKILL');
+        await broker.process.exited;
+      }
+    }
+    broker.terminated = true;
+    await broker.output.settle();
+  } finally {
+    releaseBrokerPort(broker);
+  }
 }
 
 function releaseBrokerPort(broker: PostgresProcessBroker): void {

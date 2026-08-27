@@ -1,5 +1,6 @@
 import type { TransactionSQL } from 'bun';
 import { jobId, type JobId } from '../../../domain/types/job';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { databaseNow, recordPostgresEvent, type PostgresContext } from './context';
 import { lockPostgresDependencyCompletions } from './dependencyPromotion';
 
@@ -102,11 +103,10 @@ interface CompletionPruneBatch {
 async function prunePostgresCompletionTombstoneBatch(
   ctx: PostgresContext
 ): Promise<CompletionPruneBatch> {
+  const lockName = postgresAdvisoryLockName('completion-retention', ctx.config.namespace);
   return await ctx.sql.begin(async (tx) => {
     await tx`
-      SELECT pg_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:completion-retention`})
-      )
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))
     `;
     const candidates = await tx<{ job_id: string }[]>`
       SELECT completion.job_id

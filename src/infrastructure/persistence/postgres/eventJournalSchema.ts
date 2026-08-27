@@ -17,7 +17,10 @@ END;`;
 export const POSTGRES_ASSIGN_EVENT_COMMIT_BODY = `DECLARE
   assigned_commit_seq BIGINT;
 BEGIN
-  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.namespace, 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    'bunqueue:event-commit:' || length(NEW.namespace)::text || ':' || NEW.namespace,
+    0
+  ));
   assigned_commit_seq := nextval('bunqueue_event_commit_seq');
 
   UPDATE bunqueue_event_commits

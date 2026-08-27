@@ -12,6 +12,7 @@ import { databaseNow, recordPostgresEvent, type PostgresContext } from './contex
 import { planPostgresDependencyCompletion } from './dependencyPromotion';
 import { clearPostgresParentFlowFailures } from './flowFailures';
 import type { PostgresJobRow, PostgresTransitionResult } from './types';
+import { runPostgresTransactionWithRetry } from './transactionRetry';
 import { tryLockPostgresRepeatQueues } from './queueLifecycle';
 
 async function lockActiveJob(
@@ -58,7 +59,7 @@ export async function completePostgresJob(
   result: unknown,
   removeOnComplete = false
 ): Promise<PostgresTransitionResult> {
-  return await ctx.sql.begin(async (tx) => {
+  return await runPostgresTransactionWithRetry(ctx, async (tx) => {
     const dependencyCompletion = await planPostgresDependencyCompletion(tx, ctx, [id]);
     const row = await lockActiveJob(tx, ctx, id);
     const now = await databaseNow(tx);

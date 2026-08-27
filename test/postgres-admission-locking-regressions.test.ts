@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import { createJob, jobId } from '../src/domain/types/job';
 import { admitPostgresJob } from '../src/infrastructure/persistence/postgres/admission';
+import { postgresAdvisoryLockName } from '../src/infrastructure/persistence/postgres/advisoryLocks';
 import {
   admitPostgresJobsBatch,
   PostgresBatchAdmissionConflict,
@@ -45,14 +46,18 @@ describe('PostgreSQL admission locking regressions', () => {
       });
       const blocker = new SQL(postgresUrl!, { max: 1 });
       const originalId = jobId('dedup-owner');
-      const lockName = `${namespace}:dependency-completion:${String(originalId)}`;
+      const lockName = postgresAdvisoryLockName(
+        'dependency-completion',
+        namespace,
+        String(originalId)
+      );
       let blockerHeld = false;
       try {
         await store.initialize();
         await store.insert(
           createJob(originalId, 'dedup-replace', { data: { generation: 1 }, uniqueKey: 'shared' })
         );
-        await blocker`SELECT pg_advisory_lock(hashtext(${lockName}))`;
+        await blocker`SELECT pg_advisory_lock(hashtextextended(${lockName}, 0))`;
         blockerHeld = true;
 
         const replacement = await store.insert(
@@ -68,7 +73,9 @@ describe('PostgreSQL admission locking regressions', () => {
         expect(await store.getJob(jobId('dedup-replacement'))).toBeNull();
       } finally {
         if (blockerHeld) {
-          await blocker`SELECT pg_advisory_unlock(hashtext(${lockName}))`.catch(() => []);
+          await blocker`SELECT pg_advisory_unlock(hashtextextended(${lockName}, 0))`.catch(
+            () => []
+          );
         }
         await Promise.allSettled([store.close(), blocker.close({ timeout: 5 })]);
       }
@@ -92,7 +99,11 @@ describe('PostgreSQL admission locking regressions', () => {
       const blocker = new SQL(postgresUrl!, { max: 1 });
       const inspector = new SQL(postgresUrl!, { max: 1 });
       const operations: Promise<unknown>[] = [];
-      const lockName = `${namespace}:dedup:${queue}:${uniqueKey}`;
+      const lockName = postgresAdvisoryLockName(
+        'admission',
+        namespace,
+        `dedup:${queue}:${uniqueKey}`
+      );
       let blockerHeld = false;
 
       try {
@@ -106,7 +117,7 @@ describe('PostgreSQL admission locking regressions', () => {
         const [singleBackend] = await singleSql<{ pid: number }[]>`
           SELECT pg_backend_pid() AS pid
         `;
-        await blocker`SELECT pg_advisory_lock(hashtext(${lockName}))`;
+        await blocker`SELECT pg_advisory_lock(hashtextextended(${lockName}, 0))`;
         blockerHeld = true;
 
         const batch = batchSql.begin((tx) =>
@@ -128,7 +139,7 @@ describe('PostgreSQL admission locking regressions', () => {
         operations.push(single);
         await waitForAdvisoryLock(inspector, singleBackend.pid);
 
-        await blocker`SELECT pg_advisory_unlock(hashtext(${lockName}))`;
+        await blocker`SELECT pg_advisory_unlock(hashtextextended(${lockName}, 0))`;
         blockerHeld = false;
         const outcomes = await Promise.allSettled([batch, single]);
         const failures = outcomes.filter(
@@ -145,7 +156,9 @@ describe('PostgreSQL admission locking regressions', () => {
         expect(await initializer.getJob(jobId('shared-id'))).not.toBeNull();
       } finally {
         if (blockerHeld) {
-          await blocker`SELECT pg_advisory_unlock(hashtext(${lockName}))`.catch(() => []);
+          await blocker`SELECT pg_advisory_unlock(hashtextextended(${lockName}, 0))`.catch(
+            () => []
+          );
         }
         await Promise.allSettled(operations);
         await Promise.allSettled([

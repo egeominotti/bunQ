@@ -5,7 +5,8 @@ import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
 import { jobId, normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
-import { sanitizeServerError } from '../errors';
+import { tcpLog } from '../../../shared/logger';
+import { sanitizeServerError, serverErrorDiagnostics } from '../errors';
 import {
   validateQueueName,
   validateJobData,
@@ -251,7 +252,15 @@ export async function handleAckBatch(
     }
     return outcome ? resp.data(outcome, reqId) : resp.ok(undefined, reqId);
   } catch (err) {
-    return resp.error(sanitizeServerError(err), reqId);
+    const message = sanitizeServerError(err);
+    if (message === 'Internal server error') {
+      tcpLog.error('ACKB failed', {
+        ...serverErrorDiagnostics(err),
+        batchSize: ids.length,
+        ...(reqId && { reqId }),
+      });
+    }
+    return resp.error(message, reqId);
   }
 }
 

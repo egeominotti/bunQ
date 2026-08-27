@@ -11,6 +11,7 @@ import type {
   PostgresCompletionInput,
   PostgresJobRow,
 } from './types';
+import { runPostgresTransactionWithRetry } from './transactionRetry';
 import { tryLockPostgresRepeatQueues } from './queueLifecycle';
 
 interface AppliedCompletion {
@@ -210,7 +211,7 @@ export async function completePostgresJobs(
   if (new Set(inputs.map((input) => String(input.id))).size !== inputs.length) {
     throw new Error('PostgreSQL batch completion requires unique job IDs');
   }
-  return await ctx.sql.begin(async (tx) => {
+  return await runPostgresTransactionWithRetry(ctx, async (tx) => {
     const now = await databaseNow(tx);
     const dependencyCompletion = await planPostgresDependencyCompletion(
       tx,

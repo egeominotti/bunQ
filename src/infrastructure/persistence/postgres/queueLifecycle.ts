@@ -1,4 +1,5 @@
 import type { TransactionSQL } from 'bun';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import type { PostgresContext } from './context';
 
 function queueNames(queues: readonly string[]): string[] {
@@ -11,19 +12,19 @@ export async function lockPostgresAdmissionQueues(
   ctx: PostgresContext,
   queues: readonly string[]
 ): Promise<void> {
-  const names = queueNames(queues);
-  if (names.length === 0) return;
+  const lockNames = queueNames(queues).map((queue) =>
+    postgresAdvisoryLockName('queue-lifecycle', ctx.config.namespace, queue)
+  );
+  if (lockNames.length === 0) return;
   await tx`
     WITH ordered_queues AS MATERIALIZED (
-      SELECT queue
-      FROM unnest(${tx.array(names, 'TEXT')}) AS requested(queue)
-      ORDER BY queue
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS requested(lock_name)
+      ORDER BY lock_key
     ), locked_queues AS MATERIALIZED (
-      SELECT queue, pg_advisory_xact_lock_shared(
-        hashtext(${ctx.config.namespace}), hashtext(queue)
-      ) AS acquired
+      SELECT lock_key, pg_advisory_xact_lock_shared(lock_key) AS acquired
       FROM ordered_queues
-      ORDER BY queue
+      ORDER BY lock_key
     )
     SELECT COUNT(*) FROM locked_queues
   `;
@@ -51,10 +52,9 @@ export async function lockPostgresQueueLifecycleExclusive(
   ctx: PostgresContext,
   queue: string
 ): Promise<void> {
+  const lockName = postgresAdvisoryLockName('queue-lifecycle', ctx.config.namespace, queue);
   await tx`
-    SELECT pg_advisory_xact_lock(
-      hashtext(${ctx.config.namespace}), hashtext(${queue})
-    )
+    SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))
   `;
 }
 
@@ -64,19 +64,19 @@ export async function tryLockPostgresRepeatQueues(
   ctx: PostgresContext,
   queues: readonly string[]
 ): Promise<boolean> {
-  const names = queueNames(queues);
-  if (names.length === 0) return true;
+  const lockNames = queueNames(queues).map((queue) =>
+    postgresAdvisoryLockName('queue-lifecycle', ctx.config.namespace, queue)
+  );
+  if (lockNames.length === 0) return true;
   const [result] = await tx<{ acquired: boolean }[]>`
     WITH ordered_queues AS MATERIALIZED (
-      SELECT queue
-      FROM unnest(${tx.array(names, 'TEXT')}) AS requested(queue)
-      ORDER BY queue
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS requested(lock_name)
+      ORDER BY lock_key
     ), attempted AS MATERIALIZED (
-      SELECT queue, pg_try_advisory_xact_lock_shared(
-        hashtext(${ctx.config.namespace}), hashtext(queue)
-      ) AS acquired
+      SELECT lock_key, pg_try_advisory_xact_lock_shared(lock_key) AS acquired
       FROM ordered_queues
-      ORDER BY queue
+      ORDER BY lock_key
     )
     SELECT COALESCE(bool_and(acquired), TRUE) AS acquired FROM attempted
   `;

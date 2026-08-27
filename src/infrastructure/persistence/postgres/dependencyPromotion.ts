@@ -1,5 +1,6 @@
 import type { TransactionSQL } from 'bun';
 import { jobId, MAX_TIMELINE_ENTRIES, type Job, type JobId } from '../../../domain/types/job';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { recordPostgresJobEvents } from './batchEvents';
 import { decodePostgresJob, encodePostgresValue, postgresByteaBase64 } from './codec';
 import type { PostgresContext } from './context';
@@ -24,19 +25,19 @@ export async function lockPostgresDependencyCompletions(
   ctx: PostgresContext,
   dependencyIds: readonly JobId[]
 ): Promise<void> {
-  const ids = uniqueIds(dependencyIds);
-  if (ids.length === 0) return;
+  const lockNames = uniqueIds(dependencyIds).map((id) =>
+    postgresAdvisoryLockName('dependency-completion', ctx.config.namespace, id)
+  );
+  if (lockNames.length === 0) return;
   await tx`
     WITH ordered_ids AS MATERIALIZED (
-      SELECT DISTINCT dependency_id
-      FROM unnest(${tx.array(ids, 'TEXT')}) AS dependency(dependency_id)
-      ORDER BY dependency_id
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS dependency(lock_name)
+      ORDER BY lock_key
     ), locked_ids AS MATERIALIZED (
-      SELECT dependency_id, pg_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:dependency-completion:`} || dependency_id)
-      ) AS acquired
+      SELECT lock_key, pg_advisory_xact_lock(lock_key) AS acquired
       FROM ordered_ids
-      ORDER BY dependency_id
+      ORDER BY lock_key
     )
     SELECT COUNT(*) FROM locked_ids
   `;
@@ -48,19 +49,19 @@ export async function tryLockPostgresDependencyCompletions(
   ctx: PostgresContext,
   dependencyIds: readonly JobId[]
 ): Promise<boolean> {
-  const ids = uniqueIds(dependencyIds);
-  if (ids.length === 0) return true;
+  const lockNames = uniqueIds(dependencyIds).map((id) =>
+    postgresAdvisoryLockName('dependency-completion', ctx.config.namespace, id)
+  );
+  if (lockNames.length === 0) return true;
   const [row] = await tx<{ acquired: boolean }[]>`
     WITH ordered_ids AS MATERIALIZED (
-      SELECT DISTINCT dependency_id
-      FROM unnest(${tx.array(ids, 'TEXT')}) AS dependency(dependency_id)
-      ORDER BY dependency_id
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS dependency(lock_name)
+      ORDER BY lock_key
     ), locked_ids AS MATERIALIZED (
-      SELECT dependency_id, pg_try_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:dependency-completion:`} || dependency_id)
-      ) AS acquired
+      SELECT lock_key, pg_try_advisory_xact_lock(lock_key) AS acquired
       FROM ordered_ids
-      ORDER BY dependency_id
+      ORDER BY lock_key
     )
     SELECT COALESCE(BOOL_AND(acquired), TRUE) AS acquired FROM locked_ids
   `;

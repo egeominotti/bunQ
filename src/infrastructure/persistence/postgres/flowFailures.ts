@@ -2,6 +2,7 @@ import type { TransactionSQL } from 'bun';
 import { createDlqEntry, FailureReason } from '../../../domain/types/dlq';
 import type { FlowFailureMode } from '../../../domain/types/flow';
 import { MAX_TIMELINE_ENTRIES, type Job, type JobId } from '../../../domain/types/job';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { decodePostgresJob, encodePostgresValue } from './codec';
 import { recordPostgresEvent, type PostgresContext } from './context';
 import { getPostgresQueuePolicies } from './policies';
@@ -171,19 +172,19 @@ export async function lockPostgresFlowParents(
   ctx: PostgresContext,
   parentIds: readonly JobId[]
 ): Promise<void> {
-  const ids = [...new Set(parentIds.map(String))].sort();
-  if (ids.length === 0) return;
+  const lockNames = [...new Set(parentIds.map(String))].map((id) =>
+    postgresAdvisoryLockName('flow', ctx.config.namespace, id)
+  );
+  if (lockNames.length === 0) return;
   await tx`
     WITH ordered_ids AS MATERIALIZED (
-      SELECT DISTINCT parent_id
-      FROM unnest(${tx.array(ids, 'TEXT')}) AS parent(parent_id)
-      ORDER BY parent_id
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS parent(lock_name)
+      ORDER BY lock_key
     ), locked_ids AS MATERIALIZED (
-      SELECT parent_id, pg_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:flow:`} || parent_id)
-      ) AS acquired
+      SELECT lock_key, pg_advisory_xact_lock(lock_key) AS acquired
       FROM ordered_ids
-      ORDER BY parent_id
+      ORDER BY lock_key
     )
     SELECT COUNT(*) FROM locked_ids
   `;

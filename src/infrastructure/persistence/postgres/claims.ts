@@ -8,6 +8,7 @@ import { expirePendingPostgresJobs } from './expiry';
 import { repairResolvedPostgresDependencyConsumers } from './dependencyPromotion';
 import type { ClaimedPostgresJob, PostgresQueueState } from './types';
 import { lockPostgresBrokerSession } from './brokerSessions';
+import { runPostgresTransactionWithRetry } from './transactionRetry';
 
 interface QueueStateRow {
   queue: string;
@@ -139,7 +140,7 @@ export async function claimPostgresJobs(
   const claimWithLock = async (
     exclusive: boolean
   ): Promise<{ claimed: ClaimedPostgresJob[]; retryExclusive: boolean }> =>
-    await ctx.sql.begin(async (tx) => {
+    await runPostgresTransactionWithRetry(ctx, async (tx) => {
       await lockPostgresBrokerSession(tx, ctx);
       const now = await databaseNow(tx);
       let state = await lockQueueState(tx, ctx, queue, exclusive);

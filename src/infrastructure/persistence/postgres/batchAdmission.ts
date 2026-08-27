@@ -1,5 +1,6 @@
 import type { TransactionSQL } from 'bun';
 import { MAX_TIMELINE_ENTRIES, type Job } from '../../../domain/types/job';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { recordPostgresJobEvents } from './batchEvents';
 import { encodePostgresValue, postgresStateForJob } from './codec';
 import { databaseNow, type PostgresContext } from './context';
@@ -70,19 +71,19 @@ export async function lockPostgresAdmissionKeys(
   ctx: PostgresContext,
   jobs: readonly Job[]
 ): Promise<void> {
-  const keys = admissionKeys(jobs);
-  if (keys.length === 0) return;
+  const lockNames = admissionKeys(jobs).map((key) =>
+    postgresAdvisoryLockName('admission', ctx.config.namespace, key)
+  );
+  if (lockNames.length === 0) return;
   await tx`
     WITH ordered_keys AS MATERIALIZED (
-      SELECT admission_key
-      FROM unnest(${tx.array(keys, 'TEXT')}) AS admission(admission_key)
-      ORDER BY admission_key
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS admission(lock_name)
+      ORDER BY lock_key
     ), locked_keys AS MATERIALIZED (
-      SELECT admission_key, pg_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:`} || admission_key)
-      ) AS acquired
+      SELECT lock_key, pg_advisory_xact_lock(lock_key) AS acquired
       FROM ordered_keys
-      ORDER BY admission_key
+      ORDER BY lock_key
     )
     SELECT COUNT(*) FROM locked_keys
   `;

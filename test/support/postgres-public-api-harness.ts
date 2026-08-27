@@ -32,6 +32,7 @@ export class PostgresPublicApiHarness {
   static async start(url: string, expectedVersion: string): Promise<PostgresPublicApiHarness> {
     const namespace = `test-public-api-${Date.now()}-${crypto.randomUUID()}`;
     const brokers = await startPostgresProcessCluster(url, namespace, 4, {
+      logLevel: 'warn',
       pollIntervalMs: 25,
       poolSize: 8,
     });

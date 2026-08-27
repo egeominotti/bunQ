@@ -1,4 +1,5 @@
 import type { TransactionSQL } from 'bun';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import type { PostgresContext } from './context';
 
 export interface PostgresPrunedEventRow {
@@ -12,13 +13,9 @@ export async function lockPostgresEventRetention(
   ctx: PostgresContext,
   queue: string
 ): Promise<void> {
+  const lockName = postgresAdvisoryLockName('event-retention', ctx.config.namespace, queue);
   await tx`
-    SELECT pg_advisory_xact_lock(
-      hashtextextended(
-        ${`bunqueue:event-retention:${ctx.config.namespace}:${queue}`},
-        0
-      )
-    )
+    SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))
   `;
 }
 
@@ -28,13 +25,9 @@ export async function tryLockPostgresEventRetention(
   ctx: PostgresContext,
   queue: string
 ): Promise<boolean> {
+  const lockName = postgresAdvisoryLockName('event-retention', ctx.config.namespace, queue);
   const [row] = await tx<{ acquired: boolean }[]>`
-    SELECT pg_try_advisory_xact_lock(
-      hashtextextended(
-        ${`bunqueue:event-retention:${ctx.config.namespace}:${queue}`},
-        0
-      )
-    ) AS acquired
+    SELECT pg_try_advisory_xact_lock(hashtextextended(${lockName}, 0)) AS acquired
   `;
   return row.acquired;
 }

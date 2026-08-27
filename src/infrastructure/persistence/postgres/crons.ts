@@ -7,6 +7,7 @@ import {
   getNextIntervalRun,
   validateCronExpression,
 } from '../../scheduler/cronParser';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { admitPostgresJob } from './admission';
 import { decodePostgresValue, encodePostgresValue } from './codec';
 import { databaseNow, type PostgresContext, type PostgresReadSql } from './context';
@@ -145,11 +146,10 @@ function followingRun(cron: CronJob, now: number): number {
 
 /** Recalculate missed rows only on the oldest live broker for this namespace. */
 export async function reconcilePostgresCronsOnStartup(ctx: PostgresContext): Promise<number> {
+  const lockName = postgresAdvisoryLockName('cron-startup', ctx.config.namespace);
   return await ctx.sql.begin(async (tx) => {
     await tx`
-      SELECT pg_advisory_xact_lock(
-        hashtext(${`${ctx.config.namespace}:cron-startup`})
-      )
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))
     `;
     const now = await databaseNow(tx);
     const [leader] = await tx<{ elected: boolean }[]>`

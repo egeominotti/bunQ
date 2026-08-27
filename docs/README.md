@@ -168,7 +168,11 @@ That feature reference covers the `admissionStore`, its typed
 [`admissionResult.ts`](../src/infrastructure/persistence/postgres/admissionResult.ts)
 contract and
 [`serialAdmission.ts`](../src/infrastructure/persistence/postgres/serialAdmission.ts)
-reconciler, completion lifecycle/query, dependency destruction, destructive
+reconciler, the domain-separated 64-bit lock identities in
+[`advisoryLocks.ts`](../src/infrastructure/persistence/postgres/advisoryLocks.ts),
+the rollback-certain core transition replay in
+[`transactionRetry.ts`](../src/infrastructure/persistence/postgres/transactionRetry.ts),
+completion lifecycle/query, dependency destruction, destructive
 mutation, queue destruction, DLQ repair/retry-plan facades, and manager-side
 Snapshot/view, terminal-delivery, and operation-gate modules added to keep lock
 plans, bounded read models, and shutdown draining independently testable. The

@@ -1,4 +1,5 @@
 import type { TransactionSQL } from 'bun';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { databaseNow, type PostgresContext } from './context';
 import {
   POSTGRES_ASSIGN_EVENT_COMMIT_BODY,
@@ -60,28 +61,34 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         ('bunqueue_brokers', 'session_id', 'text', FALSE, 'none'),
         ('bunqueue_jobs', 'lease_broker_session_id', 'text', FALSE, 'none'),
         ('bunqueue_workers', 'broker_session_id', 'text', FALSE, 'none')
-    ), expected_indexes(index_name, table_name, columns, descending, predicate) AS (
+    ), expected_indexes(
+      index_name, table_name, columns, descending, predicate, is_unique
+    ) AS (
       VALUES
         ('bunqueue_events_transaction_idx', 'bunqueue_events',
-         ARRAY['namespace', 'transaction_id', 'id'], ARRAY[FALSE, FALSE, FALSE], ''),
+         ARRAY['namespace', 'transaction_id', 'id'], ARRAY[FALSE, FALSE, FALSE], '', FALSE),
         ('bunqueue_event_commits_replay_idx', 'bunqueue_event_commits',
          ARRAY['namespace', 'commit_seq', 'transaction_id'], ARRAY[FALSE, FALSE, FALSE],
-         'commit_seqisnotnull'),
+         'commit_seqisnotnull', FALSE),
         ('bunqueue_event_prune_watermarks_commit_idx', 'bunqueue_event_prune_watermarks',
          ARRAY['namespace', 'queue', 'commit_seq'], ARRAY[FALSE, FALSE, TRUE],
-         'commit_seqisnotnull'),
+         'commit_seqisnotnull', FALSE),
         ('bunqueue_event_prune_watermarks_pending_commit_idx',
          'bunqueue_event_prune_watermarks', ARRAY['namespace', 'transaction_id'],
-         ARRAY[FALSE, FALSE], 'commit_seqisnull'),
+         ARRAY[FALSE, FALSE], 'commit_seqisnull', FALSE),
         ('bunqueue_event_prune_watermarks_transaction_idx',
          'bunqueue_event_prune_watermarks', ARRAY['namespace', 'transaction_id'],
-         ARRAY[FALSE, FALSE], ''),
+         ARRAY[FALSE, FALSE], '', FALSE),
         ('bunqueue_jobs_broker_session_lease_idx', 'bunqueue_jobs',
          ARRAY['namespace', 'lease_broker_id', 'lease_broker_session_id', 'id'],
-         ARRAY[FALSE, FALSE, FALSE, FALSE], 'state=''active''::text'),
+         ARRAY[FALSE, FALSE, FALSE, FALSE], 'state=''active''::text', FALSE),
         ('bunqueue_workers_broker_session_idx', 'bunqueue_workers',
          ARRAY['namespace', 'broker_id', 'broker_session_id', 'client_id'],
-         ARRAY[FALSE, FALSE, FALSE, FALSE], '')
+         ARRAY[FALSE, FALSE, FALSE, FALSE], '', FALSE),
+        ('bunqueue_jobs_live_unique_key_idx', 'bunqueue_jobs',
+         ARRAY['namespace', 'queue', 'unique_key'], ARRAY[FALSE, FALSE, FALSE],
+         'unique_keyisnotnullandstate=anyarray[''waiting''::text,''prioritized''::text,' ||
+         '''delayed''::text,''waiting-children''::text,''active''::text]', TRUE)
     ), expected_triggers(
       trigger_name, table_name, function_name, trigger_type, new_table,
       is_constraint, is_deferrable
@@ -139,7 +146,11 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         SELECT COALESCE(bool_and(COALESCE(
           indexes.indrelid = to_regclass(expected.table_name)
           AND indexes.indisvalid AND indexes.indisready
-          AND NOT indexes.indisunique AND NOT indexes.indisexclusion
+          AND indexes.indisunique = expected.is_unique
+          AND NOT indexes.indisexclusion
+          AND indexes.indnkeyatts = cardinality(expected.columns)
+          AND indexes.indnatts = indexes.indnkeyatts
+          AND indexes.indexprs IS NULL
           AND access_method.amname = 'btree'
           AND ARRAY(
             SELECT attribute.attname::text
@@ -213,8 +224,9 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
 
 /** Initialize or migrate the shared schema without locking live tables when current. */
 export async function initializePostgresSchema(ctx: PostgresContext): Promise<void> {
+  const lockName = postgresAdvisoryLockName('schema');
   await ctx.sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('bunqueue:schema'))`;
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`;
     if (await hasCurrentSchema(tx)) return;
 
     await tx.unsafe(POSTGRES_SCHEMA).simple();

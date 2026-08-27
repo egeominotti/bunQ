@@ -1122,11 +1122,14 @@ CI validates this schema on PostgreSQL 15, 16, 17, and the pinned/recommended
 18.6 release. The bunqueue schema version below is independent from the
 PostgreSQL server major.
 
-Schema initialization runs inside a transaction guarded by
-`pg_advisory_xact_lock(hashtext('bunqueue:schema'))`. The current
-`POSTGRES_SCHEMA_VERSION` is **16**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+Schema initialization runs inside a transaction guarded by a domain-separated
+64-bit `hashtextextended` advisory key. The current
+`POSTGRES_SCHEMA_VERSION` is **17**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
 EXISTS` statements upgrade earlier development schemas before version insertion.
-The v16 migration adds broker session columns and exact-session lease/worker
+The v17 migration upgrades the commit sequencer and runtime lock protocol to
+length-prefixed, domain-separated 64-bit identities; old and new brokers must
+not overlap during this coordinated migration. The v16 migration adds broker
+session columns and exact-session lease/worker
 indexes. The v15 migration also backfills `bunqueue_queue_state(namespace, queue)` from
 distinct existing job rows so an empty-but-still-registered queue remains
 discoverable after its last job is removed.
@@ -1181,10 +1184,12 @@ use `FOR UPDATE SKIP LOCKED` and recheck current-row eligibility.
 | `bunqueue_flow_failures` | `(namespace, parent_id, child_id)`   | Durable child failure policy (`fail`, `remove`, `ignore`, `continue`), error and timestamp; indexed by parent/mode.                                                                         |
 | `bunqueue_repeat_links`  | `(namespace, original_id)`           | Exactly one successor generation per completed repeat job; successor reverse index.                                                                                                         |
 
-Dependency evidence has its own namespace/ID advisory-lock domain. Admission
+Dependency evidence has its own namespace/ID advisory-lock domain. Names are
+length-prefixed before `hashtextextended(..., 0)`; multi-key plans deduplicate
+and sort the resulting 64-bit physical keys before acquiring them. Admission
 locks every referenced dependency before reading proof or inserting an edge;
-batch and flow admission lock the sorted union in one statement. Completion
-uses the same order, locks the affected parents before child rows, writes the
+batch and flow admission lock the complete union in one statement. Completion
+uses the same physical order, locks the affected parents before child rows, writes the
 completion proof, then promotes resolved parents with their encoded payload,
 timeline, state, version, and durable event in the same transaction. This closes
 both commit orders of a concurrent late-consumer race without changing the
@@ -1303,8 +1308,9 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v16 adds
-broker-session fencing, v15 backfills durable queue registry rows, v14 adds
+namespaces share the same physical tables. PostgreSQL engine schema v17 upgrades
+the advisory-lock protocol, v16 adds broker-session fencing, v15 backfills
+durable queue registry rows, v14 adds
 bounded-completion query indexes, and v13 adds the commit-ordered journal.
 Initialization rejects a recorded version newer than the runtime and verifies
 the journal tables, columns, indexes, functions, and
@@ -1313,7 +1319,12 @@ names alone: sequence type/bounds/increment/cache/cycle, column
 types/defaults/nullability, ordered index expressions and predicates, trigger
 timing/transition tables/function bindings, and normalized PL/pgSQL bodies. A
 semantically unchanged schema stays on the no-DDL path; drift is repaired under
-the migration lock.
+the migration lock. The same catalog gate requires
+`bunqueue_jobs_live_unique_key_idx` to be an exact three-key partial unique
+`btree`, including its live-state predicate and lack of expressions or included
+columns. A same-name weaker index is rebuilt transactionally. Existing duplicate
+live keys make initialization fail and roll back without deleting or merging
+rows, preserving a fail-closed operator recovery boundary.
 
 See [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md)
 for transaction boundaries, lease fencing, recovery, runtime configuration, and

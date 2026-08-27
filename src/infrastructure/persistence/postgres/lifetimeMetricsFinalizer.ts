@@ -1,3 +1,4 @@
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import type { PostgresContext } from './context';
 import {
   loadPostgresLifetimeMetrics,
@@ -9,11 +10,10 @@ export async function finalizePostgresLifetimeMetrics(
   ctx: PostgresContext,
   apply: (snapshot: PostgresLifetimeMetricsSnapshot) => void
 ): Promise<void> {
+  const lockName = postgresAdvisoryLockName('event-commit', ctx.config.namespace);
   await ctx.sql.begin(async (tx) => {
     await tx`
-      SELECT pg_advisory_xact_lock(
-        hashtextextended(${ctx.config.namespace}, 0)
-      )
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))
     `;
     const snapshot = await loadPostgresLifetimeMetrics(ctx, tx);
     apply(snapshot);

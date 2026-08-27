@@ -70,6 +70,25 @@ head:
 
 ### Changed
 
+- Dedicated PostgreSQL test commands now reject a missing or blank
+  `BUNQUEUE_TEST_POSTGRES_URL` instead of exiting successfully after skipping the
+  database suite. Explicit smoke, destruction, pressure, and full battle
+  profiles make the production gate repeatable; battle mode enables the
+  ten-broker failure soak and raises every Fast Check campaign to 100 runs. New
+  connection-reset regressions terminate every pooled backend for two brokers,
+  require stable-ID retry plus projection convergence, and kill an admission
+  after its job write to prove transactional rollback and exact retry. Spawned
+  broker diagnostics now drain bounded stdout and stderr captures, classify both
+  human and JSON records, and wait for process exit plus stream EOF before the
+  ten-broker gate asserts that no ACKB failure was hidden. Stream read errors and
+  missing EOF now cancel the remaining pipes but reject the diagnostic gate, so
+  an incomplete capture cannot produce an authoritative zero-failure result.
+- PostgreSQL schema v17 moves every advisory-lock domain to unambiguous,
+  length-prefixed 64-bit identities. Multi-key admission, dependency, flow, and
+  queue-lifecycle plans deduplicate and order the physical lock keys. Destruction
+  and pressure profiles now include deterministic legacy-hash collisions,
+  bounded core-transaction rollback/replay, retry diagnostics, and the existing
+  ten-process broker-crash soak.
 - The deployment guide now includes a production-oriented Kubernetes manifest
   for four PostgreSQL-backed brokers, with unique Pod-derived broker identities,
   database startup gating, storage-aware probes, graceful termination, connection
@@ -276,6 +295,31 @@ head:
 
 ### Fixed
 
+- PostgreSQL atomic flow admission no longer repeats an admission lock, clock
+  read, completion scan, queue registration, and full event-retention cycle for
+  every graph node. `PUSHF` now reuses its complete outer lock plan, samples one
+  post-lock transition timestamp, and batches ordered `pushed` events plus queue
+  registration while preserving one transactional graph. A nine-job durable
+  regression proves all rows, eight edges, two queue identities, event order,
+  initial states, and timestamps; a forced `55P03` replay proves no duplicate
+  timeline, edge, or event.
+- PostgreSQL core admission, claim, ACK, ACKB, and FAIL operations now replay
+  once with jitter after rollback-certain `40001`, `40P01`, or `55P03` errors.
+  Connection and statement-cancellation failures are never guessed or replayed.
+  Regressions hold the deferred event-commit lock through the first attempt and
+  prove exact job, result, event, metric, and timeline state; retry exhaustion
+  remains bounded and leaves no partial transition.
+- PostgreSQL advisory locks no longer alias distinct client-controlled job IDs,
+  deduplication keys, flow parents, or queue names through 32-bit `hashtext`
+  collisions. Fixtures verified across PostgreSQL 15–18 prove both same-identity
+  exclusion and independence for colliding dependency IDs and queue names.
+  Exhausted ACKB infrastructure errors stay redacted on the wire while bounded
+  local logs retain SQLSTATE and trigger-location diagnostics.
+- PostgreSQL schema initialization now validates the exact unique, key, access
+  method, and live-state predicate semantics of
+  `bunqueue_jobs_live_unique_key_idx`. A weaker same-name index is rebuilt in
+  the migration transaction, while pre-existing duplicate live keys fail closed
+  and roll back without mutating data or leaving a partial repair.
 - SQLite DLQ and completed retries now restore live custom-ID and unique-key
   ownership. Every DLQ retry variant persists before publishing RAM, rejects a
   key owned by another generation without dropping terminal work, and leaves

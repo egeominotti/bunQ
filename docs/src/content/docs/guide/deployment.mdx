@@ -1,6 +1,6 @@
 ---
 title: 'Deploy bunqueue: SQLite or PostgreSQL 15–18'
-description: Deploy bunqueue with embedded or single-broker SQLite, or a PostgreSQL 15–18 multi-broker topology, including Docker, health, and backups.
+description: Deploy bunqueue with embedded or single-broker SQLite, or a PostgreSQL 15–18 multi-broker topology, including Kubernetes, Docker, health, and backups.
 head:
   - tag: meta
     attrs:
@@ -17,7 +17,7 @@ import { Aside } from '@astrojs/starlight/components';
   </h1>
   <p class="bq-hero-sub">
     This page shows the smallest working way to run bunqueue in production, then ready-to-paste
-    configs for Docker, systemd, and PM2, plus health checks and backups.
+    configs for Kubernetes, Docker, systemd, and PM2, plus health checks and backups.
   </p>
 </div>
 
@@ -152,6 +152,189 @@ PostgreSQL mode is standalone-server only. Do not set `BUNQUEUE_DATA_PATH`, and
 do not enable bunqueue's SQLite S3 snapshot feature. Use PostgreSQL-native
 backups/PITR and put a TCP load balancer or service in front of the brokers. See
 [Storage backends](/guide/databases/) for the lease and consistency model.
+
+## Kubernetes: four brokers and one PostgreSQL service
+
+Use a managed PostgreSQL service or a PostgreSQL operator with tested backup,
+PITR, failover, and monitoring for production. The manifest below deliberately
+contains only the bunqueue fleet: inject the connection URL for your database
+through a Secret and replace the example image with an immutable tag or digest
+from your registry.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bunqueue
+type: Opaque
+stringData:
+  # Prefer an external secret manager or Sealed Secret in a real cluster.
+  postgres-url: postgres://bunqueue:percent-encoded-password@postgres:5432/bunqueue
+  auth-tokens: replace-with-a-long-random-token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bunqueue
+spec:
+  selector:
+    app.kubernetes.io/name: bunqueue
+  ports:
+    - name: tcp
+      port: 6789
+      targetPort: tcp
+    - name: http
+      port: 6790
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bunqueue
+spec:
+  replicas: 4
+  # bunqueue schema upgrades do not support mixed binary versions. This avoids
+  # overlap during a version change, at the cost of a coordinated outage.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bunqueue
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bunqueue
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:18.6-alpine
+          command: ['/bin/sh', '-ec']
+          args:
+            - until pg_isready -d "$BUNQUEUE_POSTGRES_URL"; do sleep 1; done
+          env:
+            - name: BUNQUEUE_POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bunqueue
+                  key: postgres-url
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+            runAsGroup: 70
+            runAsNonRoot: true
+            runAsUser: 70
+      containers:
+        - name: bunqueue
+          image: your-registry.example/bunqueue:immutable-tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: tcp, containerPort: 6789 }
+            - { name: http, containerPort: 6790 }
+          env:
+            # The repository image defaults DATA_PATH to SQLite. Clear it
+            # explicitly so PostgreSQL is the only configured backend.
+            - { name: DATA_PATH, value: '' }
+            - { name: BUNQUEUE_STORAGE_DRIVER, value: postgres }
+            - name: BUNQUEUE_POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bunqueue
+                  key: postgres-url
+            - { name: BUNQUEUE_POSTGRES_NAMESPACE, value: production }
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - { name: BUNQUEUE_BROKER_ID, value: '$(POD_NAME)' }
+            - { name: BUNQUEUE_POSTGRES_POOL_SIZE, value: '4' }
+            - { name: BUNQUEUE_POSTGRES_LEASE_DURATION_MS, value: '30000' }
+            - { name: BUNQUEUE_POSTGRES_POLL_INTERVAL_MS, value: '250' }
+            - { name: SHUTDOWN_TIMEOUT_MS, value: '30000' }
+            - name: AUTH_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: bunqueue
+                  key: auth-tokens
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            failureThreshold: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: '1', memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bunqueue
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bunqueue
+```
+
+The `initContainer` is intentional. A bunqueue process fails fast when the
+database is unreachable during startup; an HTTP readiness probe cannot delay a
+dependency that must exist before the process starts. Once running, `/ready`
+removes a broker from Service endpoints when PostgreSQL or a maintenance loop is
+degraded, while `/healthz` remains a process-liveness signal. The PostgreSQL
+schema initialization lock makes simultaneous cold starts safe.
+
+Every Pod must have a different `BUNQUEUE_BROKER_ID`. The Downward API mapping
+above supplies the immutable Pod name, including after replacement. All Pods
+must use the same PostgreSQL URL and `BUNQUEUE_POSTGRES_NAMESPACE`. Budget at
+least `replicas × BUNQUEUE_POSTGRES_POOL_SIZE` database connections, plus room
+for migrations, administration, monitoring, replicas, and failover. The
+resource values are starting points, not capacity claims; benchmark the actual
+payload, retention, concurrency, and database latency.
+
+The ClusterIP Service balances TCP **connections**, not individual commands. A
+long-lived SDK connection remains on its selected broker; connection pools and
+independent clients distribute naturally across ready endpoints. Keep both
+ports private or add authenticated TLS termination. Set
+`terminationGracePeriodSeconds` higher than `SHUTDOWN_TIMEOUT_MS`, and add
+topology spread or anti-affinity appropriate to your node count.
+
+<Aside type="caution" title="Coordinate upgrades; do not use a mixed-version rollout">
+  `Recreate` prevents old and new broker binaries from overlapping, but causes a fleet-wide outage
+  during an image update. Stop the old fleet before a new binary migrates the schema, verify one new
+  Pod, and only then restore the desired replica count. Follow the complete
+  [PostgreSQL schema upgrade and rollback procedure](/guide/production/#postgresql-schema-upgrades).
+</Aside>
+
+<Aside type="note" title="Validated Kubernetes failure campaign">
+  On 2026-08-27 this topology was exercised in a fresh kind v0.33.0 cluster running
+  Kubernetes 1.33.1, the repository Bun 1.4.0 image, PostgreSQL 18.6, and four broker Pods.
+  The campaign completed 1,000 jobs admitted and consumed through all four brokers, a four-job
+  cross-broker `FlowProducer` graph, and 120 more jobs after force-deleting the Pod that owned 24
+  active leases. All 24 leases were recovered, stale tokens were fenced, and the Deployment returned
+  to four Ready Pods. PostgreSQL ended with 1,124 completed rows, no remaining active/waiting jobs,
+  zero deadlocks, and zero temporary-file bytes. This is functional failure evidence, not a capacity
+  benchmark or PostgreSQL HA test; the single disposable database was intentionally not failed.
+</Aside>
 
 ## Docker
 

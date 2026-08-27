@@ -70,6 +70,13 @@ head:
 
 ### Changed
 
+- The deployment guide now includes a production-oriented Kubernetes manifest
+  for four PostgreSQL-backed brokers, with unique Pod-derived broker identities,
+  database startup gating, storage-aware probes, graceful termination, connection
+  budgeting, coordinated non-mixed-version upgrades, and a Pod disruption
+  budget. A fresh Kubernetes 1.33.1/kind failure campaign against PostgreSQL
+  18.6 verified cross-broker jobs and Flow execution, forced lease-owner loss,
+  stale-token fencing, recovery, and automatic Pod replacement.
 - PostgreSQL documentation now distinguishes the CI-tested 15–18 compatibility
   range from the pinned/recommended 18.6 deployment, documents broker
   heartbeat/takeover/recovery timing, Bun SQL pool lifecycle deadlines, safe

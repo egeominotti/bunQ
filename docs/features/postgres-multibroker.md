@@ -812,6 +812,21 @@ runs the complete `test/postgres-*.test.ts` set against
 `postgres:18.6-alpine`, `postgres:17-alpine`, `postgres:16-alpine`, and
 `postgres:15-alpine`.
 
+A separate manual Kubernetes campaign on 2026-08-27 used a fresh kind v0.33.0
+cluster with Kubernetes 1.33.1, four broker Pods built from the sanitized Git
+snapshot, and one disposable `postgres:18.6-alpine` StatefulSet. The functional
+phase admitted, claimed, and cross-broker-acknowledged 1,000 jobs exactly once,
+then executed a four-job public `FlowProducer` graph with leaf Workers connected
+to different Pods. The failure phase held 24 leases on one Pod, deleted it with
+zero grace, and completed all 120 jobs through the three survivors after lease
+recovery. PostgreSQL rejected every stale token from the deleted session, and
+the Deployment restored four Ready brokers with distinct current sessions.
+Final database evidence was 1,124 completed jobs, no other job states, zero
+deadlocks, and zero temporary bytes. This validates Kubernetes orchestration and
+the shared-database failure path; it is not a benchmark or a database-HA test.
+The public deployment guide records the tested `initContainer`, Downward API
+broker identity, probes, shutdown budget, and coordinated upgrade constraints.
+
 `test/postgres-ten-processes.test.ts` is the opt-in scale and failure campaign.
 It launches ten independent broker OS processes with private TCP/HTTP ports and
 four SQL pool slots each, then connects 40 TCP consumers to one PostgreSQL

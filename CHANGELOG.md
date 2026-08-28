@@ -41,6 +41,18 @@ _No changes yet._
 
 ### Fixed (test harness)
 
+- The extreme PostgreSQL public-API suite no longer fails when a shared CI
+  runner starves it. Its client command bound was 15s while four brokers, one
+  PostgreSQL and the test process compete for the same cores; a saturated run
+  hit that bound and reported a timeout instead of the exactly-once property the
+  suite exists to check. The bound is now 45s, with the per-job and per-test
+  waits raised to match. Measured on a CPU-limited PostgreSQL 16: 3 failures in
+  10 runs before, 0 in 6 after.
+- Test helpers no longer drop stream output while waiting. Racing
+  `reader.read()` against a timer leaves the pending read queued, so the chunk
+  it later receives is discarded and a slow producer looks like a silent one —
+  which is why a spawned server that did print its banner was reported as
+  producing nothing. (`test/stream-reader.test.ts`)
 - The local CLI end-to-end test no longer reports an empty stdout when the
   server it spawns loses the race for its reserved ports. It reads stderr too,
   retries a confirmed bind collision, and waits long enough for a loaded CI

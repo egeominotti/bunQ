@@ -42,7 +42,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
 
       expect({ pauseMisses, resumeMisses }).toEqual({ pauseMisses: 0, resumeMisses: 0 });
     },
-    30_000
+    120_000
   );
 
   test.skipIf(!postgresUrl)(
@@ -83,7 +83,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
       expect(executions).toBe(1);
       expect(await queues[0].getJobState(jobId)).toBe('completed');
     },
-    30_000
+    120_000
   );
 
   test.skipIf(!postgresUrl)(
@@ -124,7 +124,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
       });
       expect(await current.flow(2).getParentResult<number>(job.id)).toBe(77);
     },
-    30_000
+    120_000
   );
 
   test.skipIf(!postgresUrl)(
@@ -174,7 +174,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
         )
       );
       const results = await Promise.all(
-        roots.map(({ job }) => job.waitUntilFinished(null, 30_000))
+        roots.map(({ job }) => job.waitUntilFinished(null, 90_000))
       );
 
       expect(new Set(results)).toEqual(new Set([36]));
@@ -184,7 +184,7 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
       expect(durable.size).toBe(32);
       expect(new Set(durable.values())).toEqual(new Set([36]));
     },
-    45_000
+    180_000
   );
 
   test.skipIf(!postgresUrl)(
@@ -230,12 +230,12 @@ describe(`PostgreSQL ${expectedPostgresVersionPrefix} extreme public API concurr
       );
       await Promise.all(survivors.map((worker) => worker.waitUntilReady()));
 
-      expect(await job.waitUntilFinished(null, 20_000)).toBe('survivor-9');
+      expect(await job.waitUntilFinished(null, 60_000)).toBe('survivor-9');
       expect(victimExecutions).toBe(1);
       expect(survivorExecutions).toBe(1);
       expect(await producer.getJobState(job.id)).toBe('completed');
       expect((await producer.getJob(job.id))?.returnvalue).toBe('survivor-9');
     },
-    30_000
+    120_000
   );
 });

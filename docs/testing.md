@@ -374,6 +374,12 @@ harness captures subprocess stderr and retries only a confirmed bind collision;
 timeouts and all other startup failures retain their diagnostics and fail the
 test instead of being hidden by a generic port-wait timeout.
 
+Client command bounds in the multi-broker public-API suites are sized for a
+saturated shared runner, not for a quiet laptop: four brokers, one PostgreSQL
+and the test process compete for the same cores, so a 15s bound turned CPU
+starvation into a false timeout. Those suites assert exactly-once semantics, so
+the bound is deliberately generous and the wall time of the file grows with it.
+
 The multi-process PostgreSQL harness (`test/support/postgres-process-cluster.ts`)
 follows the same policy for the same reason: reserving a pair releases the probe
 sockets before the broker binds them, so a concurrent worker can win that

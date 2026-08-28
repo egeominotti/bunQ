@@ -36,6 +36,7 @@ import { handleCommand } from '../src/infrastructure/server/handler';
 import type { HandlerContext } from '../src/infrastructure/server/handler';
 import { QueueManager } from '../src/application/queueManager';
 import { createTcpServer, type TcpServer } from '../src/infrastructure/server/tcp';
+import { readStreamUntil } from './support/stream-reader';
 
 const REPO = join(import.meta.dir, '..');
 
@@ -211,10 +212,7 @@ describe('#5 server validates webhook events (canonical list)', () => {
 
 describe('#6 WaitJob caps timeout server-side', () => {
   test('oversize timeout is rejected with a clear error', async () => {
-    const resp = await handleCommand(
-      { cmd: 'WaitJob', id: '1', timeout: 99999999 } as never,
-      ctx
-    );
+    const resp = await handleCommand({ cmd: 'WaitJob', id: '1', timeout: 99999999 } as never, ctx);
     expect(resp.ok).toBe(false);
     expect(String((resp as { error?: string }).error)).toMatch(/timeout/i);
   });
@@ -318,18 +316,7 @@ describe('#9 `start` boots the FULL server (entry parity)', () => {
       ['bun', 'src/main.ts', 'start', '--tcp-port', '18961', '--http-port', '18962'],
       { cwd: REPO, env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' }
     );
-    let banner = '';
-    const reader = proc.stdout.getReader();
-    const deadline = Date.now() + 8000;
-    const decoder = new TextDecoder();
-    while (Date.now() < deadline && !banner.includes('Shards')) {
-      const { value, done } = await Promise.race([
-        reader.read(),
-        Bun.sleep(300).then(() => ({ value: undefined, done: false })),
-      ]);
-      if (done) break;
-      if (value) banner += decoder.decode(value);
-    }
+    const banner = await readStreamUntil(proc.stdout, 'Shards', 20_000);
     proc.kill();
     await proc.exited;
     expect(banner).toContain('S3 Backup');

@@ -60,7 +60,10 @@ export class PostgresPublicApiHarness {
     const broker = this.brokers[index];
     if (!broker) throw new Error(`PostgreSQL public API broker ${index} is unavailable`);
     return {
-      commandTimeout: 15_000,
+      // Four brokers, one PostgreSQL and the client share a CI runner, so a
+      // single command can queue behind a saturated broker. The suite asserts
+      // exactly-once semantics, not latency: keep the bound generous.
+      commandTimeout: 45_000,
       host: '127.0.0.1',
       pingInterval: 0,
       poolSize: 1,

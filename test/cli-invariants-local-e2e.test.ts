@@ -4,6 +4,7 @@ import { type HealthData, evaluateDoctor } from '../src/cli/commands/doctor';
 import { createHttpServer } from '../src/infrastructure/server/http';
 import { parseSingleJson, runCli, runCliRaw } from './cli-invariants/runtimeHarness';
 import { isBindCollision } from './support/bind-collision';
+import { readStreamUntil } from './support/stream-reader';
 
 function reservePort(): number {
   const reservation = Bun.listen({
@@ -18,22 +19,6 @@ function reservePort(): number {
   const { port } = reservation;
   reservation.stop();
   return port;
-}
-
-async function readUntilListening(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let output = '';
-  const deadline = Date.now() + 20_000;
-  while (!output.includes('TCP') && Date.now() < deadline) {
-    const chunk = await Promise.race([
-      reader.read(),
-      Bun.sleep(100).then(() => ({ value: undefined, done: false })),
-    ]);
-    if (chunk.done) break;
-    if (chunk.value) output += decoder.decode(chunk.value);
-  }
-  return output;
 }
 
 async function bootServerOnce(): Promise<{ output: string; failure: string }> {
@@ -51,7 +36,7 @@ async function bootServerOnce(): Promise<{ output: string; failure: string }> {
     ],
     { cwd: `${import.meta.dir}/..`, stdout: 'pipe', stderr: 'pipe' }
   );
-  const output = await readUntilListening(proc.stdout);
+  const output = await readStreamUntil(proc.stdout, 'TCP', 20_000);
   proc.kill();
   await proc.exited;
   const stderr = await new Response(proc.stderr).text();

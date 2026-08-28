@@ -41,6 +41,13 @@ _No changes yet._
 
 ### Fixed (test harness)
 
+- The soak test's latency-drift check no longer trips on a noisy CI runner. Its
+  per-tick statistic is the maximum of 40 probe pushes, so a noisy neighbour
+  elevated most windows of one half and shifted even that statistic's median
+  (18ms to 96ms on GitHub Actions, while every conservation, memory and WAL
+  assertion held). Drift from a bloating internal structure moves the typical
+  latency, not just the tail, so the ratio test now runs on per-tick medians and
+  the tail keeps an absolute ceiling.
 - The extreme PostgreSQL public-API suite no longer fails when a shared CI
   runner starves it. Its client command bound was 15s while four brokers, one
   PostgreSQL and the test process compete for the same cores; a saturated run

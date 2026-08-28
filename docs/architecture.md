@@ -582,6 +582,10 @@ projections retain the queue identity read from PostgreSQL so queue-wide
 replacement cannot miss or resurrect a result. `postgres/eventRetention.ts` centralizes
 the indexed journal cutoff, non-blocking inline lock, ordered candidate plan,
 and blocking single-queue sweep used by manual trim and crash recovery.
+`postgres/eventCatchupCursors.ts` owns the per-queue applied commit cursor and
+the prune watermarks already accounted for, so a reader refreshes a queue when a
+prune could have removed part of the commit it just applied, and refreshes it
+only once per new watermark.
 `postgres/dlqMaintenance.ts` composes normal DLQ upkeep with an authoritative
 retention repair without changing the store's explicit maintenance API.
 `postgres/dlqRetryPlan.ts` discovers failed consumers before taking locks, then

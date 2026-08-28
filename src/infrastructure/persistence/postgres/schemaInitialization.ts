@@ -57,6 +57,7 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         ('bunqueue_event_prune_watermarks', 'transaction_id', 'bigint', TRUE, 'transaction'),
         ('bunqueue_event_prune_watermarks', 'commit_seq', 'bigint', FALSE, 'none'),
         ('bunqueue_event_prune_watermarks', 'pruned_commit_seq', 'bigint', TRUE, 'zero'),
+        ('bunqueue_event_prune_watermarks', 'self_pruned_commit_seq', 'bigint', TRUE, 'zero'),
         ('bunqueue_event_prune_watermarks', 'prunes_current_transaction', 'boolean', TRUE, 'false'),
         ('bunqueue_brokers', 'session_id', 'text', FALSE, 'none'),
         ('bunqueue_jobs', 'lease_broker_session_id', 'text', FALSE, 'none'),

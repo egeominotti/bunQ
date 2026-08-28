@@ -135,7 +135,7 @@ success clears only its own key, so an unrelated timer cannot make a persistentl
 failed subsystem appear healthy. Schema creation is serialized with the
 transaction-scoped 64-bit advisory identity `bunqueue:schema`. While holding
 that lock, a broker first checks `bunqueue_schema_migrations` and skips all DDL
-when version 17 is already present,
+when its own `POSTGRES_SCHEMA_VERSION` is already present (18 in this release),
 so a broker joining a live cluster does not request locks on active job tables.
 The v17 migration upgrades the shared commit sequencer to the same
 domain-separated lock encoding as runtime writers. The additive v16 migration
@@ -601,10 +601,39 @@ retain their existing host-clock behavior.
 - `bunqueue_event_prune_watermarks` records, in the pruning transaction, the
   highest removed physical event ID and a cumulative, monotonic pruned-commit
   frontier per affected queue. Brokers compare that frontier with a per-queue
-  applied commit cursor. Only a broker that actually missed discarded history
-  refreshes that queue; an already-current broker does not reload it. Manual
-  trim derives the frontier from the deleted event envelopes instead of treating
-  its own transaction as pruned history.
+  applied commit cursor and refresh the queue unless the cursor is strictly
+  ahead of the pruned frontier. Equality is not proof of a complete view: one
+  transaction that writes more queue events than the retained window prunes its
+  own older events, so a reader that applied exactly that commit may hold only
+  its retained tail. Such a commit is unobservable from events by
+  construction, so the commit trigger also records it in the cumulative,
+  per-queue `self_pruned_commit_seq`. Every later watermark inherits the
+  per-queue maximum on insert and on conflict, and an uncommitted
+  `prunes_current_transaction` marker is inherited the same way, so neither a
+  superseding checkpoint nor a second prune inside the same transaction drops
+  the evidence. `events.ts` delegates the reader side to
+  `eventCatchupCursors.ts`, which remembers the newest watermark and self-prune
+  frontier already accounted for per queue, so each such commit refreshes that
+  queue once instead of on every scan, and an already-current broker with no
+  unhandled self-prune does not reload it. The memo keeps three numbers per
+  queue name observed by the process, alongside that queue's applied-commit
+  cursor, and like the cursor it is not evicted when a queue is obliterated. It
+  is seeded at startup because `PostgresQueueManagerState` loads a full snapshot
+  of every queue immediately afterwards. Because a reader can also miss history
+  that a newer commit pruned, a drain that loaded journal entries always
+  re-scans watermarks against its pre-batch position before applying them
+  instead of relying on a notification having armed the scan. That trades
+  latency for correctness: the watermark query costs roughly one row per queue
+  in the namespace, so a busy namespace with thousands of queues pays it on
+  every non-empty drain instead of once per poll interval. Idle brokers are
+  unaffected, since an empty journal batch does not arm the scan.
+
+  This bookkeeping depends on the commit-sequencer trigger, so it is part of
+  PostgreSQL schema version 18. A broker built against version 17 refuses to
+  start against an upgraded database rather than reinstalling its own trigger
+  and disabling the guarantee for every broker sharing that database; upgrade
+  all brokers in a cluster together. Manual trim derives the frontier from the deleted event envelopes instead
+  of treating its own transaction as pruned history.
 - Event retention finds the first row beyond the configured per-queue window
   through the `(namespace, queue, id DESC)` index and deletes through that cutoff.
   Inline pruning takes a non-blocking per-queue advisory lock, materializes the
@@ -687,7 +716,8 @@ The normalized schema is defined in `postgres/schema.ts` and summarized in
   `bunqueue_metric_totals`: durable observability; and
 - `bunqueue_events`: ordered invalidation and event replay; and
 - `bunqueue_event_prune_watermarks`: per-queue proof that retained history has a
-  gap requiring an authoritative refresh for brokers behind that watermark; and
+  gap requiring an authoritative refresh for brokers behind that watermark, plus
+  the carried-forward frontier of commits that pruned their own events; and
 - `bunqueue_event_commit_seq` and `bunqueue_event_commits`: the deferred commit
   sequence and immutable commit envelopes used by replay. The sequence is fixed
   at `CACHE 1`; a namespace advisory lock prevents connection-local allocation
@@ -840,7 +870,12 @@ an existing shared lock rather than requesting an exclusive one. Additional
 deterministic regressions prove the destructive lock
 order, result-cache invalidation after retry/clean/custom-ID reuse, and DLQ
 snapshot convergence after bounded eviction or expiry, including a one-event
-journal window. Dependency regressions also prove same-transaction parent
+journal window. `postgres-event-partial-commit-retention.test.ts` drains
+journal entries before any watermark scan runs and proves three cases: a commit
+that pruned its own older events still refreshes the reader, a later
+superseding watermark cannot hide such a commit, and history pruned by a newer
+commit is still repaired. It also asserts that a stable frontier stops
+refreshing the queue after the first repair. Dependency regressions also prove same-transaction parent
 promotion for single and batch completion, removed completion evidence,
 priority/delay selection, concurrent fan-in, and both commit orders of the
 completion-versus-admission race. Startup tests force more than 256 captured

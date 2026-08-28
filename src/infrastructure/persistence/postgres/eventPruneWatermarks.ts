@@ -13,6 +13,8 @@ export interface PostgresEventPruneWatermarkInput {
 export interface PostgresEventPruneWatermark extends PostgresEventPruneWatermarkInput {
   readonly commitSeq: number;
   readonly prunedCommitSeq: number;
+  /** Newest commit that pruned part of its own queue events, 0 when none did. */
+  readonly selfPrunedCommitSeq: number;
 }
 
 interface WatermarkRow {
@@ -21,6 +23,7 @@ interface WatermarkRow {
   pruned_through: number | string | bigint;
   commit_seq: number | string | bigint;
   pruned_commit_seq: number | string | bigint;
+  self_pruned_commit_seq: number | string | bigint;
 }
 
 export function maxPostgresEventId(rows: readonly { id: number | string | bigint }[]): number {
@@ -112,7 +115,7 @@ export async function recordPostgresEventPruneWatermarks(
     ), inserted AS (
       INSERT INTO bunqueue_event_prune_watermarks
         (namespace, queue, source_event_id, pruned_through, pruned_commit_seq,
-         prunes_current_transaction)
+         self_pruned_commit_seq, prunes_current_transaction)
       SELECT ${ctx.config.namespace}, queue, source_event_id, pruned_through,
              GREATEST(
                pruned_commit_seq,
@@ -123,7 +126,19 @@ export async function recordPostgresEventPruneWatermarks(
                    AND existing.queue = incoming.queue
                ), 0)
              ),
-             prunes_current_transaction
+             COALESCE((
+               SELECT MAX(existing.self_pruned_commit_seq)
+               FROM bunqueue_event_prune_watermarks AS existing
+               WHERE existing.namespace = ${ctx.config.namespace}
+                 AND existing.queue = incoming.queue
+             ), 0),
+             prunes_current_transaction OR COALESCE((
+               SELECT bool_or(existing.prunes_current_transaction)
+               FROM bunqueue_event_prune_watermarks AS existing
+               WHERE existing.namespace = ${ctx.config.namespace}
+                 AND existing.queue = incoming.queue
+                 AND existing.commit_seq IS NULL
+             ), FALSE)
       FROM incoming
       ON CONFLICT (namespace, queue, source_event_id) DO UPDATE SET
         pruned_through = GREATEST(
@@ -133,6 +148,10 @@ export async function recordPostgresEventPruneWatermarks(
         pruned_commit_seq = GREATEST(
           COALESCE(bunqueue_event_prune_watermarks.pruned_commit_seq, 0),
           COALESCE(excluded.pruned_commit_seq, 0)
+        ),
+        self_pruned_commit_seq = GREATEST(
+          COALESCE(bunqueue_event_prune_watermarks.self_pruned_commit_seq, 0),
+          COALESCE(excluded.self_pruned_commit_seq, 0)
         ),
         prunes_current_transaction =
           bunqueue_event_prune_watermarks.prunes_current_transaction
@@ -156,7 +175,8 @@ export async function loadPostgresEventPruneWatermarks(
   const rows = await ctx.sql<WatermarkRow[]>`
     SELECT DISTINCT ON (queue)
            queue, source_event_id, pruned_through, commit_seq,
-           MAX(pruned_commit_seq) OVER (PARTITION BY queue) AS pruned_commit_seq
+           MAX(pruned_commit_seq) OVER (PARTITION BY queue) AS pruned_commit_seq,
+           MAX(self_pruned_commit_seq) OVER (PARTITION BY queue) AS self_pruned_commit_seq
     FROM bunqueue_event_prune_watermarks
     WHERE namespace = ${ctx.config.namespace}
       AND commit_seq IS NOT NULL
@@ -168,6 +188,7 @@ export async function loadPostgresEventPruneWatermarks(
     prunedThrough: numeric(row.pruned_through) ?? 0,
     commitSeq: numeric(row.commit_seq) ?? 0,
     prunedCommitSeq: numeric(row.pruned_commit_seq) ?? 0,
+    selfPrunedCommitSeq: numeric(row.self_pruned_commit_seq) ?? 0,
   }));
 }
 

@@ -1127,7 +1127,7 @@ PostgreSQL server major.
 
 Schema initialization runs inside a transaction guarded by a domain-separated
 64-bit `hashtextextended` advisory key. The current
-`POSTGRES_SCHEMA_VERSION` is **17**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+`POSTGRES_SCHEMA_VERSION` is **18**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
 EXISTS` statements upgrade earlier development schemas before version insertion.
 The v17 migration upgrades the commit sequencer and runtime lock protocol to
 length-prefixed, domain-separated 64-bit identities; old and new brokers must
@@ -1264,8 +1264,13 @@ when their protected lease expires or their broker shuts down.
   commit envelope; physical-ID indexes remain for trimming and diagnostics.
 - `bunqueue_event_prune_watermarks`: namespace, queue, source event ID, and the
   highest physical event ID pruned through, plus `transaction_id`, `commit_seq`,
-  cumulative `pruned_commit_seq`, and the transient
-  `prunes_current_transaction` marker. The primary key
+  cumulative `pruned_commit_seq`, cumulative `self_pruned_commit_seq`, and the
+  transient `prunes_current_transaction` marker. `self_pruned_commit_seq` is the
+  newest commit that pruned part of its own queue events; the commit trigger
+  records it, every later watermark inherits the per-queue maximum, and it is
+  what makes a reader reload a queue it can never observe completely from events
+  alone. An uncommitted `prunes_current_transaction` marker is inherited the
+  same way, so a second prune in the same transaction cannot clear it. The primary key
   `(namespace, queue, source_event_id)` preserves concurrently committed
   checkpoints. Windowed reads retain the maximum pruned-commit frontier even
   when a later physical ID belongs to an older commit; dominated physical
@@ -1311,10 +1316,13 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v17 upgrades
-the advisory-lock protocol, v16 adds broker-session fencing, v15 backfills
-durable queue registry rows, v14 adds
+namespaces share the same physical tables. PostgreSQL engine schema v18 adds the
+per-queue `self_pruned_commit_seq` frontier and the commit sequencer that
+records it, v17 upgrades the advisory-lock protocol, v16 adds broker-session
+fencing, v15 backfills durable queue registry rows, v14 adds
 bounded-completion query indexes, and v13 adds the commit-ordered journal.
+Because v18 replaces the shared `bunqueue_assign_event_commit` function, a
+broker built against v17 refuses to start once v18 is applied.
 Initialization rejects a recorded version newer than the runtime and verifies
 the journal tables, columns, indexes, functions, and
 enabled triggers before skipping DDL. The guard verifies definitions rather than

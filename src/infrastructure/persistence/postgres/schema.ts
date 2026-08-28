@@ -1,6 +1,6 @@
 import { POSTGRES_EVENT_JOURNAL_SCHEMA } from './eventJournalSchema';
 
-export const POSTGRES_SCHEMA_VERSION = 17;
+export const POSTGRES_SCHEMA_VERSION = 18;
 
 /** PostgreSQL schema for the database-authoritative distributed queue engine. */
 export const POSTGRES_SCHEMA = `

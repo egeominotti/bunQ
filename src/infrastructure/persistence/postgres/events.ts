@@ -5,6 +5,7 @@ import {
   type PostgresEventJournalCursor,
   type PostgresJournalEvent,
 } from './eventJournal';
+import { PostgresEventCatchupCursors } from './eventCatchupCursors';
 import { loadPostgresEventPruneWatermarks } from './eventPruneWatermarks';
 import { POSTGRES_EVENT_CHANNEL } from './schema';
 import { trimPostgresQueueEvents } from './telemetry';
@@ -42,11 +43,10 @@ export class PostgresEventStream {
   private readonly invalidationListeners = new Set<InvalidationListener>();
   private readonly drainStatusListeners = new Set<DrainStatusListener>();
   private readonly waiters = new Map<string, Set<WakeRegistration>>();
-  private readonly queueEventCursors = new Map<string, number>();
+  private readonly queueCursors = new PostgresEventCatchupCursors();
   private readonly retentionQueues = new Set<string>();
   private journalCursor: PostgresEventJournalCursor = { commitSeq: 0, eventId: 0 };
   private cursor = 0;
-  private baselineCursor = 0;
   private checkpointScanRequested = false;
   private drainRequested = false;
   private draining: Promise<void> | null = null;
@@ -60,12 +60,16 @@ export class PostgresEventStream {
       loadPostgresEventPruneWatermarks(this.ctx),
     ]);
     this.cursor = baseline.latestEventId;
-    this.baselineCursor = baseline.commitSeq;
     this.journalCursor = { commitSeq: baseline.commitSeq, eventId: Number.MAX_SAFE_INTEGER };
+    this.queueCursors.reset(baseline.commitSeq);
     for (const watermark of watermarks) {
       if (watermark.commitSeq > baseline.commitSeq) {
-        this.queueEventCursors.set(watermark.queue, watermark.commitSeq);
+        this.queueCursors.applied(watermark.queue, watermark.commitSeq);
       }
+      // `PostgresQueueManagerState` loads a full snapshot of every queue after
+      // this call, so recorded prunes are already covered and must not refresh
+      // the freshly loaded read model.
+      this.queueCursors.remember(watermark);
     }
     this.subscription = await this.ctx.sql.listen(
       POSTGRES_EVENT_CHANNEL,
@@ -199,6 +203,10 @@ export class PostgresEventStream {
       await this.convergeEventRetention();
       await this.scanPruneWatermarks();
       const entries = await loadPostgresJournalEventsAfter(this.ctx, this.journalCursor, batchSize);
+      // Always re-check retention against the pre-batch position: a prune that
+      // committed after the previous scan can have removed queue history this
+      // batch does not contain, and applying the batch would hide the gap.
+      if (entries.length > 0) this.checkpointScanRequested = true;
       await this.scanPruneWatermarks();
       for (const entry of entries) this.applyEvent(entry);
       if (entries.length >= batchSize || this.drainRequested) continue;
@@ -223,10 +231,7 @@ export class PostgresEventStream {
     const { event, commitSeq } = entry;
     this.journalCursor = { commitSeq, eventId: event.id };
     this.cursor = Math.max(this.cursor, event.id);
-    this.queueEventCursors.set(
-      event.queue,
-      Math.max(this.queueEventCursors.get(event.queue) ?? this.baselineCursor, commitSeq)
-    );
+    this.queueCursors.applied(event.queue, commitSeq);
     if (requiresQueueInvalidation(event)) this.invalidateQueue(event.queue);
     const delivered = { ...event, commitSeq };
     for (const listener of this.listeners) {
@@ -248,20 +253,13 @@ export class PostgresEventStream {
     }
   }
 
-  private applyPruneWatermark(queue: string, commitSeq: number, prunedCommitSeq: number): void {
-    const appliedThrough = this.queueEventCursors.get(queue) ?? this.baselineCursor;
-    if (appliedThrough >= prunedCommitSeq) return;
-    this.queueEventCursors.set(queue, commitSeq);
-    this.invalidateQueue(queue);
-  }
-
   private async scanPruneWatermarks(): Promise<void> {
     if (!this.checkpointScanRequested) return;
     this.checkpointScanRequested = false;
     try {
       const watermarks = await loadPostgresEventPruneWatermarks(this.ctx);
       for (const watermark of watermarks) {
-        this.applyPruneWatermark(watermark.queue, watermark.commitSeq, watermark.prunedCommitSeq);
+        if (this.queueCursors.requiresRefresh(watermark)) this.invalidateQueue(watermark.queue);
       }
     } catch (error) {
       this.checkpointScanRequested = true;

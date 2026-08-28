@@ -16,7 +16,38 @@ head:
 
 ## Unreleased
 
-_No changes yet._
+### Fixed
+
+- PostgreSQL multi-broker: a broker could keep a stale queue read model after
+  retention pruned events it had not consumed. Two paths did it. A transaction
+  that writes more queue events than `maxQueueEvents` prunes its own older
+  events before any other broker can observe them, so a reader that applied only
+  the retained tail of that commit kept the pruned jobs in their previous state,
+  permanently once a later checkpoint superseded the pruning one. And a drain
+  that applied a batch without re-checking retention could miss history a newer
+  commit had pruned. A prune watermark is now treated as covered only when the
+  applied commit cursor is strictly ahead of the pruned frontier;
+  `bunqueue_event_prune_watermarks` carries a cumulative, per-queue
+  `self_pruned_commit_seq` that every later watermark inherits, so a
+  self-pruning commit forces one authoritative refresh per broker; and a drain
+  that loaded journal entries always re-scans watermarks against its pre-batch
+  position before applying them. The new `postgres/eventCatchupCursors.ts` owns
+  the per-queue bookkeeping and remembers the frontier already handled, so a
+  stable frontier does not reload the queue on every poll; a steady-state queue
+  that exceeds `maxQueueEvents` without any single commit doing so triggers no
+  extra refresh at all.
+  (`test/postgres-event-partial-commit-retention.test.ts`)
+
+### Changed
+
+- The PostgreSQL schema version is now 18. The migration adds
+  `self_pruned_commit_seq` and replaces the `bunqueue_assign_event_commit`
+  commit-sequencer function; both are applied automatically on the first
+  connection, with no manual step. Because the fix depends on that shared
+  trigger, **upgrade every broker in a cluster**: a 2.9.0 broker pointed at an
+  upgraded database now refuses to start with
+  `PostgreSQL schema version 18 is newer than supported version 17` instead of
+  rewriting the trigger back and silently disabling the fix for every broker.
 
 ## [2.9.0] - 2026-08-28
 

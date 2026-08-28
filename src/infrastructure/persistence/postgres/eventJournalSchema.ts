@@ -36,6 +36,12 @@ BEGIN
         )
         ELSE pruned_commit_seq
       END,
+      self_pruned_commit_seq = CASE
+        WHEN prunes_current_transaction THEN GREATEST(
+          COALESCE(self_pruned_commit_seq, 0), assigned_commit_seq
+        )
+        ELSE self_pruned_commit_seq
+      END,
       prunes_current_transaction = FALSE
   WHERE namespace = NEW.namespace
     AND transaction_id = NEW.transaction_id
@@ -83,21 +89,26 @@ ALTER TABLE bunqueue_event_prune_watermarks
 ALTER TABLE bunqueue_event_prune_watermarks
   ADD COLUMN IF NOT EXISTS pruned_commit_seq BIGINT;
 ALTER TABLE bunqueue_event_prune_watermarks
+  ADD COLUMN IF NOT EXISTS self_pruned_commit_seq BIGINT;
+ALTER TABLE bunqueue_event_prune_watermarks
   ADD COLUMN IF NOT EXISTS prunes_current_transaction BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE bunqueue_event_prune_watermarks
   ALTER COLUMN transaction_id DROP DEFAULT,
   ALTER COLUMN pruned_commit_seq DROP DEFAULT,
+  ALTER COLUMN self_pruned_commit_seq DROP DEFAULT,
   ALTER COLUMN prunes_current_transaction DROP DEFAULT;
 ALTER TABLE bunqueue_event_prune_watermarks
   ALTER COLUMN transaction_id TYPE BIGINT USING transaction_id::bigint,
   ALTER COLUMN commit_seq TYPE BIGINT USING commit_seq::bigint,
   ALTER COLUMN pruned_commit_seq TYPE BIGINT USING pruned_commit_seq::bigint,
+  ALTER COLUMN self_pruned_commit_seq TYPE BIGINT USING self_pruned_commit_seq::bigint,
   ALTER COLUMN prunes_current_transaction TYPE BOOLEAN
     USING prunes_current_transaction::boolean;
 ALTER TABLE bunqueue_event_prune_watermarks
   ALTER COLUMN transaction_id SET DEFAULT (pg_current_xact_id()::text::bigint);
 ALTER TABLE bunqueue_event_prune_watermarks
   ALTER COLUMN pruned_commit_seq SET DEFAULT 0,
+  ALTER COLUMN self_pruned_commit_seq SET DEFAULT 0,
   ALTER COLUMN prunes_current_transaction SET DEFAULT FALSE;
 
 UPDATE bunqueue_events
@@ -106,8 +117,10 @@ WHERE transaction_id IS NULL;
 UPDATE bunqueue_event_prune_watermarks
 SET transaction_id = COALESCE(transaction_id, -source_event_id),
     commit_seq = COALESCE(commit_seq, source_event_id),
-    pruned_commit_seq = COALESCE(pruned_commit_seq, commit_seq, source_event_id)
-WHERE transaction_id IS NULL OR commit_seq IS NULL OR pruned_commit_seq IS NULL;
+    pruned_commit_seq = COALESCE(pruned_commit_seq, commit_seq, source_event_id),
+    self_pruned_commit_seq = COALESCE(self_pruned_commit_seq, 0)
+WHERE transaction_id IS NULL OR commit_seq IS NULL OR pruned_commit_seq IS NULL
+   OR self_pruned_commit_seq IS NULL;
 
 ALTER TABLE bunqueue_events
   ALTER COLUMN transaction_id SET NOT NULL;
@@ -117,6 +130,7 @@ ALTER TABLE bunqueue_event_commits
 ALTER TABLE bunqueue_event_prune_watermarks
   ALTER COLUMN transaction_id SET NOT NULL,
   ALTER COLUMN pruned_commit_seq SET NOT NULL,
+  ALTER COLUMN self_pruned_commit_seq SET NOT NULL,
   ALTER COLUMN prunes_current_transaction SET NOT NULL;
 
 DO $migration$

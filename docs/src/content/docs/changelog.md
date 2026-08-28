@@ -16,6 +16,16 @@ head:
 
 ## Unreleased
 
+_No changes yet._
+
+## [2.9.1] - 2026-08-28
+
+> **Multi-broker correctness fix.** PostgreSQL readers no longer keep a stale
+> queue view when event retention removes history they have not consumed. The
+> schema version becomes 18, so upgrade every broker in a cluster together: a
+> 2.9.0 broker started against an upgraded database fails with
+> `PostgreSQL schema version 18 is newer than supported version 17`.
+
 ### Fixed
 
 - PostgreSQL multi-broker: a broker could keep a stale queue read model after
@@ -33,9 +43,9 @@ head:
   that loaded journal entries always re-scans watermarks against its pre-batch
   position before applying them. The new `postgres/eventCatchupCursors.ts` owns
   the per-queue bookkeeping and remembers the frontier already handled, so a
-  stable frontier does not reload the queue on every poll; a steady-state queue
-  that exceeds `maxQueueEvents` without any single commit doing so triggers no
-  extra refresh at all.
+  stable frontier does not reload the queue on every poll: a reader strictly
+  ahead of the pruned frontier makes no extra refresh at all, while a lagging
+  reader still reloads once per new frontier.
   (`test/postgres-event-partial-commit-retention.test.ts`)
 
 ### Changed
@@ -48,6 +58,14 @@ head:
   upgraded database now refuses to start with
   `PostgreSQL schema version 18 is newer than supported version 17` instead of
   rewriting the trigger back and silently disabling the fix for every broker.
+
+### Fixed (test harness)
+
+- The multi-process PostgreSQL topology harness now retries broker startup when
+  it loses the race for its probed TCP/HTTP port pair, instead of failing the
+  suite with `Is port <n> in use?`. The probe sockets are released before the
+  broker binds them, so a concurrent worker could win that window.
+  (`test/postgres-process-port-conflict.test.ts`)
 
 ## [2.9.0] - 2026-08-28
 

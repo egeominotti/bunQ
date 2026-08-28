@@ -1,4 +1,5 @@
 import { TcpClient } from '../../src/client/tcp/client';
+import { isBindCollision } from '../support/bind-collision';
 
 type Subprocess = ReturnType<typeof Bun.spawn>;
 
@@ -160,10 +161,6 @@ async function stopProcess(process: Subprocess, stderr: Promise<string>): Promis
   if (process.exitCode === null) process.kill(9);
   await process.exited;
   return stderr.catch((error: unknown) => `unable to read broker stderr: ${String(error)}`);
-}
-
-function isBindCollision(stderr: string): boolean {
-  return /EADDRINUSE|address already in use|failed to listen|port .*in use/i.test(stderr);
 }
 
 function startupError(

@@ -870,7 +870,9 @@ an existing shared lock rather than requesting an exclusive one. Additional
 deterministic regressions prove the destructive lock
 order, result-cache invalidation after retry/clean/custom-ID reuse, and DLQ
 snapshot convergence after bounded eviction or expiry, including a one-event
-journal window. `postgres-event-partial-commit-retention.test.ts` drains
+journal window. The multi-process topology harness retries broker startup when it loses the
+race for its probed port pair, and only when the broker actually exited; see
+`docs/testing.md`. `postgres-event-partial-commit-retention.test.ts` drains
 journal entries before any watermark scan runs and proves three cases: a commit
 that pruned its own older events still refreshes the reader, a later
 superseding watermark cannot hide such a commit, and history pruned by a newer

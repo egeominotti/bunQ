@@ -374,6 +374,16 @@ harness captures subprocess stderr and retries only a confirmed bind collision;
 timeouts and all other startup failures retain their diagnostics and fail the
 test instead of being hidden by a generic port-wait timeout.
 
+The multi-process PostgreSQL harness (`test/support/postgres-process-cluster.ts`)
+follows the same policy for the same reason: reserving a pair releases the probe
+sockets before the broker binds them, so a concurrent worker can win that
+window. Both harnesses classify a collision with the shared
+`test/support/bind-collision.ts` predicate, which has to match two wordings
+because `Bun.listen` and `Bun.serve` report a taken port differently
+(`Failed to listen at <host>` versus `Is port <n> in use?`) and the server
+propagates only the message. Retries are limited to a broker that actually
+exited, so a readiness timeout still fails with its own diagnostics.
+
 ## SDK hardening matrix
 
 The native suites use each public SDK against real disposable brokers. Every

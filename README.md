@@ -82,9 +82,12 @@ is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
 18.6 release. See the
 [storage guide](https://bunqueue.dev/guide/databases/).
 
-Release images also carry the exact package version. For reproducible
-deployments, pin `ghcr.io/egeominotti/bunqueue:2.9.0`; `latest` points to the
-same multi-arch image at release time.
+Every completed release publishes `ghcr.io/egeominotti/bunqueue` with the exact
+version tag alongside `latest`, the commit SHA and a build timestamp, so pin the
+version tag for reproducible deployments. Confirm the tag exists before pinning
+it, because a release whose pipeline does not complete pushes no image;
+`docker buildx imagetools inspect ghcr.io/egeominotti/bunqueue:<tag>` resolves
+the digest.
 
 Then produce and process from the language you already use:
 

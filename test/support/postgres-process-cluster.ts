@@ -5,6 +5,7 @@ import {
   type PostgresProcessOutput,
   type PostgresProcessRetryDiagnostics,
 } from './postgres-process-output';
+import { isBindCollision } from './bind-collision';
 
 type BrokerProcess = ReturnType<typeof Bun.spawn>;
 
@@ -90,7 +91,7 @@ export async function cleanupPostgresNamespace(url: string, namespace: string): 
   }
 }
 
-async function startPostgresProcessBroker(
+async function attemptPostgresProcessBroker(
   url: string,
   namespace: string,
   brokerId: string,
@@ -152,16 +153,50 @@ async function startPostgresProcessBroker(
       terminated: false,
     };
   } catch (error) {
-    if (process.exitCode === null) process.kill('SIGKILL');
+    const exited = process.exitCode !== null;
+    if (!exited) process.kill('SIGKILL');
     await process.exited;
     const outputError = await output.settle().then(
       () => '',
       (settleError: unknown) => `\n${String(settleError)}`
     );
+    const detail = `${String(error)}\n${output.snapshot()}${outputError}`.trim();
+    if (exited && isBindCollision(detail)) {
+      // Another process owns this pair: keep it leased so this worker never
+      // draws it again, and let the caller retry with a different pair. Only a
+      // broker that actually exited is retried, so a readiness timeout keeps
+      // its diagnostics instead of being hidden behind five more attempts.
+      throw new PortConflictError(detail);
+    }
     leasedPorts.delete(port);
     leasedPorts.delete(port + 1);
-    throw new Error(`${String(error)}\n${output.snapshot()}${outputError}`.trim());
+    throw new Error(detail);
   }
+}
+
+class PortConflictError extends Error {}
+
+/**
+ * Reserving a port pair releases the probe sockets before the broker binds
+ * them, so a concurrent test worker can win the race. Retry with a fresh pair
+ * instead of failing the suite on an addressing conflict.
+ */
+async function startPostgresProcessBroker(
+  url: string,
+  namespace: string,
+  brokerId: string,
+  options: PostgresProcessClusterOptions
+): Promise<PostgresProcessBroker> {
+  let lastConflict: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await attemptPostgresProcessBroker(url, namespace, brokerId, options);
+    } catch (error) {
+      if (!(error instanceof PortConflictError)) throw error;
+      lastConflict = error;
+    }
+  }
+  throw new Error(`broker ${brokerId} lost five port races: ${String(lastConflict)}`);
 }
 
 export async function postgresProcessRetryDiagnostics(

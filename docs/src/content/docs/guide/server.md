@@ -110,17 +110,21 @@ Priority when the same option is set in more than one place: CLI flags > config 
 
 ## Run it in Docker
 
-The published multi-arch image carries both the release version and `latest`.
-Pin the exact version when the server and client must move together:
+Every completed release publishes the multi-arch image with the exact version
+tag alongside `latest`, the commit SHA and a build timestamp. Pin the version
+tag when the server and client must move together:
 
 ```bash
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:2.9.0
+  ghcr.io/egeominotti/bunqueue:2.9.1
 ```
 
-`ghcr.io/egeominotti/bunqueue:latest` points to the same digest when a release
-is published.
+PostgreSQL storage needs a 2.9 image or newer: a 2.8.x image ignores the
+variables above and starts in memory or SQLite mode without an error. Confirm
+the tag you pin exists — a release whose pipeline did not complete pushes no
+image, and `2.9.0` is one such gap. `docker buildx imagetools inspect
+ghcr.io/egeominotti/bunqueue:<tag>` prints the digest a rollout should pin.
 
 To build an application-specific image instead:
 

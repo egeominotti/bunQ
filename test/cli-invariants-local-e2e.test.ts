@@ -3,6 +3,60 @@ import { QueueManager } from '../src/application/queueManager';
 import { type HealthData, evaluateDoctor } from '../src/cli/commands/doctor';
 import { createHttpServer } from '../src/infrastructure/server/http';
 import { parseSingleJson, runCli, runCliRaw } from './cli-invariants/runtimeHarness';
+import { isBindCollision } from './support/bind-collision';
+
+function reservePort(): number {
+  const reservation = Bun.listen({
+    hostname: '127.0.0.1',
+    port: 0,
+    socket: {
+      data() {
+        // Port reservation only.
+      },
+    },
+  });
+  const { port } = reservation;
+  reservation.stop();
+  return port;
+}
+
+async function readUntilListening(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let output = '';
+  const deadline = Date.now() + 20_000;
+  while (!output.includes('TCP') && Date.now() < deadline) {
+    const chunk = await Promise.race([
+      reader.read(),
+      Bun.sleep(100).then(() => ({ value: undefined, done: false })),
+    ]);
+    if (chunk.done) break;
+    if (chunk.value) output += decoder.decode(chunk.value);
+  }
+  return output;
+}
+
+async function bootServerOnce(): Promise<{ output: string; failure: string }> {
+  const proc = Bun.spawn(
+    [
+      'bun',
+      'src/main.ts',
+      'start',
+      '--host',
+      '127.0.0.1',
+      '--tcp-port',
+      String(reservePort()),
+      '--http-port',
+      String(reservePort()),
+    ],
+    { cwd: `${import.meta.dir}/..`, stdout: 'pipe', stderr: 'pipe' }
+  );
+  const output = await readUntilListening(proc.stdout);
+  proc.kill();
+  await proc.exited;
+  const stderr = await new Response(proc.stderr).text();
+  return { output, failure: `${output}${stderr}`.trim() || 'the process produced no output' };
+}
 
 describe('complete local CLI functionality over the real executable', () => {
   test('--json emits one JSON document for every terminating local command', async () => {
@@ -107,57 +161,17 @@ describe('complete local CLI functionality over the real executable', () => {
   });
 
   test('start boots a server and can be interrupted cleanly', async () => {
-    const tcpReservation = Bun.listen({
-      hostname: '127.0.0.1',
-      port: 0,
-      socket: {
-        data() {
-          // Port reservation only.
-        },
-      },
-    });
-    const tcpPort = tcpReservation.port;
-    tcpReservation.stop();
-    const httpReservation = Bun.listen({
-      hostname: '127.0.0.1',
-      port: 0,
-      socket: {
-        data() {
-          // Port reservation only.
-        },
-      },
-    });
-    const httpPort = httpReservation.port;
-    httpReservation.stop();
-
-    const proc = Bun.spawn(
-      [
-        'bun',
-        'src/main.ts',
-        'start',
-        '--host',
-        '127.0.0.1',
-        '--tcp-port',
-        String(tcpPort),
-        '--http-port',
-        String(httpPort),
-      ],
-      { cwd: `${import.meta.dir}/..`, stdout: 'pipe', stderr: 'pipe' }
-    );
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-    let output = '';
-    const deadline = Date.now() + 5000;
-    while (!output.includes('TCP') && Date.now() < deadline) {
-      const chunk = await Promise.race([
-        reader.read(),
-        Bun.sleep(100).then(() => ({ value: undefined, done: false })),
-      ]);
-      if (chunk.done) break;
-      if (chunk.value) output += decoder.decode(chunk.value);
+    // Reserving a port closes the probe socket before the server binds it, so a
+    // concurrent worker can steal the pair. Retry a confirmed bind collision and
+    // keep both streams, otherwise a lost race reports an empty stdout instead
+    // of the real reason.
+    let lastFailure = '';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { output, failure } = await bootServerOnce();
+      if (output.includes('TCP')) return;
+      lastFailure = failure;
+      if (!isBindCollision(failure)) break;
     }
-    proc.kill();
-    await proc.exited;
-    expect(output).toContain('TCP');
-  }, 10_000);
+    throw new Error(`bunqueue start never announced its TCP listener: ${lastFailure}`);
+  }, 120_000);
 });

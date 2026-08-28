@@ -41,6 +41,11 @@ _No changes yet._
 
 ### Fixed (test harness)
 
+- The local CLI end-to-end test no longer reports an empty stdout when the
+  server it spawns loses the race for its reserved ports. It reads stderr too,
+  retries a confirmed bind collision, and waits long enough for a loaded CI
+  runner to finish booting.
+  (`test/cli-invariants-local-e2e.test.ts`)
 - The multi-process PostgreSQL topology harness now retries broker startup when
   it loses the race for its probed TCP/HTTP port pair, instead of failing the
   suite with `Is port <n> in use?`. The probe sockets are released before the

@@ -14,7 +14,7 @@ Native TCP protocol (msgpack, pipelined), one runtime dependency (`msgpack`), sy
 [![downloads](https://img.shields.io/pypi/dm/bunqueue-client?color=ff4f9f)](https://pypi.org/project/bunqueue-client/)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/LICENSE)
 [![python](https://img.shields.io/badge/python-3.9%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)
-[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2018%2F18-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
 [Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/python/CHANGELOG.md)
 

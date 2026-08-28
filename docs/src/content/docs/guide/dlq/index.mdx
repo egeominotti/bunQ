@@ -29,8 +29,9 @@ the terminal attempt and remains attached across automatic DLQ redeliveries.
 Entries are not permanent by definition: `maxAge`, `maxEntries`, an explicit
 purge, or `Queue.obliterate()` can remove them. The defaults retain entries for
 seven days and cap each queue at 10,000 entries. Capacity eviction removes the
-oldest entry from memory and SQLite together, including its terminal ownership
-and stored result/log data.
+oldest entry and its terminal ownership/result/log data from the selected
+backend: in-memory state, SQLite, or PostgreSQL. Persistent-backend deletion is
+committed atomically with the eviction.
 
 ## Quick Start
 

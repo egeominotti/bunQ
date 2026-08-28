@@ -233,7 +233,7 @@ Add a single job to a queue.
   lifo?: boolean,         // Last-in-first-out (default: false)
   removeOnComplete?: boolean, // Auto-remove on completion (default: false)
   removeOnFail?: boolean,     // Auto-remove on failure (default: false)
-  durable?: boolean,      // Force immediate disk write, bypassing write buffer (default: false)
+  durable?: boolean,      // SQLite: bypass write buffer; PostgreSQL is already transactional
   repeat?: {              // Repeat configuration
     every?: number,       //   Repeat interval in ms
     pattern?: string,     //   Cron expression (alternative to every)
@@ -350,7 +350,9 @@ The complete graph is validated before mutation: strict runtime types,
 duplicate/missing/asymmetric edges, cycles, policy conflicts, 10,000 jobs,
 10 MB per job and 64 MB aggregate data. With configured SQLite, all job rows
 commit in one immediate transaction before any leaf becomes visible. In
-memory-only mode, publication is still atomic but not crash-durable.
+PostgreSQL mode commits the graph, dependency edges, and ordered durable events
+in one database transaction before publication. In memory-only mode,
+publication is still atomic but not crash-durable.
 
 **Response:**
 
@@ -1210,7 +1212,7 @@ Create or update a cron/repeating job schedule.
   queue: string,            // Target queue
   data: any,                // Job data payload
   schedule?: string,        // Cron expression (e.g., '*/5 * * * *')
-  repeatEvery?: number,     // Repeat interval in ms (alternative to schedule)
+  repeatEvery?: number,     // Positive safe-integer ms (schedule wins if both exist)
   priority?: number,        // Job priority
   maxLimit?: number,        // Max executions
   timezone?: string,        // IANA timezone (e.g., 'Europe/Rome', 'America/New_York')

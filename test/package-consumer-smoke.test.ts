@@ -80,7 +80,7 @@ describe('published package consumer contract', () => {
     // dependency set is sufficient to import every documented entrypoint. An
     // undeclared runtime import fails here instead of in a user's project.
     const declared = Object.keys(manifest.dependencies ?? {}).sort();
-    expect(declared).toEqual(['croner', 'msgpackr']);
+    expect(declared).toEqual(['msgpackr']);
     for (const dependency of declared) {
       const source = join(root, 'node_modules', dependency);
       expect(existsSync(source)).toBe(true);

@@ -1,7 +1,7 @@
 {
   "name": "bunqueue",
-  "version": "2.8.61",
-  "description": "High-performance job queue for Bun and AI agents. SQLite by default, optional PostgreSQL 18.6 multi-broker persistence, cron, retries, DLQ, and MCP.",
+  "version": "2.9.0",
+  "description": "High-performance job queue for Bun and AI agents. Memory or one-file SQLite, optional PostgreSQL 15–18 multi-broker persistence, cron, retries, DLQ, and MCP.",
   "keywords": [
     "agentic",
     "ai",
@@ -141,7 +141,6 @@
     "prepublishOnly": "bun run build:lib"
   },
   "dependencies": {
-    "croner": "10.0.1",
     "msgpackr": "^1.11.8"
   },
   "devDependencies": {

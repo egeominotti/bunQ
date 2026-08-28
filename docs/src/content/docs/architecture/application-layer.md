@@ -1,6 +1,6 @@
 ---
-title: "Application Layer: Operations, Stalls & DLQ"
-description: "bunqueue application layer: PUSH/PULL/ACK operations, stall detection, dependency resolution, DLQ management, and job lifecycle flows."
+title: 'Application Layer: Operations, Stalls & DLQ'
+description: 'bunqueue application layer: PUSH/PULL/ACK operations, stall detection, dependency resolution, DLQ management, and job lifecycle flows.'
 head:
   - tag: meta
     attrs:
@@ -14,11 +14,19 @@ head:
   <p class="bq-hero-sub">The application layer orchestrates all queue operations, coordinating between the client layer and domain layer: PUSH, PULL and ACK flows, stall detection, dependency resolution, and background tasks.</p>
 </div>
 
+The server selects one application manager at startup. `QueueManager` owns the
+synchronous memory/SQLite path shown in the diagrams below;
+`PostgresQueueManager` exposes the same handler-facing operations but commits
+state through database transactions and refreshes a bounded compatibility
+projection. See [Storage backends](/guide/databases/) for the multi-broker path.
+
 ## Module Structure
 
 ```
 src/application/
 ├── queueManager.ts        # Central orchestrator
+├── postgresQueueManager.ts # PostgreSQL manager facade
+├── postgres-queue-manager/ # Transactional operations and local projection
 ├── operations/            # PUSH, PULL, ACK, Query
 ├── backgroundTasks.ts     # Task orchestration
 ├── cleanupTasks.ts        # Memory cleanup, orphan removal
@@ -42,10 +50,20 @@ src/application/
 └── workerManager.ts       # Worker tracking
 ```
 
+`PostgresQueueManager` replaces the base delivery and lifecycle operations at
+the same handler boundary. Admissions and terminal transitions commit job
+state, ownership, results, and durable events together; pulls claim ordered
+rows with `FOR UPDATE SKIP LOCKED`; ACK/FAIL validates database-clock leases and
+broker-session tokens. A bounded local projection serves compatibility reads
+and is repaired from the durable outbox plus polling. The complete transaction,
+lease, and replay model is documented in the repository reference
+`docs/features/postgres-multibroker.md`, the [architecture overview](/architecture/),
+and the user-facing [storage guide](/guide/databases/).
+
 ## QueueManager Orchestration
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>QueueManager</b><span>central orchestrator</span></div>
+  <div class="bq-diag-head"><b>QueueManager</b><span>memory / SQLite orchestrator</span></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">state</span>
     <div class="bq-diag-row">
@@ -96,7 +114,7 @@ src/application/
 ## PUSH Operation Flow
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>PUSH flow</b><span>push(queue, input)</span></div>
+  <div class="bq-diag-head"><b>PUSH flow</b><span>memory / SQLite push(queue, input)</span></div>
   <div class="bq-diag-layer">1. Generate UUIDv7 ID, 2. check customId idempotency <i>customIdMap, if exists return existing job</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">3. Acquire shard write lock <i>shardIdx = fnv1a(queue) &amp; SHARD_MASK</i></div>
@@ -119,7 +137,7 @@ src/application/
     </div>
   </div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer bq-diag-accent">6. Update jobIndex, 7. persist to SQLite <i>buffered or durable</i>, 8. notify waiters <i>wake long poll</i>, 9. broadcast 'pushed' event</div>
+  <div class="bq-diag-layer bq-diag-accent">6. Update jobIndex, 7. persist to configured SQLite <i>buffered or durable; no-op in memory mode</i>, 8. notify waiters <i>wake long poll</i>, 9. broadcast 'pushed' event</div>
 </div>
 
 ## PULL Operation Flow
@@ -261,8 +279,9 @@ src/application/
 </div>
 
 :::tip[Related]
+
 - [Architecture Overview](/architecture/) - Full component map
 - [Domain Layer](/architecture/domain-layer/) - Shards and the state machine these operations mutate
 - [TCP Protocol](/architecture/tcp-protocol/) - How operations arrive over the wire
 - [Persistence](/architecture/persistence/) - Where these operations are durably recorded
-:::
+  :::

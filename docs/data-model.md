@@ -6,16 +6,17 @@ across its three boundaries:
 | Boundary                   | Representation                                | Source of truth                                     |
 | -------------------------- | --------------------------------------------- | --------------------------------------------------- |
 | **In-memory**              | Plain TS objects + collections                | `src/domain/types/*`, `src/application/types/*`     |
-| **On-disk (default)**      | SQLite rows, BLOB = MessagePack               | `src/infrastructure/persistence/schema.ts`          |
+| **Local persistence**      | SQLite rows, BLOB = MessagePack               | `src/infrastructure/persistence/schema.ts`          |
 | **On-disk (multi-broker)** | PostgreSQL rows, BYTEA = MessagePack          | `src/infrastructure/persistence/postgres/schema.ts` |
 | **On-wire**                | msgpack-encoded `Command` / `Response` frames | `src/domain/types/command.ts`, `response.ts`        |
 
-The same logical `Job` flows through all three: a client sends a `PushCommand`
-over TCP (msgpack), the server materializes a `Job` object in a shard's
-in-memory `PriorityQueue`, and a `WriteBuffer` persists it to the `jobs` table
-where mutable/structured fields (`data`, `depends_on`, `children_ids`, `tags`,
-`timeline`, `stacktrace`, internal `dlq_retry_state`, and `extended_options`) are
-stored as MessagePack BLOBs. These three shapes are **not identical** —
+The same logical `Job` crosses the selected boundaries. A client sends a
+`PushCommand` over TCP (msgpack). In memory/SQLite mode the server materializes
+the job in a shard's `PriorityQueue`; when a data path is configured, the
+`WriteBuffer` persists it to `jobs` with structured fields stored as MessagePack
+BLOBs. PostgreSQL mode instead admits the encoded job to `bunqueue_jobs` inside
+a database transaction and maintains a broker-local compatibility projection
+from durable events and repair reads. These shapes are **not identical** —
 `childrenCompleted` is reconstructed on reload. Recovery-critical
 `stallCount` and all four BullMQ-v5 child-failure policies are persisted so a
 restart cannot reset lifecycle or flow semantics.
@@ -238,7 +239,7 @@ by `createJob` (`src/domain/job/create.ts:77-118`) using `JOB_DEFAULTS` (`src/do
 | `stallTimeout`              | `number \| null`                                    | `null`       |
 | `repeat`                    | `{ every?, limit?, pattern?, count?, tz?, … }`      | `null`       |
 | `dedup`                     | `{ ttl?, extend?, replace? }`                       | see below    |
-| `durable`                   | `boolean` (bypass write buffer)                     | `false`      |
+| `durable`                   | `boolean` (SQLite: bypass buffer; PostgreSQL: no durability change) | `false`      |
 | `stackTraceLimit`           | `number`                                            | `10`         |
 | `keepLogs`                  | `number \| null`                                    | `null`       |
 | `sizeLimit`                 | `number \| null`                                    | `null`       |
@@ -391,7 +392,7 @@ export interface CronJob {
   readonly queue: string;
   readonly data: unknown;
   readonly schedule: string | null; // cron pattern
-  readonly repeatEvery: number | null; // ms interval (alt. to schedule)
+  readonly repeatEvery: number | null; // positive safe-integer ms interval (alt. to schedule)
   readonly priority: number;
   readonly timezone: string | null; // IANA, e.g. "Europe/Rome"
   nextRun: number; // mutable
@@ -407,11 +408,13 @@ export interface CronJob {
 ```
 
 `CronJobInput` (`cron.ts:55-79`) is the creation shape; `createCronJob`
-(`cron.ts:82-107`) requires either `schedule` or `repeatEvery` and applies
+(`cron.ts:82-107`) requires either `schedule` or `repeatEvery`, rejects a supplied
+interval unless it is a positive safe integer in milliseconds, and applies
 defaults: `priority:0`, `executions:0`, `skipMissedOnRestart:true`,
 `skipIfNoWorker:false`, `preventOverlap:true`. **Important:** `maxLimit <= 0`
 is normalized to `null` (unlimited) — storing `0` would make `isAtLimit`
-treat the cron as already exhausted (`cron.ts:99`).
+treat the cron as already exhausted (`cron.ts:99`). When both timing fields are
+valid, `schedule` takes precedence for compatibility.
 
 `CronJobOptions` (`cron.ts:17-25`) is the per-spawn subset of `JobInput`:
 `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`,

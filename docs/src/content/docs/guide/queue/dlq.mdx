@@ -1,6 +1,6 @@
 ---
-title: "DLQ Operations from the Queue Object"
-description: "Reach the dead letter queue through the bunqueue Queue: configure it, list entries, retry them and purge, plus what changes between embedded and TCP mode."
+title: 'DLQ Operations from the Queue Object'
+description: 'Reach the dead letter queue through the bunqueue Queue: configure it, list entries, retry them and purge, plus what changes between embedded and TCP mode.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "queue dlq api, getDlq, retryDlq, purgeDlq, setDlqConfig, failed jobs queue, dlq embedded vs tcp"
+      content: 'queue dlq api, getDlq, retryDlq, purgeDlq, setDlqConfig, failed jobs queue, dlq embedded vs tcp'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Dead jobs, from <em>the producer side.</em></h1>
-  <p class="bq-hero-sub">The Queue object carries the DLQ surface too, so the process that produces work can also configure and drain the pile of work that failed.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Dead jobs, from <em>the producer side.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The Queue object carries the DLQ surface too, so the process that produces work can also
+    configure and drain the pile of work that failed.
+  </p>
 </div>
 
 ## DLQ operations
@@ -29,10 +34,10 @@ The dead letter queue collects jobs that failed permanently (retries exhausted, 
 
 ```typescript
 queue.setDlqConfig({
-  autoRetry: true,             // Periodically re-queue DLQ entries
-  autoRetryInterval: 3600000,  // Every hour
+  autoRetry: true, // Periodically re-queue DLQ entries
+  autoRetryInterval: 3600000, // Every hour
   maxAutoRetries: 3,
-  maxAge: 604800000,           // Drop entries older than 7 days
+  maxAge: 604800000, // Drop entries older than 7 days
   maxEntries: 10000,
 });
 
@@ -46,9 +51,9 @@ const remoteEntries = await queue.getDlqAsync({ reason: 'stalled' });
 const remoteStats = await queue.getDlqStatsAsync();
 
 // Act
-queue.retryDlq();           // Retry all
-queue.retryDlq('job-123');  // Retry one
-queue.purgeDlq();           // Clear all
+queue.retryDlq(); // Retry all
+queue.retryDlq('job-123'); // Retry one
+queue.purgeDlq(); // Clear all
 const removed = await queue.removeDlqJob('job-123'); // Permanently delete one
 const retried = await queue.retryDlqByFilterAsync({ reason: 'stalled' });
 ```
@@ -58,10 +63,10 @@ const retried = await queue.retryDlqByFilterAsync({ reason: 'stalled' });
 
 ```typescript
 await queue.setDlqConfig({
-  autoRetry: true,             // Periodically re-queue DLQ entries
-  autoRetryInterval: 3600000,  // Every hour
+  autoRetry: true, // Periodically re-queue DLQ entries
+  autoRetryInterval: 3600000, // Every hour
   maxAutoRetries: 3,
-  maxAge: 604800000,           // Drop entries older than 7 days
+  maxAge: 604800000, // Drop entries older than 7 days
   maxEntries: 10000,
 });
 
@@ -69,9 +74,9 @@ await queue.setDlqConfig({
 const entries = await queue.getDlq();
 
 // Act
-await queue.retryDlq();           // Retry all
-await queue.retryDlq('job-123');  // Retry one
-await queue.purgeDlq();           // Clear all
+await queue.retryDlq(); // Retry all
+await queue.retryDlq('job-123'); // Retry one
+await queue.purgeDlq(); // Clear all
 ```
 
 </TabItem>
@@ -150,12 +155,12 @@ queue.purge_dlq()?;                      // Clear all
 </TabItem>
 </Tabs>
 
-*DLQ configuration (`setDlqConfig`) is available in Bun, TypeScript, and
+_DLQ configuration (`setDlqConfig`) is available in Bun, TypeScript, and
 Python; PHP, Go, Rust, and Elixir can set the same server policy through
 `PUT /queues/:queue/dlq-config`. Full metadata, stats, and server-side reason
 filters exist in the Bun package only; every SDK can use the HTTP metadata and
 stats endpoints. Automatic retries preserve their bounded retry chain and
-failure history across redelivery and SQLite-backed broker restarts.*
+failure history across redelivery and durable SQLite/PostgreSQL broker restarts._
 
 :::note[TCP mode]
 The synchronous `getDlq()` / `getDlqStats()` methods are embedded snapshots,
@@ -172,19 +177,19 @@ See [Dead Letter Queue](/guide/dlq/) for the full guide, and [Stall Detection](/
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Dead Letter Queue](/guide/dlq/) | The DLQ guide these operations belong to |
-| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
-| [DLQ Configuration](/guide/dlq/configuration/) | Bound the DLQ by age and by entry count |
-| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
-| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
-| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
-| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
-| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
-| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
-| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
-| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
-| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
-| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+|                                                                           |                                                |
+| ------------------------------------------------------------------------- | ---------------------------------------------- |
+| [Dead Letter Queue](/guide/dlq/)                                          | The DLQ guide these operations belong to       |
+| [DLQ Operations](/guide/dlq/operations/)                                  | Filter, retry selectively, check health, purge |
+| [DLQ Configuration](/guide/dlq/configuration/)                            | Bound the DLQ by age and by entry count        |
+| [Queue API](/guide/queue/)                                                | Create a queue in embedded or TCP mode         |
+| [Adding Jobs](/guide/queue/adding-jobs/)                                  | add, addBulk, priorities, delays, durability   |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids    |
+| [Querying Jobs](/guide/queue/querying/)                                   | Fetch jobs, states, counts and results         |
+| [Queue Control and Maintenance](/guide/queue/control/)                    | Pause, drain, obliterate, clean and repair     |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/)             | Progress, per-job logs and dependencies        |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/)        | Rate limits and global concurrency caps        |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/)                 | Named repeatable schedules from the queue      |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/)        | Registered workers, stats and metrics windows  |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward   |
+| [JobOptions Reference](/guide/queue/options/)                             | Every JobOptions field, with defaults          |

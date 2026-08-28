@@ -35,7 +35,10 @@ Internal:
 - `src/shared/lru.ts` (`LRUMap`) — backs `customIdMap`.
 - `src/shared/lock.ts` (`withWriteLock`) — wraps the push critical section.
 
-External / runtime: Bun + SQLite (the `jobs` table, partial index `idx_jobs_unique`). No external runtime dependencies.
+External/runtime: the memory/SQLite engine uses Bun plus the SQLite `jobs`
+table and `idx_jobs_unique`; the PostgreSQL engine uses Bun's native `SQL`
+client plus database rows/advisory locks. MessagePack encoding uses `msgpackr`,
+the package's only third-party runtime dependency.
 
 ## Public Interface
 

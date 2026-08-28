@@ -117,17 +117,22 @@ The more concurrent adds, the bigger the benefit.
 
 ## Durable Jobs Bypass the Batcher
 
-Jobs with `durable: true` skip the batcher entirely. They're sent as individual `PUSH` commands with immediate disk confirmation:
+Jobs with `durable: true` skip the client batcher entirely. They're sent as
+individual `PUSH` commands and wait for the selected backend's admission
+boundary:
 
 ```typescript
 // This goes through the batcher (buffered)
 await queue.add('normal', data);
 
-// This bypasses the batcher (direct to disk)
+// This bypasses the client batcher (backend admission before return)
 await queue.add('critical', data, { durable: true });
 ```
 
-This ensures that durable jobs get their strong persistence guarantee regardless of batching behavior.
+With SQLite, the broker performs an immediate transaction instead of using its
+10 ms write buffer. PostgreSQL commits the admission transaction. Memory-only
+mode has no crash-durable storage boundary. Host, filesystem, and physical-media
+durability remain deployment concerns.
 
 ## Overflow Protection
 

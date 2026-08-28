@@ -16,10 +16,67 @@ head:
 
 ## Unreleased
 
+_No changes yet._
+
+## [2.9.0] - 2026-08-28
+
+> **The multi-broker release.** Keep bunqueue's one-file SQLite deployment when
+> that is the right boundary, or point standalone servers at PostgreSQL and run
+> several active brokers against one authoritative queue. The public Queue,
+> Worker, Flow, cron, retry, result, and DLQ contracts stay the same.
+
+### Release highlights
+
+- **PostgreSQL without a compatibility driver.** bunqueue uses Bun 1.4's native
+  `SQL` pool, prepared tagged templates, reserved transactions, binary protocol,
+  and reconnecting `LISTEN` subscription directly. PostgreSQL 15, 16, 17, and
+  18 are CI compatibility targets; 18.6 is the pinned and recommended release.
+- **Real multi-broker coordination.** Transactional `SKIP LOCKED` claims,
+  database-clock leases, broker-session fencing, commit-ordered durable events,
+  shared rate/concurrency limits, dependencies, cron, workers, job-state/lifecycle metrics, logs,
+  results, and DLQ state live in PostgreSQL—not in one broker's memory.
+- **Failure is part of the contract.** Two-, four-, and opt-in ten-process
+  campaigns kill lease owners, reset pooled connections, race destructive
+  operations, reuse custom IDs, overflow retained event windows, and verify
+  exact recovery without duplicate delivery or stale-token commits.
+- **One runtime dependency.** Cron parsing now uses `Bun.cron.parse()` and a
+  small leading-seconds compatibility adapter, so `croner` leaves the published
+  dependency graph and `msgpackr` is the only direct runtime package.
+- **Same clients, broader topology.** TypeScript, Python, PHP, Go, Rust, and
+  Elixir run the shared protocol conformance suite against both SQLite and
+  PostgreSQL servers. PostgreSQL remains server-only; embedded Bun queues keep
+  the existing memory/SQLite path.
+
+### Compatibility notes
+
+- PostgreSQL must be selected explicitly by driver or URL, cannot share a
+  configuration with a SQLite data path, and uses normal PostgreSQL backup/PITR
+  tooling rather than bunqueue's SQLite S3 snapshots. MySQL is not supported in
+  2.9.0.
+- The supported cron grammar remains standard five-field syntax plus bunqueue's
+  documented leading-seconds six-field form. Seven-field years and the
+  undocumented Croner extensions `L`, `W`, `#`, `+`, and `?` now fail validation
+  instead of being accepted accidentally. Bun's DST rules are now explicit:
+  missing spring-forward fixed times shift by the gap; fall-back fixed times
+  fire once at their first occurrence, while wildcard minute/hour schedules
+  traverse both occurrences. The latter intentionally differs from Croner for
+  some repeated-hour schedules and is covered for both five and six fields.
+  Before upgrading, replace or remove persisted schedules that use the rejected
+  Croner extensions while a 2.8 broker is still running. Version 2.9 validates
+  the complete persisted collection before advancing any missed schedule and
+  reports the offending name and schedule instead of silently omitting it.
+  Interval definitions likewise require a positive safe-integer `repeatEvery`
+  in milliseconds across public and persisted paths. Invalid input now fails before
+  scheduler, deduplication, or database mutation; a valid calendar schedule
+  retains precedence when both timing fields are present.
+- PostgreSQL requires `maxQueueEvents >= 1` because retained durable events are
+  part of multi-broker convergence. Memory and SQLite retention behavior is
+  unchanged.
+
 ### Added
 
-- Added an optional PostgreSQL 18.6, database-authoritative storage driver for
-  standalone servers. Multiple brokers can now share transactional job state,
+- Added an optional PostgreSQL 15–18, database-authoritative storage driver for
+  standalone servers, with 18.6 pinned and recommended. Multiple brokers can now share transactional job state,
   `SKIP LOCKED` claims, fenced database-clock leases, durable events, queue
   limits, cron schedules, worker registrations, logs, metrics, dependencies,
   repeat successors, and DLQ lifecycle state. A pinned two-broker
@@ -103,11 +160,26 @@ head:
   semantics, and separate SQLite/PostgreSQL sizing. The public benchmark guide
   now includes the multi-broker version and tuning campaigns, and publishes the
   seven exact raw JSON artifacts with a SHA-256 manifest.
+- The README, documentation home, storage/deployment guides, FAQ, security
+  guidance, architecture pages, and social covers now describe the exact
+  SQLite-versus-PostgreSQL topology consistently. A full documentation audit
+  scopes performance headlines to their measured workloads, corrects the Cloud
+  payload and remote-command defaults, validates internal and external links,
+  and publishes a warning-free v2.9 TypeDoc reference while retaining v2.8 as
+  a noindex historical tree.
 - PostgreSQL uses Bun 1.4.0's built-in `SQL` client directly; no ORM or external
   PostgreSQL compatibility driver sits on the queue hot path. The implementation
   uses its native pool, binary protocol, prepared tagged templates,
   transaction-reserved connections, and reconnecting LISTEN subscription against
   PostgreSQL 18.6.
+- Cron calendar, timezone, POSIX day matching, and DST evaluation now use Bun
+  1.4.0's native `Bun.cron.parse()` API. A focused compatibility adapter keeps
+  bunqueue's documented six-field syntax by parsing the leading seconds field,
+  including lists, ranges, and steps, while the scheduler and SQLite/PostgreSQL
+  persistence paths remain unchanged. `croner` is no longer a published runtime
+  dependency, leaving `msgpackr` as the only one. Seven-field years and the
+  previously accidental `L`, `W`, `#`, `+`, and `?` Croner extensions are now
+  rejected explicitly because they were never part of bunqueue's public grammar.
 - Memory and SQLite remain the inferred/default backends and retain their
   synchronous behavior. PostgreSQL is selected only from an explicit driver or
   URL, is server-only, cannot be combined with a SQLite data path or SQLite S3
@@ -295,6 +367,10 @@ head:
 
 ### Fixed
 
+- PostgreSQL Prometheus per-queue gauges and exported/omitted cardinality now
+  read the bounded local PostgreSQL projection instead of the unused
+  SQLite/in-memory cache. Cross-broker values converge through the committed
+  event stream and polling repair.
 - PostgreSQL atomic flow admission no longer repeats an admission lock, clock
   read, completion scan, queue registration, and full event-retention cycle for
   every graph node. `PUSHF` now reuses its complete outer lock plan, samples one
@@ -2724,8 +2800,8 @@ const fwd = localQueue.forward({
 ```
 
 - Remote failure → the job fails **locally** (retry with backoff → local DLQ):
-  nothing is lost while the uplink is down; `retryDlq()` re-enqueues when it
-  returns.
+  persist the source queue to survive an uplink outage while its process or
+  volume survives; `retryDlq()` re-enqueues when connectivity returns.
 - Deduped re-forwards: forwarded jobs carry the deterministic remote jobId
   `fwd:<queue>:<localId>`, deduped server-side within the custom-id retention
   window (bounded LRU; remote `removeOnComplete` evicts the entry, for strict
@@ -3487,7 +3563,7 @@ Happy-path behaviour was already solid; these harden bunqueue under failure, str
 
 ### Fixed
 
-- **Cron job with `preventOverlap` fires immediately on reconnect**: Lock expiration was re-queuing cron jobs instead of discarding them, and batch ACK (`ackBatchWithResults`) silently skipped stall-retried jobs without recovery. Now cron jobs are discarded on lock expiry (the scheduler re-creates them at the next tick), and batch ACK properly recovers stall-retried jobs like single ACK does. Fixes [#75](https://github.com/egeominotti/bunqueue/discussions/75).
+- **Cron job with `preventOverlap` fires immediately on reconnect**: Lock expiration was re-queuing cron jobs instead of discarding them, and batch ACK (`ackBatchWithResults`) silently skipped stall-retried jobs without recovery. Now cron jobs are discarded on lock expiry (the scheduler re-creates them at the next tick), and batch ACK properly recovers stall-retried jobs like single ACK does. Reported as #75.
 
 ## [2.6.112] - 2026-04-03
 
@@ -3995,7 +4071,7 @@ Happy-path behaviour was already solid; these harden bunqueue under failure, str
 
 ### Added (Beta)
 
-- **bunqueue Cloud**: Remote dashboard telemetry agent. Connect any bunqueue instance to [bunqueue.io](https://bunqueue.io) with just 2 env vars (`BUNQUEUE_CLOUD_URL` + `BUNQUEUE_CLOUD_API_KEY`). Zero overhead when disabled.
+- **bunqueue Cloud**: Remote dashboard telemetry agent. Connect any bunqueue instance to bunqueue Cloud with just 2 env vars (`BUNQUEUE_CLOUD_URL` + `BUNQUEUE_CLOUD_API_KEY`). Zero overhead when disabled.
   - **Snapshot channel**: HTTP POST every 5s with full server state: stats, throughput, latency percentiles, memory, per-queue counts, worker details, cron jobs, storage status, DLQ entries, recent jobs.
   - **Event channel**: Outbound WebSocket for real-time job event forwarding (Failed, Stalled, etc.) with configurable filtering.
   - **Remote commands (opt-in)**: Dashboard can execute commands on the instance via the same WebSocket: `queue:pause`, `queue:resume`, `queue:drain`, `dlq:retry`, `dlq:purge`, `job:cancel`, `job:promote`, `cron:upsert`, `cron:delete`. Requires `BUNQUEUE_CLOUD_REMOTE_COMMANDS=true`.
@@ -4349,13 +4425,13 @@ Happy-path behaviour was already solid; these harden bunqueue under failure, str
 
 - **SandboxedWorker generics**: `SandboxedWorker<T>` now supports a generic type parameter for typed events (e.g., `worker.on('completed', (job: Job<MyData>) => ...)`)
 - **Processor API improvements**: Processor files now receive `log()`, `fail()`, and `parentId` on the job object alongside `progress()`
-- Typed `on()`/`once()` overloads for all SandboxedWorker events ([#25](https://github.com/egeominotti/bunqueue/issues/25))
+- Typed `on()`/`once()` overloads for all SandboxedWorker events (#25)
 
 ## [2.6.2] - 2026-03-03
 
 ### Fixed
 
-- **`job.name` always `'default'` for scheduled jobs**: When jobs were created via `Queue#upsertJobScheduler`, the `name` from `jobTemplate` was not embedded in the cron job data. The worker fell back to `'default'`. Now embeds the name in data, matching `Queue.add()` behavior. ([Discussion #23](https://github.com/egeominotti/bunqueue/discussions/23))
+- **`job.name` always `'default'` for scheduled jobs**: When jobs were created via `Queue#upsertJobScheduler`, the `name` from `jobTemplate` was not embedded in the cron job data. The worker fell back to `'default'`. Now embeds the name in data, matching `Queue.add()` behavior. (Discussion #23)
 
 ### Added
 

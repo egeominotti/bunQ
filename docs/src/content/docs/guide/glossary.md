@@ -36,7 +36,12 @@ Any code that adds jobs. Often just your HTTP handler calling `queue.add()`. See
 
 ### Embedded mode vs server mode
 
-**Embedded mode** runs the whole queue inside your app's process, backed by a local SQLite file, no server to run. **Server mode** runs bunqueue as a standalone server that many apps and workers connect to over TCP. See [Server Mode](/guide/server/) and the [Introduction](/guide/introduction/).
+**Embedded mode** runs the whole queue inside your app's process, in memory by
+default or backed by a local SQLite file when `dataPath` is set; there is no
+server to run. **Server mode** runs bunqueue as a standalone server that many
+apps and workers connect to over TCP, using memory/SQLite for one broker or
+PostgreSQL for a broker fleet. See [Server Mode](/guide/server/) and the
+[Introduction](/guide/introduction/).
 
 ### Ack
 
@@ -70,11 +75,17 @@ A small "still alive" signal a worker sends while a job runs. Missed heartbeats 
 
 ### Lock (lease)
 
-Temporary ownership of a job, given to the worker that pulled it, so two workers never run the same job. If the worker dies, the lock expires and the job can be handed out again. See the [Worker API](/guide/worker/).
+Temporary, fenced ownership of a job given to the worker that pulled it. While
+the lease is valid, only its holder may commit an outcome. If it expires, the
+job can be handed out again; handlers must therefore tolerate at-least-once
+execution when a stalled original is still alive. See the [Worker API](/guide/worker/).
 
 ### Durable write
 
-A job option (`durable: true`) that writes the job to disk immediately instead of through the 10ms write buffer. Slower, but zero data loss even if the process crashes in that window. See the [Queue API](/guide/queue/).
+A job option (`durable: true`) that makes SQLite write the job immediately
+instead of using its 10ms write buffer. It trades some SQLite throughput for no
+buffer-loss window. PostgreSQL admissions are already transactional, so the
+flag does not change server-side durability there. See the [Queue API](/guide/queue/).
 
 ## Timing and ordering
 
@@ -88,7 +99,10 @@ A job that waits a set time before it becomes runnable. It sits in the `delayed`
 
 ### Cron
 
-A schedule that adds jobs on a recurring basis, from cron expressions like `0 9 * * *` or plain intervals, with timezone support. Schedules survive restarts. See [Cron Jobs](/guide/cron/).
+A schedule that adds jobs on a recurring basis, from cron expressions like
+`0 9 * * *` or plain intervals, with timezone support. Schedules survive
+restarts when SQLite or PostgreSQL persistence is configured; memory-only
+schedules do not. See [Cron Jobs](/guide/cron/).
 
 ### Promote
 
@@ -138,7 +152,11 @@ Pausing stops workers from receiving new jobs from a queue; jobs already running
 
 ### Sharding
 
-Splitting the queue's in-memory state across independent slices (one per CPU core group) so operations on different jobs do not wait on one lock. You never configure this; it is automatic. See [Benchmarks](/guide/benchmarks/).
+In memory/SQLite mode, bunqueue splits queue state across independent in-memory
+slices (one per CPU core group) so operations on different queues do not wait on
+one lock. It is automatic. PostgreSQL mode orders and locks authoritative
+database rows instead of using those delivery shards. See
+[Benchmarks](/guide/benchmarks/).
 
 ### WAL (Write-Ahead Logging)
 
@@ -150,7 +168,11 @@ The compact binary format used on the TCP wire, smaller and faster to parse than
 
 ### Store-and-forward
 
-An edge pattern: a small embedded queue on the device stores jobs locally, then forwards them to a central server when it can reach it. Nothing is lost while offline. See [IoT & Edge](/guide/iot-edge/).
+An edge pattern: a small embedded queue stores jobs on a persistent local volume,
+then forwards them to a central server when it can reach it. A network outage
+does not drop jobs while the local process and volume survive; use SQLite
+`durable: true` when even its 10ms hard-crash window is unacceptable. See
+[IoT & Edge](/guide/iot-edge/).
 
 :::tip[Related]
 - [Introduction](/guide/introduction/) - What bunqueue is and when to use it

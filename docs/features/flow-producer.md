@@ -23,13 +23,15 @@ The Bun client has a strong creation contract:
   graph or commit nothing;
 - no worker can observe a leaf before every node and edge exists;
 - when SQLite is configured, the graph is committed there before it is
-  published in memory; a manager without `dataPath` is intentionally
+  published in memory; PostgreSQL commits the graph and ownership rows in one
+  database transaction; a manager without either backend is intentionally
   memory-only;
 - returned `Job` objects are built from the committed broker snapshots, not
   synthetic defaults;
-- an ID owned by live/retained state, a SQLite job/DLQ row, a completion or
-  timeout tombstone, a retained result, or an unresolved dependency rejects the
-  complete request. Existing topology is never rewritten implicitly.
+- an ID owned by live or retained state in the selected backend—including a
+  job/DLQ row, completion or timeout tombstone, retained result, or unresolved
+  dependency—rejects the complete request. Existing topology is never rewritten
+  implicitly.
 
 This is implemented by the `PUSHF` command. The Bun client and all six official
 external SDKs plan the complete graph locally and submit that single command.
@@ -39,11 +41,13 @@ already-observable calls into an atomic batch retroactively.
 
 Standalone `Queue.add()` and `Queue.addBulk()` also accept `parent: { id,
 queue }` for linking children to an existing pending parent. This uses the same
-dependency representation and SQLite flow-link transaction as FlowProducer:
-the broker locks both shards, appends the child to `childrenIds`/`dependsOn`,
-parks the parent in `waiting-children`, and then publishes the child. Cross-queue
-and concurrent sibling links are supported. Parents that are missing or no
-longer pending are rejected; use `FlowProducer` when all graph nodes are new.
+dependency representation and atomic backend update as FlowProducer. The
+memory/SQLite manager locks both shards and commits SQLite before publication;
+PostgreSQL locks authoritative parent/dependency rows and commits the link in
+the database. Both append the child to `childrenIds`/`dependsOn` and park the
+parent in `waiting-children`. Cross-queue and concurrent sibling links are
+supported. Parents that are missing or no longer pending are rejected; use
+`FlowProducer` when all graph nodes are new.
 
 ## Public API
 
@@ -148,6 +152,8 @@ rather than repeatedly scanning a 10,000-job batch.
 
 ### 3. Atomic commit
 
+#### Memory and SQLite
+
 `pushFlowBatch` executes under:
 
 1. the global custom-ID write lock when any node has a custom ID;
@@ -170,6 +176,18 @@ synchronous publication section.
 The server returns the committed job snapshots. The client verifies cardinality
 and exact ID equality before constructing `JobNode` objects.
 
+#### PostgreSQL
+
+`PostgresQueueManager.pushFlow()` validates the same batch, then
+`PostgresQueueStore.insertFlow()` runs one retried transaction. It locks queue,
+dependency-completion, parent, and admission-key domains in canonical order;
+retires conflicting completion generations; validates every referenced
+dependency; and commits jobs, edges, queue registration, and durable events
+together. Workers claim only committed rows with `SKIP LOCKED`. After commit,
+the accepting broker refreshes every affected queue projection before returning
+the authoritative job snapshots. The base shard locks and SQLite write buffer
+are not used.
+
 ### 4. Legacy `UpdateParent`
 
 `UpdateParent` remains for older SDKs and distinguishes two operations:
@@ -189,6 +207,11 @@ serialized DLQ snapshot and re-keys any pending `flow_failures` outbox record
 in the same transaction. A crash after that commit therefore replays the
 failure against the real parent. Self-links, conflicting ownership, missing
 undeclared nodes, and new topology on a non-queued parent still fail.
+
+PostgreSQL applies the same compatibility contract through
+`PostgresQueueStore.updateParent()`: it locks the authoritative child, parent,
+dependency, and failure rows and commits the back-patch plus durable event in
+the database before either projection is refreshed.
 
 All affected shard and processing locks are acquired in deterministic order,
 storage commits before in-memory mutation, and no `await` occurs inside the
@@ -317,6 +340,12 @@ SQLite persists:
 - payload-free
   `dependency_completions(sequence, job_id, queue, completed_at, pinned)`,
   with bounded unreferenced rows and live-edge pins.
+
+PostgreSQL persists the equivalent topology in the encoded
+`bunqueue_jobs` generations plus `bunqueue_dependencies`,
+`bunqueue_completions`, and `bunqueue_flow_failures`. Ownership changes and the
+corresponding `bunqueue_events` rows commit together, so another broker cannot
+observe a half-updated graph.
 
 See [Data Model](../data-model.md), [Persistence](./persistence.md), and
 [TCP Protocol](./tcp-protocol.md).

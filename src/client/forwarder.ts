@@ -5,11 +5,13 @@
  * The edge pattern: jobs buffer in the local queue (typically embedded
  * SQLite on a gateway); the Forwarder drains them to a central server over
  * TCP/TLS. A remote failure makes the local job fail → local retry/backoff →
- * local DLQ, so nothing is lost while the uplink is down.
+ * local DLQ. With a persistent local `dataPath`, queued work survives uplink
+ * outages and process restarts; memory-only sources provide no such guarantee.
  *
  * Idempotency: every forwarded job carries the deterministic remote jobId
- * `fwd:<localQueueKey>:<localJobId>`. The server dedupes custom jobIds, so a
- * re-forward after a crash or retry never duplicates the job remotely.
+ * `fwd:<localQueueKey>:<localJobId>`. The server dedupes custom jobIds while
+ * their ownership is retained; after bounded retention or removal, downstream
+ * effects must still tolerate at-least-once delivery.
  */
 
 import { EventEmitter } from 'events';
@@ -24,7 +26,7 @@ export interface ForwardOptions {
   queue?: string;
   /** Parallel forwards (default: 4) */
   concurrency?: number;
-  /** Push to the remote with durable: true (immediate fsync server-side) */
+  /** Push with durable: true (bypasses SQLite buffering; PostgreSQL is already transactional). */
   durable?: boolean;
 }
 

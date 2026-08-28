@@ -248,8 +248,9 @@ Injected fields: `__flowParentId`, `__flowParentIds`, plus the BullMQ-compatible
 `addTree` step receives `__flowParentId`, `__parentId`, and `__parentQueue` for
 its exact predecessor, including the predecessor's real queue in cross-queue
 flows. Fan-in jobs retain their existing parent/children fields. They are typed
-via the `FlowJobData` interface, exposed by Worker and Queue reads, persisted to
-SQLite, and survive restarts.
+via the `FlowJobData` interface, exposed by Worker and Queue reads, persisted in
+the selected SQLite or PostgreSQL backend, and survive restarts when persistence
+is configured.
 
 Keys beginning with `__` are reserved on flow input. `job.updateData(userData)`
 preserves the engine-owned topology fields and rejects attempts to forge them;

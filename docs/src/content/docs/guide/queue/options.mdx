@@ -139,7 +139,7 @@ names shown in the table.
 | `removeOnFail` | `boolean` | `false` | Auto-delete after failure |
 | `stallTimeout` | `number` | - | Per-job stall timeout override |
 | `repeat` | `object` | - | Repeating job config (`every`, `pattern`, `limit`) |
-| `durable` | `boolean` | `false` | Write to disk before returning |
+| `durable` | `boolean` | `false` | SQLite: bypass its write buffer; PostgreSQL is already transactional |
 | `lifo` | `boolean` | `false` | Process newest first |
 | `parent` | `{ id, queue }` | - | Parent job reference for [flows](/guide/flow/) |
 
@@ -159,8 +159,9 @@ moves to `waiting-children`, runs only after every linked child finishes, and
 exposes child results through `getChildrenValues()`. This works across queues
 and is committed atomically in both embedded and TCP modes, including
 `addBulk()`. A missing, active, completed, or failed parent rejects the child;
-the rejected child is not left in memory or SQLite. Use `FlowProducer` when the
-parent and children must all be created as one new graph.
+the rejected child is not left in the selected memory, SQLite, or PostgreSQL
+backend. Use `FlowProducer` when the parent and children must all be created as
+one new graph.
 
 :::tip[Related Guides]
 - [Worker API](/guide/worker/), process jobs from queues

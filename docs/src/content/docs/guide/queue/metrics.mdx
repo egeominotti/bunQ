@@ -82,7 +82,7 @@ The Rust SDK does not expose queue monitoring helpers yet. Read the broker's
 Prometheus endpoint instead:
 
 ```bash
-curl --fail http://localhost:6790/metrics
+curl --fail http://localhost:6790/prometheus
 ```
 
 </TabItem>
@@ -94,13 +94,13 @@ Prometheus endpoint with the standard Erlang HTTP client instead:
 ```elixir
 :inets.start()
 {:ok, {{_, 200, _}, _headers, body}} =
-  :httpc.request(~c"http://localhost:6790/metrics")
+  :httpc.request(~c"http://localhost:6790/prometheus")
 ```
 
 </TabItem>
 </Tabs>
 
-*Worker and stats helpers are not yet exposed in Rust and Elixir; scrape the server's HTTP `/metrics` endpoint instead. `trimEvents()` and windowed `getMetrics(state, start, end)` exist in the Bun `bunqueue` package only.*
+*Worker and stats helpers are not yet exposed in Rust and Elixir; scrape the server's Prometheus-text `/prometheus` endpoint instead. The separate `/metrics` endpoint returns JSON operational metrics. `trimEvents()` and windowed `getMetrics(state, start, end)` exist in the Bun `bunqueue` package only.*
 
 ## Metric windows
 
@@ -130,8 +130,9 @@ close. The broker retains at most 20,160 points (two weeks) per queue and state;
 `trimEvents(maxLength)` operates on the separate lifecycle-event journal. It
 returns the number of deleted entries, affects only this queue, and is
 idempotent: calling it again with the same length returns `0`. The journal is
-SQLite-persistent, automatically bounded to 10,000 entries per queue, and is
-deleted together with queue metrics by `obliterateAsync()`.
+persistent in the selected configured backend (SQLite or PostgreSQL),
+automatically bounded to 10,000 entries per queue, and is deleted together with
+queue metrics by `obliterateAsync()`. It is ephemeral in memory-only mode.
 
 ## Where to go next
 

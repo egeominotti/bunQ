@@ -1,17 +1,17 @@
 # bunqueue
 
-> bunqueue is a high-performance job queue for the Bun runtime, written in TypeScript. It uses SQLite (WAL mode) for persistence instead of Redis, offers a BullMQ-compatible API, and ships a native MCP server so AI agents can control queues directly. Zero external dependencies.
+> bunqueue is a high-performance job queue for the Bun runtime, written in TypeScript. It runs in memory or with one-file SQLite persistence by default and supports PostgreSQL 15–18 for active multi-broker fleets. It offers a BullMQ-compatible API and ships a native MCP server so AI agents can control queues directly. `msgpackr` is its only direct runtime dependency.
 
 Key facts:
-- Runs embedded (in-process, `bun:sqlite`) or as a standalone TCP/HTTP server (MessagePack binary protocol on port 6789, REST/WebSocket/SSE on 6790).
-- Production features: retries with backoff, priorities, delayed jobs, cron scheduling, Dead Letter Queue, stall detection, rate limiting, concurrency caps, webhooks (HMAC-signed), S3 backups, native TLS, OpenTelemetry.
+- Runs embedded (in-process memory or `bun:sqlite`) or as a standalone TCP/HTTP server (MessagePack binary protocol on port 6789, REST/WebSocket/SSE on 6790). Standalone servers may select PostgreSQL for database-authoritative multi-broker coordination.
+- Production features: retries with backoff, priorities, delayed jobs, cron scheduling, Dead Letter Queue, stall detection, rate limiting, concurrency caps, webhooks (HMAC-signed), SQLite S3 backups, native TLS, OpenTelemetry.
 - Workflow engine: multi-step orchestration with saga compensation, branching, parallel steps, loops, signals (human-in-the-loop), nested sub-workflows.
 - Performance (native 2026-07-30 campaign): ~729K jobs/sec internal in-memory batch push, ~186K public on-disk Embedded addBulk, ~159K TCP PUSHB, ~17K TCP worker drain, and ~2.7K/~3.2K linear workflows/sec Embedded/TCP. Operations and persistence boundaries are reported separately.
 - Install: `bun add bunqueue` — import from `bunqueue/client` (Queue, Worker, FlowProducer, Bunqueue) or `bunqueue/workflow` (Workflow, Engine).
 
 ## Getting Started
 
-- [Introduction](https://bunqueue.dev/guide/introduction/): What bunqueue is, why SQLite instead of Redis, feature overview
+- [Introduction](https://bunqueue.dev/guide/introduction/): What bunqueue is, memory/SQLite defaults, PostgreSQL scaling, feature overview
 - [Installation](https://bunqueue.dev/guide/installation/): Install via npm/bun, TypeScript types included
 - [Quick Start](https://bunqueue.dev/guide/quickstart/): Create a queue, add jobs, process with a Worker in 5 minutes
 - [Configuration File](https://bunqueue.dev/guide/configuration/): Typed bunqueue.config.ts for server settings
@@ -34,7 +34,7 @@ Key facts:
 
 - [Server Mode](https://bunqueue.dev/guide/server/): Standalone TCP+HTTP server, token auth, Docker, graceful shutdown
 - [CLI Reference](https://bunqueue.dev/guide/cli/): push/pull/ack, queue control, DLQ, cron, stats from the terminal
-- [HTTP REST API](https://bunqueue.dev/api/http/): 76 REST endpoints plus WebSocket and SSE real-time events
+- [HTTP REST API](https://bunqueue.dev/api/http/): 83 REST endpoints plus WebSocket and SSE real-time events
 - [TCP Protocol](https://bunqueue.dev/api/tcp/): MessagePack wire format, length-prefixed framing, full command reference
 - [TypeScript Types](https://bunqueue.dev/api/types/): Job, Queue, Worker, DLQ, and connection interfaces
 - [Native TLS](https://bunqueue.dev/guide/tls/): Encrypt TCP and HTTP traffic without a reverse proxy
@@ -48,7 +48,7 @@ Key facts:
 - [S3 Backup & Recovery](https://bunqueue.dev/guide/backup/): Automated backups to AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces
 - [Webhooks](https://bunqueue.dev/guide/webhooks/): HMAC-SHA256 signed HTTP callbacks on job events
 - [Security](https://bunqueue.dev/security/): Token auth, rate limiting, network config, vulnerability reporting
-- [SQLite & PostgreSQL Storage Backends](https://bunqueue.dev/guide/databases/): SQLite defaults, PostgreSQL 18.6 multi-broker mode, and serverless/ephemeral patterns
+- [Memory, SQLite & PostgreSQL Storage Backends](https://bunqueue.dev/guide/databases/): In-memory defaults, optional SQLite persistence, PostgreSQL 18.6 multi-broker mode, and serverless/ephemeral patterns
 - [CPU-Intensive Workers over TCP](https://bunqueue.dev/guide/cpu-intensive-workers/): Ping intervals, command timeouts, yield patterns
 - [IoT & Edge](https://bunqueue.dev/guide/iot-edge/): Run on Raspberry Pi/ARM64 gateways, MQTT bridging, store-and-forward
 - [Troubleshooting](https://bunqueue.dev/troubleshooting/): SQLite locks, memory, connection timeouts, common fixes
@@ -65,10 +65,10 @@ Key facts:
 
 ## Architecture Internals
 
-- [Architecture Overview](https://bunqueue.dev/architecture/): Auto-scaling shards, TCP protocol, SQLite WAL, background tasks
+- [Architecture Overview](https://bunqueue.dev/architecture/): Auto-scaling shards, TCP protocol, memory/SQLite and PostgreSQL data flows
 - [Domain Layer](https://bunqueue.dev/architecture/domain-layer/): Sharding, 4-ary priority queues, job state machine
 - [Application Layer](https://bunqueue.dev/architecture/application-layer/): PUSH/PULL/ACK operations, stall detection, DLQ management
-- [Persistence](https://bunqueue.dev/architecture/persistence/): WAL mode, write buffering, read-through cache, durability guarantees
+- [Persistence](https://bunqueue.dev/architecture/persistence/): SQLite WAL/write buffering and PostgreSQL transactional persistence
 - [TCP Protocol Internals](https://bunqueue.dev/architecture/tcp-protocol/): Wire format, pipelining, connection pooling
 - [Client SDK Internals](https://bunqueue.dev/architecture/client-sdk/): Connection pooling, embedded vs server mode, ACK batching
 - [Cron Scheduler Internals](https://bunqueue.dev/architecture/cron-scheduler/): MinHeap execution, lazy deletion, timezone handling

@@ -6,8 +6,8 @@
  * Uses the official @modelcontextprotocol/sdk for protocol compliance.
  *
  * Supports two connection modes:
- * - embedded (default): Direct SQLite access via QueueManager
- * - tcp: Connect to a remote bunqueue server
+ * - embedded (default): In-memory or direct SQLite access via QueueManager
+ * - tcp: Connect to a remote memory/SQLite or PostgreSQL-backed server
  *
  * @example Embedded mode (Claude Desktop):
  * ```json

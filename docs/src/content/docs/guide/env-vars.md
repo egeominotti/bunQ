@@ -79,7 +79,7 @@ The variable is accepted and shown in the startup banner, but the TCP listener a
 
 | Variable                      | Type    | Default | Description                                                                                             |
 | ----------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `AUTH_TOKENS`                 | string  | (none)  | Comma-separated auth tokens. When set, every TCP and HTTP request needs a valid token                   |
+| `AUTH_TOKENS`                 | string  | (none)  | Comma-separated tokens for every TCP connection and protected HTTP endpoint; health probes stay public |
 | `BQ_TOKEN` / `BUNQUEUE_TOKEN` | string  | (none)  | Default token for CLI client commands (avoids `--token` on every command)                               |
 | `METRICS_AUTH`                | boolean | `false` | Require auth for `/prometheus`. Only `true` enables it; without `AUTH_TOKENS`, the endpoint returns 503 |
 | `METRICS_MAX_QUEUES`          | integer | `100`   | Maximum queue names exposed as Prometheus label values; `0` disables per-queue series                   |
@@ -89,7 +89,7 @@ The variable is accepted and shown in the startup banner, but the TCP listener a
 # Server side
 AUTH_TOKENS=secret-token-1,secret-token-2 bunqueue start
 
-# Client side, every request must carry a token
+# Client side, every protected request must carry a token
 bunqueue push emails '{"to":"test@example.com"}' --token secret-token-1
 curl -H "Authorization: Bearer secret-token-1" http://localhost:6790/queues
 

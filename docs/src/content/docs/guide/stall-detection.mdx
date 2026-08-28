@@ -207,11 +207,11 @@ worker = Bunqueue.Worker.new("queue", handler, heartbeat_interval: 10_000)  # ms
 
 Keep `heartbeatInterval` well below `stallInterval`, otherwise healthy jobs get flagged as stalled.
 
-With SQLite persistence enabled, a custom stall policy and every job's
-cumulative stall count survive process restarts. A crash consumes one
-`attempts` slot and one `stallCount` slot; reaching either `maxAttempts` or
-`maxStalls` is terminal and moves the job to the DLQ. Repeated crashes therefore
-cannot reset either retry budget.
+With SQLite or PostgreSQL persistence enabled, a custom stall policy and every
+job's cumulative stall count survive process and broker restarts. A crash
+consumes one `attempts` slot and one `stallCount` slot; reaching either
+`maxAttempts` or `maxStalls` is terminal and moves the job to the DLQ. Repeated
+crashes therefore cannot reset either retry budget.
 
 ## Long-running jobs
 

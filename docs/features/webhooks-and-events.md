@@ -230,7 +230,10 @@ its remaining untransferred leases; expired protected cron leases are discarded.
 
 - **SSRF protection:** `validateWebhookUrl` (on by default; disabled via `validateUrls: false`) rejects non-http(s) schemes, URLs > 2048 chars, localhost variants, private IPv4 (`10.*`, `172.16–31.*`, `192.168.*`), link-local `169.254.*`, `0.*`, `127.*`, **IPv4-mapped / IPv4-compatible IPv6** whose embedded IPv4 is loopback/private (`extractMappedIpv4` unwraps the dotted `::ffff:127.0.0.1`, the URL-parser-normalized hex form `[::ffff:7f00:1]`, **and** the deprecated `::`-prefixed compatible form `[::127.0.0.1]`/`[::7f00:1]` before the octet check), **IPv6 ULA `fc00::/7` and link-local `fe80::/10`** plus the unspecified `::` (`checkBlockedIpv6`), and cloud-metadata hosts (`169.254.169.254`, `metadata.google.internal`, `*.internal`) (`webhookValidation.ts:42`).
 - **Dead-event rejection:** `AddWebhook` rejects events not in `WEBHOOK_EVENTS`, so a webhook can't be created against an event that would silently never fire (`handlers/monitoring/webhooks.ts:13-29`).
-- **Delivery is best-effort / fire-and-forget:** failures are logged and counted but never block job processing; there is no persistent retry queue and webhooks are not persisted to SQLite, so they are lost on restart.
+- **Delivery is best-effort / fire-and-forget:** failures are logged and counted
+  but never block job processing. There is no persistent retry queue, and
+  webhook definitions are in-memory in both SQLite and PostgreSQL modes, so
+  they are lost on broker restart.
 - **Fixed 10 s per-request timeout** via `AbortSignal.timeout(10000)`; linear (not exponential) inter-attempt backoff.
 - **`hasEnabledWebhooks` / `getStats` are O(1)** thanks to the `enabledCount` running counter maintained in `add`/`remove`/`setEnabled` (`webhookManager.ts:39`).
 - **Completion-waiter memory safety:** `waitForJobCompletion` registers a timer that, on timeout, marks the waiter `cancelled`, splices it out, and deletes empty arrays — preventing a leak when `WaitJob` times out without completion (`eventsManager.ts:78`). `clear()` resolves all outstanding non-cancelled waiters on shutdown.

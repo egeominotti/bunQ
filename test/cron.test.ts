@@ -8,6 +8,7 @@ import {
   validateCronExpression,
   getNextCronRun,
   expandCronShortcut,
+  describeCron,
 } from '../src/infrastructure/scheduler/cronParser';
 
 describe('CronParser', () => {
@@ -16,12 +17,32 @@ describe('CronParser', () => {
     expect(validateCronExpression('0 0 * * *')).toBeNull();
     expect(validateCronExpression('*/5 * * * *')).toBeNull();
     expect(validateCronExpression('0 9-17 * * 1-5')).toBeNull();
+    expect(validateCronExpression('30 0 9 * * *')).toBeNull();
+    expect(validateCronExpression('0,15,30,45 * * * * *')).toBeNull();
+    expect(validateCronExpression('10-20/5 * * * * *')).toBeNull();
   });
 
   test('should reject invalid cron expressions', () => {
     expect(validateCronExpression('invalid')).not.toBeNull();
     expect(validateCronExpression('* * *')).not.toBeNull();
     expect(validateCronExpression('60 * * * *')).not.toBeNull();
+    expect(validateCronExpression('60 * * * * *')).not.toBeNull();
+    expect(validateCronExpression('*/0 * * * * *')).not.toBeNull();
+    expect(validateCronExpression('10-5 * * * * *')).not.toBeNull();
+    expect(validateCronExpression('0 0 0 * * * 2027')).not.toBeNull();
+    expect(validateCronExpression('0 0 30 2 *')).not.toBeNull();
+  });
+
+  test('should reject unsupported non-POSIX extensions', () => {
+    for (const expression of [
+      '0 0 L * *',
+      '0 0 15W * *',
+      '0 0 * * MON#2',
+      '0 0 1 * +MON',
+      '0 0 ? * MON',
+    ]) {
+      expect(validateCronExpression(expression), expression).not.toBeNull();
+    }
   });
 
   test('should expand shortcuts', () => {
@@ -32,12 +53,45 @@ describe('CronParser', () => {
     expect(expandCronShortcut('@yearly')).toBe('0 0 1 1 *');
   });
 
+  test('should preserve leading seconds in six-field descriptions', () => {
+    expect(describeCron('30 0 9 * * *')).toContain('09:00:30');
+    expect(describeCron('* * * * * *')).toBe('Every second');
+    expect(describeCron('* 0 * * * *')).toContain('second *');
+    expect(describeCron('* 0 * * * *')).not.toBe('Every hour');
+    expect(describeCron('15,45 0 9 * * *')).toContain('second 15,45');
+    expect(describeCron('* * * * *')).toBe('Every minute');
+    expect(describeCron('0 * * * *')).toBe('Every hour');
+    expect(describeCron('0 0 * * *')).toBe('Every day at midnight');
+  });
+
   test('should calculate next run time', () => {
     const now = Date.now();
     const nextRun = getNextCronRun('* * * * *', now);
 
     expect(nextRun).toBeGreaterThan(now);
     expect(nextRun).toBeLessThanOrEqual(now + 60000);
+  });
+
+  test('should calculate six-field runs within the current matching minute', () => {
+    const from = Date.parse('2026-01-01T09:00:10.250Z');
+
+    expect(getNextCronRun('30 0 9 * * *', from, 'UTC')).toBe(
+      Date.parse('2026-01-01T09:00:30.000Z')
+    );
+    expect(getNextCronRun('15,45 0 9 * * *', from, 'UTC')).toBe(
+      Date.parse('2026-01-01T09:00:15.000Z')
+    );
+  });
+
+  test('should advance six-field runs strictly past an exact boundary', () => {
+    const from = Date.parse('2026-01-01T09:00:30.000Z');
+
+    expect(getNextCronRun('30 0 9 * * *', from, 'UTC')).toBe(
+      Date.parse('2026-01-02T09:00:30.000Z')
+    );
+    expect(getNextCronRun('*/20 * * * * *', from, 'UTC')).toBe(
+      Date.parse('2026-01-01T09:00:40.000Z')
+    );
   });
 });
 

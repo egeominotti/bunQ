@@ -1,6 +1,6 @@
 ---
-title: "Namespaces, Auto-Batching and Store-and-Forward"
-description: "Advanced bunqueue queue behaviour: prefixKey namespace isolation for multi-tenant servers, transparent TCP auto-batching, and forwarding local jobs to a central server."
+title: 'Namespaces, Auto-Batching and Store-and-Forward'
+description: 'Advanced bunqueue queue behaviour: prefixKey namespace isolation for multi-tenant servers, transparent TCP auto-batching, and forwarding local jobs to a central server.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "prefixKey, multi tenant queue, namespace isolation, auto batching tcp, pushb, store and forward, edge queue forwarding"
+      content: 'prefixKey, multi tenant queue, namespace isolation, auto batching tcp, pushb, store and forward, edge queue forwarding'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Sharing a server, <em>and leaving it.</em></h1>
-  <p class="bq-hero-sub">Namespacing so several environments can share one broker, batching that makes concurrent adds an order of magnitude faster, and draining an edge queue into a central one.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Sharing a server, <em>and leaving it.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Namespacing so several environments can share one broker, batching that makes concurrent adds an
+    order of magnitude faster, and draining an edge queue into a central one.
+  </p>
 </div>
 
 ## Namespace Isolation (`prefixKey`)
@@ -29,11 +34,11 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ```typescript
 // Same server, fully isolated namespaces
-const devQueue  = new Queue('emails', { prefixKey: 'dev:' });
+const devQueue = new Queue('emails', { prefixKey: 'dev:' });
 const prodQueue = new Queue('emails', { prefixKey: 'prod:' });
 
 await devQueue.add('send', { to: 'tester@example.com' });
-await prodQueue.getJobCountsAsync();  // never sees dev jobs
+await prodQueue.getJobCountsAsync(); // never sees dev jobs
 ```
 
 </TabItem>
@@ -111,7 +116,7 @@ prod_queue = Bunqueue.queue("prod:emails")
 </TabItem>
 </Tabs>
 
-*A `prefixKey` option exists in the Bun `bunqueue` package and the Python SDK; in the other SDKs, prefix the queue name directly (e.g. `new Queue('dev:emails')`), the isolation is identical.*
+_A `prefixKey` option exists in the Bun `bunqueue` package and the Python SDK; in the other SDKs, prefix the queue name directly (e.g. `new Queue('dev:emails')`), the isolation is identical._
 
 A Worker must use the same `prefixKey` to consume the prefixed queue:
 
@@ -167,7 +172,7 @@ dev_worker = Bunqueue.Worker.new("dev:emails", processor)
 </TabItem>
 </Tabs>
 
-*In the other SDKs, give the Worker the prefixed name (e.g. `new Worker('dev:emails', processor)`).*
+_In the other SDKs, give the Worker the prefixed name (e.g. `new Worker('dev:emails', processor)`)._
 
 Common patterns: `dev:` / `staging:` / `prod:` on one server, `tenant-${id}:` per customer, per-service prefixes in a monorepo, `test-${runId}:` for parallel test isolation.
 
@@ -179,7 +184,12 @@ Notes:
 
 ## Auto-batching (TCP mode)
 
-In TCP mode, concurrent `queue.add()` calls are transparently combined into single bulk commands. Enabled by default, no code changes: sequential `await add()` sends immediately with no penalty (~10k ops/s), while concurrent adds (`Promise.all`) batch into one round-trip (~145k ops/s).
+In TCP mode, concurrent `queue.add()` calls are transparently combined into
+single bulk commands. It is enabled by default with no code changes: sequential
+`await add()` sends immediately, while concurrent adds (`Promise.all`) can share
+one round trip. Throughput depends on batch shape, durability, database size,
+and backend; use the current [benchmark workloads](/guide/benchmarks/) instead
+of treating an older point measurement as a universal rate.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -187,9 +197,9 @@ In TCP mode, concurrent `queue.add()` calls are transparently combined into sing
 ```typescript
 const queue = new Queue('tasks', {
   autoBatch: {
-    enabled: true,   // default
-    maxSize: 50,     // flush when the buffer reaches this size (default: 50)
-    maxDelayMs: 5,   // max wait before flushing (default: 5)
+    enabled: true, // default
+    maxSize: 50, // flush when the buffer reaches this size (default: 50)
+    maxDelayMs: 5, // max wait before flushing (default: 5)
   },
 });
 ```
@@ -264,10 +274,12 @@ let ids = queue.add_bulk(vec![
 </TabItem>
 </Tabs>
 
-*Auto-batching is available in the Bun `bunqueue` package only; in the other SDKs, use `addBulk` to batch producer traffic into one round-trip.*
+_Auto-batching is available in the Bun `bunqueue` package only; in the other SDKs, use `addBulk` to batch producer traffic into one round-trip._
 
 :::caution[Durable jobs bypass the batcher]
-Jobs with `durable: true` are always sent individually so they hit the disk immediately, they are never batched.
+Jobs with `durable: true` are always sent individually rather than through the
+client batcher. On a SQLite server they also bypass its write buffer;
+PostgreSQL admission is already transactional.
 :::
 
 ## Store-and-forward: `queue.forward()`
@@ -283,8 +295,8 @@ destination; the same API also supports a TCP source broker:
 const forwarder = queue.forward({
   to: { host: 'queue.example.com', port: 6789, tls: true, token: process.env.BQ_TOKEN },
   queue: 'central-name', // optional remote queue name (default: same)
-  concurrency: 4,        // parallel forwards (default: 4)
-  durable: true,         // push remotely with durable: true (default: false)
+  concurrency: 4, // parallel forwards (default: 4)
+  durable: true, // push remotely with durable: true (default: false)
 });
 
 forwarder.on('forwarded', ({ id, remoteId, name }) => {});
@@ -300,7 +312,9 @@ required, write directly to the central broker:
 
 ```typescript
 const central = new Queue('central-name', {
-  host: 'queue.example.com', port: 6789, token: process.env.BQ_TOKEN,
+  host: 'queue.example.com',
+  port: 6789,
+  token: process.env.BQ_TOKEN,
 });
 await central.add('event', data, { durable: true });
 ```
@@ -379,25 +393,28 @@ central =
 </TabItem>
 </Tabs>
 
-*Only the Bun-runtime `bunqueue` package provides the `forward()` drain loop.
+_Only the Bun-runtime `bunqueue` package provides the `forward()` drain loop.
 Its source may be embedded or TCP, but only an embedded source provides the
 in-process SQLite offline buffer. Direct network writes do not retain jobs
-locally while the central broker is unavailable.*
+locally while the central broker is unavailable._
 
-If the remote is down, jobs stay local (retry, then DLQ), nothing is lost. Full guide: [IoT & Edge](/guide/iot-edge/).
+If the remote is down, locally persisted jobs stay in the source queue (retry,
+then DLQ) while that process and volume survive. Use `durable: true` locally if
+SQLite's 10ms hard-crash window is unacceptable. Full guide:
+[IoT & Edge](/guide/iot-edge/).
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
-| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
-| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
-| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
-| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
-| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
-| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
-| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
-| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
-| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+|                                                                      |                                               |
+| -------------------------------------------------------------------- | --------------------------------------------- |
+| [Queue API](/guide/queue/)                                           | Create a queue in embedded or TCP mode        |
+| [Adding Jobs](/guide/queue/adding-jobs/)                             | add, addBulk, priorities, delays, durability  |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids   |
+| [Querying Jobs](/guide/queue/querying/)                              | Fetch jobs, states, counts and results        |
+| [Queue Control and Maintenance](/guide/queue/control/)               | Pause, drain, obliterate, clean and repair    |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/)        | Progress, per-job logs and dependencies       |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/)   | Rate limits and global concurrency caps       |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/)            | Named repeatable schedules from the queue     |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/)            | Failed-job operations from the Queue object   |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/)   | Registered workers, stats and metrics windows |
+| [JobOptions Reference](/guide/queue/options/)                        | Every JobOptions field, with defaults         |

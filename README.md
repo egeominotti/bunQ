@@ -13,8 +13,8 @@
 </p>
 
 <p align="center">
-  High-performance job queue for Bun. Built for AI agents and automation.<br/>
-  SQLite by default. PostgreSQL 15–18 multi-broker when needed; 18.6 recommended. MCP-native.
+  High-performance job queue for Bun. Memory or one-file SQLite; PostgreSQL 15–18 multi-broker when you scale.<br/>
+  DLQ, cron, SQLite S3 backups, and native MCP. Built for AI agents and automation. No Redis.
 </p>
 
 <p align="center">
@@ -48,14 +48,13 @@ await app.add('send', { to: 'alice@example.com' });
 ```
 
 That's it. Queue + Worker in one object, persisted to a single SQLite file.
-No Redis, no config, no setup. The install is 5.5 MB, 7 packages, 2 runtime
-dependencies (`croner` + `msgpackr`) — SQLite, S3, HTTP and WebSocket are Bun
-built-ins.
+No Redis, no config, no setup. `msgpackr` is the only runtime dependency;
+cron, SQLite, S3, HTTP and WebSocket use Bun's built-ins.
 
 ### Not on Bun? Run the server, connect from anywhere
 
-The queue also runs as a standalone server. SQLite remains the zero-infrastructure
-default:
+The queue also runs as a standalone server. Memory is the zero-configuration
+default; SQLite is the zero-infrastructure persistent option:
 
 ```bash
 # in-memory without --data-path; pass it to persist jobs to SQLite
@@ -84,7 +83,7 @@ is not supported. CI validates PostgreSQL 15, 16, 17, and the pinned/recommended
 [storage guide](https://bunqueue.dev/guide/databases/).
 
 Release images also carry the exact package version. For reproducible
-deployments, pin `ghcr.io/egeominotti/bunqueue:2.8.61`; `latest` points to the
+deployments, pin `ghcr.io/egeominotti/bunqueue:2.9.0`; `latest` points to the
 same multi-arch image at release time.
 
 Then produce and process from the language you already use:
@@ -117,12 +116,13 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 | BullMQ       | Redis                                      | No        |
 | Agenda       | MongoDB                                    | No        |
 | pg-boss      | PostgreSQL                                 | No        |
-| **bunqueue** | **Nothing (SQLite) · PostgreSQL optional** | **Yes**   |
+| **bunqueue** | **Nothing (memory/SQLite) · PostgreSQL optional** | **Yes**   |
 
-- **Zero external infrastructure by default** — one process, one SQLite file
+- **Zero external infrastructure by default** — memory by default; one SQLite
+  file when local persistence is configured
 - **PostgreSQL 15–18 multi-broker mode** — PostgreSQL 18.6 is recommended;
   database-authoritative claims, fenced
-  leases, shared limits, cron, workers, metrics, and failover state
+  leases, shared limits, cron, workers, job-state/lifecycle metrics, and failover state
 - **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
 - **Everything server-side** — retries with backoff, priorities, cron, rate limits, dead letter queue
@@ -145,7 +145,7 @@ the queue store. If you already run Redis and BullMQ works for you, keep it.
 | ---------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
 | **How it works** | Queue runs inside your process                                 | Standalone server, clients connect via TCP               |
 | **Setup**        | `bun add bunqueue`                                             | `docker run` or `bunqueue start`                         |
-| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | 159K jobs/sec TCP `PUSHB`; 17K jobs/sec worker drain     |
+| **Performance**  | 186K jobs/sec on-disk `addBulk`; 729K internal in-memory batch | SQLite: 159K TCP `PUSHB`; 17K jobs/sec worker drain      |
 | **Best for**     | Single-process apps, CLIs, serverless                          | Multiple workers, separate producer/consumer             |
 | **Scaling**      | Same process only                                              | Multiple clients; multiple brokers with PostgreSQL 15–18 |
 
@@ -199,18 +199,20 @@ await queue.add('process', { data: 'hello' });
 
 ## One Queue, Any Language (SDKs)
 
-The server does all the heavy lifting. Official client SDKs speak the native
-TCP protocol with full feature parity, so producers and workers can live
-anywhere in your stack — add a job from TypeScript, process it from Python:
+The server does all the heavy lifting. Official client SDKs share the
+protocol-conformant core Queue, Worker, and Flow surface, so producers and
+workers can live anywhere in your stack — add a job from TypeScript, process it
+from Python. Language-specific capabilities are tracked in the
+[SDK guide](https://bunqueue.dev/guide/sdks/).
 
-| Where your code runs                                | Install                                                                              |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client)       |
-| **Python ≥ 3.9**                                    | [`pip install bunqueue-client`](https://pypi.org/project/bunqueue-client/)           |
-| **PHP ≥ 8.1**                                       | [`composer require bunqueue/client`](https://packagist.org/packages/bunqueue/client) |
-| **Go ≥ 1.26.5**                                     | `go get github.com/egeominotti/bunqueue/sdk/go`                                      |
-| **Rust ≥ 1.85**                                     | [`cargo add bunqueue-client`](https://crates.io/crates/bunqueue-client)              |
-| **Elixir ≥ 1.15**                                   | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency       |
+| Where your code runs                                | Install                                                                                |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Node.js ≥ 20, Deno ≥ 2, Bun, Cloudflare Workers** | [`npm install bunqueue-client`](https://www.npmjs.com/package/bunqueue-client)         |
+| **Python ≥ 3.9**                                    | [`pip install bunqueue-client`](https://pypi.org/project/bunqueue-client/)             |
+| **PHP ≥ 8.1**                                       | [`composer require bunqueue/client`](https://packagist.org/packages/bunqueue/client)   |
+| **Go ≥ 1.26.5**                                     | `go get github.com/egeominotti/bunqueue/sdk/go`                                        |
+| **Rust ≥ 1.85**                                     | [`cargo add bunqueue-client`](https://crates.io/crates/bunqueue-client)                |
+| **Elixir ≥ 1.15**                                   | Hex coming soon — today: use [`sdk/elixir`](./sdk/elixir) as a path dependency         |
 
 ```typescript
 // Node.js / Deno / Cloudflare Workers

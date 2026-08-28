@@ -14,10 +14,10 @@ import Simulator from '../../components/simulator/Simulator.tsx';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">simulator</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The engine, <em>in your browser.</em></h1>
-  <p class="bq-hero-sub">A faithful in-browser model of bunqueue. Push jobs and watch the same lifecycle a real server runs, waiting to active to completed, with failures bouncing through delayed backoff until they land in the dead-letter lane.</p>
+  <p class="bq-hero-sub">A faithful in-browser model of bunqueue's memory/SQLite engine. Push jobs and watch its lifecycle, waiting to active to completed, with failures bouncing through delayed backoff until they land in the dead-letter lane.</p>
 </div>
 
-Use the **scenario chips** for one-click demos, or drive everything by hand from the control panel. The transport bar pauses the simulation clock and runs it up to 4× speed. Same FNV-1a shard mapping, same priority ordering, same controls as the real engine.
+Use the **scenario chips** for one-click demos, or drive everything by hand from the control panel. The transport bar pauses the simulation clock and runs it up to 4× speed. It mirrors the FNV-1a shard mapping, priority ordering, and controls of the memory/SQLite engine; PostgreSQL uses database ordering and locks instead of in-memory delivery shards.
 
 <Simulator client:load />
 
@@ -43,11 +43,11 @@ Then compose your own: pause a queue mid-burst, drain it, or crank the failure r
 
 | Mechanic | Simulator | Real bunqueue |
 |----------|-----------|---------------|
-| Shard mapping | `fnv1aHash(queue) & 7`, 8 shards | Same hash, shard count auto-detected from CPU cores |
+| Shard mapping | `fnv1aHash(queue) & 7`, 8 shards | Memory/SQLite: same hash with an auto-detected shard count; PostgreSQL: database row ordering/locks |
 | Priority order | Higher first, FIFO within a priority (4-ary min-heap) | Same |
 | Retries | Exponential backoff, DLQ after 3 attempts | Configurable `attempts`/`backoff` per job |
 | Rate limit | Token bucket, jobs/sec per queue | [`RateLimit`](/guide/rate-limiting/) command |
-| Storage | In-memory, resets on reload | SQLite WAL with [S3 backups](/guide/backup/) |
+| Storage | In-memory, resets on reload | Memory/SQLite, or authoritative PostgreSQL for multi-broker servers |
 | Workers | Simulated processing time (0.45–1.5s; the priority demo uses a slower 1.1–2s worker) | Your code, over TCP or [embedded](/guide/quickstart/) |
 
 Ready for the real thing? Start with the [quick start](/guide/quickstart/), then meet the [Queue](/guide/queue/) and [Worker](/guide/worker/) APIs.

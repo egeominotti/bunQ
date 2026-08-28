@@ -12,7 +12,7 @@ Native TCP protocol (msgpack, length-prefixed frames), OTP-safe connections owne
 
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/elixir/LICENSE)
 [![elixir](https://img.shields.io/badge/elixir-1.15%2B-2ea44f)](https://elixir-lang.org/)
-[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2018%2F18-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
 [Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/elixir/CHANGELOG.md)
 

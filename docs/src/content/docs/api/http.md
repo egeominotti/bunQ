@@ -1,6 +1,6 @@
 ---
-title: "HTTP REST API Reference: 83 Endpoints + Live Events"
-description: "Complete HTTP REST API reference for bunqueue on port 6790: 83 endpoints, WebSocket and SSE real-time events, Bearer auth, payloads, and examples."
+title: 'HTTP REST API Reference: 83 Endpoints + Live Events'
+description: 'Complete HTTP REST API reference for bunqueue on port 6790: 83 endpoints, WebSocket and SSE real-time events, Bearer auth, payloads, and examples.'
 head:
   - tag: meta
     attrs:
@@ -28,7 +28,10 @@ head:
 
 ## Authentication
 
-When `AUTH_TOKENS` is configured, all endpoints (except health probes and CORS preflight) require a Bearer token in the `Authorization` header. Multiple tokens are supported, separated by commas.
+When `AUTH_TOKENS` is configured, protected endpoints require a Bearer token in
+the `Authorization` header. Health probes and CORS preflight stay public;
+`/prometheus` is also public unless metrics authentication is enabled. Multiple
+tokens are supported, separated by commas.
 
 ```bash
 # Server configuration (env var)
@@ -45,12 +48,13 @@ Token comparison uses **constant-time equality** (`crypto.timingSafeEqual` equiv
 
 **Endpoints that skip authentication:**
 
-| Endpoint | Reason |
-|---|---|
-| `GET /health` | Load balancer health checks must work without credentials |
-| `GET /healthz`, `GET /live` | Kubernetes liveness probes |
-| `GET /ready` | Kubernetes readiness probes |
-| `OPTIONS *` | CORS preflight must respond before auth headers are available |
+| Endpoint                    | Reason                                                        |
+| --------------------------- | ------------------------------------------------------------- |
+| `GET /health`               | Load balancer health checks must work without credentials     |
+| `GET /healthz`, `GET /live` | Kubernetes liveness probes                                    |
+| `GET /ready`                | Kubernetes readiness probes                                   |
+| `GET /prometheus`           | Public by default; protected when `METRICS_AUTH=true`          |
+| `OPTIONS *`                 | CORS preflight must respond before auth headers are available |
 
 The `GET /prometheus` endpoint optionally requires auth when `requireAuthForMetrics: true` is set in the server configuration. This allows Prometheus to scrape without credentials in trusted networks, while requiring auth in public-facing deployments.
 
@@ -84,14 +88,14 @@ The `Max-Age: 86400` (24 hours) means browsers cache the preflight response, avo
 
 All errors follow a consistent format with appropriate HTTP status codes:
 
-| Code | Meaning | When |
-|---|---|---|
-| `200` | Success | Operation completed successfully |
-| `400` | Bad Request | Invalid JSON, missing required fields, validation failure (e.g., queue name too long, priority out of range) |
-| `401` | Unauthorized | Missing or invalid Bearer token |
-| `404` | Not Found | Job, queue, cron, or webhook not found |
-| `429` | Rate Limited | Client exceeded the configured request rate |
-| `500` | Internal Error | Unexpected server error (logged server-side) |
+| Code  | Meaning        | When                                                                                                         |
+| ----- | -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `200` | Success        | Operation completed successfully                                                                             |
+| `400` | Bad Request    | Invalid JSON, missing required fields, validation failure (e.g., queue name too long, priority out of range) |
+| `401` | Unauthorized   | Missing or invalid Bearer token                                                                              |
+| `404` | Not Found      | Job, queue, cron, or webhook not found                                                                       |
+| `429` | Rate Limited   | Client exceeded the configured request rate                                                                  |
+| `500` | Internal Error | Unexpected server error (logged server-side)                                                                 |
 
 **Error response body:**
 
@@ -112,11 +116,11 @@ All errors follow a consistent format with appropriate HTTP status codes:
 
 HTTP requests are rate-limited per client IP using a **sliding window** algorithm. The client IP is resolved in order: `X-Forwarded-For` header (first IP) > `X-Real-IP` header > `"unknown"`.
 
-| Variable | Default | Description |
-|---|---|---|
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Sliding window duration in milliseconds |
-| `RATE_LIMIT_MAX_REQUESTS` | `10000` | Maximum requests per window per IP. |
-| `RATE_LIMIT_CLEANUP_MS` | `60000` | Interval for cleaning up expired rate limit entries |
+| Variable                  | Default | Description                                         |
+| ------------------------- | ------- | --------------------------------------------------- |
+| `RATE_LIMIT_WINDOW_MS`    | `60000` | Sliding window duration in milliseconds             |
+| `RATE_LIMIT_MAX_REQUESTS` | `10000` | Maximum requests per window per IP.                 |
+| `RATE_LIMIT_CLEANUP_MS`   | `60000` | Interval for cleaning up expired rate limit entries |
 
 When rate limited, the server responds with:
 
@@ -176,6 +180,7 @@ Understanding the job lifecycle is essential for using the API effectively. A jo
 </div>
 
 **States:**
+
 - **waiting**, Job is queued with priority = 0
 - **prioritized**, Job is queued with priority > 0 (processed before waiting jobs)
 - **delayed**, Job waiting for its delay to expire, then moves to waiting/prioritized
@@ -186,7 +191,11 @@ Understanding the job lifecycle is essential for using the API effectively. A jo
 
 **Delayed jobs:** When `delay > 0` is set at push time, the job enters `delayed` state and becomes `waiting` (or `prioritized` if priority > 0) after the delay expires. A delayed job can be promoted immediately via the Promote endpoint.
 
-**Durable mode:** When `durable: true` is set, the job is written to SQLite synchronously before returning. Without it, jobs are buffered in memory (10ms write buffer) for ~10x higher throughput, with a small window of potential data loss on crash.
+**Durable mode:** In SQLite mode, `durable: true` writes the job synchronously
+before returning. Without it, jobs use the 10ms in-memory write buffer for
+higher throughput, with a small window of potential data loss on a hard crash.
+PostgreSQL admissions are transactional regardless of this flag and never use
+the SQLite buffer.
 
 ---
 
@@ -212,25 +221,25 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 
 **Request body**, only `data` is required:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `data` | `any` | *(required)* | Job payload. Any JSON-serializable value. Max 10MB. |
-| `priority` | `number` | `0` | Higher value = processed sooner. Range: -1,000,000 to 1,000,000. |
-| `delay` | `number` | `0` | Milliseconds before the job becomes available for processing. Max: 1 year. |
-| `maxAttempts` | `number` | `3` | Maximum retry attempts before the job moves to the DLQ. Range: 1-1000. `attempts` is accepted as an alias. |
-| `backoff` | `number` or `object` | `1000` | Base retry delay in milliseconds (exponential: `backoff * 2^attempt`, max: 1 day). Also accepts `{ "type": "fixed" \| "exponential", "delay": ms }`. |
-| `ttl` | `number` | - | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year. |
-| `timeout` | `number` | - | Processing timeout in milliseconds. The broker fails the active attempt at its absolute deadline; a later outcome from that lease generation is ignored. Max: 1 day. |
-| `uniqueKey` | `string` | - | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored. |
-| `jobId` | `string` | - | Broker-wide custom job ID. If a live job with this ID already exists in any queue, the push is idempotent and returns the existing ID. |
-| `tags` | `string[]` | `[]` | Metadata tags for filtering and querying. |
-| `groupId` | `string` | - | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially. |
-| `lifo` | `boolean` | `false` | Last-in-first-out ordering. When true, the job is processed before other jobs at the same priority. |
-| `removeOnComplete` | `boolean` | `false` | Automatically remove the job from memory after completion. Saves memory for fire-and-forget jobs. |
-| `removeOnFail` | `boolean` | `false` | Automatically remove the job after final failure (after all retries exhausted). |
-| `durable` | `boolean` | `false` | Bypass the write buffer and persist to SQLite immediately. Slower (~10k/s vs ~100k/s) but zero data loss risk. |
-| `dependsOn` | `string[]` | `[]` | Job IDs that must complete before this job becomes available. The job enters `waiting-children` state until all dependencies are met. |
-| `repeat` | `object` | - | Repeat configuration: `{ every: ms, limit: n }` for interval-based, or `{ pattern: "cron expression" }` for cron-based (optional `tz`, `startDate`, `endDate`, `immediately`). |
+| Field              | Type                 | Default      | Description                                                                                                                                                                              |
+| ------------------ | -------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`             | `any`                | _(required)_ | Job payload. Any JSON-serializable value. Max 10MB.                                                                                                                                      |
+| `priority`         | `number`             | `0`          | Higher value = processed sooner. Range: -1,000,000 to 1,000,000.                                                                                                                         |
+| `delay`            | `number`             | `0`          | Milliseconds before the job becomes available for processing. Max: 1 year.                                                                                                               |
+| `maxAttempts`      | `number`             | `3`          | Maximum retry attempts before the job moves to the DLQ. Range: 1-1000. `attempts` is accepted as an alias.                                                                               |
+| `backoff`          | `number` or `object` | `1000`       | Base retry delay in milliseconds (exponential: `backoff * 2^attempt`, max: 1 day). Also accepts `{ "type": "fixed" \| "exponential", "delay": ms }`.                                     |
+| `ttl`              | `number`             | -            | Time-to-live from creation in milliseconds. Job is discarded if not processed within this window. Max: 1 year.                                                                           |
+| `timeout`          | `number`             | -            | Processing timeout in milliseconds. The broker fails the active attempt at its absolute deadline; a later outcome from that lease generation is ignored. Max: 1 day.                     |
+| `uniqueKey`        | `string`             | -            | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored.                                                                         |
+| `jobId`            | `string`             | -            | Broker-wide custom job ID. If a live job with this ID already exists in any queue, the push is idempotent and returns the existing ID.                                                   |
+| `tags`             | `string[]`           | `[]`         | Metadata tags for filtering and querying.                                                                                                                                                |
+| `groupId`          | `string`             | -            | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially.                                                                                  |
+| `lifo`             | `boolean`            | `false`      | Last-in-first-out ordering. When true, the job is processed before other jobs at the same priority.                                                                                      |
+| `removeOnComplete` | `boolean`            | `false`      | Automatically remove the job from memory after completion. Saves memory for fire-and-forget jobs.                                                                                        |
+| `removeOnFail`     | `boolean`            | `false`      | Automatically remove the job after final failure (after all retries exhausted).                                                                                                          |
+| `durable`          | `boolean`            | `false`      | SQLite: bypass the write buffer and commit before returning (slower, but no 10 ms buffer-loss window). PostgreSQL admissions are already transactional and do not use the SQLite buffer. |
+| `dependsOn`        | `string[]`           | `[]`         | Job IDs that must complete before this job becomes available. The job enters `waiting-children` state until all dependencies are met.                                                    |
+| `repeat`           | `object`             | -            | Repeat configuration: `{ every: ms, limit: n }` for interval-based, or `{ pattern: "cron expression" }` for cron-based (optional `tz`, `startDate`, `endDate`, `immediately`).           |
 
 **Success response** (`200`):
 
@@ -244,14 +253,14 @@ the existing job's ID is returned (idempotent).
 
 **Error responses:**
 
-| Status | Error | Cause |
-|---|---|---|
-| `400` | `Invalid JSON body` | Request body is not valid JSON |
-| `400` | `Queue name is required` | Empty queue name |
-| `400` | `Queue name contains invalid characters` | Queue name has chars outside `a-zA-Z0-9_-.:` |
-| `400` | `Job data too large (max 10MB)` | Serialized data exceeds 10MB |
-| `400` | `priority must be an integer` | Non-integer priority |
-| `400` | `delay must be at least 0` | Negative delay |
+| Status | Error                                    | Cause                                        |
+| ------ | ---------------------------------------- | -------------------------------------------- |
+| `400`  | `Invalid JSON body`                      | Request body is not valid JSON               |
+| `400`  | `Queue name is required`                 | Empty queue name                             |
+| `400`  | `Queue name contains invalid characters` | Queue name has chars outside `a-zA-Z0-9_-.:` |
+| `400`  | `Job data too large (max 10MB)`          | Serialized data exceeds 10MB                 |
+| `400`  | `priority must be an integer`            | Non-integer priority                         |
+| `400`  | `delay must be at least 0`               | Negative delay                               |
 
 ---
 
@@ -303,9 +312,9 @@ curl http://localhost:6790/queues/emails/jobs
 curl http://localhost:6790/queues/emails/jobs?timeout=5000
 ```
 
-| Parameter | Type | Default | Max | Description |
-|---|---|---|---|---|
-| `timeout` | `number` | `0` | `60000` | Long-poll timeout in ms. `0` = return immediately if no job available. |
+| Parameter | Type     | Default | Max     | Description                                                            |
+| --------- | -------- | ------- | ------- | ---------------------------------------------------------------------- |
+| `timeout` | `number` | `0`     | `60000` | Long-poll timeout in ms. `0` = return immediately if no job available. |
 
 **Response with job** (`200`):
 
@@ -315,7 +324,7 @@ curl http://localhost:6790/queues/emails/jobs?timeout=5000
   "job": {
     "id": "019ce9d7-6983-7000-946f-48737be2b0f9",
     "queue": "emails",
-    "data": {"to": "user@test.com", "subject": "Welcome"},
+    "data": { "to": "user@test.com", "subject": "Welcome" },
     "priority": 10,
     "createdAt": 1700000000000,
     "runAt": 1700000000000,
@@ -360,12 +369,12 @@ curl -X POST http://localhost:6790/queues/emails/jobs/pull-batch \
   -d '{"count": 10, "timeout": 5000}'
 ```
 
-| Field | Type | Required | Range | Description |
-|---|---|---|---|---|
-| `count` | `number` | Yes | 1-1000 | Number of jobs to pull |
-| `timeout` | `number` | No | 0-60000 | Long-poll timeout (ms), honored with or without `owner`. Default 0 (return immediately). |
-| `owner` | `string` | No | - | Lock owner identifier for lock-based processing |
-| `lockTtl` | `number` | No | - | Lock time-to-live (ms). Job is released if lock expires without ACK. |
+| Field     | Type     | Required | Range   | Description                                                                              |
+| --------- | -------- | -------- | ------- | ---------------------------------------------------------------------------------------- |
+| `count`   | `number` | Yes      | 1-1000  | Number of jobs to pull                                                                   |
+| `timeout` | `number` | No       | 0-60000 | Long-poll timeout (ms), honored with or without `owner`. Default 0 (return immediately). |
+| `owner`   | `string` | No       | -       | Lock owner identifier for lock-based processing                                          |
+| `lockTtl` | `number` | No       | -       | Lock time-to-live (ms). Job is released if lock expires without ACK.                     |
 
 **Response** (`200`):
 
@@ -403,7 +412,7 @@ curl http://localhost:6790/jobs/019ce9d7-6983-7000-946f-48737be2b0f9
   "job": {
     "id": "019ce9d7-6983-7000-946f-48737be2b0f9",
     "queue": "emails",
-    "data": {"to": "user@test.com"},
+    "data": { "to": "user@test.com" },
     "priority": 0,
     "createdAt": 1700000000000,
     "runAt": 1700000000000,
@@ -468,7 +477,7 @@ GET /jobs/:id/result
 ```
 
 ```json
-{ "ok": true, "id": "019ce9d7-...", "result": {"sent": true, "messageId": "abc-123"} }
+{ "ok": true, "id": "019ce9d7-...", "result": { "sent": true, "messageId": "abc-123" } }
 ```
 
 Results are stored in an LRU cache (max 5,000 entries). Oldest results are evicted when the cache is full. For permanent result storage, use the `result` field in your own database.
@@ -509,10 +518,10 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../ack \
 
 **Request body** (optional):
 
-| Field | Type | Description |
-|---|---|---|
-| `result` | `any` | Completion result. Stored in LRU cache (5,000 max). |
-| `token` | `string` | Lock token (if using lock-based processing). |
+| Field    | Type     | Description                                         |
+| -------- | -------- | --------------------------------------------------- |
+| `result` | `any`    | Completion result. Stored in LRU cache (5,000 max). |
+| `token`  | `string` | Lock token (if using lock-based processing).        |
 
 **Response** (`200`): `{ "ok": true }`
 
@@ -544,11 +553,11 @@ curl -X POST http://localhost:6790/jobs/ack-batch \
   -d '{"ids": ["id-1", "id-2", "id-3"], "results": [{"a": 1}, null, {"c": 3}]}'
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `ids` | `string[]` | Yes | Job IDs to acknowledge |
-| `results` | `unknown[]` | No | Per-job results (positional, same order as `ids`) |
-| `tokens` | `string[]` | No | Lock tokens (positional) |
+| Field     | Type        | Required | Description                                       |
+| --------- | ----------- | -------- | ------------------------------------------------- |
+| `ids`     | `string[]`  | Yes      | Job IDs to acknowledge                            |
+| `results` | `unknown[]` | No       | Per-job results (positional, same order as `ids`) |
+| `tokens`  | `string[]`  | No       | Lock tokens (positional)                          |
 
 ---
 
@@ -566,10 +575,10 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../fail \
   -d '{"error": "SMTP connection refused"}'
 ```
 
-| Field | Type | Description |
-|---|---|---|
+| Field   | Type     | Description                                       |
+| ------- | -------- | ------------------------------------------------- |
 | `error` | `string` | Error message. Stored with the job for debugging. |
-| `token` | `string` | Lock token (if using lock-based processing). |
+| `token` | `string` | Lock token (if using lock-based processing).      |
 
 **Retry behavior:**
 
@@ -730,14 +739,14 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../wait \
   -d '{"timeout": 30000}'
 ```
 
-| Field | Type | Default | Description |
-|---|---|---|---|
+| Field     | Type     | Default | Description                                     |
+| --------- | -------- | ------- | ----------------------------------------------- |
 | `timeout` | `number` | `30000` | Maximum wait time in milliseconds (max: 600000) |
 
 **Completed within timeout:**
 
 ```json
-{ "ok": true, "completed": true, "result": {"sent": true} }
+{ "ok": true, "completed": true, "result": { "sent": true } }
 ```
 
 **Timed out:**
@@ -793,7 +802,10 @@ GET /jobs/:id/children
 ```
 
 ```json
-{ "ok": true, "data": {"values": {"child-job-1": {"result": "..."}, "child-job-2": {"result": "..."}}} }
+{
+  "ok": true,
+  "data": { "values": { "child-job-1": { "result": "..." }, "child-job-2": { "result": "..." } } }
+}
 ```
 
 ---
@@ -864,10 +876,10 @@ curl -X POST http://localhost:6790/jobs/019ce9d7-.../logs \
   -d '{"message": "Connecting to SMTP server...", "level": "info"}'
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `message` | `string` | Yes | Log message |
-| `level` | `string` | No | `info` (default), `warn`, or `error` |
+| Field     | Type     | Required | Description                          |
+| --------- | -------- | -------- | ------------------------------------ |
+| `message` | `string` | Yes      | Log message                          |
+| `level`   | `string` | No       | `info` (default), `warn`, or `error` |
 
 Logs are stored in an LRU cache (max 100 entries per job, 10,000 jobs total).
 
@@ -914,7 +926,14 @@ GET /queues/summary
   {
     "name": "emails",
     "paused": false,
-    "counts": {"waiting": 125, "prioritized": 7, "active": 5, "completed": 10234, "failed": 23, "delayed": 2}
+    "counts": {
+      "waiting": 125,
+      "prioritized": 7,
+      "active": 5,
+      "completed": 10234,
+      "failed": 23,
+      "delayed": 2
+    }
   }
 ]
 ```
@@ -935,7 +954,17 @@ GET /queues/:queue/workers
 {
   "ok": true,
   "workers": [
-    {"id": "w-1", "name": "email-worker", "queues": ["emails"], "concurrency": 5, "registeredAt": 1700000000000, "lastSeen": 1700000010000, "activeJobs": 3, "processedJobs": 1500, "failedJobs": 12}
+    {
+      "id": "w-1",
+      "name": "email-worker",
+      "queues": ["emails"],
+      "concurrency": 5,
+      "registeredAt": 1700000000000,
+      "lastSeen": 1700000010000,
+      "activeJobs": 3,
+      "processedJobs": 1500,
+      "failedJobs": 12
+    }
   ]
 }
 ```
@@ -956,11 +985,11 @@ curl "http://localhost:6790/queues/emails/jobs/list?status=waiting&limit=20&offs
 curl "http://localhost:6790/queues/emails/jobs/list?status=failed,completed"
 ```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `status` | `string` | all | State filter: `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed`, `waiting-children`. Aliases: `state`, `states`. Repeatable and comma-separated for multiple states. |
-| `limit` | `number` | all | Max jobs to return |
-| `offset` | `number` | `0` | Skip first N jobs |
+| Parameter | Type     | Default | Description                                                                                                                                                                             |
+| --------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`  | `string` | all     | State filter: `waiting`, `prioritized`, `delayed`, `active`, `completed`, `failed`, `waiting-children`. Aliases: `state`, `states`. Repeatable and comma-separated for multiple states. |
+| `limit`   | `number` | all     | Max jobs to return                                                                                                                                                                      |
+| `offset`  | `number` | `0`     | Skip first N jobs                                                                                                                                                                       |
 
 **Response** (`200`):
 
@@ -988,7 +1017,16 @@ GET /queues/:queue/counts
 ```json
 {
   "ok": true,
-  "counts": {"waiting": 150, "prioritized": 0, "active": 12, "delayed": 30, "completed": 5000, "failed": 3, "waiting-children": 4, "paused": 0}
+  "counts": {
+    "waiting": 150,
+    "prioritized": 0,
+    "active": 12,
+    "delayed": 30,
+    "completed": 5000,
+    "failed": 3,
+    "waiting-children": 4,
+    "paused": 0
+  }
 }
 ```
 
@@ -1021,7 +1059,7 @@ GET /queues/:queue/priority-counts
 ```
 
 ```json
-{ "ok": true, "queue": "emails", "counts": {"0": 100, "5": 30, "10": 12} }
+{ "ok": true, "queue": "emails", "counts": { "0": 100, "5": 30, "10": 12 } }
 ```
 
 ---
@@ -1108,11 +1146,11 @@ curl -X POST http://localhost:6790/queues/emails/clean \
   -d '{"grace": 86400000, "state": "waiting", "limit": 500}'
 ```
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `grace` | `number` | `0` | Only remove jobs older than this many milliseconds. `0` = remove all. |
-| `state` | `string` | queued | `waiting`/`delayed`/`prioritized`/`paused` (all clean the queued set, the default), `completed`, or `failed`. |
-| `limit` | `number` | `1000` | Max jobs to remove per call. |
+| Field   | Type     | Default | Description                                                                                                   |
+| ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `grace` | `number` | `0`     | Only remove jobs older than this many milliseconds. `0` = remove all.                                         |
+| `state` | `string` | queued  | `waiting`/`delayed`/`prioritized`/`paused` (all clean the queued set, the default), `completed`, or `failed`. |
+| `limit` | `number` | `1000`  | Max jobs to remove per call.                                                                                  |
 
 **Response** (`200`):
 
@@ -1168,10 +1206,10 @@ Jobs that exhaust all retry attempts or are explicitly discarded land in the DLQ
 GET /queues/:queue/dlq[?limit=100&offset=0]
 ```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `limit` | `number` | all | Max entries to return |
-| `offset` | `number` | `0` | Skip first N entries |
+| Parameter | Type     | Default | Description           |
+| --------- | -------- | ------- | --------------------- |
+| `limit`   | `number` | all     | Max entries to return |
+| `offset`  | `number` | `0`     | Skip first N entries  |
 
 Returns full DLQ entries (original job + failure metadata) under `entries`, plus the `total` count for pagination:
 
@@ -1180,12 +1218,19 @@ Returns full DLQ entries (original job + failure metadata) under `entries`, plus
   "ok": true,
   "entries": [
     {
-      "job": {"id": "...", "data": {}, "attempts": 3},
+      "job": { "id": "...", "data": {}, "attempts": 3 },
       "enteredAt": 1700000000000,
       "reason": "max_attempts_exceeded",
       "error": "SMTP timeout",
       "attempts": [
-        {"attempt": 1, "startedAt": 1700000000000, "failedAt": 1700000001000, "reason": "explicit_fail", "error": "SMTP timeout", "duration": 1000}
+        {
+          "attempt": 1,
+          "startedAt": 1700000000000,
+          "failedAt": 1700000001000,
+          "reason": "explicit_fail",
+          "error": "SMTP timeout",
+          "duration": 1000
+        }
       ],
       "retryCount": 0
     }
@@ -1211,8 +1256,16 @@ GET /queues/:queue/dlq/stats
   "ok": true,
   "stats": {
     "total": 12,
-    "byReason": {"explicit_fail": 4, "max_attempts_exceeded": 6, "timeout": 1, "stalled": 1, "ttl_expired": 0, "worker_lost": 0, "unknown": 0},
-    "byQueue": {"emails": 12},
+    "byReason": {
+      "explicit_fail": 4,
+      "max_attempts_exceeded": 6,
+      "timeout": 1,
+      "stalled": 1,
+      "ttl_expired": 0,
+      "worker_lost": 0,
+      "unknown": 0
+    },
+    "byQueue": { "emails": 12 },
     "pendingRetry": 0,
     "expired": 0,
     "oldestEntry": 1700000000000,
@@ -1341,11 +1394,11 @@ PUT /queues/:queue/stall-config
 }
 ```
 
-| Field | Default | Description |
-|---|---|---|
-| `stallInterval` | `30000` | How often to check for stalled jobs (ms) |
-| `maxStalls` | `3` | Max times a job can stall before moving to DLQ |
-| `gracePeriod` | `5000` | Grace period after job starts before stall detection kicks in |
+| Field           | Default | Description                                                   |
+| --------------- | ------- | ------------------------------------------------------------- |
+| `stallInterval` | `30000` | How often to check for stalled jobs (ms)                      |
+| `maxStalls`     | `3`     | Max times a job can stall before moving to DLQ                |
+| `gracePeriod`   | `5000`  | Grace period after job starts before stall detection kicks in |
 
 **Broadcasts:** `config:stall-changed` event.
 
@@ -1373,11 +1426,11 @@ PUT /queues/:queue/dlq-config
 }
 ```
 
-| Field | Default | Description |
-|---|---|---|
-| `autoRetry` | `false` | Automatically retry DLQ entries after a delay |
-| `maxAge` | `604800000` | Max age of DLQ entries in ms (default: 7 days). Older entries are removed. |
-| `maxEntries` | `10000` | Max DLQ entries per queue. Oldest are evicted when full. |
+| Field        | Default     | Description                                                                |
+| ------------ | ----------- | -------------------------------------------------------------------------- |
+| `autoRetry`  | `false`     | Automatically retry DLQ entries after a delay                              |
+| `maxAge`     | `604800000` | Max age of DLQ entries in ms (default: 7 days). Older entries are removed. |
+| `maxEntries` | `10000`     | Max DLQ entries per queue. Oldest are evicted when full.                   |
 
 **Broadcasts:** `config:dlq-changed` event.
 
@@ -1431,22 +1484,23 @@ curl -X POST http://localhost:6790/crons \
   }'
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | `string` | Yes | Unique identifier. Re-using a name updates the existing cron. |
-| `queue` | `string` | Yes | Target queue for the generated jobs. |
-| `data` | `any` | Yes | Job payload pushed on each execution. |
-| `schedule` | `string` | * | Cron expression (`"*/5 * * * *"`, `"0 2 * * *"`). |
-| `repeatEvery` | `number` | * | Interval in ms (alternative to cron expression). |
-| `timezone` | `string` | No | IANA timezone (default: `UTC`). Affects cron scheduling. |
-| `priority` | `number` | No | Priority for generated jobs. |
-| `maxLimit` | `number` | No | Max total executions. Cron is removed after reaching this count. |
-| `immediately` | `boolean` | No | Fire once on creation, then continue on schedule (default `false`). |
-| `skipIfNoWorker` | `boolean` | No | Skip a tick when no worker is registered for the queue (default `false`). |
-| `preventOverlap` | `boolean` | No | Deduplicate overlapping runs, a tick is skipped while the previous generated job is still pending/active (default `true`). |
-| `jobOptions` | `object` | No | Per-job options applied to every generated job: `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. |
+| Field            | Type      | Required | Description                                                                                                                                       |
+| ---------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`           | `string`  | Yes      | Unique identifier. Re-using a name updates the existing cron.                                                                                     |
+| `queue`          | `string`  | Yes      | Target queue for the generated jobs.                                                                                                              |
+| `data`           | `any`     | Yes      | Job payload pushed on each execution.                                                                                                             |
+| `schedule`       | `string`  | *        | Cron expression (`"*/5 * * * *"`, `"0 2 * * *"`).                                                                                                 |
+| `repeatEvery`    | `number`  | *        | Positive safe-integer interval in ms (alternative to cron expression).                                                                            |
+| `timezone`       | `string`  | No       | IANA timezone. Raw HTTP uses the server/system timezone when omitted.                                                                              |
+| `priority`       | `number`  | No       | Priority for generated jobs.                                                                                                                      |
+| `maxLimit`       | `number`  | No       | Max total executions. Cron is removed after reaching this count.                                                                                  |
+| `immediately`    | `boolean` | No       | Fire once on creation, then continue on schedule (default `false`).                                                                               |
+| `skipIfNoWorker` | `boolean` | No       | Skip a tick when no worker is registered for the queue (default `false`).                                                                         |
+| `preventOverlap` | `boolean` | No       | Deduplicate overlapping runs, a tick is skipped while the previous generated job is still pending/active (default `true`).                        |
+| `jobOptions`     | `object`  | No       | Per-job options applied to every generated job: `maxAttempts`, `backoff`, `timeout`, `delay`, `stallTimeout`, `removeOnComplete`, `removeOnFail`. |
 
-\* Either `schedule` or `repeatEvery` is required (not both).
+\* At least one of `schedule` or `repeatEvery` is required. When both are valid,
+`schedule` takes precedence for backward compatibility.
 
 **Broadcasts:** `cron:created` event.
 
@@ -1499,17 +1553,25 @@ curl -X POST http://localhost:6790/webhooks \
   }'
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `url` | `string` | Yes | HTTPS endpoint URL. Validated against SSRF (localhost, private IPs, cloud metadata blocked). |
-| `events` | `string[]` | Yes | Event types to subscribe to (`completed`, `failed`, `pushed`, `started`). |
-| `queue` | `string` | No | Filter to specific queue. Omit for all queues. |
-| `secret` | `string` | No | HMAC signing secret for verifying webhook authenticity. |
+| Field    | Type       | Required | Description                                                                                  |
+| -------- | ---------- | -------- | -------------------------------------------------------------------------------------------- |
+| `url`    | `string`   | Yes      | HTTPS endpoint URL. Validated against SSRF (localhost, private IPs, cloud metadata blocked). |
+| `events` | `string[]` | Yes      | Event types to subscribe to (`completed`, `failed`, `pushed`, `started`).                    |
+| `queue`  | `string`   | No       | Filter to specific queue. Omit for all queues.                                               |
+| `secret` | `string`   | No       | HMAC signing secret for verifying webhook authenticity.                                      |
 
 **Response** (`200`):
 
 ```json
-{ "ok": true, "data": {"webhookId": "wh-abc123", "url": "https://...", "events": ["completed", "failed"], "createdAt": 1700000000000} }
+{
+  "ok": true,
+  "data": {
+    "webhookId": "wh-abc123",
+    "url": "https://...",
+    "events": ["completed", "failed"],
+    "createdAt": 1700000000000
+  }
+}
 ```
 
 **Broadcasts:** `webhook:added` event.
@@ -1553,9 +1615,17 @@ GET /workers
   "ok": true,
   "data": {
     "workers": [
-      {"id": "w-1", "name": "email-worker", "queues": ["emails"], "lastSeen": 1700000000000, "activeJobs": 3, "processedJobs": 1500, "failedJobs": 12}
+      {
+        "id": "w-1",
+        "name": "email-worker",
+        "queues": ["emails"],
+        "lastSeen": 1700000000000,
+        "activeJobs": 3,
+        "processedJobs": 1500,
+        "failedJobs": 12
+      }
     ],
-    "stats": {"total": 4, "active": 3}
+    "stats": { "total": 4, "active": 3 }
   }
 }
 ```
@@ -1612,9 +1682,9 @@ GET /health
   "status": "healthy",
   "uptime": 86400,
   "version": "x.y.z",
-  "queues": {"waiting": 150, "active": 12, "delayed": 30, "completed": 50000, "dlq": 3},
-  "connections": {"tcp": 8, "ws": 4, "sse": 2},
-  "memory": {"heapUsed": 45, "heapTotal": 64, "rss": 82}
+  "queues": { "waiting": 150, "active": 12, "delayed": 30, "completed": 50000, "dlq": 3 },
+  "connections": { "tcp": 8, "ws": 4, "sse": 2 },
+  "memory": { "heapUsed": 45, "heapTotal": 64, "rss": 82 }
 }
 ```
 
@@ -1641,7 +1711,7 @@ GET /ping
 ```
 
 ```json
-{ "ok": true, "data": {"pong": true, "time": 1700000000000} }
+{ "ok": true, "data": { "pong": true, "time": 1700000000000 } }
 ```
 
 ---
@@ -1658,12 +1728,25 @@ GET /stats
 {
   "ok": true,
   "stats": {
-    "waiting": 150, "active": 12, "delayed": 30, "completed": 50000, "dlq": 3,
-    "totalPushed": 100000, "totalPulled": 99500, "totalCompleted": 98000, "totalFailed": 200,
+    "waiting": 150,
+    "active": 12,
+    "delayed": 30,
+    "completed": 50000,
+    "dlq": 3,
+    "totalPushed": 100000,
+    "totalPulled": 99500,
+    "totalCompleted": 98000,
+    "totalFailed": 200,
     "uptime": 86400
   },
-  "memory": {"heapUsed": 45, "heapTotal": 64, "rss": 82, "external": 2, "arrayBuffers": 1},
-  "collections": {"jobIndex": 1500, "completedJobs": 5000, "processingTotal": 12, "queuedTotal": 150, "temporalIndexTotal": 30}
+  "memory": { "heapUsed": 45, "heapTotal": 64, "rss": 82, "external": 2, "arrayBuffers": 1 },
+  "collections": {
+    "jobIndex": 1500,
+    "completedJobs": 5000,
+    "processingTotal": 12,
+    "queuedTotal": 150,
+    "temporalIndexTotal": 30
+  }
 }
 ```
 
@@ -1680,7 +1763,15 @@ GET /metrics
 ```
 
 ```json
-{ "ok": true, "metrics": {"totalPushed": 100000, "totalPulled": 99500, "totalCompleted": 98000, "totalFailed": 200} }
+{
+  "ok": true,
+  "metrics": {
+    "totalPushed": 100000,
+    "totalPulled": 99500,
+    "totalCompleted": 98000,
+    "totalFailed": 200
+  }
+}
 ```
 
 ---
@@ -1702,10 +1793,15 @@ GET /storage
 ```
 
 ```json
-{ "ok": true, "data": {"diskFull": false, "error": null, "since": null} }
+{ "ok": true, "data": { "diskFull": false, "error": null, "since": null } }
 ```
 
-When `diskFull: true`, the server stops accepting durable writes. In-memory operations continue.
+In SQLite mode, `diskFull: true` means durable writes are rejected; existing
+in-memory work can continue while health remains degraded. In PostgreSQL mode,
+`diskFull` is not a local-disk signal: `error` and `since` report database or
+projection degradation, affected queue operations can reject, and `/ready`
+returns `503` until authority is restored. Memory-only mode has no persistent
+storage health to report.
 
 ---
 
@@ -1720,8 +1816,8 @@ Triggers Bun GC and internal memory compaction (`compactMemory()`). Returns befo
 ```json
 {
   "ok": true,
-  "before": {"heapUsed": 52, "heapTotal": 64, "rss": 90},
-  "after": {"heapUsed": 45, "heapTotal": 64, "rss": 85}
+  "before": { "heapUsed": 52, "heapTotal": 64, "rss": 90 },
+  "after": { "heapUsed": 45, "heapTotal": 64, "rss": 85 }
 }
 ```
 
@@ -1755,16 +1851,16 @@ Single call returning `stats` (global counts + totals + uptime), `throughput` (p
 GET /dashboard/queues[?limit=100&offset=0]
 ```
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `limit` | `number` | `100` | Max queues to return (1-500) |
-| `offset` | `number` | `0` | Skip first N queues |
+| Parameter | Type     | Default | Description                  |
+| --------- | -------- | ------- | ---------------------------- |
+| `limit`   | `number` | `100`   | Max queues to return (1-500) |
+| `offset`  | `number` | `0`     | Skip first N queues          |
 
 ```json
 {
   "ok": true,
   "queues": [
-    {"name": "emails", "waiting": 125, "delayed": 2, "active": 5, "dlq": 3, "paused": false}
+    { "name": "emails", "waiting": 125, "delayed": 2, "active": 5, "dlq": 3, "paused": false }
   ],
   "total": 3,
   "limit": 100,
@@ -1838,13 +1934,21 @@ Every pub/sub event follows this structure:
 After connecting, send a `Subscribe` command to start receiving events:
 
 ```json
-{ "cmd": "Subscribe", "events": ["job:*", "queue:counts", "stats:snapshot", "health:status"], "reqId": "1" }
+{
+  "cmd": "Subscribe",
+  "events": ["job:*", "queue:counts", "stats:snapshot", "health:status"],
+  "reqId": "1"
+}
 ```
 
 **Response:**
 
 ```json
-{ "ok": true, "subscribed": ["job:*", "queue:counts", "stats:snapshot", "health:status"], "reqId": "1" }
+{
+  "ok": true,
+  "subscribed": ["job:*", "queue:counts", "stats:snapshot", "health:status"],
+  "reqId": "1"
+}
 ```
 
 **Unsubscribe from specific events:**
@@ -1861,28 +1965,28 @@ After connecting, send a `Subscribe` command to start receiving events:
 
 #### Wildcards
 
-| Pattern | Matches |
-|---|---|
-| `*` | Every emitted event |
-| `job:*` | All 21 explicit job events, plus compatibility emissions described below |
-| `queue:*` | All 10 queue events, including `queue:counts` |
-| `flow:*` | Both flow events |
-| `worker:*` | All 7 worker events |
-| `dlq:*` | All 6 DLQ events |
-| `cron:*` | All 6 cron events |
-| `stats:*` | `stats:snapshot` |
-| `health:*` | `health:status` |
-| `storage:*` | All 5 storage events |
-| `config:*` | Both config events |
-| `ratelimit:*` | All 4 rate-limit events |
-| `concurrency:*` | All 3 concurrency events |
-| `webhook:*` | All 6 webhook events |
-| `batch:*` | Both batch events |
-| `client:*` | Both client events |
-| `auth:*` | `auth:failed` |
-| `cleanup:*` | Both cleanup events |
-| `server:*` | All 4 server events |
-| `memory:*` | `memory:compacted` |
+| Pattern         | Matches                                                                  |
+| --------------- | ------------------------------------------------------------------------ |
+| `*`             | Every emitted event                                                      |
+| `job:*`         | All 21 explicit job events, plus compatibility emissions described below |
+| `queue:*`       | All 10 queue events, including `queue:counts`                            |
+| `flow:*`        | Both flow events                                                         |
+| `worker:*`      | All 7 worker events                                                      |
+| `dlq:*`         | All 6 DLQ events                                                         |
+| `cron:*`        | All 6 cron events                                                        |
+| `stats:*`       | `stats:snapshot`                                                         |
+| `health:*`      | `health:status`                                                          |
+| `storage:*`     | All 5 storage events                                                     |
+| `config:*`      | Both config events                                                       |
+| `ratelimit:*`   | All 4 rate-limit events                                                  |
+| `concurrency:*` | All 3 concurrency events                                                 |
+| `webhook:*`     | All 6 webhook events                                                     |
+| `batch:*`       | Both batch events                                                        |
+| `client:*`      | Both client events                                                       |
+| `auth:*`        | `auth:failed`                                                            |
+| `cleanup:*`     | Both cleanup events                                                      |
+| `server:*`      | All 4 server events                                                      |
+| `memory:*`      | `memory:compacted`                                                       |
 
 `job:*` and `*` may also receive `job:waiting` and `job:duplicated` from the
 legacy job-event bridge. They are compatibility emission names, not entries in
@@ -1909,6 +2013,7 @@ ws.send(JSON.stringify({ cmd: 'Pause', queue: 'emails', reqId: '2' }));
 #### Authentication
 
 Two options:
+
 1. **Header auth:** Send `Authorization: Bearer <token>` during the WebSocket handshake
 2. **Command auth:** Send `{ "cmd": "Auth", "token": "my-secret" }` after connecting
 
@@ -1923,20 +2028,22 @@ const ws = new WebSocket('ws://localhost:6790/ws');
 
 ws.onopen = () => {
   // Subscribe to everything a dashboard needs
-  ws.send(JSON.stringify({
-    cmd: 'Subscribe',
-    events: [
-      'job:*',           // All job lifecycle events
-      'queue:counts',    // Real-time count updates (eliminates N+1 polling)
-      'stats:snapshot',  // Global stats every 5s
-      'health:status',   // Health check every 10s
-      'worker:*',        // Worker connect/disconnect
-      'dlq:*',           // DLQ events
-      'cron:*',          // Cron events
-      'queue:paused',    // Queue state changes
-      'queue:resumed',
-    ]
-  }));
+  ws.send(
+    JSON.stringify({
+      cmd: 'Subscribe',
+      events: [
+        'job:*', // All job lifecycle events
+        'queue:counts', // Real-time count updates (eliminates N+1 polling)
+        'stats:snapshot', // Global stats every 5s
+        'health:status', // Health check every 10s
+        'worker:*', // Worker connect/disconnect
+        'dlq:*', // DLQ events
+        'cron:*', // Cron events
+        'queue:paused', // Queue state changes
+        'queue:resumed',
+      ],
+    })
+  );
 };
 
 ws.onmessage = (e) => {
@@ -2005,144 +2112,144 @@ that information; the outer event envelope always supplies `event`, `ts`, and
 
 #### Job Lifecycle (21 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `job:pushed` | `queue, jobId` | Job added to queue |
-| `job:active` | `queue, jobId` | Worker picked up job |
-| `job:completed` | `queue, jobId` | Job finished successfully |
-| `job:failed` | `queue, jobId, error` | Job errored |
-| `job:removed` | `queue, jobId, prev?` | Job cancelled/deleted |
-| `job:promoted` | `jobId` | Delayed job moved to waiting |
-| `job:progress` | `queue, jobId, progress` | Worker reported progress (0-100) |
-| `job:delayed` | `queue, jobId, delay` | Job moved to delayed state |
-| `job:stalled` | `queue, jobId, stallCount?, action?` | Stall detected (no heartbeat) |
-| `job:retried` | `queue, jobId, prev?` | Failed job retried |
-| `job:discarded` | `jobId` | Job sent to DLQ via discard |
-| `job:priority-changed` | `jobId, newPriority` | Priority updated |
-| `job:data-updated` | `jobId` | Job payload modified |
-| `job:delay-changed` | `jobId, newDelay` | Delay modified |
-| `job:timeout` | `queue, jobId, timeout` | Active job exceeded its processing timeout |
-| `job:lock-expired` | `queue, jobId, renewalCount` | Ownership lock expired |
-| `job:deduplicated` | `queue, jobId, strategy` | Push reused an existing deduplicated job |
-| `job:waiting-children` | `queue, jobId, dependsOn?` | Job is waiting for dependencies |
-| `job:dependencies-resolved` | `queue, jobId` | All dependencies became complete |
-| `job:moved-to-delayed` | `jobId, delay` | Active job was explicitly moved to delayed |
-| `job:expired` | `queue, jobId, ttl, age` | Job TTL expired (distinguished from fail) |
+| Event                       | Payload                              | Description                                |
+| --------------------------- | ------------------------------------ | ------------------------------------------ |
+| `job:pushed`                | `queue, jobId`                       | Job added to queue                         |
+| `job:active`                | `queue, jobId`                       | Worker picked up job                       |
+| `job:completed`             | `queue, jobId`                       | Job finished successfully                  |
+| `job:failed`                | `queue, jobId, error`                | Job errored                                |
+| `job:removed`               | `queue, jobId, prev?`                | Job cancelled/deleted                      |
+| `job:promoted`              | `jobId`                              | Delayed job moved to waiting               |
+| `job:progress`              | `queue, jobId, progress`             | Worker reported progress (0-100)           |
+| `job:delayed`               | `queue, jobId, delay`                | Job moved to delayed state                 |
+| `job:stalled`               | `queue, jobId, stallCount?, action?` | Stall detected (no heartbeat)              |
+| `job:retried`               | `queue, jobId, prev?`                | Failed job retried                         |
+| `job:discarded`             | `jobId`                              | Job sent to DLQ via discard                |
+| `job:priority-changed`      | `jobId, newPriority`                 | Priority updated                           |
+| `job:data-updated`          | `jobId`                              | Job payload modified                       |
+| `job:delay-changed`         | `jobId, newDelay`                    | Delay modified                             |
+| `job:timeout`               | `queue, jobId, timeout`              | Active job exceeded its processing timeout |
+| `job:lock-expired`          | `queue, jobId, renewalCount`         | Ownership lock expired                     |
+| `job:deduplicated`          | `queue, jobId, strategy`             | Push reused an existing deduplicated job   |
+| `job:waiting-children`      | `queue, jobId, dependsOn?`           | Job is waiting for dependencies            |
+| `job:dependencies-resolved` | `queue, jobId`                       | All dependencies became complete           |
+| `job:moved-to-delayed`      | `jobId, delay`                       | Active job was explicitly moved to delayed |
+| `job:expired`               | `queue, jobId, ttl, age`             | Job TTL expired (distinguished from fail)  |
 
 #### Queue (10 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `queue:counts` | `queue, waiting, prioritized, active, completed, failed, delayed` | Latest counts after lifecycle activity; updates within 10ms are coalesced. |
-| `queue:paused` | `queue` | Queue paused |
-| `queue:resumed` | `queue` | Queue resumed |
-| `queue:drained` | `queue, count` | All waiting/delayed jobs removed |
-| `queue:cleaned` | `queue, state, count` | Jobs cleaned by state |
-| `queue:obliterated` | `queue` | Queue destroyed |
-| `queue:created` | `queue` | First job pushed to new queue |
-| `queue:removed` | `queue` | Queue removed |
-| `queue:idle` | `queue, idleSeconds` | Queue empty with no active jobs for N seconds. Configure via `QUEUE_IDLE_THRESHOLD_MS` (default: 30000). |
-| `queue:threshold` | `queue, size, threshold` | Queue size exceeds threshold. Configure via `QUEUE_SIZE_THRESHOLD` (default: 0 = disabled). |
+| Event               | Payload                                                           | Description                                                                                              |
+| ------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `queue:counts`      | `queue, waiting, prioritized, active, completed, failed, delayed` | Latest counts after lifecycle activity; updates within 10ms are coalesced.                               |
+| `queue:paused`      | `queue`                                                           | Queue paused                                                                                             |
+| `queue:resumed`     | `queue`                                                           | Queue resumed                                                                                            |
+| `queue:drained`     | `queue, count`                                                    | All waiting/delayed jobs removed                                                                         |
+| `queue:cleaned`     | `queue, state, count`                                             | Jobs cleaned by state                                                                                    |
+| `queue:obliterated` | `queue`                                                           | Queue destroyed                                                                                          |
+| `queue:created`     | `queue`                                                           | First job pushed to new queue                                                                            |
+| `queue:removed`     | `queue`                                                           | Queue removed                                                                                            |
+| `queue:idle`        | `queue, idleSeconds`                                              | Queue empty with no active jobs for N seconds. Configure via `QUEUE_IDLE_THRESHOLD_MS` (default: 30000). |
+| `queue:threshold`   | `queue, size, threshold`                                          | Queue size exceeds threshold. Configure via `QUEUE_SIZE_THRESHOLD` (default: 0 = disabled).              |
 
 #### Flow (2 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `flow:completed` | `parentJobId, queue, childrenCount` | All children of a flow completed successfully |
-| `flow:failed` | `parentJobId, failedChildId, queue, error` | A child in a flow failed permanently (moved to DLQ) |
+| Event            | Payload                                    | Description                                         |
+| ---------------- | ------------------------------------------ | --------------------------------------------------- |
+| `flow:completed` | `parentJobId, queue, childrenCount`        | All children of a flow completed successfully       |
+| `flow:failed`    | `parentJobId, failedChildId, queue, error` | A child in a flow failed permanently (moved to DLQ) |
 
 #### DLQ (6 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `dlq:added` | `queue, jobId, reason` | Job moved to DLQ |
-| `dlq:retried` | `queue, jobId, count` | Single DLQ entry retried |
-| `dlq:retry-all` | `queue, count` | All DLQ entries retried |
-| `dlq:purged` | `queue, count` | DLQ emptied |
-| `dlq:auto-retried` | `queue, count` | Maintenance retried eligible DLQ entries |
-| `dlq:expired` | `queue, count` | Maintenance purged expired DLQ entries |
+| Event              | Payload                | Description                              |
+| ------------------ | ---------------------- | ---------------------------------------- |
+| `dlq:added`        | `queue, jobId, reason` | Job moved to DLQ                         |
+| `dlq:retried`      | `queue, jobId, count`  | Single DLQ entry retried                 |
+| `dlq:retry-all`    | `queue, count`         | All DLQ entries retried                  |
+| `dlq:purged`       | `queue, count`         | DLQ emptied                              |
+| `dlq:auto-retried` | `queue, count`         | Maintenance retried eligible DLQ entries |
+| `dlq:expired`      | `queue, count`         | Maintenance purged expired DLQ entries   |
 
 #### Cron (6 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `cron:created` | `name, queue, pattern?, every?, nextRun` | Cron added |
-| `cron:deleted` | `name` | Cron removed |
-| `cron:fired` | `name, queue` | Cron triggered, job pushed |
-| `cron:updated` | `name, queue, nextRun` | Cron modified |
-| `cron:missed` | `name, queue, error` | Cron missed execution window |
-| `cron:skipped` | `name, queue, reason` | Cron skipped due to overlap (previous instance still within interval) |
+| Event          | Payload                                  | Description                                                           |
+| -------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `cron:created` | `name, queue, pattern?, every?, nextRun` | Cron added                                                            |
+| `cron:deleted` | `name`                                   | Cron removed                                                          |
+| `cron:fired`   | `name, queue`                            | Cron triggered, job pushed                                            |
+| `cron:updated` | `name, queue, nextRun`                   | Cron modified                                                         |
+| `cron:missed`  | `name, queue, error`                     | Cron missed execution window                                          |
+| `cron:skipped` | `name, queue, reason`                    | Cron skipped due to overlap (previous instance still within interval) |
 
 #### Worker (7 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `worker:connected` | `workerId, name, queues, hostname?, pid?` | Worker registered |
-| `worker:disconnected` | `workerId, name?, clientId?` | Worker gone |
-| `worker:heartbeat` | `workerId` | Worker alive signal |
-| `worker:idle` | `workerId, processedJobs` | Worker reached zero active jobs |
-| `worker:removed-stale` | `workerId, name` | Stale registration removed |
-| `worker:overloaded` | `workerId, name, activeJobs, concurrency, overloadedSeconds` | Worker at max concurrency for N seconds. Configure via `WORKER_OVERLOAD_THRESHOLD_MS` (default: 30000). |
-| `worker:error` | `workerId, name, failedJobs, processedJobs, failureRate` | Worker failure rate is high (emitted at thresholds: 5, 10, 25, 50, 100 failures) |
+| Event                  | Payload                                                      | Description                                                                                             |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `worker:connected`     | `workerId, name, queues, hostname?, pid?`                    | Worker registered                                                                                       |
+| `worker:disconnected`  | `workerId, name?, clientId?`                                 | Worker gone                                                                                             |
+| `worker:heartbeat`     | `workerId`                                                   | Worker alive signal                                                                                     |
+| `worker:idle`          | `workerId, processedJobs`                                    | Worker reached zero active jobs                                                                         |
+| `worker:removed-stale` | `workerId, name`                                             | Stale registration removed                                                                              |
+| `worker:overloaded`    | `workerId, name, activeJobs, concurrency, overloadedSeconds` | Worker at max concurrency for N seconds. Configure via `WORKER_OVERLOAD_THRESHOLD_MS` (default: 30000). |
+| `worker:error`         | `workerId, name, failedJobs, processedJobs, failureRate`     | Worker failure rate is high (emitted at thresholds: 5, 10, 25, 50, 100 failures)                        |
 
 #### Rate Limiting & Concurrency (7 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `ratelimit:set` | `queue, max` | Rate limit configured |
-| `ratelimit:cleared` | `queue` | Rate limit removed |
-| `ratelimit:hit` | `clientId` | TCP/HTTP client exceeded the protocol request limit |
-| `ratelimit:rejected` | `queue` | Pull found eligible work but the queue token bucket rejected it |
-| `concurrency:set` | `queue, concurrency` | Concurrency limit configured |
-| `concurrency:cleared` | `queue` | Concurrency limit removed |
-| `concurrency:rejected` | `queue` | Pull found eligible work but no queue concurrency slot was available |
+| Event                  | Payload              | Description                                                          |
+| ---------------------- | -------------------- | -------------------------------------------------------------------- |
+| `ratelimit:set`        | `queue, max`         | Rate limit configured                                                |
+| `ratelimit:cleared`    | `queue`              | Rate limit removed                                                   |
+| `ratelimit:hit`        | `clientId`           | TCP/HTTP client exceeded the protocol request limit                  |
+| `ratelimit:rejected`   | `queue`              | Pull found eligible work but the queue token bucket rejected it      |
+| `concurrency:set`      | `queue, concurrency` | Concurrency limit configured                                         |
+| `concurrency:cleared`  | `queue`              | Concurrency limit removed                                            |
+| `concurrency:rejected` | `queue`              | Pull found eligible work but no queue concurrency slot was available |
 
 #### Webhook (6 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `webhook:added` | `id, url, events` | Webhook created |
-| `webhook:removed` | `id` | Webhook deleted |
-| `webhook:fired` | `webhookId, url, event` | Webhook delivered |
-| `webhook:failed` | `webhookId, url, event, error` | Webhook delivery failed |
-| `webhook:enabled` | `webhookId` | Webhook enabled without recreating it |
-| `webhook:disabled` | `webhookId` | Webhook disabled without deleting it |
+| Event              | Payload                        | Description                           |
+| ------------------ | ------------------------------ | ------------------------------------- |
+| `webhook:added`    | `id, url, events`              | Webhook created                       |
+| `webhook:removed`  | `id`                           | Webhook deleted                       |
+| `webhook:fired`    | `webhookId, url, event`        | Webhook delivered                     |
+| `webhook:failed`   | `webhookId, url, event, error` | Webhook delivery failed               |
+| `webhook:enabled`  | `webhookId`                    | Webhook enabled without recreating it |
+| `webhook:disabled` | `webhookId`                    | Webhook disabled without deleting it  |
 
 #### Batch, Client, Auth & Cleanup (7 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `batch:pushed` | `queue, total, inserted, duplicates` | Multi-job push inserted at least one job |
-| `batch:pulled` | `queue, count` | Batch pull delivered more than one job |
-| `client:connected` | `clientId, transport` | TCP client connected |
-| `client:disconnected` | `clientId, transport` | TCP client disconnected |
-| `auth:failed` | `clientId?` or `transport` | TCP command or HTTP authentication failed |
-| `cleanup:orphans-removed` | `count` | Orphaned processing entries removed |
-| `cleanup:stale-deps-removed` | `count` | Stale dependency entries removed |
+| Event                        | Payload                              | Description                               |
+| ---------------------------- | ------------------------------------ | ----------------------------------------- |
+| `batch:pushed`               | `queue, total, inserted, duplicates` | Multi-job push inserted at least one job  |
+| `batch:pulled`               | `queue, count`                       | Batch pull delivered more than one job    |
+| `client:connected`           | `clientId, transport`                | TCP client connected                      |
+| `client:disconnected`        | `clientId, transport`                | TCP client disconnected                   |
+| `auth:failed`                | `clientId?` or `transport`           | TCP command or HTTP authentication failed |
+| `cleanup:orphans-removed`    | `count`                              | Orphaned processing entries removed       |
+| `cleanup:stale-deps-removed` | `count`                              | Stale dependency entries removed          |
 
 #### Periodic, Storage, Server & Memory (12 events)
 
-| Event | Payload | Description |
-|---|---|---|
-| `stats:snapshot` | `waiting, active, completed, dlq, totalPushed, totalCompleted, totalFailed, pushPerSec, pullPerSec, uptime, queues, workers, cronJobs` | Every 5s |
-| `health:status` | `ok, uptime, memory: { rss, heapUsed }, connections` | Every 10s |
-| `storage:status` | `collections, diskFull` | Every 30s |
-| `storage:backup-started` | `bucket` | S3 backup started |
-| `storage:backup-completed` | `bucket, key` | S3 backup completed |
-| `storage:backup-failed` | `bucket, error` | S3 backup failed |
-| `storage:size-warning` | `sizeMB, thresholdMB` | SQLite DB exceeds threshold. Configure via `STORAGE_WARNING_MB` (default: 0 = disabled). |
-| `server:started` | `tcpPort, httpPort, shards` | Server listeners started |
-| `server:shutdown` | `signal` | Graceful shutdown began |
-| `server:recovered` | `queues, jobs` | Persistent queues and jobs recovered on startup |
-| `server:memory-warning` | `heapUsedMB, thresholdMB, rssMB` | Heap exceeds threshold. Configure via `MEMORY_WARNING_MB` (default: 0 = disabled). |
-| `memory:compacted` | _(empty object)_ | Manual memory compaction completed |
+| Event                      | Payload                                                                                                                                | Description                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `stats:snapshot`           | `waiting, active, completed, dlq, totalPushed, totalCompleted, totalFailed, pushPerSec, pullPerSec, uptime, queues, workers, cronJobs` | Every 5s                                                                                 |
+| `health:status`            | `ok, uptime, memory: { rss, heapUsed }, connections`                                                                                   | Every 10s                                                                                |
+| `storage:status`           | `collections, diskFull`                                                                                                                | Every 30s                                                                                |
+| `storage:backup-started`   | `bucket`                                                                                                                               | S3 backup started                                                                        |
+| `storage:backup-completed` | `bucket, key`                                                                                                                          | S3 backup completed                                                                      |
+| `storage:backup-failed`    | `bucket, error`                                                                                                                        | S3 backup failed                                                                         |
+| `storage:size-warning`     | `sizeMB, thresholdMB`                                                                                                                  | SQLite DB exceeds threshold. Configure via `STORAGE_WARNING_MB` (default: 0 = disabled). |
+| `server:started`           | `tcpPort, httpPort, shards`                                                                                                            | Server listeners started                                                                 |
+| `server:shutdown`          | `signal`                                                                                                                               | Graceful shutdown began                                                                  |
+| `server:recovered`         | `queues, jobs`                                                                                                                         | Persistent queues and jobs recovered on startup                                          |
+| `server:memory-warning`    | `heapUsedMB, thresholdMB, rssMB`                                                                                                       | Heap exceeds threshold. Configure via `MEMORY_WARNING_MB` (default: 0 = disabled).       |
+| `memory:compacted`         | _(empty object)_                                                                                                                       | Manual memory compaction completed                                                       |
 
 #### Config (2 events)
 
-| Event | Payload | Description |
-|---|---|---|
+| Event                  | Payload         | Description                    |
+| ---------------------- | --------------- | ------------------------------ |
 | `config:stall-changed` | `queue, config` | Stall detection config updated |
-| `config:dlq-changed` | `queue, config` | DLQ config updated |
+| `config:dlq-changed`   | `queue, config` | DLQ config updated             |
 
 ### The `queue:counts` Event
 
@@ -2174,146 +2281,147 @@ This is the most impactful event for dashboards. Job lifecycle activity schedule
 
 ### Jobs (30 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/queues/:q/jobs` | Push a job |
-| `POST` | `/queues/:q/jobs/bulk` | Push jobs in bulk |
-| `GET` | `/queues/:q/jobs` | Pull a job |
-| `POST` | `/queues/:q/jobs/pull-batch` | Pull jobs in batch |
-| `GET` | `/jobs/:id` | Get job by ID |
-| `GET` | `/jobs/custom/:customId` | Get job by custom ID |
-| `DELETE` | `/jobs/:id` | Cancel a job |
-| `POST` | `/jobs/:id/ack` | Acknowledge a job |
-| `POST` | `/jobs/ack-batch` | Acknowledge batch |
-| `POST` | `/jobs/:id/fail` | Fail a job |
-| `GET` | `/jobs/:id/state` | Get job state |
-| `GET` | `/jobs/:id/result` | Get job result |
-| `GET` | `/jobs/:id/progress` | Get progress |
-| `POST` | `/jobs/:id/progress` | Update progress |
-| `PUT` | `/jobs/:id/data` | Update job data |
-| `PUT` | `/jobs/:id/priority` | Change priority |
-| `POST` | `/jobs/:id/promote` | Promote delayed job |
-| `POST` | `/jobs/:id/move-to-wait` | Move to waiting |
-| `POST` | `/jobs/:id/move-to-delayed` | Move to delayed |
-| `PUT` | `/jobs/:id/delay` | Change delay |
-| `POST` | `/jobs/:id/discard` | Discard to DLQ |
-| `POST` | `/jobs/:id/wait` | Wait for completion |
-| `GET` | `/jobs/:id/children` | Get children values |
-| `POST` | `/jobs/:id/heartbeat` | Job heartbeat |
-| `POST` | `/jobs/heartbeat-batch` | Job heartbeat batch |
-| `POST` | `/jobs/:id/extend-lock` | Extend lock |
-| `POST` | `/jobs/extend-locks` | Extend locks batch |
-| `GET` | `/jobs/:id/logs` | Get logs |
-| `POST` | `/jobs/:id/logs` | Add log |
-| `DELETE` | `/jobs/:id/logs` | Clear logs |
+| Method   | Path                         | Description          |
+| -------- | ---------------------------- | -------------------- |
+| `POST`   | `/queues/:q/jobs`            | Push a job           |
+| `POST`   | `/queues/:q/jobs/bulk`       | Push jobs in bulk    |
+| `GET`    | `/queues/:q/jobs`            | Pull a job           |
+| `POST`   | `/queues/:q/jobs/pull-batch` | Pull jobs in batch   |
+| `GET`    | `/jobs/:id`                  | Get job by ID        |
+| `GET`    | `/jobs/custom/:customId`     | Get job by custom ID |
+| `DELETE` | `/jobs/:id`                  | Cancel a job         |
+| `POST`   | `/jobs/:id/ack`              | Acknowledge a job    |
+| `POST`   | `/jobs/ack-batch`            | Acknowledge batch    |
+| `POST`   | `/jobs/:id/fail`             | Fail a job           |
+| `GET`    | `/jobs/:id/state`            | Get job state        |
+| `GET`    | `/jobs/:id/result`           | Get job result       |
+| `GET`    | `/jobs/:id/progress`         | Get progress         |
+| `POST`   | `/jobs/:id/progress`         | Update progress      |
+| `PUT`    | `/jobs/:id/data`             | Update job data      |
+| `PUT`    | `/jobs/:id/priority`         | Change priority      |
+| `POST`   | `/jobs/:id/promote`          | Promote delayed job  |
+| `POST`   | `/jobs/:id/move-to-wait`     | Move to waiting      |
+| `POST`   | `/jobs/:id/move-to-delayed`  | Move to delayed      |
+| `PUT`    | `/jobs/:id/delay`            | Change delay         |
+| `POST`   | `/jobs/:id/discard`          | Discard to DLQ       |
+| `POST`   | `/jobs/:id/wait`             | Wait for completion  |
+| `GET`    | `/jobs/:id/children`         | Get children values  |
+| `POST`   | `/jobs/:id/heartbeat`        | Job heartbeat        |
+| `POST`   | `/jobs/heartbeat-batch`      | Job heartbeat batch  |
+| `POST`   | `/jobs/:id/extend-lock`      | Extend lock          |
+| `POST`   | `/jobs/extend-locks`         | Extend locks batch   |
+| `GET`    | `/jobs/:id/logs`             | Get logs             |
+| `POST`   | `/jobs/:id/logs`             | Add log              |
+| `DELETE` | `/jobs/:id/logs`             | Clear logs           |
 
 ### Queues (15 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/queues` | List all queues |
-| `GET` | `/queues/summary` | All queues with paused + counts |
-| `GET` | `/queues/:q/workers` | Workers for a queue |
-| `GET` | `/queues/:q/jobs/list` | List jobs by state |
-| `GET` | `/queues/:q/counts` | Job counts per state |
-| `GET` | `/queues/:q/count` | Total job count |
-| `GET` | `/queues/:q/priority-counts` | Counts per priority |
-| `GET` | `/queues/:q/paused` | Check if paused |
-| `POST` | `/queues/:q/pause` | Pause queue |
-| `POST` | `/queues/:q/resume` | Resume queue |
-| `POST` | `/queues/:q/drain` | Drain queue |
-| `POST` | `/queues/:q/obliterate` | Obliterate queue |
-| `POST` | `/queues/:q/clean` | Clean old jobs |
-| `POST` | `/queues/:q/promote-jobs` | Promote delayed jobs |
-| `POST` | `/queues/:q/retry-completed` | Retry completed jobs |
+| Method | Path                         | Description                     |
+| ------ | ---------------------------- | ------------------------------- |
+| `GET`  | `/queues`                    | List all queues                 |
+| `GET`  | `/queues/summary`            | All queues with paused + counts |
+| `GET`  | `/queues/:q/workers`         | Workers for a queue             |
+| `GET`  | `/queues/:q/jobs/list`       | List jobs by state              |
+| `GET`  | `/queues/:q/counts`          | Job counts per state            |
+| `GET`  | `/queues/:q/count`           | Total job count                 |
+| `GET`  | `/queues/:q/priority-counts` | Counts per priority             |
+| `GET`  | `/queues/:q/paused`          | Check if paused                 |
+| `POST` | `/queues/:q/pause`           | Pause queue                     |
+| `POST` | `/queues/:q/resume`          | Resume queue                    |
+| `POST` | `/queues/:q/drain`           | Drain queue                     |
+| `POST` | `/queues/:q/obliterate`      | Obliterate queue                |
+| `POST` | `/queues/:q/clean`           | Clean old jobs                  |
+| `POST` | `/queues/:q/promote-jobs`    | Promote delayed jobs            |
+| `POST` | `/queues/:q/retry-completed` | Retry completed jobs            |
 
 ### DLQ (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/queues/:q/dlq` | List DLQ jobs |
-| `GET` | `/queues/:q/dlq/stats` | DLQ statistics |
+| Method | Path                   | Description    |
+| ------ | ---------------------- | -------------- |
+| `GET`  | `/queues/:q/dlq`       | List DLQ jobs  |
+| `GET`  | `/queues/:q/dlq/stats` | DLQ statistics |
 | `POST` | `/queues/:q/dlq/retry` | Retry DLQ jobs |
-| `POST` | `/queues/:q/dlq/purge` | Purge DLQ |
+| `POST` | `/queues/:q/dlq/purge` | Purge DLQ      |
 
 ### Rate Limiting & Concurrency (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `PUT` | `/queues/:q/rate-limit` | Set rate limit |
-| `DELETE` | `/queues/:q/rate-limit` | Clear rate limit |
-| `PUT` | `/queues/:q/concurrency` | Set concurrency |
+| Method   | Path                     | Description       |
+| -------- | ------------------------ | ----------------- |
+| `PUT`    | `/queues/:q/rate-limit`  | Set rate limit    |
+| `DELETE` | `/queues/:q/rate-limit`  | Clear rate limit  |
+| `PUT`    | `/queues/:q/concurrency` | Set concurrency   |
 | `DELETE` | `/queues/:q/concurrency` | Clear concurrency |
 
 ### Configuration (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
+| Method    | Path                      | Description            |
+| --------- | ------------------------- | ---------------------- |
 | `GET/PUT` | `/queues/:q/stall-config` | Stall detection config |
-| `GET/PUT` | `/queues/:q/dlq-config` | DLQ config |
+| `GET/PUT` | `/queues/:q/dlq-config`   | DLQ config             |
 
 ### Crons (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/crons` | List crons |
-| `POST` | `/crons` | Add cron |
-| `GET` | `/crons/:name` | Get cron |
+| Method   | Path           | Description |
+| -------- | -------------- | ----------- |
+| `GET`    | `/crons`       | List crons  |
+| `POST`   | `/crons`       | Add cron    |
+| `GET`    | `/crons/:name` | Get cron    |
 | `DELETE` | `/crons/:name` | Delete cron |
 
 ### Webhooks (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/webhooks` | List webhooks |
-| `POST` | `/webhooks` | Add webhook |
-| `DELETE` | `/webhooks/:id` | Remove webhook |
-| `PUT` | `/webhooks/:id/enabled` | Toggle webhook |
+| Method   | Path                    | Description    |
+| -------- | ----------------------- | -------------- |
+| `GET`    | `/webhooks`             | List webhooks  |
+| `POST`   | `/webhooks`             | Add webhook    |
+| `DELETE` | `/webhooks/:id`         | Remove webhook |
+| `PUT`    | `/webhooks/:id/enabled` | Toggle webhook |
 
 ### Workers (4 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/workers` | List workers |
-| `POST` | `/workers` | Register worker |
-| `DELETE` | `/workers/:id` | Unregister worker |
-| `POST` | `/workers/:id/heartbeat` | Worker heartbeat |
+| Method   | Path                     | Description       |
+| -------- | ------------------------ | ----------------- |
+| `GET`    | `/workers`               | List workers      |
+| `POST`   | `/workers`               | Register worker   |
+| `DELETE` | `/workers/:id`           | Unregister worker |
+| `POST`   | `/workers/:id/heartbeat` | Worker heartbeat  |
 
 ### Monitoring (11 endpoints)
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/health` | No | Health check |
-| `GET` | `/healthz` | No | Liveness probe |
-| `GET` | `/live` | No | Liveness probe |
-| `GET` | `/ready` | No | Readiness probe |
-| `GET` | `/ping` | Yes | Ping/pong |
-| `GET` | `/stats` | Yes | Server statistics |
-| `GET` | `/metrics` | Yes | Throughput metrics |
-| `GET` | `/prometheus` | Optional | Prometheus metrics |
-| `GET` | `/storage` | Yes | Storage health |
-| `POST` | `/gc` | Yes | Force GC + compact |
-| `GET` | `/heapstats` | Yes | Heap statistics |
+| Method | Path          | Auth     | Description        |
+| ------ | ------------- | -------- | ------------------ |
+| `GET`  | `/health`     | No       | Health check       |
+| `GET`  | `/healthz`    | No       | Liveness probe     |
+| `GET`  | `/live`       | No       | Liveness probe     |
+| `GET`  | `/ready`      | No       | Readiness probe    |
+| `GET`  | `/ping`       | Yes      | Ping/pong          |
+| `GET`  | `/stats`      | Yes      | Server statistics  |
+| `GET`  | `/metrics`    | Yes      | Throughput metrics |
+| `GET`  | `/prometheus` | Optional | Prometheus metrics |
+| `GET`  | `/storage`    | Yes      | Storage health     |
+| `POST` | `/gc`         | Yes      | Force GC + compact |
+| `GET`  | `/heapstats`  | Yes      | Heap statistics    |
 
 ### Dashboard (3 endpoints)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/dashboard` | Aggregated overview |
-| `GET` | `/dashboard/queues` | Paginated queues with stats |
-| `GET` | `/dashboard/queues/:q` | Single queue detail |
+| Method | Path                   | Description                 |
+| ------ | ---------------------- | --------------------------- |
+| `GET`  | `/dashboard`           | Aggregated overview         |
+| `GET`  | `/dashboard/queues`    | Paginated queues with stats |
+| `GET`  | `/dashboard/queues/:q` | Single queue detail         |
 
-### Real-time (4 channels, 60 pub/sub events)
+### Real-time (4 channels, 86 pub/sub events)
 
-| Protocol | Path | Description |
-|---|---|---|
-| SSE | `/events` | All events (legacy format) |
-| SSE | `/events/queues/:q` | Queue-filtered events |
-| WebSocket | `/ws` | Pub/sub + commands (86 explicit events, wildcards) |
-| WebSocket | `/ws/queues/:q` | Queue-filtered pub/sub |
+| Protocol  | Path                | Description                                        |
+| --------- | ------------------- | -------------------------------------------------- |
+| SSE       | `/events`           | All events (legacy format)                         |
+| SSE       | `/events/queues/:q` | Queue-filtered events                              |
+| WebSocket | `/ws`               | Pub/sub + commands (86 explicit events, wildcards) |
+| WebSocket | `/ws/queues/:q`     | Queue-filtered pub/sub                             |
 
 :::tip[Related]
+
 - [TCP Protocol Reference](/api/tcp/), the same operations over the binary msgpack protocol, with its own command list
 - [TypeScript Types](/api/types/), type definitions for all APIs
 - [Server Mode](/guide/server/), run the HTTP API server
-:::
+  :::

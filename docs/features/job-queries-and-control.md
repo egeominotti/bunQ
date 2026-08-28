@@ -39,7 +39,11 @@ Internal:
 - `src/shared/hash` — `shardIndex`, `processingShardIndex`, `SHARD_COUNT`.
 - [Webhooks, Events & Job Logs](./webhooks-and-events.md) — `EventsManager.broadcast`, `WebhookManager.trigger` (used by `updateJobProgress`, `cancelJob`, `moveJobToDelayed`).
 
-External/runtime: Bun's `bun:sqlite` (via `SqliteStorage`), `Date.now()` for temporal comparisons. Zero third-party runtime deps.
+External/runtime: this synchronous local path uses Bun's `bun:sqlite` through
+`SqliteStorage` and `Date.now()` for temporal comparisons. PostgreSQL overrides
+the asynchronous ports with Bun's native `SQL` client and database time.
+MessagePack encoding uses `msgpackr`, the package's only third-party runtime
+dependency.
 
 ## Public Interface
 

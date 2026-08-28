@@ -188,7 +188,7 @@ Throughput is one axis; what you ship is another. We measured `bun add bunqueue`
 | packages installed  | 7        | 117          | **−94%**         |
 | cold install time   | ~1.7 s   | ~6 s         | **~3.5× faster** |
 
-The savings come from making `@modelcontextprotocol/sdk` an optional peer dependency (loaded lazily only by the `bunqueue-mcp` bin), dropping `zod` and the HTTP stack from the install path, and removing `bun` from `peerDependencies`. Queue and worker users now download just two runtime dependencies: `croner` and `msgpackr`.
+The savings came from making `@modelcontextprotocol/sdk` an optional peer dependency (loaded lazily only by the `bunqueue-mcp` bin), dropping `zod` and the HTTP stack from the install path, and removing `bun` from `peerDependencies`. That 2.8.1 measurement included both `croner` and `msgpackr`; current releases use Bun's native cron parser and ship only `msgpackr` as a runtime dependency. The historical footprint above has not been recomputed.
 
 ## What the Numbers Mean
 

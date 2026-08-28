@@ -102,7 +102,15 @@ is a non-negative cap and `timestamp` includes only entries whose terminal
 timestamp is at or before the cutoff. Embedded and TCP paths apply the same
 selection rules.
 
-`promoteJobs({ count? })` delegates to the manager/server bulk operation in both embedded and TCP modes. The operation selects delayed jobs from the live shard queue in stable `(createdAt, id)` order rather than from the eventually consistent SQLite `GetJobs` view; `count: 0` promotes none. Each promotion updates the priority queue, delayed counter/temporal tracking, persisted `run_at`, and queue waiter notification before the call resolves.
+`promoteJobs({ count? })` delegates to the manager/server bulk operation in both
+embedded and TCP modes; `count: 0` promotes none. In memory/SQLite mode it
+selects delayed jobs from the live shard queue in stable `(createdAt, id)` order
+rather than from SQLite's eventually consistent `GetJobs` view, then updates the
+priority queue, delayed counter/temporal tracking, persisted `run_at`, and queue
+waiter notification before resolving. In PostgreSQL mode it locks the selected
+rows in `(created_at, id)` order with `FOR UPDATE SKIP LOCKED`, updates `run_at`
+and state, and records durable events in one transaction before refreshing the
+broker projection.
 
 Move / BullMQ-v5 (`queue/runtime/scheduling.ts`, `queue/jobMove.ts`):
 `moveJobToCompleted`, `moveJobToFailed`, `moveJobToWait`,

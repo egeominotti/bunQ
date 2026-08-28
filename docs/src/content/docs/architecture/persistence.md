@@ -1,6 +1,6 @@
 ---
-title: "SQLite Persistence: WAL, Write Buffer, S3 Backups"
-description: "bunqueue persistence layer: SQLite WAL mode config, write buffering, read-through cache, S3 backup flows, and durability guarantees."
+title: 'SQLite Persistence: WAL, Write Buffer, S3 Backups'
+description: 'bunqueue persistence layer: SQLite WAL mode config, write buffering, read-through cache, S3 backup flows, and durability guarantees.'
 head:
   - tag: meta
     attrs:
@@ -13,6 +13,12 @@ head:
   <h1 class="bq-hero-h1 bq-bench-h1">WAL mode and <em>write buffers.</em></h1>
   <p class="bq-hero-sub">bunqueue uses SQLite with WAL mode for persistence, optimized for high-throughput job processing: batched writes, crash recovery, and S3 backups.</p>
 </div>
+
+This page is intentionally specific to the memory/SQLite engine. Standalone
+servers configured with PostgreSQL bypass `SqliteStorage` and `WriteBuffer`;
+they use Bun's native `SQL` pool and database-authoritative transactions. See
+[Storage backends](/guide/databases/) for that architecture and its backup,
+durability, and failover boundaries.
 
 ## SQLite Configuration
 
@@ -51,11 +57,15 @@ head:
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Write modes</b><span>per-job choice</span></div>
   <div class="bq-diag-row">
-    <div class="bq-diag-cell bq-diag-accent">Buffered, default <i>~100k jobs/sec, up to 10ms loss, batched writes. Use for: emails, notifications, analytics</i></div>
-    <div class="bq-diag-cell">Durable, opt-in per job <i>~10k jobs/sec, no data loss, immediate write. Use for: payments, critical events, financial transactions</i></div>
+    <div class="bq-diag-cell bq-diag-accent">Buffered, default <i>up to 10 ms loss; 186,384 jobs/s median for the published public on-disk Embedded addBulk workload</i></div>
+    <div class="bq-diag-cell">Durable, opt-in per job <i>immediate write; 60,835 ops/s median for the published sequential Embedded add workload</i></div>
   </div>
   <p class="bq-diag-note">Usage: <code>queue.add('job', data, { durable: true })</code></p>
 </div>
+
+The two medians above describe different workloads. They are capacity evidence,
+not a direct buffered-versus-durable ratio; see [Engineering
+Benchmarks](/guide/benchmarks/) for distributions and TCP results.
 
 ## Database Schema
 
@@ -186,8 +196,9 @@ head:
 </div>
 
 :::tip[Related]
+
 - [Architecture Overview](/architecture/) - Full component map
 - [Data Structures](/architecture/data-structures/) - In-memory structures backed by this store
 - [TCP Protocol](/architecture/tcp-protocol/) - MessagePack payloads shared with the wire format
 - [S3 Backup](/guide/backup/) - Backing up the SQLite file this layer owns
-:::
+  :::

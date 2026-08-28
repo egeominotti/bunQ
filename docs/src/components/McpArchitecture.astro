@@ -1,7 +1,7 @@
 ---
 /**
  * Animated MCP architecture diagram.
- * Shows: AI Agent ─(stdio)─> MCP Server ─> Embedded SQLite | TCP Client ─> Remote Server
+ * Shows: AI Agent ─(stdio)─> MCP Server ─> Embedded memory/SQLite | TCP Client ─> Remote Server
  */
 ---
 
@@ -51,7 +51,7 @@
         <div class="ma-mode-dot ma-mode-dot-active"></div>
         <div class="ma-mode-info">
           <span class="ma-mode-title">Embedded</span>
-          <span class="ma-mode-sub">SQLite (local)</span>
+          <span class="ma-mode-sub">Memory / SQLite</span>
         </div>
       </div>
       <div class="ma-mode-divider"></div>
@@ -84,7 +84,7 @@
     </div>
     <div class="ma-text">
       <span class="ma-label ma-label-dim">bunqueue Server</span>
-      <span class="ma-sub">Remote instance</span>
+      <span class="ma-sub">Memory / SQLite / PostgreSQL</span>
     </div>
   </div>
 </div>

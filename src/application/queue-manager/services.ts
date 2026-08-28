@@ -1,4 +1,5 @@
 import type { CronJob, CronJobInput } from '../../domain/types/cron';
+import { assertValidCronInput } from '../../infrastructure/scheduler/cron/validation';
 import type { JobId } from '../../domain/types/job';
 import type { JobEvent } from '../../domain/types/queue';
 import type { CreateWorkerOptions } from '../../domain/types/worker';
@@ -7,6 +8,7 @@ import { QueueManagerObservability } from './observability';
 
 export class QueueManagerServices extends QueueManagerObservability {
   addCron(input: CronJobInput): CronJob {
+    assertValidCronInput(input);
     if (input.preventOverlap) {
       this.removeOrphanedCronJob(input.queue, input.uniqueKey ?? `cron:${input.name}`);
     }

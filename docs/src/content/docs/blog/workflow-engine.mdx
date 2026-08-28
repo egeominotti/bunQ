@@ -1,6 +1,6 @@
 ---
-title: "Workflow Engine: Orchestration Without Temporal"
-description: "bunqueue 2.7 ships a built-in workflow engine: saga compensation, branching and human-in-the-loop signals, all persisted to SQLite with no extra services."
+title: 'Workflow Engine: Orchestration Without Temporal'
+description: 'bunqueue 2.7 ships a built-in workflow engine: saga compensation, branching and human-in-the-loop signals, all persisted to SQLite with no extra services.'
 head:
   - tag: meta
     attrs:
@@ -13,19 +13,25 @@ head:
   - tag: meta
     attrs:
       property: article:published_time
-      content: "2026-04-10"
+      content: '2026-04-10'
   - tag: meta
     attrs:
       name: keywords
-      content: "workflow engine, orchestration, saga pattern, temporal alternative, inngest alternative, step functions, typescript workflow, bunqueue workflow, multi-step jobs, compensation, human-in-the-loop"
+      content: 'workflow engine, orchestration, saga pattern, temporal alternative, inngest alternative, step functions, typescript workflow, bunqueue workflow, multi-step jobs, compensation, human-in-the-loop'
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · workflows</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Orchestration without the <em>orchestra.</em></h1>
-  <p class="bq-hero-sub">Real processes span multiple steps, and when step three fails you must undo one and two. That is orchestration, and until now it meant Temporal, Inngest, or Trigger.dev. bunqueue 2.7 builds it into the queue you already run.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Orchestration without the <em>orchestra.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Real processes span multiple steps, and when step three fails you must undo one and two. That is
+    orchestration, and until now it meant Temporal, Inngest, or Trigger.dev. bunqueue 2.7 builds it
+    into the queue you already run.
+  </p>
 </div>
 
 **The new Workflow Engine in bunqueue 2.7** lets you define multi-step processes (charge payment, reserve inventory, send confirmation, notify shipping) with a fluent TypeScript DSL, run saga compensation on failure, branch conditionally, and pause for human approval, all inside the same queue infrastructure you already use. Zero new services. Zero cloud dependencies.
@@ -53,16 +59,20 @@ const order = new Workflow('order-pipeline')
     // Validate order exists and is payable
     return { orderId, validated: true };
   })
-  .step('charge', async (ctx) => {
-    // Charge the customer
-    return { transactionId: 'txn_abc123' };
-  }, {
-    compensate: async (ctx) => {
-      // Refund if a later step fails
-      const { transactionId } = ctx.steps.charge as { transactionId: string };
-      await refundPayment(transactionId);
+  .step(
+    'charge',
+    async (ctx) => {
+      // Charge the customer
+      return { transactionId: 'txn_abc123' };
     },
-  })
+    {
+      compensate: async (ctx) => {
+        // Refund if a later step fails
+        const { transactionId } = ctx.steps.charge as { transactionId: string };
+        await refundPayment(transactionId);
+      },
+    }
+  )
   .waitFor('manager-approval')
   .step('ship', async (ctx) => {
     return { tracking: 'TRACK-789' };
@@ -119,10 +129,16 @@ Some workflows need a human decision before continuing. `.waitFor()` pauses exec
 
 ```typescript
 const deploy = new Workflow('deploy')
-  .step('build', async (ctx) => { /* ... */ })
-  .step('test', async (ctx) => { /* ... */ })
+  .step('build', async (ctx) => {
+    /* ... */
+  })
+  .step('test', async (ctx) => {
+    /* ... */
+  })
   .waitFor('qa-approval')
-  .step('deploy-prod', async (ctx) => { /* ... */ });
+  .step('deploy-prod', async (ctx) => {
+    /* ... */
+  });
 
 engine.register(deploy);
 const deployRun = await engine.start('deploy', {});
@@ -160,17 +176,22 @@ Run independent steps concurrently with `.parallel()`:
 Compose workflows by nesting them with `.subWorkflow()`:
 
 ```typescript
-const payment = new Workflow<{ amount: number }>('payment')
-  .step('authorize', async (ctx) => ({ authorized: ctx.input.amount }));
+const payment = new Workflow<{ amount: number }>('payment').step('authorize', async (ctx) => ({
+  authorized: ctx.input.amount,
+}));
 
 const parent = new Workflow('order')
   .step('create', async () => ({ total: 99 }))
-  .subWorkflow('payment', (ctx) => ({
-    amount: (ctx.steps['create'] as { total: number }).total,
-  }), {
-    timeout: 15 * 60_000,
-    pollInterval: 250,
-  })
+  .subWorkflow(
+    'payment',
+    (ctx) => ({
+      amount: (ctx.steps['create'] as { total: number }).total,
+    }),
+    {
+      timeout: 15 * 60_000,
+      pollInterval: 250,
+    }
+  )
   .step('confirm', async (ctx) => {
     const result = ctx.steps['sub:payment'];
     return { done: true };
@@ -211,21 +232,25 @@ const pipeline = new Workflow('etl')
     async (ctx) => {
       const record = ctx.steps.__item;
       return await enrichment.process(record);
-    },
+    }
   )
   .map('aggregate', (ctx) => {
     // Collect all forEach results
     const results = [];
     let i = 0;
-    while (ctx.steps[`enrich:${i}`]) { results.push(ctx.steps[`enrich:${i}`]); i++; }
+    while (ctx.steps[`enrich:${i}`]) {
+      results.push(ctx.steps[`enrich:${i}`]);
+      i++;
+    }
     return { total: results.length };
   })
   .doUntil(
     (ctx) => (ctx.steps['sync'] as any)?.synced === true,
-    (w) => w.step('sync', async () => {
-      const ok = await externalApi.sync();
-      return { synced: ok };
-    }),
+    (w) =>
+      w.step('sync', async () => {
+        const ok = await externalApi.sync();
+        return { synced: ok };
+      }),
     { maxIterations: 10 }
   );
 ```
@@ -237,11 +262,14 @@ Validate step inputs/outputs with any `.parse()` schema (Zod, ArkType, Valibot) 
 ```typescript
 import { z } from 'zod';
 
-const flow = new Workflow('validated')
-  .step('process', async (ctx) => ({ id: 'usr_1', valid: true }), {
+const flow = new Workflow('validated').step(
+  'process',
+  async (ctx) => ({ id: 'usr_1', valid: true }),
+  {
     inputSchema: z.object({ email: z.string().email() }),
     outputSchema: z.object({ id: z.string(), valid: z.boolean() }),
-  });
+  }
+);
 
 const run = await engine.start('validated', { email: 'user@test.com' });
 const unsub = engine.subscribe(run.id, (e) => console.log(e.type));
@@ -252,7 +280,9 @@ const unsub = engine.subscribe(run.id, (e) => console.log(e.type));
 subscription is no longer needed.
 
 <Aside type="note">
-  bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you bring your own, `bun add zod` (used above), ArkType, Valibot, or anything with a compatible `.parse()` method. As of 2.8.0, bunqueue's only runtime dependencies are `croner` and `msgpackr`.
+  bunqueue does not bundle a schema library. Schema validation is duck-typed on `.parse()`, so you
+  bring your own, `bun add zod` (used above), ArkType, Valibot, or anything with a compatible
+  `.parse()` method. `msgpackr` is bunqueue's only runtime dependency.
 </Aside>
 
 ## Cleanup & Archival
@@ -261,7 +291,7 @@ Archive old executions to keep your SQLite lean:
 
 ```typescript
 engine.archive(30 * 24 * 60 * 60 * 1000); // Archive 30-day-old executions
-engine.cleanup(7 * 24 * 60 * 60 * 1000);  // Delete 7-day-old executions
+engine.cleanup(7 * 24 * 60 * 60 * 1000); // Delete 7-day-old executions
 ```
 
 ## How It Works Internally
@@ -304,8 +334,7 @@ import { Workflow, Engine } from 'bunqueue/workflow';
 Read the full guide: [Workflow Engine Documentation](/guide/workflow/)
 
 <Aside type="tip" title="Executable workflow examples">
-The guide scenarios run against the real workflow engine in
-`test/workflow-docs-examples.test.ts`; framework integrations have their own
-package-backed suite, and the durability model drives generated histories
-against a real TCP broker and SQLite.
+  The guide scenarios run against the real workflow engine in `test/workflow-docs-examples.test.ts`;
+  framework integrations have their own package-backed suite, and the durability model drives
+  generated histories against a real TCP broker and SQLite.
 </Aside>

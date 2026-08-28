@@ -1,6 +1,6 @@
 ---
-title: "Cron Recipes: Intervals, Timezones, Chained Repeats"
-description: "Practical bunqueue scheduling patterns: fixed millisecond intervals, cron patterns evaluated in a specific IANA timezone, and jobs that repeat after each completion."
+title: 'Cron Recipes: Intervals, Timezones, Chained Repeats'
+description: 'Practical bunqueue scheduling patterns: fixed millisecond intervals, cron patterns evaluated in a specific IANA timezone, and jobs that repeat after each completion.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "cron every n milliseconds, cron timezone iana, dst cron, repeat after completion, interval scheduler bun, recurring job patterns"
+      content: 'cron every n milliseconds, cron timezone iana, dst cron, repeat after completion, interval scheduler bun, recurring job patterns'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron jobs</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">The schedules you <em>actually need.</em></h1>
-  <p class="bq-hero-sub">Three shapes cover almost every recurring job: a fixed interval, a wall-clock time in a real timezone, and a job that re-arms itself only once the previous run finished.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    The schedules you <em>actually need.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Three shapes cover almost every recurring job: a fixed interval, a wall-clock time in a real
+    timezone, and a job that re-arms itself only once the previous run finished.
+  </p>
 </div>
 
 ## Common Tasks
@@ -33,24 +38,32 @@ previous generation blocks another one from being enqueued:
 <TabItem label="Bun">
 
 ```typescript
-await queue.upsertJobScheduler('heartbeat', {
-  every: 60000,  // every minute
-  limit: 100,    // optional: stop after 100 runs
-}, {
-  data: { check: 'health' },
-});
+await queue.upsertJobScheduler(
+  'heartbeat',
+  {
+    every: 60000, // every minute
+    limit: 100, // optional: stop after 100 runs
+  },
+  {
+    data: { check: 'health' },
+  }
+);
 ```
 
 </TabItem>
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.upsertJobScheduler('heartbeat', {
-  every: 60000,  // every minute
-  limit: 100,    // optional: stop after 100 runs
-}, {
-  data: { check: 'health' },
-});
+await queue.upsertJobScheduler(
+  'heartbeat',
+  {
+    every: 60000, // every minute
+    limit: 100, // optional: stop after 100 runs
+  },
+  {
+    data: { check: 'health' },
+  }
+);
 ```
 
 </TabItem>
@@ -133,13 +146,17 @@ Pass an IANA timezone (like `Europe/Rome` or `America/New_York`) and the pattern
 
 ```typescript
 // 6 PM New York time, weekdays only
-await queue.upsertJobScheduler('end-of-day', {
-  pattern: '0 18 * * 1-5',
-  timezone: 'America/New_York',
-}, {
-  name: 'end-of-day',
-  data: { type: 'summary' },
-});
+await queue.upsertJobScheduler(
+  'end-of-day',
+  {
+    pattern: '0 18 * * 1-5',
+    timezone: 'America/New_York',
+  },
+  {
+    name: 'end-of-day',
+    data: { type: 'summary' },
+  }
+);
 ```
 
 </TabItem>
@@ -147,13 +164,17 @@ await queue.upsertJobScheduler('end-of-day', {
 
 ```typescript
 // 6 PM New York time, weekdays only
-await queue.upsertJobScheduler('end-of-day', {
-  pattern: '0 18 * * 1-5',
-  tz: 'America/New_York',
-}, {
-  name: 'end-of-day',
-  data: { type: 'summary' },
-});
+await queue.upsertJobScheduler(
+  'end-of-day',
+  {
+    pattern: '0 18 * * 1-5',
+    tz: 'America/New_York',
+  },
+  {
+    name: 'end-of-day',
+    data: { type: 'summary' },
+  }
+);
 ```
 
 </TabItem>
@@ -315,7 +336,7 @@ queue.add("sync",
 The directly added generation runs first; every successful completion creates
 the next generation at the calculated cron deadline. `tz`, `startDate`,
 `endDate`, `offset`, `limit`, and `immediately` stay attached to the chain, and
-the chain survives a SQLite-backed broker restart.
+the chain survives a durable SQLite or PostgreSQL broker restart.
 
 An `offset` shifts each cron tick without skipping a tick whose shifted deadline
 is still in the future. Negative offsets advance to the next future shifted
@@ -325,8 +346,8 @@ cadence; `immediately` applies only to the directly added generation.
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
-| [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
-| [Cron Reference](/guide/cron/reference/) | Expression syntax, every scheduler option, MCP |
+|                                                           |                                                    |
+| --------------------------------------------------------- | -------------------------------------------------- |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object     |
+| [Cron Jobs in Bun](/guide/cron/)                          | Your first schedule, in every SDK and from the CLI |
+| [Cron Reference](/guide/cron/reference/)                  | Expression syntax, every scheduler option, MCP     |

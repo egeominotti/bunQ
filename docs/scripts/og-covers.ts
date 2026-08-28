@@ -11,12 +11,12 @@ export interface Cover {
 export const covers: readonly Cover[] = [
   {
     file: 'og-image',
-    eyebrow: 'job queue · zero infrastructure',
-    l1: 'The queue',
-    l2pre: 'is ',
-    l2: 'a file.',
-    sub: 'Priorities, retries, cron and DLQ in one process. No Redis.',
-    stats: ['150K+ ops/sec', 'SQLite WAL', 'MIT'],
+    eyebrow: 'job queue · SQLite or PostgreSQL',
+    l1: 'One file.',
+    l2pre: 'Many ',
+    l2: 'brokers.',
+    sub: 'Memory or one-file SQLite. PostgreSQL 15–18 when you scale. No Redis.',
+    stats: ['186K on-disk', 'PostgreSQL 15–18', 'MIT'],
   },
   {
     file: 'og/getting-started',
@@ -25,7 +25,7 @@ export const covers: readonly Cover[] = [
     l2pre: 'in ',
     l2: 'a minute.',
     sub: 'bun add bunqueue, write ten lines, run. Nothing to provision.',
-    stats: ['1 dependency', '5.5 MB install', 'zero config'],
+    stats: ['1 dependency', 'native Bun APIs', 'zero config'],
   },
   {
     file: 'og/queue',
@@ -48,11 +48,11 @@ export const covers: readonly Cover[] = [
   {
     file: 'og/server-mode',
     eyebrow: 'server mode',
-    l1: 'One process',
-    l2pre: 'serves ',
-    l2: 'them all.',
-    sub: 'TCP and HTTP, token auth, native TLS, Unix sockets.',
-    stats: ['TCP :6789', 'HTTP :6790', 'native TLS'],
+    l1: 'One protocol,',
+    l2pre: 'many ',
+    l2: 'brokers.',
+    sub: 'SQLite for one broker. PostgreSQL for an active fleet.',
+    stats: ['TCP :6789', 'PostgreSQL 15–18', 'native TLS'],
   },
   {
     file: 'og/client-sdk',
@@ -123,7 +123,7 @@ export const covers: readonly Cover[] = [
     l1: 'What survives',
     l2pre: '',
     l2: 'a crash.',
-    sub: 'At-least-once semantics, tested under kill -9. One file to back up.',
+    sub: 'At-least-once semantics. SQLite snapshots or PostgreSQL PITR.',
     stats: ['SIGKILL tested', 'fenced ACKs', 'S3 snapshots'],
   },
   {

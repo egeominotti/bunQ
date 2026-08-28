@@ -1,6 +1,6 @@
 ---
-title: "Client SDK Architecture: Pooling & Worker Modes"
-description: "bunqueue Client SDK internals: TCP connection pooling, embedded vs server mode, worker heartbeats, ACK batching, and auto-batching."
+title: 'Client SDK Architecture: Pooling & Worker Modes'
+description: 'bunqueue Client SDK internals: TCP connection pooling, embedded vs server mode, worker heartbeats, ACK batching, and auto-batching.'
 head:
   - tag: meta
     attrs:
@@ -37,10 +37,15 @@ src/client/
   </div>
 </div>
 
-| Mode | Throughput | Use Case |
-|------|------------|----------|
-| Embedded | ~100k jobs/sec | Single process |
-| TCP | Network limited | Distributed workers |
+| Mode              |                Published workload median | Use case                        |
+| ----------------- | ---------------------------------------: | ------------------------------- |
+| Embedded + SQLite | 186,384 jobs/s, public on-disk `addBulk` | Single process                  |
+| TCP + SQLite      |                  158,779 jobs/s, `PUSHB` | Distributed clients, one broker |
+| TCP + PostgreSQL  |    See the multi-broker benchmark matrix | Distributed clients and brokers |
+
+These are workload-specific ingestion medians, not a universal per-job rate.
+See [Engineering Benchmarks](/guide/benchmarks/) for distributions and lifecycle
+throughput.
 
 ## Job Submission Flow
 
@@ -95,6 +100,7 @@ src/client/
 </div>
 
 **Key Features:**
+
 - 4 connections per pool (default)
 - Load-aware client selection
 - Automatic reconnection with exponential backoff
@@ -137,6 +143,7 @@ src/client/
 </div>
 
 **Benefits:**
+
 - Reduces network round-trips
 - Batches lock verification
 - Handles retry on failure
@@ -145,11 +152,14 @@ src/client/
 
 The Bun client plans the complete graph and commits it through one `PUSHF`
 operation in both embedded and TCP modes. Validation occurs before mutation;
-all affected shard locks are held through publication, and configured SQLite
-commits every node before workers are notified. All six current external SDKs
-use the same atomic command. `PUSH` plus `UpdateParent` remains compatible for
-previously published clients; a predeclared late edge is a child-only durable
-back-patch and never rewrites an active or terminal parent.
+in memory/SQLite mode all affected shard locks are held through publication,
+and configured SQLite commits every node before workers are notified. A
+PostgreSQL server instead commits the complete graph and ownership edges in one
+database transaction, then refreshes its projection; it does not use the base
+manager's shard locks. All six current external SDKs use the same atomic
+command. `PUSH` plus `UpdateParent` remains compatible for previously published
+clients; a predeclared late edge is a child-only durable back-patch and never
+rewrites an active or terminal parent.
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Dependency chain</b><span>addChain([A, B, C])</span></div>
@@ -182,8 +192,9 @@ back-patch and never rewrites an active or terminal parent.
 </div>
 
 :::tip[Related]
+
 - [Architecture Overview](/architecture/) - How every component fits together
 - [TCP Protocol](/architecture/tcp-protocol/) - The wire format the connection pool speaks
 - [Application Layer](/architecture/application-layer/) - What the server does with pulled jobs
 - [Queue API](/guide/queue/) - The client-facing API built on this pool
-:::
+  :::

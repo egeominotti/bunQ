@@ -82,11 +82,28 @@ export interface CronJobInput {
   jobOptions?: CronJobOptions;
 }
 
-/** Create a new cron job */
-export function createCronJob(input: CronJobInput, nextRun: number): CronJob {
-  if (!input.schedule && !input.repeatEvery) {
+/** Validate the calendar/interval timing fields before scheduler mutation. */
+export function assertValidCronTiming(input: {
+  readonly schedule?: string | null;
+  readonly repeatEvery?: number | null;
+}): void {
+  if (input.repeatEvery !== undefined && input.repeatEvery !== null) {
+    if (
+      typeof input.repeatEvery !== 'number' ||
+      !Number.isSafeInteger(input.repeatEvery) ||
+      input.repeatEvery < 1
+    ) {
+      throw new Error('Cron repeatEvery must be a positive safe integer number of milliseconds');
+    }
+  }
+  if (!input.schedule && (input.repeatEvery === undefined || input.repeatEvery === null)) {
     throw new Error('Cron job must have either schedule or repeatEvery');
   }
+}
+
+/** Create a new cron job */
+export function createCronJob(input: CronJobInput, nextRun: number): CronJob {
+  assertValidCronTiming(input);
 
   const payload = normalizeJobPayload({ name: input.jobName, data: input.data });
 

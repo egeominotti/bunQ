@@ -15,7 +15,7 @@ Producer-friendly for FPM, worker-friendly for CLI: `run()` for daemons, `runOnc
 [![downloads](https://img.shields.io/packagist/dt/bunqueue/client?color=ff4f9f)](https://packagist.org/packages/bunqueue/client)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/LICENSE)
 [![php](https://img.shields.io/badge/php-8.1%2B-2ea44f)](https://github.com/egeominotti/bunqueue/tree/main/sdk/php)
-[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2018%2F18-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
 [Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/php/CHANGELOG.md)
 

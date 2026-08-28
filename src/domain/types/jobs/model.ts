@@ -84,7 +84,7 @@ export interface Job {
   readonly deduplicationReplace: boolean;
   readonly debounceId: string | null;
   readonly debounceTtl: number | null;
-  /** Whether each generation bypasses the persistence write buffer. */
+  /** Whether SQLite admission bypasses its write buffer; PostgreSQL is always transactional. */
   readonly durable?: boolean;
   timeline: JobTimelineEntry[];
 }

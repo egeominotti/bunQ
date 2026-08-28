@@ -32,7 +32,7 @@ import { Aside } from '@astrojs/starlight/components';
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Worker crashes mid-job                         | The job is redelivered to another worker after its lease expires. It may run twice, never zero times.                                                            |
 | Server killed hard (`kill -9`)                 | Jobs written to disk survive and recover on restart. Jobs accepted in the last ~10 ms may be lost, unless they were added with `durable: true`.                  |
-| Server restarted gracefully (SIGTERM, deploys) | Nothing is lost, even buffered jobs. Shutdown flushes all pending writes before exiting.                                                                         |
+| Server restarted gracefully (SIGTERM, deploys) | After shutdown completes successfully, buffered SQLite writes are flushed before exit. A flush error or forced termination follows the hard-kill row instead.   |
 | Job fails repeatedly                           | After its retry attempts are exhausted it moves to the DLQ (dead letter queue, a parking lot for failed jobs you can inspect and retry). See [DLQ](/guide/dlq/). |
 | Disk fills up                                  | The server stays up and reports itself `degraded` on `/health`. Durable pushes fail explicitly instead of pretending to succeed.                                 |
 | The whole machine is lost                      | You restore the last S3 snapshot. Your maximum data loss is the backup interval.                                                                                 |
@@ -57,7 +57,13 @@ import { Aside } from '@astrojs/starlight/components';
 4. The lease expires and the server requeues the job with its attempt count incremented.
 5. Another worker pulls it. **Your side effect runs again.**
 
-The guarantee is **at-least-once**: a job is never lost, but it can run more than once. No queue on any backend can promise better, because your side effect and the acknowledgment are two separate systems and a crash can always land between them. What bunqueue does guarantee around the edges:
+Once a job is durably admitted, the processing guarantee is **at-least-once**:
+it can run more than once, but the broker does not silently discard that
+generation. SQLite's default write buffer precedes durable admission, so a hard
+crash can still lose jobs accepted inside its documented 10 ms window unless
+they use `durable: true`. No queue can atomically combine your external side
+effect with its own acknowledgment, so a crash can always land between them.
+What bunqueue guarantees around those edges:
 
 - A late ACK after ordinary lease expiry is accepted only while that exact
   generation still owns the processing slot and the job was not re-leased.
@@ -88,26 +94,29 @@ The guarantee is **at-least-once**: a job is never lost, but it can run more tha
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">durability</span>
   <h2 class="bq-h2">Two write modes, one decision.</h2>
-  <p class="bq-lede">By default bunqueue batches writes to SQLite every 10 ms for throughput. A durable write skips the batch and hits disk before the add returns.</p>
+  <p class="bq-lede">By default bunqueue batches writes to SQLite every 10 ms for throughput. A durable write skips the application batch and commits before the add returns; host and physical-media durability remain operational concerns.</p>
 
-| Mode                    | Throughput     | Loss window on a hard crash  |
-| ----------------------- | -------------- | ---------------------------- |
-| Buffered (default)      | ~100k jobs/sec | up to 10 ms of accepted jobs |
-| `durable: true` per job | ~10k jobs/sec  | none                         |
+| SQLite mode             |         Published native workload median | Bunqueue process-crash buffer window |
+| ----------------------- | ---------------------------------------: | ------------------------------------ |
+| Buffered (default)      | 186,384 jobs/s, public on-disk `addBulk` | up to 10 ms of accepted jobs         |
+| `durable: true` per job |   60,835 ops/s, sequential Embedded adds | none after `add()` resolves          |
 
 ```typescript
 await queue.add('send-newsletter', data); // buffered, fast
-await queue.add('capture-payment', data, { durable: true }); // on disk before this returns
+await queue.add('capture-payment', data, { durable: true }); // committed before this returns
 ```
 
-Mixing is free: mark only the jobs that are money as durable and keep the rest batched. The 10 ms window only exists for hard crashes; graceful restarts flush everything. Measured numbers per mode are in [Benchmarks](/guide/benchmarks/).
+Mixing is free: mark only the jobs that are money as durable and keep the rest
+batched. The 10 ms window applies to abrupt process termination; a successfully
+completed graceful shutdown flushes the buffer. Measured numbers per mode are
+in [Benchmarks](/guide/benchmarks/).
 
 </div>
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">backup and restore</span>
   <h2 class="bq-h2">One file, snapshotted to S3.</h2>
-  <p class="bq-lede">The entire queue state is one SQLite database, so disaster recovery is one file in object storage. Works with AWS S3, Cloudflare R2, and MinIO.</p>
+  <p class="bq-lede">In SQLite mode, the entire queue state is one database file, so disaster recovery is one object-storage snapshot. Works with AWS S3, Cloudflare R2, and MinIO; PostgreSQL uses database-native backup and PITR.</p>
 
 ```bash
 S3_BACKUP_ENABLED=1
@@ -215,9 +224,19 @@ the current migration.
   <h2 class="bq-h2">SIGTERM is a contract.</h2>
   <p class="bq-lede">Deploys restart the server constantly. The shutdown path is what makes that boring.</p>
 
-On SIGTERM the server stops accepting connections, waits up to `SHUTDOWN_TIMEOUT_MS` (default 30,000 ms) for active jobs to finish, then flushes every pending write and closes the database cleanly. That flush is why even non-durable jobs survive deploys.
+On SIGTERM the server stops accepting connections and waits up to
+`SHUTDOWN_TIMEOUT_MS` (default 30,000 ms) for active jobs to finish. SQLite then
+flushes its pending write buffer and closes the database, which is why ordinary
+buffered jobs survive a graceful deploy. PostgreSQL instead closes operation
+admission, drains work already admitted to the manager, settles deferred writes
+and projection repairs, releases the broker's remaining owned leases, and then
+closes its SQL pool.
 
-Jobs still running when the deadline hits are not lost either: they are already persisted as active, and the next startup requeues them for retry. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler, and give your orchestrator a termination grace period slightly above that (Kubernetes defaults to 30 s).
+Jobs still running when the deadline hits remain in the selected persistent
+backend as active and are recovered for retry by SQLite startup or PostgreSQL
+lease recovery. Size `SHUTDOWN_TIMEOUT_MS` a little above your longest handler,
+and give your orchestrator a termination grace period slightly above that
+(Kubernetes defaults to 30 s).
 
 </div>
 

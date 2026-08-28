@@ -1,6 +1,6 @@
 ---
-title: "Bunqueue + Hono: Background Jobs in a Bun Web App"
-description: "Add background jobs to a Hono app with bunqueue: enqueue from routes, process in a worker, expose job status endpoints, and shut down cleanly."
+title: 'Bunqueue + Hono: Background Jobs in a Bun Web App'
+description: 'Add background jobs to a Hono app with bunqueue: enqueue from routes, process in a worker, expose job status endpoints, and shut down cleanly.'
 head:
   - tag: meta
     attrs:
@@ -14,7 +14,7 @@ head:
   <p class="bq-hero-sub">Return the HTTP response now, do the slow work later. This guide wires bunqueue into <a href="https://hono.dev">Hono</a>: enqueue from routes, process in a worker, check job status, shut down cleanly.</p>
 </div>
 
-This guide shows how to run background jobs, work your server does after the HTTP response is sent, inside a Hono app. Everything runs in one process using bunqueue's **embedded mode**, which stores jobs in a local SQLite file instead of a separate queue server.
+This guide shows how to run background jobs, work your server does after the HTTP response is sent, inside a Hono app. Everything runs in one process using bunqueue's **embedded mode**, configured with `dataPath` so jobs are stored in a local SQLite file instead of a separate queue server.
 
 :::note[Runtime]
 This guide runs Hono on Bun with the Bun `bunqueue` package; embedded mode is Bun-only. Running Hono on Node.js or Deno? Start a bunqueue server and use `bunqueue-client` instead, the route and worker code is otherwise the same (see [SDKs](/guide/sdks/)).
@@ -29,20 +29,25 @@ import { Hono } from 'hono';
 import { Queue, Worker, shutdownManager } from 'bunqueue/client';
 
 // Queue: where jobs wait. Worker: runs your function on each job.
-const emails = new Queue('emails', { embedded: true });
+const storage = { embedded: true, dataPath: './data/bunq.db' } as const;
+const emails = new Queue('emails', storage);
 
-new Worker('emails', async (job) => {
-  console.log('sending to', job.data.to);
-  // await sendEmail(job.data);
-  return { sent: true };
-}, { embedded: true, concurrency: 3 }); // 3 jobs in parallel
+new Worker(
+  'emails',
+  async (job) => {
+    console.log('sending to', job.data.to);
+    // await sendEmail(job.data);
+    return { sent: true };
+  },
+  { ...storage, concurrency: 3 }
+); // 3 jobs in parallel
 
 const app = new Hono();
 
 app.post('/api/send-email', async (c) => {
   const body = await c.req.json();
   const job = await emails.add('send', body, {
-    attempts: 3,   // retry up to 3 times on failure
+    attempts: 3, // retry up to 3 times on failure
     backoff: 5000, // wait 5s (then longer) between retries
   });
   return c.json({ queued: true, jobId: job.id });
@@ -86,13 +91,17 @@ app.get('/api/jobs/:id', async (c) => {
 ### Report progress from the worker
 
 ```typescript
-new Worker('reports', async (job) => {
-  await job.updateProgress(10, 'Fetching data');
-  const data = await fetchData(job.data);
-  await job.updateProgress(80, 'Rendering PDF');
-  const url = await renderPdf(data);
-  return { url };
-}, { embedded: true });
+new Worker(
+  'reports',
+  async (job) => {
+    await job.updateProgress(10, 'Fetching data');
+    const data = await fetchData(job.data);
+    await job.updateProgress(80, 'Rendering PDF');
+    const url = await renderPdf(data);
+    return { url };
+  },
+  { embedded: true, dataPath: './data/bunq.db' }
+);
 ```
 
 ### Expose queue stats
@@ -106,7 +115,10 @@ app.get('/api/queues/emails/stats', (c) => c.json(emails.getJobCounts()));
 ### React to job results
 
 ```typescript
-const worker = new Worker('emails', processor, { embedded: true });
+const worker = new Worker('emails', processor, {
+  embedded: true,
+  dataPath: './data/bunq.db',
+});
 
 worker.on('completed', (job, result) => console.log('done', job.id));
 worker.on('failed', (job, err) => console.error('failed', job.id, err.message));
@@ -122,8 +134,8 @@ import type { MiddlewareHandler } from 'hono';
 import { Queue } from 'bunqueue/client';
 
 const queues = {
-  emails: new Queue('emails', { embedded: true }),
-  reports: new Queue('reports', { embedded: true }),
+  emails: new Queue('emails', { embedded: true, dataPath: './data/bunq.db' }),
+  reports: new Queue('reports', { embedded: true, dataPath: './data/bunq.db' }),
 };
 
 type Env = { Variables: { queues: typeof queues } };
@@ -144,26 +156,52 @@ app.post('/api/reports', async (c) => {
 
 ### Run workers in a separate process
 
-In production you often want the web server and the workers to scale and restart independently. Both processes point at the same SQLite file via `dataPath`:
+In production you often want the web server and workers to scale and restart
+independently. Start one bunqueue server as the sole owner of the SQLite file,
+then connect both processes over TCP:
+
+```bash
+bunqueue start --data-path ./data/bunq.db
+```
+
+Use the same connection in the Hono app's `Queue` instances and the worker:
+
+```typescript
+// In the Hono app
+import { Queue } from 'bunqueue/client';
+
+const connection = { host: '127.0.0.1', port: 6789 };
+const queues = {
+  emails: new Queue('emails', { connection }),
+  reports: new Queue('reports', { connection }),
+};
+```
 
 ```typescript
 // worker-process.ts (run with: bun run worker-process.ts)
-import { Worker, shutdownManager } from 'bunqueue/client';
+import { Worker } from 'bunqueue/client';
 
-const worker = new Worker('emails', async (job) => {
-  // ... process job
-  return { success: true };
-}, { embedded: true, concurrency: 5 });
+const connection = { host: '127.0.0.1', port: 6789 };
+
+const worker = new Worker(
+  'emails',
+  async (job) => {
+    // ... process job
+    return { success: true };
+  },
+  { connection, concurrency: 5 }
+);
 
 process.on('SIGTERM', async () => {
   await worker.close(); // waits for active jobs to finish
-  shutdownManager();
   process.exit(0);
 });
 ```
 
 :::note
-Give both processes the same `dataPath` (or the same `BUNQUEUE_DATA_PATH` env var) so they share one database. For many producers and workers across machines, use [server mode](/guide/server/) instead.
+Never point two embedded processes at the same SQLite file. Multiple clients can
+share one SQLite-backed server over TCP; when several active broker processes
+must share the queue, use the [PostgreSQL backend](/guide/databases/).
 :::
 
 ### Shut down cleanly
@@ -190,7 +228,8 @@ process.on('SIGTERM', shutdown);
 - **CPU-heavy processors block the event loop**, the single thread Bun uses for all I/O. See [CPU-Intensive Workers](/guide/cpu-intensive-workers/) for yield patterns.
 
 :::tip[Related]
+
 - [Elysia Integration](/guide/elysia/) - Same pattern with schema validation
 - [Integrations Overview](/guide/integrations/) - All integrations
 - [Worker API](/guide/worker/) - Every worker option explained
-:::
+  :::

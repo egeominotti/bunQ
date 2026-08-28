@@ -1,9 +1,11 @@
 import type { Job, JobId, JobLock } from '../../domain/types/job';
+import type { CronJob } from '../../domain/types/cron';
 import type { JobLocation } from '../../domain/types/queue';
 import type { JobLogEntry } from '../../domain/types/worker';
 import { Shard } from '../../domain/queue/shard';
 import { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { CronScheduler } from '../../infrastructure/scheduler/cronScheduler';
+import { assertPersistedCronsSupported } from '../../infrastructure/scheduler/cron/persisted';
 import { RWLock } from '../../shared/lock';
 import { SHARD_COUNT } from '../../shared/hash';
 import { BoundedMap, BoundedSet, LRUMap } from '../../shared/lru';
@@ -96,6 +98,18 @@ export abstract class QueueManagerState {
   constructor(config: QueueManagerConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.storage = config.dataPath ? new SqliteStorage({ path: config.dataPath }) : null;
+    let persistedCrons: CronJob[];
+    try {
+      persistedCrons = this.storage?.loadCronJobs() ?? [];
+      assertPersistedCronsSupported(persistedCrons);
+    } catch (error) {
+      try {
+        this.storage?.close();
+      } catch {
+        // Preserve the read/validation error that made construction fail.
+      }
+      throw error;
+    }
     this.telemetryJournal = new QueueTelemetryJournal(
       this.storage,
       this.config.maxQueueEvents,
@@ -163,7 +177,7 @@ export abstract class QueueManagerState {
       });
     }
     this.recoveryStats = { queues: this.queueNamesCache.size, jobs: this.jobIndex.size };
-    if (this.storage) this.cronScheduler.load(this.storage.loadCronJobs());
+    if (this.storage) this.cronScheduler.load(persistedCrons);
     this.backgroundTaskHandles = bgTasks.startBackgroundTasks(
       this.contextFactory.getBackgroundContext(),
       this.cronScheduler

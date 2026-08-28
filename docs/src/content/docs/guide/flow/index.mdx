@@ -1,6 +1,6 @@
 ---
-title: "Flow Producer: Parent and Child Jobs in Bun"
-description: "Build job graphs in bunqueue: children run first, the parent runs once they finish and reads their results. Created atomically, persisted in SQLite."
+title: 'Flow Producer: Parent and Child Jobs in Bun'
+description: 'Build durable job graphs in bunqueue: children run first, then the parent reads their results. Flows are atomic in SQLite and PostgreSQL modes.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,21 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "flow producer bun, parent child jobs, job dependencies, job graph, fan-in queue, bullmq flowproducer alternative, dag jobs sqlite"
+      content: 'flow producer bun, parent child jobs, job dependencies, job graph, fan-in queue, bullmq flowproducer alternative, dag jobs sqlite'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · flow producer</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Jobs that <em>wait for each other.</em></h1>
-  <p class="bq-hero-sub">Some work only makes sense in order: resize every image, then build the album; charge each line, then close the invoice. A flow declares that shape once and bunqueue holds the parent until its children are done.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Jobs that <em>wait for each other.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Some work only makes sense in order: resize every image, then build the album; charge each line,
+    then close the invoice. A flow declares that shape once and bunqueue holds the parent until its
+    children are done.
+  </p>
 </div>
 
 A flow is a tree of jobs. Children are queued immediately, the parent stays blocked until every child has completed, and then runs with access to what they returned.
@@ -40,14 +46,18 @@ type ReportData = {
 const flow = new FlowProducer({ embedded: true });
 const rowsBySource = { sales: [120, 80], costs: [50, 20] };
 
-const worker = new Worker<ReportData>('reports', async (job) => {
-  if (job.name === 'build-report') {
-    const values = await job.getChildrenValues<{ rows: number[] }>();
-    return { report: Object.values(values) };
-  }
-  if (!job.data.source) throw new Error('source is required');
-  return { rows: rowsBySource[job.data.source] };
-}, { embedded: true });
+const worker = new Worker<ReportData>(
+  'reports',
+  async (job) => {
+    if (job.name === 'build-report') {
+      const values = await job.getChildrenValues<{ rows: number[] }>();
+      return { report: Object.values(values) };
+    }
+    if (!job.data.source) throw new Error('source is required');
+    return { rows: rowsBySource[job.data.source] };
+  },
+  { embedded: true }
+);
 
 const node = await flow.add<ReportData>({
   name: 'build-report',
@@ -207,7 +217,7 @@ let node = flow.add(FlowJob {
 })?;
 ```
 
-*Reading children results (`GetChildrenValues`) has no typed helper in the Rust SDK yet; use the documented wire protocol until it is added.*
+_Reading children results (`GetChildrenValues`) has no typed helper in the Rust SDK yet; use the documented wire protocol until it is added._
 
 </TabItem>
 <TabItem label="Elixir">
@@ -227,7 +237,7 @@ flow = Bunqueue.FlowProducer.new()
   })
 ```
 
-*Reading children results (`GetChildrenValues`) has no typed helper in the Elixir SDK yet; use the documented wire protocol until it is added.*
+_Reading children results (`GetChildrenValues`) has no typed helper in the Elixir SDK yet; use the documented wire protocol until it is added._
 
 </TabItem>
 </Tabs>
@@ -245,9 +255,11 @@ In the Bun package, FlowProducer works in TCP mode too: pass `connection: { port
 ### Creation guarantees and limits
 
 The Bun producer validates the complete graph before sending it and the broker
-validates it again. When the broker/embedded manager has a `dataPath`, one
-immediate SQLite transaction commits the graph before it is published to
-workers, even when individual nodes omit `durable: true`. Without a `dataPath`,
+validates it again. With a SQLite `dataPath`, one immediate transaction commits
+the graph before it is published to workers, even when individual nodes omit
+`durable: true`. PostgreSQL likewise admits the complete graph, dependency
+edges, queue registry changes, and durable events in one database transaction
+before any broker can claim a leaf. Without either persistent backend,
 embedded mode is intentionally memory-only: creation is still atomically
 visible to workers, but a process crash cannot recover it.
 
@@ -255,9 +267,9 @@ visible to workers, but a process crash cannot recover it.
   64 MB across the batch. A root is depth 0; descendants may be at most 100
   edges below it.
 - `jobId` is allowed, but cannot be empty or contain `:`. Reusing any existing
-  or retained flow ID—including SQLite/DLQ rows, completion/timeout tombstones,
-  retained results, and IDs still referenced by a waiting parent—rejects the
-  whole request.
+  or retained flow ID—including durable job/DLQ rows, completion or timeout
+  tombstones, retained results, and IDs still referenced by a waiting
+  parent—rejects the whole request in either persistent backend.
 - `name` inside user data is preserved independently from the job's own name.
   Keys beginning with `__` are reserved for engine-owned flow metadata.
 - `repeat`, `deduplication`, `debounce`, and `opts.parent` are rejected inside
@@ -268,7 +280,7 @@ visible to workers, but a process crash cannot recover it.
 Wire values are checked at runtime too: IDs must be strings, link fields must be
 string arrays, booleans must actually be booleans, and parent metadata must
 match both sides of every edge. These checks happen before any queue counter,
-heap, dependency index, or SQLite row changes.
+heap, dependency index, or selected-backend row changes.
 
 :::note
 When a child uses `removeOnComplete`, bunqueue retains a payload-free completion
@@ -283,8 +295,8 @@ a broker restart.
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Flow Patterns](/guide/flow/patterns/) | Chains, fan-in, trees, reading child results, options |
-| [Flow Failure Handling](/guide/flow/failures/) | What a parent does when a child dies for good |
-| [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field |
+|                                                   |                                                       |
+| ------------------------------------------------- | ----------------------------------------------------- |
+| [Flow Patterns](/guide/flow/patterns/)            | Chains, fan-in, trees, reading child results, options |
+| [Flow Failure Handling](/guide/flow/failures/)    | What a parent does when a child dies for good         |
+| [Flow Producer Reference](/guide/flow/reference/) | Every producer method, job helper and step field      |

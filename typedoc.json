@@ -11,7 +11,6 @@
     "src/client/forwarder.ts",
     "src/domain/types/queue.ts",
     "src/client/types.ts",
-    "src/client/worker/types.ts",
     "src/client/tcp/types.ts",
     "src/client/workflow/types.ts",
     "src/domain/types/job.ts",
@@ -21,11 +20,37 @@
     "src/domain/types/stall.ts"
   ],
   "out": "docs/public/reference/dev",
-  "tsconfig": "tsconfig.json",
+  "tsconfig": "tsconfig.typedoc.json",
   "skipErrorChecking": true,
   "excludePrivate": true,
+  "excludeProtected": true,
   "excludeInternal": true,
   "excludeExternals": true,
+  "intentionallyNotExported": [
+    "AckBatchOutcome",
+    "AckOutcome",
+    "AtomicFlowBatchInput",
+    "AtomicFlowBatchResult",
+    "CircuitState",
+    "CompletionOptions",
+    "ExtendedWorkerOptions",
+    "JobCounts",
+    "MemoryStats",
+    "OperationalMetrics",
+    "PerQueueStats",
+    "PoolOptions",
+    "PublicJobMethodContext",
+    "QueueJobCounts",
+    "QueueStats",
+    "RemoteQueueLike",
+    "RuntimeResult",
+    "SetLike",
+    "Shard",
+    "WebhookManager",
+    "WorkerInfo",
+    "WorkerManager"
+  ],
+  "treatWarningsAsErrors": true,
   "githubPages": false,
   "readme": "none",
   "customCss": "docs/typedoc-theme.css",
@@ -35,7 +60,5 @@
   },
   "categorizeByGroup": true,
   "searchInComments": true,
-  "sort": [
-    "alphabetical"
-  ]
+  "sort": ["alphabetical"]
 }

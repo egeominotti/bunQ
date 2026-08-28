@@ -1,6 +1,6 @@
 ---
 title: 'The Bun Job Queue: SQLite or PostgreSQL, No Redis'
-description: 'A complete Bun job queue: zero-infrastructure SQLite by default or PostgreSQL 15–18 multi-broker mode, with priorities, retries, cron, DLQ, and six SDKs.'
+description: 'A complete Bun job queue: memory or one-file SQLite for one process, or PostgreSQL 15–18 multi-broker mode, with priorities, retries, cron, DLQ, and six SDKs.'
 template: splash
 head:
   - tag: meta
@@ -18,19 +18,19 @@ head:
   - tag: meta
     attrs:
       name: 'twitter:title'
-      content: 'bunqueue, The Queue Is a File: Zero-Infrastructure Job Queue'
+      content: 'bunqueue: One-File SQLite or Multi-Broker PostgreSQL'
   - tag: meta
     attrs:
       name: 'twitter:description'
-      content: 'A complete Bun job queue with SQLite by default and optional PostgreSQL 15–18 multi-broker persistence. No Redis required.'
+      content: 'A complete Bun job queue with memory or one-file SQLite, plus optional PostgreSQL 15–18 multi-broker persistence. No Redis required.'
   - tag: meta
     attrs:
       name: 'keywords'
-      content: 'job queue, task queue, background jobs, bun, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
+      content: 'job queue, task queue, background jobs, bun, postgres queue, postgresql job queue, multi-broker queue, node.js, deno, python, cloudflare workers, bullmq alternative, redis alternative, sqlite queue, cron jobs, dead letter queue, message queue, worker queue'
   - tag: script
     attrs:
       type: 'application/ld+json'
-    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path batches persistence. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K figure is explicitly an internal in-memory batch path."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do."}}]}'
+    content: '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Can SQLite handle a production queue?","acceptedAnswer":{"@type":"Answer","text":"In WAL mode, yes: reads and writes overlap and the write path batches persistence. A native repeated-process campaign measured 186K jobs/sec public on-disk Embedded addBulk and 159K TCP PUSHB; the separate 729K figure is explicitly an internal in-memory batch path."}},{"@type":"Question","name":"Can bunqueue run multiple active brokers?","acceptedAnswer":{"@type":"Answer","text":"Yes. Standalone servers can use PostgreSQL 15 through 18 as one authoritative store. Brokers coordinate transactional claims, fenced leases, durable events, shared limits, cron, workers, results and DLQ state. PostgreSQL 18.6 is recommended."}},{"@type":"Question","name":"What happens on a crash?","acceptedAnswer":{"@type":"Answer","text":"With SQLite or PostgreSQL persistence configured, a restart recovers waiting, delayed and active jobs that were durably admitted. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable."}},{"@type":"Question","name":"Locks? \"database is locked\"?","acceptedAnswer":{"@type":"Answer","text":"SQLite uses exactly one process to open the file, embedded in your app or as the server, with any number of workers over TCP. For several active broker processes, use PostgreSQL multi-broker mode instead of sharing one SQLite file."}}]}'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
@@ -42,8 +42,8 @@ import BqIcon from '@components/BqIcon.astro';
   <div class="bq-hero-grid">
     <div class="bq-hero-left">
       <VersionPill />
-      <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">The queue is <em>a file.</em></span></h1>
-      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work by default</strong>: priorities, retries, cron, a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a>, and a native <a href="/guide/mcp/">MCP server</a>. Use one process and SQLite, or opt into PostgreSQL 15–18 when several brokers must share one authoritative queue; 18.6 is recommended. No Redis required. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
+      <h1 class="bq-hero-h1"><span class="bq-h1-brand">bunqueue.</span><br class="bq-h1-br"/><span class="bq-h1-line">One file. <em>Many brokers.</em></span></h1>
+      <p class="bq-hero-sub">bunqueue is <strong>zero-infrastructure background work by default</strong>: priorities, retries, cron, a dead letter queue, a <a href="/guide/workflow/">durable workflow engine</a>, and a native <a href="/guide/mcp/">MCP server</a>. Use one process in memory or with one SQLite file, or opt into PostgreSQL 15–18 when several brokers must share one authoritative queue; 18.6 is recommended. No Redis required. The queue speaks to <a href="/guide/sdks/">six languages</a>; the workflow engine runs in-process on Bun.</p>
 
       <div class="bq-hero-steps">
         <div class="bq-hero-step">
@@ -60,6 +60,17 @@ docker run -d --name bunqueue \
   -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
   ghcr.io/egeominotti/bunqueue:latest
+```
+
+            </TabItem>
+            <TabItem label="PostgreSQL · 2 brokers">
+
+```bash
+git clone --depth 1 https://github.com/egeominotti/bunqueue.git
+cd bunqueue
+POSTGRES_PASSWORD='replace-me' \
+  BUNQUEUE_POSTGRES_URL='postgres://bunqueue:replace-me@postgres:5432/bunqueue' \
+  docker compose -f docker-compose.postgres.yml up --build -d
 ```
 
             </TabItem>
@@ -133,7 +144,7 @@ cargo add bunqueue-client
         <a class="bq-btn" href="#quickstart">Get started in 60s</a>
         <a class="bq-btn-ghost" href="https://github.com/egeominotti/bunqueue">★ <span class="bq-stars-slot">Star</span> on GitHub</a>
       </div>
-      <p class="bq-hero-trust">MIT licensed · no signup, no server to run · same API on Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers</p>
+      <p class="bq-hero-trust">MIT licensed · embedded or standalone · protocol-conformant Queue/Worker/Flow core across Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers</p>
     </div>
 
   </div>
@@ -174,7 +185,8 @@ cargo add bunqueue-client
   <div class="bq-proof">
     <span><b>186K</b> jobs/sec public on-disk addBulk, embedded</span>
     <span><b>159K</b> jobs/sec PUSHB over TCP</span>
-    <span><b>5.5 MB</b> install, 2 runtime deps</span>
+    <span><b>PostgreSQL 15–18</b> multi-broker</span>
+    <span><b>1</b> runtime dependency</span>
     <span><b>500+</b> e2e scenarios across 7 runtimes</span>
     <span id="bq-npm-proof" hidden><b id="bq-npm-count"></b> npm downloads/week</span>
   </div>
@@ -183,7 +195,7 @@ cargo add bunqueue-client
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">capabilities</span>
   <h2 class="bq-h2">Not just a queue.</h2>
-  <p class="bq-lede">A queue is where bunqueue starts, not where it stops. The same process and the same SQLite file also give you a durable workflow engine with saga rollback, cron, a native MCP server for AI agents, and operations. Adopt one piece or all six, each stands on its own. Queue, cron, flows and operations are reachable from every client language; the workflow engine and its agent integrations are in-process Bun APIs.</p>
+  <p class="bq-lede">A queue is where bunqueue starts, not where it stops. Use memory by default, configure one SQLite file for local persistence, or choose an authoritative PostgreSQL database for a broker fleet. The server also provides cron, flows, a dead letter queue, shared operations, and a native MCP server for AI agents. Every official client shares the protocol-conformant Queue/Worker/Flow core; language-specific capabilities are listed in the <a href="/guide/sdks/#query-control-and-operations">SDK matrix</a>. The workflow engine and its agent integrations are in-process Bun APIs.</p>
 
   <div class="bq-tools">
     <div class="bq-tool">
@@ -203,7 +215,7 @@ cargo add bunqueue-client
     <div class="bq-tool">
       <BqIcon name="clock" />
       <h3>Cron &amp; schedulers</h3>
-      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted, never lost on restart.</p>
+      <p>Repeatable jobs with cron patterns, intervals and timezones, persisted across restarts when SQLite or PostgreSQL storage is configured.</p>
       <pre class="bq-tool-cmd">{"await app.cron('daily', '0 9 * * *', data)"}</pre>
       <ul class="bq-checks">
         <li><a href="/guide/cron/">Cron patterns</a></li>
@@ -313,7 +325,7 @@ Worker("emails", process,
     concurrency=10).run()
 ```
 
-      <p><a href="/guide/sdks/">same API, snake_case</a> · sync producer, threaded workers</p>
+      <p><a href="/guide/sdks/">familiar API, snake_case</a> · sync producer, threaded workers</p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: #777bb3"></span> PHP</h3>
@@ -373,7 +385,7 @@ let worker = Worker::new("emails",
 worker.run()?;
 ```
 
-      <p><a href="/guide/sdks/">typed options, no insecure TLS mode</a> · <a href="https://crates.io/crates/bunqueue-client">crates.io</a></p>
+      <p><a href="/guide/sdks/">typed options, no insecure TLS mode</a> · <a href="https://docs.rs/bunqueue-client/latest/bunqueue_client/">API docs</a></p>
     </div>
     <div class="bq-lang">
       <h3><span class="bq-dot" style="background: #6e4a7e"></span> Elixir</h3>
@@ -634,7 +646,7 @@ mix run app.exs
         </TabItem>
       </Tabs>
 
-      <p class="bq-step-note">That's the whole setup, in any of the six languages. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>; on the server, <code>--data-path</code> persists everything to a single SQLite file. <a href="/guide/quickstart/">Full quickstart</a> · <a href="/guide/sdks/">SDK guide</a></p>
+      <p class="bq-step-note">That's the whole setup, in any of the six languages. Retries, priorities, cron, rate limits and the dead letter queue are options on <code>add()</code>. Use <code>--data-path</code> for a single SQLite-backed server, or <code>BUNQUEUE_POSTGRES_URL</code> when several servers must share one queue. <a href="/guide/quickstart/">Full quickstart</a> · <a href="/guide/databases/">Storage guide</a> · <a href="/guide/sdks/">SDK guide</a></p>
     </div>
 
   </div>
@@ -643,7 +655,7 @@ mix run app.exs
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">vs bullmq</span>
   <h2 class="bq-h2">Same job, three fewer boxes.</h2>
-  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes the requirement: the queue lives in your process and persists to one file. Coming from Celery, Sidekiq or asynq instead? Same trade: the broker box is the part that disappears.</p>
+  <p class="bq-lede">BullMQ is excellent software that requires Redis. bunqueue removes that requirement: run the queue in your process and persist it to one SQLite file, or reuse PostgreSQL when you need several active brokers. Coming from Celery, Sidekiq or asynq instead? The public queue contract stays familiar while Redis remains optional infrastructure you do not need.</p>
 
 <div class="bq-vs">
   <div class="bq-vs-card">
@@ -743,8 +755,8 @@ mix run app.exs
     </div>
     <div class="bq-trust-card">
       <span class="bq-tag">durability</span>
-      <h3>Buffered writes by default</h3>
-      <p>Writes are batched for up to 10ms, that buffer is what buys ~100K jobs/sec. A hard crash inside the window can lose those jobs. Jobs that cannot tolerate it take <code>{"{ durable: true }"}</code> and hit disk before <code>add()</code> returns.</p>
+      <h3>SQLite lets you choose</h3>
+      <p>SQLite batches non-durable writes for up to 10ms; a process crash inside that window can lose them. Jobs that cannot tolerate bunqueue's buffer take <code>{"{ durable: true }"}</code> and commit before <code>add()</code> returns. PostgreSQL admissions are transactional and do not use this buffer; machine/power-loss durability remains a storage-operator concern.</p>
     </div>
     <div class="bq-trust-card">
       <span class="bq-tag">scaling</span>
@@ -787,21 +799,47 @@ mix run app.exs
 
 <div class="bq-wrap bq-section">
   <span class="bq-eyebrow">persistence</span>
-  <h2 class="bq-h2">One process. One file.</h2>
-  <div class="bq-file">
-    <p class="bq-lede">
-      Point <code>dataPath</code> at <code>bunq.db</code> and everything the queue knows lives
-      there: jobs and their states, schedules, results, the dead letter queue. Back it up with{' '}
-      <code>cp</code>, inspect it with <code>sqlite3</code>, ship it to S3 on a schedule. Your
-      infrastructure diagram loses three boxes, and there is no version skew between the queue and
-      its store.
-    </p>
-    <pre class="bq-tree">
-      production/ ├── app/ <i>your services</i>
-      └── data/ └── <b>bunq.db</b> <i>the entire queue</i>· jobs <i>waiting · active · completed</i>
-      · cron <i>schedules and repeatables</i>· dlq <i>failed jobs, kept</i>· results{' '}
-      <i>return values</i>
-    </pre>
+  <h2 class="bq-h2">Start in one file. Scale into shared SQL.</h2>
+  <p class="bq-lede">
+    Choose the operational boundary that fits today. Storage selection changes the deployment
+    topology, not the client API or job lifecycle.
+  </p>
+  <div class="bq-trust">
+    <div class="bq-trust-card">
+      <span class="bq-tag">default</span>
+      <h3>SQLite · one broker</h3>
+      <p>
+        Point <code>dataPath</code> at <code>bunq.db</code>. Jobs, schedules, results and the DLQ
+        live in one inspectable file, with no external service and built-in S3 snapshots.
+      </p>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">multi-broker</span>
+      <h3>PostgreSQL 15–18</h3>
+      <p>
+        Several standalone servers share transactional claims, fenced leases, durable events,
+        limits, cron, workers, job-state/lifecycle metrics, flows and DLQ state. PostgreSQL 18.6 is recommended.
+      </p>
+    </div>
+    <div class="bq-trust-card">
+      <span class="bq-tag">native Bun</span>
+      <h3>No ORM. No Redis.</h3>
+      <p>
+        The PostgreSQL path uses Bun's built-in <code>SQL</code> pool and prepared tagged templates
+        directly. SQLite keeps its synchronous <code>bun:sqlite</code> hot path.
+      </p>
+    </div>
+  </div>
+  <div class="bq-actions" style="margin-top: 1.4rem;">
+    <a class="bq-btn" href="/guide/databases/">
+      Choose a storage mode
+    </a>
+    <a
+      class="bq-btn-ghost"
+      href="https://github.com/egeominotti/bunqueue/blob/main/docker-compose.postgres.yml"
+    >
+      Run the two-broker topology
+    </a>
   </div>
 </div>
 
@@ -1008,11 +1046,11 @@ Bunqueue.Worker.run(worker)
     </div>
     <div class="bq-trust-card">
       <h3>What happens on a crash?</h3>
-      <p>Jobs live in SQLite, so a restart recovers waiting, delayed and active jobs. A worker that dies mid-job is caught by stall detection and its jobs are requeued. Jobs that keep failing land in the dead letter queue, kept and retryable.</p>
+      <p>With SQLite or PostgreSQL persistence configured, a restart recovers waiting, delayed and active work that was durably admitted. A worker that dies mid-job is caught by stall detection; PostgreSQL mode additionally fences the old lease before another broker recovers it. Repeated failures land in the retryable dead letter queue.</p>
     </div>
     <div class="bq-trust-card">
-      <h3>Locks? "database is locked"?</h3>
-      <p>Not in the supported topology: exactly one process opens the file, embedded in your app or as the server, and any number of workers connect over TCP. Two processes on one file is the single thing the docs tell you not to do.</p>
+      <h3>Can I run multiple brokers?</h3>
+      <p>Yes, with PostgreSQL 15–18. Independent servers claim jobs with <code>FOR UPDATE SKIP LOCKED</code>, coordinate through database-clock leases and replay missed notifications from a durable event journal. Do not point multiple processes at one SQLite file.</p>
     </div>
   </div>
   <p class="bq-dash-links" style="margin-top: 1.4rem;">More answers in the <a href="/faq/">FAQ</a>: deduplication, ordering, backups, memory, Postgres.</p>

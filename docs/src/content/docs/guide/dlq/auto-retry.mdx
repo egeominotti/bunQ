@@ -1,6 +1,6 @@
 ---
-title: "Automatic DLQ Retry"
-description: "How bunqueue automatically redelivers DLQ jobs with a bounded exponential policy that survives SQLite-backed broker restarts."
+title: 'Automatic DLQ Retry'
+description: 'How bunqueue automatically redelivers DLQ jobs with a bounded exponential policy that survives SQLite or PostgreSQL broker restarts.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "dlq auto retry, exponential backoff retry, automatic requeue, maxAutoRetries, autoRetryInterval, transient failure recovery"
+      content: 'dlq auto retry, exponential backoff retry, automatic requeue, maxAutoRetries, autoRetryInterval, transient failure recovery'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · dead letter queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Retries that happen <em>without you.</em></h1>
-  <p class="bq-hero-sub">Some failures are transient. Auto-retry puts a due DLQ entry back into its queue, preserves its failure history, and stops after the configured retry budget.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Retries that happen <em>without you.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Some failures are transient. Auto-retry puts a due DLQ entry back into its queue, preserves its
+    failure history, and stops after the configured retry budget.
+  </p>
 </div>
 
 ## Automatic Retry
@@ -27,7 +32,8 @@ entry time plus `autoRetryInterval`. The broker's DLQ maintenance task checks
 due entries every 60 seconds by default, removes each due entry from the
 DLQ, advances its automatic retry counter, resets the job's normal attempt and
 stall counters, and re-queues it. SQLite-backed queues perform the DLQ deletion
-and waiting-job insertion atomically.
+and waiting-job insertion atomically; PostgreSQL performs the corresponding
+generation transition in one transaction under the shared dependency lock plan.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -35,7 +41,7 @@ and waiting-job insertion atomically.
 ```typescript
 queue.setDlqConfig({
   autoRetry: true,
-  autoRetryInterval: 60000,  // base delay: 1 minute
+  autoRetryInterval: 60000, // base delay: 1 minute
   maxAutoRetries: 3,
 });
 // In TCP mode, prefer await queue.setDlqConfigAsync(...) to confirm the write.
@@ -47,7 +53,7 @@ queue.setDlqConfig({
 ```typescript
 await queue.setDlqConfig({
   autoRetry: true,
-  autoRetryInterval: 60000,  // base delay: 1 minute
+  autoRetryInterval: 60000, // base delay: 1 minute
   maxAutoRetries: 3,
 });
 ```
@@ -114,7 +120,7 @@ curl -X PUT http://localhost:6790/queues/emails/dlq-config \
 The config lives server-side per queue, so setting it from any client applies
 to jobs produced and consumed in every language. The policy, retry counter,
 complete failure history, original entry/expiry times, and next retry time all
-survive a SQLite-backed broker restart.
+survive a SQLite or PostgreSQL broker restart.
 
 The first retry becomes due after the base interval. Each dispatch increments
 `retryCount`; if the redelivered job fails again, its next delay follows
@@ -130,10 +136,10 @@ normal attempt/stall counters before re-queuing the job.
 
 ## Where to go next
 
-| | |
-|---|---|
+|                                                           |                                                     |
+| --------------------------------------------------------- | --------------------------------------------------- |
 | [DLQ Operations from the Queue Object](/guide/queue/dlq/) | The same operations from an existing Queue instance |
-| [Dead Letter Queue](/guide/dlq/) | What the DLQ is, and a first look at what failed |
-| [DLQ Operations](/guide/dlq/operations/) | Filter, retry selectively, check health, purge |
-| [DLQ Configuration](/guide/dlq/configuration/) | autoRetry, maxAge, maxEntries and the defaults |
-| [DLQ Reference](/guide/dlq/reference/) | Failure reasons, entry shape, every DLQ method |
+| [Dead Letter Queue](/guide/dlq/)                          | What the DLQ is, and a first look at what failed    |
+| [DLQ Operations](/guide/dlq/operations/)                  | Filter, retry selectively, check health, purge      |
+| [DLQ Configuration](/guide/dlq/configuration/)            | autoRetry, maxAge, maxEntries and the defaults      |
+| [DLQ Reference](/guide/dlq/reference/)                    | Failure reasons, entry shape, every DLQ method      |

@@ -1,12 +1,9 @@
 import type { TransactionSQL } from 'bun';
 import { createCronJob, type CronJob, type CronJobInput } from '../../../domain/types/cron';
 import { createJob, generateJobId, type JobInput } from '../../../domain/types/job';
-import {
-  expandCronShortcut,
-  getNextCronRun,
-  getNextIntervalRun,
-  validateCronExpression,
-} from '../../scheduler/cronParser';
+import { expandCronShortcut, getNextCronRun, getNextIntervalRun } from '../../scheduler/cronParser';
+import { assertPersistedCronSupported } from '../../scheduler/cron/persisted';
+import { assertValidCronInput } from '../../scheduler/cron/validation';
 import { postgresAdvisoryLockName } from './advisoryLocks';
 import { admitPostgresJob } from './admission';
 import { decodePostgresValue, encodePostgresValue } from './codec';
@@ -27,17 +24,12 @@ export function decodePostgresCron(row: PostgresCronRow): CronJob {
   if (!cron) throw new Error(`Corrupt PostgreSQL cron payload for ${row.name}`);
   cron.nextRun = Number(row.next_run);
   cron.executions = row.executions;
+  assertPersistedCronSupported(cron);
   return cron;
 }
 
 function validateInput(input: CronJobInput): void {
-  if (!input.schedule && !input.repeatEvery) {
-    throw new Error('Cron job must have either schedule or repeatEvery');
-  }
-  if (input.schedule) {
-    const error = validateCronExpression(expandCronShortcut(input.schedule), input.timezone);
-    if (error) throw new Error(`Invalid cron expression: ${error}`);
-  }
+  assertValidCronInput(input);
 }
 
 function nextRun(input: CronJobInput, now: number): number {

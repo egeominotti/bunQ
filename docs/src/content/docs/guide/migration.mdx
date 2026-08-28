@@ -1,6 +1,6 @@
 ---
 title: 'Replace BullMQ: Migrate to bunqueue in Minutes'
-description: 'Replace BullMQ with bunqueue in minutes: keep your Queue and Worker API, delete the Redis config, switch to Bun-native SQLite.'
+description: 'Replace BullMQ with bunqueue in minutes: keep your Queue and Worker API, delete Redis, and choose Bun-native SQLite or PostgreSQL multi-broker storage.'
 head:
   - tag: meta
     attrs:
@@ -22,6 +22,34 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 </div>
 
 This page is for BullMQ users. It shows the full before/after up front, then walks the steps and the few API differences that actually matter.
+
+## Before upgrading bunqueue 2.8 to 2.9
+
+bunqueue 2.9 replaces Croner with Bun 1.4's native cron parser. Standard
+five-field schedules, the documented leading-seconds six-field form, and the
+published shortcuts continue to work. Croner-only extensions such as `L`, `W`,
+`#`, `+`, `?`, and seven-field years do not.
+
+Before stopping a 2.8 broker, inventory persisted schedules:
+
+```bash
+bunqueue cron list
+bunqueue cron delete legacy-last-day
+# Recreate it with a supported schedule through your normal cron add/API path.
+```
+
+Do this while 2.8 is still running for both SQLite and PostgreSQL deployments.
+On startup, 2.9 validates the complete persisted collection before advancing
+any missed schedule. If one unsupported definition remains, startup fails with
+its escaped name and schedule plus remediation guidance; this prevents a
+silent omission or a due-timer retry loop. Do not hand-edit PostgreSQL cron
+payloads: replace or delete them through the 2.8 public API.
+
+Interval definitions are also checked before any scheduler, deduplication, or
+database mutation. `repeatEvery` must be a positive safe integer in milliseconds.
+Invalid legacy or corrupt rows fail startup with the cron name and remediation
+guidance. When both a valid calendar schedule and interval are present, the
+calendar schedule continues to take precedence for backward compatibility.
 
 ## The whole migration, one diff
 
@@ -127,9 +155,10 @@ Then, in your code:
 - **Job states**: the full BullMQ v5 state machine, including `prioritized` and `waiting-children`.
 - **Flows**: `FlowProducer.add()`, `addBulk()`, `getFlow()`,
   `queuesOptions`, `failParentOnFailure`, `removeDependencyOnFailure`. The Bun
-  package sends one broker-side `PUSHF` graph; configured SQLite commits all
-  rows before publication, providing the same all-or-nothing creation
-  guarantee without client-side rollback.
+  package sends one broker-side `PUSHF` graph. Configured SQLite commits every
+  row before publishing local state, while PostgreSQL commits the complete graph
+  in one database transaction; both provide all-or-nothing creation without
+  client-side rollback.
 - **Per-worker rate limiting**: `limiter: { max, duration }` on `WorkerOptions`, unchanged.
 
 ```typescript
@@ -202,7 +231,8 @@ enforced by the broker in both embedded and TCP modes. It defaults to 1,000 ms.
 
 ### No Redis required
 
-bunqueue uses one SQLite broker by default, and many workers may connect over
+bunqueue uses in-memory storage when no persistence backend is configured. A
+single broker can opt into SQLite persistence while many workers connect over
 TCP. If the broker tier must scale, standalone servers can instead share a
 PostgreSQL 15–18 database/namespace (18.6 recommended). This is not Redis Cluster and does not copy
 its topology or Redis-specific semantics; see [storage

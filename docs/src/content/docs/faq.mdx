@@ -43,7 +43,7 @@ Bun 1.4.0 or newer (enforced via the package `engines` field) on macOS, Linux, o
 
 ### How heavy is the install?
 
-Two runtime dependencies: `croner` (cron parsing) and `msgpackr` (binary serialization). `bun add bunqueue` installs 7 packages totaling about 5.5 MB. The MCP SDK is an optional peer dependency: only install `@modelcontextprotocol/sdk` if you use the [MCP server](/guide/mcp/), the launcher tells you if it is missing. Queue and Worker users never need it.
+One runtime dependency: `msgpackr` for the MessagePack wire and persistence formats. Cron parsing uses Bun's native `Bun.cron.parse()`. The MCP SDK is an optional peer dependency: only install `@modelcontextprotocol/sdk` if you use the [MCP server](/guide/mcp/), the launcher tells you if it is missing. Queue and Worker users never need it.
 
 ## Modes and storage
 
@@ -66,7 +66,15 @@ bunqueue start
 
 ### How does persistence work?
 
-Jobs are written to SQLite in WAL mode (write-ahead logging, a journal that lets reads and writes overlap). By default writes are buffered for up to 10ms and flushed in batches, which is what enables ~100k jobs/sec. If a 10ms loss window is unacceptable for a job, add it with `{ durable: true }` to write it to disk before `add()` returns (~10k jobs/sec). Details in [configuration](/guide/configuration/).
+Jobs are written to SQLite in WAL mode (write-ahead logging, a journal that lets
+reads and writes overlap). By default writes are buffered for up to 10 ms and
+flushed in batches. If that process-crash window is unacceptable for a job, add
+it with `{ durable: true }` to commit before `add()` returns. This closes
+bunqueue's application buffer; power-loss durability still depends on SQLite's
+host, filesystem, and storage. Current native
+evidence measures public on-disk `addBulk` and sequential durable adds as
+separate workloads; see [benchmarks](/guide/benchmarks/) rather than comparing
+one rounded headline.
 
 In PostgreSQL mode, PostgreSQL is authoritative and each mutation is
 transactional. Competing brokers claim with row locks and `SKIP LOCKED`; opaque
@@ -75,10 +83,11 @@ published performance figures do not apply to that backend.
 
 ### Can I use PostgreSQL or MySQL instead?
 
-PostgreSQL **18.6 is supported in standalone server mode** and allows multiple
-active bunqueue brokers to share one database/namespace. SQLite remains the
-default and the only persistent embedded backend. MySQL is not supported. See
-[storage backends](/guide/databases/) for configuration and boundaries.
+PostgreSQL **15–18 is supported in standalone server mode** and allows multiple
+active bunqueue brokers to share one database/namespace; 18.6 is pinned and
+recommended. SQLite remains the default and the only persistent embedded
+backend. MySQL is not supported. See [storage backends](/guide/databases/) for
+configuration and boundaries.
 
 ### How do I back up and restore?
 
@@ -88,7 +97,11 @@ For SQLite, enable the built-in S3 backup (`S3_BACKUP_ENABLED=1` plus bucket and
 
 ### How fast is it?
 
-In the default buffered mode, around 100k jobs/sec sustained pushes, with up to a 10ms data-loss window if the process dies mid-flush. In durable mode (write confirmed to disk per job), around 10k jobs/sec with no loss window. Bulk and concurrent pushes go higher, embedded mode higher still. Dated, reproducible methodology lives on the [benchmarks page](/guide/benchmarks/).
+The current native campaign measured a **186,384 jobs/s median** for public
+on-disk Embedded `addBulk`, **158,779 jobs/s** for TCP `PUSHB`, and **60,835 / 27,191
+ops/s** for sequential durable Embedded/TCP adds. These are different workloads,
+not one interchangeable throughput number. Dated distributions, integrity
+totals, and methodology live on the [benchmarks page](/guide/benchmarks/).
 
 ### How do I get more throughput?
 
@@ -250,7 +263,11 @@ single-broker. This is not a multi-region consensus layer; see
 
 ### Is bunqueue production-ready?
 
-Yes. Retries with backoff, stall detection, a dead letter queue, rate limiting, native TLS, Prometheus metrics, and S3 backups are all built in. The [production guide](/guide/production/) covers deployment, sizing, and operations.
+Yes. Retries with backoff, stall detection, a dead letter queue, rate limiting,
+native TLS, and Prometheus metrics are built in. SQLite mode also includes S3
+snapshots; PostgreSQL deployments use their database's backup and PITR tooling.
+The [production guide](/guide/production/) covers deployment, sizing, and
+operations.
 
 ## Migration
 
@@ -280,7 +297,12 @@ await queue.addBulk(
 
 ### Do workflows survive restarts?
 
-Yes. Execution state (current step, step results, received signals) is persisted in SQLite, so workflows resume after a restart and can be inspected at any time. The Engine works in both embedded and TCP server mode, it accepts the same connection options as `Queue`.
+Yes, when the `Engine` has a persistent `dataPath`. Its execution state (current
+step, step results, received signals) lives in that local SQLite file, so
+`recover()` can resume it after a restart. Without `dataPath`, the workflow store
+is in memory and does not survive process exit. The Engine can enqueue work
+through embedded, TCP, or PostgreSQL-backed bunqueue servers, but PostgreSQL does
+not replace this separate local workflow store.
 
 ## Troubleshooting
 

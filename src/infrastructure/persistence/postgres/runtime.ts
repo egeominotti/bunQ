@@ -3,7 +3,7 @@ import { releasePostgresBrokerLeases } from './leaseRelease';
 import { PostgresEventStream } from './events';
 import { prunePostgresEventCommits } from './eventJournal';
 import { maintainPostgresDlq, repairPostgresDlq } from './dlqMaintenance';
-import { processPostgresCrons, reconcilePostgresCronsOnStartup } from './crons';
+import { listPostgresCrons, processPostgresCrons, reconcilePostgresCronsOnStartup } from './crons';
 import { purgeStalePostgresWorkers, removePostgresBrokerWorkers } from './workers';
 import { initializePostgresSchema } from './schemaInitialization';
 import type { PostgresContext } from './context';
@@ -232,6 +232,7 @@ export class PostgresQueueStoreRuntime {
     try {
       await this.context.sql.connect();
       await initializePostgresSchema(this.context);
+      await listPostgresCrons(this.context);
       await registerPostgresBroker(this.context);
       this.brokerRegistrationStarted = true;
       await reconcilePostgresCronsOnStartup(this.context);

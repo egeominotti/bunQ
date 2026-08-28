@@ -48,6 +48,21 @@ same check as `bun run check` from `sdk/typescript/` and owns nested Oxc configs
 so it also works as a standalone checkout. CI, the pre-commit hook, and both
 isolated validation images invoke these same scripts.
 
+## Generated API reference
+
+`bun run docs:api` generates the current minor's TypeDoc tree from every public
+package entry point. TypeDoc reads `tsconfig.typedoc.json` so the optional MCP
+export is included even though the production type-check configuration excludes
+that subtree. Private and protected implementation members stay out of the
+published surface.
+
+Generation treats warnings as errors. A type reachable from a public signature
+must either be documented through a real entry point or listed as a deliberate
+internal structural helper in `typedoc.json`; an unmatched entry-point pattern or
+unresolved type link blocks the release. The generated current tree is indexable,
+while older minor trees receive `noindex, follow`. The complete contract and
+versioning rationale live in [Generated API Reference](../generated-api-reference.md).
+
 ## Release checks
 
 - `bun run check:docs-data` verifies generated documentation metadata.

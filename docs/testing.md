@@ -53,7 +53,7 @@ sandbox after the macOS host had passed:
   its extraction directory and never sees the consumer's `node_modules`. Only
   the real installed layout exercises the published resolution paths.
 - **Provide exactly the manifest's declared dependencies.** The consumer links
-  `croner` and `msgpackr` from the repository's `node_modules`, which keeps the
+  `msgpackr` from the repository's `node_modules`, which keeps the
   test offline while asserting the stronger property: the declared dependency
   set is sufficient to import every entrypoint. A runtime import that the
   manifest forgets to declare fails here instead of in a user's project.
@@ -382,7 +382,7 @@ language covers the same failure classes, with idiomatic mechanics:
 | Layer                    | Required SDK evidence                                                                                                                                                                                                                   |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit / integration / E2E | Pure option and wire logic, real TCP framing, Queue/Worker/Flow business paths, and permanent regressions for fixed bugs                                                                                                                |
-| Contract                 | All 17 independent producer/consumer conformance checks                                                                                                                                                                                 |
+| Contract                 | All 18 independent producer/consumer conformance checks                                                                                                                                                                                 |
 | Race / idempotency       | Many independent connections retry one custom id; many live connections contend for one lease; worker concurrency stays bounded                                                                                                         |
 | Property / fuzz          | Native generators shrink flow plans while checking graph conservation, reciprocal edges, ordering, reserved metadata, and zero I/O on invalid input; malformed/deep/cyclic/extension corpora fail typed and leave the connection usable |
 | Mutation                 | A pinned native mutation engine challenges the pure flow planner of every SDK except TypeScript (no engine, fast-check only) on scheduled/manual CI; surviving non-equivalent mutants require a stronger invariant                      |

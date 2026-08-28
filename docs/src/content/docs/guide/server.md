@@ -1,6 +1,6 @@
 ---
-title: "Server Mode: Standalone TCP & HTTP Service"
-description: "Deploy bunqueue as a standalone server with TCP and HTTP APIs. Multi-client support, token auth, Docker deployment, and graceful shutdown."
+title: 'Server Mode: SQLite or PostgreSQL over TCP & HTTP'
+description: 'Deploy bunqueue as one SQLite broker or a PostgreSQL 15–18 broker fleet, with TCP/HTTP APIs, token auth, Docker, and graceful shutdown.'
 head:
   - tag: meta
     attrs:
@@ -10,11 +10,11 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · standalone</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Server mode, one process for <em>all.</em></h1>
-  <p class="bq-hero-sub">Run bunqueue as its own process so multiple apps and services can share one queue. Producers and workers connect over TCP, with token auth, Docker deployment, and graceful shutdown built in.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">One server API. <em>One or many brokers.</em></h1>
+  <p class="bq-hero-sub">Run bunqueue as a standalone service so multiple apps can share a queue. Keep one memory/SQLite broker, or point several brokers at PostgreSQL 15–18; producers and workers use the same TCP API either way.</p>
 </div>
 
-Embedded mode ties the queue to one process. Server mode runs bunqueue standalone: your API adds jobs from one service, workers process them from another, and non-Bun clients (Node.js, Python) join over the wire. The server listens on two ports: **6789** (TCP, the fast binary protocol clients use) and **6790** (HTTP, REST API and metrics).
+Embedded mode ties the queue to one Bun process. Server mode runs bunqueue standalone: your API adds jobs from one service, workers process them from another, and all six external SDKs join over the wire. Every broker listens on two ports: **6789** (TCP, the fast binary protocol clients use) and **6790** (HTTP, REST API and metrics).
 
 ## Start the server
 
@@ -27,9 +27,15 @@ bunqueue start \
   --tcp-port 6789 \
   --http-port 6790 \
   --data-path ./data/queue.db
+
+# PostgreSQL: use a unique BUNQUEUE_BROKER_ID in every active process
+BUNQUEUE_POSTGRES_URL='postgres://bunqueue:secret@postgres:5432/bunqueue' \
+BUNQUEUE_POSTGRES_NAMESPACE=production \
+BUNQUEUE_BROKER_ID=broker-a \
+bunqueue start
 ```
 
-Always set `--data-path` in production. Without it, jobs live in memory and are lost on restart.
+Always select durable storage in production: set a SQLite `--data-path`, or configure `BUNQUEUE_POSTGRES_URL` for the server-only multi-broker backend. Without either, jobs live in memory and are lost on restart. PostgreSQL 15–18 is tested in CI and 18.6 is recommended; see [Storage backends](/guide/databases/).
 
 ## Connect from your app
 
@@ -54,12 +60,12 @@ const queue = new Queue('tasks', {
   connection: {
     host: '192.168.1.100',
     port: 6789,
-    token: 'my-secret-token',  // Required if the server sets AUTH_TOKENS
-  }
+    token: 'my-secret-token', // Required if the server sets AUTH_TOKENS
+  },
 });
 ```
 
-Not on Bun? Use the [client SDKs](/guide/sdks/) for Node.js, Deno, Python, and Cloudflare Workers.
+Not on Bun? Use the [client SDKs](/guide/sdks/) for TypeScript on Node.js/Deno/Cloudflare Workers, Python, PHP, Go, Rust, or Elixir.
 
 ## Add authentication
 
@@ -87,14 +93,18 @@ export default defineConfig({
 
 See [Configuration File](/guide/configuration/) for every option. Environment variables work too, as a fallback:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TCP_PORT` | `6789` | TCP server port |
-| `HTTP_PORT` | `6790` | HTTP server port |
-| `HOST` | `0.0.0.0` | Bind address |
-| `BUNQUEUE_DATA_PATH` | (memory) | SQLite database path |
-| `AUTH_TOKENS` | (none) | Comma-separated auth tokens |
-| `LOG_FORMAT` | `text` | Log format (`text` / `json`) |
+| Variable                      | Default   | Description                                              |
+| ----------------------------- | --------- | -------------------------------------------------------- |
+| `TCP_PORT`                    | `6789`    | TCP server port                                          |
+| `HTTP_PORT`                   | `6790`    | HTTP server port                                         |
+| `HOST`                        | `0.0.0.0` | Bind address                                             |
+| `BUNQUEUE_STORAGE_DRIVER`     | inferred  | `memory`, `sqlite`, or `postgres`                        |
+| `BUNQUEUE_DATA_PATH`          | (memory)  | SQLite database path                                     |
+| `BUNQUEUE_POSTGRES_URL`       | (none)    | PostgreSQL URL; selects `postgres` when no driver is set |
+| `BUNQUEUE_POSTGRES_NAMESPACE` | `default` | Isolates a bunqueue installation in one database         |
+| `BUNQUEUE_BROKER_ID`          | generated | Unique stable identity for each active PostgreSQL broker |
+| `AUTH_TOKENS`                 | (none)    | Comma-separated auth tokens                              |
+| `LOG_FORMAT`                  | `text`    | Log format (`text` / `json`)                             |
 
 Priority when the same option is set in more than one place: CLI flags > config file > environment variables > defaults. Full list in [Environment Variables](/guide/env-vars/).
 
@@ -106,7 +116,7 @@ Pin the exact version when the server and client must move together:
 ```bash
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:2.8.61
+  ghcr.io/egeominotti/bunqueue:2.9.0
 ```
 
 `ghcr.io/egeominotti/bunqueue:latest` points to the same digest when a release
@@ -140,7 +150,7 @@ On `SIGINT` or `SIGTERM` the server:
 
 1. Stops accepting new connections
 2. Waits for active jobs to finish (30s timeout, configurable via `SHUTDOWN_TIMEOUT_MS`)
-3. Flushes data to disk
+3. Flushes SQLite writes or drains admitted PostgreSQL operations and maintenance
 4. Exits cleanly
 
 ## Connect AI agents (MCP)
@@ -158,8 +168,9 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 Point the MCP server at your instance with `BUNQUEUE_MODE=tcp`, `BUNQUEUE_HOST`, `BUNQUEUE_PORT`, and `BUNQUEUE_TOKEN` (when auth is on). Agents get 73 tools to add jobs, manage queues, schedule crons, and monitor everything. Full setup, including Claude Desktop, Cursor, and Windsurf config, in the [MCP guide](/guide/mcp/).
 
 :::tip[Related Guides]
+
 - [Environment Variables](/guide/env-vars/), all server configuration options
 - [CLI Commands](/guide/cli/), manage the server from the terminal
 - [Security Best Practices](/security/), secure your deployment
 - [Monitoring & Prometheus Metrics](/guide/monitoring/), watch server health
-:::
+  :::

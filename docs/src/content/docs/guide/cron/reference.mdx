@@ -1,6 +1,6 @@
 ---
-title: "Cron Reference: Expressions, Options, MCP"
-description: "Reference for bunqueue scheduling: the five-field cron syntax and its shortcuts, every repeat option with defaults and per-SDK naming, and cron control from AI agents."
+title: 'Cron Reference: Expressions, Options, MCP'
+description: 'Reference for bunqueue scheduling: the five-field cron syntax and its shortcuts, every repeat option with defaults and per-SDK naming, and cron control from AI agents.'
 head:
   - tag: meta
     attrs:
@@ -9,59 +9,87 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "cron expression cheat sheet, cron syntax reference, preventOverlap, skipIfNoWorker, skipMissedOnRestart, cron mcp, scheduler options"
+      content: 'cron expression cheat sheet, cron syntax reference, preventOverlap, skipIfNoWorker, skipMissedOnRestart, cron mcp, scheduler options'
 ---
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron jobs</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every field, every <em>option.</em></h1>
-  <p class="bq-hero-sub">The expression syntax with its shortcuts, the full repeat option table with defaults and the naming each SDK uses, plus managing schedules through an AI agent.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Every field, every <em>option.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The expression syntax with its shortcuts, the full repeat option table with defaults and the
+    naming each SDK uses, plus managing schedules through an AI agent.
+  </p>
 </div>
 
 ## Cron Expression Cheat Sheet
 
 Five fields, left to right: minute (0-59), hour (0-23), day of month (1-31), month (1-12), day of week (0-7; both 0 and 7 are Sunday).
 
-| Expression | Meaning |
-|---|---|
-| `0 9 * * *` | Every day at 9:00 AM |
-| `*/15 * * * *` | Every 15 minutes |
-| `0 0 * * MON` | Every Monday at midnight |
-| `0 0 1 * *` | First day of every month |
+| Expression     | Meaning                  |
+| -------------- | ------------------------ |
+| `0 9 * * *`    | Every day at 9:00 AM     |
+| `*/15 * * * *` | Every 15 minutes         |
+| `0 0 * * MON`  | Every Monday at midnight |
+| `0 0 1 * *`    | First day of every month |
 
-Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted.
+Shortcuts (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight`) and a six-field form with a leading seconds field are also accepted. The seconds field supports values `0-59`, `*`, lists, ranges and steps; for example, `0,30 * * * * *` runs twice per minute. The five calendar fields are evaluated by Bun's native cron parser.
+
+Seven-field expressions with a year and the non-POSIX `L`, `W`, `#`, `+`, and `?` modifiers are not supported.
+
+### Time zones and daylight-saving transitions
+
+The five calendar fields follow Bun 1.4's native cron semantics in the selected
+IANA timezone. The leading-seconds adapter keeps the same calendar decision and
+then selects the requested second within that minute:
+
+- During spring-forward, a fixed time inside the missing hour moves forward by
+  the DST gap (`02:30` runs at `03:30`). For a multi-minute pattern entirely
+  inside the gap, only its first missing match fires after the jump.
+- During fall-back, a fixed time inside the repeated hour fires once, at the
+  first occurrence. A pattern whose minute or hour field is `*` traverses both
+  occurrences, once per matching real-time minute.
+
+These rules intentionally match Bun and Linux cron behavior. They differ from
+Croner for some wildcard patterns in a repeated fall-back hour.
 
 ## Scheduler Options
 
 Options on the repeat object of `upsertJobScheduler`:
 
-| Option | Default | Description |
-|---|---|---|
-| `pattern` | - | Cron expression |
-| `every` | - | Interval in ms (alternative to `pattern`) |
-| `timezone` | `UTC` (embedded) / server timezone (TCP) | IANA timezone for `pattern` evaluation |
-| `limit` | unlimited | Max executions, then the scheduler is removed |
-| `immediately` | `false` | Fire once right away on first creation |
-| `skipIfNoWorker` | `false` | Skip a run when no worker is registered for the queue |
-| `preventOverlap` | `true` | Skip a run while the previous job is still active |
-| `skipMissedOnRestart` | `true` | On server restart, recompute the next run instead of firing missed runs |
+| Option                | Default                                  | Description                                                             |
+| --------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| `pattern`             | -                                        | Cron expression                                                         |
+| `every`               | -                                        | Positive safe-integer interval in ms (alternative to `pattern`)         |
+| `timezone`            | `UTC` (embedded) / server timezone (TCP) | IANA timezone for `pattern` evaluation                                  |
+| `limit`               | unlimited                                | Max executions, then the scheduler is removed                           |
+| `immediately`         | `false`                                  | Fire once right away on first creation                                  |
+| `skipIfNoWorker`      | `false`                                  | Skip a run when no worker is registered for the queue                   |
+| `preventOverlap`      | `true`                                   | Skip a run while the previous job is still active                       |
+| `skipMissedOnRestart` | `true`                                   | On server restart, recompute the next run instead of firing missed runs |
 
 ### SDK naming and availability
 
-| Semantic option | Bun | Node.js / Deno | Python | PHP | Go | Rust | Elixir |
-|---|---|---|---|---|---|---|---|
-| cron pattern | `pattern` | `pattern` | `pattern` | `pattern` | `Pattern` | `pattern` | `pattern` |
-| interval | `every` | `every` | `every` | `every` | `EveryMs` | `every_ms` | `every` |
-| timezone | `timezone` | `tz` | `tz` | `tz` | `Timezone` | `timezone` | `tz` or `timezone` |
-| skip with no worker | `skipIfNoWorker` | `skipIfNoWorker` | `skip_if_no_worker` | `skipIfNoWorker` | `SkipIfNoWorker` | `skip_if_no_worker` | `skipIfNoWorker` |
-| missed-run policy | `skipMissedOnRestart` | `skipMissedOnRestart` | `skip_missed_on_restart` | `skipMissedOnRestart` | `SkipMissedOnRestart` (`*bool`) | server default only | `skipMissedOnRestart` |
-| overlap policy | `preventOverlap` | `preventOverlap` | `prevent_overlap` | `preventOverlap` | `PreventOverlap` (`*bool`) | server default only | `preventOverlap` |
+| Semantic option     | Bun                   | Node.js / Deno        | Python                   | PHP                   | Go                              | Rust                | Elixir                |
+| ------------------- | --------------------- | --------------------- | ------------------------ | --------------------- | ------------------------------- | ------------------- | --------------------- |
+| cron pattern        | `pattern`             | `pattern`             | `pattern`                | `pattern`             | `Pattern`                       | `pattern`           | `pattern`             |
+| interval            | `every`               | `every`               | `every`                  | `every`               | `EveryMs`                       | `every_ms`          | `every`               |
+| timezone            | `timezone`            | `tz`                  | `tz`                     | `tz`                  | `Timezone`                      | `timezone`          | `tz` or `timezone`    |
+| skip with no worker | `skipIfNoWorker`      | `skipIfNoWorker`      | `skip_if_no_worker`      | `skipIfNoWorker`      | `SkipIfNoWorker`                | `skip_if_no_worker` | `skipIfNoWorker`      |
+| missed-run policy   | `skipMissedOnRestart` | `skipMissedOnRestart` | `skip_missed_on_restart` | `skipMissedOnRestart` | `SkipMissedOnRestart` (`*bool`) | server default only | `skipMissedOnRestart` |
+| overlap policy      | `preventOverlap`      | `preventOverlap`      | `prevent_overlap`        | `preventOverlap`      | `PreventOverlap` (`*bool`)      | server default only | `preventOverlap`      |
 
 Rust's scheduler type currently omits `skipMissedOnRestart` and
 `preventOverlap`; both therefore use the server default `true`. Go uses pointer
 booleans for those two fields so explicit `false` is distinct from omission.
 `addCron` and `every` convenience helpers exist in TypeScript and Python only;
 PHP, Go, Rust, and Elixir use the scheduler API directly.
+
+At least one timing field is required. If both `pattern` and a valid `every`
+value are supplied, `pattern` takes precedence for backward compatibility.
+The server rejects non-numeric, non-finite, non-integer, unsafe, zero, and negative
+intervals before changing the existing scheduler definition.
 
 :::note[Fixed-rate and global identity]
 Scheduler `every` advances from its previous scheduled slot. It is not a delay
@@ -79,15 +107,16 @@ claude mcp add bunqueue -- bunx bunqueue-mcp
 ```
 
 :::tip[Related Guides]
+
 - [Queue API](/guide/queue/) - Job options for cron-created jobs
 - [CLI Commands](/guide/cli/) - Manage cron jobs via CLI
 - [MCP Server](/guide/mcp/) - AI agent integration
-:::
+  :::
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
-| [Cron Jobs in Bun](/guide/cron/) | Your first schedule, in every SDK and from the CLI |
-| [Cron Recipes](/guide/cron/recipes/) | Fixed intervals, timezones, repeat-after-completion |
+|                                                           |                                                     |
+| --------------------------------------------------------- | --------------------------------------------------- |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object      |
+| [Cron Jobs in Bun](/guide/cron/)                          | Your first schedule, in every SDK and from the CLI  |
+| [Cron Recipes](/guide/cron/recipes/)                      | Fixed intervals, timezones, repeat-after-completion |

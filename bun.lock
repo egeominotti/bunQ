@@ -5,7 +5,6 @@
     "": {
       "name": "bunqueue",
       "dependencies": {
-        "croner": "10.0.1",
         "msgpackr": "^1.11.8",
       },
       "devDependencies": {

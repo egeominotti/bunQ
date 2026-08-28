@@ -101,7 +101,7 @@ export default defineConfig({
       disable404Route: true,
       title: 'bunqueue',
       description:
-        'High-performance Bun job queue for AI agents. SQLite by default, optional PostgreSQL 18.6 multi-broker persistence, DLQ, cron, and MCP.',
+        'High-performance Bun job queue for AI agents. Memory or one-file SQLite, optional PostgreSQL 15–18 multi-broker persistence, DLQ, cron, and MCP.',
       logo: {
         src: './src/assets/logo.svg',
         replacesTitle: false,
@@ -270,7 +270,7 @@ export default defineConfig({
             { label: 'Telemetry', link: '/guide/telemetry/' },
             { label: 'Webhooks', link: '/guide/webhooks/' },
             { label: 'S3 Backup', link: '/guide/backup/' },
-            { label: 'Databases (Postgres/MySQL)', link: '/guide/databases/' },
+            { label: 'SQLite / PostgreSQL', link: '/guide/databases/' },
             { label: 'IoT & Edge (MQTT)', link: '/guide/iot-edge/' },
             { label: 'Production Operations', link: '/guide/production/' },
           ],
@@ -489,7 +489,7 @@ export default defineConfig({
             name: 'bunqueue',
             alternateName: 'bunQ',
             description:
-              'High-performance job queue for Bun & AI agents. Workflow engine with saga compensation and branching. Native MCP server, SQLite persistence, DLQ, cron jobs, S3 backups.',
+              'High-performance job queue for Bun and AI agents. Memory or one-file SQLite by default, PostgreSQL multi-broker scaling, workflow sagas, MCP, DLQ, and cron.',
             applicationCategory: 'DeveloperApplication',
             operatingSystem: 'Cross-platform',
             softwareVersion: pkg.version,

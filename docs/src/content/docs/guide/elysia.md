@@ -14,7 +14,11 @@ head:
   <p class="bq-hero-sub"><a href="https://elysiajs.com">Elysia</a> validates request bodies before your handler runs, so jobs enter the queue already type-checked. This guide shows the Elysia-specific pieces: validated routes, the plugin pattern, and failure monitoring.</p>
 </div>
 
-This guide wires bunqueue into Elysia. Everything runs in one process using **embedded mode**, which stores jobs in a local SQLite file, no separate queue server. The general patterns (status endpoints, separate worker processes, shutdown) are the same in every framework and live in the [Hono guide](/guide/hono/) and the [Integrations overview](/guide/integrations/); this page keeps to what Elysia does differently.
+This guide wires bunqueue into Elysia. Everything runs in one process using
+**embedded mode**, configured with `dataPath` so jobs are stored in a local
+SQLite file, with no separate queue server. The general patterns (status
+endpoints, separate worker processes, shutdown) are the same in every framework
+and live in the [Hono guide](/guide/hono/) and the [Integrations overview](/guide/integrations/); this page keeps to what Elysia does differently.
 
 :::note[Runtime]
 Elysia is a Bun framework, so this guide uses the Bun `bunqueue` package end to end; embedded mode is not available in the polyglot [SDKs](/guide/sdks/).
@@ -31,13 +35,14 @@ import { Queue, Worker } from 'bunqueue/client';
 interface EmailJob { to: string; subject: string; body: string }
 
 // Queue: where jobs wait. Worker: runs your function on each job.
-const emails = new Queue<EmailJob>('emails', { embedded: true });
+const storage = { embedded: true, dataPath: './data/bunq.db' } as const;
+const emails = new Queue<EmailJob>('emails', storage);
 
 new Worker<EmailJob>('emails', async (job) => {
   console.log('sending to', job.data.to);
   // await sendEmail(job.data);
   return { sent: true };
-}, { embedded: true, concurrency: 3 }); // 3 jobs in parallel
+}, { ...storage, concurrency: 3 }); // 3 jobs in parallel
 
 new Elysia()
   .post('/emails', async ({ body }) => {
@@ -88,8 +93,8 @@ import { Queue } from 'bunqueue/client';
 
 export const queuePlugin = new Elysia({ name: 'queue' })
   .decorate('queues', {
-    emails: new Queue('emails', { embedded: true }),
-    reports: new Queue('reports', { embedded: true }),
+    emails: new Queue('emails', { embedded: true, dataPath: './data/bunq.db' }),
+    reports: new Queue('reports', { embedded: true, dataPath: './data/bunq.db' }),
   })
   .derive(({ queues }) => ({
     enqueue: <T>(queue: keyof typeof queues, name: string, data: T) =>

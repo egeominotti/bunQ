@@ -363,7 +363,7 @@ These operations read no environment variables directly; behavior is driven by p
 | `JobInput.ttl`                               | `null`               | Expiry; expired jobs skipped on pull.                           |
 | `JobInput.timeout`                           | `null`               | Processing timeout enforced by the next-deadline scheduler.     |
 | `JobInput.removeOnComplete` / `removeOnFail` | `false`              | Drop job on success / failure.                                  |
-| `JobInput.durable`                           | `false`              | Bypass the ~10 ms write buffer (immediate disk write).          |
+| `JobInput.durable`                           | `false`              | SQLite: bypass the ~10 ms buffer; PostgreSQL is transactional.  |
 | `JobInput.stackTraceLimit`                   | `10`                 | Max stored stack lines.                                         |
 | `DEFAULT_MAX_BACKOFF`                        | `3_600_000` ms       | Backoff cap.                                                    |
 | `MAX_TIMELINE_ENTRIES`                       | `20`                 | Timeline cap.                                                   |

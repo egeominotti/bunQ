@@ -4,7 +4,7 @@
 
 ## Purpose
 
-The scheduler is the server-side engine that owns recurring/repeatable jobs ("crons"). Given either a 5–6 field cron expression (with optional IANA timezone) or a fixed millisecond interval (`repeatEvery`), it computes each job's next run time and pushes a fresh job onto the target queue when it falls due. The memory/SQLite engine is event-driven through `CronScheduler` and persists execution count/next run to SQLite. PostgreSQL multi-broker mode instead locks due `bunqueue_crons` rows, uses database time, and atomically advances the slot before job admission. The matching client surface (`upsertJobScheduler`, `every`, `cron`) is unchanged across server backends.
+The scheduler is the server-side engine that owns recurring/repeatable jobs ("crons"). Given either a 5–6 field cron expression (with optional IANA timezone) or a fixed millisecond interval (`repeatEvery`), it computes each job's next run time and pushes a fresh job onto the target queue when it falls due. The memory/SQLite engine is event-driven through `CronScheduler` and persists execution count/next run to SQLite. PostgreSQL multi-broker mode instead locks due `bunqueue_crons` rows, uses database time, and commits job admission plus slot advancement atomically in one transaction. The matching client surface (`upsertJobScheduler`, `every`, `cron`) is unchanged across server backends.
 
 ## Responsibilities & Scope
 
@@ -12,13 +12,16 @@ Owns:
 
 - In-memory cron registry keyed by name, ordered by `nextRun` via a min-heap for
   `O(k log n)` ticks (`infrastructure/scheduler/cron/runtime.ts:22-25`).
-- Cron expression validation, shortcut expansion, and next-run computation (delegated to `cronParser.ts`, which wraps the `croner` library).
+- Cron expression validation, shortcut expansion, and next-run computation
+  (delegated to `cronParser.ts`, which wraps `Bun.cron.parse()` and preserves
+  the documented leading-seconds field).
 - Firing due crons: limit checks, overlap/`skipIfNoWorker`/`preventOverlap`
   gating, and the push callback that creates each spawned job
   (`infrastructure/scheduler/cron/execution.ts:9-140`).
-- Persisting cron state before pushing (executions + nextRun) to guarantee
-  at-most-once-per-slot on crash/retry
-  (`infrastructure/scheduler/cron/execution.ts:69-90`).
+- In memory/SQLite mode, persisting cron state before pushing (executions +
+  `nextRun`) so a retry does not enqueue the same slot twice
+  (`infrastructure/scheduler/cron/execution.ts:69-90`). PostgreSQL instead
+  admits the job and advances the locked row inside one atomic transaction.
 - Restart recovery: recalculating past `nextRun` values forward and
   (optionally) skipping missed runs
   (`infrastructure/scheduler/cron/runtime.ts:126-144`).
@@ -49,7 +52,9 @@ Internal:
 
 External / runtime:
 
-- **`croner`** — the only external runtime dependency in this module; all cron-expression parsing and next-run math runs through `new Cron(expression, { timezone })` (`cronParser.ts:6,16,35`).
+- **Bun `cron`** — the native parser owns the five calendar fields, timezone,
+  POSIX day matching, and DST behavior. The local adapter parses only the
+  optional leading seconds field; this module has no third-party dependency.
 - Bun/Node timers: `setTimeout` (precise wake) + `setInterval` (60s safety fallback).
 - SQLite via the persistence layer (indirect, through callbacks).
 
@@ -93,10 +98,26 @@ validateCronExpression(expression: string, timezone?: string): string | null; //
 getNextCronRun(expression: string, fromTime?: number, timezone?: string): number; // ms epoch
 getNextIntervalRun(intervalMs: number, lastRun?: number): number;                 // lastRun + intervalMs
 expandCronShortcut(expression: string): string; // @daily, @hourly, ...
-describeCron(expression: string): string;        // human-readable (not used by scheduler)
+describeCron(expression: string): string;        // human-readable; preserves optional seconds field
 ```
 
-`CRON_SHORTCUTS` (`cronParser.ts:63-71`): `@yearly`/`@annually` → `0 0 1 1 *`, `@monthly` → `0 0 1 * *`, `@weekly` → `0 0 * * 0`, `@daily`/`@midnight` → `0 0 * * *`, `@hourly` → `0 * * * *`.
+`CRON_SHORTCUTS` (`cronParser.ts:170-178`): `@yearly`/`@annually` → `0 0 1 1 *`, `@monthly` → `0 0 1 * *`, `@weekly` → `0 0 * * 0`, `@daily`/`@midnight` → `0 0 * * *`, `@hourly` → `0 * * * *`.
+
+The public grammar is Bun's five-field POSIX syntax plus an optional leading
+seconds field (`0-59`, with `*`, lists, ranges, and steps). Seven-field years
+and the non-POSIX `L`, `W`, `#`, `+`, and `?` extensions are rejected. A next
+run is always strictly later than the supplied cursor; an expression with no
+future occurrence is invalid rather than being stored with `nextRun = 0`.
+
+Persisted definitions are validated as a complete collection before scheduler
+state, missed-run timestamps, recovery state, or PostgreSQL broker registration
+is mutated. A Croner-only definition left by a pre-2.9 installation blocks
+startup with its escaped name and schedule and directs the operator to update
+or remove it while running 2.8. SQLite closes the database when persisted cron
+reading or validation fails during synchronous construction; PostgreSQL
+performs the namespace scan before registering the broker or starting
+maintenance. This fail-closed migration boundary avoids both partial
+reconciliation and a zero-delay retry loop for a due invalid row.
 
 ### Client SDK (`scheduler.ts`, surfaced on `Queue`)
 
@@ -131,7 +152,7 @@ Both delegate to `Queue.upsertJobScheduler` — `cron` sets `pattern`, `every` s
 `Queue.add(..., { repeat })` creates a completion-chained repeat rather than a
 named `CronJob`. The directly added generation runs normally; after each
 successful completion, `repeatJobs.ts` calculates one future deadline with the
-same `croner` parser and shortcut expansion used by `CronScheduler`. Pattern
+same native parser adapter and shortcut expansion used by `CronScheduler`. Pattern
 chains respect `tz`, `startDate`, `endDate`, `offset`, `prevMillis`, `limit`,
 `immediately`, and `repeat.jobId`. Interval chains skip elapsed slots instead of
 creating a catch-up loop. `limit: N` retains the established contract of the
@@ -198,8 +219,8 @@ Canonical definition is `CronJob` (`src/domain/types/cron.ts:29-55`). See [data-
 | `name`                   | `string`                       | PRIMARY KEY in `cron_jobs`; global, so multi-prefix queues must namespace (see Concurrency). |
 | `jobName`                | `string`                       | Name assigned to every spawned Job; stored separately from user `data`.                      |
 | `queue`                  | `string`                       | target queue for spawned jobs.                                                               |
-| `schedule`               | `string \| null`               | cron expression (mutually fills with `repeatEvery`).                                         |
-| `repeatEvery`            | `number \| null`               | fixed interval in ms.                                                                        |
+| `schedule`               | `string \| null`               | cron expression; when both timing fields are valid, this takes precedence.                   |
+| `repeatEvery`            | `number \| null`               | fixed interval in ms; a positive safe integer when provided.                                  |
 | `priority`               | `number`                       | spawned-job priority (default `0`).                                                          |
 | `timezone`               | `string \| null`               | IANA tz for `schedule`.                                                                      |
 | `nextRun` / `executions` | `number`                       | mutable runtime state, persisted.                                                            |
@@ -222,8 +243,13 @@ first-class spawned-job name.
 
 ### Add / upsert (`add`, `cron/runtime.ts:79-107`)
 
-1. Reject if neither `schedule` nor `repeatEvery` is set.
-2. If `schedule`, expand shortcut then `validateCronExpression`; throw on invalid.
+1. Before orphan cleanup or state/storage mutation, reject a supplied
+   `repeatEvery` unless it is a positive safe integer in milliseconds; reject if neither
+   timing field is set; and validate the expanded calendar expression plus IANA
+   timezone. For compatibility, a valid `schedule` takes precedence when both
+   fields are supplied.
+2. The runtime reuses the same centralized validation before its own map/heap
+   mutation.
 3. Compute `nextRun` via `getNextCronRun` (cron) or `getNextIntervalRun` (interval) from `now`.
 4. `createCronJob` builds the immutable record. If a cron with the same name
    exists, **preserve its `executions`** and clear `lastFiredAt` for that name
@@ -310,7 +336,17 @@ schedules as 60-second intervals.
   are chunked without changing the persisted absolute `nextRun`; no early
   execution or 1ms hot loop occurs.
 - **Overlap from slow jobs** → suppressed via the `interval * 0.8` window and `preventOverlap` uniqueKey; interval-rate crons anchor to the scheduled slot to avoid drift.
-- **`every <= 0`** → CLI rejects it; otherwise `getNextIntervalRun` would always be in the past and fire every tick (`cli/commands/cron.ts:70-75`).
+- **DST spring-forward** → a fixed local time in the missing hour shifts forward
+  by the gap; for a multi-minute pattern inside the gap, Bun fires only the first
+  missing match after the jump.
+- **DST fall-back** → a fixed local time in the repeated hour fires once at its
+  first occurrence, while a pattern whose minute or hour is `*` traverses both
+  occurrences. The six-field adapter preserves the requested seconds on the
+  minute selected by Bun. This intentionally differs from Croner wildcard
+  traversal and is locked by `test/cron-native-dst-semantics.test.ts`.
+- **Invalid `repeatEvery`** → every public backend and persisted-row preflight
+  rejects non-numeric, non-finite, non-integer, unsafe, zero, or negative intervals before mutation. This
+  prevents past-due or zero-delay hot loops and unusable persisted definitions.
 - **Restart with past `nextRun`** → recalculated forward; missed runs skipped by default (`skipMissedOnRestart` default `true`).
 - **Upsert preserves `executions`** and resets `lastFiredAt` (H10) so a redefined cron isn't blocked by the prior definition's last fire.
 - **#103 (fixed 2.8.14)**: with `skipIfNoWorker: true`, after a TCP reconnect the cron silently stops firing if the worker is not re-registered — `fireCronJob` sees no worker and emits `cron:skipped` instead of pushing. The fix re-registers workers on reconnect; `Worker.resume()` alone does not recover it. Upgrade clients to ≥ 2.8.14.

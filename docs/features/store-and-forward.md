@@ -6,7 +6,7 @@
 
 This module groups two unrelated client-side concerns that share the "compatibility / integration" theme.
 
-1. **Store-and-Forward** (`forwarder.ts`): drains jobs from a local (typically embedded SQLite) queue to a remote bunqueue server over TCP/TLS. Built for the edge/gateway pattern — a device buffers work locally while offline, then ships it to a central broker when the uplink is up. A remote failure does not lose work: the forward is modeled as a *local* job, so a failed push triggers the local retry/backoff/DLQ path. Re-forwards are idempotent thanks to a deterministic remote `jobId`.
+1. **Store-and-Forward** (`forwarder.ts`): drains jobs from a local (typically embedded SQLite) queue to a remote bunqueue server over TCP/TLS. Built for the edge/gateway pattern — a device buffers work locally while offline, then ships it to a central broker when the uplink is up. With a surviving SQLite volume, a remote failure leaves the forward in the local retry/backoff/DLQ path. Re-forwards use a deterministic remote `jobId`; deduplication is bounded by the remote custom-id retention window.
 
 2. **BullMQ v5 compatibility shims** (`bullmqCompat.ts`): a thin adapter exposing BullMQ-named read APIs (`getPrioritized`, `getWaitingChildren`, `getJobDependencies`, …) on the [Client SDK: Queue](./client-queue-sdk.md), so code written against BullMQ can read prioritized jobs, waiting-children, and parent/child dependency views with minimal changes. The asynchronous read paths are authoritative in embedded and TCP modes; synchronous compatibility snapshots retain the explicit transport boundaries described in [Public API Completeness](./public-api-completeness.md).
 
@@ -53,7 +53,7 @@ export interface ForwardOptions {
   to: ConnectionOptions;     // remote server connection (host/port/tls/token…)
   queue?: string;            // remote queue name (default: same as source)
   concurrency?: number;      // parallel forwards (default: 4)
-  durable?: boolean;         // push to remote with durable:true (server-side fsync)
+  durable?: boolean;         // remote durable:true (bypasses SQLite buffering)
 }
 ```
 
@@ -157,7 +157,7 @@ The deterministic remote id is plain string-formatted: `` `fwd:${source.queueKey
 
 ### Failure path
 
-A failed `remote.add` throws inside the processor → the local `Worker` marks the local job failed → standard local retry/backoff applies, and on exhausting attempts the job goes to the local [DLQ](./dead-letter-queue.md). Nothing is lost while the uplink is down. The `Forwarder` separately listens to the worker's `failed` and `error` events purely for observability (`forwarder.ts:122-127`).
+A failed `remote.add` throws inside the processor → the local `Worker` marks the local job failed → standard local retry/backoff applies, and on exhausting attempts the job goes to the local [DLQ](./dead-letter-queue.md). Locally persisted work survives an uplink outage while its process or persistent volume survives; `durable: true` removes SQLite's buffered-write crash window. The `Forwarder` separately listens to the worker's `failed` and `error` events purely for observability (`forwarder.ts:122-127`).
 
 ### BullMQ shims
 
@@ -177,7 +177,7 @@ The Forwarder holds no locks of its own. Concurrency is the `Worker`'s `concurre
 
 - **Idempotent re-forwards (bounded).** Every push carries `jobId = fwd:<queueKey>:<localId>`. The server dedupes custom job ids, so a re-forward after a crash/retry does not duplicate the job remotely (`forwarder.ts:10-12`, `forwarder.ts:94`). **Invariant/gotcha:** dedupe only holds *within the server's custom-id retention window* (the bounded `customIdMap` LRU, see [Deduplication & Unique Jobs](./deduplication-and-unique.md)). If the same `localId` is re-forwarded after eviction (or after `removeOnComplete` drops it), a duplicate remote job is possible. Local job-id reuse across DB resets would likewise collide.
 - **Listener-error isolation.** A throwing `forwarded` listener is caught and ignored so it cannot fail an already-succeeded forward (`forwarder.ts:103-107`).
-- **`error` event suppression.** Worker `failed`/`error` are only re-emitted as `Forwarder` `error` when `listenerCount('error') > 0` (`forwarder.ts:123,126`). This prevents `EventEmitter`'s default "throw on unhandled error" from crashing the process on a transient uplink failure — but it also means errors are silently dropped if you never attach an `error` listener. Failed forwards are still durable locally regardless.
+- **`error` event suppression.** Worker `failed`/`error` are only re-emitted as `Forwarder` `error` when `listenerCount('error') > 0` (`forwarder.ts:123,126`). This prevents `EventEmitter`'s default "throw on unhandled error" from crashing the process on a transient uplink failure — but it also means errors are silently dropped if you never attach an `error` listener. Failed forwards remain local jobs; they survive process restart only when the source uses a surviving SQLite volume, subject to the normal buffered/durable write boundary and retry/DLQ retention.
 - **Auto-batch disabled on the remote.** The remote queue forces `autoBatch:{ enabled:false }` (`forwarder.ts:88`); forwards are individual pushes, not coalesced.
 - **Deterministic pagination:** dependency keys are sorted before slicing so repeated cursor reads cannot reorder cross-queue children. A missing parent or child is an explicit error instead of an empty-success sentinel.
 - **Waiting-children state:** manually parked jobs and flow parents are read through the dedicated state, not inferred from user data. The TCP and embedded views therefore expose the same jobs.
@@ -192,7 +192,7 @@ This module is configured per call, not via env vars.
 | `to` | `ForwardOptions` | required — remote `ConnectionOptions` (host/port/tls/token) |
 | `queue` | `ForwardOptions` | source queue `name` |
 | `concurrency` | `ForwardOptions` | `4` |
-| `durable` | `ForwardOptions` | `false` (omitted → remote uses buffered write) |
+| `durable` | `ForwardOptions` | `false` (SQLite remotes buffer by default; PostgreSQL admission is transactional either way) |
 
 The source side inherits its mode (`embedded`, `dataPath`, `connection`,
 `prefixKey`) from the originating `Queue` via `ForwardSource`

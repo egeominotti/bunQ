@@ -37,14 +37,27 @@ export class QueueManagerObservability extends QueueManagerStats {
     const storageStatus = this.getStorageStatus();
     const memory = process.memoryUsage();
     const queueSelection = selectPrometheusQueues(
-      this.queueNamesCache,
+      this.listQueues(),
       this.config.maxPrometheusQueues
+    );
+    const countsByQueue = this.getQueueJobCountsBatch(queueSelection.selected);
+    const perQueueStats = new Map(
+      [...countsByQueue].map(([queue, counts]) => [
+        queue,
+        {
+          waiting: counts.waiting,
+          prioritized: counts.prioritized,
+          delayed: counts.delayed,
+          active: counts.active,
+          dlq: counts.failed,
+        },
+      ])
     );
     return generatePrometheusMetrics(
       this.getStats(),
       this.workerManager,
       this.webhookManager,
-      statsMgr.getPerQueueStats(this.contextFactory.getStatsContext(), queueSelection.selected),
+      perQueueStats,
       {
         storageDegraded: isStorageDegraded(storageStatus),
         storageDiskFull: storageStatus.diskFull,

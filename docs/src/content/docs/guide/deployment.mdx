@@ -596,7 +596,7 @@ recommendation. See [PostgreSQL benchmark evidence](/guide/benchmarks/#postgresq
 - **Two embedded processes, one file, is silent corruption.** See the warning above; always go through the server for multi-process.
 - **Copying the database while the server runs can produce a torn copy.** SQLite runs in WAL mode (writes go to a `.db-wal` sidecar file first). Stop the server, then copy `bunq.db` and `bunq.db-wal` together, or just use the built-in S3 backup, which snapshots safely while live.
 - **`AUTH_TOKENS` is not set by default.** Anyone who can reach the ports can push and pull jobs. Set tokens (`openssl rand -hex 32`) and either enable [native TLS](/guide/tls/) or keep the ports on a private network. See [Security](/security/).
-- **SQLite jobs you cannot afford to lose in a hard crash should be `durable: true`.** SQLite buffers ordinary writes for up to 10 ms; `durable` writes hit disk before the add returns. PostgreSQL mutations are already transactional and do not use this buffer. Details in [Production Operations](/guide/production/).
+- **SQLite jobs that cannot tolerate bunqueue's process-crash buffer should be `durable: true`.** SQLite buffers ordinary writes for up to 10 ms; `durable` commits before the add returns. Host/filesystem/media durability remains operational. PostgreSQL mutations are already transactional and do not use this buffer. Details in [Production Operations](/guide/production/).
 - **Do not improvise a mixed-version PostgreSQL rollout.** Stop the old broker
   fleet before the first new binary migrates the schema, verify one new broker,
   then start the rest at the same version. An old binary may reject the newer

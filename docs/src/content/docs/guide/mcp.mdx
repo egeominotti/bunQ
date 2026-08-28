@@ -84,10 +84,10 @@ Claude Desktop, Cursor and Windsurf all use the same JSON block. Config file loc
 
 | | Embedded (default) | TCP (remote) |
 | --- | --- | --- |
-| **How it works** | Queue runs inside the MCP process, direct SQLite access | MCP server forwards to a running bunqueue server |
+| **How it works** | Queue runs inside the MCP process, in memory or direct SQLite | MCP server forwards to a running bunqueue server |
 | **Setup** | Zero config | Set `BUNQUEUE_MODE=tcp` plus host/port |
 | **Best for** | Local dev, single machine | Production queues shared by real workers |
-| **Data** | In-memory, or a SQLite file via `DATA_PATH` | The remote server owns storage |
+| **Data** | In-memory, or a SQLite file via `DATA_PATH` | The remote server owns memory/SQLite or PostgreSQL storage |
 
 To manage a production server, point the MCP server at it:
 

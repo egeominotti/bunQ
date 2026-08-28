@@ -1,6 +1,6 @@
 ---
-title: "bunqueue Data Structures: MinHeap, Skip List & LRU"
-description: "Data structures powering bunqueue: 4-ary MinHeap, skip lists, LRU cache, FNV-1a hashing, and read-write locks with complexities."
+title: "Memory/SQLite Data Structures: MinHeap, Skip List & LRU"
+description: "Data structures powering bunqueue's memory/SQLite engine: 4-ary MinHeap, skip lists, LRU cache, FNV-1a hashing, and read-write locks."
 head:
   - tag: meta
     attrs:
@@ -11,8 +11,13 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · data structures</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Heaps, skip lists, <em>LRUs.</em></h1>
-  <p class="bq-hero-sub">bunqueue uses specialized data structures optimized for job queue operations: a 4-ary MinHeap, skip lists, LRU caches, FNV-1a hashing, and read-write locks.</p>
+  <p class="bq-hero-sub">The memory/SQLite engine uses a 4-ary MinHeap, skip lists, LRU caches, FNV-1a hashing, and read-write locks. PostgreSQL uses database rows, indexes, and locks for authoritative ordering and ownership.</p>
 </div>
+
+This page covers the base memory/SQLite engine and its in-process compatibility
+caches. PostgreSQL mode keeps only bounded projections needed by the shared API;
+its authoritative claim, scheduling, limit, and lifecycle structures are the
+database tables and indexes described in [Storage backends](/guide/databases/).
 
 ## Overview
 
@@ -170,7 +175,7 @@ Used for job results, custom ID mapping, and logs.
 
 ## Hash Function (FNV-1a)
 
-Used for sharding and distribution.
+Used for sharding and distribution in the memory/SQLite engine.
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>FNV-1a hash</b><span>algorithm</span></div>
@@ -225,8 +230,8 @@ Used for sharding and distribution.
 
 | Operation | Structure | Time |
 |-----------|-----------|------|
-| Push job | 4-ary heap | O(log₄ n) |
-| Pop job | 4-ary heap | O(log₄ n) |
+| Push job (memory/SQLite) | 4-ary heap | O(log₄ n) |
+| Pop job (memory/SQLite) | 4-ary heap | O(log₄ n) |
 | Find job | Index map | O(1) |
 | Remove job | Lazy deletion | O(1) |
 | Get result | LRU map | O(1) |
@@ -238,5 +243,5 @@ Used for sharding and distribution.
 :::tip[Related]
 - [Architecture Overview](/architecture/) - Full component map
 - [Domain Layer](/architecture/domain-layer/) - Where these structures hold jobs and priorities
-- [Cron Scheduler](/architecture/cron-scheduler/) - Uses the skip list for time-ordered runs
+- [Cron Scheduler](/architecture/cron-scheduler/) - Uses a MinHeap for time-ordered runs
 :::

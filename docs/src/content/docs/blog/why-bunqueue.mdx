@@ -1,6 +1,6 @@
 ---
-title: "Why Replace Redis with SQLite for Bun Job Queues"
-description: "Discover why bunqueue uses SQLite instead of Redis for job queues on Bun. Simpler deployments, zero external services, and 100k jobs/sec throughput."
+title: 'Why Replace Redis with SQLite for Bun Job Queues'
+description: 'Discover how bunqueue can use SQLite instead of Redis for durable single-broker queues, with a PostgreSQL multi-broker path when you scale.'
 head:
   - tag: meta
     attrs:
@@ -13,11 +13,11 @@ head:
   - tag: meta
     attrs:
       property: article:published_time
-      content: "2026-02-01"
+      content: '2026-02-01'
   - tag: meta
     attrs:
       name: keywords
-      content: "bunqueue, sqlite job queue, redis alternative, bun job queue, background jobs typescript, sqlite vs redis, job queue no redis"
+      content: 'bunqueue, sqlite job queue, redis alternative, bun job queue, background jobs typescript, sqlite vs redis, job queue no redis'
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -25,8 +25,14 @@ import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · design</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">A job queue without <em>Redis.</em></h1>
-  <p class="bq-hero-sub">BullMQ, Bee-Queue, and friends all assume a running Redis server. bunqueue moves the queue in-process on SQLite instead: simpler deployments, zero external services, and around 100k jobs/sec.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    A job queue without <em>Redis.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    BullMQ, Bee-Queue, and friends all assume a running Redis server. bunqueue can keep a durable
+    queue in-process with SQLite instead: simpler deployments and zero external services, with a
+    separate PostgreSQL multi-broker path when you scale. Unconfigured queues use memory storage.
+  </p>
 </div>
 
 ## The Redis Problem
@@ -48,7 +54,10 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Dependencies</h3>
-    <p>No Redis, no external services. Just your app and a file on disk. <code>bun add bunqueue</code> installs 7 packages (5.5 MB), only <code>croner</code> and <code>msgpackr</code> at runtime.</p>
+    <p>
+      No Redis, no external services. Just your app and a file on disk, with <code>msgpackr</code>{' '}
+      as the only runtime dependency.
+    </p>
   </div>
   <div class="bq-card">
     <BqIcon name="speed" />
@@ -57,8 +66,11 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
   </div>
   <div class="bq-card">
     <BqIcon name="shield" />
-    <h3>Persistence by Default</h3>
-    <p>WAL mode gives you crash-safe writes with read concurrency.</p>
+    <h3>Persistence When Selected</h3>
+    <p>
+      Set a SQLite data path for WAL-backed recovery with concurrent reads; without one, the queue
+      is intentionally in memory.
+    </p>
   </div>
   <div class="bq-card">
     <BqIcon name="network" />
@@ -90,7 +102,10 @@ Raw SQLite writes are fast, but bunqueue goes further with a **write buffer** th
 ```typescript
 // Jobs are added to an in-memory priority queue immediately
 // The write buffer flushes to SQLite every 10ms
-const queue = new Queue('emails', { embedded: true });
+const queue = new Queue('emails', {
+  embedded: true,
+  dataPath: './data/bunqueue.db',
+});
 
 // This returns instantly - job is in memory
 await queue.add('send', { to: 'user@example.com' });
@@ -99,25 +114,37 @@ await queue.add('send', { to: 'user@example.com' });
 await queue.add('payment', data, { durable: true });
 ```
 
-The `durable: true` option bypasses the write buffer and writes directly to SQLite, trading throughput for guaranteed persistence.
+The `durable: true` option bypasses bunqueue's write buffer and commits to
+SQLite before `add()` returns, trading throughput for a smaller process-crash
+window. Host, filesystem, and physical-media durability still depend on the
+deployment.
 
 <Aside type="tip">
-  In buffered mode, bunqueue achieves ~100,000 jobs/sec. With `durable: true`, it's ~10,000 jobs/sec. Both are faster than BullMQ + Redis for most operations.
+  In the current native campaign, public on-disk Embedded `addBulk` reached a 186,384 jobs/s median,
+  while sequential SQLite `durable: true` Embedded adds reached 60,835 ops/s. These are different
+  workloads; see the [benchmark methodology](/guide/benchmarks/) before comparing them.
 </Aside>
 
 ## When to Use bunqueue
 
-bunqueue is designed for **single-instance deployments**. It's the right choice when:
+bunqueue's SQLite mode is designed for **single-broker deployments**. Choose it when:
 
 - You run your app on a single server or VPS
 - You want zero operational overhead for background jobs
 - You need reliable persistence without managing Redis
 - You're building on Bun and want native performance
 
-If you need multi-node clustering or Redis pub/sub features, BullMQ remains a solid choice. But for the majority of applications that run on a single server, bunqueue eliminates an entire layer of infrastructure.
+Choose bunqueue's PostgreSQL 15–18 server backend when several active brokers
+must share one authoritative queue; PostgreSQL 18.6 is recommended. The Queue,
+Worker, Flow, cron, retry, result, and DLQ contracts stay the same. BullMQ remains
+a solid choice when Redis or Redis Cluster is already your required operational
+standard. See [Storage backends](/guide/databases/) for the topology boundary.
 
 <Aside type="note" title="A genuinely small install">
-  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too. As of 2.8.1, `bun add bunqueue` installs **7 packages (5.5 MB)** with just two runtime dependencies (`croner` and `msgpackr`). The MCP server's `@modelcontextprotocol/sdk` is now an optional peer dependency, loaded only if you run the `bunqueue-mcp` bin, so queue and worker users never download it.
+  Eliminating Redis isn't just an operational win, it shows up in your `node_modules` too.
+  `msgpackr` is the only runtime dependency; Bun provides cron parsing, SQLite, HTTP, WebSocket and
+  S3. The MCP server's `@modelcontextprotocol/sdk` is an optional peer dependency, loaded only if
+  you run the `bunqueue-mcp` bin, so queue and worker users never download it.
 </Aside>
 
 ## Go Deeper

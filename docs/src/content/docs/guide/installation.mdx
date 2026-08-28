@@ -1,6 +1,6 @@
 ---
-title: "Install bunqueue, Setup Guide for Bun Job Queue"
-description: "Install bunqueue via npm or from source. Full TypeScript support with type definitions for Queue, Worker, Job, and all config options."
+title: 'Install bunqueue, Setup Guide for Bun Job Queue'
+description: 'Install bunqueue via npm or from source. Full TypeScript support with type definitions for Queue, Worker, Job, and all config options.'
 head:
   - tag: meta
     attrs:
@@ -12,13 +12,23 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · installation</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Install bunqueue, zero <em>infrastructure.</em></h1>
-  <p class="bq-hero-sub">One command installs everything: the library, the server, and the CLI. No Redis, no broker, nothing else to provision.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Install bunqueue, zero <em>infrastructure.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    One command installs the library, standalone server, and CLI. Embedded SQLite needs no external
+    service; PostgreSQL is available when you choose a multi-broker deployment. Redis is never
+    required.
+  </p>
 </div>
 
 ## Requirements
 
-- [Bun](https://bun.sh) v1.4.0 or later
+- The `bunqueue` server and embedded runtime require [Bun](https://bun.sh)
+  v1.4.0 or later.
+- External Node.js, Deno, Python, PHP, Go, Rust, and Elixir clients need their
+  SDK's documented runtime plus a reachable Bun-powered bunqueue server; they
+  do not require Bun in the client process.
 
 ## Install
 
@@ -29,7 +39,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 bun add bunqueue
 ```
 
-That is it. The package is 5.5 MB with 7 packages total, and includes the client library, the standalone server, and the CLI.
+That is it. The package includes the client library, standalone server, and CLI. `msgpackr` is its only direct runtime dependency; SQLite, PostgreSQL connectivity, cron parsing, HTTP, WebSocket, and S3 use Bun's native APIs.
 
 </TabItem>
 <TabItem label="Node.js / Deno">
@@ -78,7 +88,7 @@ cargo add bunqueue-client
 </TabItem>
 </Tabs>
 
-*The Bun `bunqueue` package bundles the client, the server, and the CLI. Every other SDK is a client only: it connects to a bunqueue server, started once with `bunx bunqueue start` (see [SDKs](/guide/sdks/) and [Server Mode](/guide/server/)).*
+_The Bun `bunqueue` package bundles the client, the server, and the CLI. Every other SDK is a client only: it connects to a bunqueue server, started once with `bunx bunqueue start` (see [SDKs](/guide/sdks/) and [Server Mode](/guide/server/))._
 
 ## Verify it works
 
@@ -92,10 +102,14 @@ import { Queue, Worker } from 'bunqueue/client';
 
 // Both Queue and Worker must have embedded: true
 const queue = new Queue('test', { embedded: true });
-const worker = new Worker('test', async (job) => {
-  console.log('Processing:', job.data);
-  return { success: true };
-}, { embedded: true });
+const worker = new Worker(
+  'test',
+  async (job) => {
+    console.log('Processing:', job.data);
+    return { success: true };
+  },
+  { embedded: true }
+);
 
 await queue.add('hello', { message: 'bunqueue is working!' });
 ```
@@ -258,12 +272,13 @@ import type {
   WorkerOptions,
   StallConfig,
   DlqConfig,
-  DlqEntry
+  DlqEntry,
 } from 'bunqueue/client';
 ```
 
 :::tip[Next Steps]
+
 - [Quick Start](/guide/quickstart/), build your first queue
 - [Introduction](/guide/introduction/), what bunqueue is and when to use it
 - [MCP Server](/guide/mcp/), let AI agents manage your queues
-:::
+  :::

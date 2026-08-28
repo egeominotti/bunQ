@@ -270,7 +270,12 @@ X-Signature: <hmac-sha256>  (optional, if signing secret configured)
 
   "topErrors": [
     { "message": "SMTP timeout", "count": 42, "queue": "emails", "lastSeen": 1773957260000 },
-    { "message": "Database connection lost", "count": 12, "queue": "orders", "lastSeen": 1773957250000 },
+    {
+      "message": "Database connection lost",
+      "count": 12,
+      "queue": "orders",
+      "lastSeen": 1773957250000
+    },
     { "message": "Rate limit exceeded", "count": 5, "queue": "payments", "lastSeen": 1773957240000 }
   ],
 
@@ -310,7 +315,7 @@ Event types: `pushed`, `pulled`, `completed`, `failed`, `progress`, `stalled`, `
 
 ## 3. Remote Commands (dashboard → bunqueue via WS)
 
-Requires `BUNQUEUE_CLOUD_REMOTE_COMMANDS=true`.
+Enabled by default. Set `BUNQUEUE_CLOUD_REMOTE_COMMANDS=false` to disable remote commands.
 
 ### Request format
 
@@ -321,35 +326,46 @@ Requires `BUNQUEUE_CLOUD_REMOTE_COMMANDS=true`.
 ### Response format
 
 ```json
-{ "type": "command_result", "id": "cmd_42_1773884000000", "success": true, "data": { "queue": "emails", "paused": true } }
+{
+  "type": "command_result",
+  "id": "cmd_42_1773884000000",
+  "success": true,
+  "data": { "queue": "emails", "paused": true }
+}
 ```
 
 Error:
+
 ```json
-{ "type": "command_result", "id": "cmd_42_1773884000000", "success": false, "error": "Queue not found" }
+{
+  "type": "command_result",
+  "id": "cmd_42_1773884000000",
+  "success": false,
+  "error": "Queue not found"
+}
 ```
 
 ### Available Commands
 
-| Action | Params | Response data |
-|--------|--------|---------------|
-| `queue:pause` | `queue` | `{ queue, paused: true }` |
-| `queue:resume` | `queue` | `{ queue, paused: false }` |
-| `queue:drain` | `queue` | `{ queue, drained: number }` |
-| `queue:clean` | `queue`, `graceMs?`, `state?`, `limit?` | `{ queue, cleaned: number }` |
-| `queue:detail` | `queue` | `{ queue, paused, counts, stallConfig, dlqConfig, dlqEntries, jobs }` |
-| `job:cancel` | `jobId` | `{ cancelled: boolean }` |
-| `job:promote` | `jobId` | `{ promoted: boolean }` |
-| `job:retry` | `queue`, `jobId?` | `{ retried: number }` |
-| `job:list` | `queue`, `state?`, `limit?`, `offset?` | `{ jobs: [...], total, offset, limit }` |
-| `job:get` | `jobId` | `{ job: { ...full, logs, result } }` |
-| `job:logs` | `jobId` | `{ logs: JobLogEntry[] }` |
-| `job:result` | `jobId` | `{ result: unknown \| null }` |
-| `dlq:retry` | `queue`, `jobId?` | `{ retried: number }` |
-| `dlq:purge` | `queue` | `{ purged: number }` |
-| `cron:upsert` | `name`, `queue`, `schedule`, `data?` | `{ name, nextRun }` |
-| `cron:delete` | `name` | `{ deleted: boolean }` |
-| `stats:refresh` | — | full stats object |
+| Action          | Params                                  | Response data                                                         |
+| --------------- | --------------------------------------- | --------------------------------------------------------------------- |
+| `queue:pause`   | `queue`                                 | `{ queue, paused: true }`                                             |
+| `queue:resume`  | `queue`                                 | `{ queue, paused: false }`                                            |
+| `queue:drain`   | `queue`                                 | `{ queue, drained: number }`                                          |
+| `queue:clean`   | `queue`, `graceMs?`, `state?`, `limit?` | `{ queue, cleaned: number }`                                          |
+| `queue:detail`  | `queue`                                 | `{ queue, paused, counts, stallConfig, dlqConfig, dlqEntries, jobs }` |
+| `job:cancel`    | `jobId`                                 | `{ cancelled: boolean }`                                              |
+| `job:promote`   | `jobId`                                 | `{ promoted: boolean }`                                               |
+| `job:retry`     | `queue`, `jobId?`                       | `{ retried: number }`                                                 |
+| `job:list`      | `queue`, `state?`, `limit?`, `offset?`  | `{ jobs: [...], total, offset, limit }`                               |
+| `job:get`       | `jobId`                                 | `{ job: { ...full, logs, result } }`                                  |
+| `job:logs`      | `jobId`                                 | `{ logs: JobLogEntry[] }`                                             |
+| `job:result`    | `jobId`                                 | `{ result: unknown \| null }`                                         |
+| `dlq:retry`     | `queue`, `jobId?`                       | `{ retried: number }`                                                 |
+| `dlq:purge`     | `queue`                                 | `{ purged: number }`                                                  |
+| `cron:upsert`   | `name`, `queue`, `schedule`, `data?`    | `{ name, nextRun }`                                                   |
+| `cron:delete`   | `name`                                  | `{ deleted: boolean }`                                                |
+| `stats:refresh` | —                                       | full stats object                                                     |
 
 ## 4. Batch Ingest (POST /api/v1/ingest/batch)
 
@@ -373,9 +389,9 @@ BUNQUEUE_CLOUD_API_KEY=bq_xxx
 # Optional
 BUNQUEUE_CLOUD_INSTANCE_NAME=prod-eu-1      # default: hostname
 BUNQUEUE_CLOUD_INTERVAL_MS=5000             # snapshot interval
-BUNQUEUE_CLOUD_REMOTE_COMMANDS=true         # enable remote commands (default: false)
+BUNQUEUE_CLOUD_REMOTE_COMMANDS=false        # disable remote commands (default: true)
 BUNQUEUE_CLOUD_SIGNING_SECRET=whsec_xxx     # HMAC signing
-BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=true        # include job data in WS events (default: false)
+BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=false       # omit job data from telemetry (default: true)
 BUNQUEUE_CLOUD_REDACT_FIELDS=email,password # redact fields from job data
 BUNQUEUE_CLOUD_EVENTS=failed,stalled        # filter WS events (default: all)
 BUNQUEUE_CLOUD_BUFFER_SIZE=720              # offline buffer size
@@ -385,9 +401,9 @@ BUNQUEUE_CLOUD_USE_HTTP=false               # disable HTTP channel
 
 ## 6. Two-Tier Snapshot Schedule
 
-| Tier | Frequency | Data | Cost |
-|------|-----------|------|------|
-| Light | Every 5s | stats, throughput, latency, memory, collections, queues, workers, crons, connections, storage, taskErrors | O(SHARD_COUNT) ~0.1ms |
-| Heavy | Every 30s | + recentJobs, dlqEntries, topErrors, workerDetails, queueConfigs, webhooks, s3Backup | O(active_queues × shards) ~1-5ms |
+| Tier  | Frequency | Data                                                                                                      | Cost                             |
+| ----- | --------- | --------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Light | Every 5s  | stats, throughput, latency, memory, collections, queues, workers, crons, connections, storage, taskErrors | O(SHARD_COUNT) ~0.1ms            |
+| Heavy | Every 30s | + recentJobs, dlqEntries, topErrors, workerDetails, queueConfigs, webhooks, s3Backup                      | O(active_queues × shards) ~1-5ms |
 
 Heavy data is cached between refreshes. Shutdown snapshot always includes heavy data.

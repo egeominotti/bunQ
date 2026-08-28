@@ -1,6 +1,6 @@
 ---
-title: "Adding Jobs: Priorities, Delays and Bulk"
-description: "Everything about putting work into a bunqueue queue: single and bulk adds, priorities, delays, per-job attempts and timeouts, and durable writes that skip the buffer."
+title: 'Adding Jobs: Priorities, Delays and Bulk'
+description: 'Everything about putting work into a bunqueue queue: single and bulk adds, priorities, delays, per-job attempts and timeouts, and durable writes that skip the buffer.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "queue add job, addBulk, job priority, delayed job, durable write, job attempts, bulk insert jobs bun"
+      content: 'queue add job, addBulk, job priority, delayed job, durable write, job attempts, bulk insert jobs bun'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Getting work <em>into the queue.</em></h1>
-  <p class="bq-hero-sub">One job or a hundred thousand, ordered by priority, held back by a delay, or written straight to disk when losing it is not an option.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Getting work <em>into the queue.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    One job or a hundred thousand, ordered by priority, held back by a delay, or written straight to
+    disk when losing it is not an option.
+  </p>
 </div>
 
 ## Add jobs
@@ -30,13 +35,13 @@ const basicJob = await queue.add('job-name', { key: 'value' });
 
 // With options
 const configuredJob = await queue.add('job-name', data, {
-  priority: 10,           // Higher = processed first
-  delay: 5000,            // Wait 5s before processing
-  attempts: 5,            // Max retries if the processor throws (default: 3)
-  backoff: 2000,          // Wait between retries in ms (default: 1000, jitter applied)
+  priority: 10, // Higher = processed first
+  delay: 5000, // Wait 5s before processing
+  attempts: 5, // Max retries if the processor throws (default: 3)
+  backoff: 2000, // Wait between retries in ms (default: 1000, jitter applied)
   // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
-  timeout: 30000,         // Fail the job if processing takes longer
-  jobId: 'custom-id',     // Custom ID, makes the add idempotent (see Deduplication)
+  timeout: 30000, // Fail the job if processing takes longer
+  jobId: 'custom-id', // Custom ID, makes the add idempotent (see Deduplication)
   removeOnComplete: true, // Delete job data after it completes
 });
 ```
@@ -49,13 +54,13 @@ const basicJob = await queue.add('job-name', { key: 'value' });
 
 // With options
 const configuredJob = await queue.add('job-name', data, {
-  priority: 10,           // Higher = processed first
-  delay: 5000,            // Wait 5s before processing
-  attempts: 5,            // Max retries if the processor throws (default: 3)
-  backoff: 2000,          // Wait between retries in ms (default: 1000)
+  priority: 10, // Higher = processed first
+  delay: 5000, // Wait 5s before processing
+  attempts: 5, // Max retries if the processor throws (default: 3)
+  backoff: 2000, // Wait between retries in ms (default: 1000)
   // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
-  timeout: 30000,         // Fail the job if processing takes longer
-  jobId: 'custom-id',     // Custom ID, makes the add idempotent (see Deduplication)
+  timeout: 30000, // Fail the job if processing takes longer
+  jobId: 'custom-id', // Custom ID, makes the add idempotent (see Deduplication)
   removeOnComplete: true, // Delete job data after it completes
 });
 ```
@@ -387,7 +392,7 @@ You can change the data for future runs at any point in the lifecycle with `upda
 
 ```typescript
 const job = await queue.add('sync', { endpoint: '/api/v1' }, { repeat: { every: 60000 } });
-await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
+await job.updateData({ endpoint: '/api/v2' }); // Next run uses /api/v2
 ```
 
 </TabItem>
@@ -395,7 +400,7 @@ await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
 
 ```typescript
 const job = await queue.add('sync', { endpoint: '/api/v1' }, { repeat: { every: 60000 } });
-await job.updateData({ endpoint: '/api/v2' });  // Next run uses /api/v2
+await job.updateData({ endpoint: '/api/v2' }); // Next run uses /api/v2
 ```
 
 </TabItem>
@@ -448,26 +453,37 @@ queue.update_job_data(&job.id(), update)?; // Next run uses /api/v2
 
 For named, managed schedules, see [Job Schedulers](/guide/queue/schedulers/) and the [Cron guide](/guide/cron/).
 
-### Durable jobs (no data loss)
+### Durable jobs (no SQLite buffer-loss window)
 
-By default bunqueue batches writes to disk every 10ms for speed (~100k jobs/sec). A crash inside that window can lose the not-yet-flushed jobs. For jobs where that is unacceptable, `durable: true` writes to disk before `add()` returns:
+By default SQLite mode batches writes to disk for up to 10 ms. A crash inside
+that window can lose the not-yet-flushed jobs. For jobs where that is
+unacceptable, `durable: true` bypasses bunqueue's buffer and commits before
+`add()` returns. Host, filesystem, and physical-media durability still apply:
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
 
 ```typescript
-await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
-  durable: true,
-});
+await queue.add(
+  'process-payment',
+  { orderId: '123', amount: 99.99 },
+  {
+    durable: true,
+  }
+);
 ```
 
 </TabItem>
 <TabItem label="Node.js / Deno">
 
 ```typescript
-await queue.add('process-payment', { orderId: '123', amount: 99.99 }, {
-  durable: true,
-});
+await queue.add(
+  'process-payment',
+  { orderId: '123', amount: 99.99 },
+  {
+    durable: true,
+  }
+);
 ```
 
 </TabItem>
@@ -517,32 +533,39 @@ queue.add("process-payment", data, JobOptions {
 </TabItem>
 </Tabs>
 
-Durable acceptance is fail closed. `add()` resolves only after SQLite commits
+SQLite durable acceptance is fail closed. `add()` resolves only after SQLite commits
 the job and any related custom-ID retirement, dedup replacement, dependency
 pin, or parent link. If SQLite rejects the write—for example because the disk
 is full—the call rejects and that candidate is not queryable, counted, or
 available to a Worker. Reusing a completed or DLQ `jobId` is also atomic: a
 failed replacement preserves the previous generation and its result across a
-broker restart. The same contract applies in Embedded and TCP mode and to
-durable entries in `addBulk`.
+broker restart. The same SQLite contract applies in Embedded and TCP mode and
+to durable entries in `addBulk`. PostgreSQL admission is transactional whether
+or not the flag is set. Memory-only mode remains ephemeral: `durable: true`
+cannot make it survive a process restart.
 
-| Mode | Throughput | Data loss window | Use for |
-|------|------------|------------------|---------|
-| Default | ~100k jobs/sec | Up to 10ms | Emails, notifications, analytics |
-| Durable | ~10k jobs/sec | None | Payments, orders, audit records |
+| SQLite mode |         Published native workload median | Data loss window            | Use for                         |
+| ----------- | ---------------------------------------: | --------------------------- | ------------------------------- |
+| Default     | 186,384 jobs/s, public on-disk `addBulk` | Up to 10 ms                 | Re-creatable work               |
+| Durable     |   60,835 ops/s, sequential Embedded adds | No SQLite buffer-loss window after `add()` resolves | Payments, orders, audit records |
+
+Those figures label different workloads and are not a direct per-operation
+speedup ratio. See [Benchmarks](/guide/benchmarks/) for distributions and the
+TCP rows. PostgreSQL admissions are already transactional and do not use this
+SQLite buffer.
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
-| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
-| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
-| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
-| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
-| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
-| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
-| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
-| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
-| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+|                                                                           |                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------- |
+| [Queue API](/guide/queue/)                                                | Create a queue in embedded or TCP mode        |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids   |
+| [Querying Jobs](/guide/queue/querying/)                                   | Fetch jobs, states, counts and results        |
+| [Queue Control and Maintenance](/guide/queue/control/)                    | Pause, drain, obliterate, clean and repair    |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/)             | Progress, per-job logs and dependencies       |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/)        | Rate limits and global concurrency caps       |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/)                 | Named repeatable schedules from the queue     |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/)                 | Failed-job operations from the Queue object   |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/)        | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward  |
+| [JobOptions Reference](/guide/queue/options/)                             | Every JobOptions field, with defaults         |

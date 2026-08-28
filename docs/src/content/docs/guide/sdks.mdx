@@ -1,6 +1,6 @@
 ---
-title: "SDKs: TypeScript, Python, PHP, Go, Rust, Elixir"
-description: "Six production-grade official SDKs for Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers."
+title: 'SDKs: TypeScript, Python, PHP, Go, Rust, Elixir'
+description: 'Six production-grade official SDKs for Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir and Cloudflare Workers.'
 head:
   - tag: meta
     attrs:
@@ -31,15 +31,15 @@ against the same queue, with no shared runtime and no translation layer.
 
 ## Supported platforms
 
-| Platform | Package | Distribution |
-|---|---|---|
-| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client` | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript) |
-| Python ≥ 3.9 | `bunqueue-client` | [PyPI](https://pypi.org/project/bunqueue-client/) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/python) |
-| PHP ≥ 8.1 | `bunqueue/client` | [Packagist](https://packagist.org/packages/bunqueue/client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) |
-| Go ≥ 1.26.5 | `github.com/egeominotti/bunqueue/sdk/go` | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go) |
-| Rust ≥ 1.85 | `bunqueue-client` | [crates.io](https://crates.io/crates/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) |
-| Elixir ≥ 1.15 | `bunqueue_client` | Hex upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) |
-| Bun, embedded in process, no server | `bunqueue` | [Quick Start](/guide/quickstart/) |
+| Platform                                        | Package                                  | Distribution                                                                                                                                                             |
+| ----------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Node.js ≥ 20, Bun, Deno ≥ 2, Cloudflare Workers | `bunqueue-client`                        | [npm](https://www.npmjs.com/package/bunqueue-client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/typescript)                                        |
+| Python ≥ 3.9                                    | `bunqueue-client`                        | [PyPI](https://pypi.org/project/bunqueue-client/) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/python)                                               |
+| PHP ≥ 8.1                                       | `bunqueue/client`                        | [Packagist](https://packagist.org/packages/bunqueue/client) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/php)                                        |
+| Go ≥ 1.26.5                                     | `github.com/egeominotti/bunqueue/sdk/go` | `go get`, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/go)                                                                                             |
+| Rust ≥ 1.85                                     | `bunqueue-client`                        | `cargo add bunqueue-client` · [API docs](https://docs.rs/bunqueue-client/latest/bunqueue_client/) · [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) |
+| Elixir ≥ 1.15                                   | `bunqueue_client`                        | Hex upcoming, [source](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir)                                                                                     |
+| Bun, embedded in process, no server             | `bunqueue`                               | [Quick Start](/guide/quickstart/)                                                                                                                                        |
 
 Every SDK is versioned independently from the server and follows semantic
 versioning; each changelog is linked in [Resources](#resources). The wire
@@ -89,8 +89,8 @@ services:
   bunqueue:
     image: ghcr.io/egeominotti/bunqueue:latest
     ports:
-      - "6789:6789"   # TCP protocol (SDKs)
-      - "6790:6790"   # HTTP API (/health, /metrics)
+      - '6789:6789' # TCP protocol (SDKs)
+      - '6790:6790' # HTTP API (/health, /metrics)
     volumes:
       - bunqueue-data:/app/data
     # environment:
@@ -406,10 +406,10 @@ const queue = new Queue('emails', {
   host: 'queue.example.com',
   port: 6789,
   token: process.env.BUNQUEUE_TOKEN,
-  tls: true,               // or { caFile } or { rejectUnauthorized: false }
+  tls: true, // or { caFile } or { rejectUnauthorized: false }
   commandTimeoutMs: 10000, // default
-  maxInFlight: 10_000,     // backpressure bound; 0 = unbounded (default)
-  poolSize: 4,             // producer-side connection pool; default 1
+  maxInFlight: 10_000, // backpressure bound; 0 = unbounded (default)
+  poolSize: 4, // producer-side connection pool; default 1
 });
 ```
 
@@ -501,15 +501,15 @@ command exchange.
 Every SDK preserves the same recovery invariants; implementation details follow
 the runtime:
 
-| Mechanism | Availability and behavior |
-|---|---|
-| Lazy reconnect | All six: a lost connection reconnects on the next call; workers re-register after every connection generation |
-| Worker retry backoff | All six retry a failed pull loop without spinning; TypeScript, Python, PHP, Go, and Rust use bounded backoff, while Elixir uses a short fixed delay |
-| Producer fast-fail window | TypeScript and Python throttle repeated failed connection attempts (500 ms → 5 s) |
-| TCP keepalive | TypeScript and Python enable an approximately 15 s idle probe where the OS exposes the controls |
-| Timeout-driven teardown | All six discard a stream whose framing state is ambiguous; TypeScript/Python tolerate a configurable consecutive-timeout threshold, PHP/Go/Rust/Elixir tear down immediately |
-| Backpressure | TypeScript optionally parks callers at `maxInFlight`; the synchronous clients naturally serialize/bound calls |
-| Auth ordering | All six prevent any command racing ahead of `Auth` after a reconnect |
+| Mechanism                 | Availability and behavior                                                                                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lazy reconnect            | All six: a lost connection reconnects on the next call; workers re-register after every connection generation                                                                |
+| Worker retry backoff      | All six retry a failed pull loop without spinning; TypeScript, Python, PHP, Go, and Rust use bounded backoff, while Elixir uses a short fixed delay                          |
+| Producer fast-fail window | TypeScript and Python throttle repeated failed connection attempts (500 ms → 5 s)                                                                                            |
+| TCP keepalive             | TypeScript and Python enable an approximately 15 s idle probe where the OS exposes the controls                                                                              |
+| Timeout-driven teardown   | All six discard a stream whose framing state is ambiguous; TypeScript/Python tolerate a configurable consecutive-timeout threshold, PHP/Go/Rust/Elixir tear down immediately |
+| Backpressure              | TypeScript optionally parks callers at `maxInFlight`; the synchronous clients naturally serialize/bound calls                                                                |
+| Auth ordering             | All six prevent any command racing ahead of `Auth` after a reconnect                                                                                                         |
 
 ## Producing jobs
 
@@ -526,26 +526,26 @@ each language's idiom: TypeScript and PHP use camelCase keys
 `JobOptions` fields, and Elixir accepts keyword or map options. Prefer typed
 builders: runtime handling of unknown keys differs by language.
 
-| Option | Type | Default | Notes |
-|---|---|---|---|
-| `priority` | number | 0 | Higher runs sooner; −1 000 000 … 1 000 000 |
-| `delay` | ms | 0 | Up to 1 year |
-| `attempts` | number | 3 | Max attempts including the first; up to 1000 |
-| `backoff` | number \| `{ type, delay }` | 1000 | `type`: `'fixed'` or `'exponential'`; delay up to 1 day |
-| `ttl` | ms | - | Expires the job if not processed in time |
-| `timeout` | ms | - | Per-job processing timeout, up to 1 day |
-| `jobId` | string | - | Custom id; **idempotent**, re-adding an unfinished id is a no-op |
-| `deduplication` | `{ id, ttl?, extend?, replace? }` | - | Dedup window keyed on `id` |
-| `debounce` | `{ id, ttl? }` | - | Persists compatibility metadata; use `deduplication` with `replace: true` for last-write-wins execution |
-| `dependsOn` | string[] | - | Job ids that must complete first |
-| `parentId` / `childrenIds` | string / string[] | - | Flow relationships (usually set via `FlowProducer`) |
-| `tags` / `groupId` | string[] / string | - | Metadata; `groupId` also scopes group rate limits |
-| `lifo` | boolean | false | At equal priority, LIFO jobs form a newest-first partition ahead of FIFO jobs |
-| `removeOnComplete` / `removeOnFail` | boolean | false | Drop the job record at the terminal state |
-| `durable` | boolean | false | Bypass the server write buffer, fsync before the ACK returns |
-| `repeat` | `{ every }` or `{ pattern, tz? }` + `limit?` | - | Repeatable jobs (see [Cron](/guide/cron/)) |
-| `stallTimeout` | ms | - | Per-job stall detection override |
-| `stackTraceLimit` / `keepLogs` / `sizeLimit` | number | - | Failure stack cap, retained log lines, payload cap |
+| Option                                       | Type                                         | Default | Notes                                                                                                   |
+| -------------------------------------------- | -------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `priority`                                   | number                                       | 0       | Higher runs sooner; −1 000 000 … 1 000 000                                                              |
+| `delay`                                      | ms                                           | 0       | Up to 1 year                                                                                            |
+| `attempts`                                   | number                                       | 3       | Max attempts including the first; up to 1000                                                            |
+| `backoff`                                    | number \| `{ type, delay }`                  | 1000    | `type`: `'fixed'` or `'exponential'`; delay up to 1 day                                                 |
+| `ttl`                                        | ms                                           | -       | Expires the job if not processed in time                                                                |
+| `timeout`                                    | ms                                           | -       | Per-job processing timeout, up to 1 day                                                                 |
+| `jobId`                                      | string                                       | -       | Custom id; **idempotent**, re-adding an unfinished id is a no-op                                        |
+| `deduplication`                              | `{ id, ttl?, extend?, replace? }`            | -       | Dedup window keyed on `id`                                                                              |
+| `debounce`                                   | `{ id, ttl? }`                               | -       | Persists compatibility metadata; use `deduplication` with `replace: true` for last-write-wins execution |
+| `dependsOn`                                  | string[]                                     | -       | Job ids that must complete first                                                                        |
+| `parentId` / `childrenIds`                   | string / string[]                            | -       | Flow relationships (usually set via `FlowProducer`)                                                     |
+| `tags` / `groupId`                           | string[] / string                            | -       | Metadata; `groupId` also scopes group rate limits                                                       |
+| `lifo`                                       | boolean                                      | false   | At equal priority, LIFO jobs form a newest-first partition ahead of FIFO jobs                           |
+| `removeOnComplete` / `removeOnFail`          | boolean                                      | false   | Drop the job record at the terminal state                                                               |
+| `durable`                                    | boolean                                      | false   | SQLite: bypass its write buffer before ACK; PostgreSQL admission is already transactional               |
+| `repeat`                                     | `{ every }` or `{ pattern, tz? }` + `limit?` | -       | Repeatable jobs (see [Cron](/guide/cron/))                                                              |
+| `stallTimeout`                               | ms                                           | -       | Per-job stall detection override                                                                        |
+| `stackTraceLimit` / `keepLogs` / `sizeLimit` | number                                       | -       | Failure stack cap, retained log lines, payload cap                                                      |
 
 <Tabs syncKey="lang">
 <TabItem label="TypeScript">
@@ -655,15 +655,15 @@ throughput: one round-trip for the whole batch.
 
 ### Worker options
 
-| Option | Default | Notes |
-|---|---|---|
-| `concurrency` | 4 in TypeScript/Python/Go/Rust; 1 in Elixir/PHP | Jobs processed in parallel except PHP, which is sequential by design |
-| `batchSize` | usually 10; Elixir defaults to concurrency | Jobs fetched per `PULLB`, capped by free slots and the server max (1000) |
-| `pollTimeoutMs` | usually 5000; Elixir 1000 | Server-side long-poll; max 30 000 |
-| `lockTtlMs` | 30 000 | Job lease TTL |
-| `heartbeatIntervalS` | 10; Go defaults to disabled | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
-| `ackBatch` | off | Opt-in ACK batching (below; TypeScript and Python) |
-| `autorun` | true where exposed | TypeScript/Python can start at construction; PHP, Go, Rust, and Elixir start explicitly |
+| Option               | Default                                         | Notes                                                                                   |
+| -------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `concurrency`        | 4 in TypeScript/Python/Go/Rust; 1 in Elixir/PHP | Jobs processed in parallel except PHP, which is sequential by design                    |
+| `batchSize`          | usually 10; Elixir defaults to concurrency      | Jobs fetched per `PULLB`, capped by free slots and the server max (1000)                |
+| `pollTimeoutMs`      | usually 5000; Elixir 1000                       | Server-side long-poll; max 30 000                                                       |
+| `lockTtlMs`          | 30 000                                          | Job lease TTL                                                                           |
+| `heartbeatIntervalS` | 10; Go defaults to disabled                     | Worker + per-job lock heartbeats; 0 disables (Go: negative or `DisableHeartbeat: true`) |
+| `ackBatch`           | off                                             | Opt-in ACK batching (below; TypeScript and Python)                                      |
+| `autorun`            | true where exposed                              | TypeScript/Python can start at construction; PHP, Go, Rust, and Elixir start explicitly |
 
 Names follow each language: Python, Rust, and Elixir use snake_case; PHP uses
 camelCase array keys; Go uses a `WorkerOptions` struct
@@ -800,7 +800,7 @@ worker.On("error", func(args ...any) { log.Println(args[0]) })
 **In TypeScript, always attach an `error` listener**: per Node
 `EventEmitter` semantics an unhandled `error` event throws. The other SDKs
 swallow listener exceptions. Every worker frees each job's concurrency
-slot *before* emitting, so a throwing listener cannot leak a slot or
+slot _before_ emitting, so a throwing listener cannot leak a slot or
 degrade throughput in any SDK. The error itself is yours to observe.
 
 Terminal outcomes are broker-authoritative in every official SDK. If a job
@@ -842,7 +842,7 @@ worker = Worker(
 </TabItem>
 </Tabs>
 
-Semantics are strict: a job stays *active*, its lock still heartbeated,
+Semantics are strict: a job stays _active_, its lock still heartbeated,
 until the server confirms the batch; the batch is flushed on `close()`;
 every job settles exactly once even if an event listener throws. Defaults
 are off, so nothing changes unless you enable it. When the broker ignores a
@@ -856,8 +856,8 @@ batch can contain two lease generations with the same job ID.
 <TabItem label="TypeScript">
 
 ```typescript
-await worker.close();        // stop pulling, flush batched ACKs, drain in-flight jobs
-await worker.close(true);    // force: skip the in-flight drain
+await worker.close(); // stop pulling, flush batched ACKs, drain in-flight jobs
+await worker.close(true); // force: skip the in-flight drain
 ```
 
 </TabItem>
@@ -902,17 +902,17 @@ control, basic DLQ operations, schedulers, atomic flow trees/chains, auth, TLS,
 and telemetry. They do **not** yet expose the complete Bun core surface with
 identical semantics.
 
-| Area | TypeScript | Python | PHP | Go | Rust | Elixir |
-|---|---|---|---|---|---|---|
-| Basic Queue + Worker | Full | Full | Full (sequential worker) | Full | Full | Full |
-| Full 32-operation Job API | 13 | 13 | 4 | 4 | 3 | 2 |
-| Dependency/waiting-children operations | Partial | Partial | Partial | Partial | Missing | Missing |
-| Limit mutation / readback | Partial / missing | Partial / missing | Partial / missing | Partial / missing | Partial / missing | Full / missing |
-| Rich DLQ + selector-aware bulk retry | Partial | Partial | Missing | Missing | Missing | Missing |
-| Flow bulk + fan-in + readback | Full | Full | Read only | Read only | Missing | Missing |
-| Queue-scoped workers/schedulers | Workers global | Workers global | Both global | Both global | Missing/partial | Missing/global |
-| QueueGroup, forwarding, workflow engine | Missing | Missing | Missing | Missing | Missing | Missing |
-| Simple Mode | Full | Full | Missing | Missing | Missing | Missing |
+| Area                                    | TypeScript        | Python            | PHP                      | Go                | Rust              | Elixir         |
+| --------------------------------------- | ----------------- | ----------------- | ------------------------ | ----------------- | ----------------- | -------------- |
+| Basic Queue + Worker                    | Full              | Full              | Full (sequential worker) | Full              | Full              | Full           |
+| Full 32-operation Job API               | 13                | 13                | 4                        | 4                 | 3                 | 2              |
+| Dependency/waiting-children operations  | Partial           | Partial           | Partial                  | Partial           | Missing           | Missing        |
+| Limit mutation / readback               | Partial / missing | Partial / missing | Partial / missing        | Partial / missing | Partial / missing | Full / missing |
+| Rich DLQ + selector-aware bulk retry    | Partial           | Partial           | Missing                  | Missing           | Missing           | Missing        |
+| Flow bulk + fan-in + readback           | Full              | Full              | Read only                | Read only         | Missing           | Missing        |
+| Queue-scoped workers/schedulers         | Workers global    | Workers global    | Both global              | Both global       | Missing/partial   | Missing/global |
+| QueueGroup, forwarding, workflow engine | Missing           | Missing           | Missing                  | Missing           | Missing           | Missing        |
+| Simple Mode                             | Full              | Full              | Missing                  | Missing           | Missing           | Missing        |
 
 Important current differences: TypeScript and Python dedup-owner lookup uses
 the custom-ID index, their rate-limit duration argument is not sent, and their
@@ -931,13 +931,13 @@ baseline:
 <TabItem label="TypeScript">
 
 ```typescript
-const job = await queue.getJob(id);            // null when missing
-const state = await queue.getJobState(id);     // 'waiting' | 'active' | ...
+const job = await queue.getJob(id); // null when missing
+const state = await queue.getJobState(id); // 'waiting' | 'active' | ...
 const result = await queue.waitForJob(id, 30_000);
-const counts = await queue.getJobCounts();     // { waiting, active, completed, ... }
+const counts = await queue.getJobCounts(); // { waiting, active, completed, ... }
 await queue.pause();
-const dropped = await queue.drain();           // number of removed jobs
-await queue.retryDlq();                        // re-queue dead-lettered jobs
+const dropped = await queue.drain(); // number of removed jobs
+await queue.retryDlq(); // re-queue dead-lettered jobs
 ```
 
 </TabItem>
@@ -1038,7 +1038,8 @@ await flow.addChain([
 
 // Tree: parent waits for its children
 const node = await flow.add({
-  name: 'assemble', queueName: 'orders',
+  name: 'assemble',
+  queueName: 'orders',
   children: [
     { name: 'reserve-stock', queueName: 'orders' },
     { name: 'charge-card', queueName: 'orders' },
@@ -1196,7 +1197,7 @@ isolated so an observer can never break transport or worker correctness.
 import { Queue, consoleLogger, type TelemetryEvent } from 'bunqueue-client';
 
 const queue = new Queue('emails', {
-  logger: consoleLogger('info'),           // or any { debug, info, warn, error }
+  logger: consoleLogger('info'), // or any { debug, info, warn, error }
   onTelemetry: (e: TelemetryEvent) => {
     if (e.type === 'command') histogram.observe({ cmd: e.cmd }, e.durationMs);
     if (e.type === 'reconnect_scheduled') reconnects.inc();
@@ -1267,8 +1268,9 @@ The idiomatic event sets cover connection/reconnection, authentication,
 command latency and outcome, timeout, transport error, and close as applicable
 to each runtime; worker retry events are added where the client has a retry
 loop. Tokens, job payloads, results, private keys, and CA contents are never
-recorded. Scrape the server's HTTP `/metrics` endpoint for authoritative queue
-and broker metrics.
+recorded. Scrape the server's Prometheus-text `/prometheus` endpoint for
+authoritative queue and broker metrics; `/metrics` is the JSON operational
+snapshot.
 
 ## Simple Mode
 
@@ -1363,7 +1365,12 @@ import { Queue } from 'bunqueue-client';
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const queue = new Queue('signups', { host: env.BQ_HOST, port: 6789, token: env.BQ_TOKEN, tls: true });
+    const queue = new Queue('signups', {
+      host: env.BQ_HOST,
+      port: 6789,
+      token: env.BQ_TOKEN,
+      tls: true,
+    });
     const job = await queue.add('welcome', await req.json());
     queue.close();
     return Response.json({ queued: job.id });
@@ -1389,8 +1396,8 @@ Authentication uses server-side tokens; transport security uses native TLS.
 const queue = new Queue('emails', {
   host: 'queue.example.com',
   port: 6789,
-  token: process.env.BUNQUEUE_TOKEN,   // server started with AUTH_TOKENS=...
-  tls: true,                            // or { caFile: './ca.pem' } for a custom CA
+  token: process.env.BUNQUEUE_TOKEN, // server started with AUTH_TOKENS=...
+  tls: true, // or { caFile: './ca.pem' } for a custom CA
 });
 ```
 
@@ -1480,14 +1487,14 @@ logic can branch precisely (PHP uses exception classes under
 `Bunqueue\Exception`; Go uses `errors.As`; Rust uses the `Error` enum; Elixir
 returns `{:error, exception}` or raises through bang APIs):
 
-| Error | Meaning |
-|---|---|
-| Connection | Link lost or server unreachable (in-flight commands reject; the next call reconnects) |
-| Timeout | No response within the command timeout, including `waitForJob` timeout |
-| Command | The server answered `ok: false` (validation, failed wait, or a write-side not-found) |
-| Authentication | Token rejected during the connection handshake |
-| Protocol / serialization | Invalid map, frame, MessagePack extension, or oversized outgoing body |
-| Unrecoverable processing | Raised/returned *by your processor* to skip retries and fail terminally |
+| Error                    | Meaning                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| Connection               | Link lost or server unreachable (in-flight commands reject; the next call reconnects) |
+| Timeout                  | No response within the command timeout, including `waitForJob` timeout                |
+| Command                  | The server answered `ok: false` (validation, failed wait, or a write-side not-found)  |
+| Authentication           | Token rejected during the connection handshake                                        |
+| Protocol / serialization | Invalid map, frame, MessagePack extension, or oversized outgoing body                 |
+| Unrecoverable processing | Raised/returned _by your processor_ to skip retries and fail terminally               |
 
 Delivery is **at-least-once**: a worker crash after processing but before
 the ACK means the job runs again, design handlers to be idempotent (the

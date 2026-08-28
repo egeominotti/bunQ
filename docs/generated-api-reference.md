@@ -1,6 +1,6 @@
 # Generated API Reference
 
-> **Category:** Documentation tooling · **Source:** `typedoc.json`, `scripts/build-api-reference.ts`, `docs/typedoc-theme.css`, `docs/src/content/docs/reference.mdx`, `docs/src/data/apiVersions.json`
+> **Category:** Documentation tooling · **Source:** `typedoc.json`, `tsconfig.typedoc.json`, `scripts/build-api-reference.ts`, `docs/typedoc-theme.css`, `docs/src/content/docs/reference.mdx`, `docs/src/data/apiVersions.json`
 
 ## Purpose
 
@@ -29,17 +29,30 @@ The consequence is worth stating plainly: a tree is frozen **across minors, not 
 
 `typedoc.json` `entryPoints` mirrors the package's `exports` map, so nothing is documented that a consumer cannot import:
 
-| Entry point | `exports` key |
-|---|---|
-| `src/main.ts` | `.` |
-| `src/client/index.ts` | `./client` |
-| `src/client/workflow/index.ts` | `./workflow` |
-| `src/application/queueManager.ts` | `./queue` |
-| `src/mcp/index.ts` | `./mcp` |
+| Entry point                       | `exports` key |
+| --------------------------------- | ------------- |
+| `src/main.ts`                     | `.`           |
+| `src/client/index.ts`             | `./client`    |
+| `src/client/workflow/index.ts`    | `./workflow`  |
+| `src/application/queueManager.ts` | `./queue`     |
+| `src/mcp/index.ts`                | `./mcp`       |
 
-The remaining entries (`src/client/types.ts`, `src/domain/types/job.ts`, and the other type modules) are **not** additional entrypoints. They hold types that appear in public signatures: event payloads, job options, DLQ and cron shapes. Without them TypeDoc emits `referenced but not included` and the reader hits a dead link on exactly the type they need to call the method. Adding them took the warning count from 58 to 15.
+The remaining entries (`src/client/types.ts`, `src/domain/types/job.ts`, and the other type modules) are **not** additional package export paths. They hold types that appear in public signatures: event payloads, job options, DLQ and cron shapes. Without them TypeDoc emits `referenced but not included` and the reader hits a dead link on exactly the type they need to call the method. Directory-backed modules must name their real `index.ts`; a stale `types.ts` glob is a warning and silently omits those pages.
 
 When a new type module starts appearing in those warnings, add it to `entryPoints` rather than ignoring it.
+
+TypeDoc uses `tsconfig.typedoc.json`, not the production type-check config. The
+production config deliberately excludes the optional MCP tree, while the package
+exports `bunqueue/mcp` and the reference must include it. The docs config extends
+the same compiler options but includes all of `src`. Private and protected members
+are excluded: inherited implementation state is not callable public API and would
+otherwise create dozens of misleading missing-type links.
+
+The generator treats warnings as errors. Every exported type reachable from a
+documented signature must either be an entry point or, for a deliberately private
+structural helper such as `RemoteQueueLike`, be named in
+`intentionallyNotExported`. A release cannot silently publish dead type links or
+an entry-point glob that matched nothing.
 
 ## Two collisions the layout avoids
 
@@ -47,7 +60,7 @@ Both were hit while building this, and both fail silently rather than loudly.
 
 **1. `/api/` is taken.** Starlight already owns `/api/http/`, `/api/tcp/` and `/api/types/` as content routes. Output therefore goes to `/reference/`, not `/api/`.
 
-**2. `public/` overwrites built pages.** An earlier version of the script wrote `docs/public/reference/index.html` as the version listing. Astro copies `public/` over the built output *last*, so that file clobbered the Starlight page that owns `/reference/`, and the site served unstyled HTML there. The script no longer writes it; `/reference/` is `docs/src/content/docs/reference.mdx`.
+**2. `public/` overwrites built pages.** An earlier version of the script wrote `docs/public/reference/index.html` as the version listing. Astro copies `public/` over the built output _last_, so that file clobbered the Starlight page that owns `/reference/`, and the site served unstyled HTML there. The script no longer writes it; `/reference/` is `docs/src/content/docs/reference.mdx`.
 
 ## Why the version list is a generated JSON
 
@@ -90,11 +103,11 @@ unaffected. Unit coverage for the scanners lives in `test/check-docs-data.test.t
 
 The version banner is the one piece of markup injected by the script, because TypeDoc has no slot for site chrome. It answers the two questions its own header cannot: which version am I reading, and how do I get back. Injection is idempotent, guarded by a check for `bq-ref-banner`, so re-running the build does not stack banners.
 
-`injectHead()` adds a second, separately-guarded injection: `<meta name="robots" content="noindex, follow">`, but **only on trees that are not the current version** (`shouldNoindex(version, current)`). The current tree stays indexable on purpose — TypeDoc writes real per-page titles (`Worker | bunqueue`, `StallConfig | bunqueue`; the bare `bunqueue` title is on two files, `index.html` and `hierarchy.html`), so a search for a type name landing on that type is useful. What must not accumulate is one near-identical tree per released version: all 238 pages share the description `Documentation for bunqueue` and carry no canonical, so an indexed v2.7 next to an indexed v2.8 is self-competition that grows with every release. `--dev` previews never index.
+`injectHead()` adds a second, separately-guarded injection: `<meta name="robots" content="noindex, follow">`, but **only on trees that are not the current version** (`shouldNoindex(version, current)`). The current tree stays indexable on purpose — TypeDoc writes real per-page titles (`Worker | bunqueue`, `StallConfig | bunqueue`; the bare `bunqueue` title is on two files, `index.html` and `hierarchy.html`), so a search for a type name landing on that type is useful. What must not accumulate is one near-identical tree per released version: all 250 HTML pages in the current v2.9 tree share the description `Documentation for bunqueue` and carry no canonical, so an indexed v2.8 next to an indexed v2.9 is self-competition that grows with every release. `--dev` previews never index.
 
-Demotion happens on the release that supersedes a tree, not when the tree is written: `main()` injects into the tree TypeDoc just produced, then walks every sibling version directory and re-runs the same injection with `noindex` on each one that is no longer current. Without that second pass the policy could never fire for a released version — a tree is only ever generated while it *is* current, so it would keep the indexable head it was born with and each release would add another near-identical competitor. Both passes are idempotent, so re-running costs nothing.
+Demotion happens on the release that supersedes a tree, not when the tree is written: `main()` injects into the tree TypeDoc just produced, then walks every sibling version directory and re-runs the same injection with `noindex` on each one that is no longer current. Without that second pass the policy could never fire for a released version — a tree is only ever generated while it _is_ current, so it would keep the indexable head it was born with and each release would add another near-identical competitor. Both passes are idempotent, so re-running costs nothing.
 
-The two injections need independent guards. A shared one is wrong in both directions: the committed tree already carries banners, so a `bq-ref-banner` check would skip the meta on every existing file, and a tree that predates the banner would never get chrome. `injectBanner` also asserts a post-condition — a page that ends without a robots meta *inside its `<head>`* exits the build non-zero, because a silently unmatched `replace` is exactly how the wrong `depth` shipped on 234 pages. Placement, not presence: `<head(\s[^>]*)?>` is attribute-tolerant like `<body>` above, and the `\s` is load-bearing, because `<head([^>]*)>` also matches the `<header class="tsd-page-toolbar">` TypeDoc puts on every page — on a page with no `<head>` the meta would land inside that element, still present and no longer a directive.
+The two injections need independent guards. A shared one is wrong in both directions: the committed tree already carries banners, so a `bq-ref-banner` check would skip the meta on every existing file, and a tree that predates the banner would never get chrome. `injectBanner` also asserts a post-condition — a page that ends without a robots meta _inside its `<head>`_ exits the build non-zero, because a silently unmatched `replace` is exactly how the wrong `depth` shipped on 234 pages. Placement, not presence: `<head(\s[^>]*)?>` is attribute-tolerant like `<body>` above, and the `\s` is load-bearing, because `<head([^>]*)>` also matches the `<header class="tsd-page-toolbar">` TypeDoc puts on every page — on a page with no `<head>` the meta would land inside that element, still present and no longer a directive.
 
 The generated pages are not in the sitemap either way: `@astrojs/sitemap` only enumerates Astro routes, and this tree is copied verbatim from `docs/public/`.
 
@@ -117,20 +130,20 @@ through side effects.
 
 ## Verification
 
-Do not verify with `bun run dev`. The Astro dev server does not resolve directory indexes under `public/`, so `/reference/v2.8/` returns **404** there while the identical path returns 200 in production. Build and preview instead:
+Do not verify with `bun run dev`. The Astro dev server does not resolve directory indexes under `public/`, so `/reference/v2.9/` returns **404** there while the identical path returns 200 in production. Build and preview instead:
 
 ```bash
 cd docs && bun run build && bunx astro preview --port 4399
-curl -o /dev/null -w '%{http_code}\n' http://localhost:4399/reference/v2.8/
+curl -o /dev/null -w '%{http_code}\n' http://localhost:4399/reference/v2.9/
 ```
 
 ## The generated tree is committed, deliberately
 
 `docs/public/reference/<version>/` is **not** gitignored, and cannot be.
 
-Generating at deploy time would only ever produce the *current* version, because an older tree cannot be regenerated from today's source. Serving `/reference/v2.6/` after 2.8 ships requires the v2.6 tree to exist in the repo. Versioned references and build-time generation are mutually exclusive; this design chooses versioning.
+Generating at deploy time would only ever produce the _current_ version, because an older tree cannot be regenerated from today's source. Serving `/reference/v2.6/` after 2.8 ships requires the v2.6 tree to exist in the repo. Versioned references and build-time generation are mutually exclusive; this design chooses versioning.
 
-The cost is **~5.1 MB and 245 files per minor version** (v2.8 measured: 2.4 MB interfaces, 1.4 MB classes). Ten minor versions is roughly 50 MB of mostly-static HTML.
+The current cost is **about 5.4 MB and 259 files per minor version** (v2.9 measured). Ten similarly sized minor versions would be roughly 54 MB of mostly-static HTML.
 
 If that becomes a problem, the options, in increasing effort:
 
@@ -152,9 +165,9 @@ cd /tmp/bq-2.8 && bun install && bun run docs:api
 cp -r docs/public/reference/v2.8 <this-repo>/docs/public/reference/
 ```
 
-Only `v2.8` ships today for exactly this reason: the earlier tree that existed during
-development had been generated from modified source and was removed rather than
-published.
+The repository now ships the historical `v2.8` tree and the current `v2.9`
+tree. Any older version must still be generated from its matching tag before it
+can be added safely.
 
 ## Release integration
 

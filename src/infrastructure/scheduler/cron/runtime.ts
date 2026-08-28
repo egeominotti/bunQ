@@ -1,11 +1,6 @@
 import { createCronJob, type CronJob, type CronJobInput } from '../../../domain/types/cron';
 import { MinHeap } from '../../../shared/minHeap';
-import {
-  expandCronShortcut,
-  getNextCronRun,
-  getNextIntervalRun,
-  validateCronExpression,
-} from '../cronParser';
+import { expandCronShortcut, getNextCronRun, getNextIntervalRun } from '../cronParser';
 import type {
   CronHeapEntry,
   CronRegistryEntry,
@@ -13,6 +8,8 @@ import type {
   PersistCronCallback,
   PushJobCallback,
 } from '../types/cronScheduler';
+import { assertPersistedCronsSupported } from './persisted';
+import { assertValidCronInput } from './validation';
 
 const SAFETY_FALLBACK_MS = 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -77,15 +74,7 @@ export abstract class CronRuntime {
   }
 
   add(input: CronJobInput): CronJob {
-    if (!input.schedule && !input.repeatEvery) {
-      throw new Error('Cron job must have either schedule or repeatEvery');
-    }
-
-    if (input.schedule) {
-      const expanded = expandCronShortcut(input.schedule);
-      const error = validateCronExpression(expanded, input.timezone);
-      if (error) throw new Error(`Invalid cron expression: ${error}`);
-    }
+    assertValidCronInput(input);
 
     const now = Date.now();
     const nextRun = input.schedule
@@ -124,6 +113,7 @@ export abstract class CronRuntime {
   }
 
   load(crons: CronJob[]): void {
+    assertPersistedCronsSupported(crons);
     const now = Date.now();
     const entries: CronHeapEntry[] = [];
     for (const cron of crons) {

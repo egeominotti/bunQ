@@ -18,13 +18,16 @@ This page is the hub for integrations. It shows the one pattern every integratio
 
 ## The smallest integration
 
-bunqueue in **embedded mode** runs inside your app's process, backed by a local SQLite file, so there is no queue server to install or run. This works in any Bun app, whatever framework you use:
+bunqueue in **embedded mode** runs inside your app's process. Set `dataPath` to
+back it with a local SQLite file, so there is no queue server to install or
+run. This works in any Bun app, whatever framework you use:
 
 ```typescript
 import { Queue, Worker } from 'bunqueue/client';
 
 // The queue: where jobs wait
-const emails = new Queue('emails', { embedded: true });
+const storage = { embedded: true, dataPath: './data/bunq.db' } as const;
+const emails = new Queue('emails', storage);
 
 // The worker: runs your function on each job
 new Worker(
@@ -32,7 +35,7 @@ new Worker(
   async (job) => {
     await sendEmail(job.data);
   },
-  { embedded: true }
+  storage
 );
 
 // Anywhere in your app (an HTTP handler, for example):
@@ -93,10 +96,12 @@ import { Queue } from 'bunqueue/client';
 export const queues = {
   emails: new Queue('emails', {
     embedded: true,
+    dataPath: './data/bunq.db',
     defaultJobOptions: { attempts: 3, backoff: 5000 },
   }),
   reports: new Queue('reports', {
     embedded: true,
+    dataPath: './data/bunq.db',
     defaultJobOptions: { timeout: 300_000 },
   }),
 } as const;
@@ -125,6 +130,6 @@ process.on('SIGTERM', shutdown);
 
 - [Hono Integration](/guide/hono/) - Routes, workers, and status endpoints
 - [Elysia Integration](/guide/elysia/) - Validation and the plugin pattern
-- [Storage: SQLite by Design](/guide/databases/) - Postgres questions answered
+- [Storage backends](/guide/databases/) - SQLite and PostgreSQL topologies
 - [MCP Server](/guide/mcp/) - Full AI agent setup
 - [CPU-Intensive Workers](/guide/cpu-intensive-workers/) - Heavy jobs without dropped connections

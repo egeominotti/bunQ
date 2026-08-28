@@ -1,6 +1,6 @@
 ---
-title: "Cron Scheduler: MinHeap Execution & Timezones"
-description: "bunqueue cron scheduler internals: MinHeap-based execution with O(1) lazy deletion, timezone support, and SQLite-backed persistence."
+title: 'Cron Scheduler: SQLite Heap and PostgreSQL Coordination'
+description: 'bunqueue cron internals: a MinHeap scheduler for memory/SQLite, transactional PostgreSQL multi-broker execution, Bun-native parsing, and timezones.'
 head:
   - tag: meta
     attrs:
@@ -10,11 +10,11 @@ head:
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · cron scheduler</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">The cron scheduler, time <em>persisted.</em></h1>
-  <p class="bq-hero-sub">The bunqueue cron scheduler uses a MinHeap-based execution model with generation-based lazy deletion, timezone-aware schedules, and SQLite-backed state for recovery on restart.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">One schedule. <em>One winning broker.</em></h1>
+  <p class="bq-hero-sub">Memory/SQLite uses an event-driven MinHeap with lazy deletion. PostgreSQL stores shared schedules in the database and lets competing brokers lock each due row transactionally. Both use Bun's native cron parser and the same public API.</p>
 </div>
 
-## System Overview
+## Memory/SQLite System Overview
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>CronScheduler</b><span>heap plus generation map</span></div>
@@ -30,7 +30,7 @@ head:
       <div class="bq-diag-cell">1. Pop due crons from heap <i>nextRun &lt;= now</i></div>
       <div class="bq-diag-cell">2. Check stale <i>generation mismatch: skip</i></div>
       <div class="bq-diag-cell">3. Check execution limit <i>auto-remove if reached</i></div>
-      <div class="bq-diag-cell">4. Persist new state to SQLite <i>before pushing, prevents duplicates</i></div>
+      <div class="bq-diag-cell">4. Persist to SQLite when configured <i>before pushing, prevents duplicates</i></div>
     </div>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">5. Push job to queue</div>
@@ -41,28 +41,51 @@ head:
   <p class="bq-diag-note">The scheduler is event-driven: a precise setTimeout wakes it exactly when the next cron is due, rearmed after every add/remove/load/tick. A 60s setInterval acts only as a safety fallback against timer drift or missed events.</p>
 </div>
 
+## PostgreSQL Multi-Broker Execution
+
+PostgreSQL mode does not run one independent heap per broker. Every schedule is
+stored in `bunqueue_crons` under the deployment namespace. On each maintenance
+pass, a broker opens one transaction, samples the database clock, and selects
+due rows in `(next_run, name)` order with `FOR UPDATE SKIP LOCKED`. The winning
+transaction checks the shared worker registry, admits the spawned job, advances
+`executions` and `next_run`, and commits those changes together. Other brokers
+skip the locked row, so one slot cannot fire twice.
+
+Startup reconciliation is elected under a namespace advisory lock: the oldest
+live broker session handles missed-slot policy, preventing simultaneous startup
+from making every broker skip the same schedule. Due cron rows are found by the
+configured PostgreSQL maintenance polling interval. After a committed admission,
+the shared event path can use `LISTEN/NOTIFY` to wake other brokers and workers;
+durable rows remain authoritative after a missed notification or connection
+reset.
+
+Before either SQLite recovery or PostgreSQL broker registration mutates state,
+startup validates every persisted calendar definition against Bun's supported
+grammar. An unsupported pre-2.9 Croner extension fails startup with an
+actionable name and schedule; the collection is never partially reconciled.
+
 ## Core Data Structures
 
 ### CronJob Interface
 
 ```typescript
 interface CronJob {
-  name: string;               // Unique identifier
-  jobName: string;            // Name of each spawned Job
-  queue: string;              // Target queue
-  data: unknown;              // Job payload
-  schedule: string | null;    // Cron expression (5-6 fields)
+  name: string; // Unique identifier
+  jobName: string; // Name of each spawned Job
+  queue: string; // Target queue
+  data: unknown; // Job payload
+  schedule: string | null; // Cron expression (5-6 fields)
   repeatEvery: number | null; // Interval in ms
-  priority: number;           // Job priority
-  timezone: string | null;    // IANA timezone
-  nextRun: number;            // Next execution timestamp (absolute ms)
-  executions: number;         // Current execution count
-  maxLimit: number | null;    // Max executions (null = unlimited)
-  uniqueKey: string | null;   // Dedup key for spawned jobs
-  dedup: CronDedup | null;    // Dedup options (ttl, extend, replace)
+  priority: number; // Job priority
+  timezone: string | null; // IANA timezone
+  nextRun: number; // Next execution timestamp (absolute ms)
+  executions: number; // Current execution count
+  maxLimit: number | null; // Max executions (null = unlimited)
+  uniqueKey: string | null; // Dedup key for spawned jobs
+  dedup: CronDedup | null; // Dedup options (ttl, extend, replace)
   skipMissedOnRestart: boolean; // Skip missed runs on restart
-  skipIfNoWorker: boolean;    // Skip push if no worker registered
-  preventOverlap: boolean;    // Auto uniqueKey `cron:<name>` (default: true)
+  skipIfNoWorker: boolean; // Skip push if no worker registered
+  preventOverlap: boolean; // Auto uniqueKey `cron:<name>` (default: true)
   jobOptions: CronJobOptions | null; // Per-spawned-job retry/cleanup policy
 }
 ```
@@ -101,24 +124,28 @@ Source: `src/infrastructure/scheduler/cron/runtime.ts` and
 
 ### Cron Expressions
 
-Supports standard 5-6 field cron syntax with shortcuts:
+Supports Bun's standard five-field cron syntax, a compatible six-field form
+with leading seconds, and shortcuts:
 
-| Shortcut | Expression | Description |
-|----------|-----------|-------------|
-| `@yearly` | `0 0 1 1 *` | Once per year |
-| `@monthly` | `0 0 1 * *` | First day of month |
-| `@weekly` | `0 0 * * 0` | Sunday at midnight |
-| `@daily` | `0 0 * * *` | Every day at midnight |
-| `@hourly` | `0 * * * *` | Every hour |
+| Shortcut   | Expression  | Description           |
+| ---------- | ----------- | --------------------- |
+| `@yearly`  | `0 0 1 1 *` | Once per year         |
+| `@monthly` | `0 0 1 * *` | First day of month    |
+| `@weekly`  | `0 0 * * 0` | Sunday at midnight    |
+| `@daily`   | `0 0 * * *` | Every day at midnight |
+| `@hourly`  | `0 * * * *` | Every hour            |
 
 ### Timezone Support
 
-Uses the `croner` library for timezone-aware scheduling:
+Uses Bun's native parser for timezone-aware scheduling:
 
 ```typescript
-const cron = new Cron('0 2 * * *', { timezone: 'Europe/Rome' });
-const nextDate = cron.nextRun(new Date(fromTime));
+const nextDate = Bun.cron.parse('0 2 * * *', fromTime, { tz: 'Europe/Rome' });
 ```
+
+The optional leading seconds field is handled by bunqueue before the remaining
+five fields are passed to Bun. It accepts values `0-59` with `*`, lists, ranges,
+and steps. Seven-field years and `L`, `W`, `#`, `+`, and `?` are not supported.
 
 ### Interval-Based (RepeatEvery)
 
@@ -132,7 +159,7 @@ function getNextIntervalRun(intervalMs: number, lastRun: number): number {
 
 Interval crons run at a fixed rate: the next run is anchored to the slot the fire was scheduled for, not to wall-clock time at execution, so a slow or late fire does not cumulatively drift the schedule forward.
 
-## Execution Flow
+## Memory/SQLite Execution Flow
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>Execution flow</b><span>tick() fires when the precise timer (or the 60s safety fallback) wakes</span></div>
@@ -144,7 +171,7 @@ Interval crons run at a fixed rate: the next run is anchored to the slot the fir
   <div class="bq-diag-arrow">↓ no</div>
   <div class="bq-diag-layer">At execution limit? <i>yes: auto-remove</i></div>
   <div class="bq-diag-arrow">↓ no</div>
-  <div class="bq-diag-layer bq-diag-accent">1. Calculate new executions and nextRun, 2. persist to SQLite FIRST, 3. update in-memory state, 4. fire the job (push to queue), 5. re-insert to heap</div>
+  <div class="bq-diag-layer bq-diag-accent">1. Calculate new executions and nextRun, 2. persist to SQLite FIRST when configured, 3. update in-memory state, 4. fire the job (push to queue), 5. re-insert to heap</div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-layer">scheduleNext() <i>arm a precise setTimeout for the next non-stale heap entry</i></div>
 </div>
@@ -181,16 +208,24 @@ CREATE TABLE cron_jobs (
 );
 ```
 
-### Recovery on Startup
+### Memory/SQLite Recovery on Startup
 
 ```typescript
 // In QueueManager initialization
-this.cronScheduler.load(this.storage.loadCronJobs());  // O(n) heapify
+this.cronScheduler.load(this.storage.loadCronJobs()); // O(n) heapify
 ```
 
 During `load()`, any cron whose persisted `nextRun` is in the past has it recalculated forward (and re-persisted) when `skipMissedOnRestart` or `skipIfNoWorker` is set, so missed runs are skipped instead of firing immediately on boot.
 
-## Error Handling
+### PostgreSQL Storage
+
+PostgreSQL stores the encoded `CronJob`, `next_run`, `executions`, and
+`max_limit` in `bunqueue_crons`. Scheduler upsert/remove/list operations and due
+execution use the same database row, so every broker sees one shared identity.
+Job admission and schedule advancement commit in the same transaction; unlike
+the local persist-first path, there is no persisted-advance/job-admission gap.
+
+## Memory/SQLite Error Handling
 
 ### Persist-First Execution
 
@@ -199,7 +234,7 @@ State is persisted before the job is pushed, so a crash between the two steps ca
 ```typescript
 // 1. Calculate new state BEFORE anything else
 const newExecutions = cron.executions + 1;
-const newNextRun = calculateNextRun(cron);  // interval crons anchor to the scheduled slot
+const newNextRun = calculateNextRun(cron); // interval crons anchor to the scheduled slot
 
 // 2. Persist FIRST; on failure: do NOT push, re-insert entry, retry on next tick
 this.persistCron(cron.name, newExecutions, newNextRun);
@@ -214,27 +249,24 @@ cron.nextRun = newNextRun;
 await this.fireCronJob(cron, now);
 ```
 
-## Performance Characteristics
+## Memory/SQLite Performance Characteristics
 
-| Operation | Complexity | Notes |
-|-----------|-----------|-------|
-| `add()` | O(log n) | Heap push + map insert, rearms the precise timer |
-| `remove()` | **O(1)** | Lazy deletion via generation |
-| `tick()` | O(k log n) | k = due crons |
-| `scheduleNext()` | O(1) amortized | Peek heap, pop stale entries, arm setTimeout |
-| `list()` | O(n) | Iterate map |
-| `load()` | O(n) | Heapify from array |
+| Operation        | Complexity     | Notes                                            |
+| ---------------- | -------------- | ------------------------------------------------ |
+| `add()`          | O(log n)       | Heap push + map insert, rearms the precise timer |
+| `remove()`       | **O(1)**       | Lazy deletion via generation                     |
+| `tick()`         | O(k log n)     | k = due crons                                    |
+| `scheduleNext()` | O(1) amortized | Peek heap, pop stale entries, arm setTimeout     |
+| `list()`         | O(n)           | Iterate map                                      |
+| `load()`         | O(n)           | Heapify from array                               |
 
-## Timing Model
+## Memory/SQLite Timing Model
 
 There is no configurable polling interval. The scheduler is event-driven:
 
 ```typescript
 // Precise timer, chunked at the runtime's signed 32-bit timeout ceiling
-const delay = Math.min(
-  Math.max(0, nextEntry.cron.nextRun - Date.now()),
-  2_147_483_647,
-);
+const delay = Math.min(Math.max(0, nextEntry.cron.nextRun - Date.now()), 2_147_483_647);
 this.nextTimer = setTimeout(() => void this.tick(), delay);
 
 // Safety fallback: catches timer drift and missed events
@@ -265,7 +297,7 @@ the `CronJob.nextRun` returned by the scheduler, while TCP reads the nested
 await queue.upsertJobScheduler(
   'daily-cleanup',
   { pattern: '0 2 * * *', timezone: 'Europe/Rome', limit: 365 },
-  { data: { type: 'cleanup' } },
+  { data: { type: 'cleanup' } }
 );
 
 // Add an interval-based job (every minute)
@@ -279,8 +311,10 @@ const info = await queue.getJobScheduler('health-check');
 ```
 
 :::tip[Related]
+
 - [Architecture Overview](/architecture/) - Full component map
 - [Data Structures](/architecture/data-structures/) - Skip list behind time-ordered scheduling
 - [Persistence](/architecture/persistence/) - Where schedulers survive restarts
+- [Storage Backends](/guide/databases/) - PostgreSQL cron coordination and failover boundaries
 - [Cron Jobs Guide](/guide/cron/) - Using schedulers from the client
-:::
+  :::

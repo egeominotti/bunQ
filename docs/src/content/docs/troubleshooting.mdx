@@ -291,7 +291,18 @@ Treat it as a signal that you no longer own the job, not as a transient error.
 
 ### getJobs() does not show a job I just added
 
-Job listings (`getJobs`, `GetJobs` over TCP) read from SQLite, while pushes go through a write buffer that flushes about every 10ms. A job added a moment ago can be missing from a listing for up to ~10ms. Use `getJob(id)` / `getState(id)` (which read the in-memory index) for read-after-write checks, or add the job with `durable: true` to bypass the buffer.
+In SQLite mode, job listings (`getJobs`, `GetJobs` over TCP) read from SQLite,
+while non-durable pushes go through a write buffer that flushes about every
+10ms. A job added a moment ago can therefore be missing from a listing for up
+to ~10ms. Use `getJob(id)` / `getState(id)` (which read the in-memory index) for
+read-after-write checks, or add the job with `durable: true` to bypass the
+buffer.
+
+PostgreSQL admissions are transactional and do not use the SQLite write
+buffer. The broker that accepts a push refreshes its local PostgreSQL projection
+before acknowledging it. Other brokers converge through the durable outbox and
+`LISTEN` wakeups, with polling as the fallback, so a listing sent immediately to
+a different broker can briefly reflect its previous projection.
 
 ### Jobs failing immediately
 

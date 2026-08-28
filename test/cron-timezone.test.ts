@@ -13,13 +13,9 @@ describe('Cron Timezone Support', () => {
       expect(error).toBeNull();
     });
 
-    test('validateCronExpression with timezone is lenient (croner behavior)', () => {
-      // Note: croner library is lenient with invalid timezones at parse time
-      // It only fails when actually calculating next run for certain invalid zones
+    test('validateCronExpression rejects an invalid timezone', () => {
       const error = validateCronExpression('0 9 * * *', 'Invalid/Timezone');
-      // This may not throw immediately - croner is lenient
-      // The important thing is valid timezones work correctly
-      expect(typeof error === 'string' || error === null).toBe(true);
+      expect(error).toContain('unknown time zone');
     });
 
     test('getNextCronRun uses timezone for calculation', () => {

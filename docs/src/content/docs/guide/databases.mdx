@@ -1,6 +1,6 @@
 ---
 title: 'Storage: SQLite or PostgreSQL 15–18'
-description: 'Use SQLite by default for a zero-infrastructure bunqueue, or PostgreSQL 15–18 for a database-authoritative multi-broker server deployment.'
+description: 'Use memory or one-file SQLite for a zero-infrastructure bunqueue, or PostgreSQL 15–18 for a database-authoritative multi-broker server deployment.'
 head:
   - tag: meta
     attrs:
@@ -13,7 +13,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · storage</span>
   <h1 class="bq-hero-h1 bq-bench-h1">
-    SQLite by default. PostgreSQL for <em>many brokers.</em>
+    One-file SQLite. PostgreSQL for <em>many brokers.</em>
   </h1>
   <p class="bq-hero-sub">
     Keep the zero-infrastructure SQLite engine for embedded and single-broker deployments, or opt
@@ -26,8 +26,9 @@ changed. PostgreSQL is a separate server backend; MySQL is not supported.
 
 ## The short answer
 
-bunqueue still needs **zero external infrastructure by default**. Persistence is
-one SQLite file, and the only runtime dependencies are `croner` and `msgpackr`.
+bunqueue still needs **zero external infrastructure by default**. Without a
+data path it is memory-only; set one path for SQLite persistence. The only
+runtime dependency is `msgpackr`, and cron parsing is provided by Bun itself.
 If one server or embedded process and a durable disk meet your needs, use SQLite:
 
 ```bash
@@ -44,8 +45,9 @@ _Embedded mode (and `queue.forward()` below) ships in the Bun `bunqueue` package
 
 For multiple active broker processes, use the PostgreSQL server backend. It is
 database-authoritative: claims, leases, ACK/FAIL, queue limits, cron schedules,
-worker registrations, metrics, and events are coordinated in PostgreSQL rather
-than independent in-memory queues.
+worker registrations, job-state/lifecycle metrics, and events are coordinated in PostgreSQL rather
+than independent in-memory queues. Here, metrics means job-state and lifecycle
+families; process/connection and registration collectors remain broker-local.
 
 ## PostgreSQL 15–18 multi-broker mode
 
@@ -280,12 +282,17 @@ Most container platforms can attach a durable disk. Point the data path at it an
 bunqueue runs SQLite in WAL mode (write-ahead logging, a mode that allows concurrent reads and writes). WAL creates `-wal` and `-shm` sidecar files next to the `.db` file, so mount the whole data directory on the durable volume, not just the database file.
 :::
 
-### Option 2: Store-and-forward from ephemeral instances
+### Option 2: Store-and-forward with a persistent local spool
 
-If instances scale to zero and no disk can be attached, run bunqueue embedded on the instance and forward jobs to one central, durable bunqueue server:
+When the uplink can fail but the instance has a persistent local volume, run
+bunqueue embedded and forward jobs to one central, durable bunqueue server:
 
 ```typescript
-const local = new Queue('ingest', { embedded: true, dataPath: '/tmp/spool.db' });
+const local = new Queue('ingest', {
+  embedded: true,
+  dataPath: '/var/lib/bunqueue/spool.db',
+  defaultJobOptions: { durable: true }, // close SQLite's 10ms hard-crash window
+});
 
 const forwarder = local.forward({
   to: { host: 'central.internal', port: 6789, tls: true },
@@ -293,7 +300,12 @@ const forwarder = local.forward({
 });
 ```
 
-If the central server is unreachable, jobs stay local and retry; permanent failures land in the local DLQ (dead letter queue, the holding area for jobs that exhausted their retries). Nothing is lost while offline. Full walkthrough: [IoT & Edge](/guide/iot-edge/).
+If the central server is unreachable, jobs stay local and retry; permanent
+failures land in the local DLQ (dead letter queue, the holding area for jobs
+that exhausted their retries). This protects network outages while the local
+process and volume survive. A `/tmp` spool on a scale-to-zero instance is not
+durable: if no volume can be attached, write directly to the central server
+instead. Full walkthrough: [IoT & Edge](/guide/iot-edge/).
 
 ### Option 3: One central server, stateless workers
 
@@ -391,7 +403,8 @@ Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare W
 | Your situation                                       | Use                           |
 | ---------------------------------------------------- | ----------------------------- |
 | Container with an attachable disk                    | Persistent volume (Option 1)  |
-| Scale-to-zero instances, want local durability first | Store-and-forward (Option 2)  |
+| Intermittent uplink plus a persistent local volume   | Store-and-forward (Option 2)  |
+| Scale-to-zero instance with no durable local disk    | Direct central server (Option 3) |
 | Many stateless workers, one durable host             | Central TCP server (Option 3) |
 | Multiple active bunqueue brokers sharing state       | PostgreSQL 15–18 backend      |
 

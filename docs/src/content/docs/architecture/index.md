@@ -1,6 +1,6 @@
 ---
-title: "Architecture: Sharded Job Queue Design for Bun"
-description: "Architecture overview of bunqueue: auto-scaling shards, TCP protocol, SQLite WAL persistence, and background task scheduling internals."
+title: 'Architecture: SQLite and PostgreSQL Queue Engines for Bun'
+description: 'Architecture overview of bunqueue: the sharded memory/SQLite engine, PostgreSQL multi-broker manager, TCP protocol, and scheduling internals.'
 head:
   - tag: meta
     attrs:
@@ -11,7 +11,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · overview</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Inside the bunqueue <em>architecture.</em></h1>
-  <p class="bq-hero-sub">bunqueue is a high-performance job queue built for Bun with SQLite persistence. This section covers the internal architecture, data flows, and design decisions.</p>
+  <p class="bq-hero-sub">bunqueue has two execution topologies behind one server protocol: a synchronous sharded memory/SQLite engine, and a database-authoritative PostgreSQL 15–18 engine for multiple brokers. This section maps both and identifies which diagrams belong to which path.</p>
 </div>
 
 ## System Overview
@@ -30,7 +30,7 @@ head:
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">server layer</span>
     <div class="bq-diag-group">
-      <span class="bq-diag-group-label">QueueManager</span>
+      <span class="bq-diag-group-label">QueueManager · memory / SQLite</span>
       <div class="bq-diag-layer bq-diag-accent">N shards <i>auto-detected: Shard 0, Shard 1, ... Shard N</i></div>
       <div class="bq-diag-row">
         <div class="bq-diag-cell">jobIndex</div>
@@ -41,11 +41,21 @@ head:
     </div>
     <div class="bq-diag-arrow">↓</div>
     <div class="bq-diag-group">
-      <span class="bq-diag-group-label">persistence layer</span>
+      <span class="bq-diag-group-label">local persistence path</span>
       <div class="bq-diag-flow">
         <div class="bq-diag-cell">WriteBuffer</div>
         <div class="bq-diag-arrow">→</div>
         <div class="bq-diag-cell">SQLite <i>WAL mode</i></div>
+      </div>
+    </div>
+    <div class="bq-diag-group">
+      <span class="bq-diag-group-label">PostgreSQL multi-broker path</span>
+      <div class="bq-diag-flow">
+        <div class="bq-diag-cell">PostgresQueueManager</div>
+        <div class="bq-diag-arrow">→</div>
+        <div class="bq-diag-cell">Bun.SQL <i>pool + transactions</i></div>
+        <div class="bq-diag-arrow">→</div>
+        <div class="bq-diag-cell bq-diag-accent">PostgreSQL <i>authoritative state</i></div>
       </div>
     </div>
     <div class="bq-diag-group">
@@ -62,32 +72,38 @@ head:
 
 ## Layered Architecture
 
-| Layer | Purpose | Key Components |
-|-------|---------|----------------|
-| **Client** | SDK for applications | Queue, Worker, FlowProducer, TcpPool |
-| **Server** | Request handling | TcpServer, HttpServer, Handlers |
-| **Application** | Orchestration | QueueManager, Operations, Managers |
-| **Domain** | Business logic | Shard, PriorityQueue, DLQ |
-| **Infrastructure** | External systems | SQLite, S3 Backup, Scheduler |
-| **Shared** | Utilities | Hash, Lock, LRU, MinHeap |
+| Layer              | Purpose                      | Key Components                           |
+| ------------------ | ---------------------------- | ---------------------------------------- |
+| **Client**         | SDK for applications         | Queue, Worker, FlowProducer, TcpPool     |
+| **Server**         | Request handling             | TcpServer, HttpServer, Handlers          |
+| **Application**    | Orchestration                | QueueManager, Operations, Managers       |
+| **Domain**         | Business logic               | Shard, PriorityQueue, DLQ                |
+| **Infrastructure** | Storage and external systems | SQLite, PostgreSQL, S3 Backup, Scheduler |
+| **Shared**         | Utilities                    | Hash, Lock, LRU, MinHeap                 |
 
 ## Architecture Sections
 
-| Section | Description |
-|---------|-------------|
-| [Client SDK](/architecture/client-sdk/) | TCP connection, job submission, worker processing |
-| [Domain Layer](/architecture/domain-layer/) | Sharding, priority queues, DLQ logic |
-| [Application Layer](/architecture/application-layer/) | Operations flow, background tasks |
-| [Persistence](/architecture/persistence/) | SQLite configuration, write buffering, servers |
-| [Data Structures](/architecture/data-structures/) | Core algorithms and complexities |
-| [TCP Protocol](/architecture/tcp-protocol/) | Wire format and commands |
-| [Cron Scheduler](/architecture/cron-scheduler/) | Event-driven scheduling, timezone support, persistence |
+| Section                                               | Description                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------- |
+| [Client SDK](/architecture/client-sdk/)               | TCP connection, job submission, worker processing           |
+| [Domain Layer](/architecture/domain-layer/)           | Sharding, priority queues, DLQ logic                        |
+| [Application Layer](/architecture/application-layer/) | Operations flow, background tasks                           |
+| [Persistence](/architecture/persistence/)             | SQLite configuration, write buffering, and recovery         |
+| [Storage Backends](/guide/databases/)                 | PostgreSQL transactions, multi-broker fencing, and topology |
+| [Data Structures](/architecture/data-structures/)     | Core algorithms and complexities                            |
+| [TCP Protocol](/architecture/tcp-protocol/)           | Wire format and commands                                    |
+| [Cron Scheduler](/architecture/cron-scheduler/)       | Event-driven scheduling, timezone support, persistence      |
 
 ## Key Design Decisions
 
+The shard, heap, lock, write-buffer, and complexity sections below describe the
+memory/SQLite `QueueManager`. PostgreSQL servers select `PostgresQueueManager`
+instead: PostgreSQL owns claim ordering, leases, shared policy, dependencies,
+events, cron, and terminal state. The TCP/HTTP client contract remains common.
+
 ### Dynamic Shard Architecture
 
-Jobs are distributed across N independent shards (auto-detected from CPU cores) using FNV-1a hash:
+In memory/SQLite mode, jobs are distributed across N independent shards (auto-detected from CPU cores) using FNV-1a hash:
 
 ```
 SHARD_COUNT = calculateShardCount()  // Power of 2, based on CPU cores, max 64
@@ -98,6 +114,7 @@ shardIndex = fnv1a(queueName) & SHARD_MASK  // src/shared/hash.ts
 ```
 
 **Benefits:**
+
 - Auto-scales with hardware (power of 2, max 64)
 - Parallel operations on different queues
 - Reduced lock contention
@@ -111,7 +128,7 @@ Each shard contains a 4-ary heap instead of binary:
 - Fewer tree levels (8 vs 16 for 65k items)
 - O(log₄ n) operations
 
-### Write Buffer
+### SQLite Write Buffer
 
 Jobs batch before SQLite write:
 
@@ -119,13 +136,15 @@ Jobs batch before SQLite write:
   <div class="bq-diag-flow">
     <div class="bq-diag-cell">Buffer <i>100 jobs</i></div>
     <div class="bq-diag-arrow">→</div>
-    <div class="bq-diag-cell bq-diag-accent">Multi-row INSERT <i>~100k jobs/sec</i></div>
+    <div class="bq-diag-cell bq-diag-accent">Multi-row INSERT <i>186,384 jobs/s median in the published public on-disk addBulk workload</i></div>
   </div>
   <p class="bq-diag-note">Flushes after 10ms or when 100 jobs are buffered, whichever comes first.</p>
 </div>
 
-- **Buffered**: ~100k jobs/sec, up to 10ms loss risk
-- **Durable**: ~10k jobs/sec, immediate persistence
+- **Buffered**: up to 10 ms loss risk; 186,384 jobs/s median in the published
+  public on-disk Embedded `addBulk` workload
+- **Durable**: immediate persistence; 60,835 ops/s median for published
+  sequential Embedded adds
 
 ### Lazy Deletion
 
@@ -150,29 +169,31 @@ Acquire in order to prevent deadlocks:
 
 ## Memory Bounds
 
-| Collection | Limit | Eviction |
-|------------|-------|----------|
+| Collection    | Limit  | Eviction   |
+| ------------- | ------ | ---------- |
 | completedJobs | 50,000 | FIFO batch |
-| jobResults | 10,000 | LRU |
-| jobLogs | 10,000 | LRU |
-| customIdMap | 50,000 | LRU |
-| DLQ per queue | 10,000 | FIFO |
+| jobResults    | 10,000 | LRU        |
+| jobLogs       | 10,000 | LRU        |
+| customIdMap   | 50,000 | LRU        |
+| DLQ per queue | 10,000 | FIFO       |
 
-## Performance Summary
+## Memory/SQLite Performance Summary
 
-| Operation | Complexity |
-|-----------|-----------|
-| PUSH | O(log₄ n) |
-| PULL | O(log₄ n) |
-| ACK | O(1) |
-| ACK batch | O(shards) |
-| Job lookup | O(1) |
-| Stats | O(1) |
+| Operation  | Complexity |
+| ---------- | ---------- |
+| PUSH       | O(log₄ n)  |
+| PULL       | O(log₄ n)  |
+| ACK        | O(1)       |
+| ACK batch  | O(shards)  |
+| Job lookup | O(1)       |
+| Stats      | O(1)       |
 
 :::tip[Related]
+
 - [Client SDK Architecture](/architecture/client-sdk/) - Queue, Worker, and connection pool
 - [TCP Protocol Architecture](/architecture/tcp-protocol/) - Binary protocol and commands
 - [SQLite Persistence Layer](/architecture/persistence/) - Write buffer and WAL mode
+- [SQLite or PostgreSQL](/guide/databases/) - Storage selection and multi-broker guarantees
 - [Core Data Structures](/architecture/data-structures/) - Skip lists, heaps, and LRU caches
 - [Cron Scheduler](/architecture/cron-scheduler/) - Event-driven scheduling internals
-:::
+  :::

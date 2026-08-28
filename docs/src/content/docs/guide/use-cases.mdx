@@ -641,10 +641,17 @@ The same shape works for video transcoding or any long CPU-bound task, just rais
 
 ## Payments and other critical jobs
 
-A payment job must never be lost and never run twice. Two options handle this:
+A payment job must never be lost, and its external side effect must be
+idempotent because bunqueue provides at-least-once delivery. Two job options
+support that design:
 
-- `durable: true` skips the write buffer (the small in-memory batch bunqueue normally flushes to disk every 10ms) and writes the job to SQLite before `add()` returns. A crash cannot lose it.
-- `jobId` makes the add idempotent: adding the same `jobId` twice returns the existing job instead of creating a duplicate.
+- On SQLite, `durable: true` skips the 10ms write buffer and writes the job
+  before `add()` returns. PostgreSQL admissions are already transactional and
+  do not use that buffer.
+- `jobId` makes enqueueing idempotent: adding the same unfinished `jobId` twice
+  returns the existing job instead of creating another generation. Use the
+  same key with the payment provider because a lease recovery can redeliver a
+  job after its side effect completed but before its ACK committed.
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -673,7 +680,8 @@ new Worker('payments', async (job) => {
 await payments.add(
   'charge',
   { orderId: 'ORD-123', amount: 9999, idempotencyKey: 'order-ORD-123' },
-  { jobId: 'charge-ORD-123', durable: true } // no duplicate, no loss on crash
+  // Custom ID deduplicates while retained; durable closes SQLite's admission buffer window.
+  { jobId: 'charge-ORD-123', durable: true }
 );
 ```
 
@@ -703,7 +711,7 @@ await payments.add(
   'charge',
   { orderId: 'ORD-123', amount: 9999, idempotencyKey: 'order-ORD-123' },
   {
-    jobId: 'charge-ORD-123', durable: true, // no duplicate, no loss on crash
+    jobId: 'charge-ORD-123', durable: true, // SQLite closes its buffer window; PG is transactional
     attempts: 3, backoff: 5000, timeout: 60_000,
   }
 );
@@ -737,7 +745,7 @@ Worker("payments", charge, concurrency=5)
 payments.add(
     "charge",
     {"orderId": "ORD-123", "amount": 9999, "idempotencyKey": "order-ORD-123"},
-    job_id="charge-ORD-123", durable=True,  # no duplicate, no loss on crash
+    job_id="charge-ORD-123", durable=True,  # SQLite closes its buffer window; PG is transactional
     attempts=3, backoff=5000, timeout=60_000,
 )
 ```
@@ -768,7 +776,7 @@ payments.Add("charge",
     map[string]any{"orderId": "ORD-123", "amount": 9999, "idempotencyKey": "order-ORD-123"},
     bunqueue.JobOptions{
         "jobId":   "charge-ORD-123", // no duplicate
-        "durable": true,             // no loss on crash
+        "durable": true,             // closes SQLite's buffered-admission window; PG is already transactional
         "attempts": 3, "backoff": 5000, "timeout": 60000,
     })
 ```
@@ -780,7 +788,10 @@ payments.Add("charge",
 
 ## Scheduled tasks (cron)
 
-Recurring jobs use `upsertJobScheduler()`. Schedules are stored in SQLite and survive restarts, in both embedded and server mode. A cron expression like `0 3 * * *` means "every day at 3 AM".
+Recurring jobs use `upsertJobScheduler()`. Schedules survive restarts when the
+selected backend is persistent: SQLite stores them in embedded or single-broker
+server mode, while PostgreSQL stores and coordinates them across the broker
+fleet. A cron expression like `0 3 * * *` means "every day at 3 AM".
 
 <Tabs syncKey="lang">
 <TabItem label="Bun">
@@ -1149,7 +1160,7 @@ The options you saw above, all set per job or via `defaultJobOptions`:
 | `priority` | Higher numbers run sooner | 0 |
 | `delay` | Wait this many ms before the job is runnable | 0 |
 | `jobId` | Custom ID, adding the same ID twice returns the existing job | auto |
-| `durable` | Write to disk immediately instead of the 10ms buffer | false |
+| `durable` | SQLite: bypass its 10ms buffer; PostgreSQL is already transactional | false |
 | `removeOnComplete` | Delete the job once it succeeds | false |
 
 Full list in the [queue guide](/guide/queue/).
@@ -1157,7 +1168,9 @@ Full list in the [queue guide](/guide/queue/).
 ## Gotchas
 
 - **No `dataPath` means no persistence.** An embedded queue without `dataPath` (or a `DATA_PATH` env var) keeps everything in memory and loses it on restart.
-- **The default write buffer trades 10ms for speed.** Jobs are flushed to SQLite every 10ms. A hard crash can lose jobs accepted in that window. Use `durable: true` where that matters.
+- **SQLite's default write buffer trades 10ms for speed.** A hard crash can lose
+  jobs accepted in that window; use `durable: true` where that matters.
+  PostgreSQL has no equivalent admission buffer.
 - **Throwing is how you retry.** A worker that catches every error and returns normally marks the job completed. Let errors propagate when you want a retry.
 - **Do not auto-retry money.** Set `setDlqConfig({ autoRetry: false })` on payment-like queues so failed charges wait for review.
 - **Close workers on shutdown.** `await worker.close()` waits for active jobs to finish; `worker.close(true)` forces a stop. See [production](/guide/production/) for the full shutdown pattern.

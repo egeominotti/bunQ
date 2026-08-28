@@ -203,8 +203,14 @@ Client MUSTs:
 - `GetJobs.asc=false` reverses the total createdAt/job-id ordering before
   applying `offset` and `limit`. A paginating client MUST send the same value
   on every page; omitting it preserves ascending order.
-- `GetJobs` reads from SQLite behind a ~10 ms write buffer: results are
-  eventually consistent with respect to a just-issued `PUSH`.
+- In SQLite mode, `GetJobs` reads from SQLite behind a ~10 ms write buffer, so
+  it is eventually consistent with respect to a just-issued non-durable
+  `PUSH`. `durable: true` bypasses that buffer.
+- In PostgreSQL mode, `GetJobs` reads the broker's local projection of the
+  authoritative database. The broker accepting a `PUSH`/`PUSHB` refreshes that
+  projection before acknowledging the command. Other brokers converge through
+  the durable outbox and `LISTEN` wakeups, with polling as the fallback, so an
+  immediate cross-broker listing can briefly reflect the preceding projection.
 
 #### Queue event stream
 
@@ -314,6 +320,9 @@ entries.
 
 - An SDK "limit" option MUST map to wire **`maxLimit`** (#111). `maxLimit`
   `<= 0` means unlimited.
+- `repeatEvery`, when supplied, MUST be a positive safe integer in milliseconds and is
+  rejected before mutation otherwise. At least one timing field is required;
+  for compatibility, `schedule` wins when both valid fields are present.
 - `name` identifies the globally registered schedule. `jobName` is the
   first-class name assigned to jobs spawned by that schedule; legacy peers may
   omit it and use the bounded legacy payload-envelope fallback.
@@ -383,9 +392,10 @@ Every `input` carries a top-level `name`, untouched user `data`, the ordinary
 broker revalidates unique IDs, limits, acyclicity, existing ownership, and
 reciprocal edges before mutation. It returns
 `{data: {jobs: Job[]}}` with one authoritative snapshot per input. With SQLite,
-one immediate transaction commits all rows before in-memory publication;
-without storage, visibility is still atomic but intentionally not
-crash-durable.
+one immediate transaction commits all rows before in-memory publication. With
+PostgreSQL, one database transaction admits the complete graph and publishes
+its outbox events atomically. Without storage, visibility is still atomic but
+intentionally not crash-durable.
 
 Previously published clients may use the legacy children-first sequence:
 `PUSH` children with a `pending` marker, `PUSH` a parent that already declares
@@ -422,7 +432,7 @@ NOT silently accept unverified peers.
 | Default attempts / backoff | 3 / 1000 ms                                                                  |
 | Default lock TTL           | 30000 ms                                                                     |
 | `stackTraceLimit` default  | 10 (first N lines kept)                                                      |
-| Write buffer flush         | ~10 ms (jobs pushed non-`durable` can be lost in a crash within this window) |
+| SQLite write buffer flush  | ~10 ms (SQLite jobs pushed non-`durable` can be lost in a crash within this window; PostgreSQL has no such buffer) |
 | Frame cap                  | 64 MiB                                                                       |
 | Max `PULLB` count          | 1000                                                                         |
 | Max long-poll / WaitJob    | 60 s / 600 s                                                                 |

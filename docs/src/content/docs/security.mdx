@@ -42,7 +42,8 @@ advisory database.
 A bunqueue server exposes two listeners: the TCP protocol on port 6789, used
 by every client SDK, and the HTTP API on port 6790, used for health,
 metrics, dashboards and the REST surface. Both listeners share the same
-authentication and TLS configuration. Each broker is one process, and a shared
+token and TLS configuration, with explicit public health and metrics exceptions
+described below. Each broker is one process, and a shared
 SQLite server or PostgreSQL namespace is one trust domain: any authenticated
 client can operate on any queue.
 Multi tenant isolation, when required, is achieved by running one instance
@@ -53,8 +54,11 @@ organizational rather than adversarial.
 
 Authentication is token based and disabled until you configure it. When
 `AUTH_TOKENS` is set, every TCP connection must authenticate as its first
-command and every HTTP request must carry the token; this includes the
-debug endpoints `/gc` and `/heapstats`, which reject unauthenticated calls.
+command. HTTP API and debug requests require the bearer token, including `/gc`
+and `/heapstats`. The orchestrator probes `/health`, `/healthz`, `/live`, and
+`/ready` intentionally remain public. `/prometheus` is public by default and
+requires the same bearer token only when `METRICS_AUTH=true`; that setting with
+an empty token set fails closed.
 
 ```bash
 AUTH_TOKENS=$(openssl rand -hex 32) bunqueue start
@@ -222,12 +226,15 @@ instance beyond a trusted network:
 
 ## Data protection
 
-- **At rest.** Persistence is a single SQLite file in WAL mode. Restrict it
-  to the service user (`chmod 600`) and place it on an encrypted volume
-  where the platform provides one. The `-wal` and `-shm` sidecar files live
-  in the same directory and inherit the same handling.
-- **Backups.** S3 backups support server side encryption; scope the IAM
-  credentials to the single backup bucket.
+- **At rest, SQLite.** Restrict the database to the service user (`chmod 600`)
+  and place it on an encrypted volume. The `-wal` and `-shm` sidecars live in
+  the same directory and require the same handling.
+- **At rest, PostgreSQL.** Use provider or volume encryption, require TLS with
+  certificate verification, keep the connection URL in a secret manager, and
+  grant the bunqueue role only the target database/schema privileges it needs.
+- **Backups.** SQLite S3 backups support server-side encryption; scope their IAM
+  credentials to one bucket. PostgreSQL mode does not use this snapshot flow:
+  configure and test normal database backups and point-in-time recovery.
 - **Job payloads.** Do not place secrets in job data. Store a reference and
   resolve it inside the worker:
 
@@ -239,14 +246,16 @@ instance beyond a trusted network:
   await queue.add('task', { secretRef: 'vault:api-key' });
   ```
 
-- **Cloud telemetry.** The optional bunqueue.io integration sends metrics
-  only: job payloads are excluded by default
-  (`BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=false`), specific fields can be redacted
-  (`BUNQUEUE_CLOUD_REDACT_FIELDS`), and outgoing events can be signed with
-  HMAC (`BUNQUEUE_CLOUD_SIGNING_SECRET`). Remote commands are disabled by
-  default.
+- **Cloud telemetry.** When the optional bunqueue.io integration is enabled,
+  job payloads and remote commands are both enabled by default. Set
+  `BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=false` for metadata-only telemetry and
+  `BUNQUEUE_CLOUD_REMOTE_COMMANDS=false` for a read-only connection. Specific
+  top-level fields can be redacted with `BUNQUEUE_CLOUD_REDACT_FIELDS`, and
+  outgoing events can be signed with `BUNQUEUE_CLOUD_SIGNING_SECRET`.
 
 ## Hardening checklist
+
+SQLite-backed server example:
 
 ```bash
 AUTH_TOKENS=$(openssl rand -hex 32) \
@@ -256,6 +265,8 @@ HOST=10.0.0.5 \
 CORS_ALLOW_ORIGIN=https://dashboard.example.com \
 METRICS_AUTH=true \
 BUNQUEUE_DATA_PATH=/data/bunq.db \
+BUNQUEUE_CLOUD_INCLUDE_JOB_DATA=false \
+BUNQUEUE_CLOUD_REMOTE_COMMANDS=false \
 bunqueue start
 ```
 
@@ -265,12 +276,17 @@ bunqueue start
 3. Bind `HOST` to the narrowest interface that still reaches your clients.
 4. Leave `CORS_ALLOW_ORIGIN` unset unless a browser client needs the HTTP
    API; when it does, list the exact origins.
-5. Gate `/prometheus` with `METRICS_AUTH=true` where metrics are sensitive.
-6. Run as an unprivileged user, `chmod 600` the data file, encrypt the
-   volume.
-7. Keep the data directory on a persistent volume and enable S3 backups
-   with server side encryption.
-8. Monitor `/health`, watch authentication failures in the logs, and alert
+5. If Cloud is enabled, explicitly disable job payload collection and remote
+   commands unless the deployment requires them.
+6. Gate `/prometheus` with `METRICS_AUTH=true` where metrics are sensitive.
+7. Run as an unprivileged user. For SQLite, `chmod 600` the data file and
+   encrypt its persistent volume; enable S3 backups with server-side
+   encryption where required.
+8. For PostgreSQL, inject `BUNQUEUE_POSTGRES_URL` from a secret manager, require
+   verified TLS, use a least-privilege database role, assign a unique
+   `BUNQUEUE_BROKER_ID` to every broker, and rely on database-native HA,
+   backups, and point-in-time recovery instead of the SQLite S3 snapshot flow.
+9. Monitor `/health`, watch authentication failures in the logs, and alert
    on unusual job patterns.
 
 ## Supported versions

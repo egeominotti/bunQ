@@ -11,7 +11,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">server · s3 backup</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The whole queue, backed up to <em>S3.</em></h1>
-  <p class="bq-hero-sub">bunqueue stores everything in one SQLite file. Turn on S3 backup and the server uploads a compressed, checksummed copy of that file on a schedule, to any S3-compatible storage.</p>
+  <p class="bq-hero-sub">In SQLite mode, bunqueue stores queue state in one database file. Turn on S3 backup and the server uploads a compressed, checksummed copy on a schedule to any S3-compatible storage. PostgreSQL uses database-native backup and PITR.</p>
 </div>
 
 If the machine running bunqueue dies, a backup in object storage is how you get your jobs, cron schedules, and DLQ back. Backups are gzip-compressed and verified with a SHA256 checksum (a fingerprint of the data that proves the restore is byte-identical).

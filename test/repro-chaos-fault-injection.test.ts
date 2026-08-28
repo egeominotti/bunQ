@@ -414,14 +414,14 @@ describe('CHAOS — cron clock skew (parser monotonicity)', () => {
     const past = now - 3_600_000;
     const nextFromPast = getNextCronRun(expr, past);
     expect(nextFromPast).toBeGreaterThan(past);
-    // And it is a real, finite timestamp (croner returned a date, not 0).
+    // And it is a real, finite timestamp (the parser returned a date, not 0).
     expect(Number.isFinite(nextFromPast)).toBe(true);
     expect(nextFromPast).toBeGreaterThan(0);
   });
 
   it('C5b: DST boundary — next run across a spring-forward transition is a valid future instant', async () => {
     // Europe/Rome springs forward 2024-03-31 02:00→03:00. A daily 02:30 job on
-    // that date must still resolve to a real future instant (croner handles the
+    // that date must still resolve to a real future instant (the parser handles the
     // skipped wall-clock hour); the parser must not return 0 or a past time.
     const expr = '30 2 * * *';
     const tz = 'Europe/Rome';

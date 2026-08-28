@@ -64,6 +64,11 @@ bearer token from `AUTH_TOKENS`, then add `bearer_token: 'your-auth-token'` to
 the scrape config. If auth is required but `AUTH_TOKENS` is empty, the endpoint
 fails closed with `503` rather than becoming public.
 
+Per-queue gauges read the active backend projection. With PostgreSQL, each
+broker exposes its local projection, which converges after committed events via
+`LISTEN` plus polling repair; scrape every broker or aggregate them according to
+your deployment topology.
+
 ### Server-wide metrics
 
 | Metric | Type | Description |
@@ -72,14 +77,14 @@ fails closed with `503` rather than becoming public.
 | `bunqueue_jobs_prioritized` | gauge | Prioritized jobs (priority > 0) |
 | `bunqueue_jobs_delayed` | gauge | Delayed jobs |
 | `bunqueue_jobs_active` | gauge | Jobs being processed |
-| `bunqueue_jobs_completed` | gauge | Completed jobs in memory |
+| `bunqueue_jobs_completed` | gauge | Retained completed jobs visible to this broker or manager |
 | `bunqueue_jobs_dlq` | gauge | Jobs in the dead letter queue |
 | `bunqueue_jobs_pushed_total` | counter | Total jobs pushed |
 | `bunqueue_jobs_pulled_total` | counter | Total jobs pulled |
 | `bunqueue_jobs_completed_total` | counter | Total jobs completed |
 | `bunqueue_jobs_failed_total` | counter | Total jobs failed |
 | `bunqueue_uptime_seconds` | gauge | Server uptime |
-| `bunqueue_cron_jobs_registered` | gauge | Registered cron jobs |
+| `bunqueue_cron_jobs_registered` | gauge | Cron jobs registered in this broker's local scheduler projection |
 | `bunqueue_workers_registered` | gauge | Registered workers |
 | `bunqueue_workers_active` | gauge | Active workers |
 | `bunqueue_worker_active_jobs` | gauge | Jobs currently held by registered workers |
@@ -100,6 +105,12 @@ fails closed with `503` rather than becoming public.
 | `process_start_time_seconds` | gauge | Standard process start timestamp |
 | `process_resident_memory_bytes` | gauge | Standard process resident memory collector |
 | `process_heap_bytes` | gauge | Standard process heap collector |
+
+In PostgreSQL mode, job-state gauges and lifecycle totals come from the local
+backend projection and converge after committed events plus polling repair.
+Cron, worker, webhook, backup, process, runtime, and connection families describe
+the specific broker being scraped; aggregate or retain the broker label when
+scraping a fleet.
 
 ### Per-queue metrics
 

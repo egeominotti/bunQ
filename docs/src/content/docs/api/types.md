@@ -1,6 +1,6 @@
 ---
-title: "TypeScript Types: Job, Queue, Worker & DLQ"
-description: "Complete TypeScript type definitions for bunqueue. Includes Job, Queue, Worker, DLQ, and connection interfaces with full generic support."
+title: 'TypeScript Types: Job, Queue, Worker & DLQ'
+description: 'Complete TypeScript type definitions for bunqueue. Includes Job, Queue, Worker, DLQ, and connection interfaces with full generic support.'
 head:
   - tag: meta
     attrs:
@@ -20,14 +20,14 @@ head:
 
 ```typescript
 type JobStateType =
-  | 'waiting'             // In queue, priority = 0
-  | 'prioritized'         // In queue, priority > 0 (BullMQ v5)
-  | 'delayed'             // Waiting for delay to expire
-  | 'active'              // Currently being processed
-  | 'completed'           // Successfully finished
-  | 'failed'              // Failed after all retries (DLQ)
-  | 'waiting-children'    // Waiting for child jobs to complete (flows)
-  | 'unknown';            // Job not found or invalid state
+  | 'waiting' // In queue, priority = 0
+  | 'prioritized' // In queue, priority > 0 (BullMQ v5)
+  | 'delayed' // Waiting for delay to expire
+  | 'active' // Currently being processed
+  | 'completed' // Successfully finished
+  | 'failed' // Failed after all retries (DLQ)
+  | 'waiting-children' // Waiting for child jobs to complete (flows)
+  | 'unknown'; // Job not found or invalid state
 ```
 
 :::note[BullMQ v5 State Machine]
@@ -73,10 +73,11 @@ bunqueue implements the full BullMQ v5 job state machine:
 </div>
 
 **Key differences from BullMQ v5:**
+
 - `failed` = BullMQ's failed state. Internally stored in DLQ with metadata (reason, attempt history).
 - `prioritized` = BullMQ's prioritized state. Jobs with `priority > 0` are in a separate logical state but share the same priority queue data structure.
 - `waiting-children` = Parent jobs waiting for child flows to complete before becoming processable.
-:::
+  :::
 
 ### Job
 
@@ -367,14 +368,14 @@ Raw JSON representation with all values as strings.
 interface JobJsonRaw {
   id: string;
   name: string;
-  data: string;        // JSON stringified
-  opts: string;        // JSON stringified
-  progress: string;    // JSON stringified
+  data: string; // JSON stringified
+  opts: string; // JSON stringified
+  progress: string; // JSON stringified
   delay: string;
   timestamp: string;
   attemptsMade: string;
   stacktrace: string | null; // JSON stringified
-  returnvalue?: string;      // JSON stringified
+  returnvalue?: string; // JSON stringified
   failedReason?: string;
   finishedOn?: string;
   processedOn?: string;
@@ -470,9 +471,9 @@ interface JobOptions {
   repeat?: RepeatOptions;
 
   /**
-   * Force immediate persistence to disk (bypass write buffer).
-   * Use for critical jobs where data loss is unacceptable.
-   * Default: false (uses buffered writes for ~100k jobs/sec throughput)
+   * Request immediate admission persistence.
+   * SQLite bypasses its write buffer; PostgreSQL admissions are already transactional.
+   * Default: false (uses the SQLite buffer when that backend is selected)
    */
   durable?: boolean;
 
@@ -541,6 +542,7 @@ interface BackoffOptions {
 ```
 
 All backoff delays include automatic **jitter** to prevent thundering herd:
+
 - **Exponential**: ±50% jitter around the computed delay
 - **Fixed**: ±20% jitter around the configured delay
 
@@ -675,7 +677,7 @@ interface QueueOptions {
   /** TCP connection options (for server mode) */
   connection?: ConnectionOptions;
 
-  /** Use embedded mode (in-process SQLite, default: false) */
+  /** Use embedded mode (in-process memory or SQLite, default: false) */
   embedded?: boolean;
 
   /**
@@ -810,7 +812,7 @@ interface WorkerOptions {
   /** TCP connection options (for server mode) */
   connection?: ConnectionOptions;
 
-  /** Use embedded mode (in-process SQLite, default: false) */
+  /** Use embedded mode (in-process memory or SQLite, default: false) */
   embedded?: boolean;
 
   /**
@@ -1002,34 +1004,58 @@ const events = new QueueEvents('my-queue', {
   connection: { host: '127.0.0.1', port: 6789, token: process.env.BUNQUEUE_TOKEN },
 });
 
-events.on('waiting', ({ jobId }) => { /* ... */ });
-events.on('active', ({ jobId }) => { /* ... */ });
-events.on('completed', ({ jobId, returnvalue }) => { /* ... */ });
-events.on('failed', ({ jobId, failedReason }) => { /* ... */ });
-events.on('progress', ({ jobId, data }) => { /* ... */ });
-events.on('stalled', ({ jobId }) => { /* ... */ });
-events.on('removed', ({ jobId, prev }) => { /* ... */ });
-events.on('delayed', ({ jobId, delay }) => { /* ... */ });
-events.on('duplicated', ({ jobId }) => { /* ... */ });
-events.on('retried', ({ jobId, prev }) => { /* ... */ });
-events.on('waiting-children', ({ jobId }) => { /* ... */ });
-events.on('drained', ({ id }) => { /* ... */ });
-events.on('paused', () => { /* ... */ });
-events.on('resumed', () => { /* ... */ });
-events.on('error', (error: Error) => { /* ... */ });
+events.on('waiting', ({ jobId }) => {
+  /* ... */
+});
+events.on('active', ({ jobId }) => {
+  /* ... */
+});
+events.on('completed', ({ jobId, returnvalue }) => {
+  /* ... */
+});
+events.on('failed', ({ jobId, failedReason }) => {
+  /* ... */
+});
+events.on('progress', ({ jobId, data }) => {
+  /* ... */
+});
+events.on('stalled', ({ jobId }) => {
+  /* ... */
+});
+events.on('removed', ({ jobId, prev }) => {
+  /* ... */
+});
+events.on('delayed', ({ jobId, delay }) => {
+  /* ... */
+});
+events.on('duplicated', ({ jobId }) => {
+  /* ... */
+});
+events.on('retried', ({ jobId, prev }) => {
+  /* ... */
+});
+events.on('waiting-children', ({ jobId }) => {
+  /* ... */
+});
+events.on('drained', ({ id }) => {
+  /* ... */
+});
+events.on('paused', () => {
+  /* ... */
+});
+events.on('resumed', () => {
+  /* ... */
+});
+events.on('error', (error: Error) => {
+  /* ... */
+});
 ```
 
 ## QueueEventType
 
 ```typescript
 type QueueEventType =
-  | 'waiting'
-  | 'active'
-  | 'completed'
-  | 'failed'
-  | 'progress'
-  | 'removed'
-  | 'drained';
+  'waiting' | 'active' | 'completed' | 'failed' | 'progress' | 'removed' | 'drained';
 ```
 
 ## FlowProducer Types
@@ -1085,6 +1111,7 @@ follows the same rule using `job_id` inside each node's `opts`, never inside
 `queues_options`.
 
 **Example:**
+
 ```typescript
 await flow.add(
   {
@@ -1097,8 +1124,8 @@ await flow.add(
   },
   {
     queuesOptions: {
-      api: { attempts: 5, backoff: 2000 },  // All jobs in 'api' queue
-      cpu: { timeout: 60000 },               // All jobs in 'cpu' queue
+      api: { attempts: 5, backoff: 2000 }, // All jobs in 'api' queue
+      cpu: { timeout: 60000 }, // All jobs in 'cpu' queue
     },
   }
 );
@@ -1204,9 +1231,9 @@ Returned by `sandboxedWorker.getStats()`.
 
 ```typescript
 {
-  total: number;    // Total worker processes
-  busy: number;     // Currently processing
-  idle: number;     // Alive and available for work
+  total: number; // Total worker processes
+  busy: number; // Currently processing
+  idle: number; // Alive and available for work
   recycled: number; // Workers recycled after idling
   restarts: number; // Total restarts across all workers
 }
@@ -1259,17 +1286,18 @@ interface DlqConfig {
 
 ```typescript
 type FailureReason =
-  | 'explicit_fail'        // Job explicitly failed via fail() or thrown error
+  | 'explicit_fail' // Job explicitly failed via fail() or thrown error
   | 'max_attempts_exceeded' // Exceeded all retry attempts
-  | 'timeout'              // Job processing timed out (exceeded timeout option)
-  | 'stalled'              // Job stalled (no heartbeat within stallInterval)
-  | 'ttl_expired'          // Time-to-live expired before processing
-  | 'worker_lost'          // Worker disconnected while processing (TCP mode)
-  | 'unknown';             // Catch-all for edge cases
+  | 'timeout' // Job processing timed out (exceeded timeout option)
+  | 'stalled' // Job stalled (no heartbeat within stallInterval)
+  | 'ttl_expired' // Time-to-live expired before processing
+  | 'worker_lost' // Worker disconnected while processing (TCP mode)
+  | 'unknown'; // Catch-all for edge cases
 ```
 
 :::note[When is 'unknown' used?]
 The `unknown` reason is a catch-all for rare edge cases:
+
 - Job data corruption during serialization
 - Internal queue manager errors
 - Jobs recovered from database without failure metadata
@@ -1414,14 +1442,11 @@ await queue.add('welcome', {
 });
 
 // Worker with typed data and result
-const worker = new Worker<EmailJobData, EmailResult>(
-  'emails',
-  async (job) => {
-    // job.data is typed as EmailJobData
-    const { to, subject, body } = job.data;
-    return { sent: true, messageId: 'msg-123' };
-  }
-);
+const worker = new Worker<EmailJobData, EmailResult>('emails', async (job) => {
+  // job.data is typed as EmailJobData
+  const { to, subject, body } = job.data;
+  return { sent: true, messageId: 'msg-123' };
+});
 
 // Type error at compile time: missing required fields
 await queue.add('send', { to: 'test@example.com' }); // Error!
@@ -1435,7 +1460,8 @@ events.on('completed', ({ jobId, returnvalue }) => {
 ```
 
 :::tip[Related]
+
 - [Queue API](/guide/queue/) - Queue usage with these types
 - [Worker API](/guide/worker/) - Worker usage with these types
 - [HTTP API Reference](/api/http/) - HTTP endpoints reference
-:::
+  :::

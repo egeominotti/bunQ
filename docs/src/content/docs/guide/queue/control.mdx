@@ -260,8 +260,9 @@ Retrying a completed job starts a new waiting execution. Its previous
 `returnvalue`, progress/message, `processedOn`, and `finishedOn` are cleared;
 attempts restart at zero, while the diagnostic stacktrace and timeline history
 remain available. For persisted queues, that reset and removal of the old
-result are one atomic SQLite transaction and remain cleared after broker
-restart.
+result are atomic in the selected backend: one SQLite transaction in
+single-broker mode, or a PostgreSQL transaction with its durable event in
+multi-broker mode. The cleared state therefore survives broker restart.
 
 ## Where to go next
 

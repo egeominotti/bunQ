@@ -113,10 +113,18 @@ complete text payload ends with a line-feed, as required by the Prometheus text
 parser.
 
 The queue label dimension is capped at 100 queue names by default. Selection is
-the deterministic insertion-order prefix, and
+the deterministic registration-order prefix in memory/SQLite mode and the
+sorted local snapshot prefix in PostgreSQL mode. Counts come from the selected
+backend's synchronous projection; another PostgreSQL broker converges through
+the transactional event stream and polling repair. In every mode,
 `exported + omitted == registered queues` on every scrape. Set
 `METRICS_MAX_QUEUES=0` to disable all per-queue series or configure
-`telemetry.maxPrometheusQueues`; the unlabelled global totals remain exact.
+`telemetry.maxPrometheusQueues`; the unlabelled job totals remain exported and
+uncapped. With PostgreSQL, job-state gauges and lifecycle counters share the
+short projection-convergence window described above. Cron, worker, webhook,
+backup, and process/runtime families describe the broker being scraped; for
+example, a cron created through another broker is not projected into the local
+`bunqueue_cron_jobs_registered` gauge.
 This caps scrape cost and live series cardinality without placing tenant/job
 identifiers in labels.
 

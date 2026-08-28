@@ -1,5 +1,5 @@
 ---
-title: "IoT & Edge: Buffer Locally, Forward to the Center"
+title: 'IoT & Edge: Buffer Locally, Forward to the Center'
 description: Run bunqueue on edge gateways (Raspberry Pi, ARM64). Bridge MQTT sensors to a persisted job queue, buffer offline, and forward to a central server over TLS.
 head:
   - tag: meta
@@ -22,13 +22,13 @@ Everything on this page uses the Bun `bunqueue` package: embedded mode and `queu
 
 ## Is it the right fit?
 
-| Scenario | Fit |
-| --- | --- |
-| Edge gateway (Raspberry Pi 4/5, Jetson, ARM64/x64 mini-PC) | Yes, embedded queue plus store-and-forward |
-| Backend telemetry ingestion (absorb bursts, retry, DLQ) | Yes |
-| Offline-first buffering over a flaky uplink | Yes, jobs persist to SQLite on the gateway |
-| Replacing an MQTT broker | No, keep Mosquitto/EMQX and bridge into bunqueue |
-| Running directly on microcontrollers (ESP32, 32-bit ARM) | No, Bun needs ARM64/x64; those devices publish MQTT to the gateway |
+| Scenario                                                   | Fit                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| Edge gateway (Raspberry Pi 4/5, Jetson, ARM64/x64 mini-PC) | Yes, embedded queue plus store-and-forward                         |
+| Backend telemetry ingestion (absorb bursts, retry, DLQ)    | Yes                                                                |
+| Offline-first buffering over a flaky uplink                | Yes, jobs persist to SQLite on the gateway                         |
+| Replacing an MQTT broker                                   | No, keep Mosquitto/EMQX and bridge into bunqueue                   |
+| Running directly on microcontrollers (ESP32, 32-bit ARM)   | No, Bun needs ARM64/x64; those devices publish MQTT to the gateway |
 
 The pattern that works:
 
@@ -98,7 +98,7 @@ const local = new Queue('telemetry', { embedded: true, dataPath: './edge.db' });
 const forwarder = local.forward({
   to: { host: 'queue.example.com', port: 6789, tls: true, token: Bun.env.BQ_TOKEN },
   queue: 'telemetry-ingest', // optional remote queue name (default: same as local)
-  concurrency: 4,            // parallel forwards (default: 4)
+  concurrency: 4, // parallel forwards (default: 4)
 });
 
 forwarder.on('forwarded', ({ id, remoteId }) => console.log(`${id} -> ${remoteId}`));
@@ -119,31 +119,54 @@ bunqueue start \
 
 What `forward()` guarantees:
 
-- **Nothing is lost while offline.** If the remote push fails, the job fails locally, retries with backoff, and after its attempts land in the local DLQ. When the uplink returns, `local.retryDlq()` re-enqueues everything buffered.
-- **Re-forwards do not duplicate.** Each forwarded job carries a deterministic remote job id, `fwd:<local queue>:<local job id>`, and the server treats a repeated custom id as a no-op. So a retry or a crash mid-forward never creates the job twice on the server.
-- **Priority is preserved.** Pass `durable: true` in the forward options to have the server write each forwarded job to disk immediately.
+- **An uplink outage does not discard locally persisted work.** If the remote
+  push fails, the job fails locally, retries with backoff, and after its attempts
+  lands in the local DLQ. When the uplink returns, `local.retryDlq()` re-enqueues
+  it. This assumes the gateway process or persistent volume survives; use
+  `durable: true` for local jobs that cannot tolerate SQLite's 10ms hard-crash
+  window.
+- **Re-forwards deduplicate while ownership is retained.** Each forwarded job
+  carries a deterministic remote job id, `fwd:<local queue>:<local job id>`, and
+  the server treats that custom id as a no-op while its ownership record is
+  retained. End-to-end processing remains at-least-once; see the bounded-window
+  caveat below.
+- **Priority is preserved.** Pass `durable: true` in the forward options to
+  bypass a remote SQLite server's write buffer. PostgreSQL admissions are
+  already transactional.
 
 TLS certificate setup and client options (custom CA, self-signed) are in the [Native TLS guide](/guide/tls/).
 
 ## Offline buffering and durability
 
-The embedded queue persists to SQLite in WAL mode (writes go to a fast append-only sidecar file, so a power cut cannot corrupt the database). By default writes are batched for up to 10 ms; for readings you cannot afford to lose even inside that window, mark them durable, meaning written to disk before `add()` returns:
+The embedded queue persists to SQLite in WAL mode: committed frames use an
+append-only sidecar and SQLite recovery preserves transactional consistency
+across ordinary process or power interruption. Hardware, filesystem, and
+volume durability still belong to the operator. By default writes are batched
+for up to 10 ms; for readings you cannot afford to lose inside that window,
+mark them durable, meaning committed before `add()` returns:
 
 ```typescript
 await queue.add('critical-alarm', data, { durable: true });
 ```
 
-Throughput trade-off: buffered ~100k jobs/sec, durable ~10k jobs/sec. Both are far beyond typical sensor rates.
+The published native results measure buffered bulk ingestion and sequential
+durable adds as different workloads, so do not turn them into one speed ratio.
+Both exceed typical sensor rates; use [the benchmark distributions](/guide/benchmarks/)
+for capacity planning on your hardware.
 
 ## Downsampling on the gateway
 
 Aggregate locally before forwarding, for a cheaper uplink and less central load. This schedules a recurring job every 5 minutes:
 
 ```typescript
-await queue.upsertJobScheduler('aggregate-5m', { every: 5 * 60 * 1000 }, {
-  name: 'aggregate',
-  data: { window: '5m' },
-});
+await queue.upsertJobScheduler(
+  'aggregate-5m',
+  { every: 5 * 60 * 1000 },
+  {
+    name: 'aggregate',
+    data: { window: '5m' },
+  }
+);
 ```
 
 See [Cron & Scheduled Jobs](/guide/cron/) for cron expressions and timezones.
@@ -156,7 +179,11 @@ See [Cron & Scheduled Jobs](/guide/cron/) for cron expressions and timezones.
 
 ## Gotchas
 
-- **Forward dedup has a window.** The server remembers custom job ids in a bounded cache, and `removeOnComplete` on the remote evicts entries. A re-forward long after the original completed and was evicted can be accepted again. For strict exactly-once across long outages, keep `removeOnComplete: false` on the remote queue or dedupe downstream.
+- **Forward dedup has a window.** The server remembers custom job ids in a
+  bounded cache, and `removeOnComplete` on the remote evicts entries. A
+  re-forward long after the original completed and was evicted can be accepted
+  again. Retaining completed jobs extends the window; strict exactly-once
+  effects require downstream idempotency.
 - **`forwarder.on('error')` is observability, not control flow.** Failed forwards are already handled by the local retry and DLQ path; the event just tells you the uplink is unhappy.
 - **One process per SQLite file.** Run the bridge, worker, and forwarder in the same process (as above), or switch to a local bunqueue server if you need several processes on the gateway.
 

@@ -12,9 +12,10 @@ Native TCP protocol (msgpack, length-prefixed frames), synchronous API, bounded 
 
 [![crates.io](https://img.shields.io/crates/v/bunqueue-client?color=d3156d&label=crates.io)](https://crates.io/crates/bunqueue-client)
 [![downloads](https://img.shields.io/crates/d/bunqueue-client?color=ff4f9f)](https://crates.io/crates/bunqueue-client)
+[![docs.rs](https://img.shields.io/docsrs/bunqueue-client?color=1a1a2e)](https://docs.rs/bunqueue-client/latest/bunqueue_client/)
 [![license](https://img.shields.io/badge/license-MIT-1a1a2e)](https://github.com/egeominotti/bunqueue/blob/main/sdk/rust/LICENSE)
 [![rust](https://img.shields.io/badge/rust-1.85%2B-2ea44f)](https://www.rust-lang.org/)
-[![conformance](https://img.shields.io/badge/protocol-conformant%2017%2F17-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
+[![conformance](https://img.shields.io/badge/protocol-conformant%2018%2F18-d3156d)](https://github.com/egeominotti/bunqueue/tree/main/sdk/conformance)
 
 [Documentation](https://bunqueue.dev/guide/sdks/) · [Protocol spec](https://github.com/egeominotti/bunqueue/blob/main/docs/protocol.md) · [Server](https://github.com/egeominotti/bunqueue) · [Changelog](https://github.com/egeominotti/bunqueue/blob/main/sdk/rust/CHANGELOG.md)
 
@@ -108,16 +109,16 @@ replace the broker's terminal state or persisted result.
 
 ## API surface
 
-| Area | Capabilities |
-|---|---|
-| Produce | `add`, `add_bulk` (custom ids preserved), the complete wire job option set: priority, delay, attempts, backoff, jobId, deduplication, dependsOn, lifo, durable, ... |
-| Query | jobs, states, results, progress, `wait_for_job`, counts, job logs, children values |
-| Control | pause, resume, drain, clean, obliterate, promote, retry, change priority/delay, update data |
-| DLQ | get, retry, purge |
-| Schedulers | cron pattern or fixed interval, execution limit, get/list/remove |
-| Admin | webhooks, rate limit with duration window and broker-side TTL, workers, stats, list queues, ping |
-| Flows | `FlowProducer`: atomic parent/child trees (`add`) and dependency chains (`add_chain`) |
-| Worker | bounded thread pool, batch pulls capped by concurrency, ACK-gated completion, reconnect-safe registration |
+| Area       | Capabilities                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Produce    | `add`, `add_bulk` (custom ids preserved), the complete wire job option set: priority, delay, attempts, backoff, jobId, deduplication, dependsOn, lifo, durable, ... |
+| Query      | jobs, states, results, progress, `wait_for_job`, counts, job logs, children values                                                                                  |
+| Control    | pause, resume, drain, clean, obliterate, promote, retry, change priority/delay, update data                                                                         |
+| DLQ        | get, retry, purge                                                                                                                                                   |
+| Schedulers | cron pattern or fixed interval, execution limit, get/list/remove                                                                                                    |
+| Admin      | webhooks, rate limit with duration window and broker-side TTL, workers, stats, list queues, ping                                                                    |
+| Flows      | `FlowProducer`: atomic parent/child trees (`add`) and dependency chains (`add_chain`)                                                                               |
+| Worker     | bounded thread pool, batch pulls capped by concurrency, ACK-gated completion, reconnect-safe registration                                                           |
 
 ## Security
 

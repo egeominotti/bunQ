@@ -20,7 +20,7 @@ What this module owns:
 What it does NOT own (delegated elsewhere):
 
 - **Deciding when a job enters the DLQ.** That lives in the fail/stall/lock/recovery paths (`src/application/operations/ack/`, `stallDetection.ts`, `lockManager.ts`, `background/recovery/`, `queue-manager/flow-failures.ts`). The DLQ only exposes `addToDlq`. See [Job Lifecycle](./job-lifecycle.md).
-- **Persistence.** Writes/reads of the `dlq` SQLite table are owned by [Persistence](./persistence.md) (`saveDlqEntry`, `deleteDlqEntry`, `clearDlqQueue`, `loadDlq`).
+- **Persistence.** Local writes/reads of the SQLite `dlq` table are owned by [Persistence](./persistence.md) (`saveDlqEntry`, `deleteDlqEntry`, `clearDlqQueue`, `loadDlq`). PostgreSQL terminal and retry transactions are owned by the [multi-broker store](./postgres-multibroker.md).
 - **The 60s maintenance scheduling loop** itself — owned by [Background Tasks](./background-tasks.md) (`performDlqMaintenance`).
 - **Stall detection / lock expiry logic** — see [Rate Limiting & Concurrency](./rate-limiting-and-concurrency.md) and [Background Tasks](./background-tasks.md). `DlqShard` only stores the `StallConfig`.
 
@@ -36,7 +36,9 @@ Internal:
 
 External/runtime:
 
-- Bun's `bun:sqlite` (via the persistence layer). DLQ blobs are msgpack-packed (`pack`/`unpack`). No external runtime dependencies.
+- Memory/SQLite uses Bun's `bun:sqlite`; PostgreSQL uses Bun's native `SQL`
+  client. DLQ payloads are MessagePack encoded with `msgpackr`, the package's
+  only third-party runtime dependency.
 
 ## Public Interface
 

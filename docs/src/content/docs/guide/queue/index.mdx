@@ -1,6 +1,6 @@
 ---
-title: "Queue API: Add and Manage Jobs in Bun"
-description: "The bunqueue Queue is the producer side: create it embedded in your process or pointed at a server, then add, inspect and control jobs backed by SQLite."
+title: 'Queue API: Add and Manage Jobs in Bun'
+description: 'The bunqueue Queue is the producer side: create it embedded or connect to a SQLite/PostgreSQL-backed server, then add, inspect, and control jobs.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,21 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "bun queue, job queue api, embedded queue sqlite, tcp queue client, bullmq queue alternative, background jobs typescript"
+      content: 'bun queue, job queue api, embedded queue sqlite, tcp queue client, bullmq queue alternative, background jobs typescript'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">The producer <em>side.</em></h1>
-  <p class="bq-hero-sub">A Queue is where work goes in. Same object whether it writes straight to a SQLite file in your process or talks to a shared server over TCP, so the code you write does not change when the deployment does.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    The producer <em>side.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    A Queue is where work goes in. It is the same object whether it writes to SQLite in your process
+    or talks over TCP to a memory-, SQLite-, or PostgreSQL-backed server, so client code does not
+    change when the deployment does.
+  </p>
 </div>
 
 Start here: create the queue, pick a mode, and know which options belong to the constructor rather than to individual jobs.
@@ -125,7 +131,7 @@ const emailQueue = new Queue('emails', {
     attempts: 3,
     backoff: 1000,
     removeOnComplete: true,
-  }
+  },
 });
 
 // TCP mode with a custom connection
@@ -133,9 +139,9 @@ const remoteQueue = new Queue('tasks', {
   connection: {
     host: '192.168.1.100',
     port: 6789,
-    token: 'secret-token',  // If AUTH_TOKENS is set on the server
-    poolSize: 4,            // Connection pool size
-  }
+    token: 'secret-token', // If AUTH_TOKENS is set on the server
+    poolSize: 4, // Connection pool size
+  },
 });
 ```
 
@@ -156,8 +162,8 @@ const typedQueue = new Queue<TaskData>('tasks');
 const remoteQueue = new Queue('tasks', {
   host: '192.168.1.100',
   port: 6789,
-  token: 'secret-token',  // If AUTH_TOKENS is set on the server
-  poolSize: 4,            // Producer-side connection pool
+  token: 'secret-token', // If AUTH_TOKENS is set on the server
+  poolSize: 4, // Producer-side connection pool
 });
 ```
 
@@ -253,20 +259,20 @@ remote_queue =
 </TabItem>
 </Tabs>
 
-*`embedded: true` and `defaultJobOptions` exist in the Bun `bunqueue` package only; the `poolSize` connection pool is TypeScript-only. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call.*
+_`embedded: true` and `defaultJobOptions` exist in the Bun `bunqueue` package only; the `poolSize` connection pool is TypeScript-only. In the other SDKs, pass connection options to the constructor (see [SDKs](/guide/sdks/#connection-options)) and job options per `add` call._
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
-| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
-| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
-| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
-| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
-| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
-| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
-| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
-| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
-| [JobOptions Reference](/guide/queue/options/) | Every JobOptions field, with defaults |
+|                                                                           |                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------- |
+| [Adding Jobs](/guide/queue/adding-jobs/)                                  | add, addBulk, priorities, delays, durability  |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids   |
+| [Querying Jobs](/guide/queue/querying/)                                   | Fetch jobs, states, counts and results        |
+| [Queue Control and Maintenance](/guide/queue/control/)                    | Pause, drain, obliterate, clean and repair    |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/)             | Progress, per-job logs and dependencies       |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/)        | Rate limits and global concurrency caps       |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/)                 | Named repeatable schedules from the queue     |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/)                 | Failed-job operations from the Queue object   |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/)        | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward  |
+| [JobOptions Reference](/guide/queue/options/)                             | Every JobOptions field, with defaults         |

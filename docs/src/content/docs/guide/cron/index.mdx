@@ -1,6 +1,6 @@
 ---
-title: "Cron Jobs in Bun: Scheduled Background Tasks"
-description: "Schedule recurring jobs in bunqueue with cron expressions or fixed intervals. Persisted in SQLite, timezone aware, and managed from code, the CLI or MCP."
+title: 'Cron Jobs in Bun: Scheduled Background Tasks'
+description: 'Schedule recurring jobs with cron expressions or intervals. Persist schedules in SQLite or coordinate them across PostgreSQL brokers, with timezone support.'
 head:
   - tag: meta
     attrs:
@@ -9,18 +9,24 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "bun cron, cron jobs typescript, scheduled tasks bun, job scheduler sqlite, upsertJobScheduler, repeatable jobs, node-cron alternative"
+      content: 'bun cron, cron jobs typescript, scheduled tasks bun, job scheduler sqlite, upsertJobScheduler, repeatable jobs, node-cron alternative'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron jobs</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Work that runs <em>on a clock.</em></h1>
-  <p class="bq-hero-sub">Nightly reports, hourly cleanups, a health ping every thirty seconds. Schedules live in SQLite next to the jobs, so they survive a restart and need no extra scheduler process.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Work that runs <em>on a clock.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Nightly reports, hourly cleanups, a health ping every thirty seconds. Schedules live in the
+    selected persistent backend: beside jobs in SQLite, or transactionally coordinated across a
+    PostgreSQL broker fleet. Memory-only mode does not survive a restart.
+  </p>
 </div>
 
-A scheduler is a named rule that keeps producing jobs on a queue. Create it once with `upsertJobScheduler()` and bunqueue fires the job on every tick, whether that tick comes from a cron pattern or a fixed interval. Scheduler IDs are global to one broker, not scoped by queue: use names such as `reports:daily-report` when several applications share a server.
+A scheduler is a named rule that keeps producing jobs on a queue. Create it once with `upsertJobScheduler()` and bunqueue fires the job on every tick, whether that tick comes from a cron pattern or a fixed interval. Scheduler IDs are global to the selected backend—not scoped by queue—and, in PostgreSQL mode, shared by every broker in the namespace. Use names such as `reports:daily-report` when several applications share a deployment.
 
 ## Quick Start
 
@@ -35,17 +41,25 @@ import { Queue, Worker } from 'bunqueue/client';
 const queue = new Queue('reports', { embedded: true });
 
 // Every day at 9:00 AM
-await queue.upsertJobScheduler('daily-report', {
-  pattern: '0 9 * * *',
-}, {
-  name: 'daily-report',
-  data: { type: 'sales' },
-});
+await queue.upsertJobScheduler(
+  'daily-report',
+  {
+    pattern: '0 9 * * *',
+  },
+  {
+    name: 'daily-report',
+    data: { type: 'sales' },
+  }
+);
 
 // A normal worker processes the scheduled jobs
-new Worker('reports', async (job) => {
-  console.log('Running report:', job.data.type);
-}, { embedded: true });
+new Worker(
+  'reports',
+  async (job) => {
+    console.log('Running report:', job.data.type);
+  },
+  { embedded: true }
+);
 ```
 
 </TabItem>
@@ -57,12 +71,16 @@ import { Queue, Worker } from 'bunqueue-client';
 const queue = new Queue('reports');
 
 // Every day at 9:00 AM
-await queue.upsertJobScheduler('daily-report', {
-  pattern: '0 9 * * *',
-}, {
-  name: 'daily-report',
-  data: { type: 'sales' },
-});
+await queue.upsertJobScheduler(
+  'daily-report',
+  {
+    pattern: '0 9 * * *',
+  },
+  {
+    name: 'daily-report',
+    data: { type: 'sales' },
+  }
+);
 
 // A normal worker processes the scheduled jobs
 new Worker('reports', async (job) => {
@@ -203,8 +221,8 @@ bunqueue cron delete daily-report
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object |
-| [Cron Recipes](/guide/cron/recipes/) | Fixed intervals, timezones, repeat-after-completion |
-| [Cron Reference](/guide/cron/reference/) | Expression syntax, every scheduler option, MCP |
+|                                                           |                                                     |
+| --------------------------------------------------------- | --------------------------------------------------- |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules on the Queue object      |
+| [Cron Recipes](/guide/cron/recipes/)                      | Fixed intervals, timezones, repeat-after-completion |
+| [Cron Reference](/guide/cron/reference/)                  | Expression syntax, every scheduler option, MCP      |

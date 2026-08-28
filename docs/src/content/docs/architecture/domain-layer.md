@@ -1,6 +1,6 @@
 ---
-title: "Domain Layer: Sharding, Priority Queues & States"
-description: "bunqueue domain layer internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic."
+title: "Memory/SQLite Domain Layer: Sharding, Queues & States"
+description: "bunqueue memory/SQLite domain internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic."
 head:
   - tag: meta
     attrs:
@@ -11,8 +11,13 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">architecture · domain layer</span>
   <h1 class="bq-hero-h1 bq-bench-h1">The domain layer, no <em>I/O.</em></h1>
-  <p class="bq-hero-sub">The domain layer contains the pure business logic of bunqueue. No external dependencies, just core algorithms and data structures.</p>
+  <p class="bq-hero-sub">The memory/SQLite domain layer contains pure queue logic: no I/O, just core algorithms and data structures. PostgreSQL shares the public job model but owns ordering and coordination in database transactions.</p>
 </div>
+
+This page describes the base memory/SQLite engine. PostgreSQL servers use the
+same public states and payload types, but authoritative queues, limits, leases,
+and claims live in PostgreSQL rather than these in-memory shards. See
+[Storage backends](/guide/databases/) and the [application layer](/architecture/application-layer/).
 
 ## Module Structure
 
@@ -33,7 +38,7 @@ src/domain/
 
 ## Sharding Architecture
 
-Jobs are distributed across N shards (auto-detected from CPU cores) for parallelism:
+In memory/SQLite mode, jobs are distributed across N shards (auto-detected from CPU cores) for parallelism:
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>QueueManager</b><span>N independent shards, auto-detected</span></div>

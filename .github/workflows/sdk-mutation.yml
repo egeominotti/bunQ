@@ -130,7 +130,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      # The broker imports msgpackr and croner. Without an explicit frozen
+      # The broker imports msgpackr. Without an explicit frozen
       # install it would only start via Bun's implicit auto-install, which is
       # network-dependent and unpinned — the opposite of what CI must do.
       - name: Install pinned broker dependencies

@@ -685,8 +685,11 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   become one unbounded `ANY(...)` read.
   Inline retention never waits for a second queue lock after job locks are held;
   candidate tuples are locked by ascending ID, and a commit-aware autonomous
-  sweep recalculates the cutoff under one per-queue advisory lock. Cumulative
-  per-queue prune frontiers refresh only a broker behind discarded history.
+  sweep recalculates the cutoff under one per-queue advisory lock. Live
+  notification sweeps acquire that lock non-blockingly and coalesce contention
+  behind one bounded retry timer, leaving journal replay unblocked; manual and
+  crash-recovery sweeps remain blocking. Cumulative per-queue prune frontiers
+  refresh only a broker behind discarded history.
   A 256-event startup accumulator permits one authoritative retry when it
   overflows; a second overflow cannot starve readiness because affected queues
   retain coalesced dirty markers. Bootstrap and queue projections each

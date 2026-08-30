@@ -16,7 +16,15 @@ head:
 
 ## Unreleased
 
-_No changes yet._
+### Fixed
+
+- PostgreSQL notification-driven event retention no longer waits behind an
+  in-flight writer for the full database lock timeout. Automatic sweeps use a
+  non-blocking per-queue advisory-lock attempt and retain one coalesced retry
+  capped at 250 ms, while manual trim and crash recovery remain blocking and
+  exact. Expected contention stays healthy, retry timers are cancelled during
+  shutdown, and the retained event window now converges promptly after a
+  high-contention multi-broker burst.
 
 ## [2.9.2] - 2026-08-30
 

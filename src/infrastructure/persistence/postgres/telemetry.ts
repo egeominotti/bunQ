@@ -1,10 +1,15 @@
+import type { TransactionSQL } from 'bun';
 import type { QueueMetrics, QueueMetricType } from '../../../domain/types/metrics';
 import type { PostgresContext } from './context';
 import {
   recordPostgresEventPruneWatermarks,
   summarizePostgresPrunedEvents,
 } from './eventPruneWatermarks';
-import { lockPostgresEventRetention, prunePostgresQueueEvents } from './eventRetention';
+import {
+  lockPostgresEventRetention,
+  prunePostgresQueueEvents,
+  tryLockPostgresEventRetention,
+} from './eventRetention';
 import { POSTGRES_EVENT_CHANNEL } from './schema';
 
 function assertNonNegativeInteger(value: number, name: string): void {
@@ -65,6 +70,37 @@ export async function getPostgresQueueMetrics(
   };
 }
 
+async function trimLockedPostgresQueueEvents(
+  tx: TransactionSQL,
+  ctx: PostgresContext,
+  queue: string,
+  maxLength: number
+): Promise<number> {
+  const rows = await prunePostgresQueueEvents(tx, ctx, queue, maxLength);
+  const prune = summarizePostgresPrunedEvents(rows);
+  const { prunedThrough } = prune;
+  if (prunedThrough > 0) {
+    await recordPostgresEventPruneWatermarks(tx, ctx, [
+      {
+        queue,
+        sourceEventId: prunedThrough,
+        ...prune,
+        prunesCurrentTransaction: false,
+      },
+    ]);
+    await tx.notify(
+      POSTGRES_EVENT_CHANNEL,
+      JSON.stringify({
+        namespace: ctx.config.namespace,
+        queue,
+        brokerId: ctx.config.brokerId,
+        prunedThrough,
+      })
+    );
+  }
+  return rows.length;
+}
+
 export async function trimPostgresQueueEvents(
   ctx: PostgresContext,
   queue: string,
@@ -73,29 +109,20 @@ export async function trimPostgresQueueEvents(
   assertNonNegativeInteger(maxLength, 'maxLength');
   return await ctx.sql.begin(async (tx) => {
     await lockPostgresEventRetention(tx, ctx, queue);
-    const rows = await prunePostgresQueueEvents(tx, ctx, queue, maxLength);
-    const prune = summarizePostgresPrunedEvents(rows);
-    const { prunedThrough } = prune;
-    if (prunedThrough > 0) {
-      await recordPostgresEventPruneWatermarks(tx, ctx, [
-        {
-          queue,
-          sourceEventId: prunedThrough,
-          ...prune,
-          prunesCurrentTransaction: false,
-        },
-      ]);
-      await tx.notify(
-        POSTGRES_EVENT_CHANNEL,
-        JSON.stringify({
-          namespace: ctx.config.namespace,
-          queue,
-          brokerId: ctx.config.brokerId,
-          prunedThrough,
-        })
-      );
-    }
-    return rows.length;
+    return await trimLockedPostgresQueueEvents(tx, ctx, queue, maxLength);
+  });
+}
+
+/** Try one automatic retention sweep without waiting behind an active writer. */
+export async function tryTrimPostgresQueueEvents(
+  ctx: PostgresContext,
+  queue: string,
+  maxLength: number
+): Promise<number | null> {
+  assertNonNegativeInteger(maxLength, 'maxLength');
+  return await ctx.sql.begin(async (tx) => {
+    if (!(await tryLockPostgresEventRetention(tx, ctx, queue))) return null;
+    return await trimLockedPostgresQueueEvents(tx, ctx, queue, maxLength);
   });
 }
 

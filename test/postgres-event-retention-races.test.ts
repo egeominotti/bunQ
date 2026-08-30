@@ -1,8 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { SQL } from 'bun';
 import { createJob, jobId } from '../src/domain/types/job';
+import { postgresAdvisoryLockName } from '../src/infrastructure/persistence/postgres/advisoryLocks';
 import { recordPostgresEvent } from '../src/infrastructure/persistence/postgres/context';
 import { PostgresQueueStore } from '../src/infrastructure/persistence/postgres';
-import { cleanupPostgresNamespace, eventually } from './support/postgres-event-race';
+import { cleanupPostgresNamespace, deferred, eventually } from './support/postgres-event-race';
 
 const postgresUrl = Bun.env.BUNQUEUE_TEST_POSTGRES_URL;
 const namespaces: string[] = [];
@@ -29,6 +31,75 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL event-retention races', () => {
+  test.skipIf(!postgresUrl)(
+    'converges retention without blocking on transient lock contention',
+    async () => {
+      const value = namespace('retry-after-timeout');
+      const queue = 'retry-after-timeout';
+      const queueStore = new PostgresQueueStore({
+        url: postgresUrl!,
+        namespace: value,
+        brokerId: 'retention-retry',
+        poolSize: 4,
+        maxQueueEvents: 2,
+        pollIntervalMs: 60_000,
+        lockTimeoutMs: 100,
+      });
+      const blocker = new SQL(postgresUrl!, { max: 1 });
+      const lockAcquired = deferred<undefined>();
+      const releaseLock = deferred<undefined>();
+      let blockingTransaction: Promise<void> | null = null;
+      const retainedEventCount = async () => {
+        const [row] = await queueStore.context.sql<{ count: number }[]>`
+          SELECT COUNT(*)::int AS count
+          FROM bunqueue_events
+          WHERE namespace = ${value} AND queue = ${queue}
+        `;
+        return row.count;
+      };
+
+      try {
+        await queueStore.initialize();
+        for (let index = 0; index < 2; index++) {
+          await queueStore.insert(
+            createJob(jobId(`retention-seed-${index}`), queue, { data: { index } })
+          );
+        }
+        expect(await retainedEventCount()).toBe(2);
+
+        const lockName = postgresAdvisoryLockName('event-retention', value, queue);
+        blockingTransaction = blocker.begin(async (tx) => {
+          await tx`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`;
+          lockAcquired.resolve(undefined);
+          await releaseLock.promise;
+        });
+        await lockAcquired.promise;
+
+        await queueStore.insert(
+          createJob(jobId('retention-contended'), queue, { data: { contended: true } })
+        );
+        expect(await retainedEventCount()).toBe(3);
+        const eventStream = queueStore.events as unknown as {
+          retentionRetryTimer: ReturnType<typeof setTimeout> | null;
+        };
+        expect(await eventually(() => Boolean(eventStream.retentionRetryTimer))).toBe(true);
+        expect(queueStore.health()).toMatchObject({ ok: true, error: null, since: null });
+
+        releaseLock.resolve(undefined);
+        await blockingTransaction;
+        blockingTransaction = null;
+
+        expect(await eventually(async () => (await retainedEventCount()) === 2)).toBe(true);
+        expect(await eventually(() => queueStore.health().ok)).toBe(true);
+      } finally {
+        releaseLock.resolve(undefined);
+        await blockingTransaction?.catch(() => undefined);
+        await Promise.allSettled([queueStore.close(), blocker.close({ timeout: 5 })]);
+      }
+    },
+    10_000
+  );
+
   test.skipIf(!postgresUrl)(
     'never waits on inverse inline queue-retention lock orders',
     async () => {

@@ -511,6 +511,12 @@ claim token across delayed journal replay, retry every captured client lease
 after a transient release error, bound repeated startup-buffer overflow, stop
 queue refresh under continuous event-version churn, serialize each maintenance
 subsystem, and prove store close awaits admitted maintenance.
+Event-retention regressions hold the per-queue advisory lock while a committed
+writer requests an autonomous trim. They assert that normal contention leaves
+storage health intact, one coalesced retry restores the exact retained window
+after release, and close cancels the pending timer without issuing a late SQL
+query. The existing two-broker campaign still drives 5,000 jobs through 16
+consumers and requires the 32-event window to converge within five seconds.
 Direct-child removal tests exercise two managers against one database and assert
 pending-state coverage, exact event emission, idempotence, active/terminal lease
 and result retention, plus fixed-point protection for shared dependency graphs.

@@ -8,7 +8,7 @@ import {
 import { PostgresEventCatchupCursors } from './eventCatchupCursors';
 import { loadPostgresEventPruneWatermarks } from './eventPruneWatermarks';
 import { POSTGRES_EVENT_CHANNEL } from './schema';
-import { trimPostgresQueueEvents } from './telemetry';
+import { tryTrimPostgresQueueEvents } from './telemetry';
 import type { PostgresContext } from './context';
 import type { PostgresDeliveredStoreEvent, PostgresStoreEvent } from './types';
 
@@ -50,6 +50,7 @@ export class PostgresEventStream {
   private checkpointScanRequested = false;
   private drainRequested = false;
   private draining: Promise<void> | null = null;
+  private retentionRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
   constructor(private readonly ctx: PostgresContext) {}
@@ -98,6 +99,8 @@ export class PostgresEventStream {
     this.closed = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.retentionRetryTimer) clearTimeout(this.retentionRetryTimer);
+    this.retentionRetryTimer = null;
     await this.subscription?.unlisten();
     this.subscription = null;
     for (const registrations of this.waiters.values()) {
@@ -184,11 +187,12 @@ export class PostgresEventStream {
     if (this.draining) return this.draining;
     this.draining = this.drainLoop()
       .then(() => {
-        if (!this.closed) this.reportDrainStatus(null);
+        if (!this.closed && !this.retentionRetryTimer) this.reportDrainStatus(null);
       })
-      .catch((error: unknown) =>
-        this.reportDrainStatus(error instanceof Error ? error : new Error(String(error)))
-      )
+      .catch((error: unknown) => {
+        this.reportDrainStatus(error instanceof Error ? error : new Error(String(error)));
+        this.scheduleRetentionRetry();
+      })
       .finally(() => {
         this.draining = null;
         if (this.drainRequested && !this.closed) void this.drain(false);
@@ -215,16 +219,31 @@ export class PostgresEventStream {
   }
 
   private async convergeEventRetention(): Promise<void> {
+    if (this.retentionRetryTimer) return;
+    const maxLength = this.ctx.config.maxQueueEvents;
     const queues = [...this.retentionQueues].sort();
     for (const queue of queues) {
       this.retentionQueues.delete(queue);
       try {
-        await trimPostgresQueueEvents(this.ctx, queue, this.ctx.config.maxQueueEvents);
+        const removed = await tryTrimPostgresQueueEvents(this.ctx, queue, maxLength);
+        if (removed === null) {
+          this.retentionQueues.add(queue);
+          this.scheduleRetentionRetry();
+        }
       } catch (error) {
         this.retentionQueues.add(queue);
         throw error;
       }
     }
+  }
+
+  private scheduleRetentionRetry(): void {
+    if (this.closed || this.retentionRetryTimer || this.retentionQueues.size === 0) return;
+    const delay = Math.min(this.ctx.config.pollIntervalMs, 250);
+    this.retentionRetryTimer = setTimeout(() => {
+      this.retentionRetryTimer = null;
+      if (!this.closed && this.retentionQueues.size > 0) void this.drain(false);
+    }, delay);
   }
 
   private applyEvent(entry: PostgresJournalEvent): void {

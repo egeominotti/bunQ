@@ -642,8 +642,15 @@ retain their existing host-clock behavior.
   transaction that already owns another queue's event tuples never waits for a
   second retention lock, preventing both same-queue tuple cycles and inverse
   multi-queue lock orders. A skipped prune requests, after commit, a coalesced
-  single-queue sweep with a fresh snapshot; startup and
-  periodic maintenance provide crash recovery. The retained window therefore
+  single-queue sweep with a fresh snapshot. Notification-driven sweeps also use
+  a non-blocking advisory-lock attempt: a busy queue remains in the bounded
+  pending set and arms one retry no later than 250 ms, so multiple brokers do
+  not occupy pool connections for the full lock timeout. The retry timer gates
+  only retention; durable journal replay continues while it is armed, and
+  shutdown cancels it before awaiting an in-flight drain. Expected contention
+  does not degrade storage health, while a real SQL failure remains unhealthy
+  until a complete retry succeeds. Manual trim, startup recovery, and periodic
+  crash repair retain their blocking exact sweeps. The retained window therefore
   converges exactly after concurrent commits without placing a namespace lock on
   the lifecycle hot path. A batch larger than the window publishes a durable
   watermark instead of storing a synthetic public event.
@@ -654,8 +661,9 @@ retain their existing host-clock behavior.
 - `PostgresEventStream` LISTENs on `bunqueue_jobs_changed` and also polls the
   durable journal in `(commit_seq, id)` order. Notifications contain only wake-up
   hints; correctness does not depend on their payload or delivery. Drain requests
-  coalesce into bounded state instead of an unbounded range queue, and a complete
-  failed/recovered durable scan updates runtime health independently of periodic
+  coalesce into bounded state instead of an unbounded range queue. A retention
+  miss is coalesced separately from journal work, while a complete failed or
+  recovered durable scan updates runtime health independently of periodic
   maintenance. Job events carry the
   authoritative job/state payload and update the snapshot directly. Terminal
   and retry events also carry the complete DLQ entry and retry state, including
@@ -851,8 +859,13 @@ push batch, exact event retention, and deduplication-conflict fallback without a
 partial fast-path commit. Opposite-order, same-ID batches from two brokers are
 repeated to reject transaction deadlocks. Event-retention races hold two
 transactions after their first prune, then request `Q1 -> Q2` and `Q2 -> Q1`;
-both must commit and converge to the exact window. A repeated manual-trim versus
-obliterate race covers the lifecycle/retention/event/watermark order. Public TCP tests compare zero and
+both must commit and converge to the exact window. A deterministic blocker
+also proves that notification-driven retention defers without degrading
+health, coalesces its retry, reaches the exact window after release, and
+cancels the timer during close. The unchanged 5,000-job, two-broker campaign
+remains the black-box guard against retention lock convoys. A repeated
+manual-trim versus obliterate race covers the
+lifecycle/retention/event/watermark order. Public TCP tests compare zero and
 negative rate-limit duration/TTL behavior with SQLite, while concurrent log
 tests assert exact retention and no orphan on removal. Runtime tests keep a
 failed maintenance key unhealthy across unrelated successes; configuration and

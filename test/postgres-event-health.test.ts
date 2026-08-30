@@ -18,6 +18,12 @@ interface MaintainableStore {
   runMaintenance(operation: () => Promise<unknown>, subsystem?: string): Promise<void>;
 }
 
+interface RetriableEventStream {
+  readonly retentionQueues: Set<string>;
+  retentionRetryTimer: ReturnType<typeof setTimeout> | null;
+  scheduleRetentionRetry(): void;
+}
+
 function fakeContext(execute: () => Promise<unknown[]>): PostgresContext {
   return {
     sql: execute as unknown as SQL,
@@ -65,6 +71,27 @@ describe('PostgreSQL event stream health', () => {
       unsubscribe();
       await stream.close();
     }
+  });
+
+  test('coalesces and cancels pending retention retries during close', async () => {
+    let queries = 0;
+    const stream = new PostgresEventStream(
+      fakeContext(async () => {
+        queries++;
+        return [];
+      })
+    );
+    const retry = stream as unknown as RetriableEventStream;
+    retry.retentionQueues.add('contended');
+    retry.scheduleRetentionRetry();
+    const scheduled = retry.retentionRetryTimer;
+    retry.scheduleRetentionRetry();
+    expect(retry.retentionRetryTimer).toBe(scheduled);
+
+    await stream.close();
+    expect(retry.retentionRetryTimer).toBeNull();
+    await Bun.sleep(50);
+    expect(queries).toBe(0);
   });
 
   test.skipIf(!postgresUrl)(

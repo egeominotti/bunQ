@@ -72,6 +72,27 @@ export class QueueTelemetryJournal {
     this.metrics.set(event.queue, queueMetrics);
   }
 
+  /** Persist a lifecycle batch atomically, with scalar fallback on write failure. */
+  recordBatch(events: readonly JobEvent[]): void {
+    if (events.length === 0) return;
+    if (this.storage) {
+      try {
+        this.storage.recordQueueEventsBatch(events, this.maxEvents, this.maxMetricDataPoints);
+      } catch {
+        for (const event of events) {
+          try {
+            this.storage.recordQueueEvent(event, this.maxEvents, this.maxMetricDataPoints);
+          } catch {
+            // Match scalar subscriber isolation and continue with later events.
+          }
+        }
+      }
+      return;
+    }
+
+    for (const event of events) this.record(event);
+  }
+
   getMetrics(queue: string, type: QueueMetricType, start = 0, end = -1): QueueMetrics {
     assertNonNegativeInteger(start, 'start');
     if (end !== -1) assertNonNegativeInteger(end, 'end');

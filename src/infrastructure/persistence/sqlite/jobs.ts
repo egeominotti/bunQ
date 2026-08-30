@@ -13,6 +13,18 @@ import { encodeJobOptions } from '../jobOptionsBlob';
 import type { DurableAdmissionMetadata } from '../types/admission';
 import { SqliteAdmission } from './admission';
 
+export interface ActiveJobWrite {
+  jobId: JobId;
+  startedAt: number;
+  timeline?: JobTimelineEntry[];
+}
+
+export interface CompletedJobWrite {
+  jobId: JobId;
+  completedAt: number;
+  timeline?: JobTimelineEntry[];
+}
+
 /** Job insertion, state transitions, and DLQ persistence. */
 export abstract class SqliteJobs extends SqliteAdmission {
   insertJob(job: Job, durable?: boolean, admission?: DurableAdmissionMetadata): void {
@@ -98,6 +110,23 @@ export abstract class SqliteJobs extends SqliteAdmission {
     });
   }
 
+  markActiveBatch(updates: readonly ActiveJobWrite[]): void {
+    if (updates.length === 0) return;
+    for (const update of updates) this.flushIfBuffered(update.jobId);
+    const rows = updates.map((update) => ({
+      ...update,
+      timeline: update.timeline?.length ? pack(update.timeline) : null,
+    }));
+    this.safeWrite(() => {
+      this.db.transaction((batch: typeof rows) => {
+        const statement = this.statements.get('updateJobState')!;
+        for (const row of batch) {
+          statement.run('active', row.startedAt, row.timeline, row.jobId);
+        }
+      })(rows);
+    });
+  }
+
   markWaitingChildren(jobId: JobId, timeline?: JobTimelineEntry[]): void {
     this.flushIfBuffered(jobId);
     this.safeWrite(() => {
@@ -118,6 +147,23 @@ export abstract class SqliteJobs extends SqliteAdmission {
           timeline && timeline.length > 0 ? pack(timeline) : null,
           jobId
         );
+    });
+  }
+
+  markCompletedBatch(updates: readonly CompletedJobWrite[]): void {
+    if (updates.length === 0) return;
+    for (const update of updates) this.flushIfBuffered(update.jobId);
+    const rows = updates.map((update) => ({
+      ...update,
+      timeline: update.timeline?.length ? pack(update.timeline) : null,
+    }));
+    this.safeWrite(() => {
+      this.db.transaction((batch: typeof rows) => {
+        const statement = this.statements.get('completeJob')!;
+        for (const row of batch) {
+          statement.run('completed', row.completedAt, row.timeline, row.jobId);
+        }
+      })(rows);
     });
   }
 

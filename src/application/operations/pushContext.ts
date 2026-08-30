@@ -1,7 +1,7 @@
 import type { Shard } from '../../domain/queue/shard';
 import type { Job, JobId } from '../../domain/types/job';
 import type { JobLocation } from '../../domain/types/queue';
-import { type EventType } from '../../domain/types/queue';
+import { type EventType, type JobEvent } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { RWLock } from '../../shared/lock';
 import type { MapLike, SetLike } from '../../shared/lru';
@@ -33,6 +33,7 @@ export interface PushContext {
     jobId: JobId;
     timestamp: number;
   }) => void;
+  broadcastBatch?: (events: readonly JobEvent[]) => void;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
   registerQueueName?: (queue: string) => void;
 }

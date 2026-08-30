@@ -1049,7 +1049,12 @@ The event journal is ordered newest-first by its monotonic id and bounded per
 queue. Metric rows are independent: trimming events never changes metric
 counters. `total_count` is cumulative, while sparse minute rows are expanded to
 a newest-first, zero-filled series and bounded to `maxMetricDataPoints`.
-`obliterate(queue)` deletes all three table partitions.
+`obliterate(queue)` deletes all three table partitions. SQLite batch lifecycle
+events are appended in input order in one transaction. Final per-queue journal
+retention is equivalent to trimming after every scalar append; terminal metric
+groups simulate each event in order before writing aggregate increments, which
+preserves `prev_ts`, `prev_count`, zero-window behavior, and out-of-order minute
+semantics exactly.
 
 ### `migrations` (`src/infrastructure/persistence/schema.ts:194-200`)
 

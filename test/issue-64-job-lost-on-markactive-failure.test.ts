@@ -17,7 +17,11 @@ const DB_PATH = '/tmp/test-issue-64-markactive.db';
 
 function cleanup() {
   for (const f of [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`]) {
-    try { unlinkSync(f); } catch {}
+    try {
+      unlinkSync(f);
+    } catch {
+      // The database sidecar may not exist.
+    }
   }
 }
 
@@ -25,7 +29,11 @@ describe('Issue #64 follow-up: job lost when markActive fails', () => {
   let manager: QueueManager;
 
   afterEach(() => {
-    try { manager?.shutdown(); } catch {}
+    try {
+      manager?.shutdown();
+    } catch {
+      // Cleanup still removes any database files after a shutdown failure.
+    }
     cleanup();
   });
 
@@ -75,10 +83,16 @@ describe('Issue #64 follow-up: job lost when markActive fails', () => {
 
     expect(manager.getQueueJobCounts(queue).waiting).toBe(5);
 
-    // Monkey-patch markActive to always throw
-    const storage = (manager as unknown as { storage: { markActive: Function } }).storage;
+    // Force both the batch transaction and its scalar fallback to fail.
+    const storage = (
+      manager as unknown as { storage: { markActive: Function; markActiveBatch: Function } }
+    ).storage;
     const originalMarkActive = storage.markActive.bind(storage);
+    const originalMarkActiveBatch = storage.markActiveBatch.bind(storage);
     storage.markActive = () => {
+      throw new Error('disk I/O error');
+    };
+    storage.markActiveBatch = () => {
       throw new Error('disk I/O error');
     };
 
@@ -87,6 +101,7 @@ describe('Issue #64 follow-up: job lost when markActive fails', () => {
 
     // Restore markActive
     storage.markActive = originalMarkActive;
+    storage.markActiveBatch = originalMarkActiveBatch;
 
     // All 5 jobs should be pulled despite markActive failures
     expect(pulled.length).toBe(5);
@@ -137,7 +152,6 @@ describe('Issue #64 follow-up: job lost when markActive fails', () => {
     // Monkey-patch the entire storage to throw on any method call
     // This simulates a catastrophic failure beyond just markActive
     const storage = (manager as unknown as { storage: object }).storage;
-    const originalStorage = { ...Object.getOwnPropertyDescriptors(Object.getPrototypeOf(storage)) };
     const originalMarkActive = (storage as { markActive: Function }).markActive;
 
     // Override markActive to throw AND also make broadcast throw

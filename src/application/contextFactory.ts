@@ -117,6 +117,7 @@ export class ContextFactory {
       jobIndex: this.deps.jobIndex,
       totalPushed: this.deps.metrics.totalPushed,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
+      broadcastBatch: this.deps.eventsManager.broadcastBatch.bind(this.deps.eventsManager),
       dashboardEmit: this.callbacks.emitDashboardEvent,
       registerQueueName: this.callbacks.registerQueueName,
     };
@@ -132,6 +133,7 @@ export class ContextFactory {
       jobIndex: this.deps.jobIndex,
       totalPulled: this.deps.metrics.totalPulled,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
+      broadcastBatch: this.deps.eventsManager.broadcastBatch.bind(this.deps.eventsManager),
       dashboardEmit: this.callbacks.emitDashboardEvent,
     };
   }
@@ -156,6 +158,7 @@ export class ContextFactory {
       totalFailed: this.deps.metrics.totalFailed,
       perQueueMetrics: this.deps.perQueueMetrics,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
+      broadcastBatch: this.deps.eventsManager.broadcastBatch.bind(this.deps.eventsManager),
       onJobCompleted: this.callbacks.onJobCompleted,
       onJobFailed: this.callbacks.onJobFailed,
       onJobsCompleted: this.callbacks.onJobsCompleted,

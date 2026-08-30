@@ -2,7 +2,7 @@ import type { Shard } from '../../domain/queue/shard';
 import type { FlowFailureRecord } from '../../domain/types/flow';
 import type { FailureReason } from '../../domain/types/dlq';
 import type { Job, JobId } from '../../domain/types/job';
-import type { EventType, JobLocation } from '../../domain/types/queue';
+import type { EventType, JobEvent, JobLocation } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { RWLock } from '../../shared/lock';
 import type { MapLike, SetLike } from '../../shared/lru';
@@ -37,6 +37,7 @@ export interface AckContext {
     prev?: string;
     terminal?: boolean;
   }) => void;
+  broadcastBatch?: (events: readonly JobEvent[]) => void;
   onJobCompleted: (jobId: JobId) => void;
   onJobFailed?: (jobId: JobId) => void;
   onJobsCompleted?: (jobIds: JobId[]) => void;
@@ -104,6 +105,7 @@ export interface FinalizeContext {
     timestamp: number;
     data?: unknown;
   }) => void;
+  broadcastBatch?: (events: readonly JobEvent[]) => void;
   onJobCompleted: (jobId: JobId) => void;
   onJobsCompleted?: (jobIds: JobId[]) => void;
   needsBroadcast?: () => boolean;

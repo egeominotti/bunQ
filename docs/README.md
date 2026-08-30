@@ -93,7 +93,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 | Document                                                                        | Purpose                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Persistence](./features/persistence.md)                                        | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer), including atomic admission metadata for terminal-ID retirement and dependency pins, plus batched recovery reads.                                                                                             |
+| [Persistence](./features/persistence.md)                                        | Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer), including transactional lifecycle-state/telemetry batches, atomic admission metadata for terminal-ID retirement and dependency pins, plus batched recovery reads.                                            |
 | [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md) | Optional database-authoritative server backend: focused admission/completion/destruction modules, generation-safe dependency locking and bounded proofs, atomic shared-child removal, lifecycle admission/drain, set-based claim/ACK, lease fencing/recovery, and commit-ordered durable replay. |
 | [S3 Backup](./features/backup-s3.md)                                            | Periodic gzip-compressed, SHA-256-checksummed SQLite snapshots to S3-compatible storage with retention pruning and validate-before-replace restore.                                                                                                                                              |
 | [Configuration & Entrypoint](./features/configuration.md)                       | Config layer and process entrypoint: resolves config-file/env/default precedence into typed config, dispatches the executable, and provides the Logger, VERSION, and Bun-only runtime guards.                                                                                                    |
@@ -161,6 +161,12 @@ The job-admission split (`operations/push.ts`, `pushBatch.ts`,
 is documented in [Job Lifecycle](./features/job-lifecycle.md), with its
 `persistence/sqlite/admission.ts` transaction contract documented in
 [Persistence](./features/persistence.md).
+The pull split between orchestration, atomic dequeue state, and durable handoff
+is implemented by `operations/pull.ts`, `operations/pullStateTransition.ts`,
+and [`operations/pullFinalization.ts`](../src/application/operations/pullFinalization.ts).
+SQLite batch telemetry semantics live in
+[`persistence/sqlite/telemetryWrites.ts`](../src/infrastructure/persistence/sqlite/telemetryWrites.ts);
+both are documented in the same lifecycle and persistence references.
 The optional server-only PostgreSQL runtime lives under
 `persistence/postgres/`, with its manager adapter under
 `application/postgres-queue-manager/`; see

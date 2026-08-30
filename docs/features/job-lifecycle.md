@@ -1,6 +1,6 @@
 # Job Lifecycle (push / pull / ack / fail)
 
-> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pushBatch.ts`, `src/application/operations/pushAdmission.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/ack.ts`, `src/application/operations/ack/`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/application/dependencyCompletions.ts`, `src/domain/types/jobs/model.ts`, `src/domain/job/`, `src/domain/queue/waiterManager.ts`
+> **Category:** Jobs · **Source:** `src/application/operations/push.ts`, `src/application/operations/pushBatch.ts`, `src/application/operations/pushAdmission.ts`, `src/application/operations/pull.ts`, `src/application/operations/pullStateTransition.ts`, `src/application/operations/pullFinalization.ts`, `src/application/operations/ack.ts`, `src/application/operations/ack/`, `src/application/operations/ackHelpers.ts`, `src/application/operations/jobStateTransitions.ts`, `src/application/dependencyCompletions.ts`, `src/domain/types/jobs/model.ts`, `src/domain/job/`, `src/domain/queue/waiterManager.ts`
 
 ## Purpose
 
@@ -39,7 +39,7 @@ Internal:
 - `src/shared/lru.ts` — `SetLike` / `MapLike` (bounded `completedJobs`, `jobResults`, `customIdMap`).
 - `src/application/dependencyCompletions.ts` — two-tier removed-completion
   tracker plus pin, unpin, and recovery reconciliation helpers.
-- `src/infrastructure/persistence/sqlite.ts` — `insertJob`, `insertJobsBatch`, `markActive`, `markCompleted`, `updateForRetry`, `storeResult`, `saveDlqEntry`, `deleteJob`. See [Persistence](./persistence.md).
+- `src/infrastructure/persistence/sqlite.ts` — `insertJob`, `insertJobsBatch`, `markActive`, `markActiveBatch`, `markCompleted`, `markCompletedBatch`, `updateForRetry`, `storeResult`, `saveDlqEntry`, `deleteJob`. See [Persistence](./persistence.md).
 - `src/application/latencyTracker.ts`, `src/application/throughputTracker.ts` — observability counters.
 
 External / runtime: Bun APIs — `Bun.nanoseconds()` (latency), `Bun.randomUUIDv7()` (`generateJobId`, `generateLockToken`), `setTimeout` (waiter timeout). SQLite via the storage layer.
@@ -201,9 +201,10 @@ leaves no phantom batch in either Embedded or TCP mode.
    paying `O(k log n)` for each of the `b` delivered jobs. `nextRunAt` retains
    the minimum deadline across every parked delayed job so long-poll wake-up
    semantics remain unchanged.
-5. `finalizeProcessing`: `storage.markActive(...)` (non-fatal on error —
-   in-memory is source of truth), bump counters, broadcast `pulled`. It returns
-   `false` when a management operation claimed the job before handoff.
+5. `finalizeProcessing` in `pullFinalization.ts` uses
+   `storage.markActive(...)` for a single handoff (non-fatal on error —
+   in-memory is source of truth), bumps counters, and broadcasts `pulled`. It
+   returns `false` when a management operation claimed the job before handoff.
 6. If no job and deadline not reached, `await shard.waitForJob(queue, remaining)`
    and loop; otherwise return `null`.
 
@@ -211,7 +212,11 @@ leaves no phantom batch in either Embedded or TCP mode.
 rate-limit and concurrency slot per selected job. A blocked or delayed entry
 consumes neither. If a limiter stops a partially filled batch, every parked job
 is still restored by the outer `finally`; `finalizeProcessingBatch` returns only
-the jobs actually delivered.
+the jobs actually delivered. Those survivors are packed before the SQLite
+critical section and persisted by one `markActiveBatch` transaction. On a batch
+failure SQLite rolls back every row, then the application retries each scalar
+`markActive`; scalar errors remain non-fatal, preserving the historical
+in-memory-authoritative delivery contract.
 
 **Safety net:** if `finalizeProcessing` throws, `requeueJob`
 (`pullStateTransition.ts`) restores the job with the same observer-atomicity
@@ -266,7 +271,12 @@ from hiding which generation was retired.
 `removeOnComplete` entries use the same delete-plus-proof transaction in both
 optimized variants, including result-bearing ACKB. For retained jobs,
 `jobResults.set` happens before `completedJobs.add`, so a live dependent never
-observes completion before its in-memory result.
+observes completion before its in-memory result. When every extracted job is
+retained and no defined result must be stored, `finalizeBatchAck` precomputes
+the capped completion timelines and commits all rows through one
+`markCompletedBatch` transaction. A failed batch rolls back before the original
+scalar loop runs. Batches containing a defined result or any removal keep the
+existing per-job ordering and transaction boundaries.
 
 ### Manual transitions (`jobStateTransitions.ts`)
 
@@ -323,7 +333,7 @@ detached CLI, and durable recovery paths.
 - **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`src/application/operations/pushDeduplication.ts:96-110`); the returned placeholder carries the correct existing id (`src/application/operations/push.ts:76-85`).
 - **Pull loss prevention**: `requeueJob` restores any job that fails to move to processing.
 - **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered. Their SQLite row (or pending buffered INSERT) is deleted before the heap/counter/index removal, preventing restart resurrection while keeping the shard critical section synchronous.
-- **markActive / persistence errors** during pull are swallowed — in-memory `processingShards` is the source of truth; SQLite recovery reconciles on restart.
+- **markActive / persistence errors** during pull are swallowed — an atomic batch failure retries through scalar `markActive`, and individual failures remain non-fatal because in-memory `processingShards` is the source of truth; SQLite recovery reconciles on restart.
 - **Late processor outcomes**: the timeout transition records the exact claimed
   processing generation (`jobId`, `startedAt`, and lease token when present)
   while holding the processing lock. ACK and FAIL classify again after their

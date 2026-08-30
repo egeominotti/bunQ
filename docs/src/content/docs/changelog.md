@@ -16,6 +16,10 @@ head:
 
 ## Unreleased
 
+_No changes yet._
+
+## [2.9.2] - 2026-08-30
+
 ### Added
 
 - Reworked the main Examples page into an explicit beginner-to-advanced path:
@@ -61,6 +65,44 @@ head:
   image and its explicit context allowlist include the full-text transformer
   and executable example, keeping both regression suites inside the mandatory
   isolated repository gate without widening the context to unrelated examples.
+
+### Performance
+
+- SQLite lifecycle telemetry now batches `PUSHB`, `PULLB`, and `ACKB` journal
+  writes in one transaction. Events retain their input order, journal retention
+  runs once per affected queue, and completed/failed metric mutations are
+  aggregated per queue/type after simulating scalar pruning exactly. Ordinary
+  subscribers, completion waiters, and webhooks still receive every event; a
+  failed batch rolls back and retries per event so one rejected row does not
+  suppress later telemetry. A deterministic differential suite covers mixed
+  queues, terminal and retry-attempt failures, zero through bounded retention,
+  and out-of-order timestamps. On native macOS arm64 with Bun 1.4.0, the new
+  diagnostic runner's five-run median for 5,000 durable jobs improved from
+  5,310.42ms (941.55 jobs/s) to 1,689.22ms (2,959.95 jobs/s), a 3.14x complete
+  push/pull/ack lifecycle gain. Per-phase medians improved 2.08x for push, 3.31x
+  for pull, and 4.08x for ack. These host results are diagnostic before/after
+  evidence, not publication benchmarks.
+- SQLite `PULLB` and retained, result-free `ACKB` now persist active/completed
+  state with one transaction per operation instead of one commit per job.
+  Buffered inserts are flushed first, timelines are encoded outside the
+  transaction, and any rejected row rolls the batch back before scalar retry;
+  result-bearing and `removeOnComplete` batches keep their existing ordering.
+  Differential tests compare raw rows with scalar writes and cover buffered
+  jobs, atomic rollback, public routing, and both fallback paths. Using the same
+  native macOS arm64/Bun 1.4.0 runner for 5,000 durable jobs, the five-run
+  median improved from 1,784.47ms (2,801.95 jobs/s) to 932.63ms (5,361.18
+  jobs/s), a further 1.91x complete-lifecycle gain. Pull improved from 529.45ms
+  to 153.89ms (3.44x) and ack from 613.98ms to 176.81ms (3.47x); push remained
+  outside the change at 627.75ms versus 602.62ms. These are diagnostic
+  before/after results, not publication benchmarks.
+- A final native A-B-B-A comparison ran the clean preceding Git revision and
+  the complete candidate in alternating fresh processes. Across 10 measured
+  fresh-database samples per version, the pooled median for the same 5,000-job
+  durable lifecycle fell from 5,195.99ms to 911.90ms (5.70x), while
+  median-derived throughput rose from 962.28 to 5,483.06 jobs/s. The
+  candidate's slowest sample was still 5.44x faster than the preceding
+  revision's fastest sample. Exact raw results and methodology are retained in
+  the local validation artifacts; this remains diagnostic host evidence.
 
 ## [2.9.1] - 2026-08-28
 

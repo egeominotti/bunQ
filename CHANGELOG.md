@@ -6,6 +6,33 @@ All notable changes to bunqueue are documented here.
 
 _No changes yet._
 
+## [2.9.2] - 2026-08-30
+
+> **SQLite lifecycle performance release.** Durable batch admission, delivery,
+> completion, and telemetry now amortize SQLite transactions while preserving
+> the existing event, retry, result, dependency, and rollback semantics.
+
+### Performance
+
+- Batched `PUSHB`, `PULLB`, and `ACKB` telemetry writes into one transaction,
+  with deterministic event order, bounded retention, aggregated terminal
+  metrics, and scalar fallback when a row is rejected.
+- Persisted batched active transitions and retained result-free completions in
+  one transaction per operation. Buffered jobs are flushed before transition,
+  timelines are encoded outside the transaction, and atomic failures retry
+  through the scalar path.
+- In the final native A-B-B-A comparison over 5,000 durable jobs, median
+  end-to-end lifecycle time fell from 5,195.99ms to 911.90ms (5.70x), while
+  median-derived throughput rose from 962.28 to 5,483.06 jobs/s. These are
+  diagnostic host measurements, not publication benchmarks.
+
+### Documentation
+
+- Reworked the Examples documentation into a progressive embedded-to-
+  multi-broker path and added a fully executable PostgreSQL three-broker
+  project with asserted lifecycle, priority, delay, retry, flow, concurrency,
+  rate-limit, and DLQ scenarios.
+
 ## [2.9.1] - 2026-08-28
 
 > **Multi-broker correctness fix.** PostgreSQL readers no longer keep a stale

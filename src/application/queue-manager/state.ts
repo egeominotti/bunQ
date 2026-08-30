@@ -156,7 +156,10 @@ export abstract class QueueManagerState {
       (queue) => this.workerManager.getForQueue(queue).length > 0
     );
     this.eventsManager = new EventsManager(this.webhookManager);
-    this.eventsManager.subscribe((event) => this.telemetryJournal.record(event));
+    this.eventsManager.subscribe(
+      (event) => this.telemetryJournal.record(event),
+      (events) => this.telemetryJournal.recordBatch(events)
+    );
     this.contextFactory = new ContextFactory(
       createContextDependencies(managerRuntime(this)),
       createContextCallbacks(runtime)

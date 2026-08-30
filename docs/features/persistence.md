@@ -1,6 +1,6 @@
 # Persistence (SQLite, WriteBuffer, ReadThrough)
 
-> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/`, `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts` (compatibility facade), `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/migrations.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
+> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/` (including `telemetryWrites.ts`), `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts` (compatibility facade), `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/migrations.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
 
 ## Purpose
 
@@ -24,12 +24,17 @@ Owns:
 - Buffered and durable (immediate) job inserts, single and bulk (`insertJob`,
   `insertJobImmediate`, `insertJobsBatch`), plus two-phase admission metadata
   that makes persistence-sensitive queue publication fail closed.
-- State-mutating writes: `markActive`, `markWaitingChildren`, `markCompleted`, `markFailed`, `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `clearJobUniqueKey`, `deleteJob`.
+- State-mutating writes: scalar `markActive`/`markCompleted`, transactional
+  `markActiveBatch`/`markCompletedBatch`, `markWaitingChildren`, `markFailed`,
+  `updateForRetry`, `updateJobData`, `updateJobChildrenIds`, `clearJobUniqueKey`,
+  and `deleteJob`.
 - Results, DLQ rows, cron rows, queue control-state rows, the durable
   flow-failure outbox, and `removeOnComplete` dependency evidence with bounded
   recent retention plus live-edge pin ownership.
 - A bounded per-queue lifecycle journal, cumulative terminal metric metadata,
-  and bounded one-minute completed/failed buckets (`SqliteTelemetry`).
+  and bounded one-minute completed/failed buckets. Scalar events use
+  `SqliteTelemetry`; lifecycle batches use the same semantics through
+  `telemetryWrites.ts` in one SQLite transaction.
 - Paginated recovery reads (`loadPendingJobs`, `loadActiveJobs`, `loadCompletedJobs`, `loadDlq`, plus the id-set loaders).
 - Disk-full detection, write-retry/backoff, and critical-loss accounting.
 - MessagePack (de)serialization and DB-row ↔ `Job` conversion.
@@ -97,7 +102,15 @@ Key methods (real signatures):
   `replaceJob(oldJobId, newJob, durable?, admission?)`,
   `transferActiveDedupJob(oldJobId, newJob, durable?, admission?)`, and
   `commitFlowLink(child, parent, parentState, mode, admission?)`.
-- State: `markActive(jobId, startedAt, timeline?)`, `markWaitingChildren(jobId, timeline?)`, `markCompleted(jobId, completedAt, timeline?)`, `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`, `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`, `clearJobUniqueKey(jobId)`, `deleteJob(jobId)`.
+- State: `markActive(jobId, startedAt, timeline?)`,
+  `markActiveBatch(updates: readonly ActiveJobWrite[])`,
+  `markWaitingChildren(jobId, timeline?)`,
+  `markCompleted(jobId, completedAt, timeline?)`,
+  `markCompletedBatch(updates: readonly CompletedJobWrite[])`,
+  `markFailed(job, error)`, `updateForRetry(job)`, `updateJobData(jobId, data)`,
+  `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving
+  `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`,
+  `clearJobUniqueKey(jobId)`, `deleteJob(jobId)`.
 - Flow transactions: `commitFailedJob(jobId, dlqEntry, flowFailure)`,
   `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
   `updateFlowParentResolution(parent)`, `saveFlowFailure(record)`,
@@ -114,6 +127,7 @@ Key methods (real signatures):
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
 - Queue control-state (#100): `saveQueueState(name, { paused, rateLimit, concurrencyLimit, rateLimitDuration?, rateLimitExpiresAt?, stallConfig?, dlqConfig? })`, `loadQueueState()`, `deleteQueueState(name)` (`persistence/sqlite/control.ts:93-150`).
 - Queue telemetry: `recordQueueEvent(event,maxEvents,maxMetricDataPoints)`,
+  `recordQueueEventsBatch(events,maxEvents,maxMetricDataPoints)`,
   `getQueueMetrics(queue,type,maxMetricDataPoints)`,
   `trimQueueEvents(queue,maxLength)`, `countQueueEvents(queue)`, and
   `clearQueueTelemetry(queue)`.
@@ -178,7 +192,8 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   `dlq_config BLOB` for the effective per-queue DLQ policy.
 - `queue_events` — autoincrement sequence, queue, event type, job id,
   occurrence timestamp, and MessagePack payload. Append and per-queue bound
-  enforcement run in one SQLite transaction.
+  enforcement run in one SQLite transaction. `PUSHB`, `PULLB`, and `ACKB`
+  retain input event order while committing their journal entries together.
 - `queue_metrics_meta` — `(queue,type)` cumulative terminal count and current
   bucket metadata. `queue_metric_buckets` — `(queue,type,minute)` counts,
   pruned to the configured minute window without resetting the cumulative
@@ -262,6 +277,30 @@ active marker so restart recovery cannot treat a manual requeue as a crash.
 state, clears `started_at`, and persists the transition timeline. Explicit
 deduplication-key release uses `clearJobUniqueKey` after its owner-aware
 in-memory mutation so recovery cannot recreate the removed key.
+
+`markActiveBatch` and `markCompletedBatch` preserve that invariant for every
+input ID before opening one transaction. Timeline payloads are MessagePack
+encoded before the transaction; its synchronous critical section only reuses
+the prepared state statement for each row. `markCompletedBatch` also applies
+the scalar completion side effects (`progress=100` and
+`dlq_retry_state=NULL`). Any rejected row aborts the complete transaction. The
+pull and retained/result-free ACK application paths then retry scalar writes;
+pull keeps individual failures non-fatal, while ACK retains its historical
+scalar error behavior. Empty batches are no-ops.
+
+Lifecycle telemetry batching is separate from job-state durability. Batch
+operations build an ordered `JobEvent` array and `EventsManager.broadcastBatch`
+routes the manager-owned telemetry subscriber through
+`QueueTelemetryJournal.recordBatch`; ordinary subscribers, completion waiters,
+and webhooks still receive every event in order. `telemetryWrites.ts` packs all
+payloads before opening the transaction, appends events in input order, trims
+the journal once per affected queue, and groups terminal work by
+`(queue, completed|failed)`. Its in-memory bucket simulation applies events in
+their original per-group order before emitting aggregate increments and one
+retention trim, so out-of-order timestamps, a zero metric window,
+`prev_ts`/`prev_count`, and cumulative totals match scalar writes exactly. A
+batch SQL failure rolls back atomically; the journal then retries events one by
+one and isolates a rejected payload/row without suppressing later telemetry.
 
 External snapshot flush invariant: `flushWriteBuffer()` invokes the synchronous
 buffer flush and then checks `pendingCount`. A storage error can re-buffer rows

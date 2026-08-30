@@ -10,7 +10,7 @@ import {
   isReady,
   MAX_TIMELINE_ENTRIES,
 } from '../../domain/types/job';
-import type { EventType, JobLocation } from '../../domain/types/queue';
+import type { EventType, JobEvent, JobLocation } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { processingShardIndex } from '../../shared/hash';
 import type { RWLock } from '../../shared/lock';
@@ -31,6 +31,7 @@ export interface PullContext {
     jobId: JobId;
     timestamp: number;
   }) => void;
+  broadcastBatch?: (events: readonly JobEvent[]) => void;
   dashboardEmit?: (event: string, data: Record<string, unknown>) => void;
 }
 

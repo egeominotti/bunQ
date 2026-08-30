@@ -141,13 +141,15 @@ export async function pushJobBatch(
     ctx.totalPushed.value += BigInt(acceptedJobs.length);
     throughputTracker.pushRate.increment(acceptedJobs.length);
 
-    for (const job of acceptedJobs) {
-      ctx.broadcast({
-        eventType: 'pushed' as EventType,
-        queue: job.queue,
-        jobId: job.id,
-        timestamp: now,
-      });
+    const events = acceptedJobs.map((job) => ({
+      eventType: 'pushed' as EventType,
+      queue: job.queue,
+      jobId: job.id,
+      timestamp: now,
+    }));
+    if (ctx.broadcastBatch) ctx.broadcastBatch(events);
+    else {
+      for (const event of events) ctx.broadcast(event);
     }
   }
   if (jobsToInsert.length > 0) ctx.shards[idx].notifyBatch(queue, jobsToInsert.length);

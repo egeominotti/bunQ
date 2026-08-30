@@ -1,7 +1,7 @@
 import type { QueueMetricsMeta, QueueMetricType } from '../../../domain/types/metrics';
-import { EventType, type JobEvent } from '../../../domain/types/queue';
-import { pack } from '../sqliteSerializer';
+import type { JobEvent } from '../../../domain/types/queue';
 import { SqliteControl } from './control';
+import { writeQueueEvents } from './telemetryWrites';
 
 interface MetricBucketRow {
   minute: number;
@@ -19,88 +19,18 @@ export interface PersistedQueueMetrics {
   data: number[];
 }
 
-function terminalMetricType(event: JobEvent): QueueMetricType | null {
-  if (event.eventType === EventType.Completed) return 'completed';
-  if (event.eventType === EventType.Failed && event.terminal !== false) return 'failed';
-  return null;
-}
-
-function eventPayload(event: JobEvent): Uint8Array {
-  return pack({
-    data: event.data,
-    error: event.error,
-    progress: event.progress,
-    prev: event.prev,
-    delay: event.delay,
-    terminal: event.terminal,
-  });
-}
-
 /** Durable lifecycle journal and minute-bucket metrics. */
 export abstract class SqliteTelemetry extends SqliteControl {
   recordQueueEvent(event: JobEvent, maxEvents: number, maxMetricDataPoints: number): void {
-    const eventLimit = Math.max(0, Math.floor(maxEvents));
-    const metricLimit = Math.max(0, Math.floor(maxMetricDataPoints));
-    const metricType = terminalMetricType(event);
-    const minute = Math.floor(event.timestamp / 60_000);
-    const payload = eventPayload(event);
+    this.safeWrite(() => writeQueueEvents(this.db, [event], maxEvents, maxMetricDataPoints));
+  }
 
-    this.safeWrite(() => {
-      const transaction = this.db.transaction(() => {
-        this.db
-          .prepare(
-            'INSERT INTO queue_events (queue, event_type, job_id, occurred_at, payload) VALUES (?, ?, ?, ?, ?)'
-          )
-          .run(event.queue, event.eventType, String(event.jobId), event.timestamp, payload);
-        this.db
-          .prepare(
-            'DELETE FROM queue_events WHERE queue = ? AND id IN (SELECT id FROM queue_events WHERE queue = ? ORDER BY id DESC LIMIT -1 OFFSET ?)'
-          )
-          .run(event.queue, event.queue, eventLimit);
-
-        if (!metricType) return;
-        this.db
-          .prepare(
-            `INSERT INTO queue_metric_buckets (queue, type, minute, count)
-             VALUES (?, ?, ?, 1)
-             ON CONFLICT(queue, type, minute) DO UPDATE SET count = count + 1`
-          )
-          .run(event.queue, metricType, minute);
-        const bucketCount =
-          this.db
-            .query<{ count: number }, [string, QueueMetricType, number]>(
-              'SELECT count FROM queue_metric_buckets WHERE queue = ? AND type = ? AND minute = ?'
-            )
-            .get(event.queue, metricType, minute)?.count ?? 1;
-        this.db
-          .prepare(
-            `INSERT INTO queue_metrics_meta (queue, type, total_count, prev_ts, prev_count)
-             VALUES (?, ?, 1, ?, ?)
-             ON CONFLICT(queue, type) DO UPDATE SET
-               total_count = total_count + 1,
-               prev_ts = excluded.prev_ts,
-               prev_count = excluded.prev_count`
-          )
-          .run(event.queue, metricType, event.timestamp, bucketCount);
-
-        if (metricLimit === 0) {
-          this.db
-            .prepare('DELETE FROM queue_metric_buckets WHERE queue = ? AND type = ?')
-            .run(event.queue, metricType);
-          return;
-        }
-        const newest =
-          this.db
-            .query<{ minute: number }, [string, QueueMetricType]>(
-              'SELECT MAX(minute) AS minute FROM queue_metric_buckets WHERE queue = ? AND type = ?'
-            )
-            .get(event.queue, metricType)?.minute ?? minute;
-        this.db
-          .prepare('DELETE FROM queue_metric_buckets WHERE queue = ? AND type = ? AND minute < ?')
-          .run(event.queue, metricType, newest - metricLimit + 1);
-      });
-      transaction();
-    });
+  recordQueueEventsBatch(
+    events: readonly JobEvent[],
+    maxEvents: number,
+    maxMetricDataPoints: number
+  ): void {
+    this.safeWrite(() => writeQueueEvents(this.db, events, maxEvents, maxMetricDataPoints));
   }
 
   getQueueMetrics(

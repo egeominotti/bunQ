@@ -11,10 +11,41 @@ import type { BatchContext, ExtractedJob, FinalizeContext } from '../types/ack';
 
 export type { BatchContext, ExtractedJob, FinalizeContext } from '../types/ack';
 
-/**
- * Group job IDs by processing shard
- * Returns Map<shardIndex, jobIds[]>
- */
+/** Batch only when no per-job durable result/removal ordering must be preserved. */
+function persistCompletedBatch<T>(
+  extractedJobs: readonly ExtractedJob<T>[],
+  ctx: FinalizeContext,
+  includeResults: boolean,
+  now: number
+): boolean {
+  const storage = ctx.storage;
+  if (!storage || extractedJobs.length === 0) return false;
+  if (
+    extractedJobs.some(
+      ({ job, removeOnComplete }) => job.removeOnComplete || removeOnComplete === true
+    ) ||
+    (includeResults && extractedJobs.some(({ result }) => result !== undefined))
+  ) {
+    return false;
+  }
+  try {
+    storage.markCompletedBatch(
+      extractedJobs.map(({ id: jobId, job }) => ({
+        jobId,
+        completedAt: now,
+        timeline:
+          job.timeline.length < MAX_TIMELINE_ENTRIES
+            ? [...job.timeline, { state: 'completed' as const, timestamp: now }]
+            : job.timeline,
+      }))
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Group job IDs by processing shard. */
 export function groupByProcShard(jobIds: JobId[]): Map<number, JobId[]> {
   const byProcShard = new Map<number, JobId[]>();
   for (const jobId of jobIds) {
@@ -156,6 +187,7 @@ export function finalizeBatchAck<T>(
 
   const needsBroadcast = ctx.needsBroadcast?.() ?? true;
   const hasPendingDeps = ctx.hasPendingDeps?.() ?? true;
+  const completionBatchPersisted = persistCompletedBatch(extractedJobs, ctx, includeResults, now);
 
   // Batch counter update
   ctx.totalCompleted.value += BigInt(jobCount);
@@ -200,7 +232,9 @@ export function finalizeBatchAck<T>(
       // 2. Update job index and store job data for completed listing
       ctx.jobIndex.set(jobId, { type: 'completed' as const, queueName: job.queue });
       ctx.completedJobsData.set(jobId, job);
-      if (hasStorage) storage.markCompleted(jobId, now, job.timeline);
+      if (hasStorage && !completionBatchPersisted) {
+        storage.markCompleted(jobId, now, job.timeline);
+      }
       // 3. Mark as completed LAST - this is the signal other threads wait for
       ctx.completedJobs.add(jobId);
     } else {
@@ -219,15 +253,16 @@ export function finalizeBatchAck<T>(
 
   // Broadcast events
   if (needsBroadcast) {
-    for (let i = 0; i < jobCount; i++) {
-      const { id: jobId, job, result } = extractedJobs[i];
-      ctx.broadcast({
-        eventType: 'completed' as EventType,
-        queue: job.queue,
-        jobId,
-        timestamp: now,
-        data: includeResults ? result : undefined,
-      });
+    const events = extractedJobs.map(({ id: jobId, job, result }) => ({
+      eventType: 'completed' as EventType,
+      queue: job.queue,
+      jobId,
+      timestamp: now,
+      data: includeResults ? result : undefined,
+    }));
+    if (ctx.broadcastBatch) ctx.broadcastBatch(events);
+    else {
+      for (const event of events) ctx.broadcast(event);
     }
   }
 

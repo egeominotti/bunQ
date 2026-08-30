@@ -112,7 +112,10 @@ be claimed.
   accepted-prefix batches in `operations/pushBatch.ts`, and the persistence-
   before-publication boundary in `operations/pushAdmission.ts`; custom-ID,
   deduplication, insertion and parent-link planning remain separate focused
-  modules. It also owns the
+  modules. Pull orchestration, synchronous dequeue mutation, and post-lock
+  persistence are split across `pull.ts`, `pullStateTransition.ts`, and
+  [`pullFinalization.ts`](../src/application/operations/pullFinalization.ts),
+  respectively. It also owns the
   [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) for
   live flow-result retention, and background-task wiring.
 - **`infrastructure/`** — The ten-line `SqliteStorage` façade composes focused
@@ -393,7 +396,9 @@ mutates both sides of the topology.
    ([`queue-manager/delivery.ts`](../src/application/queue-manager/delivery.ts),
    [`operations/pull.ts`](../src/application/operations/pull.ts)); atomic
    queue-state transitions and the reusable dequeue scratch live in
-   [`operations/pullStateTransition.ts`](../src/application/operations/pullStateTransition.ts).
+   [`operations/pullStateTransition.ts`](../src/application/operations/pullStateTransition.ts),
+   while post-lock persistence and event publication live in
+   [`operations/pullFinalization.ts`](../src/application/operations/pullFinalization.ts).
 3. Under the shard lock, the priority queue is scanned in priority order until
    the first ready job from an eligible FIFO group is found. Delayed or group-
    blocked entries are parked in one scratch for the whole batch and restored
@@ -403,8 +408,10 @@ mutates both sides of the topology.
    `processingShards[procIdx]` and its `jobIndex` entry flips to processing
    (state → `active`), so observers never see a stale location. Post-await
    bookkeeping (persist active state, counters, broadcast) runs in
-   `finalizeProcessing` ([`operations/pull.ts:133`](../src/application/operations/pull.ts)),
-   which skips delivery when a management op claimed the job in the meantime.
+   `finalizeProcessing`, which skips delivery when a management op claimed the
+   job in the meantime. `PULLB` persists all surviving handoffs through one
+   `markActiveBatch` transaction; a failed transaction rolls back and retries
+   each row through the non-fatal scalar path.
    A lock token is issued when leasing. Long-poll waits in a queue-specific
    `WaiterManager` bucket until a matching queue edge or the timeout; surplus
    notifications coalesce into one retry hint.
@@ -420,12 +427,24 @@ mutates both sides of the topology.
    validation, only the exact retired `{ jobId, startedAt, token }` generation
    is reported as ignored; a newer retry lease is untouched.
 4. The job is removed from `processingShards`, added to `completedJobs`, its result
-   stored in the `jobResults` LRU. The completed state and result are written
-   directly to SQLite (`markCompleted`/`storeResult`, after flushing any pending
-   buffered insert for that id), or the row is deleted on `removeOnComplete`;
-   dependents are queued for resolution.
+   stored in the `jobResults` LRU. A retained `ACKB` with no defined results
+   flushes pending inserts and commits all completed states through one
+   `markCompletedBatch` transaction. Result-bearing or `removeOnComplete`
+   entries retain their ordered scalar/combined completion paths. A failed
+   state batch rolls back before scalar retry. Dependents are queued for
+   resolution only after the corresponding completion bookkeeping.
 5. `job:completed` is emitted (events/webhooks/SSE/WS); repeat/cron successors and
    flow parents are scheduled.
+
+For in-memory/SQLite `PUSHB`, `PULLB`, and `ACKB`, lifecycle emission uses
+`EventsManager.broadcastBatch`. The manager-owned `QueueTelemetryJournal`
+commits the ordered batch through `SqliteStorage.recordQueueEventsBatch`, while
+ordinary event subscribers, completion waiters, and webhooks still receive
+individual events in order. Journal retention runs once per affected queue and
+terminal metric mutations are aggregated per queue/type after an exact
+in-memory simulation of scalar bucket pruning. Job-state writes use their own
+`markActiveBatch`/`markCompletedBatch` transactions, so best-effort
+observability remains isolated from durable scheduling state.
 
 **FAIL** (error)
 

@@ -1,6 +1,6 @@
 {
   "name": "bunqueue",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "High-performance job queue for Bun and AI agents. Memory or one-file SQLite, optional PostgreSQL 15–18 multi-broker persistence, cron, retries, DLQ, and MCP.",
   "keywords": [
     "agentic",
@@ -127,6 +127,7 @@
     "bench:autobatch": "bun run bench/local-autobatch.ts",
     "bench:postgres:versions": "bun run bench/postgres-versions.ts",
     "bench:pushbulk": "bun run bench/pushbulk-delta.ts",
+    "bench:sqlite-lifecycle": "bun run bench/sqlite-lifecycle-batching.ts",
     "bench:workflow": "bun run bench/workflow-engine.ts",
     "bench:workflow:scale": "bun run bench/workflow-engine/scale.ts",
     "bench:joblist": "bun run bench/job-list-perf.ts",

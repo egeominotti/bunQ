@@ -31,6 +31,14 @@ current minute and zero-filled gaps. `start`/`end` are inclusive list indexes;
 `end=-1` selects through the oldest retained bucket. `meta.count` is cumulative,
 while top-level `count` is the pre-pagination bucket count.
 
+SQLite lifecycle batches (`PUSHB`, `PULLB`, and `ACKB`) reach the journal as one
+ordered batch. They append in one transaction, trim once per affected queue,
+and aggregate terminal bucket mutations by queue/type while simulating the
+scalar retention order. External event subscribers, completion waiters, and
+webhooks still observe each individual event in input order. If the batch
+transaction fails, telemetry falls back to isolated scalar writes so one bad
+event does not suppress the remainder.
+
 With SQLite, `queue_events`, `queue_metrics_meta`, and
 `queue_metric_buckets` survive restart. Defaults retain 10,000 journal entries
 per queue and 20,160 minute points per queue/type. `trimEvents` removes old

@@ -12,7 +12,8 @@ Owns:
 
 - Webhook registry (in-memory `Map<WebhookId, Webhook>`), URL validation, delivery with retries, HMAC-SHA256 signing, and per-webhook success/failure counters (`webhookManager.ts:32`).
 - The canonical webhook event vocabulary and event→webhook mapping (`webhook.ts:16`, `eventsManager.ts:185`).
-- In-process event broadcast to subscribers and event-driven completion waiters used by `WaitJob` (`eventsManager.ts:22`).
+- In-process scalar/batch event broadcast to subscribers and event-driven
+  completion waiters used by `WaitJob` (`eventsManager.ts`).
 - Bounded per-job log buffers (`jobLogsManager.ts:19`).
 - Client-job ownership tracking and disconnect-time release/requeue (`clientTracking.ts:14`).
 
@@ -21,8 +22,8 @@ Does NOT own:
 - Event _emission_ — the queue engine calls `eventsManager.broadcast(...)` and operations call `webhookManager.trigger(...)`; this module never decides when a job changes state. See [Job Lifecycle](./job-lifecycle.md) and [Core Queue Engine](./core-queue-engine.md).
 - Transport/fan-out plumbing — SSE/WebSocket streaming, the `/webhooks/*` HTTP routes, and the `Stats`/`Metrics` payloads live in [HTTP / REST / SSE / WebSocket API](./http-api.md) and [Stats, Metrics & Monitoring](./stats-and-monitoring.md).
 
-Every `EventsManager.broadcast` is also consumed by the manager-owned
-`QueueTelemetryJournal`. That subscriber persists a bounded per-queue
+Every `EventsManager.broadcast` and `broadcastBatch` is also consumed by the
+manager-owned `QueueTelemetryJournal`. That subscriber persists a bounded per-queue
 lifecycle journal for `trimEvents`, even when no user listener or webhook is
 registered. Terminal completed/failed events update a separate minute-metrics
 store; retry-attempt failures stay in the journal but do not increment failed
@@ -71,15 +72,18 @@ class WebhookManager {
 
 // eventsManager.ts
 type EventSubscriber = (event: JobEvent) => void;
+type EventBatchSubscriber = (events: readonly JobEvent[]) => void;
 class EventsManager {
   constructor(webhookManager: WebhookManager);
   get subscriberCount(): number;
   get completionWaiterCount(): number;
-  subscribe(callback: EventSubscriber): () => void;            // returns unsubscribe fn
+  subscribe(callback: EventSubscriber,
+            batchCallback?: EventBatchSubscriber): () => void; // returns unsubscribe fn
   clear(): void;                                               // shutdown: resolves all waiters
   waitForJobCompletion(jobId: JobId, timeoutMs: number): Promise<boolean>; // true=done, false=timeout
   needsBroadcast(): boolean;                                   // batch fast-path check
   broadcast(event: Partial<JobEvent> & { eventType; queue; jobId; timestamp; error? }): void;
+  broadcastBatch(events: readonly JobEvent[]): void;
 }
 
 // jobLogsManager.ts
@@ -179,11 +183,21 @@ interface JobLogEntry {
 
 ### Event broadcast → webhook delivery
 
-1. The queue engine builds a `JobEvent` and calls `eventsManager.broadcast(...)` (for example from `queue-manager/control.ts` and the lifecycle operations under `application/operations/`).
+1. The queue engine builds a `JobEvent` and calls `eventsManager.broadcast(...)`.
+   `PUSHB`, `PULLB`, and `ACKB` instead build an ordered array and call
+   `broadcastBatch(...)`.
 2. `broadcast` computes `hasSubscribers`, `hasWebhooks` (`webhookManager.hasEnabledWebhooks()`), and `hasWaiters` (only for `Completed`). **Fast path:** if all three are false it returns immediately, doing zero work (`eventsManager.ts:133`).
 3. Subscribers are invoked in a try/catch — a throwing subscriber is swallowed so one bad listener can't break the fan-out (`eventsManager.ts:139`).
 4. For `Completed`, all completion waiters for that `jobId` are resolved and the map entry deleted (`eventsManager.ts:149`).
 5. If webhooks are enabled, `mapEventToWebhook` translates the `EventType` (`pushed→job.pushed`, `pulled→job.started`, `completed→job.completed`, `failed→job.failed`; everything else → `null`/no webhook) and calls `webhookManager.trigger(...)` fire-and-forget (`eventsManager.ts:164`).
+
+The optional batch callback is an internal optimization used by the telemetry
+journal. It receives the array once; regular subscribers are still called once
+per event in input order, completion waiters resolve per completed ID, and
+webhook mapping/delivery remains per event. Both callback forms isolate thrown
+subscriber errors. The durable journal batch runs before ordinary subscriber
+fan-out, so callbacks observe the complete batch's telemetry state rather than
+a partially persisted prefix.
 
 The TCP registry is one of those subscribers while at least one remote queue
 subscription exists. It filters by the socket's selected queue, frames the
@@ -224,7 +238,9 @@ broker increments `lease_renewals` and transfers `lease_broker_id`, so loss of
 the original pull socket cannot double-deliver the job. Broker shutdown releases
 its remaining untransferred leases; expired protected cron leases are discarded.
 
-- `EventsManager`/`WebhookManager` hold no locks; `broadcast` is synchronous and webhook delivery is async fire-and-forget.
+- `EventsManager`/`WebhookManager` hold no locks; `broadcast` and
+  `broadcastBatch` are synchronous and webhook delivery is async
+  fire-and-forget.
 
 ## Edge Cases & Failure Modes
 
@@ -237,7 +253,9 @@ its remaining untransferred leases; expired protected cron leases are discarded.
 - **Fixed 10 s per-request timeout** via `AbortSignal.timeout(10000)`; linear (not exponential) inter-attempt backoff.
 - **`hasEnabledWebhooks` / `getStats` are O(1)** thanks to the `enabledCount` running counter maintained in `add`/`remove`/`setEnabled` (`webhookManager.ts:39`).
 - **Completion-waiter memory safety:** `waitForJobCompletion` registers a timer that, on timeout, marks the waiter `cancelled`, splices it out, and deletes empty arrays — preventing a leak when `WaitJob` times out without completion (`eventsManager.ts:78`). `clear()` resolves all outstanding non-cancelled waiters on shutdown.
-- **Subscriber isolation:** exceptions thrown by subscribers in `broadcast` are caught and ignored (`eventsManager.ts:142`).
+- **Subscriber isolation:** exceptions thrown by scalar or batch subscribers
+  are caught and ignored; a failed telemetry batch performs isolated scalar
+  retries before returning.
 - **Job-log bounds:** per-job cap is `maxLogsPerJob = 100` (`queue-manager/state.ts`); the `jobLogs` LRU itself holds at most `maxJobLogs = 10_000` distinct jobs (`application/types/config.ts`), evicting whole-job entries. Adding logs to a job not in `jobIndex` returns `false`.
 - **Cron `preventOverlap` invariant:** disconnect release must discard (not requeue) `cron:*` jobs, or they re-run immediately on reconnect (#73).
 

@@ -4,12 +4,11 @@
  */
 
 import type { Job } from '../../domain/types/job';
-import type { EventType } from '../../domain/types/queue';
 import type { Shard } from '../../domain/queue/shard';
 import { withWriteLock } from '../../shared/lock';
-import { shardIndex, processingShardIndex } from '../../shared/hash';
+import { shardIndex } from '../../shared/hash';
 import { latencyTracker } from '../latencyTracker';
-import { throughputTracker } from '../throughputTracker';
+import { finalizeProcessing, finalizeProcessingBatch } from './pullFinalization';
 import {
   createDequeueScan,
   requeueJob,
@@ -43,53 +42,6 @@ async function waitForNextCandidate(options: {
   const remaining = deadline - now;
   const untilNextRun = nextRunAt === null ? remaining : Math.max(1, nextRunAt - now);
   await shard.waitForJob(queue, Math.min(remaining, untilNextRun), signal);
-}
-
-/**
- * Finish the handoff of a dequeued job: persist active state and broadcast.
- *
- * The job was ALREADY inserted into processingShards and jobIndex was flipped
- * to 'processing' inside the dequeue critical section (tryDequeueNextJob),
- * atomically with the queue pop, so readers never see a stale 'queue'
- * location. Only the bookkeeping that may follow an await happens here.
- *
- * Returns false when the job is no longer in processingShards: a management
- * op (discardJob, moveJobToDelayed, obliterate) claimed it between the
- * dequeue and this call. The claimer owns the job now; the pull must NOT
- * deliver it to a worker nor mark it active.
- */
-function finalizeProcessing(job: Job, queue: string, ctx: PullContext): boolean {
-  const procIdx = processingShardIndex(job.id);
-  if (!ctx.processingShards[procIdx].has(job.id)) return false;
-
-  const now = Date.now();
-  try {
-    ctx.storage?.markActive(job.id, job.startedAt ?? now, job.timeline);
-  } catch {
-    // Non-fatal: job is already in processingShards (in-memory source of truth).
-    // On crash, SQLite recovery will handle the stale state.
-  }
-  ctx.totalPulled.value++;
-  throughputTracker.pullRate.increment();
-  ctx.broadcast({
-    eventType: 'pulled' as EventType,
-    queue,
-    jobId: job.id,
-    timestamp: now,
-  });
-  return true;
-}
-
-/**
- * Finish the handoff for a batch of dequeued jobs.
- * Returns the jobs actually delivered (claimed jobs are skipped, see above).
- */
-function finalizeProcessingBatch(jobs: Job[], queue: string, ctx: PullContext): Job[] {
-  const delivered: Job[] = [];
-  for (const job of jobs) {
-    if (finalizeProcessing(job, queue, ctx)) delivered.push(job);
-  }
-  return delivered;
 }
 
 /**

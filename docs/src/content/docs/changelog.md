@@ -18,6 +18,16 @@ head:
 
 ### Added
 
+- Reworked the main Examples page into an explicit beginner-to-advanced path:
+  one embedded job, lifecycle and reliability, process boundaries, workflows,
+  and finally the tested PostgreSQL multi-broker project. Existing section
+  anchors remain stable. New progressively enhanced diagrams let readers step
+  through success, retry, and DLQ transitions or compare embedded, TCP broker,
+  and PostgreSQL multi-broker topologies. The controls are keyboard accessible,
+  announce state changes, respect reduced motion, and retain a useful
+  server-rendered first state. Pure explainer models and documentation
+  regressions verify the reading order, local anchor targets, state boundaries,
+  topology progression, accessibility hooks, and project file-size limit.
 - Added a complete PostgreSQL multi-broker Examples section backed by an
   executable project rather than copied snippets. Its disposable Docker
   topology runs PostgreSQL 18.6, three uniquely identified brokers, an internal

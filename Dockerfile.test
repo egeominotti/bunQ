@@ -28,6 +28,7 @@ COPY --chown=bun:bun docs/*.md ./docs/
 COPY --chown=bun:bun docs/benchmarks ./docs/benchmarks
 COPY --chown=bun:bun docs/features ./docs/features
 COPY --chown=bun:bun docs/src/content/docs ./docs/src/content/docs
+COPY --chown=bun:bun docs/src/components/examples ./docs/src/components/examples
 COPY --chown=bun:bun docs/src/lib/llms-full.ts ./docs/src/lib/llms-full.ts
 COPY --chown=bun:bun docs/vercel.json ./docs/vercel.json
 COPY --chown=bun:bun .github/workflows/ci.yml ./.github/workflows/ci.yml

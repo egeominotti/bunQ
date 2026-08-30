@@ -1,0 +1,129 @@
+---
+import './examples-explainers.css';
+import { JOB_JOURNEYS } from './explainerModels';
+
+const journeys = Object.entries(JOB_JOURNEYS);
+const initialJourney = JOB_JOURNEYS.success;
+---
+
+<bq-job-journey class="ex-panel ex-journey">
+  <div class="ex-panel-heading">
+    <div>
+      <span class="ex-kicker">Interactive lifecycle</span>
+      <h3>Follow one job, one state at a time</h3>
+    </div>
+    <span class="ex-panel-hint">Select an outcome, then advance the state.</span>
+  </div>
+
+  <div class="ex-choice-row" role="group" aria-label="Choose the job outcome">
+    {
+      journeys.map(([id, journey], index) => (
+        <button type="button" data-journey-choice={id} aria-pressed={index === 0 ? 'true' : 'false'}>
+          {journey.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="ex-route-stage">
+    {
+      journeys.map(([id, journey], journeyIndex) => (
+        <ol
+          class="ex-route"
+          data-journey-route={id}
+          aria-label={`${journey.label} lifecycle`}
+          hidden={journeyIndex > 0}
+        >
+          {journey.steps.map((step, stepIndex) => (
+            <li
+              data-state={stepIndex === 0 ? 'current' : 'upcoming'}
+              data-tone={step.tone}
+              data-detail={step.detail}
+              aria-current={stepIndex === 0 ? 'step' : undefined}
+            >
+              <span>{step.label}</span>
+              <small>{step.detail}</small>
+            </li>
+          ))}
+        </ol>
+      ))
+    }
+  </div>
+
+  <div class="ex-step-controls">
+    <button type="button" data-journey-action="previous" disabled>Previous state</button>
+    <span data-journey-counter>1 / {initialJourney.steps.length}</span>
+    <button type="button" data-journey-action="next">Next state</button>
+  </div>
+  <p class="ex-live-status" data-journey-status aria-live="polite" aria-atomic="true">
+    {initialJourney.label}. Step 1 of {initialJourney.steps.length}: {initialJourney.steps[0].detail}
+  </p>
+</bq-job-journey>
+
+<script>
+  import { clampJourneyStep } from './explainerModels';
+
+  class JobJourneyElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.initialized === 'true') return;
+      this.dataset.initialized = 'true';
+
+      const choices = [...this.querySelectorAll<HTMLButtonElement>('[data-journey-choice]')];
+      const routes = [...this.querySelectorAll<HTMLOListElement>('[data-journey-route]')];
+      const previous = this.querySelector<HTMLButtonElement>('[data-journey-action="previous"]');
+      const next = this.querySelector<HTMLButtonElement>('[data-journey-action="next"]');
+      const counter = this.querySelector<HTMLElement>('[data-journey-counter]');
+      const status = this.querySelector<HTMLElement>('[data-journey-status]');
+      if (!choices.length || !routes.length || !previous || !next || !counter || !status) return;
+
+      let activeId = routes[0].dataset.journeyRoute ?? 'success';
+      let stepIndex = 0;
+
+      const update = (revealStep = false) => {
+        const route = routes.find(({ dataset }) => dataset.journeyRoute === activeId) ?? routes[0];
+        const steps = [...route.querySelectorAll<HTMLLIElement>('li')];
+        stepIndex = clampJourneyStep(stepIndex, steps.length);
+        steps.forEach((step, index) => {
+          step.dataset.state = index < stepIndex ? 'done' : index === stepIndex ? 'current' : 'upcoming';
+          if (index === stepIndex) step.setAttribute('aria-current', 'step');
+          else step.removeAttribute('aria-current');
+        });
+        previous.disabled = stepIndex === 0;
+        next.disabled = stepIndex === steps.length - 1;
+        counter.textContent = `${stepIndex + 1} / ${steps.length}`;
+        const label = choices.find(({ dataset }) => dataset.journeyChoice === activeId)?.textContent;
+        status.textContent = `${label?.trim()}. Step ${stepIndex + 1} of ${steps.length}: ${steps[stepIndex].dataset.detail}`;
+        if (revealStep) {
+          steps[stepIndex].scrollIntoView({
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+            block: 'nearest',
+            inline: 'center',
+          });
+        }
+      };
+
+      choices.forEach((choice) => {
+        choice.addEventListener('click', () => {
+          activeId = choice.dataset.journeyChoice ?? activeId;
+          stepIndex = 0;
+          choices.forEach((item) => item.setAttribute('aria-pressed', String(item === choice)));
+          routes.forEach((route) => (route.hidden = route.dataset.journeyRoute !== activeId));
+          update(true);
+        });
+      });
+      previous.addEventListener('click', () => {
+        stepIndex--;
+        update(true);
+      });
+      next.addEventListener('click', () => {
+        stepIndex++;
+        update(true);
+      });
+      update();
+    }
+  }
+
+  if (!customElements.get('bq-job-journey')) {
+    customElements.define('bq-job-journey', JobJourneyElement);
+  }
+</script>

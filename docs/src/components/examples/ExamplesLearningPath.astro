@@ -1,0 +1,48 @@
+---
+import './examples-learning.css';
+---
+
+<nav class="ex-learning" aria-label="Examples learning path">
+  <ol>
+    <li>
+      <span class="ex-learning-index" aria-hidden="true">01</span>
+      <div>
+        <strong><a href="#minimal-queue-and-worker">Run one job</a></strong>
+        <p>Start with one queue and one worker in the same process.</p>
+      </div>
+    </li>
+    <li>
+      <span class="ex-learning-index" aria-hidden="true">02</span>
+      <div>
+        <strong><a href="#understand-the-job-lifecycle">Make failure predictable</a></strong>
+        <p>Follow the lifecycle, then add retries, schedules, and idempotency.</p>
+        <span class="ex-learning-links">
+          <a href="#retries-and-the-dead-letter-queue">Retries</a>
+          <a href="#scheduled-and-repeating-jobs">Schedules</a>
+          <a href="#deduplicate-jobs-with-jobid">Deduplication</a>
+        </span>
+      </div>
+    </li>
+    <li>
+      <span class="ex-learning-index" aria-hidden="true">03</span>
+      <div>
+        <strong><a href="#choose-a-deployment-topology">Split into processes</a></strong>
+        <p>Move to TCP, observe events, and shut workers down safely.</p>
+      </div>
+    </li>
+    <li>
+      <span class="ex-learning-index" aria-hidden="true">04</span>
+      <div>
+        <strong><a href="#workflow-automatic-rollback-on-failure">Orchestrate workflows</a></strong>
+        <p>Coordinate compensation and human decisions after queue fundamentals are clear.</p>
+      </div>
+    </li>
+    <li>
+      <span class="ex-learning-index" aria-hidden="true">05</span>
+      <div>
+        <strong><a href="#end-to-end-example-projects">Scale to multiple brokers</a></strong>
+        <p>Finish with the tested PostgreSQL topology and its engineering report.</p>
+      </div>
+    </li>
+  </ol>
+</nav>

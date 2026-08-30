@@ -79,6 +79,29 @@ sitemap index. Astro's sitemap integration emits only canonical indexable
 routes, derives per-page `lastmod` values from Git history when available, and
 omits the 404, Markdown mirrors, Open Graph images, and text endpoints.
 
+## Progressive examples and interactive explainers
+
+`docs/src/content/docs/examples.mdx` is ordered as a learning path. It begins
+with one embedded queue and worker, adds lifecycle and reliability controls,
+introduces process boundaries, and ends with workflows and the PostgreSQL
+multi-broker project. Existing section headings retain their anchors when the
+reading order changes, so inbound links remain valid.
+
+The page's small visual system lives under `docs/src/components/examples/`.
+`ExamplesLearningPath.astro` provides direct anchor navigation, while
+`JobJourney.astro` and `TopologyExplorer.astro` use guarded custom elements for
+progressive enhancement. Their first server-rendered state is meaningful
+without JavaScript. Native buttons, `aria-pressed`, `aria-current`, live status
+text, visible keyboard focus, and reduced-motion styling are required parts of
+the component contract.
+
+`explainerModels.ts` is the shared source for lifecycle routes and deployment
+topologies. `test/docs-examples-page.test.ts` verifies the page order, anchor
+targets, model boundaries, topology progression, accessibility hooks, and the
+300-line file limit. The unit validation image copies only this explicit
+component subtree in addition to the documentation content already required by
+the test suite.
+
 ## Release checks
 
 - `bun run check:docs-data` verifies generated documentation metadata and

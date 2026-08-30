@@ -1,0 +1,108 @@
+---
+import './examples-explainers.css';
+import { resolveTopology, TOPOLOGIES } from './explainerModels';
+
+const initialTopology = resolveTopology(undefined);
+---
+
+<bq-topology-explorer class="ex-panel ex-topology">
+  <div class="ex-panel-heading">
+    <div>
+      <span class="ex-kicker">Interactive topology</span>
+      <h3>Change only the boundary you need</h3>
+    </div>
+    <span class="ex-panel-hint">The Queue and Worker API stays familiar.</span>
+  </div>
+
+  <div class="ex-choice-row" role="group" aria-label="Choose a deployment topology">
+    {
+      TOPOLOGIES.map((topology, index) => (
+        <button
+          type="button"
+          data-topology-choice={topology.id}
+          aria-controls={`topology-${topology.id}`}
+          aria-pressed={index === 0 ? 'true' : 'false'}
+        >
+          {topology.label}
+        </button>
+      ))
+    }
+  </div>
+
+  {
+    TOPOLOGIES.map((topology, topologyIndex) => (
+      <section
+        id={`topology-${topology.id}`}
+        class="ex-topology-panel"
+        data-topology-panel={topology.id}
+        data-summary={topology.summary}
+        hidden={topologyIndex > 0}
+      >
+        <div class="ex-topology-visual" role="img" aria-label={topology.summary}>
+          {topology.layers.map((layer, layerIndex) => (
+            <>
+              <div class="ex-topology-layer">
+                <span>{layer.label}</span>
+                <div>
+                  {layer.nodes.map((node) => (
+                    <strong>{node}</strong>
+                  ))}
+                </div>
+              </div>
+              {layerIndex < topology.links.length && (
+                <div class="ex-topology-link" aria-hidden="true">
+                  <i />
+                  <span>{topology.links[layerIndex]}</span>
+                  <i />
+                </div>
+              )}
+            </>
+          ))}
+        </div>
+        <dl class="ex-topology-facts">
+          <div>
+            <dt>Best fit</dt>
+            <dd>{topology.bestFor}</dd>
+          </div>
+          <div>
+            <dt>Durability owner</dt>
+            <dd>{topology.durability}</dd>
+          </div>
+        </dl>
+      </section>
+    ))
+  }
+
+  <p class="ex-live-status" data-topology-status aria-live="polite" aria-atomic="true">
+    {initialTopology.label}: {initialTopology.summary}
+  </p>
+</bq-topology-explorer>
+
+<script>
+  class TopologyExplorerElement extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.initialized === 'true') return;
+      this.dataset.initialized = 'true';
+
+      const choices = [...this.querySelectorAll<HTMLButtonElement>('[data-topology-choice]')];
+      const panels = [...this.querySelectorAll<HTMLElement>('[data-topology-panel]')];
+      const status = this.querySelector<HTMLElement>('[data-topology-status]');
+      if (!choices.length || !panels.length || !status) return;
+
+      choices.forEach((choice) => {
+        choice.addEventListener('click', () => {
+          const activeId = choice.dataset.topologyChoice;
+          const panel = panels.find(({ dataset }) => dataset.topologyPanel === activeId);
+          if (!panel) return;
+          choices.forEach((item) => item.setAttribute('aria-pressed', String(item === choice)));
+          panels.forEach((item) => (item.hidden = item !== panel));
+          status.textContent = `${choice.textContent?.trim()}: ${panel.dataset.summary}`;
+        });
+      });
+    }
+  }
+
+  if (!customElements.get('bq-topology-explorer')) {
+    customElements.define('bq-topology-explorer', TopologyExplorerElement);
+  }
+</script>

@@ -16,7 +16,41 @@ head:
 
 ## Unreleased
 
-_No changes yet._
+### Added
+
+- Added a complete PostgreSQL multi-broker Examples section backed by an
+  executable project rather than copied snippets. Its disposable Docker
+  topology runs PostgreSQL 18.6, three uniquely identified brokers, an internal
+  runtime network, authenticated TCP/metrics, readiness gates, and a separate
+  SDK image built from the current public package source. Four asserted
+  scenarios cover broker health, multiple queues/workers, bulk admission,
+  behaviorally asserted priority and delayed ineligibility/promotion, retry,
+  progress, logs, events, worker discovery, concurrent custom-ID idempotency,
+  shared pause, a cross-broker single-slot concurrency handoff, fixed-window
+  rate-budget exhaustion/removal, DLQ recovery, and a three-level cross-queue
+  `FlowProducer` graph. The runner rejects prototype-chain scenario names, is
+  import-safe, lazily loads only the selected scenario, and bounds HTTP
+  requests, polling predicates, and scenarios.
+  Multi-phase application cleanup captures synchronous and asynchronous errors
+  without skipping later phases. The verifier validates destructive project
+  overrides, registers cleanup before infrastructure creation, independently
+  attempts resource and image removal, and preserves the original failure
+  status. A real forced-timeout campaign and focused fake-Docker regressions
+  prove those failure paths. The new docs
+  include topology, SDK, reliability, flows, N-broker operations, and a dated
+  engineering validation report; rendered code is imported from the exact
+  tested files to prevent documentation drift. The documentation data guard now
+  resolves Vite query and fragment suffixes before checking those source files,
+  preserving its clean-checkout and tracked-file guarantees for `?raw` imports.
+  The full LLM documentation dump expands the same imports into real fenced
+  source instead of leaking unresolved MDX variables, while the curated
+  `llms.txt` links the new example hub directly. Documentation builds now end
+  with a discovery validator that compares `llms-full.txt` and the sitemap with
+  the content tree, verifies all imported example sources, checks curated links
+  and ordering, and confirms the robots discovery pointers. The sanitized unit
+  image and its explicit context allowlist include the full-text transformer
+  and executable example, keeping both regression suites inside the mandatory
+  isolated repository gate without widening the context to unrelated examples.
 
 ## [2.9.1] - 2026-08-28
 

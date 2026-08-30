@@ -1,0 +1,200 @@
+---
+title: 'Engineering Validation Report'
+description: 'Engineering report for the PostgreSQL multi-broker examples: scope, environment, exact commands, scenario results, findings, teardown proof, limitations, and verdict.'
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · engineering report · 2026-08-30</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Tested end to end. <em>Nothing left running.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Functional evidence for the exact sources rendered in this section, including the first-run
+    findings, final passing matrix, environment, cleanup audit, and exclusions.
+  </p>
+</div>
+
+## Verdict
+
+**PASS for the documented functional scope.** PostgreSQL 18.6 and three active
+bunqueue brokers shared queue state correctly across all four executable
+scenarios. The final run returned exit code `0`. Its exit trap removed every
+project container, network, volume, and locally built image. A separate forced
+timeout campaign returned exit code `1` and removed the same resource classes.
+
+<Aside type="caution" title="Not a production benchmark or HA certification">
+  The scenario timings below describe one small functional run. They must not be used for
+  capacity planning. PostgreSQL primary failure, multi-region behavior, sustained pressure, and
+  broker-crash lease recovery are outside this example gate.
+</Aside>
+
+## Environment
+
+| Field                                 | Recorded value                                   |
+| ------------------------------------- | ------------------------------------------------ |
+| Date                                  | 2026-08-30                                       |
+| Host                                  | macOS Darwin 25.6.0, arm64                       |
+| Docker client/server                  | 29.4.0 / 29.4.0                                  |
+| Container OS/architecture             | Linux / arm64                                    |
+| Bun                                   | 1.4.0 (`34cbb9a40` reported by the image)        |
+| PostgreSQL image                      | `postgres:18.6-alpine`                           |
+| Broker count                          | 3 independent containers                         |
+| Broker storage                        | One PostgreSQL database and one shared namespace |
+| Runtime network                       | Dedicated Compose network with `internal: true`  |
+| Repository mounts                     | None                                             |
+| Docker socket/credentials/home mounts | None                                             |
+
+## Exact gate
+
+```bash
+./examples/postgres-multibroker/verify.sh
+```
+
+Internally, the script validates Compose, builds fresh broker and SDK images,
+waits for PostgreSQL and all three `/ready` probes, runs each scenario in its
+own client container, prints the fleet state, and tears the project down.
+
+Static checks run before the Docker gate:
+
+```bash
+bunx oxfmt --check examples/postgres-multibroker/*.ts
+bunx oxlint examples/postgres-multibroker/*.ts
+bunx tsc --noEmit --strict --target ESNext --module ESNext \
+  --moduleResolution bundler --types bun-types --skipLibCheck \
+  examples/postgres-multibroker/*.ts
+docker compose -f examples/postgres-multibroker/compose.yaml config --quiet
+bun test test/postgres-multibroker-example.test.ts
+git diff --check
+```
+
+## Documentation discovery gate
+
+The publication build runs the discovery audit automatically:
+
+```bash
+cd docs
+bun run build
+```
+
+Final result: **118 Astro pages built**, followed by a passing comparison of
+**102 full-text documentation pages**, **117 sitemap URLs**, and **6 inlined
+executable sources**. The audit derives expected routes from the content tree,
+requires unique canonical URLs, checks the seven multi-broker pages in reading
+order, proves that every `?raw` source is present in `llms-full.txt`, validates
+all internal links in the curated `llms.txt`, and confirms the sitemap and
+robots discovery pointers.
+
+## Final scenario matrix
+
+| Scenario      | Result | Runner duration | Functional assertions                                                                               |
+| ------------- | ------ | --------------: | --------------------------------------------------------------------------------------------------- |
+| `topology`    | PASS   |            8 ms | 3× bounded liveness/readiness, unauthenticated metrics denied, authenticated metrics returned       |
+| `multi-queue` | PASS   |          613 ms | 3 queues/workers, priority order, delayed hold/promotion, retry, progress, logs, events, results    |
+| `reliability` | PASS   |        1,492 ms | concurrency handoff, fixed-window rate enforcement, custom-ID race, pause, DLQ, operator retry      |
+| `flow`        | PASS   |          551 ms | 5 durable nodes, 3 levels, child ordering, exactly-once successful execution, tree and result reads |
+
+These durations are emitted by `performance.now()` inside the isolated SDK
+runner. Image build, service startup, and teardown are excluded. They are
+reported only to identify hangs or regressions in the example workflow.
+
+## Findings and corrections
+
+The examples were not published on their first draft:
+
+1. Static lint found unnecessary asynchronous callbacks and unsafe non-null
+   assertions. The callbacks became synchronous and graph structure is now
+   asserted before access.
+2. The first container campaign passed the first three functional scenarios,
+   but the one-shot reliability runner remained attached after printing
+   `PASS`. The CLI entrypoint now exits with status `0` only after scenario
+   cleanup completes, and exits `1` after cleanup on any thrown assertion.
+3. The interrupted first campaign's targeted runner was stopped, after which
+   the installed trap removed all remaining project resources. A completely
+   fresh second campaign then passed all four scenarios and normal teardown.
+   The final publication campaign repeated that result after the docs and
+   verifier were frozen; its measurements appear in the matrix above.
+4. Mandatory pre-commit review reproduced an inherited-property CLI bug:
+   `toString` could be accepted as a scenario and falsely report `PASS`. The
+   registry now uses `Object.hasOwn`, the module is import-safe, and regressions
+   reject `toString`, `constructor`, `__proto__`, and an ordinary unknown name
+   while exercising every valid selection in order.
+5. The same review showed that a synchronous cleanup throw could skip later
+   callbacks and phases. Cleanup now captures synchronous and asynchronous
+   failures, settles every task in a phase, continues later phases in order,
+   and throws one aggregate error. The verifier independently attempts resource
+   and image removal while preserving the original failure status.
+6. Configuration-only checks for priority, delay, global concurrency, and rate
+   limits were replaced with behavioral assertions. HTTP calls, polling
+   predicates, startup, and each scenario also gained explicit deadlines.
+
+## Failure-path campaign
+
+The real Compose topology was also run with an intentionally impossible
+one-millisecond scenario budget:
+
+```bash
+BUNQUEUE_EXAMPLE_PROJECT=bunqueue-pg-example-timeout-audit \
+  BUNQUEUE_EXAMPLE_SCENARIO_TIMEOUT_MS=1 \
+  ./examples/postgres-multibroker/verify.sh
+```
+
+The topology runner raised `Timed out after 1ms while running scenario
+topology`, the verifier returned exit code `1`, and its exit trap removed all
+containers, the PostgreSQL volume, the internal network, and all four locally
+built images. Eleven focused unit regressions separately cover hostile CLI
+names, valid ordering, scenario and predicate deadlines, HTTP aborts,
+multi-phase cleanup, original-status preservation, cleanup fallback, and
+project-name rejection.
+
+## Cleanup evidence
+
+After both the forced-timeout and final passing commands returned, four
+independent filters produced no output:
+
+```bash
+docker ps -a --format '{{.Names}}' | rg '^bunqueue-pg-example-'
+docker volume ls --format '{{.Name}}' | rg '^bunqueue-pg-example-'
+docker network ls --format '{{.Name}}' | rg '^bunqueue-pg-example-'
+docker images --format '{{.Repository}}:{{.Tag}}' | rg '^bunqueue-pg-example-'
+```
+
+Residual example resources: **0 containers, 0 volumes, 0 networks, 0 local
+project images**. The shared pulled base images are Docker cache inputs and are
+not project resources.
+
+## Coverage boundaries
+
+Covered here:
+
+- real public TypeScript SDK built from the current source;
+- real TCP transport with authentication;
+- real PostgreSQL schema, transactions, event journal, queue policies, leases,
+  results, logs, and DLQ;
+- three independent server processes and explicit cross-broker reads/writes;
+- application cleanup and infrastructure teardown.
+
+Not covered here:
+
+- PostgreSQL primary or replica failover;
+- broker `SIGKILL` while it owns an active lease;
+- mixed-version rollout, backup restore, TLS PKI, or external secret manager;
+- all six external language SDKs;
+- sustained load, capacity, latency distributions, or memory-leak proof.
+
+Use the repository PostgreSQL integration, fast-check, multi-process crash,
+ten-broker, SDK conformance, and sandbox gates for those broader contracts.
+
+## Reproduction
+
+Run the same gate at any time from a clean worktree:
+
+```bash
+./examples/postgres-multibroker/verify.sh
+```
+
+Every run receives a timestamp/PID-derived Compose project name, so it does not
+reuse a prior database or collide with a normal bunqueue Compose project. The
+script's final status is the scenario status; teardown is mandatory on every
+exit path.

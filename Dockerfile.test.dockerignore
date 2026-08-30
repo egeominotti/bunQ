@@ -18,6 +18,9 @@
 !bench/**
 !monitoring/
 !monitoring/**
+!examples/
+!examples/postgres-multibroker/
+!examples/postgres-multibroker/**
 !docker-compose.yml
 !docker-compose.postgres.yml
 !docs/

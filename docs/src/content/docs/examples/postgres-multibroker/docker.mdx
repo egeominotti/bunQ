@@ -1,0 +1,118 @@
+---
+title: 'Docker: PostgreSQL and Three Brokers'
+description: 'Run the verified Docker Compose topology: PostgreSQL 18.6, three uniquely identified bunqueue brokers, authenticated metrics, health checks, and automatic teardown.'
+---
+
+import { Aside, Code, Steps } from '@astrojs/starlight/components';
+import composeSource from '../../../../../../examples/postgres-multibroker/compose.yaml?raw';
+import verifySource from '../../../../../../examples/postgres-multibroker/verify.sh?raw';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · docker topology</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    PostgreSQL plus <em>three active brokers.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    A local topology that behaves like a broker fleet: private east-west traffic, unique broker
+    identities, readiness gates, loopback-only host ports, and no bind mounts.
+  </p>
+</div>
+
+## Complete Compose file
+
+This is the exact file used by the automated example gate.
+
+<Code code={composeSource} lang="yaml" meta='title="examples/postgres-multibroker/compose.yaml"' />
+
+### Why these details matter
+
+| Detail                           | Reason                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| `postgres:18.6-alpine`           | The pinned and recommended PostgreSQL release                                   |
+| `DATA_PATH: ''`                  | Prevents the image's SQLite default from conflicting with PostgreSQL mode       |
+| One shared URL and namespace     | Makes PostgreSQL the authoritative state for all three brokers                  |
+| Unique `BUNQUEUE_BROKER_ID`      | Prevents session and lease-owner identity collisions                            |
+| `/ready` health check            | Gates traffic on PostgreSQL and maintenance-loop health, not process life alone |
+| `AUTH_TOKENS` and `METRICS_AUTH` | Exercises authenticated TCP and Prometheus access                               |
+| `internal: true` network         | Stops runtime containers from reaching the public internet                      |
+| Loopback host bindings           | Keeps local demonstration ports off external interfaces                         |
+| Named PostgreSQL volume          | Makes persistence explicit and teardown auditable                               |
+| Startup and scenario deadlines   | Turn a stalled health gate or runner into a failing, cleanable command          |
+
+<Aside type="caution" title="Local credentials only">
+  `local-demo-only` and `demo-token` are deliberate disposable-example values. Use a secret manager,
+  a percent-encoded password in the PostgreSQL URL, verified TLS, and rotated high-entropy tokens in
+  production.
+</Aside>
+
+## Run it safely
+
+<Steps>
+
+1. **Start from the repository root**
+
+   Docker must be running. No pre-existing bunqueue or PostgreSQL process is
+   used.
+
+2. **Execute the verifier**
+
+   ```bash
+   ./examples/postgres-multibroker/verify.sh
+   ```
+
+3. **Read one JSON result per scenario**
+
+   ```json
+   { "durationMs": 7, "scenario": "topology", "status": "PASS" }
+   ```
+
+   The duration is diagnostic functional timing, not a publishable benchmark.
+
+4. **Confirm teardown**
+
+   The script independently attempts resource teardown and local-image removal,
+   then preserves the original scenario failure status. A cleanup failure makes
+   an otherwise successful run fail.
+
+</Steps>
+
+## Complete verification script
+
+The trap is registered before the first Docker resource is created.
+
+<Code code={verifySource} lang="bash" meta='title="examples/postgres-multibroker/verify.sh"' />
+
+## Host endpoints
+
+The SDK runner uses service DNS on the internal network. For manual inspection
+from the host, the Compose file publishes these loopback-only endpoints:
+
+| Broker |               TCP |              HTTP |
+| ------ | ----------------: | ----------------: |
+| A      | `127.0.0.1:16789` | `127.0.0.1:16790` |
+| B      | `127.0.0.1:17789` | `127.0.0.1:17790` |
+| C      | `127.0.0.1:18789` | `127.0.0.1:18790` |
+
+Override a host port with `BROKER_A_TCP_PORT`, `BROKER_A_HTTP_PORT`, and the
+corresponding `B` or `C` variables. Internal container ports remain `6789` and
+`6790`.
+
+`BUNQUEUE_EXAMPLE_SCENARIO_TIMEOUT_MS` overrides the positive 60,000 ms runner
+deadline. A custom `BUNQUEUE_EXAMPLE_PROJECT` must begin with
+`bunqueue-pg-example-` and contain only lowercase letters, digits, `_`, and `-`.
+The verifier deliberately destroys every resource owned by that selected
+project, so never reuse the name of a project you intend to retain.
+
+## Readiness is not liveness
+
+- `/healthz` answers whether the broker process can serve HTTP.
+- `/ready` returns `503` when persistent storage or a critical maintenance
+  loop is degraded, so a load balancer should remove that broker.
+- `/prometheus` exposes operational metrics; this example requires the bearer
+  token.
+
+Clients should be routed only to ready brokers. Killing an unhealthy process
+just because readiness failed can make a transient database incident noisier;
+keep liveness and readiness probes separate.
+
+Next: [connect multiple queues and workers](/examples/postgres-multibroker/queues-workers/).

@@ -54,7 +54,7 @@ export function stripCode(source: string): string {
       continue;
     }
     if (fence !== null) {
-      if (opener && opener[1][0] === fence) fence = null;
+      if (opener?.[1][0] === fence) fence = null;
       continue;
     }
     kept.push(line.replace(/`[^`\n]*`/g, ''));
@@ -83,6 +83,11 @@ export function scanReferences(source: string): Reference[] {
     found.push({ specifier: match[1] ?? match[2], kind: 'asset' });
   }
   return found;
+}
+
+/** Remove bundler-only suffixes before resolving a module specifier on disk. */
+export function moduleFilePath(specifier: string): string {
+  return specifier.replace(/[?#].*$/, '');
 }
 
 /** Newest minor first, mirroring scripts/build-api-reference.ts. Non-`vN.N` names sort last. */
@@ -141,8 +146,9 @@ const SCAN_ROOTS: { dir: string; extensions: string[] }[] = [
 
 async function resolveCandidates(fromFile: string, specifier: string): Promise<string[]> {
   const found: string[] = [];
+  const fileSpecifier = moduleFilePath(specifier);
   for (const extension of CANDIDATES) {
-    const candidate = resolve(dirname(fromFile), specifier + extension);
+    const candidate = resolve(dirname(fromFile), fileSpecifier + extension);
     if (await Bun.file(candidate).exists()) found.push(candidate);
   }
   return found;
@@ -250,7 +256,9 @@ async function checkApiVersions(): Promise<void> {
       `${rel(API_VERSIONS)} lists the "dev" preview: it must never be committed ` +
         `(re-run \`bun run docs:api\` without --dev)`
     );
-  } else if ((await Bun.file(API_VERSIONS).text()) !== `${JSON.stringify({ current, versions }, null, 2)}\n`) {
+  } else if (
+    (await Bun.file(API_VERSIONS).text()) !== `${JSON.stringify({ current, versions }, null, 2)}\n`
+  ) {
     failures.push(
       `${rel(API_VERSIONS)} is stale: expected ${JSON.stringify({ current, versions })}, ` +
         `found ${JSON.stringify(committed)} — run \`bun run docs:api\``
@@ -260,7 +268,7 @@ async function checkApiVersions(): Promise<void> {
   // Mirror hole: the list may advertise a version whose 5 MB tree is untracked,
   // which publishes a /reference/ link straight to a 404.
   const tracked = await trackedPaths([join(REFERENCE_ROOT, current)]);
-  if (tracked && tracked.size === 0) {
+  if (tracked?.size === 0) {
     failures.push(
       `${rel(REFERENCE_ROOT)}/${current}/ is not tracked by git, so the published ` +
         `/reference/ listing would link to a 404`

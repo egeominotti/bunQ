@@ -1,0 +1,85 @@
+---
+title: 'Multi-Broker Reliability Controls'
+description: 'A verified bunqueue reliability example for concurrent custom IDs, global pause/resume, shared concurrency and rate limits, retries, DLQ inspection, and operator recovery.'
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import scenarioSource from '../../../../../../examples/postgres-multibroker/reliability.ts?raw';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · reliability</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Retry safely. Recover <em>deliberately.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Race producers through different brokers, control the queue globally, inspect failures from a
+    peer, and retry only after the simulated payment provider is safe.
+  </p>
+</div>
+
+## Complete scenario
+
+<Code
+  code={scenarioSource}
+  lang="typescript"
+  meta='title="examples/postgres-multibroker/reliability.ts"'
+/>
+
+## Guarantees exercised
+
+### Concurrent custom-ID admission
+
+Broker A and broker C concurrently add the same custom job ID. Both calls
+return that ID, PostgreSQL stores one live job generation, and the worker runs
+it once. This makes the queue admission idempotent; it does not automatically
+make an external payment API idempotent.
+
+### Shared pause and limits
+
+Pause, global concurrency, and global rate limits live in PostgreSQL. The
+scenario writes them through broker A and waits for broker C to observe each
+configuration before testing behavior.
+
+For concurrency, Worker B occupies the single global slot with a blocked job,
+then pauses locally. Worker C reaches `drained`, broker C reports one active and
+one waiting job plus `isMaxed() === true`, and its processor has not started.
+Releasing B lets C claim the waiting job, proving the broker-to-broker handoff.
+
+For rate limiting, Worker B consumes the first token in a two-claim,
+five-minute PostgreSQL fixed window. Worker C consumes the second token and
+observes the third job still waiting with a positive TTL. Removing the global
+rate limit lets C finish that job; the example never waits for the five-minute
+window to expire. Finally, the queue pause prevents the idempotency job from
+being claimed until broker C resumes it.
+
+### DLQ and operator retry
+
+The simulated payment fails with `attempts: 1`, reaches the shared DLQ, and is
+inspected through broker C. Only after `allowRetry` represents an operator or
+provider recovery does the example call `retryDlqAsync(id)`. Broker B executes
+the new attempt; broker A observes completion and an empty DLQ.
+
+<Aside type="caution" title="Exactly-once effects require application idempotency">
+  bunqueue fences stale lease owners and prevents two valid queue completions for one processing
+  generation. A worker can still crash after an external provider commits but before the queue ACK
+  reaches PostgreSQL. Pass a stable idempotency key to the provider and reconcile ambiguous outcomes
+  before retrying money movement, email, inventory, or webhook effects.
+</Aside>
+
+## Recommended processor pattern
+
+For an external side effect, derive a stable key from the queue job ID, send it
+to the provider, and persist or query the provider outcome. Throw only for a
+retryable condition. Send permanent validation failures directly to the DLQ or
+use one attempt; do not retry an invalid request until an operator changes the
+input or upstream state.
+
+## Broker failure boundary
+
+The TypeScript SDK reconnects to the endpoint it was configured with. It does
+not accept a list of alternate broker hosts. Put a TCP service/load balancer in
+front of ready brokers, or implement endpoint selection in your application.
+Jobs remain authoritative in PostgreSQL; client reconnection and job lease
+recovery are separate concerns.
+
+Next: [build a durable cross-queue flow](/examples/postgres-multibroker/flows/).

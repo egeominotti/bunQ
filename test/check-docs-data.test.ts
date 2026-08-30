@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import fc from 'fast-check';
 import {
+  moduleFilePath,
   scanReferences,
   sortVersions,
   stripCode,
@@ -24,7 +25,9 @@ describe('stripCode', () => {
   });
 
   test('handles tilde fences and does not let one style close the other', () => {
-    const page = ['~~~js', 'import x from "./tilde";', '~~~', 'import y from "./after";'].join('\n');
+    const page = ['~~~js', 'import x from "./tilde";', '~~~', 'import y from "./after";'].join(
+      '\n'
+    );
     expect(stripCode(page)).not.toContain('./tilde');
     expect(stripCode(page)).toContain('./after');
   });
@@ -82,9 +85,10 @@ describe('scanReferences', () => {
   });
 
   test('ignores bare and aliased specifiers, which are never repo files', () => {
-    const page = ['import { Queue } from "bunqueue";', 'import x from "~/components/x.astro";'].join(
-      '\n'
-    );
+    const page = [
+      'import { Queue } from "bunqueue";',
+      'import x from "~/components/x.astro";',
+    ].join('\n');
     expect(scanReferences(page)).toEqual([]);
   });
 
@@ -107,6 +111,14 @@ describe('scanReferences', () => {
   });
 });
 
+describe('moduleFilePath', () => {
+  test('removes Vite query and fragment suffixes before filesystem resolution', () => {
+    expect(moduleFilePath('./scenario.ts?raw')).toBe('./scenario.ts');
+    expect(moduleFilePath('../asset.svg?url#cover')).toBe('../asset.svg');
+    expect(moduleFilePath('./plain.ts')).toBe('./plain.ts');
+  });
+});
+
 describe('sortVersions', () => {
   test('newest minor first, with numeric (not lexicographic) minors', () => {
     expect(sortVersions(['v2.8', 'v2.10', 'v3.0'])).toEqual(['v3.0', 'v2.10', 'v2.8']);
@@ -119,13 +131,16 @@ describe('sortVersions', () => {
   test('is a total order: independent of input order, and stable', () => {
     fc.assert(
       fc.property(
-        fc.uniqueArray(
-          fc.tuple(fc.integer({ min: 0, max: 30 }), fc.integer({ min: 0, max: 30 })),
-          { minLength: 1, maxLength: 8 }
-        ),
+        fc.uniqueArray(fc.tuple(fc.integer({ min: 0, max: 30 }), fc.integer({ min: 0, max: 30 })), {
+          minLength: 1,
+          maxLength: 8,
+        }),
         fc.array(fc.constantFrom('legacy', 'draft', 'old'), { maxLength: 2 }),
         (pairs, strays) => {
-          const names = [...pairs.map(([major, minor]) => `v${major}.${minor}`), ...new Set(strays)];
+          const names = [
+            ...pairs.map(([major, minor]) => `v${major}.${minor}`),
+            ...new Set(strays),
+          ];
           const sorted = sortVersions(names);
           const shuffled = sortVersions([...names].reverse());
           return (

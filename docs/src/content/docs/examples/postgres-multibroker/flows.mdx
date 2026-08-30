@@ -1,0 +1,68 @@
+---
+title: 'Cross-Queue FlowProducer Graph'
+description: 'Run and verify a durable three-level FlowProducer graph across three queues and three PostgreSQL-backed bunqueue brokers.'
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import scenarioSource from '../../../../../../examples/postgres-multibroker/flow.ts?raw';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · flow producer</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Fan out. Transform. <em>Converge.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Admit one atomic job graph through broker A, execute leaves through B, transform and publish
+    through C, then read the final state and result through B.
+  </p>
+</div>
+
+## Graph
+
+```text
+extract-sales (2) ─┐
+                   ├─ transform-ledger (×2 = 10) ─┐
+extract-costs (3) ─┘                               ├─ publish-report (= 15)
+extract-forecast (5) ──────────────────────────────┘
+```
+
+Children run before their parent. The report job cannot be claimed until both
+the transformed ledger and forecast child are complete.
+
+## Complete scenario
+
+<Code
+  code={scenarioSource}
+  lang="typescript"
+  meta='title="examples/postgres-multibroker/flow.ts"'
+/>
+
+## What is verified
+
+- `FlowProducer.add()` commits all five nodes as one durable graph.
+- each node executes exactly once in the successful campaign;
+- both extraction leaves finish before `transform-ledger`;
+- the transform finishes before `publish-report`;
+- `job.getChildrenValues()` returns authoritative child results;
+- broker B observes the root as completed even though broker C processed it;
+- `getFlow()` reconstructs the persisted tree to depth three;
+- `getParentResult()` returns the durable final value `15`.
+
+<Aside type="note" title="Failure policy is explicit">
+  The example uses the default dependency policy: a parent waits for successful children. For
+  partial-success graphs, select `failParentOnFailure`, `removeDependencyOnFailure`,
+  `continueParentOnFailure`, or `ignoreDependencyOnFailure` per child and test the intended outcome.
+</Aside>
+
+## Design guidance
+
+Keep leaf payloads small and place large artifacts in object storage. Return
+references and structured summaries as child results. Use deterministic custom
+IDs when the same business graph may be submitted twice. Processor effects
+still need application-level idempotency for crash-after-effect recovery.
+
+For long-running business orchestration with signals, human approval, loops,
+and compensation, use the [Workflow Engine](/guide/workflow/). `FlowProducer`
+is the smaller primitive for queue-native dependency graphs.
+
+Next: [operate and scale the fleet](/examples/postgres-multibroker/operations/).

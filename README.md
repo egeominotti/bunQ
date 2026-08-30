@@ -126,6 +126,7 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
 - **PostgreSQL 15–18 multi-broker mode** — PostgreSQL 18.6 is recommended;
   database-authoritative claims, fenced
   leases, shared limits, cron, workers, job-state/lifecycle metrics, and failover state
+  ([tested three-broker Docker example](https://bunqueue.dev/examples/postgres-multibroker/))
 - **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
 - **Everything server-side** — retries with backoff, priorities, cron, rate limits, dead letter queue

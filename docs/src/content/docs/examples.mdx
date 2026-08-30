@@ -8,7 +8,7 @@ head:
       content: https://bunqueue.dev/og/examples.png
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · examples</span>
@@ -22,6 +22,20 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 </div>
 
 This page is a set of small, working snippets. For end-to-end scenarios like email pipelines, webhooks and payments, see [use cases](/guide/use-cases/).
+
+## End-to-end example projects
+
+<CardGrid>
+  <Card title="PostgreSQL multi-broker" icon="seti:docker">
+    Run PostgreSQL 18.6, three active brokers, multiple queues and workers, authenticated metrics,
+    custom-ID idempotency, retries, DLQ recovery, shared limits, events, and durable flows. Every
+    source is executed in disposable containers and has a published
+    [engineering report](/examples/postgres-multibroker/validation/).
+
+    [Open the complete example →](/examples/postgres-multibroker/)
+
+  </Card>
+</CardGrid>
 
 :::note[Persistence]
 The Bun tabs use embedded mode, meaning the queue runs inside your process with no separate server. Pass `dataPath` so jobs are saved to a SQLite file, otherwise everything is in-memory and lost on restart:

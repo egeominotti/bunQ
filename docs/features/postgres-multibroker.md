@@ -634,6 +634,7 @@ retain their existing host-clock behavior.
   and disabling the guarantee for every broker sharing that database; upgrade
   all brokers in a cluster together. Manual trim derives the frontier from the deleted event envelopes instead
   of treating its own transaction as pruned history.
+
 - Event retention finds the first row beyond the configured per-queue window
   through the `(namespace, queue, id DESC)` index and deletes through that cutoff.
   Inline pruning takes a non-blocking per-queue advisory lock, materializes the
@@ -1215,6 +1216,14 @@ evidence, not a capacity benchmark.
 
 ## Related docs
 
+- [Executable PostgreSQL multi-broker example](../../examples/postgres-multibroker/README.md)
+  — disposable PostgreSQL 18.6, three active brokers, four asserted public-SDK
+  scenarios, bounded HTTP/polling/scenario waits, behaviorally enforced shared
+  concurrency and fixed-window rate limits, priority/delay scheduling, and
+  multi-phase application plus container/network/volume/image teardown. A
+  forced-timeout campaign and focused fake-Docker regressions prove the failure
+  path. The user-facing walkthrough and validation report start at
+  `/examples/postgres-multibroker/`.
 - [Persistence](./persistence.md) — unchanged SQLite engine.
 - [Configuration & Entrypoint](./configuration.md) — driver resolution and
   bootstrap selection.

@@ -294,6 +294,23 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Examples',
+          collapsed: true,
+          items: [
+            { label: 'All Recipes', link: '/examples/' },
+            { label: 'PostgreSQL Multi-Broker', link: '/examples/postgres-multibroker/' },
+            { label: 'Docker Topology', link: '/examples/postgres-multibroker/docker/' },
+            {
+              label: 'Queues & Workers',
+              link: '/examples/postgres-multibroker/queues-workers/',
+            },
+            { label: 'Reliability Controls', link: '/examples/postgres-multibroker/reliability/' },
+            { label: 'Durable Flows', link: '/examples/postgres-multibroker/flows/' },
+            { label: 'Production Operations', link: '/examples/postgres-multibroker/operations/' },
+            { label: 'Validation Report', link: '/examples/postgres-multibroker/validation/' },
+          ],
+        },
+        {
           label: 'Reference',
           collapsed: true,
           items: [
@@ -302,7 +319,6 @@ export default defineConfig({
             { label: 'TCP Protocol', link: '/api/tcp/' },
             { label: 'TypeScript Types', link: '/api/types/' },
             { label: 'Glossary', link: '/guide/glossary/' },
-            { label: 'Examples', link: '/examples/' },
           ],
         },
         {

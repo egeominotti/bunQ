@@ -1,11 +1,12 @@
 {
   "name": "bunqueue-docs",
-  "type": "module",
   "version": "0.0.1",
+  "type": "module",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro build && bun run validate:discovery",
+    "validate:discovery": "bun scripts/validate-discovery.ts",
     "preview": "astro preview",
     "astro": "astro"
   },

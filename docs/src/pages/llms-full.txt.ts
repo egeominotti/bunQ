@@ -1,11 +1,15 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { inlineRawCodeImports } from '../lib/llms-full';
 
 /**
  * Full-text dump of the docs for LLM grounding (https://llmstxt.org/).
  * Companion to the curated /llms.txt: this concatenates every page's title,
- * description, canonical URL and raw markdown body into one file an LLM can
- * ingest without crawling. Referenced from robots.txt.
+ * description, canonical URL and Markdown/MDX body into one file an LLM can
+ * ingest without crawling. Tested sources imported with `?raw` are expanded
+ * into fenced code blocks. Referenced from robots.txt.
  */
 const SITE = 'https://bunqueue.dev';
 
@@ -53,6 +57,13 @@ const ORDER = [
   'guide/iot-edge',
   'guide/migration',
   'examples',
+  'examples/postgres-multibroker',
+  'examples/postgres-multibroker/docker',
+  'examples/postgres-multibroker/queues-workers',
+  'examples/postgres-multibroker/reliability',
+  'examples/postgres-multibroker/flows',
+  'examples/postgres-multibroker/operations',
+  'examples/postgres-multibroker/validation',
   'architecture',
   'architecture/client-sdk',
   'architecture/domain-layer',
@@ -75,6 +86,23 @@ const rank = (id: string) => {
 
 const urlFor = (id: string) => (id === 'index' || id === '' ? `${SITE}/` : `${SITE}/${id}/`);
 
+async function loadRawSource(pageFilePath: string | undefined, specifier: string): Promise<string> {
+  if (!pageFilePath)
+    throw new Error(`Cannot resolve ${specifier}: the content entry has no file path`);
+
+  const relativeSource = specifier.replace(/[?#].*$/, '');
+  const roots = [process.cwd(), resolve(process.cwd(), 'docs')];
+  for (const root of roots) {
+    const sourcePath = resolve(dirname(resolve(root, pageFilePath)), relativeSource);
+    try {
+      return await readFile(sourcePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error(`Cannot resolve raw documentation source ${specifier} from ${pageFilePath}`);
+}
+
 export const GET: APIRoute = async () => {
   const docs = await getCollection('docs');
   const pages = docs
@@ -89,13 +117,16 @@ export const GET: APIRoute = async () => {
     'It provides a BullMQ-compatible API and a native MCP server. ' +
     `Canonical site: ${SITE}. Curated index: ${SITE}/llms.txt\n`;
 
-  const body = pages
-    .map((e) => {
+  const sections = await Promise.all(
+    pages.map(async (e) => {
       const desc = e.data.description ? `${e.data.description}\n` : '';
-      const raw = (e.body ?? '').trim();
+      const raw = await inlineRawCodeImports(e.body ?? '', (specifier) =>
+        loadRawSource(e.filePath, specifier)
+      );
       return `\n\n---\n\n# ${e.data.title}\n${desc}URL: ${urlFor(e.id)}\n\n${raw}`;
     })
-    .join('');
+  );
+  const body = sections.join('');
 
   return new Response(head + body, {
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },

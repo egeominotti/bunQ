@@ -1,0 +1,108 @@
+x-broker-environment: &broker-environment
+  DATA_PATH: ''
+  BUNQUEUE_STORAGE_DRIVER: postgres
+  BUNQUEUE_POSTGRES_URL: postgres://bunqueue:local-demo-only@postgres:5432/bunqueue
+  BUNQUEUE_POSTGRES_NAMESPACE: realistic-example
+  BUNQUEUE_POSTGRES_POOL_SIZE: '4'
+  BUNQUEUE_POSTGRES_LEASE_DURATION_MS: '10000'
+  BUNQUEUE_POSTGRES_POLL_INTERVAL_MS: '50'
+  AUTH_TOKENS: demo-token
+  METRICS_AUTH: 'true'
+  TCP_PORT: '6789'
+  HTTP_PORT: '6790'
+  SHUTDOWN_TIMEOUT_MS: '15000'
+
+x-broker: &broker
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  depends_on:
+    postgres:
+      condition: service_healthy
+  healthcheck:
+    test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:6790/ready']
+    interval: 2s
+    timeout: 3s
+    retries: 30
+    start_period: 5s
+  restart: unless-stopped
+  networks: [demo]
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: bunqueue
+      POSTGRES_USER: bunqueue
+      POSTGRES_PASSWORD: local-demo-only
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U bunqueue -d bunqueue']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    restart: unless-stopped
+    networks: [demo]
+
+  broker-a:
+    <<: *broker
+    environment:
+      <<: *broker-environment
+      BUNQUEUE_BROKER_ID: broker-a
+    ports:
+      - '127.0.0.1:${BROKER_A_TCP_PORT:-16789}:6789'
+      - '127.0.0.1:${BROKER_A_HTTP_PORT:-16790}:6790'
+
+  broker-b:
+    <<: *broker
+    environment:
+      <<: *broker-environment
+      BUNQUEUE_BROKER_ID: broker-b
+    ports:
+      - '127.0.0.1:${BROKER_B_TCP_PORT:-17789}:6789'
+      - '127.0.0.1:${BROKER_B_HTTP_PORT:-17790}:6790'
+
+  broker-c:
+    <<: *broker
+    environment:
+      <<: *broker-environment
+      BUNQUEUE_BROKER_ID: broker-c
+    ports:
+      - '127.0.0.1:${BROKER_C_TCP_PORT:-18789}:6789'
+      - '127.0.0.1:${BROKER_C_HTTP_PORT:-18790}:6790'
+
+  sdk-example:
+    profiles: [tools]
+    build:
+      context: ../..
+      dockerfile: examples/postgres-multibroker/client.Dockerfile
+    entrypoint: ['bun', 'run', 'examples/postgres-multibroker/run.ts']
+    command: ['all']
+    environment:
+      BUNQUEUE_TOKEN: demo-token
+      BROKER_A_HOST: broker-a
+      BROKER_A_PORT: '6789'
+      BROKER_A_HTTP_URL: http://broker-a:6790
+      BROKER_B_HOST: broker-b
+      BROKER_B_PORT: '6789'
+      BROKER_B_HTTP_URL: http://broker-b:6790
+      BROKER_C_HOST: broker-c
+      BROKER_C_PORT: '6789'
+      BROKER_C_HTTP_URL: http://broker-c:6790
+      BUNQUEUE_EXAMPLE_SCENARIO_TIMEOUT_MS: ${BUNQUEUE_EXAMPLE_SCENARIO_TIMEOUT_MS:-60000}
+    depends_on:
+      broker-a:
+        condition: service_healthy
+      broker-b:
+        condition: service_healthy
+      broker-c:
+        condition: service_healthy
+    networks: [demo]
+
+volumes:
+  postgres-data:
+
+networks:
+  demo:
+    internal: true

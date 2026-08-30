@@ -1,0 +1,129 @@
+---
+title: 'Operate and Scale N Brokers'
+description: 'Production checklist for scaling PostgreSQL-backed bunqueue brokers: identities, connection budgets, routing, readiness, security, observability, upgrades, backups, and failure drills.'
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · production operations</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Scale the fleet without <em>breaking its invariants.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The SDK code stays ordinary. Production quality comes from stable broker identity, bounded
+    database connections, correct traffic routing, coordinated upgrades, and rehearsed recovery.
+  </p>
+</div>
+
+## N-broker contract
+
+Before adding a broker, verify all of these:
+
+| Invariant        | Required value                                                 |
+| ---------------- | -------------------------------------------------------------- |
+| Storage driver   | `postgres`                                                     |
+| PostgreSQL URL   | Same primary database or HA endpoint                           |
+| Namespace        | Same for brokers that must share queues                        |
+| Broker ID        | Unique, stable, and never concurrently reused                  |
+| bunqueue binary  | Same version across the active fleet                           |
+| SQLite data path | Unset or explicitly empty                                      |
+| Clock            | PostgreSQL time is authoritative for leases                    |
+| Network          | Brokers reach PostgreSQL; clients reach TCP; probes reach HTTP |
+
+Do not use `docker compose up --scale broker=N` on a service with one static
+`BUNQUEUE_BROKER_ID`. Explicit services are safe for a local fleet. In an
+orchestrator, inject a stable Pod or task identity.
+
+## Connection budget
+
+The default PostgreSQL pool is four connections per broker. Start with:
+
+```text
+required database connections = broker replicas × pool size
+                              + migrations and administration
+                              + monitoring and failover headroom
+```
+
+Ten brokers at pool size four require 40 queue connections before operational
+headroom. A larger pool is not automatically faster: it can increase database
+contention, WAL pressure, and tail latency. Tune against the real payload,
+batch size, broker count, and PostgreSQL latency.
+
+## Traffic routing
+
+Expose one TCP service or L4 load balancer and include only `/ready` brokers in
+its backend set. TCP balancing happens per connection, not per command; a
+long-lived SDK pool can remain uneven during low connection churn. Watch
+broker-local process and connection metrics in addition to PostgreSQL-global
+job-state metrics.
+
+<Aside type="caution" title="Readiness cannot delay initial startup">
+  A broker fails fast when PostgreSQL is unavailable during startup. Use an init container,
+  dependency gate, or orchestrator restart policy to wait for the database. After startup, `/ready`
+  is the traffic gate and `/healthz` remains the process-liveness signal.
+</Aside>
+
+## Security checklist
+
+- keep PostgreSQL private and require verified TLS, such as
+  `sslmode=verify-full`, according to the provider contract;
+- keep raw database passwords out of Compose files and percent-encode reserved
+  URL password characters;
+- enable TCP authentication and protect metrics, REST, SSE, and WebSocket
+  surfaces;
+- terminate client TLS at bunqueue or a trusted internal proxy;
+- bind no debug or database ports to public interfaces;
+- run as a non-root user with a read-only root filesystem where the platform
+  supports it;
+- rotate credentials and test the rollout without mixing broker versions.
+
+## Observability
+
+Alert on behavior, not just process presence:
+
+| Signal                         | Investigate when                                            |
+| ------------------------------ | ----------------------------------------------------------- |
+| `/ready`                       | Any broker stays non-ready beyond a short database incident |
+| Queue depth and oldest age     | Backlog grows or violates the business SLO                  |
+| Active jobs and lease recovery | Active work stalls or recovery frequency rises              |
+| DLQ size and failure rate      | Permanent or exhausted failures appear                      |
+| Command latency/errors         | TCP operations approach client deadlines                    |
+| PostgreSQL connections         | Pool budget nears `max_connections`                         |
+| Locks/deadlocks                | Lock wait grows or any new deadlock appears                 |
+| WAL, dead tuples, vacuum lag   | Queue churn outruns maintenance                             |
+| Replica replay lag             | HA replicas cannot meet recovery expectations               |
+
+## Upgrades
+
+Schema initialization is automatic, but mixed bunqueue versions are not a
+supported steady state. Test backup/PITR restoration on a clone, drain or stop
+the old fleet, start one new broker, wait for readiness and validate counts,
+then start the remaining brokers at exactly the same version. An old binary may
+refuse a newer schema; restoring the application alone is not a rollback plan.
+
+## Backups and disaster recovery
+
+Use PostgreSQL-native physical or managed-service backups and PITR. The
+bunqueue SQLite S3 snapshot feature does not back up PostgreSQL mode. Rehearse a
+restore into an isolated cluster, start one broker, verify state and health,
+then add the rest of the fleet. A point-in-time restore can replay a job whose
+later ACK fell outside the recovery point, so external effects must be
+idempotent.
+
+## Failure drills before production
+
+1. Kill a broker that owns active leases and verify recovery plus stale-token
+   rejection.
+2. Reset PostgreSQL connections and confirm bounded client errors and
+   reconnection.
+3. Fill the DLQ and rehearse filtered inspection, repair, retry, and audit.
+4. Pause a queue through one broker and verify all brokers honor it.
+5. Restore PostgreSQL to a fresh endpoint and validate job conservation.
+6. Simulate a database outage long enough to exercise readiness and caller
+   retry budgets.
+
+The repository has deeper automated PostgreSQL crash and contention campaigns;
+the disposable example intentionally stays fast enough for onboarding.
+
+Next: [read the engineering validation report](/examples/postgres-multibroker/validation/).

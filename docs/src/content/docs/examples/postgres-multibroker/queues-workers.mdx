@@ -1,0 +1,91 @@
+---
+title: 'Multiple Queues, Producers, and Workers'
+description: 'Use the public bunqueue SDK across three PostgreSQL-backed brokers with typed queues, addBulk, priorities, delays, retries, progress, logs, results, QueueEvents, and worker discovery.'
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import sharedSource from '../../../../../../examples/postgres-multibroker/shared.ts?raw';
+import scenarioSource from '../../../../../../examples/postgres-multibroker/multi-queue.ts?raw';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · sdk · queues and workers</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    N queues. N workers. <em>One truth.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Put producers on broker A, workers on B and C, and observers on C. PostgreSQL keeps jobs,
+    policies, lifecycle state, events, logs, and results coherent across the fleet.
+  </p>
+</div>
+
+## Connection factory
+
+Every SDK object receives one normal TCP connection. The SDK does not receive
+the PostgreSQL URL and does not need database credentials.
+
+<Code
+  code={sharedSource}
+  lang="typescript"
+  meta='title="examples/postgres-multibroker/shared.ts"'
+/>
+
+The example deliberately names three endpoints so cross-broker behavior is
+observable. In production, pass a service or TCP load-balancer address instead
+when clients do not need deterministic placement.
+
+## Realistic multi-queue scenario
+
+<Code
+  code={scenarioSource}
+  lang="typescript"
+  meta='title="examples/postgres-multibroker/multi-queue.ts"'
+/>
+
+## What the assertions prove
+
+| Surface        | Broker path | Assertion                                                                |
+| -------------- | ----------- | ------------------------------------------------------------------------ |
+| Email producer | A           | Four durable jobs accepted with bulk, priority, delay, and retry options |
+| Email worker   | B           | One-slot priority order, delayed hold/promotion, retry, progress, logs   |
+| Media worker   | C           | Independent queue and typed result                                       |
+| Audit worker   | B           | Third queue processed independently                                      |
+| QueueEvents    | C           | Completion and progress events converge for all email jobs               |
+| Queue observer | C           | Counts, worker registration, logs, state, and return value are visible   |
+
+<Aside type="note" title="Auto-batching and addBulk">
+  Network queues auto-batch nearby `add()` calls by default. This scenario calls `addBulk()`
+  explicitly because the batch is already known. PostgreSQL commits the admission transaction before
+  the promise resolves; `durable: true` is retained for portable intent but PostgreSQL does not use
+  SQLite's write buffer.
+</Aside>
+
+## Scale workers independently
+
+Queue names define the work stream; worker processes do not need to live with
+their producer. Add replicas according to the workload:
+
+- more `emails` workers for network-bound delivery;
+- fewer `media` workers with lower concurrency for CPU or memory-heavy work;
+- separate `audit` workers with stricter retention and access controls.
+
+The broker-side queue concurrency limit is global across all brokers and
+workers. Worker `concurrency` controls only that worker instance. Use both when
+you need local capacity and a fleet-wide safety ceiling.
+
+## Scheduling proof
+
+The email queue is paused before `addBulk()`, and broker C confirms that shared
+state before admission. The worker uses `concurrency: 1` and `batchSize: 1`, so
+the VIP job must be the first eligible start. The delayed follow-up has an even
+higher priority but remains in `delayed`; three ready emails complete while the
+counts stay at three completed and one delayed. Only an explicit
+`delayedJob.promote()` makes the fourth job eligible. This proves priority among
+ready work and proves that priority never bypasses a delay.
+
+## Lifecycle rule
+
+Close workers first so in-flight outcomes can settle, then event subscriptions,
+then queues. The example obliterates its UUID-suffixed queues only because it is
+a disposable demonstration. A production shutdown must not obliterate queues.
+
+Next: [idempotency, retries, DLQ, and shared limits](/examples/postgres-multibroker/reliability/).

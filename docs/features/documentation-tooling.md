@@ -63,12 +63,39 @@ unresolved type link blocks the release. The generated current tree is indexable
 while older minor trees receive `noindex, follow`. The complete contract and
 versioning rationale live in [Generated API Reference](../generated-api-reference.md).
 
+## LLM discovery outputs
+
+`docs/public/llms.txt` is the curated, low-token documentation index.
+`/llms-full.txt` is generated from the content collection and includes every
+non-blog documentation page except the 404 route, with a title, description,
+canonical URL, and source body. When an MDX page renders a tracked `?raw`
+import through Starlight's `Code` component, the generator replaces the MDX
+variable with the actual source in a fenced block. It fails the build if the
+import has no code destination or cannot be read, preventing an apparently
+complete dump from silently omitting executable examples.
+
+`docs/public/robots.txt` advertises the curated and full-text endpoints and the
+sitemap index. Astro's sitemap integration emits only canonical indexable
+routes, derives per-page `lastmod` values from Git history when available, and
+omits the 404, Markdown mirrors, Open Graph images, and text endpoints.
+
 ## Release checks
 
-- `bun run check:docs-data` verifies generated documentation metadata.
+- `bun run check:docs-data` verifies generated documentation metadata and
+  resolves local module imports after removing Vite query or fragment suffixes
+  such as `?raw`, so executable source imports remain tracked-file checked.
 - `bun run docs:api` rebuilds the versioned TypeDoc reference.
 - `bun run build` from `docs/` builds the complete public site and search
-  index.
+  index, then runs `scripts/validate-discovery.ts`. The validator compares the
+  full-text and sitemap URL sets with the content tree, detects duplicates and
+  stale curated links, proves every raw executable source is inlined, checks
+  multi-broker reading order, and verifies the robots discovery pointers.
+- `Dockerfile.test` copies the full-text transformer and the executable
+  PostgreSQL multi-broker example into the sanitized unit image. This keeps the
+  discovery regressions plus CLI, timeout, HTTP-bound, multi-phase cleanup, and
+  verifier failure-path tests inside the same isolated gate as the repository.
+  Its Dockerfile-specific ignore allowlist admits only that example subtree,
+  not unrelated examples or host files.
 - The tracked root and `docs/bun.lock` files are the frozen dependency inputs
   for CI, the documentation build, and both disposable validation images; a
   release snapshot must never rely on an ignored local lockfile.

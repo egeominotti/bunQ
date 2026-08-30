@@ -1,0 +1,113 @@
+---
+title: 'PostgreSQL Multi-Broker Examples'
+description: 'A tested, end-to-end bunqueue example: PostgreSQL 18.6, three active brokers, multiple queues and workers, retries, DLQ, limits, events, and durable flows.'
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">examples · postgresql · multi-broker</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Three brokers. One database. <em>Real work.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Build a disposable PostgreSQL 18.6 cluster, run three active bunqueue brokers, and exercise the
+    public SDK across queues, workers, events, retries, the DLQ, shared limits, and durable job
+    graphs.
+  </p>
+</div>
+
+<Aside type="tip" title="Every source shown here is executable">
+  The pages render the repository's actual example files, not hand-copied pseudocode. The complete
+  project is type-checked, built, and run in disposable Linux containers. The [validation
+  report](/examples/postgres-multibroker/validation/) records the exact environment, results,
+  limitations, and teardown audit.
+</Aside>
+
+## Architecture
+
+```text
+                         PostgreSQL 18.6
+                        authoritative state
+                       /         |         \
+              broker-a        broker-b        broker-c
+             producer TCP     worker TCP      observer TCP
+                 \               |               /
+                  \------ public bunqueue SDK --/
+                         multiple queues
+```
+
+All brokers use the same PostgreSQL URL and `BUNQUEUE_POSTGRES_NAMESPACE`.
+Each broker has a different, stable `BUNQUEUE_BROKER_ID`. Clients connect to a
+broker over TCP; they never connect directly to PostgreSQL.
+
+## Follow the example
+
+<CardGrid>
+  <Card title="1. Docker topology" icon="seti:docker">
+    [Build PostgreSQL and three brokers, understand every environment variable, and tear the whole
+    project down.](/examples/postgres-multibroker/docker/)
+  </Card>
+  <Card title="2. N queues and workers" icon="seti:typescript">
+    [Route producers, workers, and QueueEvents through different brokers while preserving one queue
+    state.](/examples/postgres-multibroker/queues-workers/)
+  </Card>
+  <Card title="3. Reliability controls" icon="seti:lock">
+    [Exercise custom-ID idempotency, pause/resume, shared limits, retries, DLQ inspection, and
+    operator retry.](/examples/postgres-multibroker/reliability/)
+  </Card>
+  <Card title="4. Durable flows" icon="random">
+    [Run a three-level FlowProducer graph across three queues and verify dependency ordering and
+    durable results.](/examples/postgres-multibroker/flows/)
+  </Card>
+  <Card title="5. Production operations" icon="seti:config">
+    [Scale to N brokers safely, budget connections, route traffic, monitor readiness, secure the
+    deployment, and coordinate upgrades.](/examples/postgres-multibroker/operations/)
+  </Card>
+  <Card title="6. Engineering report" icon="approve-check-circle">
+    [Read the exact test matrix, measured functional timings, cleanup proof, findings, and honest
+    exclusions.](/examples/postgres-multibroker/validation/)
+  </Card>
+</CardGrid>
+
+## One-command verification
+
+From the repository root:
+
+```bash
+./examples/postgres-multibroker/verify.sh
+```
+
+The script creates a unique Compose project, runs each scenario separately with
+a 60-second deadline, and installs an exit trap before creating infrastructure.
+Success, failure, timeout, `SIGINT`, and `SIGTERM` all run ordered, independent
+resource and local-image removal attempts. Invalid project overrides are
+rejected before Docker is called.
+
+## What “N brokers” means
+
+The included topology uses three brokers because it is large enough to prove
+cross-broker behavior without hiding identities behind a load balancer. The
+same invariants apply to any supported fleet size:
+
+| Setting          | Across the fleet                                                |
+| ---------------- | --------------------------------------------------------------- |
+| PostgreSQL URL   | Same authoritative database                                     |
+| Namespace        | Same for shared queues; different to isolate environments       |
+| Broker ID        | Unique and stable per active broker process                     |
+| TCP/HTTP ports   | May be identical inside separate containers                     |
+| PostgreSQL pool  | Budget `brokers × poolSize`, plus operational headroom          |
+| bunqueue version | Keep identical; mixed-version schema operation is not supported |
+
+Compose cannot safely scale one service definition when it contains one static
+broker ID. Declare instances explicitly, as this example does, or derive the ID
+from a stable orchestrator identity such as a Kubernetes Pod name.
+
+## Scope
+
+This is a functional correctness example, not a benchmark. It proves real
+PostgreSQL persistence and multi-broker SDK behavior. It does not claim a
+production capacity number, test PostgreSQL primary failover, or replace the
+repository's deeper crash, lease-fencing, contention, and model campaigns.
+
+Next: [build the Docker topology](/examples/postgres-multibroker/docker/).

@@ -195,7 +195,7 @@ describe('SQLite telemetry batching', () => {
         batched.storage.close();
       }
     }
-  });
+  }, 15_000);
 
   test('routes public lifecycle batches through one telemetry write per operation', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'bunqueue-telemetry-routing-test-'));

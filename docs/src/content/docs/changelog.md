@@ -52,6 +52,9 @@ head:
 
 ### Fixed
 
+- CI: the deterministic SQLite telemetry batching campaign now has an explicit
+  15-second timeout, preserving all coverage while avoiding false failures when
+  shared runners temporarily exceed Bun's 5-second default.
 - Documentation site: hero blocks whose content spanned several source lines
   made MDX emit a markdown paragraph inside them, producing invalid `<p>` in
   `<h1>` and `<p>` in `<p>` on 33 pages. The nested paragraph also inherited the

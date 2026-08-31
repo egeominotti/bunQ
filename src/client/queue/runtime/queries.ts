@@ -4,6 +4,7 @@ import * as addOps from '../operations/add';
 import * as queryOps from '../operations/query';
 import * as queryStateOps from '../operations/queryStates';
 import * as groupOps from '../operations/groups';
+import { normalizeGroupId } from '../../groupId';
 import { QueueState } from './state';
 
 /** Job creation, lookup, state-listing, and count operations. */
@@ -46,6 +47,38 @@ export class QueueQueries<T> extends QueueState<T> {
 
   removeGroupConcurrency(groupId: string): Promise<number> {
     return groupOps.removeGroupConcurrency(this.ctx, groupId);
+  }
+
+  pauseGroup(groupId: string): Promise<boolean> {
+    return groupOps.pauseGroup(this.ctx, groupId);
+  }
+
+  resumeGroup(groupId: string): Promise<boolean> {
+    return groupOps.resumeGroup(this.ctx, groupId);
+  }
+
+  isGroupPaused(groupId: string): Promise<boolean> {
+    return groupOps.isGroupPaused(this.ctx, groupId);
+  }
+
+  async getGroupJobs(groupId: string, start = 0, end = -1): Promise<Job<T>[]> {
+    const normalized = normalizeGroupId(groupId);
+    const jobs = (await this.getJobsAsync({
+      state: ['waiting', 'prioritized', 'delayed'],
+      start: 0,
+      end: -1,
+      asc: true,
+    })) as Job<T>[];
+    const grouped = jobs.filter((job) => String(job.opts.group?.id) === normalized);
+    return grouped.slice(start, end < 0 ? undefined : end + 1);
+  }
+
+  async getCountsPerPriorityForGroup(groupId: string): Promise<Record<number, number>> {
+    const counts: Record<number, number> = {};
+    for (const job of await this.getGroupJobs(groupId)) {
+      counts[job.priority] = (counts[job.priority] ?? 0) + 1;
+    }
+    return counts;
   }
 
   add(name: string, data: T, opts?: JobOptions): Promise<Job<T>> {

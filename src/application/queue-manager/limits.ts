@@ -89,6 +89,36 @@ export class QueueManagerLimits extends QueueManagerControl {
     return removed;
   }
 
+  pauseGroup(queue: string, groupId: string): boolean | Promise<boolean> {
+    assertGroupId(groupId);
+    const shard = this.shards[shardIndex(queue)];
+    const changed = shard.pauseGroup(queue, groupId);
+    if (changed) this.storage?.saveGroupPaused(queue, groupId, true);
+    return changed;
+  }
+
+  resumeGroup(queue: string, groupId: string): boolean | Promise<boolean> {
+    assertGroupId(groupId);
+    const shard = this.shards[shardIndex(queue)];
+    const changed = shard.resumeGroup(queue, groupId);
+    if (changed) {
+      this.storage?.saveGroupPaused(queue, groupId, false);
+      shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
+    }
+    return changed;
+  }
+
+  isGroupPaused(queue: string, groupId: string): boolean | Promise<boolean> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].isGroupPaused(queue, groupId);
+  }
+
+  rateLimitGroup(queue: string, groupId: string, duration: number): void | Promise<void> {
+    assertGroupId(groupId);
+    assertPositiveSafeInteger(duration, 'duration');
+    this.shards[shardIndex(queue)].rateLimitGroup(queue, groupId, duration);
+  }
+
   getCountsPerPriority(queue: string): Record<number, number> {
     const counts = this.shards[shardIndex(queue)].getCountsPerPriority(queue);
     return Object.fromEntries(counts);

@@ -23,6 +23,7 @@ import { lockPostgresAdmissionKeys } from './batchAdmission';
 import type { PostgresAdmissionResult } from './admissionResult';
 import { linkedPostgresParentQueue, lockPostgresAdmissionParent } from './admissionParent';
 import { lockPostgresAdmissionQueues, registerPostgresAdmissionQueues } from './queueLifecycle';
+import { lockPostgresGroupCapacity } from './groups';
 
 function isLive(state: string): boolean {
   return ['waiting', 'prioritized', 'delayed', 'waiting-children', 'active'].includes(state);
@@ -142,6 +143,8 @@ export interface AdmitPostgresJobOptions {
   readonly completionConsumerExemptions?: readonly JobId[];
   /** Flow caller already holds identity locks and batches completion, queue, and event writes. */
   readonly preparedFlow?: { readonly now: number };
+  readonly groupMaxSize?: number;
+  readonly groupCapacityLocksHeld?: boolean;
 }
 
 /** Insert one job inside the caller's transaction and return its authoritative generation. */
@@ -154,6 +157,9 @@ export async function admitPostgresJob(
   const parentQueue = options.linkParent === false ? null : linkedPostgresParentQueue(job);
   if (!options.queueLifecycleLocksHeld) {
     await lockPostgresAdmissionQueues(tx, ctx, [job.queue]);
+  }
+  if (job.groupId && options.groupMaxSize !== undefined && !options.groupCapacityLocksHeld) {
+    await lockPostgresGroupCapacity(tx, ctx, [{ queue: job.queue, groupId: job.groupId }]);
   }
   if (!options.dependencyLocksHeld) {
     await lockPostgresDependencyCompletions(tx, ctx, [job.id, ...job.dependsOn]);
@@ -244,6 +250,18 @@ export async function admitPostgresJob(
 
   if (!options.dependencyExistenceCheckDeferred) {
     await assertPostgresDependenciesExist(tx, ctx, job.dependsOn);
+  }
+  if (job.groupId && options.groupMaxSize !== undefined) {
+    const [group] = await tx<{ count: number | string | bigint }[]>`
+      SELECT COUNT(*)::bigint AS count FROM bunqueue_jobs
+      WHERE namespace = ${ctx.config.namespace} AND queue = ${job.queue}
+        AND group_id = ${job.groupId} AND state IN ('waiting', 'prioritized', 'delayed')
+    `;
+    if (Number(group.count) >= options.groupMaxSize) {
+      throw new Error(
+        `Group ${job.groupId} has reached its maximum size of ${options.groupMaxSize}`
+      );
+    }
   }
   if (job.runAt === job.createdAt) job.runAt = now;
   const state = postgresStateForJob(

@@ -6,7 +6,13 @@ import { toPublicJob } from '../../../types';
 import { jobId } from '../../../../domain/types/job';
 import { createJobProxy } from '../../jobProxy';
 import type { AddContext, ExtendedJobOptions } from '../../types/add';
-import { buildJobData, buildPushPayload, buildRepeatOptions, resolveGroupId } from './payload';
+import {
+  buildJobData,
+  buildPushPayload,
+  buildRepeatOptions,
+  reflectionMeta,
+  resolveGroupId,
+} from './payload';
 
 export async function add<T>(
   context: AddContext,
@@ -27,7 +33,7 @@ export async function add<T>(
     const job = await manager.push(context.name, {
       name: jobName,
       data: jobData,
-      priority: merged.priority,
+      priority: merged.group?.priority ?? merged.priority,
       delay: merged.delay,
       maxAttempts: merged.attempts,
       backoff: merged.backoff,
@@ -38,6 +44,7 @@ export async function add<T>(
       dependsOn: merged.dependsOn?.map((id: string) => jobId(id)),
       tags: merged.tags,
       groupId: resolveGroupId(merged),
+      groupMaxSize: merged.group?.maxSize,
       dedup: merged.deduplication
         ? {
             ttl: merged.deduplication.ttl,
@@ -124,6 +131,6 @@ export async function add<T>(
       retryJob: context.retryJob,
       getChildrenValues: context.getChildrenValues,
     },
-    { priority: merged.priority, delay: merged.delay, opts: merged }
+    reflectionMeta(merged)
   );
 }

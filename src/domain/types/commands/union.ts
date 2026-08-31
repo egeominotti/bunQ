@@ -73,6 +73,10 @@ export type Command =
   | Limits.SetGroupConcurrencyCommand
   | Limits.GetGroupConcurrencyCommand
   | Limits.RemoveGroupConcurrencyCommand
+  | Limits.PauseGroupCommand
+  | Limits.ResumeGroupCommand
+  | Limits.IsGroupPausedCommand
+  | Limits.RateLimitGroupCommand
   | Cron.CronCommand
   | Cron.CronDeleteCommand
   | Cron.CronListCommand

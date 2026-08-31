@@ -31,7 +31,7 @@ src/domain/
     ├── uniqueKeyManager.ts  # Deduplication
     ├── limiterManager.ts    # Rate/concurrency
     ├── groupLimiterManager.ts # Per-group rate/concurrency
-    ├── groupScheduler.ts    # Secondary FIFO lanes + rotation
+    ├── groupScheduler.ts    # Secondary priority/FIFO lanes + rotation
     ├── dependencyTracker.ts # Job dependencies
     ├── temporalManager.ts   # Temporal index + delayed jobs
     ├── waiterManager.ts     # Long-poll waiters
@@ -252,14 +252,14 @@ explicit server-side override can replace it for one group. Per-group fixed
 window rate limits are checked by the same eligibility path.
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>FIFO groups</b><span>secondary lanes over the authoritative queue</span></div>
+  <div class="bq-diag-head"><b>Priority/FIFO groups</b><span>secondary lanes over the authoritative queue</span></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">PULL</span>
     <div class="bq-diag-layer">1. Promote due secondary entries, 2. serve ready ungrouped work first, 3. otherwise inspect the next group in circular rotation</div>
     <div class="bq-diag-arrow">↓</div>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell">Ineligible group <i>keep its FIFO head in place and rotate to another group</i></div>
-      <div class="bq-diag-cell bq-diag-accent">Eligible group <i>claim its FIFO head, increment ownership, advance the round-robin cursor</i></div>
+      <div class="bq-diag-cell">Ineligible group <i>keep its priority/FIFO head in place and rotate to another group</i></div>
+      <div class="bq-diag-cell bq-diag-accent">Eligible group <i>claim its priority/FIFO head, increment ownership, advance the round-robin cursor</i></div>
     </div>
   </div>
   <div class="bq-diag-group">
@@ -270,7 +270,9 @@ window rate limits are checked by the same eligibility path.
 
 The primary priority queue remains authoritative. `GroupScheduler` is a lazy
 secondary view built only when grouped work appears: one heap for ready
-ungrouped jobs, one delayed/TTL heap, and one immutable FIFO lane per group.
+ungrouped jobs, one delayed/TTL heap, and one immutable priority/FIFO lane per
+group. Lower BullMQ Pro group priorities run first; equal-priority entries keep
+their durable admission order.
 These indexes let a rate- or concurrency-blocked group remain parked while
 other groups continue round-robin, avoiding queue-head blocking and temporary
 pop/reinsert cycles. Primary and secondary membership change together under the

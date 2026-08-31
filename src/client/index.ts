@@ -47,6 +47,8 @@ export { SandboxedWorker } from './sandboxedWorker';
 export { Forwarder } from './forwarder';
 export type { ForwardOptions, ForwardedInfo } from './forwarder';
 export { QueueEvents } from './events';
+export { QueuePro, WorkerPro, QueueEventsPro } from './pro';
+export type { JobPro } from './pro';
 export type {
   ActiveEvent,
   CompletedEvent,
@@ -64,7 +66,7 @@ export type {
 } from './types/events';
 export { QueueGroup } from './queueGroup';
 export { FlowProducer } from './flow';
-export { UnrecoverableError, DelayedError } from './errors';
+export { UnrecoverableError, DelayedError, RateLimitError } from './errors';
 export { shutdownManager } from './manager';
 export { closeSharedTcpClient } from './tcpClient';
 export type { ConnectionHealth } from './tcpClient';
@@ -74,11 +76,14 @@ export type {
   JobOptions,
   GroupJobOptions,
   GroupWorkerOptions,
+  BatchWorkerOptions,
   JobJson,
   JobJsonRaw,
   QueueOptions,
   WorkerOptions,
   Processor,
+  ProcessorContext,
+  ObservableLike,
   FlowJobData,
   StallConfig,
   DlqConfig,

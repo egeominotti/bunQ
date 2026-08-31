@@ -1,4 +1,4 @@
-import type { ConnectionOptions, GroupWorkerOptions } from '../../types';
+import type { BatchWorkerOptions, ConnectionOptions, GroupWorkerOptions } from '../../types';
 
 export interface ExtendedWorkerOptions {
   concurrency: number;
@@ -17,4 +17,5 @@ export interface ExtendedWorkerOptions {
   removeOnFail?: boolean | number | { age?: number; count?: number };
   connection?: ConnectionOptions;
   group?: GroupWorkerOptions;
+  batch?: Required<BatchWorkerOptions>;
 }

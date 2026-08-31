@@ -95,3 +95,16 @@ export interface GetGroupConcurrencyCommand extends GroupCommand {
 export interface RemoveGroupConcurrencyCommand extends GroupCommand {
   readonly cmd: 'RemoveGroupConcurrency';
 }
+export interface PauseGroupCommand extends GroupCommand {
+  readonly cmd: 'PauseGroup';
+}
+export interface ResumeGroupCommand extends GroupCommand {
+  readonly cmd: 'ResumeGroup';
+}
+export interface IsGroupPausedCommand extends GroupCommand {
+  readonly cmd: 'IsGroupPaused';
+}
+export interface RateLimitGroupCommand extends GroupCommand {
+  readonly cmd: 'RateLimitGroup';
+  readonly duration: number;
+}

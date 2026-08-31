@@ -126,6 +126,27 @@ The Bun, TypeScript, and Python workers start polling immediately (`autorun`); t
 `embedded: true` runs in-process alongside an embedded Queue and is a Bun (`bunqueue/client`) feature. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode. The external SDKs are TCP-only.
 :::
 
+## Bun processor contract
+
+The Bun package passes `{ signal }` as the optional second processor argument:
+
+```typescript
+const worker = new Worker('downloads', async (job, context) => {
+  const response = await fetch(job.data.url, { signal: context?.signal });
+  return await response.arrayBuffer();
+});
+```
+
+Per-job timeout and `worker.cancelJob()` abort this signal. Promise processors
+remain cooperative: code that ignores the signal continues running, although a
+late outcome cannot overwrite a broker timeout. The processor may also return a
+structural Observable; bunqueue stores its final emission, fails on `error` or
+empty completion, and unsubscribes on abort. No RxJS dependency is required.
+
+For BullMQ Pro-oriented imports, `WorkerPro` is an alias of this same `Worker`;
+`QueuePro`, `QueueEventsPro`, and the `JobPro<T>` type are exported alongside it.
+The aliases do not create a second implementation or enable telemetry.
+
 ## Where to go next
 
 | | |
@@ -138,4 +159,3 @@ The Bun, TypeScript, and Python workers start polling immediately (`autorun`); t
 | [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
 | [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
 | [WorkerOptions Reference](/guide/worker/options/) | Every WorkerOptions field, with defaults |
-

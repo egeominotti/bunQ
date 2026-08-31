@@ -8,7 +8,7 @@ runtime. `test/documented-feature-coverage.test.ts` prevents a guide section or
 one side of its evidence from disappearing silently.
 
 For the thirteen Queue guide sections, `test/docs-queue-snippets.test.ts` also
-accounts for all 33 language groups and all 241 fenced examples. It rejects
+accounts for all 33 language groups and all 243 fenced examples. It rejects
 lexically invalid TypeScript alternatives and guards the documented distinction
 between custom job IDs and TTL deduplication keys. Native parser checks cover
 the exact TypeScript, Python, PHP, Go, Rust, Elixir, and shell fences during the

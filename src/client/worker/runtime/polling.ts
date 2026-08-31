@@ -90,9 +90,14 @@ export abstract class WorkerPolling<T = unknown, R = unknown> extends WorkerBuff
     const groupBlockedBuffer =
       this.groupLimiter !== null && this.pendingJobsHead < this.pendingJobs.length;
     const leased = groupBlockedBuffer ? this.activeJobs : this.pulledJobIds.size;
-    const slots = this.opts.concurrency - leased - this.pendingPull;
+    const capacity = this.opts.batch
+      ? this.opts.concurrency * this.opts.batch.size
+      : this.opts.concurrency;
+    const slots = capacity - leased - this.pendingPull;
     const rateSlots = this.rateLimiter.getAvailableSlots() - this.pendingPull;
-    const batchSize = Math.min(this.opts.batchSize, slots, rateSlots, 1000);
+    const configuredBatchSize =
+      this.opts.batch?.groupAffinity && this.batchAffinity === undefined ? 1 : this.opts.batchSize;
+    const batchSize = Math.min(configuredBatchSize, slots, rateSlots, 1000);
     if (batchSize <= 0) return [];
 
     const config = this.getPullConfig();

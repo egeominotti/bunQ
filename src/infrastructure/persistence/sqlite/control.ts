@@ -22,6 +22,7 @@ export interface PersistedGroupState {
   rateLimit: number | null;
   rateDuration: number | null;
   concurrencyLimit: number | null;
+  paused: boolean;
 }
 
 /** Cron schedules and durable queue control-state. */
@@ -215,6 +216,19 @@ export abstract class SqliteControl extends SqliteQueries {
     });
   }
 
+  saveGroupPaused(queue: string, groupId: string, paused: boolean): void {
+    this.safeWrite(() => {
+      this.db
+        .prepare(
+          `INSERT INTO group_state (queue, group_id, paused)
+           VALUES (?, ?, ?)
+           ON CONFLICT(queue, group_id) DO UPDATE SET paused = excluded.paused`
+        )
+        .run(queue, groupId, paused ? 1 : 0);
+      if (!paused) this.deleteEmptyGroupState(queue, groupId);
+    });
+  }
+
   loadGroupState(): PersistedGroupState[] {
     return this.db
       .query<
@@ -224,6 +238,7 @@ export abstract class SqliteControl extends SqliteQueries {
           rate_limit: number | null;
           rate_duration: number | null;
           concurrency_limit: number | null;
+          paused: number;
         },
         []
       >('SELECT * FROM group_state')
@@ -234,6 +249,7 @@ export abstract class SqliteControl extends SqliteQueries {
         rateLimit: row.rate_limit,
         rateDuration: row.rate_duration,
         concurrencyLimit: row.concurrency_limit,
+        paused: row.paused === 1,
       }));
   }
 
@@ -254,7 +270,7 @@ export abstract class SqliteControl extends SqliteQueries {
       .prepare(
         `DELETE FROM group_state
          WHERE queue = ? AND group_id = ?
-           AND rate_limit IS NULL AND concurrency_limit IS NULL`
+           AND rate_limit IS NULL AND concurrency_limit IS NULL AND paused = 0`
       )
       .run(queue, groupId);
   }

@@ -86,8 +86,8 @@ be claimed.
 
 - **`domain/`** — Pure, synchronous, side-effect-free. `Shard` composes
   `IndexedPriorityQueue` (authoritative waiting/delayed membership),
-  lazy `GroupScheduler` (ungrouped/delayed secondary heaps plus FIFO group lanes,
-  hidden durable admission order, and round-robin rotation), `DlqShard`,
+  lazy `GroupScheduler` (ungrouped/delayed secondary heaps plus priority/FIFO
+  group lanes, hidden durable admission order, and round-robin rotation), `DlqShard`,
   `UniqueKeyManager` (dedup), `LimiterManager` (queue rate/concurrency),
   `GroupLimiterManager`, `DependencyTracker`,
   `TemporalManager`/`TemporalIndex`, queue-scoped `WaiterManager`, `ShardCounters`
@@ -409,9 +409,10 @@ mutates both sides of the topology.
    secondary group state. On the first grouped insertion, `GroupScheduler`
    builds its view from authoritative membership; it is removed again after the
    last queued grouped job leaves. While active, it promotes due entries from a
-   secondary delayed heap, serves ready ungrouped work first, then selects FIFO
-   lane heads in round-robin group order. Per-group concurrency and fixed-window
-   rate eligibility are checked before admission. Insert/remove hooks keep every
+   secondary delayed heap, serves ready ungrouped work first, then selects
+   priority/FIFO lane heads in round-robin group order. Per-group pause,
+   concurrency, manual deadlines, and fixed-window rate eligibility are checked
+   before admission. Insert/remove hooks keep every
    secondary index synchronous with the primary queue, so blocked groups require
    no global-heap scan or temporary reinsertion.
 4. In the same synchronous critical section as the pop, the job is inserted into
@@ -657,8 +658,9 @@ retried once with a bound, and an exit code is emitted in every terminal path.
   configured rate/concurrency decisions retain an exclusive row lock. Indexed
   FIFO, mixed-order, and grouped selection paths apply `FOR UPDATE SKIP LOCKED`
   to narrow tuples before payload fetch. Grouped admissions allocate a
-  `BIGINT` `group_order`, so lane selection stays FIFO across brokers, batch
-  chunks, and restarts. The claim then assigns an opaque token plus database-
+  `BIGINT` `group_order`, so equal-priority lane selection stays FIFO across
+  brokers, batch chunks, and restarts. Durable pause and manual-rate deadlines
+  are filtered in the same selection. The claim then assigns an opaque token plus database-
   clock lease deadline before commit. Bounded group-state retention preserves
   live jobs, explicit overrides, and effective rate windows while reclaiming
   inactive rotation rows.
@@ -975,7 +977,7 @@ against on-disk SQLite) and asserts hard invariants — not just "it ran".
 
 - [Persistence (SQLite, WriteBuffer, recovery)](./features/persistence.md) — Durable SQLite-backed store (WAL + msgpack + buffered/double-buffered WriteBuffer) that persists jobs, results, DLQ, cron, queue control-state, and the bounded per-queue event/metric journal, and serves batched recovery reads on restart.
 - [PostgreSQL 15–18 Multi-Broker Persistence](./features/postgres-multibroker.md) — Optional database-authoritative server backend with transactional lifecycle updates, `SKIP LOCKED` claims, lease fencing/recovery, shared policies/cron/workers/job-state metrics, and durable LISTEN/NOTIFY replay across brokers.
-- [Job Groups](./features/job-groups.md) — Round-robin/FIFO scheduling, server-side group limits and counts, lazy embedded secondary indexes, durable admission order, PostgreSQL rotation, and bounded group-state retention.
+- [Job Groups](./features/job-groups.md) — Round-robin priority/FIFO scheduling, atomic max-size admission, pause/manual and fixed-window limits, lazy embedded indexes, durable order, PostgreSQL rotation, and bounded group-state retention.
 - [Scheduler & Cron](./features/scheduler-and-cron.md) — Event-driven server engine that fires recurring cron/interval jobs onto queues, persisting next-run/execution state for crash-safe at-most-once-per-slot scheduling.
 - [Background Tasks](./features/background-tasks.md) — Periodic server-side maintenance: timers for timeouts, stall/lock recovery, DLQ upkeep, dependency resolution, memory-bound cleanup, monitoring, plus startup recovery from SQLite.
 

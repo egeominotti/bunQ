@@ -21,7 +21,7 @@
 <li><span id="tinput"><span class="tsd-kind-type-parameter">TInput</span> = <span class="tsd-signature-type">unknown</span></span></li>
 <li><span id="tsteps"><span class="tsd-kind-type-parameter">TSteps</span> <span class="tsd-signature-keyword">extends</span> <span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">unknown</span><span class="tsd-signature-symbol">&gt;</span> = <span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">unknown</span><span class="tsd-signature-symbol">&gt;</span></span></li></ul></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L5">client/workflow/stepTypes.ts:5</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L5">client/workflow/stepTypes.ts:5</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -46,7 +46,7 @@
 <div class="tsd-comment tsd-typography"><p>Current execution ID</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L16">client/workflow/stepTypes.ts:16</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L16">client/workflow/stepTypes.ts:16</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="forwardidempotencykey"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>forward<wbr/>Idempotency<wbr/>Key</span><a href="#forwardidempotencykey" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">forwardIdempotencyKey</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div>
@@ -55,7 +55,7 @@ in doubt, this is what lets a rollback ask the provider &quot;did this actually
 happen?&quot; instead of depending on an output that may never have been persisted.</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L35">client/workflow/stepTypes.ts:35</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L35">client/workflow/stepTypes.ts:35</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="idempotencykey"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>idempotency<wbr/>Key</span><a href="#idempotencykey" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">idempotencyKey</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div>
@@ -64,14 +64,14 @@ and across crash-resume; different for a different run. Pass it straight to the
 provider so a repeat lands on the same operation instead of a new one.</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L29">client/workflow/stepTypes.ts:29</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L29">client/workflow/stepTypes.ts:29</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="input"><code class="tsd-tag">Readonly</code><span>input</span><a href="#input" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">input</span><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#tinput">TInput</a></div>
 <div class="tsd-comment tsd-typography"><p>Original workflow input</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L10">client/workflow/stepTypes.ts:10</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L10">client/workflow/stepTypes.ts:10</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="signal"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>signal</span><a href="#signal" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">signal</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">AbortSignal</span></div>
@@ -80,21 +80,21 @@ provider so a repeat lands on the same operation instead of a new one.</p>
 downstream I/O so timed-out work does not continue after the workflow moves on.</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L23">client/workflow/stepTypes.ts:23</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L23">client/workflow/stepTypes.ts:23</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="signals"><code class="tsd-tag">Readonly</code><span>signals</span><a href="#signals" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">signals</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Readonly</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">unknown</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">&gt;</span></div>
 <div class="tsd-comment tsd-typography"><p>Signals received via engine.signal()</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L14">client/workflow/stepTypes.ts:14</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L14">client/workflow/stepTypes.ts:14</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="steps"><code class="tsd-tag">Readonly</code><span>steps</span><a href="#steps" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">steps</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Readonly</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#tsteps">TSteps</a><span class="tsd-signature-symbol">&gt;</span></div>
 <div class="tsd-comment tsd-typography"><p>Results from completed steps (step name → result)</p>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/workflow/stepTypes.ts#L12">client/workflow/stepTypes.ts:12</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/workflow/stepTypes.ts#L12">client/workflow/stepTypes.ts:12</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

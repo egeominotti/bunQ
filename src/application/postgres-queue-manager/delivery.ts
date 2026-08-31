@@ -1,5 +1,11 @@
 import type { AtomicFlowBatchInput, AtomicFlowBatchResult } from '../../domain/types/flow';
-import { assertGroupPullOptions, type GroupPullOptions } from '../../domain/types/group';
+import {
+  assertGroupPriority,
+  assertGroupPullOptions,
+  assertOptionalGroupId,
+  assertPositiveSafeInteger,
+  type GroupPullOptions,
+} from '../../domain/types/group';
 import {
   createJob,
   DEFAULT_LOCK_TTL,
@@ -16,10 +22,16 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
   override async push(queue: string, input: JobInput): Promise<Job> {
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
+      assertOptionalGroupId(input.groupId);
+      if (input.groupId !== undefined) assertGroupPriority(input.priority);
+      if (input.groupMaxSize !== undefined) {
+        assertPositiveSafeInteger(input.groupMaxSize, 'group.maxSize');
+      }
       validateRepeatJobInput(input);
       const id = input.customId ? jobId(input.customId) : generateJobId();
       const admitted = await this.postgresStore.insert(
-        createJob(id, queue, input, await this.postgresStore.now())
+        createJob(id, queue, input, await this.postgresStore.now()),
+        input.groupMaxSize
       );
       await this.refreshJob(admitted.job.id, queue);
       return admitted.job;
@@ -29,12 +41,23 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
   override async pushBatch(queue: string, inputs: JobInput[]): Promise<JobId[]> {
     return await this.runPostgresOperation(async () => {
       await this.postgresReady;
-      for (const input of inputs) validateRepeatJobInput(input);
+      for (const input of inputs) {
+        assertOptionalGroupId(input.groupId);
+        if (input.groupId !== undefined) assertGroupPriority(input.priority);
+        if (input.groupMaxSize !== undefined) {
+          assertPositiveSafeInteger(input.groupMaxSize, 'group.maxSize');
+        }
+        validateRepeatJobInput(input);
+      }
       const now = await this.postgresStore.now();
       const jobs = inputs.map((input) =>
         createJob(input.customId ? jobId(input.customId) : generateJobId(), queue, input, now)
       );
-      const stored = await this.postgresStore.insertMany(jobs);
+      const stored = await this.postgresStore.insertMany(
+        jobs,
+        false,
+        inputs.map((input) => input.groupMaxSize)
+      );
       await this.refreshJobs(
         stored.map((job) => job.id),
         queue

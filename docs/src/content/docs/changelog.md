@@ -18,9 +18,15 @@ head:
 
 ### Added
 
+- Added the BullMQ Pro compatibility layer without telemetry or NestJS:
+  persistent group pause/resume, atomic group `maxSize`, intra-group priority,
+  group job/priority queries, manual group rate limits, native batch processors
+  with affinity/min-size/timeout and selective member failure, AbortSignal job
+  cancellation/timeouts, structural Observable results, and the `QueuePro`,
+  `WorkerPro`, `QueueEventsPro`, and `JobPro` aliases.
 - Added first-class job groups to the Bun Queue and Worker APIs. Jobs accept
   `group: { id }`; ready ungrouped work has precedence, grouped work rotates
-  fairly across IDs, and each group's claims remain FIFO. New Queue getters
+  fairly across IDs, and each group uses ascending priority with FIFO ties. New Queue getters
   expose queued depth per group, total grouped depth, and active depth. Workers
   can supply broker-authoritative per-group concurrency and fixed-window rate
   defaults, while Queue methods set/get/remove local overrides and inspect rate
@@ -34,6 +40,13 @@ head:
 
 ### Changed
 
+- Updated the root README, internal architecture/feature references, protocol
+  contract, public API types, Queue/Worker/Flow guides, migration/comparison
+  matrices, and regenerated TypeDoc reference for the complete BullMQ Pro
+  compatibility surface. Telemetry and NestJS remain explicitly excluded.
+- SQLite schema version 36 persists group pause state. PostgreSQL schema
+  version 20 adds group pause and manual rate-limit deadlines and extends the
+  grouped ready index with priority ordering.
 - SQLite schema version 35 adds durable `group_state` configuration. PostgreSQL
   schema version 19 adds a `BIGINT CACHE 1` grouped-admission sequence,
   `group_order`, exact FIFO/rotation indexes, and durable group state for
@@ -49,9 +62,28 @@ head:
   integer validation before any state change. PostgreSQL uses `BIGINT` for the
   corresponding limits, counters, and concurrency state, preserving parity
   with embedded mode instead of rounding fractions at the database boundary.
+- Intra-group priority now validates the BullMQ Pro integer range from `0` to
+  `2,097,151` at the shared admission boundary for SQLite, TCP, flows, batches,
+  and PostgreSQL.
 
 ### Fixed
 
+- Native batches now reserve one Worker limiter slot per member only when the
+  batch is ready, so `minSize` accumulation consumes no capacity and concurrent
+  batches cannot exceed the configured start budget. A synchronously throwing
+  batch processor is invoked once, and synchronous Observable completion/error
+  now runs the returned teardown exactly once. Cancelling or timing out any
+  batch member aborts the shared processor signal; impossible global-limiter
+  configurations with `minSize > limiter.max` now reject at construction while
+  larger `size` values continue in bounded chunks.
+- PostgreSQL group `maxSize` admission now serializes the count-and-insert
+  decision across brokers with sorted transaction-scoped capacity locks. Manual
+  group rate-limit TTL queries now report the live manual deadline, and
+  intra-group priority follows BullMQ Pro ordering (`0` first, then ascending).
+- A `Job` returned from TCP `Queue.add()` now reflects `group.priority` exactly
+  like embedded mode and TCP bulk admission.
+- Atomic `FlowProducer` planning now preserves group IDs, intra-group priority,
+  and `maxSize`; invalid group options reject the complete graph before writes.
 - CI: the deterministic SQLite telemetry batching campaign now has an explicit
   15-second timeout, preserving all coverage while avoiding false failures when
   shared runners temporarily exceed Bun's 5-second default.
@@ -129,7 +161,7 @@ head:
 - Quick Start: the persistence section advertised `DATA_PATH`; `BUNQUEUE_DATA_PATH`
   is the canonical variable and `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH` are
   ordered fallbacks. The section now shows the server-mode `--data-path` step and
-  states that a *different* embedded `dataPath` throws instead of opening a second
+  states that a _different_ embedded `dataPath` throws instead of opening a second
   database. The "Setup" table row also uses `bunx bunqueue start`, like the rest
   of the page.
 - The embedded heartbeat-token regression now advances a controlled wall clock

@@ -47,4 +47,11 @@ export class PostgresQueueManagerGroupQueries extends PostgresQueueManagerState 
       return await this.postgresStore.getGroupConcurrency(queue, groupId);
     });
   }
+
+  override async isGroupPaused(queue: string, groupId: string): Promise<boolean> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.getGroupPaused(queue, groupId);
+    });
+  }
 }

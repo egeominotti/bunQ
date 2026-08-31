@@ -3,6 +3,8 @@ import {
   assertPositiveSafeInteger,
   type GroupRateLimitOverride,
 } from '../../../domain/types/group';
+import type { TransactionSQL } from 'bun';
+import { postgresAdvisoryLockName } from './advisoryLocks';
 import { databaseNow, type PostgresContext } from './context';
 
 interface GroupStateRow {
@@ -12,6 +14,33 @@ interface GroupStateRow {
   rate_count: number | string | bigint;
   rate_effective_duration_ms: number | string | bigint | null;
   concurrency_limit: number | string | bigint | null;
+  manual_rate_limit_until: number | string | bigint | null;
+}
+
+export async function lockPostgresGroupCapacity(
+  tx: TransactionSQL,
+  ctx: PostgresContext,
+  groups: ReadonlyArray<{ queue: string; groupId: string }>
+): Promise<void> {
+  const lockNames = [
+    ...new Set(
+      groups.map(({ queue, groupId }) =>
+        postgresAdvisoryLockName('group-capacity', ctx.config.namespace, queue, groupId)
+      )
+    ),
+  ];
+  if (lockNames.length === 0) return;
+  await tx`
+    WITH requested AS MATERIALIZED (
+      SELECT DISTINCT hashtextextended(lock_name, 0) AS lock_key
+      FROM unnest(${tx.array(lockNames, 'TEXT')}) AS locks(lock_name)
+      ORDER BY lock_key
+    ), acquired AS MATERIALIZED (
+      SELECT lock_key, pg_advisory_xact_lock(lock_key)
+      FROM requested ORDER BY lock_key
+    )
+    SELECT COUNT(*) FROM acquired
+  `;
 }
 
 export async function getPostgresGroupJobsCount(
@@ -82,7 +111,7 @@ export async function getPostgresGroupRateLimit(
   assertGroupId(groupId);
   const rows = await ctx.sql<GroupStateRow[]>`
     SELECT rate_limit, rate_duration_ms, rate_window_started_at, rate_count,
-           rate_effective_duration_ms, concurrency_limit
+           rate_effective_duration_ms, concurrency_limit, manual_rate_limit_until
     FROM bunqueue_group_state
     WHERE namespace = ${ctx.config.namespace} AND queue = ${queue} AND group_id = ${groupId}
   `;
@@ -117,17 +146,20 @@ export async function getPostgresGroupRateLimitTtl(
   assertGroupId(groupId);
   const rows = await ctx.sql<GroupStateRow[]>`
     SELECT rate_limit, rate_duration_ms, rate_window_started_at, rate_count,
-           rate_effective_duration_ms, concurrency_limit
+           rate_effective_duration_ms, concurrency_limit, manual_rate_limit_until
     FROM bunqueue_group_state
     WHERE namespace = ${ctx.config.namespace} AND queue = ${queue} AND group_id = ${groupId}
   `;
   const row = rows[0];
-  if (!row?.rate_window_started_at || row.rate_effective_duration_ms === null) return -2;
+  if (!row) return -2;
+  const now = await databaseNow(ctx.sql);
+  const manualUntil =
+    row.manual_rate_limit_until === null ? null : Number(row.manual_rate_limit_until);
+  if (manualUntil !== null && manualUntil > now) return manualUntil - now;
+  if (row.rate_window_started_at === null || row.rate_effective_duration_ms === null) return -2;
   if (maxJobs !== undefined && Number(row.rate_count) < maxJobs) return 0;
   const remaining =
-    Number(row.rate_window_started_at) +
-    Number(row.rate_effective_duration_ms) -
-    (await databaseNow(ctx.sql));
+    Number(row.rate_window_started_at) + Number(row.rate_effective_duration_ms) - now;
   return remaining > 0 ? remaining : -2;
 }
 
@@ -174,4 +206,53 @@ export async function removePostgresGroupConcurrency(
     RETURNING group_id
   `;
   return rows.length;
+}
+
+export async function setPostgresGroupPaused(
+  ctx: PostgresContext,
+  queue: string,
+  groupId: string,
+  paused: boolean
+): Promise<boolean> {
+  assertGroupId(groupId);
+  const rows = await ctx.sql<{ changed: boolean }[]>`
+    INSERT INTO bunqueue_group_state (namespace, queue, group_id, paused)
+    VALUES (${ctx.config.namespace}, ${queue}, ${groupId}, ${paused})
+    ON CONFLICT (namespace, queue, group_id) DO UPDATE
+    SET paused = EXCLUDED.paused
+    WHERE bunqueue_group_state.paused IS DISTINCT FROM EXCLUDED.paused
+    RETURNING TRUE AS changed
+  `;
+  return rows.length > 0;
+}
+
+export async function getPostgresGroupPaused(
+  ctx: PostgresContext,
+  queue: string,
+  groupId: string
+): Promise<boolean> {
+  assertGroupId(groupId);
+  const rows = await ctx.sql<{ paused: boolean }[]>`
+    SELECT paused FROM bunqueue_group_state
+    WHERE namespace = ${ctx.config.namespace} AND queue = ${queue} AND group_id = ${groupId}
+  `;
+  return rows[0]?.paused ?? false;
+}
+
+export async function rateLimitPostgresGroup(
+  ctx: PostgresContext,
+  queue: string,
+  groupId: string,
+  duration: number
+): Promise<void> {
+  assertGroupId(groupId);
+  assertPositiveSafeInteger(duration, 'duration');
+  const now = await databaseNow(ctx.sql);
+  await ctx.sql`
+    INSERT INTO bunqueue_group_state (
+      namespace, queue, group_id, manual_rate_limit_until
+    ) VALUES (${ctx.config.namespace}, ${queue}, ${groupId}, ${now + duration})
+    ON CONFLICT (namespace, queue, group_id) DO UPDATE
+    SET manual_rate_limit_until = EXCLUDED.manual_rate_limit_until
+  `;
 }

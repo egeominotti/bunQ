@@ -25,6 +25,8 @@ export class GroupLimiterManager {
   private readonly rateOverrides = new Map<string, GroupRateLimitOverride>();
   private readonly concurrencyOverrides = new Map<string, number>();
   private readonly windows = new Map<string, RateWindow>();
+  private readonly manualRateLimits = new Map<string, number>();
+  private readonly paused = new Set<string>();
 
   status(
     queue: string,
@@ -34,6 +36,12 @@ export class GroupLimiterManager {
     now = Date.now()
   ): GroupLimitStatus {
     const groupKey = key(queue, groupId);
+    if (this.paused.has(groupKey)) return { eligible: false, retryAt: null };
+    const manualUntil = this.manualRateLimits.get(groupKey);
+    if (manualUntil !== undefined) {
+      if (now < manualUntil) return { eligible: false, retryAt: manualUntil };
+      this.manualRateLimits.delete(groupKey);
+    }
     if (defaults?.concurrency !== undefined) {
       const concurrency = this.concurrencyOverrides.get(groupKey) ?? defaults.concurrency;
       if (active >= concurrency) return { eligible: false, retryAt: null };
@@ -90,6 +98,11 @@ export class GroupLimiterManager {
 
   getRateLimitTtl(queue: string, groupId: string, maxJobs?: number, now = Date.now()): number {
     const groupKey = key(queue, groupId);
+    const manualUntil = this.manualRateLimits.get(groupKey);
+    if (manualUntil !== undefined) {
+      if (now < manualUntil) return manualUntil - now;
+      this.manualRateLimits.delete(groupKey);
+    }
     const window = this.windows.get(groupKey);
     if (!window) return -2;
     if (now >= window.startedAt + window.duration) {
@@ -113,18 +126,49 @@ export class GroupLimiterManager {
     return this.concurrencyOverrides.delete(key(queue, groupId)) ? 1 : 0;
   }
 
+  pause(queue: string, groupId: string): boolean {
+    const groupKey = key(queue, groupId);
+    if (this.paused.has(groupKey)) return false;
+    this.paused.add(groupKey);
+    return true;
+  }
+
+  resume(queue: string, groupId: string): boolean {
+    return this.paused.delete(key(queue, groupId));
+  }
+
+  isPaused(queue: string, groupId: string): boolean {
+    return this.paused.has(key(queue, groupId));
+  }
+
+  rateLimit(queue: string, groupId: string, duration: number, now = Date.now()): void {
+    assertPositiveSafeInteger(duration, 'duration');
+    this.manualRateLimits.set(key(queue, groupId), now + duration);
+  }
+
   clearQueue(queue: string): void {
     const prefix = `${queue}\0`;
-    for (const map of [this.rateOverrides, this.concurrencyOverrides, this.windows]) {
+    for (const map of [
+      this.rateOverrides,
+      this.concurrencyOverrides,
+      this.windows,
+      this.manualRateLimits,
+    ]) {
       for (const groupKey of map.keys()) {
         if (groupKey.startsWith(prefix)) map.delete(groupKey);
       }
+    }
+    for (const groupKey of this.paused) {
+      if (groupKey.startsWith(prefix)) this.paused.delete(groupKey);
     }
   }
 
   pruneExpiredWindows(now = Date.now()): void {
     for (const [groupKey, window] of this.windows) {
       if (now >= window.startedAt + window.duration) this.windows.delete(groupKey);
+    }
+    for (const [groupKey, until] of this.manualRateLimits) {
+      if (now >= until) this.manualRateLimits.delete(groupKey);
     }
   }
 

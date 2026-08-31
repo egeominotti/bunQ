@@ -107,8 +107,8 @@ pause mutation or use finite pages with application-level reconciliation.
 
 The exhaustive successor to this focused remediation audit is the
 [Core Public API End-to-End Matrix](./core-public-api-e2e.md). It automatically
-discovers all 320 callable instance methods on exported core client objects and
-requires exact, no-test-double coverage in every applicable runtime. The 284
+discovers all 326 callable instance methods on exported core client objects and
+requires exact, no-test-double coverage in every applicable runtime. The 290
 dual-mode methods run against embedded SQLite and a real TCP/SQLite broker; the
 13 `TcpConnectionPool` methods are TCP-only and 23 synchronous snapshot methods
 have async TCP counterparts. Those boundaries carry explicit `N/A` cells. A

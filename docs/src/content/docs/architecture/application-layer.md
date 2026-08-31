@@ -151,7 +151,7 @@ and the user-facing [storage guide](/guide/databases/).
     <div class="bq-diag-row">
       <div class="bq-diag-cell">TTL expired <i>drop, try next</i></div>
       <div class="bq-diag-cell">Ungrouped ready <i>serve before grouped work</i></div>
-      <div class="bq-diag-cell">Grouped ready <i>FIFO lane, round-robin cursor, check group limits</i></div>
+      <div class="bq-diag-cell">Grouped ready <i>priority/FIFO lane, round-robin cursor, check group limits</i></div>
       <div class="bq-diag-cell">No candidate <i>track earliest delayed/rate-window wake-up</i></div>
     </div>
     <p class="bq-diag-note">The authoritative priority heap and secondary ungrouped, delayed and per-group indexes change under the same synchronous shard lock. A blocked group requires no heap scan or temporary reinsertion.</p>

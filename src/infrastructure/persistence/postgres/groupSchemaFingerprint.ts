@@ -16,14 +16,16 @@ export async function hasCurrentPostgresGroupSchema(tx: TransactionSQL): Promise
         ('bunqueue_group_state', 'rate_effective_max', 'bigint', FALSE, 'none'),
         ('bunqueue_group_state', 'rate_effective_duration_ms', 'bigint', FALSE, 'none'),
         ('bunqueue_group_state', 'concurrency_limit', 'bigint', FALSE, 'none'),
+        ('bunqueue_group_state', 'paused', 'boolean', TRUE, 'false'),
+        ('bunqueue_group_state', 'manual_rate_limit_until', 'bigint', FALSE, 'none'),
         ('bunqueue_group_state', 'last_served', 'bigint', FALSE, 'none')
     ), expected_indexes(
       index_name, table_name, columns, descending, predicate
     ) AS (
       VALUES
         ('bunqueue_jobs_group_ready_idx', 'bunqueue_jobs',
-         ARRAY['namespace', 'queue', 'group_id', 'run_at', 'group_order', 'id'],
-         ARRAY[FALSE, FALSE, FALSE, FALSE, FALSE, FALSE],
+         ARRAY['namespace', 'queue', 'group_id', 'priority', 'run_at', 'group_order', 'id'],
+         ARRAY[FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE],
          'group_idisnotnullandstate=anyarray[''waiting''::text,''prioritized''::text,' ||
          '''delayed''::text]'),
         ('bunqueue_group_state_rotation_idx', 'bunqueue_group_state',
@@ -49,6 +51,10 @@ export async function hasCurrentPostgresGroupSchema(tx: TransactionSQL): Promise
               lower(COALESCE(pg_get_expr(defaults.adbin, defaults.adrelid), '')),
               '[()[:space:]]', '', 'g'
             ) IN ('0', '0::bigint')
+            WHEN 'false' THEN regexp_replace(
+              lower(COALESCE(pg_get_expr(defaults.adbin, defaults.adrelid), '')),
+              '[()[:space:]]', '', 'g'
+            ) IN ('false', 'false::boolean')
             ELSE defaults.oid IS NULL
           END,
           FALSE

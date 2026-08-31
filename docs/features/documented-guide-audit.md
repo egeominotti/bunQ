@@ -38,9 +38,9 @@ and 43 files**, with zero failures.
 The page-to-file and TCP/embedded script routing is maintained in
 `docs/features/documented-feature-verification.md`.
 
-The separate fail-closed public API compiler discovers **320 callable instance
-methods** and requires **604 applicable method/runtime cells** to complete real
-operations: 307 embedded and 297 TCP. The focused suite contains 608 tests after
+The separate fail-closed public API compiler discovers **326 callable instance
+methods** and requires **616 applicable method/runtime cells** to complete real
+operations: 313 embedded and 303 TCP. The focused suite contains 620 tests after
 inventory and hygiene checks. Its generated evidence is written to
 `artifacts/core-e2e/public-api-matrix.{md,json}`.
 
@@ -103,13 +103,20 @@ The guide suites also prove the following behavior in both modes.
   progress, logs, dependencies, QueueEvents, and wait-for-result;
 - global concurrency, token-bucket rate limits, temporary overrides, TTL,
   `isMaxed`, and QueueGroup isolation;
+- BullMQ Pro job groups with priority/FIFO lanes, atomic max-size admission,
+  pause/resume, manual deadlines, backlog/priority queries, and SQLite/TCP
+  parity;
 - namespaces/prefixes across jobs, workers, control, DLQ, limits, and scheduler
   IDs; automatic batching and store-and-forward fallback.
 
 ### Worker
 
-- autorun/manual processing, runtime concurrency changes, batching, long-poll
-  wake-up, every public Job method, and all documented event signatures;
+- autorun/manual processing, runtime concurrency changes, transport and native
+  processor batching, group affinity/minimum/timeout behavior, selective batch
+  failure, long-poll wake-up, every public Job method, and all documented event
+  signatures;
+- AbortSignal cancellation/timeouts, structural Observable results, and manual
+  group rate limiting in embedded and TCP modes;
 - retry/backoff, terminal and per-attempt failure events, graceful/forced
   shutdown, heartbeats, lock extension, stall recovery, and max-stall bounds;
 - CPU-yield expectations, SandboxedWorker threads, statistics, processor

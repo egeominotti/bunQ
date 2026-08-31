@@ -149,7 +149,7 @@ the shapes and the rules a client MUST get right. All commands below answer
 Job options on `PUSH` (all optional, exact names): `priority`, `delay`,
 `maxAttempts`, `backoff` (ms or `{type, delay, maxDelay}`), `ttl`, `timeout`,
 `jobId`, `uniqueKey`, `dedup {ttl, extend, replace}`, `dependsOn: []`,
-`parentId`, `childrenIds: []`, `tags: []`, `groupId`, `lifo`,
+`parentId`, `childrenIds: []`, `tags: []`, `groupId`, `groupMaxSize`, `lifo`,
 `removeOnComplete`, `removeOnFail`, `stallTimeout`, `durable`, `repeat`,
 `debounceId`, `debounceTtl`, `stackTraceLimit`, `keepLogs`, `sizeLimit`,
 `timestamp`, `failParentOnFailure`, `removeDependencyOnFailure`,
@@ -170,6 +170,12 @@ Client MUSTs:
 - `groupId` is the normalized job-group identifier: a non-empty string of at
   most 256 characters. Public clients may accept safe integers but MUST encode
   them as decimal strings on the wire.
+- When `groupId` is present, `priority` is the BullMQ Pro intra-group priority:
+  an integer from 0 through 2,097,151, served in ascending order (`0` first).
+  Without `groupId`, the ordinary queue priority keeps its higher-first range.
+- `groupMaxSize` is a positive safe integer. The broker checks pending depth
+  and admission atomically; if any job in a `PUSHB` or `PUSHF` graph would
+  exceed the limit, it rejects the complete command without partial writes.
 
 ### 6.2 Query
 
@@ -327,12 +333,19 @@ field `maxCount?`:
 | `SetGroupConcurrency`    | `concurrency`             | none                               |
 | `GetGroupConcurrency`    | —                         | `{concurrency: number \| null}`    |
 | `RemoveGroupConcurrency` | —                         | `{removed: 0 \| 1}`                |
+| `PauseGroup`             | —                         | `{changed: boolean}`               |
+| `ResumeGroup`            | —                         | `{changed: boolean}`               |
+| `IsGroupPaused`          | —                         | `{paused: boolean}`                |
+| `RateLimitGroup`         | `duration`                | none                               |
 
 `max`, `duration`, and `concurrency` are positive safe integers. Group depth
 counts waiting, prioritized, and delayed grouped jobs, excluding active jobs.
-The scheduler serves ungrouped work first, then FIFO within each group and
-round-robin across groups. PostgreSQL makes rotation and capacity
-database-authoritative across brokers.
+The scheduler serves ungrouped work first, then ascending priority within each
+group with FIFO ties, and round-robin across groups. `PauseGroup` blocks only
+new claims for that group. `RateLimitGroup` installs an immediately effective
+manual deadline independent of a Worker group default. PostgreSQL makes
+rotation, capacity, pause, and manual deadlines database-authoritative across
+brokers.
 
 ### 6.5 DLQ
 

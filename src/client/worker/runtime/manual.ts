@@ -94,6 +94,18 @@ export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerContr
     if (this.groupLimiter) this.groupLimiter.increment(processingJob);
     this.activeJobs++;
     this.beginDelivery(delivery);
+    const jobId = String(processingJob.id);
+    const abortController = this.createAbortController(jobId);
+    let timedOut = false;
+    const timeout =
+      processingJob.timeout === null
+        ? null
+        : setTimeout(() => {
+            timedOut = true;
+            abortController.abort(
+              new Error(`Job ${jobId} timed out after ${processingJob.timeout}ms`)
+            );
+          }, processingJob.timeout);
 
     try {
       await processJob(processingJob, {
@@ -104,10 +116,14 @@ export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerContr
         ackBatcher: this.ackBatcher,
         emitter: this,
         token: this.opts.useLocks ? delivery.token : undefined,
-        shouldAbandonOutcome: () => this._forceClose || !this.isCurrentDelivery(delivery),
+        shouldAbandonOutcome: () =>
+          timedOut || this._forceClose || !this.isCurrentDelivery(delivery),
+        abortController,
       });
       if (fetchNextCallback) return await fetchNextCallback();
     } finally {
+      if (timeout !== null) clearTimeout(timeout);
+      this.releaseAbortController(jobId, abortController);
       this.activeJobs--;
       this.finishDelivery(delivery);
       if (this.groupLimiter) this.groupLimiter.decrement(processingJob);

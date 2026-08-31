@@ -11,6 +11,13 @@ export interface GroupWorkerOptions {
   limit?: { max: number; duration: number };
 }
 
+export interface BatchWorkerOptions {
+  size: number;
+  minSize?: number;
+  timeout?: number;
+  groupAffinity?: boolean;
+}
+
 export interface WorkerOptions {
   concurrency?: number;
   autorun?: boolean;
@@ -24,6 +31,7 @@ export interface WorkerOptions {
   useLocks?: boolean;
   limiter?: RateLimiterOptions;
   group?: GroupWorkerOptions;
+  batch?: BatchWorkerOptions;
   lockDuration?: number;
   maxStalledCount?: number;
   skipStalledCheck?: boolean;

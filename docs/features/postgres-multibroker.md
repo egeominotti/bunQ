@@ -96,8 +96,11 @@ cannot commit an orphan log.
 
 `groupClaims.ts` owns durable round-robin cursor assignment and fixed-window
 budget consumption, while `groups.ts` owns database-authoritative per-group
-depth/configuration/TTL queries. `admission.ts` and `batchAdmission.ts` assign
-the immutable `group_order` sequence before insert chunking.
+depth/configuration/TTL queries and sorted group-capacity advisory locks.
+`admission.ts` and `batchAdmission.ts` assign the immutable `group_order`
+sequence before insert chunking. A `group.maxSize` admission takes its capacity
+lock before identity locks, making the count-and-insert decision atomic across
+brokers, batches, and flows.
 `groupStateRetention.ts` reclaims bounded inactive policyless state without
 deleting explicit overrides or live effective windows. Their state lives in
 `bunqueue_jobs.group_order` and `bunqueue_group_state`; no broker-local cache
@@ -470,8 +473,9 @@ Within that lock, a claim:
    events with set-based statements before commit.
 
 Ungrouped candidate ordering remains deterministic: higher priority first, then
-the LIFO partition, then FIFO by ready time and ID. Grouped jobs are FIFO by
-durable `(run_at, group_order, id)` within each group and round-robin by durable
+the LIFO partition, then FIFO by ready time and ID. Grouped jobs use ascending
+BullMQ Pro priority followed by durable `(run_at, group_order, id)` FIFO ties
+within each group and round-robin by durable
 `last_served`; ungrouped work has
 precedence. Group concurrency is unlimited unless the Worker supplies a
 `group.concurrency` default, and fixed-window group limiting is disabled unless
@@ -663,6 +667,11 @@ retain their existing host-clock behavior.
   chunks. Bounded cleanup resets inactive rotation positions and deletes only
   rows with no job, override, or live effective rate window; queue obliteration
   removes all group state transactionally.
+
+- PostgreSQL schema version 20 adds durable group pause state and manual
+  rate-limit deadlines. Group selection excludes both before locking jobs and
+  orders each lane by ascending BullMQ Pro priority before FIFO ties (`0` is
+  highest).
 
 - Event retention finds the first row beyond the configured per-queue window
   through the `(namespace, queue, id DESC)` index and deletes through that cutoff.

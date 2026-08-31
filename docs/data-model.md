@@ -38,7 +38,7 @@ export interface Job {
   readonly id: JobId; // UUIDv7, branded string (types/jobs/model.ts:1)
   readonly queue: string;
   readonly data: unknown; // user payload (msgpack BLOB on disk)
-  readonly priority: number; // higher = sooner
+  readonly priority: number; // ungrouped: higher first; grouped: 0 first, then ascending
   readonly createdAt: number; // epoch ms
   readonly lifo: boolean; // tie-break among equal priority
 
@@ -1051,12 +1051,13 @@ CREATE TABLE IF NOT EXISTS group_state (
     rate_limit INTEGER,
     rate_duration INTEGER,
     concurrency_limit INTEGER,
+    paused INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (queue, group_id)
 );
 ```
 
-Stores durable local rate and concurrency overrides for job groups. Rows with
-neither override are deleted. Embedded fixed-window timestamps/counts remain
+Stores durable local rate/concurrency overrides and pause state for job groups.
+Rows with neither override and `paused = 0` are deleted. Embedded fixed-window timestamps/counts remain
 runtime state, consistent with the existing in-memory queue limiter; startup
 reapplies the stored configuration before workers pull. `obliterate(queue)`
 deletes the queue's group rows.
@@ -1157,6 +1158,7 @@ version and is retried on reopen (`src/infrastructure/persistence/sqlite/state.t
 | 33      | Queue event journal and per-queue metric tables/indexes                                                               |
 | 34      | `jobs.extended_options` (repeat and advanced generation policy across restart)                                        |
 | 35      | `group_state` durable per-group rate/concurrency overrides                                                            |
+| 36      | `group_state.paused` durable per-group pause state                                                                    |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -1227,9 +1229,9 @@ Indexes:
 - partial `bunqueue_jobs_lease_idx(namespace, lease_until)` for active rows;
 - partial `bunqueue_jobs_broker_session_lease_idx(namespace, lease_broker_id, lease_broker_session_id, id)` for exact-session shutdown cleanup;
 - partial `bunqueue_jobs_parent_idx(namespace, parent_id)`;
-- partial `bunqueue_jobs_group_ready_idx(namespace, queue, group_id, run_at,
-  group_order, id)` and `bunqueue_jobs_group_active_idx` for durable grouped
-  FIFO candidates and active capacity;
+- partial `bunqueue_jobs_group_ready_idx(namespace, queue, group_id, priority,
+run_at, group_order, id)` and `bunqueue_jobs_group_active_idx` for durable
+  grouped priority/FIFO candidates and active capacity;
 - partial `bunqueue_jobs_lifo_ready_idx` for the mixed-order probe;
 - partial `bunqueue_jobs_ttl_pending_idx` for pending-expiry scans; and
 - unique partial `bunqueue_jobs_live_unique_key_idx(namespace, queue,
@@ -1308,13 +1310,14 @@ non-positive/non-finite TTL is stored as `NULL` and does not expire.
 
 ### `bunqueue_group_state`
 
-Primary key: `(namespace, queue, group_id)`. PostgreSQL schema v19 stores:
+Primary key: `(namespace, queue, group_id)`. PostgreSQL schema v20 stores:
 
 - configured `rate_limit` and `rate_duration_ms` overrides;
 - `rate_window_started_at`, `rate_count`, `rate_effective_max`, and
   `rate_effective_duration_ms` for the active database-authoritative fixed
   window;
-- optional `concurrency_limit`; and
+- optional `concurrency_limit`, durable `paused`, and
+  `manual_rate_limit_until`; and
 - `last_served`, the group's durable rotation position.
 
 `rate_limit`, `rate_count`, `rate_effective_max`, and `concurrency_limit` are
@@ -1333,8 +1336,8 @@ getters read these same tables; queue destruction removes the rows.
 
 Bounded retention selects at most 1,000 inactive rows per transaction (up to 10
 batches per sweep). It resets obsolete `last_served` positions and deletes a row
-only when no queued/active job, explicit rate/concurrency override, or live
-effective fixed window still owns it. Retention runs after terminal outcomes
+only when no queued/active job, explicit rate/concurrency override, pause,
+manual deadline, or live effective fixed window still owns it. Retention runs after terminal outcomes
 and override removal, during startup, and every 60 seconds.
 
 ### Cron, worker, and broker coordination
@@ -1412,15 +1415,17 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v19 adds
+namespaces share the same physical tables. PostgreSQL engine schema v20 adds
+durable group pause/manual deadlines and grouped priority indexing; v19 adds
 durable group rotation and shared group limit state. Schema v18 adds the
 per-queue `self_pruned_commit_seq` frontier and the commit sequencer that
 records it, v17 upgrades the advisory-lock protocol, v16 adds broker-session
 fencing, v15 backfills durable queue registry rows, v14 adds
 bounded-completion query indexes, and v13 adds the commit-ordered journal.
-Because schema migrations are database-global, a broker supporting at most v18
-refuses to start once v19 is applied; all brokers in a cluster must be upgraded
-together. The same fail-closed rule protected the v18 commit-trigger change
+Because schema migrations are database-global, a broker supporting at most v19
+refuses to start once v20 is applied; all brokers in a cluster must be upgraded
+together. The same fail-closed rule protected the v19 group-state change
+from v18 binaries and the v18 commit-trigger change
 from v17 binaries.
 Initialization rejects a recorded version newer than the runtime and verifies
 the journal tables, columns, indexes, functions, and

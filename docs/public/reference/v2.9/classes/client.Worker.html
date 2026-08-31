@@ -16,14 +16,14 @@
 <ul class="tsd-type-parameter-list">
 <li><span id="t"><span class="tsd-kind-type-parameter">T</span> = <span class="tsd-signature-type">unknown</span></span></li>
 <li><span id="r"><span class="tsd-kind-type-parameter">R</span> = <span class="tsd-signature-type">unknown</span></span></li></ul></section>
-<section class="tsd-panel tsd-hierarchy" data-refl="2538">
+<section class="tsd-panel tsd-hierarchy" data-refl="2661">
 <h4>Hierarchy</h4>
 <ul class="tsd-hierarchy">
 <li class="tsd-hierarchy-item"><span class="tsd-signature-type">WorkerExecution</span><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">,</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#r">R</a><span class="tsd-signature-symbol">&gt;</span>
 <ul class="tsd-hierarchy">
 <li class="tsd-hierarchy-item"><span class="tsd-hierarchy-target">Worker</span></li></ul></li></ul></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/worker.ts#L4">client/worker/worker.ts:4</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/worker.ts#L5">client/worker/worker.ts:5</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -63,6 +63,8 @@
 <a href="#pause" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a>
 <a href="#processjobmanually" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Job<wbr/>Manually</span></a>
 <a href="#ratelimit" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>rate<wbr/>Limit</span></a>
+<a href="#ratelimiterror" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>Rate<wbr/>Limit<wbr/>Error</span></a>
+<a href="#ratelimitgroup" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>rate<wbr/>Limit<wbr/>Group</span></a>
 <a href="#resume" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>resume</span></a>
 <a href="#run" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>run</span></a>
 <a href="#startstalledchecktimer" class="tsd-index-link tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>start<wbr/>Stalled<wbr/>Check<wbr/>Timer</span></a>
@@ -91,7 +93,7 @@
 <h4 class="tsd-returns-title">Returns <a href="" class="tsd-signature-type tsd-kind-class">Worker</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">,</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#r">R</a><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution&lt;T, R&gt;.constructor</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L109">client/worker/runtime/state.ts:109</a></li></ul></aside></div></li></ul></section></section></details>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L111">client/worker/runtime/state.ts:111</a></li></ul></aside></div></li></ul></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="properties-1">Properties<a href="#properties-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -100,13 +102,13 @@
 <div class="tsd-signature"><span class="tsd-kind-property">name</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.name</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L25">client/worker/runtime/state.ts:25</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L25">client/worker/runtime/state.ts:25</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="opts"><code class="tsd-tag">Readonly</code><span>opts</span><a href="#opts" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">opts</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">ExtendedWorkerOptions</span></div><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.opts</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L27">client/worker/runtime/state.ts:27</a></li></ul></aside></section></section></details>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L27">client/worker/runtime/state.ts:27</a></li></ul></aside></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Accessors"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="accessors-1">Accessors<a href="#accessors-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -119,7 +121,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.closing</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L121">client/worker/runtime/control.ts:121</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L122">client/worker/runtime/control.ts:122</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="concurrency"><span>concurrency</span><a href="#concurrency" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -129,7 +131,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.concurrency</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L110">client/worker/runtime/control.ts:110</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L111">client/worker/runtime/control.ts:111</a></li></ul></aside></div></li>
 <li>
 <div class="tsd-signature" id="concurrencyconcurrency-1"><span class="tsd-signature-keyword">set</span> <span class="tsd-kind-set-signature">concurrency</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">value</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span></div>
 <div class="tsd-description">
@@ -140,7 +142,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.concurrency</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L114">client/worker/runtime/control.ts:114</a></li></ul></aside></div></li></ul></section></section></details>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L115">client/worker/runtime/control.ts:115</a></li></ul></aside></div></li></ul></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -157,7 +159,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.cancelAllJobs</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L140">client/worker/runtime/control.ts:140</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L143">client/worker/runtime/control.ts:143</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="canceljob"><span>cancel<wbr/>Job</span><a href="#canceljob" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -172,7 +174,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.cancelJob</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L131">client/worker/runtime/control.ts:131</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L132">client/worker/runtime/control.ts:132</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="close"><span>close</span><a href="#close" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -186,7 +188,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.close</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/lifecycle.ts#L7">client/worker/runtime/lifecycle.ts:7</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/lifecycle.ts#L7">client/worker/runtime/lifecycle.ts:7</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="delay"><span>delay</span><a href="#delay" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -201,7 +203,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.delay</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L167">client/worker/runtime/control.ts:167</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L193">client/worker/runtime/control.ts:193</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="extendjoblocks"><span>extend<wbr/>Job<wbr/>Locks</span><a href="#extendjoblocks" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -217,7 +219,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.extendJobLocks</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/manual.ts#L117">client/worker/runtime/manual.ts:117</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/manual.ts#L133">client/worker/runtime/manual.ts:133</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="getnextjob"><span>get<wbr/>Next<wbr/>Job</span><a href="#getnextjob" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -232,7 +234,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/client.ManualJob.html" class="tsd-signature-type tsd-kind-type-alias">ManualJob</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.getNextJob</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/manual.ts#L22">client/worker/runtime/manual.ts:22</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/manual.ts#L22">client/worker/runtime/manual.ts:22</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="getratelimiterinfo"><span>get<wbr/>Rate<wbr/>Limiter<wbr/>Info</span><a href="#getratelimiterinfo" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -242,7 +244,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">current</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">duration</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">max</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.getRateLimiterInfo</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L151">client/worker/runtime/control.ts:151</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L156">client/worker/runtime/control.ts:156</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="isclosed"><span>is<wbr/>Closed</span><a href="#isclosed" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -252,7 +254,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.isClosed</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L106">client/worker/runtime/control.ts:106</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L107">client/worker/runtime/control.ts:107</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="isjobcancelled"><span>is<wbr/>Job<wbr/>Cancelled</span><a href="#isjobcancelled" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -266,7 +268,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.isJobCancelled</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L147">client/worker/runtime/control.ts:147</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L152">client/worker/runtime/control.ts:152</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="ispaused"><span>is<wbr/>Paused</span><a href="#ispaused" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -276,7 +278,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.isPaused</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L102">client/worker/runtime/control.ts:102</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L103">client/worker/runtime/control.ts:103</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="isratelimited"><span>is<wbr/>Rate<wbr/>Limited</span><a href="#isratelimited" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -286,7 +288,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.isRateLimited</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L159">client/worker/runtime/control.ts:159</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L164">client/worker/runtime/control.ts:164</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="isrunning"><span>is<wbr/>Running</span><a href="#isrunning" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -296,7 +298,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.isRunning</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L98">client/worker/runtime/control.ts:98</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L99">client/worker/runtime/control.ts:99</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="off"><span>off</span><a href="#off" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -317,7 +319,7 @@
 </div></div><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L95">client/worker/runtime/state.ts:95</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L97">client/worker/runtime/state.ts:97</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-2"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;active&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -329,7 +331,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L96">client/worker/runtime/state.ts:96</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L98">client/worker/runtime/state.ts:98</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-3"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;completed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">result</span><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#r">R</a><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-3" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -341,7 +343,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L97">client/worker/runtime/state.ts:97</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L99">client/worker/runtime/state.ts:99</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-4"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;failed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-4" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -353,7 +355,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L98">client/worker/runtime/state.ts:98</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L100">client/worker/runtime/state.ts:100</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-5"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;progress&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">progress</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-5" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -365,7 +367,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L99">client/worker/runtime/state.ts:99</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L101">client/worker/runtime/state.ts:101</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-6"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;stalled&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-6" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -377,7 +379,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L100">client/worker/runtime/state.ts:100</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L102">client/worker/runtime/state.ts:102</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-7"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;error&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-7" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -389,7 +391,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L101">client/worker/runtime/state.ts:101</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L103">client/worker/runtime/state.ts:103</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-8"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;cancelled&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">data</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-8" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -401,7 +403,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L102">client/worker/runtime/state.ts:102</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L104">client/worker/runtime/state.ts:104</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="off-9"><span class="tsd-kind-call-signature">off</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;log&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">message</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#off-9" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -413,7 +415,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.off</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L103">client/worker/runtime/state.ts:103</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L105">client/worker/runtime/state.ts:105</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="on"><span>on</span><a href="#on" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -450,7 +452,7 @@ event listener to the beginning of the listeners array.</p>
 </div></div><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L67">client/worker/runtime/state.ts:67</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L69">client/worker/runtime/state.ts:69</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-2"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;active&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -462,7 +464,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L68">client/worker/runtime/state.ts:68</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L70">client/worker/runtime/state.ts:70</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-3"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;completed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">result</span><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#r">R</a><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-3" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -474,7 +476,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L69">client/worker/runtime/state.ts:69</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L71">client/worker/runtime/state.ts:71</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-4"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;failed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-4" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -486,7 +488,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L70">client/worker/runtime/state.ts:70</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L72">client/worker/runtime/state.ts:72</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-5"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;progress&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">progress</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-5" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -498,7 +500,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L71">client/worker/runtime/state.ts:71</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L73">client/worker/runtime/state.ts:73</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-6"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;stalled&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-6" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -510,7 +512,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L72">client/worker/runtime/state.ts:72</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L74">client/worker/runtime/state.ts:74</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-7"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;error&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-7" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -522,7 +524,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L73">client/worker/runtime/state.ts:73</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L75">client/worker/runtime/state.ts:75</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-8"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;cancelled&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">data</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-8" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -534,7 +536,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L74">client/worker/runtime/state.ts:74</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L76">client/worker/runtime/state.ts:76</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="on-9"><span class="tsd-kind-call-signature">on</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;log&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">message</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#on-9" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -546,7 +548,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.on</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L75">client/worker/runtime/state.ts:75</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L77">client/worker/runtime/state.ts:77</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="once"><span>once</span><a href="#once" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -580,7 +582,7 @@ event listener to the beginning of the listeners array.</p>
 </div></div><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L81">client/worker/runtime/state.ts:81</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L83">client/worker/runtime/state.ts:83</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-2"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;active&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -592,7 +594,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L82">client/worker/runtime/state.ts:82</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L84">client/worker/runtime/state.ts:84</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-3"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;completed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">result</span><span class="tsd-signature-symbol">:</span> <a class="tsd-signature-type tsd-kind-type-parameter" href="#r">R</a><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-3" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -604,7 +606,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L83">client/worker/runtime/state.ts:83</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L85">client/worker/runtime/state.ts:85</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-4"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;failed&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-4" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -616,7 +618,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L84">client/worker/runtime/state.ts:84</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L86">client/worker/runtime/state.ts:86</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-5"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;progress&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">progress</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-5" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -628,7 +630,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L85">client/worker/runtime/state.ts:85</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L87">client/worker/runtime/state.ts:87</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-6"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;stalled&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-6" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -640,7 +642,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L86">client/worker/runtime/state.ts:86</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L88">client/worker/runtime/state.ts:88</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-7"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;error&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">error</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Error</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-7" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -652,7 +654,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L87">client/worker/runtime/state.ts:87</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L89">client/worker/runtime/state.ts:89</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-8"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;cancelled&quot;</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">data</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">jobId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">reason</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-8" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -664,7 +666,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L88">client/worker/runtime/state.ts:88</a></li></ul></aside></div></li>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L90">client/worker/runtime/state.ts:90</a></li></ul></aside></div></li>
 <li class="tsd-is-inherited">
 <div class="tsd-signature tsd-anchor-link" id="once-9"><span class="tsd-kind-call-signature">once</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">event</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;log&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">listener</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">message</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">)</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">this</span><a href="#once-9" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
@@ -676,7 +678,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">this</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.once</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/state.ts#L89">client/worker/runtime/state.ts:89</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/state.ts#L91">client/worker/runtime/state.ts:91</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="pause"><span>pause</span><a href="#pause" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -686,7 +688,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.pause</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L85">client/worker/runtime/control.ts:85</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L86">client/worker/runtime/control.ts:86</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="processjobmanually"><span>process<wbr/>Job<wbr/>Manually</span><a href="#processjobmanually" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -702,7 +704,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><a href="../types/client.ManualJob.html" class="tsd-signature-type tsd-kind-type-alias">ManualJob</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.processJobManually</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/manual.ts#L59">client/worker/runtime/manual.ts:59</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/manual.ts#L59">client/worker/runtime/manual.ts:59</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="ratelimit"><span>rate<wbr/>Limit</span><a href="#ratelimit" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -716,7 +718,31 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.rateLimit</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L155">client/worker/runtime/control.ts:155</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L160">client/worker/runtime/control.ts:160</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="ratelimiterror"><code class="tsd-tag">Static</code><span>Rate<wbr/>Limit<wbr/>Error</span><a href="#ratelimiterror" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="ratelimiterror-1"><span class="tsd-kind-call-signature">RateLimitError</span><span class="tsd-signature-symbol">()</span><span class="tsd-signature-symbol">:</span> <a href="client.RateLimitError.html" class="tsd-signature-type tsd-kind-class">RateLimitError</a><a href="#ratelimiterror-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<h4 class="tsd-returns-title">Returns <a href="client.RateLimitError.html" class="tsd-signature-type tsd-kind-class">RateLimitError</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/worker.ts#L6">client/worker/worker.ts:6</a></li></ul></aside></div></li></ul></section>
+<section class="tsd-panel tsd-member tsd-is-inherited">
+<h3 class="tsd-anchor-link" id="ratelimitgroup"><span>rate<wbr/>Limit<wbr/>Group</span><a href="#ratelimitgroup" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul class="tsd-signatures tsd-is-inherited">
+<li class="tsd-is-inherited">
+<div class="tsd-signature tsd-anchor-link" id="ratelimitgroup-1"><span class="tsd-kind-call-signature">rateLimitGroup</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">job</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-kind-parameter">duration</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#ratelimitgroup-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">job</span>: <a href="../interfaces/client.Job.html" class="tsd-signature-type tsd-kind-interface">Job</a><span class="tsd-signature-symbol">&lt;</span><a class="tsd-signature-type tsd-kind-type-parameter" href="#t">T</a><span class="tsd-signature-symbol">&gt;</span></span></li>
+<li><span><span class="tsd-kind-parameter">duration</span>: <span class="tsd-signature-type">number</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
+<p>Inherited from WorkerExecution.rateLimitGroup</p>
+<ul>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L168">client/worker/runtime/control.ts:168</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="resume"><span>resume</span><a href="#resume" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -726,7 +752,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.resume</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L92">client/worker/runtime/control.ts:92</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L93">client/worker/runtime/control.ts:93</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="run"><span>run</span><a href="#run" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -736,7 +762,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.run</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L10">client/worker/runtime/control.ts:10</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L11">client/worker/runtime/control.ts:11</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="startstalledchecktimer"><span>start<wbr/>Stalled<wbr/>Check<wbr/>Timer</span><a href="#startstalledchecktimer" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -746,7 +772,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.startStalledCheckTimer</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L163">client/worker/runtime/control.ts:163</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L189">client/worker/runtime/control.ts:189</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="waituntilready"><span>wait<wbr/>Until<wbr/>Ready</span><a href="#waituntilready" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited">
@@ -756,7 +782,7 @@ event listener to the beginning of the listeners array.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from WorkerExecution.waitUntilReady</p>
 <ul>
-<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/59db4a53dc3902613326fb0199090bdbc983a19c/src/client/worker/runtime/control.ts#L125">client/worker/runtime/control.ts:125</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/egeominotti/bunqueue/blob/main/src/client/worker/runtime/control.ts#L126">client/worker/runtime/control.ts:126</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
@@ -777,7 +803,7 @@ event listener to the beginning of the listeners array.</p>
 <details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Accessors"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Accessors</summary>
 <div><a href="#closing" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Accessor"><use href="../assets/icons.svg#icon-262144"></use></svg><span>closing</span></a><a href="#concurrency" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Accessor"><use href="../assets/icons.svg#icon-262144"></use></svg><span>concurrency</span></a></div></details>
 <details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Methods</summary>
-<div><a href="#cancelalljobs" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>cancel<wbr/>All<wbr/>Jobs</span></a><a href="#canceljob" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>cancel<wbr/>Job</span></a><a href="#close" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>close</span></a><a href="#delay" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>delay</span></a><a href="#extendjoblocks" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>extend<wbr/>Job<wbr/>Locks</span></a><a href="#getnextjob" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Next<wbr/>Job</span></a><a href="#getratelimiterinfo" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Rate<wbr/>Limiter<wbr/>Info</span></a><a href="#isclosed" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Closed</span></a><a href="#isjobcancelled" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Job<wbr/>Cancelled</span></a><a href="#ispaused" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Paused</span></a><a href="#isratelimited" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Rate<wbr/>Limited</span></a><a href="#isrunning" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Running</span></a><a href="#off" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>off</span></a><a href="#on" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on</span></a><a href="#once" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>once</span></a><a href="#pause" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a><a href="#processjobmanually" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Job<wbr/>Manually</span></a><a href="#ratelimit" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>rate<wbr/>Limit</span></a><a href="#resume" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>resume</span></a><a href="#run" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>run</span></a><a href="#startstalledchecktimer" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>start<wbr/>Stalled<wbr/>Check<wbr/>Timer</span></a><a href="#waituntilready" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>wait<wbr/>Until<wbr/>Ready</span></a></div></details></div></details></div>
+<div><a href="#cancelalljobs" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>cancel<wbr/>All<wbr/>Jobs</span></a><a href="#canceljob" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>cancel<wbr/>Job</span></a><a href="#close" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>close</span></a><a href="#delay" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>delay</span></a><a href="#extendjoblocks" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>extend<wbr/>Job<wbr/>Locks</span></a><a href="#getnextjob" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Next<wbr/>Job</span></a><a href="#getratelimiterinfo" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Rate<wbr/>Limiter<wbr/>Info</span></a><a href="#isclosed" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Closed</span></a><a href="#isjobcancelled" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Job<wbr/>Cancelled</span></a><a href="#ispaused" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Paused</span></a><a href="#isratelimited" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Rate<wbr/>Limited</span></a><a href="#isrunning" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>is<wbr/>Running</span></a><a href="#off" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>off</span></a><a href="#on" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>on</span></a><a href="#once" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>once</span></a><a href="#pause" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a><a href="#processjobmanually" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Job<wbr/>Manually</span></a><a href="#ratelimit" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>rate<wbr/>Limit</span></a><a href="#ratelimiterror"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>Rate<wbr/>Limit<wbr/>Error</span></a><a href="#ratelimitgroup" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>rate<wbr/>Limit<wbr/>Group</span></a><a href="#resume" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>resume</span></a><a href="#run" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>run</span></a><a href="#startstalledchecktimer" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>start<wbr/>Stalled<wbr/>Check<wbr/>Timer</span></a><a href="#waituntilready" class="tsd-is-inherited"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>wait<wbr/>Until<wbr/>Ready</span></a></div></details></div></details></div>
 <div class="site-menu">
 <nav id="tsd-sidebar-links" class="tsd-navigation"><a href="https://bunqueue.dev/guide/introduction/" class="tsd-nav-link">Guide</a><a href="https://github.com/egeominotti/bunqueue" class="tsd-nav-link">GitHub</a></nav>
 <nav class="tsd-navigation"><a href="../index.html">bunqueue</a>

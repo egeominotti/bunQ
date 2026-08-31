@@ -34,6 +34,8 @@
     "CircuitState",
     "CompletionOptions",
     "ExtendedWorkerOptions",
+    "GroupPullOptions",
+    "GroupRateLimitOverride",
     "JobCounts",
     "MemoryStats",
     "OperationalMetrics",
@@ -52,6 +54,7 @@
   ],
   "treatWarningsAsErrors": true,
   "githubPages": false,
+  "gitRevision": "main",
   "readme": "none",
   "customCss": "docs/typedoc-theme.css",
   "navigationLinks": {

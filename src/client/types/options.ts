@@ -41,6 +41,10 @@ export interface RepeatOptions {
 
 export interface GroupJobOptions {
   id: string | number;
+  /** Maximum number of pending jobs admitted for this group. */
+  maxSize?: number;
+  /** Intra-group priority from 0 to 2,097,151; lower values run first. */
+  priority?: number;
 }
 
 /** Options accepted when adding a job. */

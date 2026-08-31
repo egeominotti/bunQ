@@ -92,6 +92,10 @@ export function routeRateLimitCommand(
     case 'SetGroupConcurrency':
     case 'GetGroupConcurrency':
     case 'RemoveGroupConcurrency':
+    case 'PauseGroup':
+    case 'ResumeGroup':
+    case 'IsGroupPaused':
+    case 'RateLimitGroup':
       return handleGroupCommand(command, context, requestId);
     case 'RateLimit':
       return handleRateLimit(command, context, requestId);

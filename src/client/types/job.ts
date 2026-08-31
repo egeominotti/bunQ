@@ -130,4 +130,8 @@ export interface Job<T = unknown> {
   removeChildDependency(): Promise<boolean>;
   removeDeduplicationKey(): Promise<boolean>;
   removeUnprocessedChildren(): Promise<void>;
+  /** Available on a native batch processor's leading job. */
+  getBatch?(): Job<T>[];
+  /** Mark only this member as failed while allowing the rest of its batch to complete. */
+  setAsFailed?(error: Error): void;
 }

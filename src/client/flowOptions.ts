@@ -1,4 +1,5 @@
 import type { JobInput, JobId } from '../domain/types/job';
+import { normalizeGroupId } from './groupId';
 import type { JobOptions } from './types';
 
 function removeFlag(value: JobOptions['removeOnComplete']): boolean {
@@ -30,7 +31,7 @@ export function flowJobInput(
   return {
     name,
     data,
-    priority: opts.priority,
+    priority: opts.group?.priority ?? opts.priority,
     delay: opts.delay,
     maxAttempts: opts.attempts,
     backoff: opts.backoff,
@@ -52,5 +53,7 @@ export function flowJobInput(
     continueParentOnFailure: opts.continueParentOnFailure,
     ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
     timestamp: opts.timestamp,
+    groupId: opts.group ? normalizeGroupId(opts.group.id) : undefined,
+    groupMaxSize: opts.group?.maxSize,
   };
 }

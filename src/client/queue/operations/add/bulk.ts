@@ -33,7 +33,7 @@ export async function addBulk<T>(
       return {
         name,
         data: buildJobData(data, options),
-        priority: options.priority,
+        priority: options.group?.priority ?? options.priority,
         delay: options.delay,
         maxAttempts: options.attempts,
         backoff: options.backoff,
@@ -45,6 +45,7 @@ export async function addBulk<T>(
         parentId: options.parent ? jobId(options.parent.id) : undefined,
         tags: options.tags,
         groupId: resolveGroupId(options),
+        groupMaxSize: options.group?.maxSize,
         stallTimeout: options.stallTimeout,
         timestamp: options.timestamp,
         removeOnComplete,
@@ -95,7 +96,7 @@ export async function addBulk<T>(
     return compact({
       name,
       data: buildJobData(data, options),
-      priority: options.priority,
+      priority: options.group?.priority ?? options.priority,
       delay: options.delay,
       maxAttempts: options.attempts,
       backoff: options.backoff,
@@ -104,6 +105,7 @@ export async function addBulk<T>(
       customId: options.jobId,
       tags: options.tags,
       groupId: resolveGroupId(options),
+      groupMaxSize: options.group?.maxSize,
       dependsOn: options.dependsOn?.map((id: string) => jobId(id)),
       parentId: options.parent ? jobId(options.parent.id) : undefined,
       uniqueKey: options.deduplication?.id,

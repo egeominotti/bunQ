@@ -131,4 +131,6 @@ CREATE TABLE IF NOT EXISTS group_state (
     PRIMARY KEY (queue, group_id)
 );
 `,
+  // Persist per-group pause state.
+  36: 'ALTER TABLE group_state ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;',
 };

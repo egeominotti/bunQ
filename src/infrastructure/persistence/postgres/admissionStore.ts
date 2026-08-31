@@ -21,6 +21,7 @@ import { PostgresQueueStoreRuntime } from './runtime';
 import { reconcilePostgresSerialAdmissions } from './serialAdmission';
 import { lockPostgresAdmissionQueues, registerPostgresAdmissionQueues } from './queueLifecycle';
 import { runPostgresTransactionWithRetry } from './transactionRetry';
+import { lockPostgresGroupCapacity } from './groups';
 
 function admissionDependencyIds(jobs: readonly Job[]): JobId[] {
   return jobs.flatMap((job) => [job.id, ...job.dependsOn]);
@@ -36,14 +37,18 @@ function replaySafeAdmissionJob(job: Job): Job {
 
 /** Atomic single, batch, and flow admission strategy shared by the store facade. */
 export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
-  async insert(job: Job): Promise<{ job: Job; inserted: boolean }> {
+  async insert(job: Job, groupMaxSize?: number): Promise<{ job: Job; inserted: boolean }> {
     await this.initialize();
     return await runPostgresTransactionWithRetry(this.context, (tx) =>
-      admitPostgresJob(tx, this.context, replaySafeAdmissionJob(job))
+      admitPostgresJob(tx, this.context, replaySafeAdmissionJob(job), { groupMaxSize })
     );
   }
 
-  async insertMany(jobs: readonly Job[], rejectExisting = false): Promise<Job[]> {
+  async insertMany(
+    jobs: readonly Job[],
+    rejectExisting = false,
+    groupMaxSizes: ReadonlyArray<number | undefined> = []
+  ): Promise<Job[]> {
     await this.initialize();
     const insertSerially = () =>
       runPostgresTransactionWithRetry(this.context, async (tx) => {
@@ -52,13 +57,23 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
           this.context,
           jobs.map((job) => job.queue)
         );
+        await lockPostgresGroupCapacity(
+          tx,
+          this.context,
+          jobs.flatMap((job, index) =>
+            job.groupId && groupMaxSizes[index] !== undefined
+              ? [{ queue: job.queue, groupId: job.groupId }]
+              : []
+          )
+        );
         await lockPostgresDependencyCompletions(tx, this.context, admissionDependencyIds(jobs));
         await lockPostgresFlowParents(tx, this.context, admissionParentIds(jobs));
         await lockPostgresAdmissionKeys(tx, this.context, jobs);
         const admissions: PostgresAdmissionResult[] = [];
         const insertedJobIds: JobId[] = [];
         const insertedDependencies: JobId[] = [];
-        for (const source of jobs) {
+        for (let index = 0; index < jobs.length; index++) {
+          const source = jobs[index];
           const job = replaySafeAdmissionJob(source);
           const admitted = await admitPostgresJob(tx, this.context, job, {
             rejectExisting,
@@ -66,6 +81,8 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
             queueLifecycleLocksHeld: true,
             dependencyExistenceCheckDeferred: true,
             completionConsumerExemptions: insertedJobIds,
+            groupMaxSize: groupMaxSizes[index],
+            groupCapacityLocksHeld: true,
           });
           admissions.push(admitted);
           if (admitted.inserted) {
@@ -76,7 +93,9 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
         await assertPostgresDependenciesExist(tx, this.context, insertedDependencies);
         return await reconcilePostgresSerialAdmissions(tx, this.context, admissions);
       });
-    if (!canBatchAdmitPostgresJobs(jobs)) return await insertSerially();
+    if (!canBatchAdmitPostgresJobs(jobs) || groupMaxSizes.some((size) => size !== undefined)) {
+      return await insertSerially();
+    }
     try {
       return await runPostgresTransactionWithRetry(this.context, (tx) =>
         admitPostgresJobsBatch(tx, this.context, jobs)
@@ -100,6 +119,15 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
         this.context,
         created.map((job) => job.queue)
       );
+      await lockPostgresGroupCapacity(
+        tx,
+        this.context,
+        created.flatMap((job, index) =>
+          job.groupId && batch.jobs[index].input.groupMaxSize !== undefined
+            ? [{ queue: job.queue, groupId: job.groupId }]
+            : []
+        )
+      );
       await lockPostgresDependencyCompletions(tx, this.context, admissionDependencyIds(created));
       await retirePostgresCompletionGenerations(
         tx,
@@ -111,7 +139,8 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
       const admissionNow = await databaseNow(tx);
       const jobs: Job[] = [];
       const admissions: PostgresAdmissionResult[] = [];
-      for (const job of created) {
+      for (let index = 0; index < created.length; index++) {
+        const job = created[index];
         const admitted = await admitPostgresJob(tx, this.context, job, {
           rejectExisting: true,
           linkParent: false,
@@ -119,6 +148,8 @@ export class PostgresAdmissionStore extends PostgresQueueStoreRuntime {
           queueLifecycleLocksHeld: true,
           dependencyExistenceCheckDeferred: true,
           preparedFlow: { now: admissionNow },
+          groupMaxSize: batch.jobs[index].input.groupMaxSize,
+          groupCapacityLocksHeld: true,
         });
         admissions.push(admitted);
         jobs.push(admitted.job);

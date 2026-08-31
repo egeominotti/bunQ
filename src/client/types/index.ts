@@ -20,7 +20,13 @@ export type {
   WaitingChildrenEvent,
   WaitingEvent,
 } from './events';
-export type { FlowJobData, Processor, QueueEventType } from './flow';
+export type {
+  FlowJobData,
+  ObservableLike,
+  Processor,
+  ProcessorContext,
+  QueueEventType,
+} from './flow';
 export type {
   ChangePriorityOpts,
   GetDependenciesOpts,
@@ -42,6 +48,12 @@ export type {
   ParentOpts,
   RepeatOptions,
 } from './options';
-export type { GroupWorkerOptions, RateLimiterOptions, StallConfig, WorkerOptions } from './worker';
+export type {
+  BatchWorkerOptions,
+  GroupWorkerOptions,
+  RateLimiterOptions,
+  StallConfig,
+  WorkerOptions,
+} from './worker';
 export { createPublicJob, toDlqEntry, toPublicJob } from '../jobConversion';
 export type { CreatePublicJobOptions, ToPublicJobOptions } from '../jobConversion';

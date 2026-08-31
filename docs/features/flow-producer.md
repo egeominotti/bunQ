@@ -132,7 +132,9 @@ actual queue.
 Atomic flows intentionally reject `repeat`, deduplication, debounce, and an
 explicit `opts.parent`. Those options require independent ownership/lifetime
 semantics and cannot be made part of this graph transaction. `jobId` is allowed,
-but it must be non-empty and cannot contain `:`.
+but it must be non-empty and cannot contain `:`. Group `id`, `priority`, and
+`maxSize` are mapped into every planned node and validated before the graph is
+admitted, so an invalid or full group rejects the complete flow.
 
 ### 2. Broker validation
 

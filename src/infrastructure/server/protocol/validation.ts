@@ -1,3 +1,5 @@
+import { validateGroupPriority } from '../../../domain/types/group';
+
 export function validateQueueName(name: string): string | null {
   if (!name || name.length === 0) return 'Queue name is required';
   if (name.length > 256) return 'Queue name too long (max 256 characters)';
@@ -58,7 +60,9 @@ export function validateBackoffField(value: unknown): string | null {
 
 export function validateJobOptions(options: Record<string, unknown>): string | null {
   const validations = [
-    validateNumericField(options['priority'], 'priority', { min: -1000000, max: 1000000 }),
+    options['groupId'] === undefined
+      ? validateNumericField(options['priority'], 'priority', { min: -1000000, max: 1000000 })
+      : validateGroupPriority(options['priority']),
     validateNumericField(options['delay'], 'delay', { min: 0, max: 365 * 24 * 60 * 60 * 1000 }),
     validateNumericField(options['timeout'], 'timeout', { min: 0, max: 24 * 60 * 60 * 1000 }),
     validateNumericField(options['maxAttempts'], 'maxAttempts', { min: 1, max: 1000 }),

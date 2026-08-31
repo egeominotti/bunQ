@@ -29,6 +29,7 @@ export async function handlePush(
   if (groupError) return resp.error(groupError, reqId);
 
   const optionsError = validateJobOptions({
+    groupId: cmd.groupId,
     priority: cmd.priority,
     delay: cmd.delay,
     timeout: cmd.timeout,
@@ -59,6 +60,7 @@ export async function handlePush(
       parentId: cmd.parentId ? jobId(cmd.parentId) : undefined,
       tags: cmd.tags,
       groupId: cmd.groupId,
+      groupMaxSize: cmd.groupMaxSize,
       lifo: cmd.lifo,
       removeOnComplete: cmd.removeOnComplete,
       removeOnFail: cmd.removeOnFail,

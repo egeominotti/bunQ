@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
+import { PostgresQueueManager } from '../src/application/postgresQueueManager';
 import { createJob, generateJobId, jobId } from '../src/domain/types/job';
 import { PostgresQueueStore } from '../src/infrastructure/persistence/postgres';
 
@@ -35,10 +36,11 @@ async function cleanup(url: string, value: string): Promise<void> {
   }
 }
 
-function job(queue: string, label: string, groupId?: string) {
+function job(queue: string, label: string, groupId?: string, priority = 0) {
   return createJob(generateJobId(), queue, {
     data: { label },
     groupId,
+    priority,
   });
 }
 
@@ -56,6 +58,34 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL BullMQ Pro compatible groups', () => {
+  test.skipIf(!postgresUrl)(
+    'validates the intra-group priority range before PostgreSQL admission',
+    async () => {
+      const value = namespace();
+      const manager = new PostgresQueueManager({
+        postgres: { url: postgresUrl!, namespace: value, brokerId: 'priority-validation' },
+      });
+      try {
+        await expect(
+          manager.push('priority', { data: {}, groupId: 'A', priority: -1 })
+        ).rejects.toThrow('group.priority must be between 0 and 2097151');
+        await expect(
+          manager.push('priority', { data: {}, groupId: 'A', priority: 2_097_152 })
+        ).rejects.toThrow('group.priority must be between 0 and 2097151');
+
+        const accepted = await manager.push('priority', {
+          data: {},
+          groupId: 'A',
+          priority: 2_097_151,
+        });
+        expect(accepted.priority).toBe(2_097_151);
+      } finally {
+        await manager.shutdownPostgres();
+      }
+    },
+    30_000
+  );
+
   test.skipIf(!postgresUrl)(
     'preserves insertion FIFO when custom IDs sort in the opposite order',
     async () => {
@@ -272,6 +302,52 @@ describe('PostgreSQL BullMQ Pro compatible groups', () => {
         expect(await a.getGroupRateLimit('rate', 'A')).toEqual({ max: 1, duration: 60_000 });
         expect(await b.getGroupRateLimitTtl('rate', 'A', 1)).toBeGreaterThan(0);
         expect(await a.claim('rate', 10, 'a', undefined, groupRate)).toHaveLength(0);
+      } finally {
+        await Promise.allSettled([a.close(), b.close()]);
+      }
+    },
+    30_000
+  );
+
+  test.skipIf(!postgresUrl)(
+    'shares max size, pause, manual rate limits and intra-group priority across brokers',
+    async () => {
+      const value = namespace();
+      const a = new PostgresQueueStore({ url: postgresUrl!, namespace: value, brokerId: 'a' });
+      const b = new PostgresQueueStore({ url: postgresUrl!, namespace: value, brokerId: 'b' });
+      try {
+        await Promise.all([a.initialize(), b.initialize()]);
+        const admissions = await Promise.allSettled([
+          a.insert(job('capacity', 'A1', 'A'), 1),
+          b.insert(job('capacity', 'A2', 'A'), 1),
+        ]);
+        expect(admissions.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+        expect(admissions.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+
+        await a.insertMany([
+          job('controls', 'low', 'A', 9),
+          job('controls', 'high', 'A', 1),
+          job('controls', 'other', 'B'),
+        ]);
+        expect(await a.setGroupPaused('controls', 'A', true)).toBe(true);
+        expect(await b.getGroupPaused('controls', 'A')).toBe(true);
+        const [other] = await b.claim('controls', 3);
+        expect((other.job.data as { label: string }).label).toBe('other');
+        await b.complete(other.job.id, other.token);
+        expect(await b.setGroupPaused('controls', 'A', false)).toBe(true);
+        const prioritized = await a.claim('controls', 2);
+        expect(
+          prioritized.map(({ job: value }) => (value.data as { label: string }).label)
+        ).toEqual(['high', 'low']);
+
+        await a.rateLimitGroup('manual-rate', 'A', 1_000);
+        await a.insertMany([
+          job('manual-rate', 'blocked', 'A'),
+          job('manual-rate', 'available', 'B'),
+        ]);
+        expect(await b.getGroupRateLimitTtl('manual-rate', 'A')).toBeGreaterThan(0);
+        const [available] = await b.claim('manual-rate', 2);
+        expect((available.job.data as { label: string }).label).toBe('available');
       } finally {
         await Promise.allSettled([a.close(), b.close()]);
       }

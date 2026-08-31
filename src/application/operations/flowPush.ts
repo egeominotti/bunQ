@@ -54,6 +54,27 @@ function publishJobs(jobs: Job[], ctx: PushContext): Map<string, number> {
   return notifications;
 }
 
+function assertGroupCapacity(
+  batch: AtomicFlowBatchInput,
+  jobs: readonly Job[],
+  ctx: PushContext
+): void {
+  const counts = new Map<string, number>();
+  for (let index = 0; index < jobs.length; index++) {
+    const job = jobs[index];
+    if (!job.groupId || job.timeline[0]?.state === 'waiting-children') continue;
+    const key = `${job.queue}\0${job.groupId}`;
+    const current =
+      counts.get(key) ??
+      ctx.shards[shardIndex(job.queue)].getGroupJobsCount(job.queue, job.groupId);
+    const maxSize = batch.jobs[index].input.groupMaxSize;
+    if (maxSize !== undefined && current >= maxSize) {
+      throw new Error(`Group ${job.groupId} has reached its maximum size of ${maxSize}`);
+    }
+    counts.set(key, current + 1);
+  }
+}
+
 async function acquireFlowLocks(
   batch: AtomicFlowBatchInput,
   ctx: PushContext
@@ -98,6 +119,7 @@ export async function pushFlowBatch(
     assertIdsAvailable(batch, ctx);
     const now = Date.now();
     jobs = prepareJobs(batch, ctx, now);
+    assertGroupCapacity(batch, jobs, ctx);
     ctx.storage?.insertJobsBatch(jobs, true);
     notifications = publishJobs(jobs, ctx);
   } finally {

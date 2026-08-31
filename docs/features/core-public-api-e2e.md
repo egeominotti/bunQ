@@ -20,14 +20,14 @@ maintenance methods that are easy to omit from representative tests.
 
 ## Audited surface
 
-The current source compiler discovers **320 methods**:
+The current source compiler discovers **326 methods**:
 
 | Surface             | Methods |
 | ------------------- | ------: |
-| `Queue`             |     128 |
+| `Queue`             |     133 |
 | `Bunqueue`          |      47 |
 | `Job`               |      34 |
-| `Worker`            |      22 |
+| `Worker`            |      23 |
 | `TcpConnectionPool` |      13 |
 | `Engine`            |      17 |
 | `Workflow`          |      14 |
@@ -37,7 +37,7 @@ The current source compiler discovers **320 methods**:
 | `QueueEvents`       |       6 |
 | `SandboxedWorker`   |       6 |
 | `Forwarder`         |       2 |
-| **Total**           | **320** |
+| **Total**           | **326** |
 
 `support/public-surface.ts` uses the TypeScript checker rather than a maintained
 class or method list. It scans the client and workflow entrypoints, resolves
@@ -45,13 +45,13 @@ their exported classes plus the `Job` interface, keeps public callable
 declarations owned by `src/client/`, removes inherited Node `EventEmitter`
 methods, and emits stable `Class.method` keys. The final assertion requires
 exact equality between the applicable set and successfully exercised methods.
-The runner registers **604 applicable method-mode checks**. The
+The runner registers **616 applicable method-mode checks**. The
 13 `TcpConnectionPool` methods are TCP-only. Another 23 legacy synchronous
 snapshot methods have authoritative async companions and are embedded-only by
-signature because they cannot await a TCP round trip. Those 37 non-dual cells
-are explicit `N/A`, not fabricated sentinel passes. The remaining 284 methods
+signature because they cannot await a TCP round trip. Those 36 non-dual cells
+are explicit `N/A`, not fabricated sentinel passes. The remaining 290 methods
 run in both modes. Including inventory and hygiene assertions, the focused
-suite has 608 tests.
+suite has 620 tests.
 
 ## Runtime contract
 
@@ -74,7 +74,7 @@ capability boundaries are explicit `N/A` cells, and every `PASS` is a successful
 real operation.
 
 Each successful operation records its mode, contract, operation kind, duration,
-and exact source location. The suite writes the complete 320-row matrix to:
+and exact source location. The suite writes the complete 326-row matrix to:
 
 - `artifacts/core-e2e/public-api-matrix.md` for human review;
 - `artifacts/core-e2e/public-api-matrix.json` for automation.

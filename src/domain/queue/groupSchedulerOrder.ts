@@ -3,7 +3,7 @@ import type { Job } from '../types/job';
 import type { HeapEntry } from '../types/priorityQueue';
 
 export function orderedGroupClone(job: Job, runAt = job.runAt): Job {
-  const clone = { ...job, priority: 0, lifo: false, runAt };
+  const clone = { ...job, lifo: false, runAt };
   copyGroupFifoOrder(job, clone);
   return clone;
 }
@@ -18,6 +18,7 @@ function compareOrder(left: bigint, right: bigint): number {
 }
 
 export function compareGroupFifoEntries(left: HeapEntry, right: HeapEntry): number {
+  if (left.priority !== right.priority) return left.priority - right.priority;
   const order = compareOrder(
     left.groupFifoOrder ?? left.generation,
     right.groupFifoOrder ?? right.generation

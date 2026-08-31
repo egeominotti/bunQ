@@ -127,7 +127,10 @@ Python, PHP, Go, Rust and Elixir clients speak the same protocol — see
   database-authoritative claims, fenced
   leases, shared limits, cron, workers, job-state/lifecycle metrics, and failover state
   ([tested three-broker Docker example](https://bunqueue.dev/examples/postgres-multibroker/))
-- **BullMQ-compatible API** — same `Queue`, `Worker`, `QueueEvents`; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
+- **BullMQ and BullMQ Pro-compatible API** — `Queue`, `Worker`,
+  `QueueEvents`, `FlowProducer`, plus `QueuePro`/`WorkerPro` aliases, fair job
+  groups, native processor batches, cooperative cancellation, and Observable
+  results; [migrating takes minutes](https://bunqueue.dev/guide/migration/)
 - **MCP server included** — 73 tools; AI agents get full queue control out of the box
 - **Everything server-side** — retries with backoff, priorities, cron, rate limits, dead letter queue
 - **Measured, operation-specific performance** — 729K jobs/sec internal
@@ -200,6 +203,46 @@ await queue.add('process', { data: 'hello' });
 
 [Running the server →](https://bunqueue.dev/guide/server/) ·
 [Deployment guide →](https://bunqueue.dev/guide/deployment/)
+
+## BullMQ Pro-compatible groups and batches
+
+The Bun client exposes Pro-style aliases backed by the same native queue and
+worker implementations. No separate runtime or license is required:
+
+```typescript
+import { QueuePro, WorkerPro } from 'bunqueue/client';
+
+const queue = new QueuePro('webhooks', { embedded: true, dataPath: './data/app.db' });
+
+await queue.add('deliver', payload, {
+  group: { id: 'tenant-a', priority: 1, maxSize: 10_000 },
+});
+
+const worker = new WorkerPro(
+  'webhooks',
+  async (job, { signal } = { signal: new AbortController().signal }) => {
+    const batch = job.getBatch?.() ?? [job];
+    return await deliver(batch, signal);
+  },
+  {
+    embedded: true,
+    batch: { size: 100, minSize: 10, timeout: 250, groupAffinity: true },
+    group: { concurrency: 2, limit: { max: 20, duration: 1000 } },
+  }
+);
+```
+
+Groups support atomic `maxSize` admission, priority within a group, pause and
+resume, manual rate limits, per-group concurrency/rate defaults, pending-job
+queries, and fair round-robin claims. Native batches support minimum size,
+timeout, group affinity, and selective `job.setAsFailed(error)`. Processor
+timeouts and explicit cancellation abort the second-argument `AbortSignal`;
+Promise handlers remain cooperative, while structural Observable handlers are
+unsubscribed. These contracts are identical with SQLite and PostgreSQL 15–18.
+BullMQ Pro telemetry and NestJS integration are intentionally not included.
+
+[Job Groups guide →](https://bunqueue.dev/guide/queue/job-groups/) ·
+[Worker options →](https://bunqueue.dev/guide/worker/options/)
 
 ## One Queue, Any Language (SDKs)
 

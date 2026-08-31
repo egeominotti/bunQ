@@ -38,6 +38,7 @@ import {
 } from './processorHandlers';
 import { handleJobFailure, handleManualMove, isJobNotFoundError } from './processorOutcome';
 import type { ManualMove } from './types';
+import { resolveProcessorResult } from './processorResult';
 
 export type { ProcessorConfig } from './types';
 
@@ -140,7 +141,11 @@ export async function processJob<T, R>(
   emitter.emit('active', job);
 
   try {
-    const result = await processor(job);
+    const abortController = config.abortController ?? new AbortController();
+    const result = await resolveProcessorResult(
+      processor(job, { signal: abortController.signal }),
+      abortController.signal
+    );
     if (config.shouldAbandonOutcome?.()) return;
 
     // An explicit broker disposition owns the generation, so skip auto-ACK.

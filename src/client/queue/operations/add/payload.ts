@@ -43,7 +43,7 @@ export function buildPushPayload(
     queue,
     name,
     data,
-    priority: options.priority,
+    priority: options.group?.priority ?? options.priority,
     delay: options.delay,
     maxAttempts: options.attempts,
     backoff: options.backoff,
@@ -61,6 +61,7 @@ export function buildPushPayload(
     dependsOn: options.dependsOn,
     tags: options.tags,
     groupId: resolveGroupId(options),
+    groupMaxSize: options.group?.maxSize,
     lifo: options.lifo,
     removeOnComplete:
       typeof options.removeOnComplete === 'boolean' ? options.removeOnComplete : undefined,
@@ -101,5 +102,9 @@ export function reflectionMeta(options: ExtendedJobOptions): {
   delay?: number;
   opts: JobOptions;
 } {
-  return { priority: options.priority, delay: options.delay, opts: options };
+  return {
+    priority: options.group?.priority ?? options.priority,
+    delay: options.delay,
+    opts: options,
+  };
 }

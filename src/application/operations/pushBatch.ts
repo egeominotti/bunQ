@@ -5,7 +5,11 @@ import {
   createJob,
   normalizeJobPayload,
 } from '../../domain/types/job';
-import { assertOptionalGroupId } from '../../domain/types/group';
+import {
+  assertGroupPriority,
+  assertOptionalGroupId,
+  assertPositiveSafeInteger,
+} from '../../domain/types/group';
 import { EventType } from '../../domain/types/queue';
 import { shardIndex } from '../../shared/hash';
 import { releaseDependencyCompletionPins } from '../dependencyCompletions';
@@ -32,6 +36,10 @@ export async function pushJobBatch(
 ): Promise<JobId[]> {
   for (const input of inputs) {
     assertOptionalGroupId(input.groupId);
+    if (input.groupId !== undefined) assertGroupPriority(input.priority);
+    if (input.groupMaxSize !== undefined) {
+      assertPositiveSafeInteger(input.groupMaxSize, 'group.maxSize');
+    }
     validateRepeatJobInput(input);
     normalizeJobPayload(input);
   }
@@ -66,6 +74,16 @@ export async function pushJobBatch(
         if (dedupResult.skip) {
           resultIds.push(dedupResult.existingId);
           continue;
+        }
+        if (
+          job.groupId &&
+          input.groupMaxSize !== undefined &&
+          !dedupResult.replacement &&
+          shard.getGroupJobsCount(queue, job.groupId) >= input.groupMaxSize
+        ) {
+          throw new Error(
+            `Group ${job.groupId} has reached its maximum size of ${input.groupMaxSize}`
+          );
         }
         shard.assignGroupFifoOrder(job);
 

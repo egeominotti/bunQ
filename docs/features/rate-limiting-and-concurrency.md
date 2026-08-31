@@ -148,9 +148,10 @@ interface GroupWorkerOptions {
 ```
 
 Queue limits are persisted in `queue_state`. Per-group overrides are persisted
-in SQLite schema-v35 `group_state`; embedded runtime windows are in memory.
-PostgreSQL schema-v19 stores overrides and live fixed-window accounting in
-`bunqueue_group_state` so all brokers share the same capacity.
+in SQLite schema-v36 `group_state`; embedded runtime windows are in memory.
+PostgreSQL schema-v20 stores overrides, pause/manual deadlines, and live
+fixed-window accounting in `bunqueue_group_state` so all brokers share the same
+capacity and eligibility state.
 
 ## Business Logic / Control Flow
 
@@ -159,9 +160,10 @@ PostgreSQL schema-v19 stores overrides and live fixed-window accounting in
 `tryPullFromShard` (`src/application/operations/pull.ts`) runs entirely inside the shard write lock:
 
 1. If `state.paused`, return no job.
-2. Ask `GroupScheduler` for the next ready ungrouped job or eligible FIFO group
-   head. Its secondary delayed heap and circular group rotation avoid scanning
-   or reinserting an ineligible prefix of the authoritative heap.
+2. Ask `GroupScheduler` for the next ready ungrouped job or eligible
+   priority/FIFO group head. Its secondary delayed heap and circular group
+   rotation avoid scanning or reinserting an ineligible prefix of the
+   authoritative heap.
 3. `shard.tryAcquireConcurrency(queue)` atomically reserves the active slot. On miss, emit `concurrency:rejected` and return no job.
 4. `shard.tryAcquireRateLimit(queue)` consumes the token only after the concurrency check; if it rejects, release the just-acquired concurrency slot because rate-limit tokens have no rollback operation.
 5. Pop the selected job and keep its concurrency slot for the entire active

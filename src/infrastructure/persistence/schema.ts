@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS group_state (
     rate_limit INTEGER,
     rate_duration INTEGER,
     concurrency_limit INTEGER,
+    paused INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (queue, group_id)
 );
 
@@ -210,4 +211,4 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 `;
 /** Current schema version */
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;

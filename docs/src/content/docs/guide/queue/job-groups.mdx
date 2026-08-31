@@ -15,7 +15,7 @@ head:
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
   <h1 class="bq-hero-h1 bq-bench-h1">Fair streams, <em>one queue.</em></h1>
-  <p class="bq-hero-sub">Put each tenant, webhook destination or customer in a group. bunqueue keeps FIFO order inside that stream, rotates fairly across streams and enforces backpressure at the broker.</p>
+  <p class="bq-hero-sub">Put each tenant, webhook destination or customer in a group. bunqueue keeps FIFO ties inside that stream, rotates fairly across streams and enforces backpressure at the broker.</p>
 </div>
 
 :::note[Job groups, not QueueGroup]
@@ -39,12 +39,29 @@ await queue.add('deliver', { event: 'created' }, { group: { id: 'tenant-b' } });
 ```
 
 When both groups are ready, claims rotate `tenant-a`, `tenant-b`,
-`tenant-a`. Jobs inside each group stay FIFO. Ready jobs without a group are
-served before grouped jobs.
+`tenant-a`. Equal-priority jobs inside each group stay FIFO. Ready jobs without
+a group are served before grouped jobs.
 
 Group IDs may be non-empty strings or safe integers and may contain at most 256
 characters. NUL characters are rejected. Numeric IDs are normalized to strings;
 objects and fractional or unsafe numeric IDs are not coerced.
+
+Use `priority` for ordered work inside one group and `maxSize` for atomic
+producer backpressure. Priority `0` is highest; among positive priorities, a
+lower number runs first. Values must be integers from `0` through `2,097,151`:
+
+```typescript
+await queue.add('deliver', payload, {
+  group: { id: 'tenant-a', priority: 1, maxSize: 10_000 },
+});
+```
+
+`maxSize` counts pending jobs in waiting, prioritized, and delayed states; an
+active job no longer consumes that pending-cap slot. The broker performs the
+count and insert as one admission decision. A full group rejects a single add,
+the complete `addBulk`, or the complete atomic FlowProducer graph without
+leaving partial jobs. The same guarantee is transactionally serialized across
+PostgreSQL brokers.
 
 ## FIFO does not mean concurrency one
 
@@ -114,6 +131,23 @@ await queue.removeGroupRateLimit('tenant-a');
 await queue.removeGroupConcurrency('tenant-a');
 ```
 
+Pause and resume one tenant without pausing the queue:
+
+```typescript
+await queue.pauseGroup('tenant-a');
+await queue.isGroupPaused('tenant-a'); // true
+await queue.resumeGroup('tenant-a');
+```
+
+Inside a processor, apply an immediate cooldown and return the current delivery
+to waiting with `await worker.rateLimitGroup(job, 30_000)`. This manual deadline
+works even when the Worker has no `group.limit` default. The stored
+`setGroupRateLimit` override above is different: it customizes a configured
+fixed-window default and has no effect when all Workers omit that default.
+The broker installs the manual deadline before moving the active delivery back
+to waiting. If the lease is stale and that move rejects, the Promise rejects but
+the group cooldown remains active.
+
 ## Depth and autoscaling signals
 
 ```typescript
@@ -121,6 +155,8 @@ const tenantDepth = await queue.getGroupJobsCount('tenant-a');
 const groupedDepth = await queue.getGroupsJobsCount();
 const tenantActive = await queue.getGroupActiveCount('tenant-a');
 const retryIn = await queue.getGroupRateLimitTtl('tenant-a', 5);
+const jobs = await queue.getGroupJobs('tenant-a', 0, 99);
+const priorities = await queue.getCountsPerPriorityForGroup('tenant-a');
 ```
 
 `getGroupJobsCount` and `getGroupsJobsCount` count queued grouped jobs in the
@@ -137,18 +173,19 @@ one broker includes work admitted or claimed through another.
 ## Persistence and cleanup
 
 SQLite persists group-specific rate/concurrency configuration across broker
-restarts; its current fixed-window counter resets with the process, like the
-existing SQLite queue-level limiter. PostgreSQL persists configuration, live
-fixed-window accounting, immutable grouped admission order and round-robin
-position. Inactive PostgreSQL scheduler rows are reclaimed only after their
-jobs, overrides and live rate window are gone. `queue.obliterateAsync()` removes
-the jobs and all group configuration for that queue.
+restarts, including pause state; its current fixed-window and manual deadline
+reset with the process, like the existing SQLite queue-level limiter.
+PostgreSQL persists configuration, pause/manual deadlines, live fixed-window
+accounting, immutable grouped admission order and round-robin position.
+Inactive PostgreSQL scheduler rows are reclaimed only after their jobs,
+overrides and live rate window are gone. `queue.obliterateAsync()` removes the
+jobs and all group configuration for that queue.
 
 ## Where to go next
 
-| | |
-| --- | --- |
+|                                                   |                                                          |
+| ------------------------------------------------- | -------------------------------------------------------- |
 | [Rate Limits & Concurrency](/guide/queue/limits/) | Queue-wide limits and how they compose with group limits |
-| [Worker Concurrency](/guide/worker/concurrency/) | Total Worker parallelism and batch pulling |
-| [SQLite / PostgreSQL](/guide/databases/) | Share group order and budgets across brokers |
-| [Job Options](/guide/queue/options/) | All per-job options, including `group` |
+| [Worker Concurrency](/guide/worker/concurrency/)  | Total Worker parallelism and batch pulling               |
+| [SQLite / PostgreSQL](/guide/databases/)          | Share group order and budgets across brokers             |
+| [Job Options](/guide/queue/options/)              | All per-job options, including `group`                   |

@@ -65,7 +65,7 @@ function dedupConfig(opts: JobOptions) {
  */
 function managerOptions(opts: JobOptions) {
   return {
-    priority: opts.priority,
+    priority: opts.group?.priority ?? opts.priority,
     delay: opts.delay,
     maxAttempts: opts.attempts,
     backoff: opts.backoff,
@@ -88,13 +88,14 @@ function managerOptions(opts: JobOptions) {
     ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
     continueParentOnFailure: opts.continueParentOnFailure,
     groupId: groupId(opts),
+    groupMaxSize: opts.group?.maxSize,
   };
 }
 
 /** Full option set for the TCP PUSH command, mirroring buildPushPayload in add.ts (#90). */
 function tcpOptions(opts: JobOptions) {
   return {
-    priority: opts.priority,
+    priority: opts.group?.priority ?? opts.priority,
     delay: opts.delay,
     maxAttempts: opts.attempts,
     backoff: opts.backoff,
@@ -117,6 +118,7 @@ function tcpOptions(opts: JobOptions) {
     ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
     continueParentOnFailure: opts.continueParentOnFailure,
     groupId: groupId(opts),
+    groupMaxSize: opts.group?.maxSize,
   };
 }
 

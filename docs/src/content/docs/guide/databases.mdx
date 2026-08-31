@@ -39,8 +39,9 @@ const queue = new Queue('jobs', { embedded: true, dataPath: '/data/jobs.db' });
 _Embedded mode (and `queue.forward()` below) ships in the Bun `bunqueue` package only. From every other language, run the server and connect with a [client SDK](/guide/sdks/), as in Option 3._
 
 For multiple active broker processes, use the PostgreSQL server backend. It is
-database-authoritative: claims, leases, ACK/FAIL, queue limits, cron schedules,
-worker registrations, job-state/lifecycle metrics, and events are coordinated in PostgreSQL rather
+database-authoritative: claims, leases, ACK/FAIL, queue limits, Pro-style group
+capacity/order/pause/rate state, cron schedules, worker registrations,
+job-state/lifecycle metrics, and events are coordinated in PostgreSQL rather
 than independent in-memory queues. Here, metrics means job-state and lifecycle
 families; process/connection and registration collectors remain broker-local.
 
@@ -121,8 +122,9 @@ The broker count is not limited to the two services in the example. The
 PostgreSQL integration gate also starts four independent bunqueue processes,
 each with its own ports and connection pool, against one PostgreSQL 18.6
 namespace. It exercises concurrent production/consumption, shared rate and
-concurrency limits, pause/resume, cross-broker ACK, and recovery after one broker
-is killed while holding leases.
+concurrency limits, group max-size admission, priority/FIFO rotation, group
+pause/manual deadlines, queue pause/resume, cross-broker ACK, and recovery after
+one broker is killed while holding leases.
 
 PostgreSQL transactions use `FOR UPDATE SKIP LOCKED` for competing claims and
 opaque, database-clock leases for fencing. LISTEN/NOTIFY only wakes other
@@ -413,6 +415,8 @@ Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare W
 | Authority                        | Process memory + optional SQLite durability | PostgreSQL transactions   |
 | Claim coordination               | In-process locks                            | Row locks + `SKIP LOCKED` |
 | Lease clock                      | Broker process                              | PostgreSQL                |
+| Job-group ordering and capacity  | In-process; SQLite persists config/order    | Transactional across brokers |
+| Group pause/manual deadline      | Pause persists; live deadline is in memory  | Both persist in PostgreSQL |
 | Built-in S3 snapshots            | SQLite only                                 | No; use database backups  |
 | MySQL compatibility              | No                                          | No                        |
 

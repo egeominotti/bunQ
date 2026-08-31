@@ -79,12 +79,15 @@ import { removePostgresUnprocessedChildren } from './removeUnprocessedChildren';
 import {
   getPostgresGroupActiveCount,
   getPostgresGroupConcurrency,
+  getPostgresGroupPaused,
   getPostgresGroupJobsCount,
   getPostgresGroupRateLimit,
   getPostgresGroupRateLimitTtl,
   removePostgresGroupConcurrency,
   removePostgresGroupRateLimit,
+  rateLimitPostgresGroup,
   setPostgresGroupConcurrency,
+  setPostgresGroupPaused,
   setPostgresGroupRateLimit,
 } from './groups';
 import { prunePostgresGroupStates } from './groupStateRetention';
@@ -93,13 +96,11 @@ import {
   loadPostgresManagerSnapshot,
   loadPostgresQueueReadModel,
 } from './readModels';
-
 function pruneInactiveGroups(ctx: PostgresContext): Promise<void> {
   return runPostgresPostCommitMaintenance(ctx, 'group-state-retention', async () => {
     await prunePostgresGroupStates(ctx);
   });
 }
-
 /** Database-authoritative PostgreSQL queue store safe for concurrent brokers. */
 export class PostgresQueueStore extends PostgresAdmissionStore {
   getGroupJobsCount = (queue: string, groupId?: string) =>
@@ -126,6 +127,12 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
     if (removed) await pruneInactiveGroups(this.context);
     return removed;
   };
+  setGroupPaused = (queue: string, groupId: string, paused: boolean) =>
+    setPostgresGroupPaused(this.context, queue, groupId, paused);
+  getGroupPaused = (queue: string, groupId: string) =>
+    getPostgresGroupPaused(this.context, queue, groupId);
+  rateLimitGroup = (queue: string, groupId: string, duration: number) =>
+    rateLimitPostgresGroup(this.context, queue, groupId, duration);
   async now(): Promise<number> {
     await this.initialize();
     return await databaseNow(this.context.sql);
@@ -147,7 +154,6 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
       groupOptions,
     });
   }
-
   async complete(id: JobId, token: string, result?: unknown, remove = false) {
     await this.initialize();
     const transition = await completePostgresJob(this.context, id, token, result, remove);
@@ -161,7 +167,6 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
     }
     return transition;
   }
-
   async completeMany(items: readonly PostgresCompletionInput[]) {
     await this.initialize();
     const transitions = await completePostgresJobs(this.context, items);
@@ -175,7 +180,6 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
     }
     return transitions;
   }
-
   async fail(input: PostgresFailureInput) {
     await this.initialize();
     const transition = await failPostgresJob(this.context, input);

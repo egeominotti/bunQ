@@ -120,7 +120,7 @@ export function queuedWrite<T extends { writeQueue: SocketWriteQueue }>(socket, 
 `serialization.ts` exports `serializeJob`/`serializeJobs` (BigInt id → string, `Record<string,unknown>`), `bigIntReplacer`, and `jsonStringify`. These produce **JSON-safe** shapes used by the JSON/HTTP layer; the binary TCP path relies on `msgpackr` (which encodes `bigint` natively) and does not call these.
 
 **TCP commands carried (exact `cmd` names):** the full set is the `Command` union (`commands/union.ts:13-107`):
-`PUSH`, `PUSHB`, `PUSHF`, `PULL`, `PULLB`, `ACK`, `ACKB`, `FAIL`, `GetJob`, `GetState`, `GetResult`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `GetJobByCustomId`, `Count`, `GetProgress`, `GetQueueLimits`, `GetDeduplicationJobId`, `Cancel`, `Progress`, `Update`, `ChangePriority`, `Promote`, `WaitJob`, `MoveToDelayed`, `MoveToWaitingChildren`, `Discard`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`, `Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RemoveDlqJob`, `RetryCompleted`, `RateLimit`, `SetConcurrency`, `RateLimitClear`, `ClearConcurrency`, `GetGroupJobsCount`, `GetGroupsJobsCount`, `GetGroupActiveCount`, `SetGroupRateLimit`, `GetGroupRateLimit`, `RemoveGroupRateLimit`, `GetGroupRateLimitTtl`, `SetGroupConcurrency`, `GetGroupConcurrency`, `RemoveGroupConcurrency`, `SetStallConfig`, `GetStallConfig`, `SetDlqConfig`, `GetDlqConfig`, `Cron`, `CronDelete`, `CronList`, `AddLog`, `GetLogs`, `Heartbeat`, `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `RegisterWorker`, `UnregisterWorker`, `ListWorkers`, `AddWebhook`, `RemoveWebhook`, `ListWebhooks`, `Stats`, `Metrics`, `TrimEvents`, `Prometheus`, `CronGet`, `GetChildrenValues`, `StorageStatus`, `ClearLogs`, `ExtendLock`, `ExtendLocks`, `ChangeDelay`, `SetWebhookEnabled`, `CompactMemory`, `UpdateParent`, `MoveToWait`, `PromoteJobs`, `DashboardOverview`, `DashboardQueues`, `DashboardQueue`, `Auth`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Hello`, `SubscribeEvents`, `UnsubscribeEvents`.
+`PUSH`, `PUSHB`, `PUSHF`, `PULL`, `PULLB`, `ACK`, `ACKB`, `FAIL`, `GetJob`, `GetState`, `GetResult`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `GetJobByCustomId`, `Count`, `GetProgress`, `GetQueueLimits`, `GetDeduplicationJobId`, `Cancel`, `Progress`, `Update`, `ChangePriority`, `Promote`, `WaitJob`, `MoveToDelayed`, `MoveToWaitingChildren`, `Discard`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`, `Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RemoveDlqJob`, `RetryCompleted`, `RateLimit`, `SetConcurrency`, `RateLimitClear`, `ClearConcurrency`, `GetGroupJobsCount`, `GetGroupsJobsCount`, `GetGroupActiveCount`, `SetGroupRateLimit`, `GetGroupRateLimit`, `RemoveGroupRateLimit`, `GetGroupRateLimitTtl`, `SetGroupConcurrency`, `GetGroupConcurrency`, `RemoveGroupConcurrency`, `PauseGroup`, `ResumeGroup`, `IsGroupPaused`, `RateLimitGroup`, `SetStallConfig`, `GetStallConfig`, `SetDlqConfig`, `GetDlqConfig`, `Cron`, `CronDelete`, `CronList`, `AddLog`, `GetLogs`, `Heartbeat`, `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `RegisterWorker`, `UnregisterWorker`, `ListWorkers`, `AddWebhook`, `RemoveWebhook`, `ListWebhooks`, `Stats`, `Metrics`, `TrimEvents`, `Prometheus`, `CronGet`, `GetChildrenValues`, `StorageStatus`, `ClearLogs`, `ExtendLock`, `ExtendLocks`, `ChangeDelay`, `SetWebhookEnabled`, `CompactMemory`, `UpdateParent`, `MoveToWait`, `PromoteJobs`, `DashboardOverview`, `DashboardQueues`, `DashboardQueue`, `Auth`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Hello`, `SubscribeEvents`, `UnsubscribeEvents`.
 
 `Metrics` without queue fields retains the legacy broker-wide `{metrics}`
 response. The Queue client sends `{cmd:'Metrics',queue,type,start,end}` and
@@ -150,10 +150,13 @@ deduplication commands expose lookup, queue-key release, and generation-safe
 job-owned release. `MoveToWaitingChildren` performs the real active-to-parked
 state transition. `GetJobs.asc` is optional and defaults to `true`; `false`
 selects descending createdAt/job-id order before offset/limit pagination.
-`PULL`/`PULLB` carry optional positive-safe-integer group defaults, and the ten
-group getter/control commands return server-authoritative depth, active count,
-fixed-window TTL/configuration, and concurrency configuration through wrapped
-`data` payloads.
+`PULL`/`PULLB` carry optional positive-safe-integer group defaults. The fourteen
+group getter/control commands expose server-authoritative depth, active count,
+fixed-window TTL/configuration, concurrency, pause state, and immediate manual
+deadlines. Grouped `PUSH`/`PUSHB`/`PUSHF` inputs carry normalized `groupId`,
+ascending BullMQ Pro priority, and optional atomic `groupMaxSize`; a failed
+capacity check rejects the complete batch/graph through the ordinary error
+response.
 
 `PUSHF` carries `{ cmd: 'PUSHF', jobs: AtomicFlowJobInput[] }`, where every
 entry already has its final string `id`, queue, job input, and graph links. The

@@ -159,6 +159,10 @@ to the multi-broker backend.
 | Rate limiting                                                     | ✅ Per-worker and per-queue                         | ✅ Per-worker                        |
 | Cron / repeatable jobs                                            | ✅ Built-in                                         | ✅ Via Job Scheduler                 |
 | Parent-child flows                                                | ✅                                                  | ✅                                   |
+| Pro-style job groups                                               | ✅ Priority/FIFO, max size, pause, limits           | ✅ BullMQ Pro                        |
+| Native processor batches                                          | ✅ Bun client, selective member failure             | ✅ BullMQ Pro                        |
+| AbortSignal / Observable processors                                | ✅ Bun client                                       | ✅ BullMQ Pro                        |
+| Pro telemetry / NestJS integration                                 | ❌ Use native metrics; framework-neutral            | ✅ BullMQ Pro                        |
 | Persistence                                                       | Memory/SQLite by default; PostgreSQL 15–18 optional | Redis server                         |
 | Horizontal broker scaling                                         | ✅ PostgreSQL mode                                  | ✅ Redis Cluster                     |
 | External infrastructure                                           | ✅ None with SQLite; PostgreSQL optional            | ❌ Redis required                    |

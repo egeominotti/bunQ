@@ -4,7 +4,11 @@
  */
 
 import { type Job, type JobId, type JobInput, createJob } from '../../domain/types/job';
-import { assertOptionalGroupId } from '../../domain/types/group';
+import {
+  assertGroupPriority,
+  assertOptionalGroupId,
+  assertPositiveSafeInteger,
+} from '../../domain/types/group';
 import { EventType } from '../../domain/types/queue';
 import { shardIndex } from '../../shared/hash';
 import { latencyTracker } from '../latencyTracker';
@@ -32,6 +36,10 @@ export { pushJobBatch } from './pushBatch';
  */
 export async function pushJob(queue: string, input: JobInput, ctx: PushContext): Promise<Job> {
   assertOptionalGroupId(input.groupId);
+  if (input.groupId !== undefined) assertGroupPriority(input.priority);
+  if (input.groupMaxSize !== undefined) {
+    assertPositiveSafeInteger(input.groupMaxSize, 'group.maxSize');
+  }
   validateRepeatJobInput(input);
   const startNs = Bun.nanoseconds();
   const idx = shardIndex(queue);
@@ -74,6 +82,14 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
         persisted: false,
       };
       return;
+    }
+    if (
+      job.groupId &&
+      input.groupMaxSize !== undefined &&
+      !dedupResult.replacement &&
+      shard.getGroupJobsCount(queue, job.groupId) >= input.groupMaxSize
+    ) {
+      throw new Error(`Group ${job.groupId} has reached its maximum size of ${input.groupMaxSize}`);
     }
     shard.assignGroupFifoOrder(job);
 

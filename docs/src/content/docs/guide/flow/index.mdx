@@ -269,6 +269,10 @@ visible to workers, but a process crash cannot recover it.
 - `repeat`, `deduplication`, `debounce`, and `opts.parent` are rejected inside
   an atomic flow because their independent lifetime/ownership semantics cannot
   participate safely in the graph transaction.
+- `opts.group` is preserved for every node, including `id`, BullMQ Pro
+  intra-group `priority`, and `maxSize`. Group options are validated with the
+  rest of the graph; an invalid option or full group rejects every node before
+  either SQLite or PostgreSQL publishes a partial flow.
 - The four child-failure policies are mutually exclusive.
 
 Wire values are checked at runtime too: IDs must be strings, link fields must be

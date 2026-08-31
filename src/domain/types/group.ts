@@ -7,9 +7,13 @@ export interface GroupRateLimit {
 export interface GroupPullOptions {
   readonly concurrency?: number;
   readonly limit?: GroupRateLimit;
+  /** Internal batch affinity: undefined means any group; null means ungrouped only. */
+  readonly affinity?: string | null;
 }
 
 export interface GroupRateLimitOverride extends GroupRateLimit {}
+
+export const MAX_GROUP_PRIORITY = 2_097_151;
 
 /** Validate the canonical string form shared by every broker and persistence backend. */
 export function validateGroupId(value: unknown, required = false): string | null {
@@ -28,6 +32,23 @@ export function assertGroupId(value: unknown): asserts value is string {
 
 export function assertOptionalGroupId(value: unknown): asserts value is string | undefined {
   const error = validateGroupId(value);
+  if (error) throw new Error(error);
+}
+
+export function validateGroupPriority(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'group.priority must be a finite number';
+  }
+  if (!Number.isInteger(value)) return 'group.priority must be an integer';
+  if (value < 0 || value > MAX_GROUP_PRIORITY) {
+    return `group.priority must be between 0 and ${MAX_GROUP_PRIORITY}`;
+  }
+  return null;
+}
+
+export function assertGroupPriority(value: unknown): void {
+  const error = validateGroupPriority(value);
   if (error) throw new Error(error);
 }
 
@@ -62,6 +83,13 @@ export function validateGroupPullOptions(options: unknown): string | null {
     return 'group must be an object';
   }
   const group = options as Record<string, unknown>;
+  if (
+    group.affinity !== undefined &&
+    group.affinity !== null &&
+    typeof group.affinity !== 'string'
+  ) {
+    return 'group.affinity must be a string or null';
+  }
   if (group.concurrency !== undefined) {
     const error = validatePositiveSafeInteger(group.concurrency, 'group.concurrency');
     if (error) return error;

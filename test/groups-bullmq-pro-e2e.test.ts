@@ -56,6 +56,21 @@ afterEach(async () => {
 });
 
 describe('BullMQ Pro compatible groups end to end', () => {
+  test('validates the intra-group priority range over TCP', async () => {
+    const current = start();
+    const producer = queue(current, `groups-e2e-priority-${Bun.randomUUIDv7()}`);
+
+    await expect(producer.add('job', {}, { group: { id: 'A', priority: -1 } })).rejects.toThrow(
+      'group.priority must be between 0 and 2097151'
+    );
+    await expect(
+      producer.add('job', {}, { group: { id: 'A', priority: 2_097_152 } })
+    ).rejects.toThrow('group.priority must be between 0 and 2097151');
+
+    const accepted = await producer.add('job', {}, { group: { id: 'A', priority: 2_097_151 } });
+    expect(accepted.priority).toBe(2_097_151);
+  });
+
   test('preserves insertion FIFO over TCP when custom IDs sort in reverse', async () => {
     const current = start();
     const name = `groups-e2e-fifo-${Bun.randomUUIDv7()}`;
@@ -101,10 +116,15 @@ describe('BullMQ Pro compatible groups end to end', () => {
 
     expect(await producer.getGroupJobsCount('A')).toBe(2);
     expect(await producer.getGroupsJobsCount()).toBe(4);
+    expect((await producer.getGroupJobs('A')).map((job) => job.data.label)).toEqual(['A1', 'A2']);
+    expect(await producer.getCountsPerPriorityForGroup('A')).toEqual({ 0: 2 });
     await producer.setGroupRateLimit('A', 3, 1_000);
     expect(await producer.getGroupRateLimit('A')).toEqual({ max: 3, duration: 1_000 });
     await producer.setGroupConcurrency('A', 2);
     expect(await producer.getGroupConcurrency('A')).toBe(2);
+    expect(await producer.pauseGroup('A')).toBe(true);
+    expect(await producer.isGroupPaused('A')).toBe(true);
+    expect(await producer.resumeGroup('A')).toBe(true);
 
     const tcp = new TcpClient({
       autoReconnect: false,
@@ -208,6 +228,7 @@ describe('BullMQ Pro compatible groups end to end', () => {
     const before = new Queue<{ label: string }>(name, options);
     await before.setGroupRateLimit('A', 3, 60_000);
     await before.setGroupConcurrency('A', 2);
+    await before.pauseGroup('A');
     await before.add('job', { label: 'A1' }, { durable: true, group: { id: 'A' } });
     before.close();
     shutdownManager();
@@ -215,7 +236,9 @@ describe('BullMQ Pro compatible groups end to end', () => {
     const restored = new Queue<{ label: string }>(name, options);
     expect(await restored.getGroupRateLimit('A')).toEqual({ max: 3, duration: 60_000 });
     expect(await restored.getGroupConcurrency('A')).toBe(2);
+    expect(await restored.isGroupPaused('A')).toBe(true);
     expect(await restored.getGroupJobsCount('A')).toBe(1);
+    expect(await restored.resumeGroup('A')).toBe(true);
     await restored.obliterateAsync();
     restored.close();
     shutdownManager();
@@ -225,5 +248,40 @@ describe('BullMQ Pro compatible groups end to end', () => {
     expect(await cleared.getGroupConcurrency('A')).toBeNull();
     expect(await cleared.getGroupJobsCount('A')).toBe(0);
     cleared.close();
+  });
+
+  test('processes one native affinity batch over TCP', async () => {
+    const current = start();
+    const name = `groups-batch-e2e-${Bun.randomUUIDv7()}`;
+    const producer = queue<{ label: string }>(current, name);
+    for (const label of ['A1', 'A2', 'B1', 'B2']) {
+      await producer.add('job', { label }, { group: { id: label[0] } });
+    }
+
+    const batches: string[][] = [];
+    const finished = Promise.withResolvers<undefined>();
+    let completed = 0;
+    const worker = new Worker<{ label: string }, string>(
+      name,
+      (job) => {
+        const labels = (job.getBatch?.() ?? []).map((member) => member.data.label);
+        batches.push(labels);
+        return labels.join(',');
+      },
+      {
+        batch: { size: 2, minSize: 2, timeout: 100, groupAffinity: true },
+        concurrency: 1,
+        connection: connection(current),
+        embedded: false,
+        group: { concurrency: 2 },
+      }
+    );
+    current.workers.push(worker as Worker<unknown, unknown>);
+    worker.on('completed', () => {
+      if (++completed === 4) finished.resolve(undefined);
+    });
+    await finished.promise;
+    expect(batches).toHaveLength(2);
+    expect(batches.every((batch) => batch[0][0] === batch[1][0])).toBe(true);
   });
 });

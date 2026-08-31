@@ -79,6 +79,27 @@ export async function handleGroupCommand(
         { removed: await manager.removeGroupConcurrency(command.queue, command.groupId) },
         requestId
       );
+    case 'PauseGroup':
+      return resp.data(
+        { changed: await manager.pauseGroup(command.queue, command.groupId) },
+        requestId
+      );
+    case 'ResumeGroup':
+      return resp.data(
+        { changed: await manager.resumeGroup(command.queue, command.groupId) },
+        requestId
+      );
+    case 'IsGroupPaused':
+      return resp.data(
+        { paused: await manager.isGroupPaused(command.queue, command.groupId) },
+        requestId
+      );
+    case 'RateLimitGroup': {
+      const durationError = validatePositiveSafeInteger(command.duration, 'duration');
+      if (durationError) return resp.error(durationError, requestId);
+      await manager.rateLimitGroup(command.queue, command.groupId, command.duration);
+      return resp.ok(undefined, requestId);
+    }
   }
 }
 

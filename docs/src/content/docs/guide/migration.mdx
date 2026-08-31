@@ -161,7 +161,7 @@ bun add bunqueue
 
 Then, in your code:
 
-1. Change imports from `'bullmq'` to `'bunqueue/client'`. `Queue`, `Worker`, `QueueEvents`, and `FlowProducer` all exist under the same names.
+1. Change imports from `'bullmq'` to `'bunqueue/client'`. `Queue`, `Worker`, `QueueEvents`, and `FlowProducer` all exist under the same names; Pro-oriented code may use the `QueuePro`, `WorkerPro`, and `QueueEventsPro` aliases plus the `JobPro` type.
 2. Delete the Redis connection object. Pass `embedded: true` plus a `dataPath`, or `connection: { host, port }` for server mode.
 3. Run your test suite. Job options, events, and flows behave the same, the differences are listed below.
 4. Remove the Redis server from your infrastructure.
@@ -180,6 +180,36 @@ Then, in your code:
   in one database transaction; both provide all-or-nothing creation without
   client-side rollback.
 - **Per-worker rate limiting**: `limiter: { max, duration }` on `WorkerOptions`, unchanged.
+
+### BullMQ Pro-oriented APIs in the Bun package
+
+The Pro aliases point directly at bunqueue's native implementations:
+
+```typescript
+import { QueuePro, WorkerPro, QueueEventsPro } from 'bunqueue/client';
+import type { JobPro } from 'bunqueue/client';
+```
+
+No extra package, connection, or license is required. The Bun client supports:
+
+- job groups with round-robin fairness, priority/FIFO lanes, atomic `maxSize`,
+  pause/resume, backlog and priority queries, per-group concurrency/rate
+  defaults, local overrides, and manual `worker.rateLimitGroup()` cooldowns;
+- native processor batches through
+  `batch: { size, minSize?, timeout?, groupAffinity? }`, `job.getBatch()`, and
+  selective `member.setAsFailed(error)`;
+- cooperative active-job cancellation through the processor's second-argument
+  `AbortSignal`; and
+- structural Observable processor results without requiring RxJS.
+
+These features use the same public contract in embedded memory/SQLite and TCP
+server mode. PostgreSQL 15–18 makes group capacity, ordering, pause, limits, and
+manual deadlines authoritative across brokers. BullMQ Pro telemetry and its
+NestJS integration are intentionally outside this compatibility layer; use
+bunqueue's existing metrics/events and framework-neutral Worker lifecycle
+instead.
+
+Ordinary BullMQ job code remains unchanged:
 
 ```typescript
 // This BullMQ code runs as-is on bunqueue

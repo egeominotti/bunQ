@@ -11,6 +11,7 @@ import { executeWithRetry } from './retry';
 import { TriggerManager } from './triggers';
 import { TtlChecker } from './ttl';
 import type { BunqueueMiddleware, BunqueueOptions } from './types';
+import { resolveProcessorResult } from '../worker/processorResult';
 
 /** Construction and processing pipeline shared by the compact Bunqueue façade. */
 export abstract class BunqueueRuntime<T, R> {
@@ -67,10 +68,10 @@ export abstract class BunqueueRuntime<T, R> {
 
   private buildRouteProcessor(routes: Record<string, Processor<T, R>>): Processor<T, R> {
     const routeMap: Partial<Record<string, Processor<T, R>>> = routes;
-    return (job: Job<T & FlowJobData>): Promise<R> | R => {
+    return (job: Job<T & FlowJobData>, context) => {
       const handler = routeMap[job.name];
       if (!handler) throw new Error(`No route for job "${job.name}" in queue "${this.name}"`);
-      return handler(job);
+      return handler(job, context);
     };
   }
 
@@ -145,15 +146,19 @@ export abstract class BunqueueRuntime<T, R> {
     if (abortController.signal.aborted) return Promise.reject(new Error('Job cancelled'));
     const publicJob = job as unknown as Job<T>;
     if (this.middlewares.length === 0) {
-      const result = this.baseProcessor(job);
-      return result instanceof Promise ? result : Promise.resolve(result);
+      return resolveProcessorResult(
+        this.baseProcessor(job, { signal: abortController.signal }),
+        abortController.signal
+      );
     }
     let index = 0;
     const next = (): Promise<R> => {
       if (abortController.signal.aborted) return Promise.reject(new Error('Job cancelled'));
       if (index < this.middlewares.length) return this.middlewares[index++](publicJob, next);
-      const result = this.baseProcessor(job);
-      return result instanceof Promise ? result : Promise.resolve(result);
+      return resolveProcessorResult(
+        this.baseProcessor(job, { signal: abortController.signal }),
+        abortController.signal
+      );
     };
     return next();
   }

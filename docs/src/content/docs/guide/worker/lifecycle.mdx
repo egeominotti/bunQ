@@ -119,6 +119,32 @@ processor returns or throws after that claim, the Worker receives an explicit
 ignored outcome and suppresses its local `completed`, `failed`, and ACK/FAIL
 error events. A retry's newer lease is independent and can complete normally.
 
+## Cancel active processors cooperatively (Bun)
+
+Every Bun processor receives an `AbortSignal` in its second argument. Cancel
+one delivery or every active delivery owned by this Worker:
+
+```typescript
+const worker = new Worker('downloads', async (job, context) => {
+  return await fetch(job.data.url, { signal: context?.signal });
+});
+
+worker.cancelJob(jobId, 'request withdrawn'); // false when this Worker does not own it
+worker.cancelAllJobs('service is shutting down');
+worker.isJobCancelled(jobId); // true while its cancelled delivery remains active here
+```
+
+Cancellation aborts the signal and emits `cancelled({ jobId, reason })`. A
+Promise processor must pass that signal to `fetch` or another cancellable API,
+or check `signal.aborted`; JavaScript cannot forcibly stop a Promise that
+ignores it. Structural Observable processors are unsubscribed automatically.
+The resulting processor rejection follows normal failure/retry handling.
+
+`close(true)` is different: it relinquishes active delivery ownership and
+suppresses late outcomes so broker recovery can redeliver. Use cancellation
+when the processor should observe and handle an abort; use forced close when
+the process must stop owning work immediately.
+
 For a clean process exit, hook your runtime's shutdown signal; in the Bun client, also shut down the shared machinery:
 
 <Tabs syncKey="lang">

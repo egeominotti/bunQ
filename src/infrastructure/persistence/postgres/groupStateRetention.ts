@@ -36,6 +36,8 @@ async function pruneBatch(
           groups.rate_limit IS NULL
           AND groups.rate_duration_ms IS NULL
           AND groups.concurrency_limit IS NULL
+          AND groups.paused = FALSE
+          AND (groups.manual_rate_limit_until IS NULL OR groups.manual_rate_limit_until <= ${now})
           AND (
             groups.rate_window_started_at IS NULL
             OR (
@@ -76,6 +78,8 @@ async function pruneBatch(
       AND groups.rate_limit IS NULL
       AND groups.rate_duration_ms IS NULL
       AND groups.concurrency_limit IS NULL
+      AND groups.paused = FALSE
+      AND (groups.manual_rate_limit_until IS NULL OR groups.manual_rate_limit_until <= ${now})
       AND (
         groups.rate_window_started_at IS NULL
         OR (

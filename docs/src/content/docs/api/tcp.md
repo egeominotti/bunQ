@@ -221,7 +221,7 @@ Add a single job to a queue.
   queue: string,          // Queue name (required, max 256 chars, alphanumeric/underscore/dash/dot/colon)
   name: string,           // Job name metadata (required for protocol v3 clients)
   data: any,              // Untouched user payload (required, max 10 MB)
-  priority?: number,      // Higher = processed sooner (default: 0, range: -1000000 to 1000000)
+  priority?: number,      // Ungrouped: higher first. With groupId: 0 first, then ascending (0..2097151)
   delay?: number,         // Delay in ms before processing (default: 0, max: 1 year)
   maxAttempts?: number,   // Max retry attempts (default: 3, range: 1-1000)
   backoff?: number,       // Retry backoff delay in ms (default: 1000, max: 1 day)
@@ -232,6 +232,7 @@ Add a single job to a queue.
   dependsOn?: string[],   // Job IDs this job depends on
   tags?: string[],        // Metadata tags
   groupId?: string,       // Job group identifier
+  groupMaxSize?: number,  // Positive safe-integer pending-depth admission cap
   lifo?: boolean,         // Last-in-first-out (default: false)
   removeOnComplete?: boolean, // Auto-remove on completion (default: false)
   removeOnFail?: boolean,     // Auto-remove on failure (default: false)
@@ -299,6 +300,7 @@ Batch push multiple jobs to a queue.
     dependsOn?: string[],
     tags?: string[],
     groupId?: string,
+    groupMaxSize?: number,
     lifo?: boolean,
     removeOnComplete?: boolean,
     removeOnFail?: boolean,
@@ -312,6 +314,11 @@ Each job is validated with the same rules as `PUSH` (option bounds and
 of any job in the same batch, so order-independent intra-batch chains work. On
 violation the whole batch is rejected with an error naming the offending index
 (`jobs[i]: ...`).
+
+When `groupId` is present, `priority` is the intra-group priority and must be an
+integer from `0` through `2,097,151`; lower values run first. `groupMaxSize`
+makes pending-depth admission atomic. If one member would exceed its group cap,
+the complete `PUSHB` is rejected without partial writes.
 
 **Response:**
 
@@ -342,6 +349,9 @@ calls.
       dependsOn?: string[],
       parentId?: string,
       childrenIds?: string[],
+      groupId?: string,
+      priority?: number,       // with groupId: 0 first, then ascending
+      groupMaxSize?: number,
       // supported ordinary scheduling/retry/failure options
     }
   }>
@@ -1986,11 +1996,23 @@ jobs. Every response below is wrapped in `data`:
 
 { cmd: 'RemoveGroupConcurrency', queue, groupId }
 // -> { ok: true, data: { removed: 0 | 1 } }
+
+{ cmd: 'PauseGroup', queue, groupId }
+// -> { ok: true, data: { changed: boolean } }
+{ cmd: 'ResumeGroup', queue, groupId }
+// -> { ok: true, data: { changed: boolean } }
+{ cmd: 'IsGroupPaused', queue, groupId }
+// -> { ok: true, data: { paused: boolean } }
+{ cmd: 'RateLimitGroup', queue, groupId, duration }
+// -> { ok: true }
 ```
 
 Group IDs are non-empty strings of at most 256 characters. `max`, `duration`,
 and `concurrency` must be positive safe integers. Stored overrides affect a
 claim only when `PULL`/`PULLB` carries the corresponding `group` default.
+Pause blocks only new claims from that group. `RateLimitGroup` installs an
+immediately effective manual deadline even when the Worker has no group-rate
+default.
 
 ---
 
@@ -2364,6 +2386,8 @@ Job data payloads are limited to **10 MB** when serialized.
 |                | `SetGroupRateLimit` / `GetGroupRateLimit` / `RemoveGroupRateLimit`       | Manage one group's rate override             |
 |                | `GetGroupRateLimitTtl`                                                   | Read one group's fixed-window TTL            |
 |                | `SetGroupConcurrency` / `GetGroupConcurrency` / `RemoveGroupConcurrency` | Manage one group's concurrency override      |
+|                | `PauseGroup` / `ResumeGroup` / `IsGroupPaused`                           | Control and read one group's pause state      |
+|                | `RateLimitGroup`                                                         | Install an immediate manual group deadline    |
 | **Config**     | `SetStallConfig`                                                         | Set per-queue stall config                   |
 |                | `GetStallConfig`                                                         | Get per-queue stall config                   |
 |                | `SetDlqConfig`                                                           | Set per-queue DLQ config                     |

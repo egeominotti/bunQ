@@ -178,6 +178,31 @@ if (job) {
 token argument can be omitted. If you pass an explicit token, it must match the
 current delivery.
 
+## Native batch members (Bun)
+
+When the Worker has `batch: { size, ... }`, the processor is invoked once with
+the leading job. Read all independently leased members through `getBatch()`:
+
+```typescript
+const worker = new Worker('imports', async (leadingJob) => {
+  const jobs = leadingJob.getBatch?.() ?? [leadingJob];
+  for (const job of jobs) {
+    try {
+      await importRow(job.data);
+    } catch (error) {
+      job.setAsFailed?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+  return { processed: jobs.length };
+}, { batch: { size: 50, minSize: 10, timeout: 100 } });
+```
+
+`getBatch` and `setAsFailed` are optional in the public Job type because an
+ordinary one-job delivery does not carry them. Every returned member has both
+methods. `setAsFailed` records a selective failure for that member after the
+shared processor invocation completes; all unmarked members receive the
+processor's common result.
+
 ## Ownership-changing methods inside a processor
 
 When a Bun processor calls `retry()`, `changeDelay()`, `moveToWait()`,

@@ -16,14 +16,18 @@ export class ShardLimits extends ShardKeys {
     this.groupScheduler.observeFifoOrder(job);
   }
   peekGroupCandidate(queue: string, now: number, options?: GroupPullOptions): GroupCandidate {
-    return this.groupScheduler.peek(queue, now, (groupId): GroupEligibility =>
-      this.groupLimiterManager.status(
-        queue,
-        groupId,
-        options,
-        this.getGroupActiveCount(queue, groupId),
-        now
-      )
+    return this.groupScheduler.peek(
+      queue,
+      now,
+      (groupId): GroupEligibility =>
+        this.groupLimiterManager.status(
+          queue,
+          groupId,
+          options,
+          this.getGroupActiveCount(queue, groupId),
+          now
+        ),
+      options?.affinity
     );
   }
   acquireGroup(queue: string, groupId: string, options?: GroupPullOptions, now?: number): boolean {
@@ -74,6 +78,18 @@ export class ShardLimits extends ShardKeys {
   }
   removeGroupConcurrency(queue: string, groupId: string): number {
     return this.groupLimiterManager.removeConcurrency(queue, groupId);
+  }
+  pauseGroup(queue: string, groupId: string): boolean {
+    return this.groupLimiterManager.pause(queue, groupId);
+  }
+  resumeGroup(queue: string, groupId: string): boolean {
+    return this.groupLimiterManager.resume(queue, groupId);
+  }
+  isGroupPaused(queue: string, groupId: string): boolean {
+    return this.groupLimiterManager.isPaused(queue, groupId);
+  }
+  rateLimitGroup(queue: string, groupId: string, duration: number): void {
+    this.groupLimiterManager.rateLimit(queue, groupId, duration);
   }
   setRateLimit(queue: string, limit: number, durationMs?: number, ttlMs?: number): void {
     this.limiterManager.setRateLimit(queue, limit, durationMs, ttlMs);

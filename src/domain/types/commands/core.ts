@@ -21,6 +21,7 @@ export interface PushCommand extends BaseCommand {
   readonly parentId?: string;
   readonly tags?: string[];
   readonly groupId?: string;
+  readonly groupMaxSize?: number;
   readonly lifo?: boolean;
   readonly removeOnComplete?: boolean;
   readonly removeOnFail?: boolean;

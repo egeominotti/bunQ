@@ -117,3 +117,24 @@ export async function removeGroupConcurrency(ctx: GroupContext, groupId: string)
   const response = await send(ctx, { cmd: 'RemoveGroupConcurrency', groupId: id });
   return Number(response.removed ?? 0);
 }
+
+export async function pauseGroup(ctx: GroupContext, groupId: string): Promise<boolean> {
+  const id = normalizeGroupId(groupId);
+  if (ctx.embedded) return await manager(ctx).pauseGroup(ctx.name, id);
+  const response = await send(ctx, { cmd: 'PauseGroup', groupId: id });
+  return response.changed === true;
+}
+
+export async function resumeGroup(ctx: GroupContext, groupId: string): Promise<boolean> {
+  const id = normalizeGroupId(groupId);
+  if (ctx.embedded) return await manager(ctx).resumeGroup(ctx.name, id);
+  const response = await send(ctx, { cmd: 'ResumeGroup', groupId: id });
+  return response.changed === true;
+}
+
+export async function isGroupPaused(ctx: GroupContext, groupId: string): Promise<boolean> {
+  const id = normalizeGroupId(groupId);
+  if (ctx.embedded) return await manager(ctx).isGroupPaused(ctx.name, id);
+  const response = await send(ctx, { cmd: 'IsGroupPaused', groupId: id });
+  return response.paused === true;
+}

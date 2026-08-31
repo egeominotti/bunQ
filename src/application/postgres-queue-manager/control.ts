@@ -64,6 +64,27 @@ export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance
     });
   }
 
+  override async pauseGroup(queue: string, groupId: string): Promise<boolean> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.setGroupPaused(queue, groupId, true);
+    });
+  }
+
+  override async resumeGroup(queue: string, groupId: string): Promise<boolean> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.setGroupPaused(queue, groupId, false);
+    });
+  }
+
+  override async rateLimitGroup(queue: string, groupId: string, duration: number): Promise<void> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      await this.postgresStore.rateLimitGroup(queue, groupId, duration);
+    });
+  }
+
   override pause(queue: string): void {
     this.operations.runSync(() => {
       this.setLocalQueueState(queue, { paused: true });

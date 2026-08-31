@@ -1,6 +1,6 @@
 # Client SDK: Worker (& sandboxed)
 
-> **Category:** Client SDK · **Source:** `src/client/worker/worker.ts`, `src/client/worker/runtime/`, `src/client/worker/types/`, `src/client/worker/handlers/`, `src/client/worker/processor.ts`, `src/client/worker/processorOutcome.ts`, `src/client/worker/ackBatcher.ts`, `src/client/worker/workerPull.ts`, `src/client/worker/workerHeartbeat.ts`, `src/client/queue-events/tcpSubscription.ts`, `src/client/sandboxed/worker.ts`, `src/client/sandboxed/runtime/`, `src/client/sandboxed/types/`, `src/client/sandboxed/wrapper.ts`, `src/client/sandboxed/queueOps.ts`
+> **Category:** Client SDK · **Source:** `src/client/worker/worker.ts`, `src/client/worker/runtime/`, `src/client/worker/types/`, `src/client/worker/handlers/`, `src/client/worker/processor.ts`, `src/client/worker/processorOutcome.ts`, `src/client/worker/processorResult.ts`, `src/client/worker/batchExecution.ts`, `src/client/worker/ackBatcher.ts`, `src/client/worker/workerPull.ts`, `src/client/worker/workerHeartbeat.ts`, `src/client/queue-events/tcpSubscription.ts`, `src/client/sandboxed/worker.ts`, `src/client/sandboxed/runtime/`, `src/client/sandboxed/types/`, `src/client/sandboxed/wrapper.ts`, `src/client/sandboxed/queueOps.ts`
 
 ## Purpose
 
@@ -15,6 +15,9 @@ Owns:
 - Processor invocation, auto-ack on success, fail/retry dispatch,
   `DelayedError`/`UnrecoverableError` handling, and processor-owned terminal or
   nonterminal transitions (`processor.ts`, `processorOutcome.ts`).
+- One-invocation native batch processing with per-member outcomes
+  (`batchExecution.ts`), structural Observable completion (`processorResult.ts`),
+  and AbortSignal cancellation for active delivery generations.
 - ACK batching with backpressure and retry (`ackBatcher.ts`).
 - Job and worker heartbeats / lock renewal (`workerHeartbeat.ts`,
   `runtime/control.ts`, `runtime/execution.ts`).
@@ -73,7 +76,7 @@ class Worker<T = unknown, R = unknown> extends EventEmitter {
   processJobManually(job, token?, fetchNextCallback?): Promise<ManualJob<T> | undefined>;
   extendJobLocks(jobIds: string[], tokens: string[], duration: number): Promise<number>;
 
-  // Cancellation (cooperative; processor must check isJobCancelled)
+  // Cancellation (cooperative through the processor context signal)
   cancelJob(jobId: string, reason?: string): boolean;
   cancelAllJobs(reason?: string): void;
   isJobCancelled(jobId: string): boolean;
@@ -82,6 +85,7 @@ class Worker<T = unknown, R = unknown> extends EventEmitter {
   getRateLimiterInfo(): { current: number; max: number; duration: number } | null;
   rateLimit(expireTimeMs: number): void;
   isRateLimited(): boolean;
+  rateLimitGroup(job: Job<T>, duration: number): Promise<void>;
 
   // BullMQ v5 compat
   startStalledCheckTimer(): Promise<void>; // no-op (stall detection is server-side)
@@ -115,7 +119,7 @@ Re-exported (with a `@deprecated` alias) from `src/client/sandboxedWorker.ts`.
 
 ### TCP commands sent (client → server)
 
-`PULL`, `PULLB`; `ACKB` (batch ack), `FAIL`; `MoveToWait`, `MoveToDelayed`, `MoveToWaitingChildren`; `JobHeartbeat`, `JobHeartbeatB`, `Heartbeat`; `RegisterWorker`, `UnregisterWorker`; `Ping`; `ExtendLock`, `ExtendLocks`; and `SubscribeEvents` on a dedicated queue-event connection (`UnsubscribeEvents` is available to raw protocol clients; Worker closes its dedicated socket). Processor `Job` handlers additionally send `Progress`, `AddLog`, `GetState`, `GetResult`, `GetChildrenValues`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveJobDeduplicationKey`, `RemoveUnprocessedChildren`, `Cancel` (remove), `Update`, `Promote`, `ChangeDelay`, `ChangePriority`, `ClearLogs`, `Discard`, `WaitJob`. `SandboxedWorker` TCP ops also use plain `ACK` and `GetJobCounts`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
+`PULL`, `PULLB`; `ACKB` (batch ack), `FAIL`; `MoveToWait`, `MoveToDelayed`, `MoveToWaitingChildren`; `RateLimitGroup`; `JobHeartbeat`, `JobHeartbeatB`, `Heartbeat`; `RegisterWorker`, `UnregisterWorker`; `Ping`; `ExtendLock`, `ExtendLocks`; and `SubscribeEvents` on a dedicated queue-event connection (`UnsubscribeEvents` is available to raw protocol clients; Worker closes its dedicated socket). Processor `Job` handlers additionally send `Progress`, `AddLog`, `GetState`, `GetResult`, `GetChildrenValues`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveJobDeduplicationKey`, `RemoveUnprocessedChildren`, `Cancel` (remove), `Update`, `Promote`, `ChangeDelay`, `ChangePriority`, `ClearLogs`, `Discard`, `WaitJob`. `SandboxedWorker` TCP ops also use plain `ACK` and `GetJobCounts`. See [TCP Server Command Handlers](./tcp-server-handlers.md).
 
 ### Events emitted
 
@@ -153,6 +157,41 @@ See [data-model](../data-model.md) for the full `Job` shape. Key types used here
 `maxStalledCount=1`. `worker/runtime/state.ts` owns
 `queueKey = (prefixKey ?? '') + name`, transport construction, ACK-batcher
 wiring, reconnect registration, and the `autorun` decision.
+
+`batch: { size, minSize, timeout, groupAffinity }` enables native batch
+processing. One processor invocation receives a leading job whose `getBatch()`
+returns every leased member; `setAsFailed(error)` selectively fails one member.
+Each member retains its own lease, ACK/failure transition, events, and cleanup.
+`groupAffinity` never mixes group IDs in one batch. `minSize` waits indefinitely
+when `timeout` is omitted and permits a partial batch after the timeout. Without
+group affinity, grouped batches ignore `minSize`, matching BullMQ Pro. A Worker
+limiter reserves one start per batch member only after the batch is ready;
+waiting for `minSize` consumes no limiter capacity. Synchronous processor throws
+are shared across the batch without invoking the processor again. A global
+Worker limiter rejects `minSize > limiter.max`; `size` may remain larger and
+ready work is processed in capacity-bounded chunks. The `groupKey` limiter form
+is per-group concurrency and is not subject to this rolling-window constraint.
+
+Processors receive `{ signal }` as their second argument. `cancelJob`,
+`cancelAllJobs`, and per-job `timeout` abort that signal and Observable
+subscriptions are unsubscribed. A native batch composes every member signal:
+cancelling or timing out any member aborts the shared processor invocation and
+all members observe its shared outcome. Promise processors remain cooperative:
+aborting does not fabricate cancellation of a Promise that ignores its signal. A
+structural Observable is accepted without an RxJS dependency; its final
+emission becomes the job result, and its teardown runs exactly once after
+completion, failure, or abort, including synchronous settlement. `QueuePro`,
+`WorkerPro`, `QueueEventsPro`, and `JobPro` are compatibility aliases over the
+same native implementations.
+
+`rateLimitGroup(job, duration)` requires a grouped active job, installs a
+broker-authoritative manual deadline for that group, then returns the current
+delivery to waiting with its lease token. It is effective without a configured
+`group.limit`; SQLite keeps the live manual deadline in process while
+PostgreSQL stores it transactionally for all brokers.
+The deadline is committed before the active delivery is returned to waiting;
+if that lease transition rejects, the Promise rejects but the group cooldown
+remains active.
 
 In embedded mode the constructor claims the same process-wide manager used by
 Queue and QueueEvents. A supplied `dataPath` must identify its active database;

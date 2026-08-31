@@ -35,17 +35,17 @@ export class WorkerRateLimiter {
     return this.getAvailableSlots() > 0;
   }
 
-  /** Atomically reserve one start in the current window. */
-  tryAcquire(): boolean {
+  /** Atomically reserve starts in the current window. */
+  tryAcquire(count = 1): boolean {
     const now = Date.now();
     if (now < this.rateLimitExpiration) return false;
     if (!this.limiter) return true;
 
     const windowStart = now - this.limiter.duration;
     this.evictExpired(windowStart);
-    if (this.activeCount() >= this.limiter.max) return false;
+    if (this.activeCount() + count > this.limiter.max) return false;
 
-    this.limiterTokens.push(now);
+    for (let index = 0; index < count; index++) this.limiterTokens.push(now);
     return true;
   }
 

@@ -1,5 +1,5 @@
 import type { AtomicFlowBatchInput } from '../../domain/types/flow';
-import { validateGroupId } from '../../domain/types/group';
+import { validateGroupId, validateGroupPriority } from '../../domain/types/group';
 import { normalizeJobPayload, type JobInput } from '../../domain/types/job';
 import { validateFlowTopology } from './flowTopologyValidation';
 
@@ -30,7 +30,12 @@ function numeric(value: unknown, name: string, min: number, max: number, integer
 }
 
 function validateOptions(input: JobInput): void {
-  numeric(input.priority, 'priority', -1_000_000, 1_000_000, true);
+  if (input.groupId === undefined) {
+    numeric(input.priority, 'priority', -1_000_000, 1_000_000, true);
+  } else {
+    const priorityError = validateGroupPriority(input.priority);
+    if (priorityError) throw new Error(priorityError);
+  }
   numeric(input.delay, 'delay', 0, 365 * 24 * 60 * 60 * 1_000);
   numeric(input.timeout, 'timeout', 0, 24 * 60 * 60 * 1_000);
   numeric(input.ttl, 'ttl', 0, 365 * 24 * 60 * 60 * 1_000);
@@ -40,6 +45,7 @@ function validateOptions(input: JobInput): void {
   numeric(input.keepLogs, 'keepLogs', 0, 1_000_000, true);
   numeric(input.sizeLimit, 'sizeLimit', 0, MAX_JOB_DATA_BYTES, true);
   numeric(input.timestamp, 'timestamp', 0, Number.MAX_SAFE_INTEGER);
+  numeric(input.groupMaxSize, 'group.maxSize', 1, Number.MAX_SAFE_INTEGER, true);
 
   if (typeof input.backoff === 'object' && input.backoff !== null) {
     if (input.backoff.type !== 'fixed' && input.backoff.type !== 'exponential') {

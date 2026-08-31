@@ -46,6 +46,7 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected readonly pulledJobIds: Set<string> = new Set();
   protected readonly jobTokens: Map<string, string> = new Map();
   protected readonly cancelledJobs: Set<string> = new Set();
+  private readonly abortControllers = new Map<string, Set<AbortController>>();
   private deliverySequence = 0;
   private readonly currentDeliveries = new Map<string, WorkerDelivery>();
   private readonly activeDeliveries = new Map<string, Set<number>>();
@@ -59,6 +60,7 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected pendingJobs: WorkerDelivery[] = [];
   protected pendingJobsHead = 0;
   protected processingScheduled = false;
+  protected batchAffinity: string | null | undefined;
   protected pendingPull = 0;
   protected lastDrainedEmit = 0;
   protected stalledUnsubscribe: (() => void) | null = null;
@@ -207,6 +209,34 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected clearDeliveries(): void {
     this.currentDeliveries.clear();
     this.activeDeliveries.clear();
+    for (const controllers of this.abortControllers.values()) {
+      for (const controller of controllers) controller.abort(new Error('Worker closed'));
+    }
+    this.abortControllers.clear();
+  }
+
+  protected createAbortController(jobId: string): AbortController {
+    const controller = new AbortController();
+    let controllers = this.abortControllers.get(jobId);
+    if (!controllers) {
+      controllers = new Set();
+      this.abortControllers.set(jobId, controllers);
+    }
+    controllers.add(controller);
+    return controller;
+  }
+
+  protected releaseAbortController(jobId: string, controller: AbortController): void {
+    const controllers = this.abortControllers.get(jobId);
+    controllers?.delete(controller);
+    if (controllers?.size === 0) this.abortControllers.delete(jobId);
+  }
+
+  protected abortJob(jobId: string, reason: string): boolean {
+    const controllers = this.abortControllers.get(jobId);
+    if (!controllers?.size) return false;
+    for (const controller of controllers) controller.abort(new Error(reason));
+    return true;
   }
 
   protected clearPollTimer(): void {

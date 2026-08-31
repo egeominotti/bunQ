@@ -141,12 +141,18 @@ names shown in the table.
 | `repeat`           | `object`                    | -       | Repeating job config (`every`, `pattern`, `limit`)                   |
 | `durable`          | `boolean`                   | `false` | SQLite: bypass its write buffer; PostgreSQL is already transactional |
 | `lifo`             | `boolean`                   | `false` | Process newest first                                                 |
-| `group`            | `{ id: string \| number }`  | -       | Assign the job to a [fair FIFO job group](/guide/queue/job-groups/)  |
+| `group`            | `{ id, priority?, maxSize? }` | -       | Assign a [fair job group](/guide/queue/job-groups/), optional 0-first intra-group priority, and atomic pending-depth cap |
 | `parent`           | `{ id, queue }`             | -       | Parent job reference for [flows](/guide/flow/)                       |
 
 At the same priority, LIFO jobs run newest-first ahead of FIFO jobs. Priority
 always remains authoritative, so a lower-priority LIFO job cannot overtake a
 higher-priority FIFO job.
+
+The top-level `priority` rule above applies to ungrouped jobs. For grouped jobs,
+put priority inside `group`: `group.priority` accepts integers from `0` through
+`2,097,151`, where `0` is highest and positive values run in ascending order.
+`group.maxSize` must be a positive safe integer and rejects the entire single,
+bulk, or flow admission before writes when the group's pending depth is full.
 
 Processing `timeout` values are measured from the active transition and use an
 absolute next-deadline timer. Concurrent jobs retain their individual deadlines.

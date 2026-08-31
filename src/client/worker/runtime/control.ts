@@ -3,6 +3,7 @@ import { jobId } from '../../../domain/types/job';
 import { EventType } from '../../../domain/types/queue';
 import { getSharedManager } from '../../manager';
 import { TcpEventSubscription } from '../../queue-events/tcpSubscription';
+import type { Job } from '../../types';
 import { startHeartbeat } from '../workerHeartbeat';
 import { WorkerState } from './state';
 
@@ -131,7 +132,9 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
   cancelJob(jobId: string, reason?: string): boolean {
     if (this.hasActiveDelivery(jobId)) {
       this.cancelledJobs.add(jobId);
-      this.emit('cancelled', { jobId, reason: reason ?? 'Job cancelled by worker' });
+      const message = reason ?? 'Job cancelled by worker';
+      this.abortJob(jobId, message);
+      this.emit('cancelled', { jobId, reason: message });
       return true;
     }
     return false;
@@ -140,7 +143,9 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
   cancelAllJobs(reason?: string): void {
     for (const jobId of this.activeDeliveryIds()) {
       this.cancelledJobs.add(jobId);
-      this.emit('cancelled', { jobId, reason: reason ?? 'All jobs cancelled' });
+      const message = reason ?? 'All jobs cancelled';
+      this.abortJob(jobId, message);
+      this.emit('cancelled', { jobId, reason: message });
     }
   }
 
@@ -158,6 +163,27 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
 
   isRateLimited(): boolean {
     return this.rateLimiter.isRateLimited();
+  }
+
+  async rateLimitGroup(job: Job<T>, duration: number): Promise<void> {
+    const groupId = job.opts.group?.id;
+    if (groupId === undefined) throw new Error('Cannot rate limit a job without a group');
+    if (!Number.isSafeInteger(duration) || duration <= 0) {
+      throw new Error('duration must be a positive safe integer');
+    }
+    if (this.embedded) {
+      await getSharedManager().rateLimitGroup(this.queueKey, String(groupId), duration);
+    } else {
+      if (!this.tcp) throw new Error('TCP connection is unavailable for group rate limiting');
+      const response = await this.tcp.send({
+        cmd: 'RateLimitGroup',
+        queue: this.queueKey,
+        groupId: String(groupId),
+        duration,
+      });
+      if (!response.ok) throw new Error(String(response.error ?? 'Group rate limiting failed'));
+    }
+    await job.moveToWait(job.token);
   }
 
   async startStalledCheckTimer(): Promise<void> {

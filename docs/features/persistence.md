@@ -194,7 +194,7 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   `stall_interval` / `max_stalls` / `stall_grace_period`, and nullable
   `dlq_config BLOB` for the effective per-queue DLQ policy.
 - `group_state` — `(queue,group_id)` primary key plus nullable rate,
-  duration, and concurrency overrides. Runtime fixed-window counters remain
+  duration, concurrency overrides, and durable pause state. Runtime fixed-window counters remain
   in memory; recovery restores the configuration before pulls begin. Embedded
   Queue group operations and grouped single/bulk admission always reopen the
   Queue's explicit `dataPath` after a shared-manager restart.

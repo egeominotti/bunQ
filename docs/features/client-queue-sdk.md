@@ -13,8 +13,11 @@ Owns:
 - The stable `Queue<T>` façade and inherited capability chain under `queue/runtime/`.
 - Constructor/state wiring in `runtime/state.ts`, transport cleanup in `runtime/connection.ts`, and per-concern contexts consumed by thin operation modules.
 - Job-add option translation: merging `defaultJobOptions`, injecting `__parentId`/`__parentQueue` into data, mapping public `JobOptions` to the embedded `manager.push` shape and to the compacted `PUSH`/`PUSHB` wire payload (`add.ts`).
-- Constructing the public `Job<T>` object via three builders — `createJobProxy` (TCP single add), `createSimpleJob` (embedded + TCP query results), and `toPublicJob`/`createPublicJob` (`jobProxy.ts`, `jobConversion.ts`). Conversion helpers receive grouped presentation metadata so name, data, result, failure, token, and serialization fields cannot drift between construction paths.
+- Constructing the public `Job<T>` object via three builders — `createJobProxy` (TCP single add), `createSimpleJob` (embedded + TCP query results), and `toPublicJob`/`createPublicJob` (`jobProxy.ts`, `jobConversion.ts`). Conversion helpers receive grouped presentation metadata, including the effective `group.priority`, so name, data, priority, result, failure, token, and serialization fields cannot drift between construction paths.
 - Auto-batching `add()` calls into `PUSHB` in TCP mode (`addBatcher.ts`).
+- BullMQ Pro-compatible group admission and broker-authoritative group reads,
+  overrides, pause/resume, and cleanup (`operations/groups.ts`,
+  `runtime/queries.ts`).
 - `QueueEvents`, the read-only embedded/TCP lifecycle-event listener
   (`events.ts`, `queue-events/tcpSubscription.ts`).
 - BullMQ-compatible error classes `UnrecoverableError` / `DelayedError` (`errors.ts`).
@@ -72,6 +75,18 @@ Counts (`queue/runtime/queries.ts`, `queue/operations/counts.ts`):
 `getCompletedCount`, `getFailedCount`, `getDelayedCount`, `count()` /
 `countAsync()`, `getCountsPerPriority()` / `getCountsPerPriorityAsync()`. Sync
 `count()` / `getCountsPerPriority()` return `0` / `{}` over TCP.
+
+Group methods (`queue/runtime/queries.ts`, `queue/operations/groups.ts`) are
+asynchronous in both runtimes: `getGroupJobsCount`, `getGroupsJobsCount`,
+`getGroupActiveCount`, `getGroupJobs`, `getCountsPerPriorityForGroup`,
+`setGroupRateLimit`, `getGroupRateLimit`, `removeGroupRateLimit`,
+`getGroupRateLimitTtl`, `setGroupConcurrency`, `getGroupConcurrency`,
+`removeGroupConcurrency`, `pauseGroup`, `resumeGroup`, and `isGroupPaused`.
+The list/count helpers cover pending grouped jobs (waiting, prioritized, and
+delayed), while active depth is separate. Public `JobOptions.group` accepts
+`{ id, priority?, maxSize? }`: `priority` is an integer from 0 through
+2,097,151 with lower values served first inside the group; `maxSize` makes the
+pending-depth admission check atomic for single, bulk, and flow adds.
 
 Control (`queue/runtime/control.ts`, `queue/operations/control.ts`): `pause()`,
 `resume()`, `drain()`, `obliterate()` (all sync, fire-and-forget),
@@ -145,7 +160,9 @@ the constructor is released exactly once. Repeated `close()` calls, including
 `disconnect()` followed by `close()`, therefore cannot close a shared pool
 still owned by another Queue.
 
-Also exported: `QueueEvents<R, P>`, `QueueEventsOptions`, `QueueMetrics`,
+Also exported: `QueuePro` (the `Queue` implementation), `QueueEventsPro` (the
+`QueueEvents` implementation), the type alias `JobPro<T>`,
+`QueueEvents<R, P>`, `QueueEventsOptions`, `QueueMetrics`,
 `QueueMetricsMeta`, `QueueMetricType`,
 `UnrecoverableError`, and `DelayedError`.
 
@@ -155,7 +172,7 @@ broker events. TCP mode owns one dedicated authenticated subscription socket,
 re-subscribes after reconnect, filters by the prefixed queue key, and is ready
 only after the broker acknowledges `SubscribeEvents`.
 
-TCP commands emitted by this module (exact names): `PUSH`, `PUSHB`, `GetJob`, `GetState`, `GetChildrenValues`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `Count`, `Pause`, `Resume`, `Drain`, `Obliterate`, `IsPaused`, `Ping`, `Cancel`, `MoveToWait`, `MoveToWaitingChildren`, `RetryDlq`, `RetryCompleted`, `GetDlqStats`, `Clean`, `Promote`, `PromoteJobs`, `Progress`, `GetLogs`, `AddLog`, `ClearLogs`, `Update`, `ChangeDelay`, `ChangePriority`, `ExtendLock`, `ACK`, `FAIL`, `MoveToDelayed`, `WaitJob`, `SetStallConfig`, `GetStallConfig`, `GetQueueLimits`, `GetDeduplicationJobId`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `ListWorkers`, `Metrics`, `TrimEvents`, `GetResult`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Discard`, `SubscribeEvents`, `UnsubscribeEvents`.
+TCP commands emitted by this module (exact names): `PUSH`, `PUSHB`, `GetJob`, `GetState`, `GetChildrenValues`, `GetJobs`, `GetJobCounts`, `GetCountsPerPriority`, `Count`, `Pause`, `Resume`, `Drain`, `Obliterate`, `IsPaused`, `Ping`, `Cancel`, `MoveToWait`, `MoveToWaitingChildren`, `RetryDlq`, `RetryCompleted`, `GetDlqStats`, `Clean`, `Promote`, `PromoteJobs`, `Progress`, `GetLogs`, `AddLog`, `ClearLogs`, `Update`, `ChangeDelay`, `ChangePriority`, `ExtendLock`, `ACK`, `FAIL`, `MoveToDelayed`, `WaitJob`, `SetStallConfig`, `GetStallConfig`, `GetQueueLimits`, `GetGroupJobsCount`, `GetGroupsJobsCount`, `GetGroupActiveCount`, `SetGroupRateLimit`, `GetGroupRateLimit`, `RemoveGroupRateLimit`, `GetGroupRateLimitTtl`, `SetGroupConcurrency`, `GetGroupConcurrency`, `RemoveGroupConcurrency`, `PauseGroup`, `ResumeGroup`, `IsGroupPaused`, `GetDeduplicationJobId`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `ListWorkers`, `Metrics`, `TrimEvents`, `GetResult`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveUnprocessedChildren`, `Discard`, `SubscribeEvents`, `UnsubscribeEvents`.
 
 `QueueEvents` events emitted: `waiting`, `active`, `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`, `duplicated`, `retried`, `waiting-children`, `drained`, `paused`, `resumed`, `error` (`events.ts:150`).
 

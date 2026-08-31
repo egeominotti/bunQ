@@ -17,6 +17,7 @@ export function restoreGroupPolicies(
     if (state.concurrencyLimit !== null) {
       shard.setGroupConcurrency(state.queue, state.groupId, state.concurrencyLimit);
     }
+    if (state.paused) shard.pauseGroup(state.queue, state.groupId);
     ctx.registerQueueName(state.queue);
   }
 }

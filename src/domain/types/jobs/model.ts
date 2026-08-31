@@ -105,6 +105,7 @@ export interface JobInput {
   parentId?: JobId;
   tags?: string[];
   groupId?: string;
+  groupMaxSize?: number;
   lifo?: boolean;
   removeOnComplete?: boolean;
   removeOnFail?: boolean;

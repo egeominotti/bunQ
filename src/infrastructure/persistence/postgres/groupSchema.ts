@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS bunqueue_group_state (
   rate_effective_max BIGINT,
   rate_effective_duration_ms BIGINT,
   concurrency_limit BIGINT,
+  paused BOOLEAN NOT NULL DEFAULT FALSE,
+  manual_rate_limit_until BIGINT,
   last_served BIGINT,
   PRIMARY KEY (namespace, queue, group_id)
 );
@@ -61,6 +63,8 @@ ALTER TABLE bunqueue_group_state
   ADD COLUMN IF NOT EXISTS rate_effective_max BIGINT,
   ADD COLUMN IF NOT EXISTS rate_effective_duration_ms BIGINT,
   ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT,
+  ADD COLUMN IF NOT EXISTS paused BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS manual_rate_limit_until BIGINT,
   ADD COLUMN IF NOT EXISTS last_served BIGINT;
 ALTER TABLE bunqueue_group_state
   ALTER COLUMN namespace TYPE TEXT USING namespace::text,
@@ -73,8 +77,11 @@ ALTER TABLE bunqueue_group_state
   ALTER COLUMN rate_effective_max TYPE BIGINT USING rate_effective_max::bigint,
   ALTER COLUMN rate_effective_duration_ms TYPE BIGINT USING rate_effective_duration_ms::bigint,
   ALTER COLUMN concurrency_limit TYPE BIGINT USING concurrency_limit::bigint,
+  ALTER COLUMN paused TYPE BOOLEAN USING paused::boolean,
+  ALTER COLUMN manual_rate_limit_until TYPE BIGINT USING manual_rate_limit_until::bigint,
   ALTER COLUMN last_served TYPE BIGINT USING last_served::bigint;
 UPDATE bunqueue_group_state SET rate_count = 0 WHERE rate_count IS NULL;
+UPDATE bunqueue_group_state SET paused = FALSE WHERE paused IS NULL;
 ALTER TABLE bunqueue_group_state
   ALTER COLUMN namespace DROP DEFAULT,
   ALTER COLUMN namespace SET NOT NULL,
@@ -96,6 +103,10 @@ ALTER TABLE bunqueue_group_state
   ALTER COLUMN rate_effective_duration_ms DROP NOT NULL,
   ALTER COLUMN concurrency_limit DROP DEFAULT,
   ALTER COLUMN concurrency_limit DROP NOT NULL,
+  ALTER COLUMN paused SET DEFAULT FALSE,
+  ALTER COLUMN paused SET NOT NULL,
+  ALTER COLUMN manual_rate_limit_until DROP DEFAULT,
+  ALTER COLUMN manual_rate_limit_until DROP NOT NULL,
   ALTER COLUMN last_served DROP DEFAULT,
   ALTER COLUMN last_served DROP NOT NULL;
 
@@ -147,7 +158,7 @@ $group_state_primary_key$;
 
 DROP INDEX IF EXISTS bunqueue_jobs_group_ready_idx;
 CREATE INDEX bunqueue_jobs_group_ready_idx
-  ON bunqueue_jobs(namespace, queue, group_id, run_at ASC, group_order ASC, id ASC)
+  ON bunqueue_jobs(namespace, queue, group_id, priority ASC, run_at ASC, group_order ASC, id ASC)
   WHERE group_id IS NOT NULL AND state IN ('waiting', 'prioritized', 'delayed');
 DROP INDEX IF EXISTS bunqueue_group_state_rotation_idx;
 CREATE INDEX bunqueue_group_state_rotation_idx

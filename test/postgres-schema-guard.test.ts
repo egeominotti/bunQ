@@ -234,7 +234,7 @@ describe('PostgreSQL schema guard', () => {
         window_type: 'bigint',
       });
       expect(state.group_ready_definition).toContain(
-        '(namespace, queue, group_id, run_at, group_order, id)'
+        '(namespace, queue, group_id, priority, run_at, group_order, id)'
       );
       expect(state.rotation_definition).toContain('(namespace, queue, last_served, group_id)');
       expect(state.rotation_definition).not.toContain('UNIQUE');

@@ -1,4 +1,4 @@
-import type { Job, Worker } from '../../../src/client';
+import { Worker, type Job } from '../../../src/client';
 import { CoreE2eHarness, type CoreE2eMode } from '../support/harness';
 import { CoverageTracker, ensure, eventually } from '../support/tracker';
 
@@ -156,6 +156,30 @@ export async function runWorkerContract(mode: CoreE2eMode): Promise<CoverageTrac
     const startedAt = performance.now();
     await tracker.invoke('Worker', 'delay', () => limited.delay(20));
     ensure(performance.now() - startedAt >= 10, 'delay resolved too early');
+
+    const groupRateQueue = harness.queue('manual-group-rate');
+    let groupRateAttempts = 0;
+    let groupRateWorker!: Worker;
+    groupRateWorker = harness.worker(groupRateQueue.name, async (job) => {
+      groupRateAttempts++;
+      if (groupRateAttempts === 1) {
+        await tracker.invoke('Worker', 'rateLimitGroup', () =>
+          groupRateWorker.rateLimitGroup(job, 20)
+        );
+        throw Worker.RateLimitError();
+      }
+    });
+    const groupRateJob = await groupRateQueue.add(
+      'manual-group-rate',
+      {},
+      { group: { id: 'A' }, durable: true }
+    );
+    await eventually(
+      () => groupRateQueue.getJobState(groupRateJob.id),
+      (state) => state === 'completed',
+      'rateLimitGroup did not requeue the job'
+    );
+    ensure(groupRateAttempts === 2, `rateLimitGroup ran ${groupRateAttempts} attempts`);
 
     await tracker.invoke('Worker', 'close', () => lifecycle.close());
     ensure(

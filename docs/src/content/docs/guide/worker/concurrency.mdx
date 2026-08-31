@@ -255,6 +255,58 @@ worker =
 
 Bulk pushes wake idle long-polling workers immediately, they never wait out the timeout.
 
+## Native processor batches (Bun)
+
+`batchSize` above optimizes transport but still invokes the processor once per
+job. The Bun package's `batch` option changes the processor contract: one call
+owns several independently leased jobs.
+
+```typescript
+const worker = new Worker(
+  'webhooks',
+  async (leadingJob) => {
+    const jobs = leadingJob.getBatch?.() ?? [leadingJob];
+    for (const job of jobs) {
+      try {
+        await deliver(job.data);
+      } catch (error) {
+        job.setAsFailed?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    return { received: jobs.length };
+  },
+  {
+    concurrency: 4,
+    batch: { size: 100, minSize: 10, timeout: 250, groupAffinity: true },
+  }
+);
+```
+
+Here `concurrency: 4` means up to four processor invocations, each with at most
+100 jobs. `size` is 1..1000; `minSize` defaults to 1 and cannot exceed `size`.
+When a global Worker `limiter` is present, `minSize` also cannot exceed
+`limiter.max`; larger maximum batches remain valid and run in bounded chunks.
+With `minSize` and no positive `timeout`, the Worker waits indefinitely for the
+minimum. After a positive timeout it runs a partial batch. `groupAffinity`
+keeps every member on the same job-group ID. Without affinity, any batch that
+contains grouped jobs starts with the members already available instead of
+waiting for `minSize`.
+
+A Worker `limiter` still counts job starts, not processor calls: a ready batch
+atomically consumes one slot per member, and a batch waiting for `minSize`
+consumes no slots. If the processor throws synchronously, it is invoked once and
+the same failure is applied to every unmarked member.
+
+Cancellation is shared by the processor invocation. Cancelling or timing out
+any active member aborts the processor context signal, so cooperative processor
+code can stop the whole batch; every member then follows that shared outcome.
+
+The processor's return value completes every member not marked with
+`setAsFailed(error)`. Each member still has its own token, events, retry budget,
+and final transition; one selective failure does not fail the rest of the
+batch. Native processor batches currently belong to the Bun client, while all
+external SDKs retain transport batch pulling.
+
 ## Where to go next
 
 | | |

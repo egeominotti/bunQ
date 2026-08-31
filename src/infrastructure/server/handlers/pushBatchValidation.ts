@@ -128,6 +128,7 @@ function validateJobs(jobs: JobInput[], state: BatchDependencyState): string | n
     if (groupError) return `jobs[${i}]: ${groupError}`;
 
     const optionsError = validateJobOptions({
+      groupId: job.groupId,
       priority: job.priority,
       delay: job.delay,
       timeout: job.timeout,

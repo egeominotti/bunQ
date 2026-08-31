@@ -15,6 +15,7 @@ export interface ProcessorConfig<T, R> {
   removeOnFail?: boolean;
   onOutcome?: (succeeded: boolean) => void;
   shouldAbandonOutcome?: () => boolean;
+  abortController?: AbortController;
 }
 
 export interface FailureContext<T extends FlowJobData> {

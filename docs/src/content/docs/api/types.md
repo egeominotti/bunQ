@@ -128,7 +128,7 @@ interface Job<T = unknown> {
   /** Timestamp when job finished (completed or failed) */
   finishedOn?: number;
 
-  /** Job priority (higher = processed sooner) */
+  /** Ungrouped: higher runs sooner. Grouped: 0 runs first, then ascending. */
   priority: number;
 
   // ── Failure & Stall Tracking ─────────────────────────────────
@@ -266,6 +266,18 @@ interface Job<T = unknown> {
 
   /** Remove all unprocessed child jobs of this job */
   removeUnprocessedChildren(): Promise<void>;
+
+  /**
+   * Return every member of the current native processor batch.
+   * Present only on jobs delivered through WorkerOptions.batch.
+   */
+  getBatch?(): Job<T>[];
+
+  /**
+   * Fail only this member while allowing the rest of its native batch to
+   * complete. Present only on jobs delivered through WorkerOptions.batch.
+   */
+  setAsFailed?(error: Error): void;
 
   // ── Move Methods ─────────────────────────────────────────────
 
@@ -429,7 +441,7 @@ Options when adding a job to a queue.
 
 ```typescript
 interface JobOptions {
-  /** Job priority (higher = processed sooner, default: 0) */
+  /** Ungrouped job priority (higher = processed sooner, default: 0) */
   priority?: number;
 
   /** Delay in milliseconds before job becomes available (default: 0) */
@@ -528,6 +540,12 @@ interface JobOptions {
 interface GroupJobOptions {
   /** Non-empty group identifier; safe integers are normalized to strings */
   id: string | number;
+
+  /** Maximum pending jobs admitted atomically for this group */
+  maxSize?: number;
+
+  /** Integer from 0 to 2,097,151; lower values run first */
+  priority?: number;
 }
 ```
 
@@ -651,8 +669,31 @@ interface DebounceOptions {
 ### Processor
 
 ```typescript
-type Processor<T = unknown, R = unknown> = (job: Job<T & FlowJobData>) => Promise<R> | R;
+interface ProcessorContext {
+  signal: AbortSignal;
+}
+
+interface ObservableLike<T> {
+  subscribe(observer: {
+    next(value: T): void;
+    error(error: unknown): void;
+    complete(): void;
+  }): { unsubscribe(): void } | (() => void) | undefined;
+}
+
+type Processor<T = unknown, R = unknown> = (
+  job: Job<T & FlowJobData>,
+  context?: ProcessorContext
+) => Promise<R> | ObservableLike<R> | R;
 ```
+
+The Worker supplies a fresh `AbortSignal` for every delivery. A processing
+timeout, `worker.cancelJob()`, or `worker.cancelAllJobs()` aborts it. Promise
+processors are cooperative and must pass the signal to cancellable work or
+check `signal.aborted`; an ignored signal does not forcibly stop JavaScript.
+A structural Observable needs no RxJS dependency: its final `next` value is the
+job result, `error` fails the attempt, completion without a value fails, and
+abort unsubscribes it.
 
 `FlowJobData` contains the optional flow-injected fields (`__parentId`,
 `__parentQueue`, `__childrenIds`, `__flowParentId`, `__flowParentIds`) that
@@ -853,6 +894,9 @@ interface WorkerOptions {
   /** Broker-authoritative job-group defaults; omitted means unlimited/disabled */
   group?: GroupWorkerOptions;
 
+  /** Native BullMQ Pro-compatible batch processing */
+  batch?: BatchWorkerOptions;
+
   /** Lock duration in ms (default: 30000). Sent to the server on pull; also used by stall detection. */
   lockDuration?: number;
 
@@ -896,6 +940,46 @@ interface GroupWorkerOptions {
   limit?: { max: number; duration: number };
 }
 ```
+
+### BatchWorkerOptions
+
+```typescript
+interface BatchWorkerOptions {
+  /** Maximum jobs in one processor invocation (1..1000) */
+  size: number;
+
+  /** Minimum members before starting (default: 1; must be <= size) */
+  minSize?: number;
+
+  /** Maximum wait for minSize in ms; omitted/0 waits indefinitely */
+  timeout?: number;
+
+  /** Keep every member in a batch on the same group ID (default: false) */
+  groupAffinity?: boolean;
+}
+```
+
+With `batch`, `concurrency` counts concurrent processor invocations, while each
+invocation may own up to `batch.size` independently leased jobs. The processor
+is called once with a leading job; `job.getBatch()` returns all members and
+`member.setAsFailed(error)` selectively fails one. Without `groupAffinity`, a
+batch that contains grouped work does not wait for `minSize`. With affinity,
+the broker and Worker keep one group ID per batch and the minimum-size wait is
+honored.
+
+### Worker Pro control methods
+
+```typescript
+worker.cancelJob(jobId: string, reason?: string): boolean;
+worker.cancelAllJobs(reason?: string): void;
+worker.isJobCancelled(jobId: string): boolean;
+worker.rateLimitGroup(job: Job, duration: number): Promise<void>;
+```
+
+Cancellation targets only deliveries active in that Worker and aborts their
+processor signals. `rateLimitGroup` requires a grouped active job, installs a
+broker-authoritative manual deadline, and moves that delivery back to waiting.
+It does not require `WorkerOptions.group.limit`.
 
 ### Worker Events
 
@@ -950,6 +1034,19 @@ Calling `new QueueEvents(name)` keeps the historical embedded default. Pass
 `{ connection }` or `{ embedded: false, connection }` to subscribe to a remote
 broker. The TCP subscription uses a dedicated authenticated connection and
 automatically re-subscribes after reconnect.
+
+## BullMQ Pro aliases
+
+```typescript
+import { QueuePro, WorkerPro, QueueEventsPro } from 'bunqueue/client';
+import type { JobPro } from 'bunqueue/client';
+```
+
+`QueuePro`, `WorkerPro`, and `QueueEventsPro` are aliases of the native
+`Queue`, `Worker`, and `QueueEvents` implementations; `JobPro<T>` aliases
+`Job<T>`. They add no wrapper state, connection, persistence path, or telemetry.
+The aliases make Pro-oriented migrations explicit while retaining the ordinary
+class names and behavior.
 
 ### QueueEvents Event Payloads
 

@@ -100,6 +100,26 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
       groupQueue.getGroupsJobsCount(1)
     );
     ensure(groupedDepth === 3, `getGroupsJobsCount returned ${groupedDepth}`);
+    const groupJobs = await tracker.invoke('Queue', 'getGroupJobs', () =>
+      groupQueue.getGroupJobs('A')
+    );
+    ensure(groupJobs.length === 2, `getGroupJobs returned ${groupJobs.length}`);
+    const groupPriorities = await tracker.invoke('Queue', 'getCountsPerPriorityForGroup', () =>
+      groupQueue.getCountsPerPriorityForGroup('A')
+    );
+    ensure(groupPriorities[0] === 2, 'getCountsPerPriorityForGroup missed waiting jobs');
+    ensure(
+      await tracker.invoke('Queue', 'pauseGroup', () => groupQueue.pauseGroup('A')),
+      'pauseGroup did not change state'
+    );
+    ensure(
+      await tracker.invoke('Queue', 'isGroupPaused', () => groupQueue.isGroupPaused('A')),
+      'isGroupPaused missed paused state'
+    );
+    ensure(
+      await tracker.invoke('Queue', 'resumeGroup', () => groupQueue.resumeGroup('A')),
+      'resumeGroup did not change state'
+    );
 
     await tracker.invoke('Queue', 'setGroupRateLimit', () =>
       groupQueue.setGroupRateLimit('A', 1, 60_000)

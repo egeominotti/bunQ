@@ -119,25 +119,30 @@ export class GroupScheduler {
   peek(
     queue: string,
     now: number,
-    eligibility: (groupId: string) => GroupEligibility
+    eligibility: (groupId: string) => GroupEligibility,
+    affinity?: string | null
   ): GroupCandidate {
     const state = this.queues.get(queue);
     if (!state) return { job: null, nextRunAt: null };
     while (true) {
       this.promoteDue(state, now);
 
-      let plain = state.plain.peek();
-      while (plain) {
-        const job = state.jobs.get(plain.id) ?? plain;
-        if (isReady(job, now) || isExpired(job, now)) return { job, nextRunAt: null };
-        this.demoteReady(state, job);
-        plain = state.plain.peek();
+      if (affinity === undefined || affinity === null) {
+        let plain = state.plain.peek();
+        while (plain) {
+          const job = state.jobs.get(plain.id) ?? plain;
+          if (isReady(job, now) || isExpired(job, now)) return { job, nextRunAt: null };
+          this.demoteReady(state, job);
+          plain = state.plain.peek();
+        }
       }
 
       let nextRunAt = state.delayed.peek()?.runAt ?? null;
-      let groupId = state.cursor;
+      if (affinity === null) return { job: null, nextRunAt };
+      let groupId = affinity ?? state.cursor;
       let restart = false;
-      for (let visited = 0; groupId && visited < state.rotationSize; visited++) {
+      const visits = affinity === undefined ? state.rotationSize : 1;
+      for (let visited = 0; groupId && visited < visits; visited++) {
         const lane = state.lanes.get(groupId);
         if (!lane?.inRotation) break;
         const candidate = lane.jobs.peek();

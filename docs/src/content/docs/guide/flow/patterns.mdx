@@ -441,6 +441,12 @@ assign the same ID to multiple nodes. Note that `delay` on a chained step sets
 its earliest run time, but the step still waits for its dependency to complete
 first.
 
+The Bun producer also carries `group: { id, priority?, maxSize? }` from each
+node into the atomic graph. Group priority uses `0` first and then ascending
+values. If a `maxSize` capacity check fails, no node in that `add()` or
+`addBulk()` transaction is admitted. PostgreSQL serializes the capacity check
+across brokers; SQLite performs it in the same local admission transaction.
+
 ### Inspect an existing graph
 
 ```typescript

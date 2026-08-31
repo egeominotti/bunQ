@@ -12,10 +12,15 @@ export async function hasClaimablePostgresGroup(
   const [row] = await tx<{ exists: boolean }[]>`
     SELECT EXISTS (
       SELECT 1 FROM bunqueue_jobs AS job
+      LEFT JOIN bunqueue_group_state AS groups
+        ON groups.namespace = job.namespace AND groups.queue = job.queue
+       AND groups.group_id = job.group_id
       WHERE job.namespace = ${ctx.config.namespace} AND job.queue = ${queue}
         AND job.group_id IS NOT NULL
         AND job.state IN ('waiting', 'prioritized', 'delayed')
         AND job.run_at <= ${now}
+        AND COALESCE(groups.paused, FALSE) = FALSE
+        AND (groups.manual_rate_limit_until IS NULL OR groups.manual_rate_limit_until <= ${now})
         AND (job.ttl IS NULL OR job.created_at + job.ttl >= ${now})
         AND NOT EXISTS (
           SELECT 1 FROM bunqueue_dependencies AS dependency
@@ -88,15 +93,18 @@ async function selectGroupedCandidates(
   const { queue, now, capacity, options } = input;
   const concurrency = options?.concurrency ?? null;
   const rateMax = options?.limit?.max ?? null;
+  const affinity = options?.affinity ?? null;
   return await tx<PostgresJobRow[]>`
     WITH ready AS (
       SELECT job.id, job.group_id,
         row_number() OVER (
-          PARTITION BY job.group_id ORDER BY job.run_at, job.group_order, job.id
+          PARTITION BY job.group_id
+          ORDER BY job.priority, job.run_at, job.group_order, job.id
         ) AS group_position
       FROM bunqueue_jobs AS job
       WHERE job.namespace = ${ctx.config.namespace} AND job.queue = ${queue}
         AND job.group_id IS NOT NULL
+        AND (CAST(${affinity} AS TEXT) IS NULL OR job.group_id = CAST(${affinity} AS TEXT))
         AND job.state IN ('waiting', 'prioritized', 'delayed')
         AND job.run_at <= ${now}
         AND (job.ttl IS NULL OR job.created_at + job.ttl >= ${now})
@@ -136,6 +144,8 @@ async function selectGroupedCandidates(
       FROM bunqueue_group_state AS groups
       LEFT JOIN active ON active.group_id = groups.group_id
       WHERE groups.namespace = ${ctx.config.namespace} AND groups.queue = ${queue}
+        AND groups.paused = FALSE
+        AND (groups.manual_rate_limit_until IS NULL OR groups.manual_rate_limit_until <= ${now})
     ), selected AS (
       SELECT ready.id, ready.group_id, ready.group_position, capacities.last_served
       FROM ready JOIN capacities ON capacities.group_id = ready.group_id
@@ -164,8 +174,13 @@ export async function selectPostgresClaimCandidates(
   }
 ): Promise<PostgresJobRow[]> {
   const { queue, now, capacity, options } = input;
-  const ungrouped = await selectUngroupedCandidates(tx, ctx, queue, now, capacity);
+  const affinity = options && 'affinity' in options ? options.affinity : undefined;
+  const ungrouped =
+    typeof affinity === 'string'
+      ? []
+      : await selectUngroupedCandidates(tx, ctx, queue, now, capacity);
   if (ungrouped.length >= capacity) return ungrouped;
+  if (affinity === null) return ungrouped;
   const grouped = await selectGroupedCandidates(tx, ctx, {
     queue,
     now,

@@ -38,6 +38,18 @@ serial unless they opt into `test.concurrent`. The explicit worker count keeps
 local, sandbox, and CI behavior consistent instead of scaling unexpectedly with
 the host's CPU count.
 
+`test/cli-invariants-e2e.test.ts` runs four campaigns that each start multiple
+real CLI processes sequentially. Their 20-second aggregate test deadline is
+separate from the unchanged 5-second watchdog around every child process. This
+lets a contended parallel runner finish the complete command matrix without
+allowing one hung command to consume the campaign budget or escape cleanup.
+
+`test/bug-embedded-heartbeat-token.test.ts` uses `setSystemTime()` to advance
+the wall clock across the original lease expiry. It observes `renewalCount`,
+`lastRenewalAt`, and `expiresAt` before verifying the lease and acknowledging
+the job. This preserves the single and batch token-forwarding regression while
+removing real sleeps and their former 50-millisecond scheduling margin.
+
 `test/repro-chaos-soak.test.ts` deliberately runs beside that parallel load.
 Its churn oracle records each worker termination attempt with `performance.now()` and
 derives the realistic cycle from the configured kill interval plus the socket

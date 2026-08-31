@@ -49,6 +49,14 @@ head:
 
 ### Fixed
 
+- The embedded heartbeat-token regression now advances a controlled wall clock
+  and checks each lease's renewal count and expiry directly. Single,
+  acknowledgement, and batch coverage still cross the original expiry without
+  depending on a 50-millisecond real-time scheduling window.
+- Real-executable CLI campaigns now use a 20-second aggregate test deadline
+  while retaining the 5-second watchdog around every child process. Contended
+  runners no longer kill a healthy final command in the sequential matrix, and
+  individual CLI hangs remain bounded and attributable.
 - The sustained-churn soak test now records worker-termination-attempt cadence
   with a monotonic clock and validates both density and full-window coverage. It still
   rejects sparse, clustered, or long-gap churn, but a contended CI runner no

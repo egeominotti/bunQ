@@ -28,6 +28,15 @@ All notable changes to bunqueue are documented here.
 
 ### Fixed
 
+- The embedded heartbeat-token regression now advances a controlled wall clock
+  and asserts the renewed lease metadata directly. It still proves single,
+  acknowledgement, and batch behavior past the original expiry, without a
+  50-millisecond scheduler race under parallel CI load.
+- Real-executable CLI campaigns now separate a 20-second aggregate test
+  deadline from the unchanged 5-second watchdog for each child process. A
+  contended CI runner can finish the sequential command matrix without killing
+  its final command, while an individually hung CLI command still fails
+  promptly.
 - The sustained-churn soak gate now evaluates monotonic
   worker-termination-attempt timestamps
   for both density and coverage across the load window. It requires at least

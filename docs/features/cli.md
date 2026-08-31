@@ -176,6 +176,13 @@ dispatcher alias, and interruptible `start`. S3 data
 integrity itself remains owned by the mock-S3 backup suites; the CLI invariant
 proves local dispatch and JSON/error behavior without external credentials.
 
+Each real-executable campaign has a 20-second aggregate test deadline because
+it starts between 3 and 28 sequential Bun processes. Every process keeps its
+independent 5-second `runCli` watchdog, so a hung command still fails promptly
+and is attributed to that command. The wider campaign deadline only covers the
+cumulative process-start cost on a contended parallel runner; it does not relax
+the command-level hang invariant.
+
 `cli-invariants-boundaries`, `cli-doctor-logic`,
 `cli-invariants-concurrency`, and `cli-invariants-protocol-e2e` add 5,000-run
 pure properties, Unicode/numeric boundaries, 32-way idempotency/rollback races,

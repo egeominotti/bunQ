@@ -38,6 +38,20 @@ serial unless they opt into `test.concurrent`. The explicit worker count keeps
 local, sandbox, and CI behavior consistent instead of scaling unexpectedly with
 the host's CPU count.
 
+`test/repro-chaos-soak.test.ts` deliberately runs beside that parallel load.
+Its churn oracle records each worker termination attempt with `performance.now()` and
+derives the realistic cycle from the configured kill interval plus the socket
+release delay. Configuration arithmetic is normalized to safe integer
+microseconds, and configurations whose derived cycle or gap bounds are unsafe
+are rejected. A valid campaign must execute at least half of the possible
+strictly pre-deadline cycles, use finite strictly increasing timestamps inside
+the load window, and leave no gap longer than four cycles, including the leading
+and trailing gaps. This proves that churn spans the campaign without treating an
+ideal timer count as an event-loop guarantee on a contended CI runner. Job
+conservation, terminal state, collection cleanup, latency, and memory remain
+independent hard assertions. WAL size remains diagnostic telemetry in the soak
+report.
+
 The unit command includes `test/package-consumer-smoke.test.ts`. That test runs
 the library build, creates the exact npm tarball without network access, unpacks
 it into an isolated consumer's `node_modules`, and imports every documented Bun

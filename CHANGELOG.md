@@ -28,6 +28,12 @@ All notable changes to bunqueue are documented here.
 
 ### Fixed
 
+- The sustained-churn soak gate now evaluates monotonic
+  worker-termination-attempt timestamps
+  for both density and coverage across the load window. It requires at least
+  half of the realistically possible kill/reconnect cycles and rejects long
+  silent gaps, while no longer assuming every 400 ms timer fires exactly on a
+  contended CI runner.
 - Embedded Queue group operations and grouped `add`/`addBulk` now reuse the
   Queue's explicit `dataPath` when the shared manager is recreated. Group
   configuration and admission no longer switch silently to the default in-

@@ -49,6 +49,10 @@ head:
 
 ### Fixed
 
+- The sustained-churn soak test now records worker-termination-attempt cadence
+  with a monotonic clock and validates both density and full-window coverage. It still
+  rejects sparse, clustered, or long-gap churn, but a contended CI runner no
+  longer fails solely because timer callbacks cannot match their ideal cadence.
 - Embedded Queue group operations and grouped `add`/`addBulk` now reopen the
   Queue's explicit SQLite `dataPath` after the shared manager is restarted,
   rather than silently recreating an unrelated default in-memory manager.

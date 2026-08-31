@@ -205,8 +205,158 @@ function quantile(sorted: number[], q: number): number {
     : sorted[base];
 }
 
+interface ChaosCadenceEvidence {
+  possibleKills: number;
+  minimumKills: number;
+  observedKills: number;
+  maxAllowedGapMs: number;
+  observedMaxGapMs: number;
+  offsetsAreValid: boolean;
+  sustained: boolean;
+}
+
+const CADENCE_TICKS_PER_MS = 1000;
+
+function toCadenceTicks(milliseconds: number): number | null {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+  const ticks = Math.round(milliseconds * CADENCE_TICKS_PER_MS);
+  return Number.isSafeInteger(ticks) ? ticks : null;
+}
+
+function evaluateChaosCadence(
+  killOffsetsMs: readonly number[],
+  soakMs: number,
+  killMs: number,
+  releaseSettleMs = 30
+): ChaosCadenceEvidence {
+  const soakTicks = toCadenceTicks(soakMs);
+  const killTicks = toCadenceTicks(killMs);
+  const releaseSettleTicks = toCadenceTicks(releaseSettleMs);
+  const cycleTicks = (killTicks ?? 0) + (releaseSettleTicks ?? 0);
+  const maxAllowedGapTicks = cycleTicks * 4;
+  const derivedConfigIsValid =
+    soakTicks !== null &&
+    soakTicks > 0 &&
+    killTicks !== null &&
+    killTicks > 0 &&
+    releaseSettleTicks !== null &&
+    Number.isSafeInteger(cycleTicks) &&
+    cycleTicks > 0 &&
+    Number.isSafeInteger(maxAllowedGapTicks);
+  const calculatedPossibleKills =
+    derivedConfigIsValid && soakTicks > killTicks
+      ? Math.ceil((soakTicks - killTicks) / cycleTicks)
+      : 0;
+  const possibleKills = Number.isSafeInteger(calculatedPossibleKills) ? calculatedPossibleKills : 0;
+  const validConfig = derivedConfigIsValid && Number.isSafeInteger(calculatedPossibleKills);
+  const minimumKills = Math.max(2, Math.ceil(possibleKills / 2));
+  const maxAllowedGapMs = validConfig ? maxAllowedGapTicks / CADENCE_TICKS_PER_MS : 0;
+  let previous = 0;
+  let offsetsAreValid = validConfig && killOffsetsMs.length > 0;
+  let observedMaxGapMs = 0;
+  for (const offset of killOffsetsMs) {
+    if (!Number.isFinite(offset) || offset <= previous || offset >= soakMs) {
+      offsetsAreValid = false;
+      break;
+    }
+    observedMaxGapMs = Math.max(observedMaxGapMs, offset - previous);
+    previous = offset;
+  }
+  observedMaxGapMs = offsetsAreValid
+    ? Math.max(observedMaxGapMs, soakMs - previous)
+    : Number.POSITIVE_INFINITY;
+  const sustained =
+    possibleKills >= 2 &&
+    offsetsAreValid &&
+    killOffsetsMs.length >= minimumKills &&
+    observedMaxGapMs <= maxAllowedGapMs;
+
+  return {
+    possibleKills,
+    minimumKills,
+    observedKills: killOffsetsMs.length,
+    maxAllowedGapMs,
+    observedMaxGapMs,
+    offsetsAreValid,
+    sustained,
+  };
+}
+
+describe('soak chaos cadence under event-loop delay', () => {
+  it('accepts worker kills that span the load window even when timer callbacks run late', () => {
+    const delayedKillOffsetsMs = [
+      500, 1150, 1800, 2450, 3100, 3750, 4400, 5050, 5700, 6350, 7000, 7650,
+    ];
+
+    expect(evaluateChaosCadence(delayedKillOffsetsMs, 8000, 400).sustained).toBe(true);
+  });
+
+  it('rejects kills clustered at one edge or separated by a long silent gap', () => {
+    const earlyBurst = Array.from({ length: 17 }, (_, index) => 100 + index * 50);
+    const splitBurst = [300, 600, 900, 1200, 1500, 1800, 6200, 6500, 6800, 7100, 7400, 7700];
+
+    expect(evaluateChaosCadence(earlyBurst, 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence(splitBurst, 8000, 400).sustained).toBe(false);
+  });
+
+  it('requires at least half of the realistically possible kill cycles', () => {
+    const evenlySpaced = (count: number): number[] =>
+      Array.from({ length: count }, (_, index) => ((index + 1) * 8000) / (count + 1));
+
+    expect(evaluateChaosCadence(evenlySpaced(8), 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence(evenlySpaced(9), 8000, 400).sustained).toBe(true);
+  });
+
+  it('counts only kill cycles strictly before the load-window deadline', () => {
+    expect(evaluateChaosCadence([], 2119.999, 400).possibleKills).toBe(4);
+    expect(evaluateChaosCadence([], 2120, 400).possibleKills).toBe(4);
+    expect(evaluateChaosCadence([], 2120.001, 400).possibleKills).toBe(5);
+    expect(evaluateChaosCadence([], 2120, 400).minimumKills).toBe(2);
+    expect(evaluateChaosCadence([], 2120.001, 400).minimumKills).toBe(3);
+  });
+
+  it('normalizes fractional milliseconds before strict-boundary arithmetic', () => {
+    expect(evaluateChaosCadence([], 1140.899, 100.1, 30).possibleKills).toBe(8);
+    expect(evaluateChaosCadence([], 1140.9, 100.1, 30).possibleKills).toBe(8);
+    expect(evaluateChaosCadence([], 1140.901, 100.1, 30).possibleKills).toBe(9);
+    expect(evaluateChaosCadence([], 0.4, 0.1, 0).possibleKills).toBe(3);
+  });
+
+  it('rejects invalid timestamps and configurations', () => {
+    expect(evaluateChaosCadence([], 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 400, 1200], 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 1200, Number.NaN], 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([0, 800], 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 8000], 8000, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400], 500, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 800], Number.NaN, 400).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 800], 8000, 0).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 800], 8000, 400, -1).sustained).toBe(false);
+    expect(evaluateChaosCadence([400, 800], Number.MAX_VALUE, Number.MIN_VALUE, 0).sustained).toBe(
+      false
+    );
+    const hugeCycleMs = Math.floor(Number.MAX_SAFE_INTEGER / 3) / CADENCE_TICKS_PER_MS;
+    const overflowedGap = evaluateChaosCadence(
+      [hugeCycleMs / 2, hugeCycleMs],
+      hugeCycleMs * 2,
+      hugeCycleMs,
+      0
+    );
+    expect(Number.isFinite(overflowedGap.maxAllowedGapMs)).toBe(true);
+    expect(overflowedGap.sustained).toBe(false);
+    const finiteInputsOverflow = evaluateChaosCadence(
+      [Number.MAX_VALUE / 4, Number.MAX_VALUE / 2],
+      Number.MAX_VALUE,
+      Number.MAX_VALUE / 6,
+      Number.MAX_VALUE / 6
+    );
+    expect(Number.isFinite(finiteInputsOverflow.maxAllowedGapMs)).toBe(true);
+    expect(finiteInputsOverflow.sustained).toBe(false);
+  });
+});
+
 describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
-  it('marathon: continuous produce/consume with a worker dying every SOAK_KILL_MS — no job lost, memory returns to baseline, p99 does not drift, WAL bounded', async () => {
+  it('marathon: continuous produce/consume with a worker dying every SOAK_KILL_MS — no job lost, memory returns to baseline, p99 does not drift', async () => {
     const SOAK_MS = Number(process.env.SOAK_MS ?? 8000);
     const KILL_MS = Number(process.env.SOAK_KILL_MS ?? 400);
     const K_WORKERS = 6;
@@ -244,10 +394,10 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
     // ---- Producers: keep pushing for the whole SOAK_MS window ----
     const producers: FramedClient[] = [];
     for (let p = 0; p < K_PRODUCERS; p++) producers.push(await openFramed(port));
-    const t0 = Date.now();
+    const t0 = performance.now();
     const produce = async (prod: FramedClient, pid: number) => {
       let n = 0;
-      while (Date.now() - t0 < SOAK_MS && !stop) {
+      while (performance.now() - t0 < SOAK_MS && !stop) {
         const res = await prod.send({ cmd: 'PUSH', queue: QUEUE, data: { pid, n: n++ } });
         if (res.ok && res.id) pushedIds.add(String(res.id));
         // Light pacing so the queue actually builds a backlog to churn against.
@@ -288,17 +438,21 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
     // expiry — that's a test artifact, not a queue defect).
     let stopChaos = false;
     let kills = 0;
+    const killOffsetsMs: number[] = [];
+    const releaseSettleMs = 30;
     const chaos = (async () => {
       let slot = 0;
       while (!stop && !stopChaos) {
         await Bun.sleep(KILL_MS);
-        if (stop || stopChaos) break;
+        const killOffsetMs = performance.now() - t0;
+        if (stop || stopChaos || killOffsetMs >= SOAK_MS) break;
         try {
           workers[slot % K_WORKERS]?.terminate();
         } catch {
           /* ignore */
         }
-        await Bun.sleep(30); // let the close handler release leased jobs
+        killOffsetsMs.push(killOffsetMs);
+        await Bun.sleep(releaseSettleMs); // let the close handler release leased jobs
         workers[slot % K_WORKERS] = await openFramed(port);
         kills++;
         slot++;
@@ -312,9 +466,9 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
         // Latency probe: a burst of PUSHes, record per-op RTT, take p99.
         const rtts: number[] = [];
         for (let i = 0; i < 40; i++) {
-          const s = Date.now();
+          const s = performance.now();
           await probe.send({ cmd: 'PUSH', queue: 'probe', data: { i } });
-          rtts.push(Date.now() - s);
+          rtts.push(performance.now() - s);
         }
         rtts.sort((a, b) => a - b);
         const mem = qm.getMemoryStats();
@@ -326,7 +480,7 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
           /* ignore */
         }
         samples.push({
-          t: Date.now() - t0,
+          t: performance.now() - t0,
           rssMb: process.memoryUsage().rss / 1024 / 1024,
           heapObjs: (heapStats() as { objectCount: number }).objectCount,
           jobIndex: mem.jobIndex,
@@ -378,8 +532,8 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
         0
       );
     };
-    const drainDeadline = Date.now() + 45000; // > lockTtl(10s) with wide margin
-    while (Date.now() < drainDeadline) {
+    const drainDeadline = performance.now() + 45000; // > lockTtl(10s) with wide margin
+    while (performance.now() < drainDeadline) {
       if (completed.size >= pushedIds.size && (await queueEmpty())) break;
       if (await queueEmpty()) break;
       await Bun.sleep(150);
@@ -430,7 +584,12 @@ describe('SOAK — sustained churn: no loss, no leak, no latency drift', () => {
     for (const id of pushedIds) expect(done.has(id)).toBe(true);
     expect(done.size).toBe(pushedIds.size);
     // Chaos actually happened, and it was sustained (not a single tick).
-    expect(kills).toBeGreaterThanOrEqual(Math.max(1, Math.floor(SOAK_MS / KILL_MS) - 3));
+    const cadence = evaluateChaosCadence(killOffsetsMs, SOAK_MS, KILL_MS, releaseSettleMs);
+    console.log(`[soak] chaos cadence: ${JSON.stringify(cadence)}`);
+    expect(cadence.offsetsAreValid).toBe(true);
+    expect(cadence.observedKills).toBeGreaterThanOrEqual(cadence.minimumKills);
+    expect(cadence.observedMaxGapMs).toBeLessThanOrEqual(cadence.maxAllowedGapMs);
+    expect(cadence.sustained).toBe(true);
     expect(samples.length).toBeGreaterThanOrEqual(3);
 
     // NO LATENCY DRIFT: the p99 in the second half of the run is not a

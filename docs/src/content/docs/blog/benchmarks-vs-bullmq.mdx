@@ -25,14 +25,8 @@ import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · benchmarks</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    bunqueue vs BullMQ, <em>measured.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Performance claims without numbers are just marketing. These are reproducible benchmarks of
-    bunqueue TCP against BullMQ with Redis on identical workloads, both over real network
-    connections.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">bunqueue vs BullMQ, <em>measured.</em></h1>
+  <p class="bq-hero-sub">Performance claims without numbers are just marketing. These are reproducible benchmarks of bunqueue TCP against BullMQ with Redis on identical workloads, both over real network connections.</p>
 </div>
 
 ## Test Environment
@@ -52,30 +46,22 @@ Both use TCP connections (bunqueue TCP mode, BullMQ via Redis TCP). Embedded mod
   <div class="bq-card">
     <BqIcon name="spark" />
     <h3>3.5x Faster Bulk</h3>
-    <p>
-      <b>85,700 vs 24,800 ops/sec</b> - Bulk push (100 jobs per batch)
-    </p>
+    <p><b>85,700 vs 24,800 ops/sec</b> - Bulk push (100 jobs per batch)</p>
   </div>
   <div class="bq-card">
     <BqIcon name="speed" />
     <h3>1.8x Lower p99</h3>
-    <p>
-      <b>6.3ms vs 11.1ms</b> - Bulk push p99 latency
-    </p>
+    <p><b>6.3ms vs 11.1ms</b> - Bulk push p99 latency</p>
   </div>
   <div class="bq-card">
     <BqIcon name="stack" />
     <h3>Single Push: Parity</h3>
-    <p>
-      <b>52,756 vs 56,736 ops/sec</b> - BullMQ slightly ahead, effectively a tie
-    </p>
+    <p><b>52,756 vs 56,736 ops/sec</b> - BullMQ slightly ahead, effectively a tie</p>
   </div>
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>94% Smaller Install</h3>
-    <p>
-      <b>5.5 MB vs 93 MB</b>, 7 packages, no Redis server required
-    </p>
+    <p><b>5.5 MB vs 93 MB</b>, 7 packages, no Redis server required</p>
   </div>
 </div>
 

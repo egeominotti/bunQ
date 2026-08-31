@@ -203,7 +203,7 @@ cargo add bunqueue-client
 
 ### 3. Produce jobs
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -270,7 +270,7 @@ queue = Bunqueue.queue("emails")
 
 ### 4. Process jobs
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -398,7 +398,7 @@ Understanding four facts about the transport explains most SDK behavior:
 
 ### Connection options
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -547,7 +547,7 @@ builders: runtime handling of unknown keys differs by language.
 | `stallTimeout`                               | ms                                           | -       | Per-job stall detection override                                                                        |
 | `stackTraceLimit` / `keepLogs` / `sizeLimit` | number                                       | -       | Failure stack cap, retained log lines, payload cap                                                      |
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -580,6 +580,16 @@ queue.Add("charge", payment, bunqueue.JobOptions{"jobId": "order-" + orderID, "d
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir).
+
+</TabItem>
 </Tabs>
 
 ### Idempotency and bulk
@@ -590,7 +600,7 @@ instead of creating a duplicate. This holds for `addBulk` too, each bulk
 entry's `jobId` is preserved on the wire, so an idempotent batch ingest can
 be re-run safely after a crash:
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -633,6 +643,16 @@ for _, o := range orders {
 }
 ids, err := queue.AddBulk(entries)
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir).
 
 </TabItem>
 </Tabs>
@@ -684,7 +704,7 @@ work into shorter jobs.
 
 ### Failures
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -743,6 +763,16 @@ Panics are recovered, failed with their real stack, and never kill the
 worker.
 
 </TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir).
+
+</TabItem>
 </Tabs>
 
 A thrown error fails the job with its message and the leading stack lines
@@ -756,7 +786,7 @@ TypeScript, Python, PHP, and Go expose worker lifecycle listeners. Rust and
 Elixir use their structured telemetry callback for transport/command lifecycle
 and normal language control flow for per-job handler outcomes.
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -795,6 +825,16 @@ worker.On("error", func(args ...any) { log.Println(args[0]) })
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+Rust has no worker lifecycle listeners. Record per-job outcomes where the processor returns them, and pass the connection `telemetry` callback for transport and command lifecycle events.
+
+</TabItem>
+<TabItem label="Elixir">
+
+Elixir has no worker lifecycle listeners. Record per-job outcomes where the processor returns them, and pass the connection `:event_handler` callback for transport and command lifecycle events.
+
+</TabItem>
 </Tabs>
 
 **In TypeScript, always attach an `error` listener**: per Node
@@ -814,10 +854,10 @@ a protocol error instead of being treated as completion.
 ### ACK batching (high volume)
 
 Opt-in: coalesce completed-job acknowledgements into `ACKB` round-trips.
-Available in TypeScript and Python; the PHP and Go workers acknowledge
-each job individually.
+Available in TypeScript and Python; the PHP, Go, Rust and Elixir workers
+acknowledge each job individually.
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -840,6 +880,26 @@ worker = Worker(
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+ACK batching is a TypeScript and Python feature. The PHP worker acknowledges each job individually; there is no batching option to configure.
+
+</TabItem>
+<TabItem label="Go">
+
+ACK batching is a TypeScript and Python feature. The Go worker acknowledges each job individually; there is no batching option to configure.
+
+</TabItem>
+<TabItem label="Rust">
+
+ACK batching is a TypeScript and Python feature. The Rust worker acknowledges each job individually; there is no batching option to configure.
+
+</TabItem>
+<TabItem label="Elixir">
+
+ACK batching is a TypeScript and Python feature. The Elixir worker acknowledges each job individually; there is no batching option to configure.
+
+</TabItem>
 </Tabs>
 
 Semantics are strict: a job stays _active_, its lock still heartbeated,
@@ -852,7 +912,7 @@ batch can contain two lease generations with the same job ID.
 
 ### Graceful shutdown
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -893,6 +953,16 @@ worker.Close() // unregister and close the connection
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir).
+
+</TabItem>
 </Tabs>
 
 ## Query, control and operations
@@ -927,7 +997,7 @@ TypeScript and PHP use camelCase, Python/Rust/Elixir use snake_case, and Go uses
 exported Go style (`GetJobCounts`, `RetryDlq`, ...). A representative shared
 baseline:
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -1021,7 +1091,7 @@ Two behaviors worth knowing:
 Pipelines and parent/child trees with automatic ordering, children
 complete before their parent, results are readable from the parent:
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -1190,7 +1260,7 @@ OpenTelemetry, Prometheus, `Logger`, `tracing`, or your own collector; SDKs stay
 silent by default. Consumer callback exceptions and Rust callback panics are
 isolated so an observer can never break transport or worker correctness.
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -1282,7 +1352,7 @@ cancellation, and deduplication or debounce defaults. Available in
 TypeScript and Python; in PHP and Go, compose `Queue` and `Worker`
 directly.
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript
@@ -1338,6 +1408,26 @@ app.cron("daily-digest", "0 9 * * *", {"to": "all"})
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In PHP, compose `Queue` and `Worker` directly and route on the job name inside the processor.
+
+</TabItem>
+<TabItem label="Go">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Go, compose `Queue` and `Worker` directly and route on the job name inside the processor.
+
+</TabItem>
+<TabItem label="Rust">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Rust, compose `Queue` and `Worker` directly and route on the job name inside the processor.
+
+</TabItem>
+<TabItem label="Elixir">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Elixir, compose `Queue` and `Worker` directly and route on the job name inside the processor.
+
+</TabItem>
 </Tabs>
 
 Scheduler job options are honored end to end for each SDK's supported fields.
@@ -1389,7 +1479,7 @@ internet, and TLS needs a publicly trusted certificate.
 
 Authentication uses server-side tokens; transport security uses native TLS.
 
-<Tabs syncKey="lang">
+<Tabs syncKey="sdk">
 <TabItem label="TypeScript">
 
 ```typescript

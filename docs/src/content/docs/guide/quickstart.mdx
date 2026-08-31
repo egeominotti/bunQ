@@ -12,14 +12,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · quickstart</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    Working queue in <em>a minute.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Create a queue, add jobs, process them with a Worker, and turn on persistence. On Bun everything
-    runs embedded in a single process with zero configuration; from any other language, start the
-    server once and connect.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">Working queue in <em>a minute.</em></h1>
+  <p class="bq-hero-sub">Create a queue, add jobs, process them with a Worker, and turn on persistence. On Bun everything runs embedded in a single process with zero configuration; from any other language, start the server once and connect.</p>
 </div>
 
 ## The smallest working queue
@@ -83,7 +77,8 @@ def process(job):
     print(f"Sending {job.data['subject']} to {job.data['to']}")
     return {"sent": True}
 
-Worker("emails", process).run()
+worker = Worker("emails", process)
+worker.run()
 ```
 
 </TabItem>
@@ -175,6 +170,29 @@ Bunqueue.Worker.run(worker)
 
 </TabItem>
 </Tabs>
+
+The snippets above are the body of a program, not a whole file: drop each one into
+your project's entry point, then run it. The worker keeps running until you stop it
+with `Ctrl-C`:
+
+```bash
+bun run app.ts       # Bun
+node app.js          # Node.js (needs "type": "module" in package.json)
+deno run -A app.ts   # Deno
+python app.py        # Python
+php app.php          # PHP
+go run .             # Go
+cargo run            # Rust
+mix run --no-halt    # Elixir
+```
+
+The worker prints one line per job:
+
+```text
+Sending "Welcome!" to user@example.com    # Bun, Node.js / Deno
+Sending Welcome! to user@example.com      # Python, PHP, Go, Elixir
+Sending Map([(String(Utf8String { s: Ok("to") }), ...)])    # Rust: `{:?}` on the decoded msgpack value
+```
 
 On Bun, `embedded: true` means the queue runs inside your process, no server needed. Every other client talks TCP to the server (`bunx bunqueue start`) and defaults to `localhost:6789`.
 
@@ -558,9 +576,49 @@ worker.On("failed", func(args ...any) {
 ```
 
 </TabItem>
-</Tabs>
+<TabItem label="Rust">
 
-_Rust and Elixir have no worker event emitter: use the structured telemetry callback for transport lifecycle and normal language control flow for per-job outcomes (see the [SDK guide](/guide/sdks/))._
+```rust
+// The Rust worker has no event emitter: handle each outcome in the processor,
+// and use the connection telemetry callback for transport lifecycle events.
+let worker = Worker::new(
+    "emails",
+    |job| match send_email(job.data()) {
+        Ok(_) => {
+            println!("Job {} completed", job.id());
+            Ok(Value::from(true))
+        }
+        Err(e) => {
+            eprintln!("Job {} failed: {e}", job.id());
+            Err(ProcessError::retryable(e.to_string()))
+        }
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# The Elixir worker has no event emitter: handle each outcome in the handler,
+# and use the connection `:event_handler` callback for transport lifecycle events.
+worker =
+  Bunqueue.Worker.new("emails", fn job ->
+    case send_email(job.data) do
+      :ok ->
+        IO.puts("Job #{job.id} completed")
+        {:ok, %{sent: true}}
+
+      {:error, reason} ->
+        IO.puts("Job #{job.id} failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end)
+```
+
+</TabItem>
+</Tabs>
 
 The full event list is in the [Worker guide](/guide/worker/).
 
@@ -574,10 +632,22 @@ const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db
 const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
 
 // Option 2: environment variable
-// DATA_PATH=./data/bunqueue.db bun run app.ts
+// BUNQUEUE_DATA_PATH=./data/bunqueue.db bun run app.ts
 ```
 
-_`dataPath` applies to embedded (Bun) mode only. In server mode, persistence is configured on the server (`bunx bunqueue start --data-path ./data/bunq.db`); clients in every language need no changes._
+Every embedded `Queue` and `Worker` in the process shares one database. Naming the same
+`dataPath` again is fine; naming a *different* one throws instead of silently opening a
+second database.
+
+**In server mode** persistence is configured once on the server, and no client in any language
+changes:
+
+```bash
+bunx bunqueue start --data-path ./data/bunq.db
+```
+
+_`dataPath` is an embedded (Bun) option only. `BUNQUEUE_DATA_PATH` is the canonical variable;
+`BQ_DATA_PATH`, `DATA_PATH` and `SQLITE_PATH` are still read, in that order, as fallbacks._
 
 ## Shut down cleanly
 
@@ -658,7 +728,7 @@ The Bun examples above run in a single process. When multiple services need to s
 |              | Embedded mode                   | Server mode                                                           |
 | ------------ | ------------------------------- | --------------------------------------------------------------------- |
 | **Best for** | Single-process apps, serverless | Multi-process, microservices                                          |
-| **Setup**    | `embedded: true`                | Run `bunqueue start`, drop the option                                 |
+| **Setup**    | `embedded: true`                | Run `bunx bunqueue start`, drop the option                            |
 | **Clients**  | Bun only (in process)           | Node.js, Deno, Bun, Python, PHP, Go, Rust, Elixir, Cloudflare Workers |
 
 See the [Server guide](/guide/server/). All six official client SDKs speak the same protocol against the same queues, see the [SDK guide](/guide/sdks/).
@@ -726,9 +796,31 @@ app.cron("daily-report", "0 9 * * *", {"type": "summary"})
 ```
 
 </TabItem>
-</Tabs>
+<TabItem label="PHP">
 
-_Simple Mode is available in TypeScript and Python. In PHP, Go, Rust and Elixir, compose `Queue` and `Worker` directly._
+Simple Mode ships in the TypeScript and Python SDKs only. In PHP, compose `Queue` and
+`Worker` directly, and route on `$job->name()` inside the processor.
+
+</TabItem>
+<TabItem label="Go">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Go, compose `Queue` and
+`Worker` directly, and route on `job.Name()` inside the processor.
+
+</TabItem>
+<TabItem label="Rust">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Rust, compose `Queue` and
+`Worker` directly, and route on `job.name()` inside the processor.
+
+</TabItem>
+<TabItem label="Elixir">
+
+Simple Mode ships in the TypeScript and Python SDKs only. In Elixir, compose `Queue` and
+`Worker` directly, and route on `job.name` inside the handler.
+
+</TabItem>
+</Tabs>
 
 See the [Simple Mode guide](/guide/simple-mode/).
 
@@ -743,8 +835,9 @@ Try the [live demo](https://egeominotti.github.io/bunqueue-dashboard/) without i
 **Connect AI agents.** bunqueue ships an MCP server with 73 tools, so agents like Claude can add jobs, manage crons, and monitor queues via natural language:
 
 ```bash
-bun add bunqueue @modelcontextprotocol/sdk
-claude mcp add bunqueue -- bunx bunqueue-mcp
+bun add -g bunqueue                     # provides the bunqueue-mcp binary
+bun add -g @modelcontextprotocol/sdk    # required by the MCP server only
+claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp
 ```
 
 Setup for Claude Desktop, Cursor, and Windsurf is in the [MCP guide](/guide/mcp/).

@@ -10,7 +10,7 @@ const GUIDE_PATTERNS = [
   'cron/*.{md,mdx}',
   'dlq/*.{md,mdx}',
   'rate-limiting.mdx',
-  'queue-group.md',
+  'queue-group.mdx',
   'stall-detection.mdx',
   'cpu-intensive-workers.mdx',
 ];

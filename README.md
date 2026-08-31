@@ -395,7 +395,7 @@ have an embedded worker call it for every job.
 
 ```bash
 bun add bunqueue @modelcontextprotocol/sdk   # the MCP SDK is an optional peer
-claude mcp add bunqueue -- bunx bunqueue-mcp
+claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp
 ```
 
 ```json

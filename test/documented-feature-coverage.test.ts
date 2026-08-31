@@ -83,7 +83,7 @@ const COVERAGE: CoverageEntry[] = [
   {
     area: 'Queue',
     section: 'Queue Groups',
-    guide: 'queue-group.md',
+    guide: 'queue-group.mdx',
     tcp: scripts('tcp', 'test-queue-group.ts', 'test-queue-group-advanced.ts'),
     embedded: scripts('embedded', 'test-queue-group.ts'),
   },

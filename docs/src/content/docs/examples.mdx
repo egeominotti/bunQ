@@ -15,13 +15,8 @@ import TopologyExplorer from '../../components/examples/TopologyExplorer.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">reference · examples</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    Code examples you copy and <em>ship.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Short recipes for the tasks you hit first: retries, schedules, dedup, events, shutdown and
-    workflows. Each one links to the guide that covers it in depth.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">Code examples you copy and <em>ship.</em></h1>
+  <p class="bq-hero-sub">Short recipes for the tasks you hit first: retries, schedules, dedup, events, shutdown and workflows. Each one links to the guide that covers it in depth.</p>
 </div>
 
 This page starts with one local job, adds reliability and operational controls, then finishes with
@@ -770,9 +765,30 @@ worker.On("error", func(args ...any) { log.Println(args[0]) })
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+// Rust has no worker event emitter. Per-job outcomes are the processor's return
+// value; transport lifecycle arrives on the connection telemetry callback.
+let options = ConnectionOptions {
+    telemetry: Some(Arc::new(|event| println!("{event:?}"))),
+    ..Default::default()
+};
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Elixir has no worker event emitter. Per-job outcomes are the handler's return
+# value; transport lifecycle arrives on the connection `:event_handler` callback.
+queue = Bunqueue.queue("emails", event_handler: &IO.inspect/1)
+```
+
+</TabItem>
 </Tabs>
 
-_`QueueEvents` streaming is available in the Bun `bunqueue` package only. Rust and Elixir surface lifecycle through the structured telemetry callback instead of worker listeners, see the [SDK guide](/guide/sdks/#worker-events)._
+_`QueueEvents` streaming is available in the Bun `bunqueue` package only; see the [SDK guide](/guide/sdks/#worker-events)._
 
 Dashboards, metrics and Prometheus in the [monitoring guide](/guide/monitoring/).
 

@@ -282,6 +282,11 @@ emails.add_bulk([
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Not shown here. The PHP equivalent is in the [PHP SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
 <TabItem label="Go">
 
 ```go
@@ -320,6 +325,16 @@ for _, s := range subscribers {
 }
 emails.AddBulk(entries)
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) and the [SDK guide](/guide/sdks/).
 
 </TabItem>
 </Tabs>
@@ -444,6 +459,11 @@ webhooks.add("order.created", {
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Not shown here. The PHP equivalent is in the [PHP SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
 <TabItem label="Go">
 
 ```go
@@ -480,6 +500,16 @@ webhooks.Add("order.created", map[string]any{
     "payload":  map[string]any{"orderId": "ORD-123"},
 }, bunqueue.JobOptions{"attempts": 8, "backoff": 5000}) // 5s, 10s, 20s, 40s...
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) and the [SDK guide](/guide/sdks/).
 
 </TabItem>
 </Tabs>
@@ -594,6 +624,11 @@ images.add("product-image", {
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Not shown here. The PHP equivalent is in the [PHP SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
 <TabItem label="Go">
 
 ```go
@@ -631,6 +666,16 @@ images.Add("product-image", map[string]any{
     },
 }, bunqueue.JobOptions{"attempts": 3, "timeout": 120000}) // kill stuck jobs after 2 minutes
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) and the [SDK guide](/guide/sdks/).
 
 </TabItem>
 </Tabs>
@@ -751,6 +796,11 @@ payments.add(
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Not shown here. The PHP equivalent is in the [PHP SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/php) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
 <TabItem label="Go">
 
 ```go
@@ -780,6 +830,16 @@ payments.Add("charge",
         "attempts": 3, "backoff": 5000, "timeout": 60000,
     })
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) and the [SDK guide](/guide/sdks/).
 
 </TabItem>
 </Tabs>
@@ -1140,6 +1200,16 @@ worker := bunqueue.NewWorker("orders", func(job *bunqueue.Job) (any, error) {
 }, bunqueue.WorkerOptions{})
 worker.Run()
 ```
+
+</TabItem>
+<TabItem label="Rust">
+
+Not shown here. The Rust equivalent is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust) and the [SDK guide](/guide/sdks/).
+
+</TabItem>
+<TabItem label="Elixir">
+
+Not shown here. The Elixir equivalent is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir) and the [SDK guide](/guide/sdks/).
 
 </TabItem>
 </Tabs>

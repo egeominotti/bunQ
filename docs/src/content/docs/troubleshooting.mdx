@@ -132,14 +132,14 @@ const queue = new Queue('tasks', { embedded: true, dataPath: './data/bunqueue.db
 const worker = new Worker('tasks', processor, { embedded: true, dataPath: './data/bunqueue.db' });
 ```
 
-**Solution (server mode):** Use a [configuration file](/guide/configuration/) or set `DATA_PATH`:
+**Solution (server mode):** Use a [configuration file](/guide/configuration/) or set `BUNQUEUE_DATA_PATH`:
 
 ```bash
-DATA_PATH=./data/bunqueue.db bunqueue start
+BUNQUEUE_DATA_PATH=./data/bunqueue.db bunqueue start
 ```
 
 :::note
-Without `dataPath` or `DATA_PATH`, bunqueue runs in-memory (no persistence across restarts).
+Without `dataPath` or `BUNQUEUE_DATA_PATH`, bunqueue runs in-memory (no persistence across restarts).
 :::
 
 ### Jobs not persisted across restarts
@@ -364,9 +364,44 @@ worker.On("failed", func(args ...any) {
 ```
 
 </TabItem>
-</Tabs>
+<TabItem label="Rust">
 
-*Worker lifecycle events exist in TypeScript, Python, PHP, and Go; in Rust and Elixir, handler failures surface through normal control flow and the telemetry callback.*
+```rust
+// Rust has no worker event emitter: a failed attempt surfaces where you return it,
+// and transport-level problems arrive on the connection telemetry callback.
+let worker = Worker::new(
+    "queue",
+    |job| {
+        process(job.data()).map_err(|e| {
+            eprintln!("job {} failed on attempt {}: {e}", job.id(), job.attempts_made());
+            ProcessError::retryable(e.to_string())
+        })
+    },
+    WorkerOptions::default(),
+);
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# Elixir has no worker event emitter: a failed attempt surfaces where you return it,
+# and transport-level problems arrive on the connection `:event_handler` callback.
+worker =
+  Bunqueue.Worker.new("queue", fn job ->
+    case process(job.data) do
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, reason} ->
+        IO.puts("job #{job.id} failed on attempt #{job.attempts_made}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end)
+```
+
+</TabItem>
+</Tabs>
 
 ### Memory usage keeps growing
 

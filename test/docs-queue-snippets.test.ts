@@ -14,7 +14,7 @@ const GUIDES = {
   'queue/limits.mdx': 1,
   'rate-limiting.mdx': 5,
   'queue/job-groups.mdx': 0,
-  'queue-group.md': 4,
+  'queue-group.mdx': 4,
   'queue/metrics.mdx': 1,
   'queue/advanced.mdx': 4,
   'queue/options.mdx': 1,

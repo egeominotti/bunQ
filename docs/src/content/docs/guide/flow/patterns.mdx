@@ -175,6 +175,26 @@ parallel_ids, final_id = result["parallel_ids"], result["final_id"]
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+`addBulkThen` is available in the Bun package and the TypeScript and Python SDKs. In PHP, build the same shape with `add`: a parent whose `children` are the parallel jobs, so the children complete before the parent runs.
+
+</TabItem>
+<TabItem label="Go">
+
+`addBulkThen` is available in the Bun package and the TypeScript and Python SDKs. In Go, build the same shape with `add`: a parent whose `children` are the parallel jobs, so the children complete before the parent runs.
+
+</TabItem>
+<TabItem label="Rust">
+
+`addBulkThen` is available in the Bun package and the TypeScript and Python SDKs. In Rust, build the same shape with `add`: a parent whose `children` are the parallel jobs, so the children complete before the parent runs.
+
+</TabItem>
+<TabItem label="Elixir">
+
+`addBulkThen` is available in the Bun package and the TypeScript and Python SDKs. In Elixir, build the same shape with `add`: a parent whose `children` are the parallel jobs, so the children complete before the parent runs.
+
+</TabItem>
 </Tabs>
 
 *`addBulkThen` is available in the Bun package, the TypeScript SDK and the Python SDK. In PHP, Go, Rust and Elixir build the same shape with `add`: a parent whose `children` are the parallel jobs (children complete first, then the parent runs).*
@@ -206,6 +226,36 @@ const { jobIds } = await flow.addTree({
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In Node.js / Deno, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
+<TabItem label="Python">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In Python, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
+<TabItem label="PHP">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In PHP, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
+<TabItem label="Go">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In Go, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
+<TabItem label="Rust">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In Rust, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
+<TabItem label="Elixir">
+
+`addTree` (parent-first hierarchies) is available in the Bun `bunqueue` package only. In Elixir, `add` builds the inverse tree, where children complete before their parent.
+
+</TabItem>
 </Tabs>
 
 *`addTree` (parent-first hierarchies) is available in the Bun package only for now. Every SDK's `add` builds the inverse tree, where children complete before their parent ([Quick Start](/guide/flow/#quick-start)).*
@@ -233,6 +283,36 @@ const worker = new Worker('pipeline', async (job) => {
   return { processed: true };
 }, runtimeOptions);
 ```
+
+</TabItem>
+<TabItem label="Node.js / Deno">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In Node.js / Deno, read a parent with `getResult(parentId)` on the queue.
+
+</TabItem>
+<TabItem label="Python">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In Python, read a parent with `get_result(parent_id)` on the queue.
+
+</TabItem>
+<TabItem label="PHP">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In PHP, read a parent with `getResult($parentId)` on the queue.
+
+</TabItem>
+<TabItem label="Go">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In Go, read a parent with `GetResult(parentID)` on the queue.
+
+</TabItem>
+<TabItem label="Rust">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In Rust, read a parent with `get_result(parent_id)` on the queue.
+
+</TabItem>
+<TabItem label="Elixir">
+
+`getParentResult` / `getParentResults` are Bun-package helpers. In Elixir, read a parent with `get_result(parent_id)` on the queue.
 
 </TabItem>
 </Tabs>
@@ -284,6 +364,30 @@ await flow.add(
 ```
 
 </TabItem>
+<TabItem label="Node.js / Deno">
+
+```typescript
+import { FlowProducer } from 'bunqueue-client';
+
+await flow.add(
+  {
+    name: 'report',
+    queueName: 'reports',
+    children: [
+      { name: 'fetch', queueName: 'api', data: {}, opts: { priority: 10 } },
+      { name: 'render', queueName: 'cpu', data: {} },
+    ],
+  },
+  {
+    queuesOptions: {
+      api: { attempts: 5, backoff: 2000 },  // defaults for all 'api' jobs
+      cpu: { timeout: 60000 },              // defaults for all 'cpu' jobs
+    },
+  }
+);
+```
+
+</TabItem>
 <TabItem label="Python">
 
 ```python
@@ -306,9 +410,29 @@ flow.add(
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+Per-queue defaults (`queuesOptions`) are supported in the Bun package, the TypeScript SDK and the Python SDK. In PHP, set per-step `opts` on each node instead; that is available everywhere.
+
+</TabItem>
+<TabItem label="Go">
+
+Per-queue defaults (`queuesOptions`) are supported in the Bun package, the TypeScript SDK and the Python SDK. In Go, set per-step `opts` on each node instead; that is available everywhere.
+
+</TabItem>
+<TabItem label="Rust">
+
+Per-queue defaults (`queuesOptions`) are supported in the Bun package, the TypeScript SDK and the Python SDK. In Rust, set per-step `opts` on each node instead; that is available everywhere.
+
+</TabItem>
+<TabItem label="Elixir">
+
+Per-queue defaults (`queuesOptions`) are supported in the Bun package, the TypeScript SDK and the Python SDK. In Elixir, set per-step `opts` on each node instead; that is available everywhere.
+
+</TabItem>
 </Tabs>
 
-*Per-queue defaults (`queuesOptions`) are supported in the Bun package and the Python SDK; in the other SDKs set per-step `opts` on each node instead (available everywhere).*
+*Per-queue defaults (`queuesOptions`) are supported in the Bun package, the TypeScript SDK and the Python SDK; in the other SDKs set per-step `opts` on each node instead (available everywhere).*
 
 Per-job `opts` override `queuesOptions` defaults. Identity is the exception:
 set `jobId` (or Python `job_id`) in the individual node's `opts`. It is rejected

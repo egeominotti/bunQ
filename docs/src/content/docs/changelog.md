@@ -28,6 +28,9 @@ head:
   FIFO claim order does not imply serial execution: group concurrency remains
   unlimited unless configured. Real TCP/Worker E2E coverage verifies ordering,
   overrides, input validation, SQLite restart recovery, and obliterate cleanup.
+- Quick Start: a "run it" step after the first snippet, with the run command for
+  each of the seven runtimes and the expected output, plus explicit Rust and
+  Elixir guidance for per-job outcomes where those SDKs have no event emitter.
 
 ### Changed
 
@@ -49,6 +52,83 @@ head:
 
 ### Fixed
 
+- Documentation site: hero blocks whose content spanned several source lines
+  made MDX emit a markdown paragraph inside them, producing invalid `<p>` in
+  `<h1>` and `<p>` in `<p>` on 33 pages. The nested paragraph also inherited the
+  1.75 body line-height, so hero headings rendered with a ~1.75 leading instead
+  of the intended 1.05 and broke across lines. All hero headings and ledes are
+  now single-line, and a CSS guard keeps hero typography correct if it regresses.
+- Documentation site: `.bq-wrap` sits inside `.content-panel`, which already
+  supplies the page gutter, but added another 3rem, so every hero was inset 48px
+  from the prose below it. Above the 38rem phone layer every `.bq-wrap` on a
+  non-splash hero page now drops that inset, which also keeps pages that continue
+  in `.bq-wrap` sections (the production guide, the blog index) on one left edge
+  from hero to last section. The home splash keeps its inset.
+- Quick Start: the "React to events" and Simple Mode tab groups were missing
+  languages while sharing `syncKey="lang"`. Starlight syncs tab sets by label,
+  so a reader on Rust, Elixir, PHP or Go silently fell back to the Bun tab and
+  was shown TypeScript. Every synced group on the page now carries the same
+  seven labels.
+- Quick Start: the MCP setup used `bun add bunqueue` plus `bunx bunqueue-mcp`,
+  but the `bunqueue-mcp` binary ships inside `bunqueue` and is not a package of
+  its own. It now matches the MCP guide: `bun add -g` plus
+  `bunx --package=bunqueue bunqueue-mcp`.
+- Quick Start: the Python first snippet called `Worker(...).run()` inline, so
+  the `worker` handle used by the later events section did not exist. It now
+  binds `worker` before running it.
+- Documentation site: the nested-paragraph defect also affected `.bq-lede`,
+  `.bq-chart-title`, `.bq-vs-sum`, `.bq-bench-title`, `.bq-bench-foot` and
+  `.bq-pipeline-caption` blocks on the home page, the comparison page, the
+  production page and two blog posts. Every literal `<p>`/`<hN>` JSX block in the
+  content sources now keeps its text on one line, and the built site has no
+  nested paragraph left.
+- Documentation site: `bunx bunqueue-mcp` appeared in the home page, the server
+  guide, the cron reference and the env-vars guide. `bunqueue-mcp` is a binary
+  inside `bunqueue`, not a package, so the bare form 404s (the MCP guide already
+  documented that). Every call site, including `README.md`, now uses
+  `bunx --package=bunqueue bunqueue-mcp`.
+- Documentation site: deployment, server, env-vars, troubleshooting and the
+  production blog post configured persistence through `DATA_PATH` while the
+  env-vars reference documents `BUNQUEUE_DATA_PATH` as canonical. Examples now use
+  the canonical name; the fallbacks are unchanged and still documented.
+- Documentation site: many tab groups were missing languages while sharing
+  `syncKey="lang"`. Starlight syncs tab groups by label through localStorage, so a
+  group without the reader's label silently fell back to its first tab and showed
+  the wrong language, both between adjacent groups on one page and across pages.
+  All 128 `lang` groups site-wide now carry the same seven labels in the same
+  order, filling gaps with an explicit pointer instead of a silent fallback:
+  Quick Start, webhooks, flow patterns and failures, use cases, examples,
+  troubleshooting, Simple Mode and the BullMQ migration guide.
+- Documentation site: the flow-patterns guide said per-queue defaults
+  (`queuesOptions`) were supported in the Bun package and the Python SDK only. The
+  TypeScript SDK implements them too (`sdk/typescript/src/flow-types.ts`,
+  `flow-plan.ts`), so the Node.js / Deno tab now carries the real
+  `bunqueue-client` snippet and every mention names all three.
+- Documentation site: `guide/queue-group` was a `.md` file that used `<Tabs>` and
+  `<TabItem>`. Plain Markdown does not process components, so the page printed the
+  literal `import { Tabs, TabItem } ...` line as body text and rendered its four tab
+  groups as a flat stack of code blocks. Renamed to `.mdx`; the page now renders its
+  tabs and joins the site-wide `lang` sync (128 groups, one label set). The doc-audit
+  fixtures in `test/docs-language-tabs.test.ts`,
+  `test/docs-queue-snippets.test.ts` and `test/documented-feature-coverage.test.ts`
+  follow the new extension: the glob had been silently matching nothing, so the
+  page's four language groups were not label-audited at all.
+- Documentation site: the SDK guide labels the TypeScript SDK as a single tab, a
+  different vocabulary from the runtime-oriented groups elsewhere, so a reader who
+  had picked Bun or Node.js / Deno matched nothing and fell back silently. Its
+  groups now use their own `syncKey="sdk"`.
+- Documentation site: Elixir guidance referred to a "telemetry callback"; the
+  Elixir SDK spells that option `:event_handler` on the connection.
+- Documentation site: the SDK guide offered ACK batching placeholders that pointed
+  PHP, Go, Rust and Elixir readers at a non-existent equivalent. Batching is a
+  TypeScript and Python feature; the other workers acknowledge each job
+  individually, and the tabs now say so.
+- Quick Start: the persistence section advertised `DATA_PATH`; `BUNQUEUE_DATA_PATH`
+  is the canonical variable and `BQ_DATA_PATH`, `DATA_PATH`, `SQLITE_PATH` are
+  ordered fallbacks. The section now shows the server-mode `--data-path` step and
+  states that a *different* embedded `dataPath` throws instead of opening a second
+  database. The "Setup" table row also uses `bunx bunqueue start`, like the rest
+  of the page.
 - The embedded heartbeat-token regression now advances a controlled wall clock
   and checks each lease's renewal count and expiry directly. Single,
   acknowledgement, and batch coverage still cross the original expiry without

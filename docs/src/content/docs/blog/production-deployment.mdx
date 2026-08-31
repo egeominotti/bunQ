@@ -24,14 +24,8 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · operations</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    One instance, deployed <em>properly.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    This article covers bunqueue's default single-instance SQLite deployment with Docker, systemd,
-    and PM2. PostgreSQL 15–18 multi-broker mode is now also available, with 18.6 recommended; follow
-    the current deployment guide for that topology.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">One instance, deployed <em>properly.</em></h1>
+  <p class="bq-hero-sub">This article covers bunqueue's default single-instance SQLite deployment with Docker, systemd, and PM2. PostgreSQL 15–18 multi-broker mode is now also available, with 18.6 recommended; follow the current deployment guide for that topology.</p>
 </div>
 
 :::note[Storage update]
@@ -132,7 +126,7 @@ Configure bunqueue through environment variables or a [configuration file](/guid
 TCP_PORT=6789
 HTTP_PORT=6790
 HOST=0.0.0.0
-DATA_PATH=/var/lib/bunqueue/queue.db
+BUNQUEUE_DATA_PATH=/var/lib/bunqueue/queue.db
 
 # Authentication
 AUTH_TOKENS=your-secret-token-here

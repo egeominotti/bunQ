@@ -12,13 +12,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · migration</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    BullMQ code, minus <em>Redis.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    bunqueue keeps the BullMQ Queue and Worker API. Most migrations are an import change and a
-    deleted Redis config. This page shows the diff first, then lists every real difference.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">BullMQ code, minus <em>Redis.</em></h1>
+  <p class="bq-hero-sub">bunqueue keeps the BullMQ Queue and Worker API. Most migrations are an import change and a deleted Redis config. This page shows the diff first, then lists every real difference.</p>
 </div>
 
 This page is for BullMQ users. It shows the full before/after up front, then walks the steps and the few API differences that actually matter.
@@ -118,6 +113,31 @@ const worker = new Worker(
 ```
 
 Staying on Node.js or Deno? Install `bunqueue-client` instead of `bunqueue`, start the server once with `bunx bunqueue start --data-path ./data/bunq.db`, and keep your runtime.
+
+</TabItem>
+<TabItem label="Python">
+
+BullMQ is a Node.js library, so the before/after pairs on this page are JavaScript and TypeScript only. If the destination is Python, the target-side API is in the [Python SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/python).
+
+</TabItem>
+<TabItem label="PHP">
+
+BullMQ is a Node.js library, so the before/after pairs on this page are JavaScript and TypeScript only. If the destination is PHP, the target-side API is in the [PHP SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/php).
+
+</TabItem>
+<TabItem label="Go">
+
+BullMQ is a Node.js library, so the before/after pairs on this page are JavaScript and TypeScript only. If the destination is Go, the target-side API is in the [Go SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/go).
+
+</TabItem>
+<TabItem label="Rust">
+
+BullMQ is a Node.js library, so the before/after pairs on this page are JavaScript and TypeScript only. If the destination is Rust, the target-side API is in the [Rust SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/rust).
+
+</TabItem>
+<TabItem label="Elixir">
+
+BullMQ is a Node.js library, so the before/after pairs on this page are JavaScript and TypeScript only. If the destination is Elixir, the target-side API is in the [Elixir SDK reference](https://github.com/egeominotti/bunqueue/tree/main/sdk/elixir).
 
 </TabItem>
 </Tabs>

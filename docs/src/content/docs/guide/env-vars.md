@@ -233,7 +233,7 @@ Telemetry agent for the bunqueue Cloud dashboard. Cloud mode activates only when
 
 ```bash
 # Point the MCP server at a remote bunqueue instance
-BUNQUEUE_MODE=tcp BUNQUEUE_HOST=your-server.com BUNQUEUE_PORT=7000 bunx bunqueue-mcp
+BUNQUEUE_MODE=tcp BUNQUEUE_HOST=your-server.com BUNQUEUE_PORT=7000 bunx --package=bunqueue bunqueue-mcp
 ```
 
 The MCP server also reads `BUNQUEUE_TOKEN` for authentication.
@@ -255,7 +255,7 @@ bunqueue stats   # connects to localhost:7000
 # .env.development
 TCP_PORT=6789
 HTTP_PORT=6790
-DATA_PATH=./data/dev.db
+BUNQUEUE_DATA_PATH=./data/dev.db
 LOG_LEVEL=debug
 LOG_FORMAT=text
 ```
@@ -266,7 +266,7 @@ LOG_FORMAT=text
 # .env.production
 TCP_PORT=6789
 HTTP_PORT=6790
-DATA_PATH=/var/lib/production.db
+BUNQUEUE_DATA_PATH=/var/lib/production.db
 LOG_LEVEL=info
 LOG_FORMAT=json
 AUTH_TOKENS=prod-token-abc123,prod-token-xyz789
@@ -294,7 +294,7 @@ services:
     volumes:
       - bunqueue-data:/data
     environment:
-      - DATA_PATH=/data/queue.db
+      - BUNQUEUE_DATA_PATH=/data/queue.db
       - LOG_FORMAT=json
       - AUTH_TOKENS=${AUTH_TOKENS}
       - S3_BACKUP_ENABLED=1

@@ -24,14 +24,8 @@ import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · workflows</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    Orchestration without the <em>orchestra.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Real processes span multiple steps, and when step three fails you must undo one and two. That is
-    orchestration, and until now it meant Temporal, Inngest, or Trigger.dev. bunqueue 2.7 builds it
-    into the queue you already run.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">Orchestration without the <em>orchestra.</em></h1>
+  <p class="bq-hero-sub">Real processes span multiple steps, and when step three fails you must undo one and two. That is orchestration, and until now it meant Temporal, Inngest, or Trigger.dev. bunqueue 2.7 builds it into the queue you already run.</p>
 </div>
 
 **The new Workflow Engine in bunqueue 2.7** lets you define multi-step processes (charge payment, reserve inventory, send confirmation, notify shipping) with a fluent TypeScript DSL, run saga compensation on failure, branch conditionally, and pause for human approval, all inside the same queue infrastructure you already use. Zero new services. Zero cloud dependencies.

@@ -16,14 +16,8 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · cron jobs</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    Work that runs <em>on a clock.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Nightly reports, hourly cleanups, a health ping every thirty seconds. Schedules live in the
-    selected persistent backend: beside jobs in SQLite, or transactionally coordinated across a
-    PostgreSQL broker fleet. Memory-only mode does not survive a restart.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">Work that runs <em>on a clock.</em></h1>
+  <p class="bq-hero-sub">Nightly reports, hourly cleanups, a health ping every thirty seconds. Schedules live in the selected persistent backend: beside jobs in SQLite, or transactionally coordinated across a PostgreSQL broker fleet. Memory-only mode does not survive a restart.</p>
 </div>
 
 A scheduler is a named rule that keeps producing jobs on a queue. Create it once with `upsertJobScheduler()` and bunqueue fires the job on every tick, whether that tick comes from a cron pattern or a fixed interval. Scheduler IDs are global to the selected backend—not scoped by queue—and, in PostgreSQL mode, shared by every broker in the namespace. Use names such as `reports:daily-report` when several applications share a deployment.

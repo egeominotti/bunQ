@@ -131,6 +131,26 @@ Worker("main", process).run()
 ```
 
 </TabItem>
+<TabItem label="PHP">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from PHP like anywhere else; read child outcomes by looking the child IDs up with `getJob($childId)` / `getResult($childId)` on the queue.
+
+</TabItem>
+<TabItem label="Go">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Go like anywhere else; read child outcomes by looking the child IDs up with `GetJob(childID)` / `GetResult(childID)` on the queue.
+
+</TabItem>
+<TabItem label="Rust">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Rust like anywhere else; read child outcomes by looking the child IDs up with `get_job(child_id)` / `get_result(child_id)` on the queue.
+
+</TabItem>
+<TabItem label="Elixir">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Elixir like anywhere else; read child outcomes by looking the child IDs up with `get_job(child_id)` / `get_result(child_id)` on the queue.
+
+</TabItem>
 </Tabs>
 
 And with `ignoreDependencyOnFailure`, when the parent should continue with partial data:
@@ -172,6 +192,26 @@ def process(job):
 
 Worker("reports", process).run()
 ```
+
+</TabItem>
+<TabItem label="PHP">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from PHP like anywhere else; read child outcomes by looking the child IDs up with `getJob($childId)` / `getResult($childId)` on the queue.
+
+</TabItem>
+<TabItem label="Go">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Go like anywhere else; read child outcomes by looking the child IDs up with `GetJob(childID)` / `GetResult(childID)` on the queue.
+
+</TabItem>
+<TabItem label="Rust">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Rust like anywhere else; read child outcomes by looking the child IDs up with `get_job(child_id)` / `get_result(child_id)` on the queue.
+
+</TabItem>
+<TabItem label="Elixir">
+
+The child-failure queries (`getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeUnprocessedChildren`) are available in the Bun package and the TypeScript and Python SDKs. The failure options themselves work from Elixir like anywhere else; read child outcomes by looking the child IDs up with `get_job(child_id)` / `get_result(child_id)` on the queue.
 
 </TabItem>
 </Tabs>

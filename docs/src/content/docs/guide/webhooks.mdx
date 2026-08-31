@@ -47,6 +47,12 @@ That is enough to see events flowing. In production, always verify the signature
 The TypeScript, Python, PHP, and Go SDKs expose the same webhook surface programmatically:
 
 <Tabs syncKey="lang">
+<TabItem label="Bun">
+
+The Bun package has no typed webhook helpers yet. Manage webhooks with the CLI above,
+the HTTP API, or the raw `AddWebhook` / `ListWebhooks` / `RemoveWebhook` TCP commands.
+
+</TabItem>
 <TabItem label="Node.js / Deno">
 
 ```typescript
@@ -121,9 +127,21 @@ _ = queue.RemoveWebhook(webhookID)
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+The Rust SDK has no typed webhook helpers yet. Manage webhooks with the CLI above,
+the HTTP API, or the raw `AddWebhook` / `ListWebhooks` / `RemoveWebhook` TCP commands.
+
+</TabItem>
+<TabItem label="Elixir">
+
+The Elixir SDK has no typed webhook helpers yet. Manage webhooks with the CLI above,
+the HTTP API, or the raw `AddWebhook` / `ListWebhooks` / `RemoveWebhook` TCP commands.
+
+</TabItem>
 </Tabs>
 
-*The PHP and Go helpers register global, unsigned webhooks (`url` + `events` only); use the CLI or HTTP API to set a `secret` or a queue scope from those languages. The Bun package, Rust, and Elixir have no typed webhook helpers yet: use the CLI above, the HTTP API, or the raw TCP commands.*
+*The PHP and Go helpers register global, unsigned webhooks (`url` + `events` only); use the CLI or HTTP API to set a `secret` or a queue scope from those languages.*
 
 ### Scope a webhook to one queue
 
@@ -286,9 +304,45 @@ func verifySignature(rawBody []byte, signature, secret string) bool {
 ```
 
 </TabItem>
+<TabItem label="Rust">
+
+```rust
+// requires the hmac, sha2 and hex crates
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+fn verify_signature(raw_body: &[u8], signature: &str, secret: &str) -> bool {
+    let Ok(sig) = hex::decode(signature) else {
+        return false;
+    };
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("any key length");
+    mac.update(raw_body);
+    mac.verify_slice(&sig).is_ok() // constant-time comparison
+}
+
+// In your HTTP handler: read the RAW body first, verify, then deserialize it.
+```
+
+</TabItem>
+<TabItem label="Elixir">
+
+```elixir
+# requires {:plug_crypto, "~> 2.0"} for the constant-time comparison
+def verify_signature(raw_body, signature, secret) do
+  expected =
+    :crypto.mac(:hmac, :sha256, secret, raw_body)
+    |> Base.encode16(case: :lower)
+
+  Plug.Crypto.secure_compare(expected, signature)
+end
+
+# In your HTTP handler: read the RAW body first, verify, then decode it.
+```
+
+</TabItem>
 </Tabs>
 
-Two things matter in any language: compute the HMAC over the **raw request body** (not a re-serialized object), and compare with a constant-time function (`timingSafeEqual` in Node/Bun, `hmac.compare_digest` in Python, `hash_equals` in PHP, `hmac.Equal` in Go).
+Two things matter in any language: compute the HMAC over the **raw request body** (not a re-serialized object), and compare with a constant-time function (`timingSafeEqual` in Node/Bun, `hmac.compare_digest` in Python, `hash_equals` in PHP, `hmac.Equal` in Go, `Mac::verify_slice` in Rust, `Plug.Crypto.secure_compare` in Elixir).
 
 :::caution[Unsigned webhooks]
 Without `--secret`, payloads are sent unsigned and anyone can forge requests to your endpoint. Always set a secret in production.

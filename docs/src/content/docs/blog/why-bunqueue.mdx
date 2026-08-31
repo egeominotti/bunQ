@@ -25,14 +25,8 @@ import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">blog · design</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    A job queue without <em>Redis.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    BullMQ, Bee-Queue, and friends all assume a running Redis server. bunqueue can keep a durable
-    queue in-process with SQLite instead: simpler deployments and zero external services, with a
-    separate PostgreSQL multi-broker path when you scale. Unconfigured queues use memory storage.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">A job queue without <em>Redis.</em></h1>
+  <p class="bq-hero-sub">BullMQ, Bee-Queue, and friends all assume a running Redis server. bunqueue can keep a durable queue in-process with SQLite instead: simpler deployments and zero external services, with a separate PostgreSQL multi-broker path when you scale. Unconfigured queues use memory storage.</p>
 </div>
 
 ## The Redis Problem
@@ -54,10 +48,7 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Dependencies</h3>
-    <p>
-      No Redis, no external services. Just your app and a file on disk, with <code>msgpackr</code>{' '}
-      as the only runtime dependency.
-    </p>
+    <p>No Redis, no external services. Just your app and a file on disk, with <code>msgpackr</code>{' '} as the only runtime dependency.</p>
   </div>
   <div class="bq-card">
     <BqIcon name="speed" />
@@ -67,10 +58,7 @@ SQLite runs in-process. There's no network hop, no connection pool, no separate 
   <div class="bq-card">
     <BqIcon name="shield" />
     <h3>Persistence When Selected</h3>
-    <p>
-      Set a SQLite data path for WAL-backed recovery with concurrent reads; without one, the queue
-      is intentionally in memory.
-    </p>
+    <p>Set a SQLite data path for WAL-backed recovery with concurrent reads; without one, the queue is intentionally in memory.</p>
   </div>
   <div class="bq-card">
     <BqIcon name="network" />

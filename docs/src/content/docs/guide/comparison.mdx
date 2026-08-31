@@ -13,13 +13,8 @@ import BqIcon from '@components/BqIcon.astro';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · comparison</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">
-    bunqueue vs BullMQ, one less <em>server.</em>
-  </h1>
-  <p class="bq-hero-sub">
-    Benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical
-    workloads, a feature comparison, and the cases where BullMQ is still the better pick.
-  </p>
+  <h1 class="bq-hero-h1 bq-bench-h1">bunqueue vs BullMQ, one less <em>server.</em></h1>
+  <p class="bq-hero-sub">Benchmark results comparing the bunqueue TCP server against BullMQ with Redis on identical workloads, a feature comparison, and the cases where BullMQ is still the better pick.</p>
 </div>
 
 This page helps you decide between bunqueue and BullMQ. Short version first, then the numbers with their caveats, then features.
@@ -40,33 +35,25 @@ need Redis-specific behavior, or you cannot run a Bun broker. Details in
   <div class="bq-card">
     <BqIcon name="speed" />
     <h3>1.3x Faster Push</h3>
-    <p>
-      <b>54,140 vs 43,261 ops/sec</b>
-    </p>
+    <p><b>54,140 vs 43,261 ops/sec</b></p>
     <p>Single job push</p>
   </div>
   <div class="bq-card">
     <BqIcon name="spark" />
     <h3>3.2x Faster Bulk</h3>
-    <p>
-      <b>139,200 vs 44,000 ops/sec</b>
-    </p>
+    <p><b>139,200 vs 44,000 ops/sec</b></p>
     <p>Bulk push, 100 jobs per batch</p>
   </div>
   <div class="bq-card">
     <BqIcon name="check" />
     <h3>Lower Bulk Latency</h3>
-    <p>
-      <b>3.26 vs 4.53 ms p99</b>
-    </p>
+    <p><b>3.26 vs 4.53 ms p99</b></p>
     <p>Bulk push tail latency</p>
   </div>
   <div class="bq-card">
     <BqIcon name="file" />
     <h3>Zero Infrastructure</h3>
-    <p>
-      <b>No Redis required</b>
-    </p>
+    <p><b>No Redis required</b></p>
     <p>Embedded SQLite. One direct runtime dependency.</p>
   </div>
 </div>
@@ -98,9 +85,7 @@ to the multi-broker backend.
 
 <div class="bq-chart-grid">
   <div class="bq-chart">
-    <p class="bq-chart-title">
-      Push <span>ops/sec, higher is better</span>
-    </p>
+    <p class="bq-chart-title">Push <span>ops/sec, higher is better</span></p>
     <div class="bq-hrow">
       <span class="bq-hname">bunqueue</span>
       <div class="bq-htrack">
@@ -115,14 +100,10 @@ to the multi-broker backend.
       </div>
       <span class="bq-hval">43,261</span>
     </div>
-    <p class="bq-chart-note">
-      <b>1.3x faster</b>
-    </p>
+    <p class="bq-chart-note"><b>1.3x faster</b></p>
   </div>
   <div class="bq-chart">
-    <p class="bq-chart-title">
-      Bulk push <span>ops/sec, higher is better</span>
-    </p>
+    <p class="bq-chart-title">Bulk push <span>ops/sec, higher is better</span></p>
     <div class="bq-hrow">
       <span class="bq-hname">bunqueue</span>
       <div class="bq-htrack">
@@ -137,14 +118,10 @@ to the multi-broker backend.
       </div>
       <span class="bq-hval">44,000</span>
     </div>
-    <p class="bq-chart-note">
-      <b>3.2x faster</b>
-    </p>
+    <p class="bq-chart-note"><b>3.2x faster</b></p>
   </div>
   <div class="bq-chart">
-    <p class="bq-chart-title">
-      Bulk push p99 <span>ms, lower is better</span>
-    </p>
+    <p class="bq-chart-title">Bulk push p99 <span>ms, lower is better</span></p>
     <div class="bq-hrow">
       <span class="bq-hname">bunqueue</span>
       <div class="bq-htrack">
@@ -159,9 +136,7 @@ to the multi-broker backend.
       </div>
       <span class="bq-hval">4.53 ms</span>
     </div>
-    <p class="bq-chart-note">
-      <b>1.4x lower</b>
-    </p>
+    <p class="bq-chart-note"><b>1.4x lower</b></p>
   </div>
 </div>
 

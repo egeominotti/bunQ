@@ -142,7 +142,7 @@ CMD ["bun", "run", "src/main.ts"]
 docker build -t bunqueue .
 docker run -p 6789:6789 -p 6790:6790 \
   -v ./data:/app/data \
-  -e DATA_PATH=/app/data/queue.db \
+  -e BUNQUEUE_DATA_PATH=/app/data/queue.db \
   bunqueue
 ```
 
@@ -166,7 +166,7 @@ bunqueue start --data-path ./data/queue.db
 
 # In another terminal
 bun add bunqueue @modelcontextprotocol/sdk
-claude mcp add bunqueue -- bunx bunqueue-mcp
+claude mcp add bunqueue -- bunx --package=bunqueue bunqueue-mcp
 ```
 
 Point the MCP server at your instance with `BUNQUEUE_MODE=tcp`, `BUNQUEUE_HOST`, `BUNQUEUE_PORT`, and `BUNQUEUE_TOKEN` (when auth is on). Agents get 73 tools to add jobs, manage queues, schedule crons, and monitor everything. Full setup, including Claude Desktop, Cursor, and Windsurf config, in the [MCP guide](/guide/mcp/).

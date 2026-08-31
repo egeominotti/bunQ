@@ -1654,6 +1654,34 @@ main.bq-has-hero .sl-container {
   text-align: left;
 }
 
+/* .bq-wrap already sits inside .content-panel, which supplies the page gutter.
+   Its own 3rem inset pushed every doc hero 48px to the right of the prose
+   underneath it, so the h1 and the first h2 did not share a left edge. This
+   drops the inset for every .bq-wrap on a non-splash hero page, not only the
+   hero itself: pages that continue in .bq-wrap sections (guide/production,
+   blog/index) keep one left edge from the hero to the last section instead of
+   gaining a new internal step. Only the home splash (the
+   .bq-hero-grid variant) wants the extra inset; the phone layer below 38rem
+   sets its own gutter and is left alone. */
+@media (min-width: 38.0001rem) {
+  main:has(.bq-hero):not(:has(.bq-hero-grid)) .bq-wrap {
+    padding-inline: 0;
+  }
+}
+
+/* MDX parses multi-line content inside a JSX block element as a markdown
+   paragraph, which nests <p> in <h1> and <p> in <p>: invalid markup, and the
+   inner <p> picks up the 1.75 body line-height, blowing the hero h1 apart.
+   Hero sources keep their content on one line; this keeps the typography
+   correct if that ever regresses. */
+.bq-hero-h1 > p,
+.bq-hero-sub > p {
+  margin: 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
 /* ── hero grid (copy + install left, benchmark card right) ─────────── */
 
 .bq-hero-grid {

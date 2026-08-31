@@ -1,5 +1,6 @@
 import type { JobOptions } from '../../../types';
 import type { ExtendedJobOptions } from '../../types/add';
+import { normalizeGroupId } from '../../../groupId';
 
 export function compact<T extends Record<string, unknown>>(object: T): T {
   const output: Record<string, unknown> = {};
@@ -59,7 +60,7 @@ export function buildPushPayload(
       : undefined,
     dependsOn: options.dependsOn,
     tags: options.tags,
-    groupId: options.groupId,
+    groupId: resolveGroupId(options),
     lifo: options.lifo,
     removeOnComplete:
       typeof options.removeOnComplete === 'boolean' ? options.removeOnComplete : undefined,
@@ -79,6 +80,11 @@ export function buildPushPayload(
     repeat: options.repeat,
     parentId: options.parent?.id,
   });
+}
+
+export function resolveGroupId(options: ExtendedJobOptions): string | undefined {
+  if (options.group) return normalizeGroupId(options.group.id);
+  return options.groupId === undefined ? undefined : normalizeGroupId(options.groupId);
 }
 
 export function buildJobData(data: unknown, options: ExtendedJobOptions): unknown {

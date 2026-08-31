@@ -39,6 +39,10 @@ export interface RepeatOptions {
   jobId?: string;
 }
 
+export interface GroupJobOptions {
+  id: string | number;
+}
+
 /** Options accepted when adding a job. */
 export interface JobOptions {
   priority?: number;
@@ -65,4 +69,5 @@ export interface JobOptions {
   timestamp?: number;
   deduplication?: DeduplicationOptions;
   debounce?: DebounceOptions;
+  group?: GroupJobOptions;
 }

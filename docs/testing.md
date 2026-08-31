@@ -663,17 +663,17 @@ the isolation equivalent of one local suite container. The unit job runs
 container.
 
 `test-core-e2e` runs `bun run test:core-e2e` as a distinct required job. Its
-TypeScript-compiler inventory currently covers 308 public instance methods
+TypeScript-compiler inventory currently covers 320 public instance methods
 across Queue, Worker, Job, schedulers, DLQ, FlowProducer, QueueGroup, Bunqueue,
 SandboxedWorker, Forwarder, Workflow, Engine, event facades, and
 TcpConnectionPool. Exported runtime classes are discovered automatically. The
-272 dual-mode methods use a fresh embedded SQLite manager and a real
+284 dual-mode methods use a fresh embedded SQLite manager and a real
 dynamic-port TCP broker with a separate SQLite database; the 13 transport-only
 pool methods carry embedded `N/A`, and 23 synchronous snapshots with async
 counterparts carry TCP `N/A`.
 The suite scans its contracts for test doubles and compares successful coverage
-to the applicable discovered surface exactly. It exposes 580 applicable
-method-mode checks and uploads the full 308-row Markdown/JSON evidence matrix as
+to the applicable discovered surface exactly. It exposes 604 applicable
+method-mode checks and uploads the full 320-row Markdown/JSON evidence matrix as
 a CI artifact. See
 [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md).
 

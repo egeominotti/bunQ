@@ -12,7 +12,7 @@ import {
   type JobInput,
 } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
-import { validateJobData, validateJobOptions } from '../protocol';
+import { validateGroupId, validateJobData, validateJobOptions } from '../protocol';
 
 type DurableDependencyManager = HandlerContext['queueManager'] & {
   findMissingDependenciesDurable?: (ids: readonly JobId[]) => Promise<JobId[]>;
@@ -124,6 +124,8 @@ function validateJobs(jobs: JobInput[], state: BatchDependencyState): string | n
 
     const dataError = validateJobData(job.data);
     if (dataError) return `jobs[${i}]: ${dataError}`;
+    const groupError = validateGroupId(job.groupId);
+    if (groupError) return `jobs[${i}]: ${groupError}`;
 
     const optionsError = validateJobOptions({
       priority: job.priority,

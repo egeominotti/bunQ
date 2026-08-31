@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "label": "baseline-hol-a2",
+    "revision": "c39facb9",
+    "sourceRoot": "/private/tmp/bunqueue-baseline.PtViBb",
+    "profile": "full",
+    "only": "pull-group-head-of-line",
+    "generatedAt": "2026-08-31T05:07:46.231Z",
+    "bunVersion": "1.4.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "profileConfig": {
+      "recoveryJobs": 10001,
+      "recoverySamples": 3,
+      "memoryQueryJobs": 50000,
+      "sqlNormalJobs": 20000,
+      "sqlPriorityJobs": 5000,
+      "querySamples": 21,
+      "holBlockedJobs": 5000,
+      "holSamples": 7,
+      "ungroupedJobs": 20000,
+      "mixedJobs": 20000,
+      "mixedGroups": 100,
+      "queuePathSamples": 7,
+      "statsQueues": 200,
+      "statsJobs": 50000,
+      "statsSamples": 15,
+      "temporalUnrelatedJobs": 500000,
+      "temporalQuerySamples": 31,
+      "temporalRemovalSamples": 15,
+      "waiterCount": 10000,
+      "waiterSamples": 5,
+      "delayedChurnJobs": 100000,
+      "delayedSamples": 5
+    },
+    "sink": 0
+  },
+  "results": [
+    {
+      "id": "pull-group-head-of-line",
+      "category": "scheduling",
+      "operation": "pull past active FIFO group",
+      "workload": {
+        "blockedGroupJobsAhead": 5000
+      },
+      "samples": [
+        2.762375,
+        2.295917,
+        1.571875,
+        1.355209,
+        1.335,
+        1.490459,
+        1.345708
+      ],
+      "correctness": {
+        "returnedLabels": [
+          "B1",
+          "B1",
+          "B1",
+          "B1",
+          "B1",
+          "B1",
+          "B1"
+        ],
+        "eligibleJobReturnedEveryTime": true
+      },
+      "comparable": true,
+      "note": "Models one saturated tenant ahead of another ready tenant with explicit serial group capacity.",
+      "unit": "ms",
+      "direction": "lower-is-better",
+      "distribution": {
+        "count": 7,
+        "min": 1.335,
+        "median": 1.49,
+        "p95": 2.762,
+        "max": 2.762,
+        "mad": 0.145
+      }
+    }
+  ]
+}

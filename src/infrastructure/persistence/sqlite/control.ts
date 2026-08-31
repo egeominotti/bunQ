@@ -16,6 +16,14 @@ export interface PersistedQueueState {
   dlqConfig: DlqConfig | null;
 }
 
+export interface PersistedGroupState {
+  queue: string;
+  groupId: string;
+  rateLimit: number | null;
+  rateDuration: number | null;
+  concurrencyLimit: number | null;
+}
+
 /** Cron schedules and durable queue control-state. */
 export abstract class SqliteControl extends SqliteQueries {
   saveCron(cron: CronJob): void {
@@ -150,9 +158,104 @@ export abstract class SqliteControl extends SqliteQueries {
     }));
   }
 
+  saveGroupRateLimit(queue: string, groupId: string, max: number, duration: number): void {
+    this.safeWrite(() => {
+      this.db
+        .prepare(
+          `INSERT INTO group_state (queue, group_id, rate_limit, rate_duration)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(queue, group_id) DO UPDATE SET
+             rate_limit = excluded.rate_limit,
+             rate_duration = excluded.rate_duration`
+        )
+        .run(queue, groupId, max, duration);
+    });
+  }
+
+  removeGroupRateLimit(queue: string, groupId: string): void {
+    this.safeWrite(() => {
+      const transaction = this.db.transaction(() => {
+        this.db
+          .prepare(
+            `UPDATE group_state SET rate_limit = NULL, rate_duration = NULL
+             WHERE queue = ? AND group_id = ?`
+          )
+          .run(queue, groupId);
+        this.deleteEmptyGroupState(queue, groupId);
+      });
+      transaction();
+    });
+  }
+
+  saveGroupConcurrency(queue: string, groupId: string, concurrency: number): void {
+    this.safeWrite(() => {
+      this.db
+        .prepare(
+          `INSERT INTO group_state (queue, group_id, concurrency_limit)
+           VALUES (?, ?, ?)
+           ON CONFLICT(queue, group_id) DO UPDATE SET
+             concurrency_limit = excluded.concurrency_limit`
+        )
+        .run(queue, groupId, concurrency);
+    });
+  }
+
+  removeGroupConcurrency(queue: string, groupId: string): void {
+    this.safeWrite(() => {
+      const transaction = this.db.transaction(() => {
+        this.db
+          .prepare(
+            `UPDATE group_state SET concurrency_limit = NULL
+             WHERE queue = ? AND group_id = ?`
+          )
+          .run(queue, groupId);
+        this.deleteEmptyGroupState(queue, groupId);
+      });
+      transaction();
+    });
+  }
+
+  loadGroupState(): PersistedGroupState[] {
+    return this.db
+      .query<
+        {
+          queue: string;
+          group_id: string;
+          rate_limit: number | null;
+          rate_duration: number | null;
+          concurrency_limit: number | null;
+        },
+        []
+      >('SELECT * FROM group_state')
+      .all()
+      .map((row) => ({
+        queue: row.queue,
+        groupId: row.group_id,
+        rateLimit: row.rate_limit,
+        rateDuration: row.rate_duration,
+        concurrencyLimit: row.concurrency_limit,
+      }));
+  }
+
+  deleteGroupState(queue: string): void {
+    this.safeWrite(() => {
+      this.db.prepare('DELETE FROM group_state WHERE queue = ?').run(queue);
+    });
+  }
+
   deleteQueueState(name: string): void {
     this.safeWrite(() => {
       this.statements.get('deleteQueueState')!.run(name);
     });
+  }
+
+  private deleteEmptyGroupState(queue: string, groupId: string): void {
+    this.db
+      .prepare(
+        `DELETE FROM group_state
+         WHERE queue = ? AND group_id = ?
+           AND rate_limit IS NULL AND concurrency_limit IS NULL`
+      )
+      .run(queue, groupId);
   }
 }

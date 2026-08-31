@@ -1,6 +1,6 @@
 ---
-title: "WorkerOptions Reference"
-description: "Every bunqueue WorkerOptions field with its default: concurrency, batchSize, pollTimeout, heartbeatInterval, lockDuration, connection pooling and prefixKey."
+title: 'WorkerOptions Reference'
+description: 'Every bunqueue WorkerOptions field with its default: concurrency, batchSize, pollTimeout, heartbeatInterval, lockDuration, connection pooling and prefixKey.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "workeroptions, worker configuration, concurrency default, heartbeatInterval, lockDuration, poolSize, prefixKey, bunqueue reference"
+      content: 'workeroptions, worker configuration, concurrency default, heartbeatInterval, lockDuration, poolSize, prefixKey, bunqueue reference'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · worker</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every knob, <em>with its default.</em></h1>
-  <p class="bq-hero-sub">The complete option surface for a Worker, what each one changes, and the defaults you get when you leave it alone.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Every knob, <em>with its default.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The complete option surface for a Worker, what each one changes, and the defaults you get when
+    you leave it alone.
+  </p>
 </div>
 
 ## Options reference
@@ -29,9 +34,9 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 const worker = new Worker('queue', processor, {
   embedded: true,
   concurrency: 5,
-  batchSize: 100,      // Pull up to 100 jobs per request
-  pollTimeout: 5000,   // Long-poll: wait up to 5s for jobs instead of busy polling
-  limiter: { max: 10, duration: 1000 },  // Max 10 jobs per second
+  batchSize: 100, // Pull up to 100 jobs per request
+  pollTimeout: 5000, // Long-poll: wait up to 5s for jobs instead of busy polling
+  limiter: { max: 10, duration: 1000 }, // Max 10 jobs per second
 });
 ```
 
@@ -41,10 +46,10 @@ const worker = new Worker('queue', processor, {
 ```typescript
 const worker = new Worker('queue', processor, {
   concurrency: 5,
-  batchSize: 100,       // Pull up to 100 jobs per request
-  pollTimeoutMs: 5000,  // Long-poll: wait up to 5s for jobs (default)
-  lockTtlMs: 30000,     // Job lease TTL
-  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 },  // Opt-in ACK batching
+  batchSize: 100, // Pull up to 100 jobs per request
+  pollTimeoutMs: 5000, // Long-poll: wait up to 5s for jobs (default)
+  lockTtlMs: 30000, // Job lease TTL
+  ackBatch: { enabled: true, maxSize: 50, maxDelayMs: 5 }, // Opt-in ACK batching
 });
 ```
 
@@ -124,25 +129,26 @@ worker =
 
 The table below documents the Bun client's options; the external SDK worker options are tabulated in the [SDK guide](/guide/sdks/#worker-options).
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `embedded` | `boolean` | `false` | Use in-process mode |
-| `concurrency` | `number` | `1` | Parallel job processing |
-| `autorun` | `boolean` | `true` | Start polling automatically |
-| `heartbeatInterval` | `number` | `10000` | Heartbeat interval in ms (0 = disabled) |
-| `batchSize` | `number` | `10` | Jobs to pull per batch (max: 1000) |
-| `pollTimeout` | `number` | `0` | Long-poll timeout in ms (max: 30000) |
-| `useLocks` | `boolean` | `true` | Enable BullMQ-style job locks |
-| `limiter` | `{ max, duration, groupKey? }` | - | Without `groupKey`: max job starts per rolling window, acquired atomically even with concurrent or manual processing. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
-| `lockDuration` | `number` | `30000` | Job lock TTL in ms |
-| `maxStalledCount` | `number` | `1` | Accepted for BullMQ compatibility, but not applied by the Worker. Configure the broker's per-queue `maxStalls` policy with `Queue.setStallConfig()` or the HTTP API instead |
-| `skipStalledCheck` | `boolean` | `false` | In embedded or TCP mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery |
-| `skipLockRenewal` | `boolean` | `false` | Skip lock renewal via heartbeat |
-| `drainDelay` | `number` | `50` | Delay between polls when the queue is empty (ms) |
-| `removeOnComplete` | `boolean \| number \| KeepJobs` | `false` | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false` |
-| `removeOnFail` | `boolean \| number \| KeepJobs` | `false` | Same behavior as `removeOnComplete` (boolean only) |
-| `connection` | `ConnectionOptions` | - | TCP connection (`host`, `port`, `token`, `poolSize`) |
-| `prefixKey` | `string` | - | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey) |
+| Option              | Type                                          | Default          | Description                                                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `embedded`          | `boolean`                                     | `false`          | Use in-process mode                                                                                                                                                                                                                 |
+| `concurrency`       | `number`                                      | `1`              | Parallel job processing                                                                                                                                                                                                             |
+| `autorun`           | `boolean`                                     | `true`           | Start polling automatically                                                                                                                                                                                                         |
+| `heartbeatInterval` | `number`                                      | `10000`          | Heartbeat interval in ms (0 = disabled)                                                                                                                                                                                             |
+| `batchSize`         | `number`                                      | `10`             | Jobs to pull per batch (max: 1000)                                                                                                                                                                                                  |
+| `pollTimeout`       | `number`                                      | `0`              | Long-poll timeout in ms (max: 30000)                                                                                                                                                                                                |
+| `useLocks`          | `boolean`                                     | `true`           | Enable BullMQ-style job locks                                                                                                                                                                                                       |
+| `limiter`           | `{ max, duration, groupKey? }`                | -                | Without `groupKey`: max job starts per rolling window, acquired atomically even with concurrent or manual processing. With `groupKey`: per-group concurrency cap of `max` (jobs grouped by `job.data[groupKey]`, `duration` unused) |
+| `group`             | `{ concurrency?, limit?: { max, duration } }` | unlimited / none | Broker-authoritative per-job-group concurrency and fixed-window rate defaults. See [Job Groups](/guide/queue/job-groups/)                                                                                                           |
+| `lockDuration`      | `number`                                      | `30000`          | Job lock TTL in ms                                                                                                                                                                                                                  |
+| `maxStalledCount`   | `number`                                      | `1`              | Accepted for BullMQ compatibility, but not applied by the Worker. Configure the broker's per-queue `maxStalls` policy with `Queue.setStallConfig()` or the HTTP API instead                                                         |
+| `skipStalledCheck`  | `boolean`                                     | `false`          | In embedded or TCP mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery                                                                               |
+| `skipLockRenewal`   | `boolean`                                     | `false`          | Skip lock renewal via heartbeat                                                                                                                                                                                                     |
+| `drainDelay`        | `number`                                      | `50`             | Delay between polls when the queue is empty (ms)                                                                                                                                                                                    |
+| `removeOnComplete`  | `boolean \| number \| KeepJobs`               | `false`          | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but treated as `false`                                                                                 |
+| `removeOnFail`      | `boolean \| number \| KeepJobs`               | `false`          | Same behavior as `removeOnComplete` (boolean only)                                                                                                                                                                                  |
+| `connection`        | `ConnectionOptions`                           | -                | TCP connection (`host`, `port`, `token`, `poolSize`)                                                                                                                                                                                |
+| `prefixKey`         | `string`                                      | -                | Namespace prefix; must match the producing Queue's. See [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey)                                                                                                 |
 
 **Connection pool sizing (TCP):** when `poolSize` is not set, it defaults to `min(concurrency, 8)`. Override it by setting `poolSize` explicitly.
 
@@ -156,13 +162,13 @@ heartbeats and can therefore cause long-running jobs to be redelivered.
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Worker](/guide/worker/) | Create a worker and process your first job |
-| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/) | Run jobs in parallel and pull them in batches |
-| [The Job Object Inside a Worker Processor](/guide/worker/job-object/) | Everything the processor receives and can do |
-| [Worker Events](/guide/worker/events/) | completed, failed, stalled and the rest |
-| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/) | Retries, backoff, timeouts and giving up |
-| [Worker Lifecycle](/guide/worker/lifecycle/) | Pause, resume and shut down without losing work |
-| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership |
-| [SandboxedWorker](/guide/worker/sandboxed/) | Experimental isolation for CPU-heavy handlers |
+|                                                                         |                                                 |
+| ----------------------------------------------------------------------- | ----------------------------------------------- |
+| [Worker](/guide/worker/)                                                | Create a worker and process your first job      |
+| [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/)      | Run jobs in parallel and pull them in batches   |
+| [The Job Object Inside a Worker Processor](/guide/worker/job-object/)   | Everything the processor receives and can do    |
+| [Worker Events](/guide/worker/events/)                                  | completed, failed, stalled and the rest         |
+| [Worker Error Handling, Retries and Backoff](/guide/worker/errors/)     | Retries, backoff, timeouts and giving up        |
+| [Worker Lifecycle](/guide/worker/lifecycle/)                            | Pause, resume and shut down without losing work |
+| [Heartbeats, Stall Detection and Lock Ownership](/guide/worker/stalls/) | Heartbeats, stall recovery and lock ownership   |
+| [SandboxedWorker](/guide/worker/sandboxed/)                             | Experimental isolation for CPU-heavy handlers   |

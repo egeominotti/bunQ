@@ -7,8 +7,8 @@ a real TCP client connected to a fresh broker and the in-process embedded
 runtime. `test/documented-feature-coverage.test.ts` prevents a guide section or
 one side of its evidence from disappearing silently.
 
-For the twelve Queue guide sections, `test/docs-queue-snippets.test.ts` also
-accounts for all 33 language groups and all 235 fenced examples. It rejects
+For the thirteen Queue guide sections, `test/docs-queue-snippets.test.ts` also
+accounts for all 33 language groups and all 241 fenced examples. It rejects
 lexically invalid TypeScript alternatives and guards the documented distinction
 between custom job IDs and TTL deduplication keys. Native parser checks cover
 the exact TypeScript, Python, PHP, Go, Rust, Elixir, and shell fences during the
@@ -21,10 +21,10 @@ page. Each suite runs that page's own snippets and behavioural claims against a
 real broker in both runtimes (embedded manager and a fresh TCP server on an
 ephemeral port), sharing `test/docs-guide-support.ts` and the `CoreE2eHarness`.
 There are no test doubles: workers, flows, restarts, and Bun Worker threads are
-the real implementations. The combined working-tree run covers 642 tests and
-1,888 assertions across 40 files. Including the seven-language tab inventory
-and Queue snippet compiler, the complete documentation contract covers 711
-tests and 2,083 assertions across 42 files.
+the real implementations. The combined working-tree run covers 652 tests and
+1,944 assertions across 41 files. Including the seven-language tab inventory
+and Queue snippet compiler, the complete documentation contract covers 721
+tests and 2,140 assertions across 43 files.
 
 | Guide page | Proof |
 | --- | --- |
@@ -36,6 +36,7 @@ tests and 2,083 assertions across 42 files.
 | Queue: Progress, Logs & Dependencies | `docs-queue-guide/progress.test.ts` |
 | Queue: Rate Limits & Concurrency | `docs-queue-guide/limits.test.ts` |
 | Rate Limiting in Depth | `docs-queue-guide/rate-limiting.test.ts` |
+| Job Groups | `docs-queue-guide/job-groups.test.ts` |
 | Queue Groups | `docs-queue-guide/queue-group.test.ts` |
 | Queue: Workers & Metrics | `docs-queue-guide/metrics.test.ts` |
 | Queue: Namespaces & Batching | `docs-queue-guide/advanced-prefix.test.ts`, `docs-queue-guide/advanced-batching.test.ts` |
@@ -98,6 +99,7 @@ assertions in both modes.
 | Progress, Logs & Dependencies | `test-job-progress.ts`, `test-job-dependencies.ts`, `test-runtime-results.ts` | `test-job-progress.ts`, `test-job-dependencies.ts`, `test-runtime-results.ts` |
 | Rate Limits & Concurrency | `test-rate-limiting.ts`, `test-concurrency.ts` | `test-rate-limiting.ts`, `test-concurrency.ts` |
 | Rate Limiting in Depth | `test-rate-limit-window-parity.ts` | `test-rate-limit-window-parity.ts` |
+| Job Groups | `test-job-groups.ts` | `test-job-groups.ts` |
 | Queue Groups | `test-queue-group.ts`, `test-queue-group-advanced.ts` | `test-queue-group.ts` |
 | Workers & Metrics | `test-worker-management.ts`, `test-monitoring.ts` | `test-worker-management.ts`, `test-monitoring.ts` |
 | Namespaces & Batching | `test-prefix-key-parity.ts`, `test-batch-operations.ts` | `test-prefix-key-parity.ts`, `test-batch-operations.ts` |

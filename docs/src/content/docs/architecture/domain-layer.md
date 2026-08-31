@@ -1,6 +1,6 @@
 ---
-title: "Memory/SQLite Domain Layer: Sharding, Queues & States"
-description: "bunqueue memory/SQLite domain internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic."
+title: 'Memory/SQLite Domain Layer: Sharding, Queues & States'
+description: 'bunqueue memory/SQLite domain internals: auto-scaled sharding, 4-ary priority queues, job state machine, DLQ flow, and rate limiting logic.'
 head:
   - tag: meta
     attrs:
@@ -30,6 +30,8 @@ src/domain/
     ├── dlqShard.ts          # Dead letter queue
     ├── uniqueKeyManager.ts  # Deduplication
     ├── limiterManager.ts    # Rate/concurrency
+    ├── groupLimiterManager.ts # Per-group rate/concurrency
+    ├── groupScheduler.ts    # Secondary FIFO lanes + rotation
     ├── dependencyTracker.ts # Job dependencies
     ├── temporalManager.ts   # Temporal index + delayed jobs
     ├── waiterManager.ts     # Long-poll waiters
@@ -79,7 +81,7 @@ Each shard is a composition of managers:
   </div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell">stats <i>running shard totals: queued, delayed, dlq</i></div>
-    <div class="bq-diag-cell">activeGroups <i>Map, FIFO groups</i></div>
+    <div class="bq-diag-cell">group ownership <i>active set + authoritative counts</i></div>
     <div class="bq-diag-cell">waiters <i>queue-local cursor deques, long-poll support</i></div>
   </div>
 </div>
@@ -241,27 +243,42 @@ accumulating credits that would cause repeated empty pulls.
 
 ## FIFO Groups
 
-Ensures only one job per group processes at a time:
+Groups preserve claim order within each group without making group execution
+serial by default. Active ownership is counted: `activeGroupCounts` is the
+authoritative per-group count, while `activeGroups` is its set-shaped view for
+telemetry and membership. With no group concurrency option, the limit is
+unbounded. A Worker can supply a default per-group concurrency cap, and an
+explicit server-side override can replace it for one group. Per-group fixed
+window rate limits are checked by the same eligibility path.
 
 <div class="bq-diag">
-  <div class="bq-diag-head"><b>FIFO groups</b><span>job with groupId: "user-123"</span></div>
+  <div class="bq-diag-head"><b>FIFO groups</b><span>secondary lanes over the authoritative queue</span></div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">PULL</span>
-    <div class="bq-diag-layer">1. Peek job at queue head, 2. check: is groupId in activeGroups?</div>
+    <div class="bq-diag-layer">1. Promote due secondary entries, 2. serve ready ungrouped work first, 3. otherwise inspect the next group in circular rotation</div>
     <div class="bq-diag-arrow">↓</div>
     <div class="bq-diag-row">
-      <div class="bq-diag-cell">YES <i>job stays at the head, this pull returns no job (preserves strict per-group order)</i></div>
-      <div class="bq-diag-cell bq-diag-accent">NO <i>pop, add to activeGroups, return job</i></div>
+      <div class="bq-diag-cell">Ineligible group <i>keep its FIFO head in place and rotate to another group</i></div>
+      <div class="bq-diag-cell bq-diag-accent">Eligible group <i>claim its FIFO head, increment ownership, advance the round-robin cursor</i></div>
     </div>
   </div>
   <div class="bq-diag-group">
     <span class="bq-diag-group-label">ACK / FAIL</span>
-    <div class="bq-diag-layer">1. Remove groupId from activeGroups, 2. next job in the same group can now be pulled</div>
+    <div class="bq-diag-layer">1. Decrement the authoritative ownership count, 2. remove set membership only when the count reaches zero, 3. notify waiting pulls</div>
   </div>
 </div>
 
+The primary priority queue remains authoritative. `GroupScheduler` is a lazy
+secondary view built only when grouped work appears: one heap for ready
+ungrouped jobs, one delayed/TTL heap, and one immutable FIFO lane per group.
+These indexes let a rate- or concurrency-blocked group remain parked while
+other groups continue round-robin, avoiding queue-head blocking and temporary
+pop/reinsert cycles. Primary and secondary membership change together under the
+same synchronous shard lock.
+
 :::tip[Related]
+
 - [Architecture Overview](/architecture/) - Full component map
 - [Data Structures](/architecture/data-structures/) - The 4-ary MinHeap and skip list behind these queues
 - [Application Layer](/architecture/application-layer/) - Operations that drive these state transitions
-:::
+  :::

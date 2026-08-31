@@ -7,6 +7,7 @@ import {
   POSTGRES_REGISTER_WATERMARK_ROWS_BODY,
 } from './eventJournalSchema';
 import { POSTGRES_SCHEMA, POSTGRES_SCHEMA_VERSION } from './schema';
+import { hasCurrentPostgresGroupSchema } from './groupSchemaFingerprint';
 
 interface FunctionState {
   name: string;
@@ -61,7 +62,8 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         ('bunqueue_event_prune_watermarks', 'prunes_current_transaction', 'boolean', TRUE, 'false'),
         ('bunqueue_brokers', 'session_id', 'text', FALSE, 'none'),
         ('bunqueue_jobs', 'lease_broker_session_id', 'text', FALSE, 'none'),
-        ('bunqueue_workers', 'broker_session_id', 'text', FALSE, 'none')
+        ('bunqueue_workers', 'broker_session_id', 'text', FALSE, 'none'),
+        ('bunqueue_queue_state', 'group_sequence', 'bigint', TRUE, 'zero')
     ), expected_indexes(
       index_name, table_name, columns, descending, predicate, is_unique
     ) AS (
@@ -195,6 +197,7 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
       ) AS valid
   `;
   if (!objects.valid) return false;
+  if (!(await hasCurrentPostgresGroupSchema(tx))) return false;
 
   const functions = await tx<FunctionState[]>`
     SELECT expected.name, functions.prosrc AS body,

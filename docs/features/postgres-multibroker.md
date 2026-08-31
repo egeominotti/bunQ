@@ -94,6 +94,15 @@ insertion, retention, or clearing. That row is the serialization point shared
 with job deletion, so concurrent writers retain the exact configured window and
 cannot commit an orphan log.
 
+`groupClaims.ts` owns durable round-robin cursor assignment and fixed-window
+budget consumption, while `groups.ts` owns database-authoritative per-group
+depth/configuration/TTL queries. `admission.ts` and `batchAdmission.ts` assign
+the immutable `group_order` sequence before insert chunking.
+`groupStateRetention.ts` reclaims bounded inactive policyless state without
+deleting explicit overrides or live effective windows. Their state lives in
+`bunqueue_jobs.group_order` and `bunqueue_group_state`; no broker-local cache
+decides a multi-broker group claim.
+
 This is a deliberate combination of small patterns rather than one generic SQL
 abstraction:
 
@@ -134,9 +143,11 @@ refresh, heartbeat, recovery, DLQ/worker/event pruning, and cron subsystem. A
 success clears only its own key, so an unrelated timer cannot make a persistently
 failed subsystem appear healthy. Schema creation is serialized with the
 transaction-scoped 64-bit advisory identity `bunqueue:schema`. While holding
-that lock, a broker first checks `bunqueue_schema_migrations` and skips all DDL
-when its own `POSTGRES_SCHEMA_VERSION` is already present (18 in this release),
-so a broker joining a live cluster does not request locks on active job tables.
+that lock, a broker first checks `bunqueue_schema_migrations` and the semantic
+catalog fingerprint. It skips all DDL only when its own
+`POSTGRES_SCHEMA_VERSION` is already present (19 in this release) and every
+guarded object matches, so a broker joining a healthy live cluster does not
+request locks on active job tables.
 The v17 migration upgrades the shared commit sequencer to the same
 domain-separated lock encoding as runtime writers. The additive v16 migration
 adds broker-session fencing to broker, lease, and
@@ -155,7 +166,12 @@ transactional drop/recreate at the end of the migration. If live duplicate keys
 already exist, unique-index creation fails closed: the transaction restores the
 previous index and data, records no new migration, and startup remains blocked
 until an operator resolves the inconsistency. An unchanged schema keeps the
-no-DDL path and preserves existing index object IDs.
+no-DDL path and preserves existing index object IDs. The v19 group fingerprint
+adds the exact `BIGINT CACHE 1` admission sequence, `group_order`, every group-
+state column/default/nullability rule, the semantic three-column primary key,
+and both group indexes to this fast-path decision. Same-name but wrong-type,
+wrong-order, wrong-predicate, or wrong-cache objects therefore cannot pass
+because the recorded version is already current.
 
 Schema migration is an automatic one-way compatibility boundary, not permission
 to keep mixed bunqueue binary versions running. The safe production procedure is
@@ -446,21 +462,25 @@ Within that lock, a claim:
 2. expires pending TTL jobs and promotes resolved dependencies;
 3. calculates rate/concurrency capacity only when the corresponding policy is
    configured;
-4. uses indexed probes to select the FIFO-only, mixed FIFO/LIFO, or grouped
-   query path;
+4. serves ungrouped candidates first, then uses the grouped query path to take
+   FIFO positions round-robin across groups;
 5. locks a narrow ID/order tuple with `FOR UPDATE SKIP LOCKED` before applying
    the batch limit, then fetches payloads only for locked IDs; and
 6. writes payloads, opaque tokens, owner, broker ID, lease deadlines, and pulled
    events with set-based statements before commit.
 
-Candidate ordering is deterministic: higher priority first, then the LIFO
-partition, then FIFO by ready time and ID. An active row in the same `group_id`
-blocks another group member. The common FIFO path follows the partial ready
-B-tree directly, while partial group, active-group, LIFO, and TTL indexes keep
-feature probes bounded. Rechecking eligibility on the row version acquired by
-the lock prevents a row that became active during selection from receiving a
-second token. Two brokers can claim concurrently without returning the same
-generation.
+Ungrouped candidate ordering remains deterministic: higher priority first, then
+the LIFO partition, then FIFO by ready time and ID. Grouped jobs are FIFO by
+durable `(run_at, group_order, id)` within each group and round-robin by durable
+`last_served`; ungrouped work has
+precedence. Group concurrency is unlimited unless the Worker supplies a
+`group.concurrency` default, and fixed-window group limiting is disabled unless
+it supplies `group.limit`. Stored group-specific values override only those
+enabled defaults. A grouped claim takes the exclusive queue-state row,
+calculates active leases and remaining fixed-window budget, fences candidates
+with `FOR UPDATE SKIP LOCKED`, then advances `group_sequence`, every selected
+group's `last_served`, and rate counts in the same transaction as the leases and
+events. Rechecking eligibility on the locked row prevents double delivery.
 
 Every destructive command uses one shared protocol: discover candidate IDs
 without row locks, acquire their dependency-completion advisory locks in sorted
@@ -628,12 +648,21 @@ retain their existing host-clock behavior.
   every non-empty drain instead of once per poll interval. Idle brokers are
   unaffected, since an empty journal batch does not arm the scan.
 
-  This bookkeeping depends on the commit-sequencer trigger, so it is part of
-  PostgreSQL schema version 18. A broker built against version 17 refuses to
+  This bookkeeping depends on the commit-sequencer trigger, so it was introduced
+  in PostgreSQL schema version 18. A broker built against version 17 refuses to
   start against an upgraded database rather than reinstalling its own trigger
   and disabling the guarantee for every broker sharing that database; upgrade
   all brokers in a cluster together. Manual trim derives the frontier from the deleted event envelopes instead
   of treating its own transaction as pruned history.
+
+- PostgreSQL schema version 19 adds `bunqueue_group_order_seq`,
+  `bunqueue_jobs.group_order`, `bunqueue_queue_state.group_sequence`,
+  `bunqueue_group_state`, and exact ready/rotation indexes. A v18 binary refuses
+  to start after this migration; upgrade every broker in a namespace together.
+  Admission allocates grouped order in input order before 1,000-row insert
+  chunks. Bounded cleanup resets inactive rotation positions and deletes only
+  rows with no job, override, or live effective rate window; queue obliteration
+  removes all group state transactionally.
 
 - Event retention finds the first row beyond the configured per-queue window
   through the `(namespace, queue, id DESC)` index and deletes through that cutoff.

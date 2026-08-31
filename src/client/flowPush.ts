@@ -7,6 +7,11 @@ import { getSharedManager } from './manager';
 import type { TcpConnectionPool } from './tcpPool';
 import { jobId } from '../domain/types/job';
 import type { JobOptions } from './types';
+import { normalizeGroupId } from './groupId';
+
+function groupId(opts: JobOptions): string | undefined {
+  return opts.group ? normalizeGroupId(opts.group.id) : undefined;
+}
 
 export interface PushContext {
   embedded: boolean;
@@ -82,6 +87,7 @@ function managerOptions(opts: JobOptions) {
     removeDependencyOnFailure: opts.removeDependencyOnFailure,
     ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
     continueParentOnFailure: opts.continueParentOnFailure,
+    groupId: groupId(opts),
   };
 }
 
@@ -110,6 +116,7 @@ function tcpOptions(opts: JobOptions) {
     removeDependencyOnFailure: opts.removeDependencyOnFailure,
     ignoreDependencyOnFailure: opts.ignoreDependencyOnFailure,
     continueParentOnFailure: opts.continueParentOnFailure,
+    groupId: groupId(opts),
   };
 }
 

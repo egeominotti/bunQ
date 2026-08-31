@@ -206,18 +206,19 @@ describe('Job Groups (FIFO)', () => {
     });
 
     // First pull should get job1
-    const pulled1 = await qm.pull('test', 0);
+    const group = { concurrency: 1 };
+    const pulled1 = await qm.pull('test', 0, undefined, group);
     expect(pulled1?.id).toBe(job1.id);
 
     // Second pull should return null (group1 has active job)
-    const pulled2 = await qm.pull('test', 0);
+    const pulled2 = await qm.pull('test', 0, undefined, group);
     expect(pulled2).toBeNull();
 
     // Ack job1
     await qm.ack(job1.id, {});
 
     // Now job2 should be pullable
-    const pulled3 = await qm.pull('test', 0);
+    const pulled3 = await qm.pull('test', 0, undefined, group);
     expect(pulled3?.id).toBe(job2.id);
   });
 
@@ -246,11 +247,12 @@ describe('Job Groups (FIFO)', () => {
     });
 
     // Pull and fail job1
-    await qm.pull('test', 0);
+    const group = { concurrency: 1 };
+    await qm.pull('test', 0, undefined, group);
     await qm.fail(job1.id, 'error');
 
     // Job2 should now be pullable
-    const pulled = await qm.pull('test', 0);
+    const pulled = await qm.pull('test', 0, undefined, group);
     expect(pulled?.id).toBe(job2.id);
   });
 });

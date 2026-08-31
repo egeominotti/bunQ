@@ -158,6 +158,17 @@ CREATE TABLE IF NOT EXISTS queue_state (
     dlq_config BLOB
 );
 
+-- Durable per-group overrides. Runtime rate windows remain in-memory in the
+-- embedded single-broker engine, matching the existing queue-level limiter.
+CREATE TABLE IF NOT EXISTS group_state (
+    queue TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    rate_limit INTEGER,
+    rate_duration INTEGER,
+    concurrency_limit INTEGER,
+    PRIMARY KEY (queue, group_id)
+);
+
 -- Per-queue lifecycle event journal. Entries are kept newest-first by id and
 -- bounded by QueueManagerConfig.maxQueueEvents when they are appended.
 CREATE TABLE IF NOT EXISTS queue_events (
@@ -199,4 +210,4 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 `;
 /** Current schema version */
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;

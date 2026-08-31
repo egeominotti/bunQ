@@ -75,6 +75,13 @@ const COVERAGE: CoverageEntry[] = [
   },
   {
     area: 'Queue',
+    section: 'Job Groups',
+    guide: 'queue/job-groups.mdx',
+    tcp: scripts('tcp', 'test-job-groups.ts'),
+    embedded: scripts('embedded', 'test-job-groups.ts'),
+  },
+  {
+    area: 'Queue',
     section: 'Queue Groups',
     guide: 'queue-group.md',
     tcp: scripts('tcp', 'test-queue-group.ts', 'test-queue-group-advanced.ts'),
@@ -270,6 +277,7 @@ const EXPECTED_SECTIONS = {
     'Progress, Logs & Dependencies',
     'Rate Limits & Concurrency',
     'Rate Limiting in Depth',
+    'Job Groups',
     'Queue Groups',
     'Workers & Metrics',
     'Namespaces & Batching',
@@ -301,6 +309,7 @@ const EXPECTED_SECTIONS = {
 
 const PARITY_CONTRACTS = [
   ['advanced-dlq-contract.ts', 'test-advanced-dlq.ts'],
+  ['job-groups-contract.ts', 'test-job-groups.ts'],
   ['prefix-key-contract.ts', 'test-prefix-key-parity.ts'],
   ['queue-group-contract.ts', 'test-queue-group.ts'],
   ['rate-limit-window-contract.ts', 'test-rate-limit-window-parity.ts'],

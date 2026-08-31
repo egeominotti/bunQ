@@ -3,12 +3,25 @@ export interface BenchJob {
   priority: number;
   createdAt: number;
   data: unknown;
+  groupId?: string | null;
 }
 
 export interface QueueManagerLike {
   push(queue: string, input: Record<string, unknown>): Promise<BenchJob>;
   pushBatch(queue: string, inputs: Array<Record<string, unknown>>): Promise<string[]>;
-  pull(queue: string, timeoutMs?: number): Promise<BenchJob | null>;
+  pull(
+    queue: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    groupOptions?: { concurrency?: number; limit?: { max: number; duration: number } }
+  ): Promise<BenchJob | null>;
+  pullBatch(
+    queue: string,
+    count: number,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    groupOptions?: { concurrency?: number; limit?: { max: number; duration: number } }
+  ): Promise<BenchJob[]>;
   getJobs(
     queue: string,
     options?: { state?: string | string[]; start?: number; end?: number; asc?: boolean }
@@ -105,6 +118,10 @@ export interface Profile {
   querySamples: number;
   holBlockedJobs: number;
   holSamples: number;
+  ungroupedJobs: number;
+  mixedJobs: number;
+  mixedGroups: number;
+  queuePathSamples: number;
   statsQueues: number;
   statsJobs: number;
   statsSamples: number;
@@ -126,6 +143,10 @@ export const FULL_PROFILE: Profile = {
   querySamples: 21,
   holBlockedJobs: 5_000,
   holSamples: 7,
+  ungroupedJobs: 20_000,
+  mixedJobs: 20_000,
+  mixedGroups: 100,
+  queuePathSamples: 7,
   statsQueues: 200,
   statsJobs: 50_000,
   statsSamples: 15,
@@ -147,6 +168,10 @@ export const SMOKE_PROFILE: Profile = {
   querySamples: 5,
   holBlockedJobs: 50,
   holSamples: 3,
+  ungroupedJobs: 500,
+  mixedJobs: 500,
+  mixedGroups: 10,
+  queuePathSamples: 2,
   statsQueues: 20,
   statsJobs: 2_000,
   statsSamples: 5,

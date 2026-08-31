@@ -1,21 +1,24 @@
 # Rate Limiting & Concurrency Control
 
-> **Category:** Control · **Source:** `src/domain/queue/limiterManager.ts`, `src/domain/types/queue.ts`, `src/infrastructure/server/rateLimiter.ts`, `src/client/worker/workerRateLimiter.ts`, `src/client/queue/rateLimit.ts`, `src/client/worker/groupConcurrency.ts`
+> **Category:** Control · **Source:** `src/domain/queue/limiterManager.ts`, `src/domain/queue/groupLimiterManager.ts`, `src/domain/types/queue.ts`, `src/infrastructure/server/rateLimiter.ts`, `src/client/worker/workerRateLimiter.ts`, `src/client/queue/rateLimit.ts`, `src/client/queue/operations/groups.ts`, `src/client/worker/groupConcurrency.ts`
 
 ## Purpose
 
-bunqueue throttles work at three independent layers: (1) **per-queue rate + concurrency limits** enforced server-side at pull time (`LimiterManager` + token-bucket `RateLimiter` + `ConcurrencyLimiter`), (2) a **protocol-level abuse limiter** that caps raw TCP/HTTP requests per client IP (`ProtocolRateLimiter`), and (3) **worker-side limiters** in the client SDK that gate how fast a single `Worker` starts jobs (`WorkerRateLimiter`, BullMQ v5 `{max, duration}`) and how many jobs run concurrently per group key (`GroupConcurrencyLimiter`). These layers are orthogonal — a queue can have a server rate limit while a worker independently applies its own limiter, and both fire on top of the always-on protocol limiter.
+bunqueue throttles work at four independent layers: (1) **per-queue rate + concurrency limits** enforced server-side at pull time (`LimiterManager` + token-bucket `RateLimiter` + `ConcurrencyLimiter`), (2) **per-job-group fixed-window rate and concurrency limits** admitted by the broker (`GroupLimiterManager` or database-authoritative PostgreSQL state), (3) a **protocol-level abuse limiter** that caps raw TCP/HTTP requests per client IP (`ProtocolRateLimiter`), and (4) **worker-side limiters** in the client SDK that gate how fast a single `Worker` starts jobs (`WorkerRateLimiter`, BullMQ v5 `{max, duration}`) and how many jobs run concurrently per legacy job-data group key (`GroupConcurrencyLimiter`). These layers are orthogonal.
 
 ## Responsibilities & Scope
 
 Owns:
+
 - Per-queue rate limiting (token bucket, jobs per configured window) and concurrency capping, stored per-shard in `LimiterManager` (`src/domain/queue/limiterManager.ts:10`).
 - Token-bucket refill math and concurrency slot accounting (`src/domain/types/queue.ts:33`, `:84`).
+- Broker-authoritative per-group fixed windows, active counts, and stored local overrides (`src/domain/queue/groupLimiterManager.ts`, `src/infrastructure/persistence/postgres/groups.ts`).
 - Protocol-level per-client sliding-window request limiting for TCP and HTTP (`src/infrastructure/server/rateLimiter.ts:70`).
 - Worker-local rate limiting and per-group concurrency in the client SDK (`src/client/worker/workerRateLimiter.ts:12`, `src/client/worker/groupConcurrency.ts:11`).
-- The `RateLimit` / `RateLimitClear` / `SetConcurrency` / `ClearConcurrency` TCP commands, their HTTP routes, and CLI subcommands.
+- Queue and group rate/concurrency TCP commands, plus queue-level HTTP routes and CLI subcommands.
 
 Does NOT own:
+
 - The actual pull/dequeue decision and queue locking — delegated to [Job Lifecycle](./job-lifecycle.md) and [Concurrency & Locking](./concurrency-and-locking.md). Limiters are consulted inside the pull lock but don't manage it.
 - Pausing/resuming queues (also lives in `LimiterManager` via `QueueState.paused`, but documented under [Job Queries & Queue Control](./job-queries-and-control.md)).
 - Worker concurrency cap (`WorkerOptions.concurrency`) — that is a plain counter check in the worker poll loop, separate from the limiter classes here. See [Client SDK: Worker](./client-worker-sdk.md).
@@ -24,6 +27,7 @@ Does NOT own:
 ## Dependencies
 
 Internal:
+
 - `QueueState` / `createQueueState` / `RateLimiter` / `ConcurrencyLimiter` from `src/domain/types/queue.ts` — consumed by `LimiterManager`.
 - `Shard` composes one `LimiterManager` per shard and exposes `setRateLimit` / `tryAcquireRateLimit` / `tryAcquireConcurrency` / `releaseConcurrency` through `ShardLimits` (`src/domain/queue/shard/limits.ts:7-35`).
 - `QueueManager` routes limit mutations to the owning shard and writes them
@@ -32,6 +36,7 @@ Internal:
 - `RateLimiterOptions` from `src/client/types/worker.ts:3-7` configures the worker-side limiters.
 
 External/runtime:
+
 - Bun only: `Date.now()` for windows, `Bun.env` for protocol-limiter defaults, `setInterval`/`setTimeout`. No external libraries, no SQLite calls inside the limiter classes themselves.
 
 ## Public Interface
@@ -83,6 +88,10 @@ returning, so an elapsed temporary limit is reported as absent.
 - `ClearConcurrency { queue }`
 - `GetQueueLimits { queue, maxJobs? }` — returns
   `{ data: { limits: { rateLimit, rateLimitTtl, concurrencyLimit, maxed } } }`.
+- Group commands: `Set/Get/RemoveGroupRateLimit`,
+  `GetGroupRateLimitTtl`, `Set/Get/RemoveGroupConcurrency`,
+  `GetGroupJobsCount`, `GetGroupsJobsCount`, and `GetGroupActiveCount`.
+  Every mutation and admission is server-side; see [Job Groups](./job-groups.md).
 
 ### HTTP endpoints (`src/infrastructure/server/httpRouteQueueConfig.ts:84`)
 
@@ -111,7 +120,7 @@ See [data-model](../data-model.md) for full definitions. Most relevant shapes:
 interface QueueState {
   readonly name: string;
   paused: boolean;
-  rateLimit: number | null;        // bucket capacity, null = unlimited
+  rateLimit: number | null; // bucket capacity, null = unlimited
   rateLimitDuration: number | null; // configured window ms; null = 1000
   rateLimitExpiresAt: number | null; // temporary-limit deadline; null = permanent
   concurrencyLimit: number | null; // max concurrent, null = unlimited
@@ -120,20 +129,28 @@ interface QueueState {
 
 // src/infrastructure/server/rateLimiter.ts:7 — protocol abuse limiter config
 interface RateLimiterConfig {
-  windowMs: number;        // default 60000
-  maxRequests: number;     // default 10000
+  windowMs: number; // default 60000
+  maxRequests: number; // default 10000
   cleanupIntervalMs?: number; // default 60000
 }
 
 // src/client/types/worker.ts:3 — worker limiter (BullMQ v5 compatible)
 interface RateLimiterOptions {
-  max: number;       // jobs per window OR per-group cap when groupKey set
-  duration: number;  // window in ms
+  max: number; // jobs per window OR per-group cap when groupKey set
+  duration: number; // window in ms
   groupKey?: string; // job-data field; switches max to per-group concurrency
+}
+
+interface GroupWorkerOptions {
+  concurrency?: number; // per-group default; omitted = unlimited
+  limit?: { max: number; duration: number }; // fixed window per group
 }
 ```
 
-Persisted in the `queue_state` SQLite table (`src/infrastructure/persistence/schema.ts:147-159`), including `rate_limit`, `rate_limit_duration`, `rate_limit_expires_at`, and `concurrency_limit` alongside pause, stall, and DLQ policy state.
+Queue limits are persisted in `queue_state`. Per-group overrides are persisted
+in SQLite schema-v35 `group_state`; embedded runtime windows are in memory.
+PostgreSQL schema-v19 stores overrides and live fixed-window accounting in
+`bunqueue_group_state` so all brokers share the same capacity.
 
 ## Business Logic / Control Flow
 
@@ -142,12 +159,24 @@ Persisted in the `queue_state` SQLite table (`src/infrastructure/persistence/sch
 `tryPullFromShard` (`src/application/operations/pull.ts`) runs entirely inside the shard write lock:
 
 1. If `state.paused`, return no job.
-2. Scan priority-ordered entries, temporarily parking delayed jobs and jobs whose FIFO group is active; expired jobs are removed. This proves an eligible job exists before consuming capacity.
+2. Ask `GroupScheduler` for the next ready ungrouped job or eligible FIFO group
+   head. Its secondary delayed heap and circular group rotation avoid scanning
+   or reinserting an ineligible prefix of the authoritative heap.
 3. `shard.tryAcquireConcurrency(queue)` atomically reserves the active slot. On miss, emit `concurrency:rejected` and return no job.
 4. `shard.tryAcquireRateLimit(queue)` consumes the token only after the concurrency check; if it rejects, release the just-acquired concurrency slot because rate-limit tokens have no rollback operation.
-5. Pop the selected job and keep its concurrency slot for the entire active lifetime. Restore every parked queue entry in `finally` without touching logical counters or indexes.
+5. Pop the selected job and keep its concurrency slot for the entire active
+   lifetime. For grouped work, atomically acquire the effective group budget,
+   increment the active group count, and advance the round-robin cursor.
 
 Batch pull repeats the same selection and acquires **one rate token + one concurrency slot per delivered job**. The concurrency slot is released only when the job exits the active state — ack, fail-to-DLQ, stall handling, lock expiry, and the claim operations — all routed through `shard.releaseJobResources` → `releaseConcurrency`. Each release also notifies the same queue, so a long-poll waiter blocked by the cap retries immediately; another queue sharing the shard cannot consume that wake-up.
+
+Group rate limits use fixed windows rather than the queue token bucket. A Worker
+must provide `group.limit` to enable them; a stored group override replaces that
+default for its ID. Likewise `group.concurrency` enables server-side per-group
+active capacity and a stored concurrency override replaces that default. Both
+defaults are unlimited when omitted. Group rate tokens are consumed only after
+a candidate passes queue-level admission; active capacity is released on every
+active exit while the fixed-window token remains consumed.
 
 **Token bucket math** (`LimiterManager.setRateLimit`, `src/domain/queue/limiterManager.ts:54-62`; `RateLimiter.refill`, `src/domain/types/queue.ts:55-62`): capacity is `limit`, while refill rate is `limit / (durationMs / 1000)` tokens per second. On each `tryAcquire`, elapsed-time tokens are added up to the capacity and one token is consumed when available. The queue can burst up to `limit` jobs and then sustains exactly `limit` starts per configured window (one second when `duration` is omitted). The bucket is consumed at pull time, not at completion.
 
@@ -172,11 +201,13 @@ Every inbound TCP frame and HTTP request first calls `getRateLimiter().isAllowed
 ### Worker-side rate limiting
 
 In the worker state constructor (`src/client/worker/runtime/state.ts`):
+
 ```typescript
 this.rateLimiter = new WorkerRateLimiter(opts.limiter?.groupKey ? null : (opts.limiter ?? null));
 this.groupLimiter = GroupConcurrencyLimiter.fromOptions(opts.limiter);
 ```
-Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabled** and `limiter.max` instead becomes a per-group concurrency cap. A single `limiter` option is therefore *either* a global rate limit *or* a per-group concurrency limit, never both.
+
+Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabled** and `limiter.max` instead becomes a per-group concurrency cap. A single `limiter` option is therefore _either_ a global rate limit _or_ a per-group concurrency limit, never both.
 
 - `poll()` and `tryProcess()` (`worker/runtime/polling.ts`) check availability
   before pulling. `doPullBatch()` also caps the requested batch by
@@ -198,6 +229,7 @@ Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabl
 ### Worker-side group concurrency
 
 `GroupConcurrencyLimiter` (`src/client/worker/groupConcurrency.ts`) tracks `activeByGroup: Map<groupValue, count>`:
+
 - `getGroupValue(job)` reads `job.data[groupKey]`; `null`/`undefined`/missing → `null` (not subject to the limit); non-strings are stringified.
 - `canProcess(job)` → `current < maxPerGroup` (jobs without a group always pass).
 - `getNextEligibleJob()` (`worker/runtime/buffer.ts`) scans for the first group
@@ -240,15 +272,18 @@ Key invariant: **if `limiter.groupKey` is set, the `WorkerRateLimiter` is disabl
 
 Protocol-level limiter (`src/infrastructure/server/rateLimiter.ts:13`):
 
-| Env var                   | Default | Meaning                                   |
-| ------------------------- | ------- | ----------------------------------------- |
-| `RATE_LIMIT_WINDOW_MS`    | 60000   | Sliding window size per client            |
-| `RATE_LIMIT_MAX_REQUESTS` | 10000   | Max raw requests per client per window    |
-| `RATE_LIMIT_CLEANUP_MS`   | 60000   | Interval to evict idle client deques      |
+| Env var                   | Default | Meaning                                |
+| ------------------------- | ------- | -------------------------------------- |
+| `RATE_LIMIT_WINDOW_MS`    | 60000   | Sliding window size per client         |
+| `RATE_LIMIT_MAX_REQUESTS` | 10000   | Max raw requests per client per window |
+| `RATE_LIMIT_CLEANUP_MS`   | 60000   | Interval to evict idle client deques   |
 
 Per-queue limits are runtime-set (TCP/HTTP/CLI/SDK), persisted in `queue_state`, and have no env defaults (unset = unlimited).
 
-Worker limits are set via `WorkerOptions.limiter: { max, duration, groupKey? }` (`src/client/types/worker.ts:9-28`). `WorkerOptions.concurrency` (default 1) is a separate in-worker counter, not part of these limiter classes.
+Worker-local limits are set via `WorkerOptions.limiter: { max, duration,
+groupKey? }`. `WorkerOptions.group` is a separate broker-authoritative job-group
+policy. `WorkerOptions.concurrency` (default 1) is the Worker's own parallelism
+cap and does not replace either server limit.
 
 ## Related Docs
 
@@ -258,6 +293,7 @@ Worker limits are set via `WorkerOptions.limiter: { max, duration, groupKey? }` 
 - [Job Queries & Queue Control](./job-queries-and-control.md)
 - [Client SDK: Worker (& sandboxed)](./client-worker-sdk.md)
 - [Client SDK: Queue](./client-queue-sdk.md)
+- [Job Groups](./job-groups.md)
 - [Persistence (SQLite, WriteBuffer, ReadThrough)](./persistence.md)
 - [TCP Server Command Handlers](./tcp-server-handlers.md)
 - [HTTP / REST / SSE / WebSocket API](./http-api.md)

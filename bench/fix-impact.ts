@@ -13,6 +13,7 @@ import { Harness } from './fix-impact/harness';
 import { benchmarkInMemoryGetJobs, benchmarkSqlGetJobs } from './fix-impact/query';
 import { benchmarkRecovery } from './fix-impact/recovery';
 import { benchmarkHeadOfLine, benchmarkStats } from './fix-impact/scheduling-stats';
+import { benchmarkMixedGroupPath, benchmarkUngroupedPath } from './fix-impact/group-paths';
 import {
   benchmarkDelayedHeap,
   benchmarkTemporalIndex,
@@ -31,7 +32,21 @@ const label = args.get('label') || 'candidate';
 const revision = args.get('revision') || 'unknown';
 const profileName = args.get('profile') === 'smoke' ? 'smoke' : 'full';
 const profile = profileName === 'smoke' ? SMOKE_PROFILE : FULL_PROFILE;
+const only = args.get('only');
 const outputPath = args.get('output');
+const benchmarkSelectors = new Set([
+  'sqlite-recovery-active',
+  'getjobs',
+  'pull-group-head-of-line',
+  'queue-paths',
+  'stats',
+  'temporal',
+  'waiter-notify-batch',
+  'delayed-heap-churn',
+]);
+if (only !== undefined && !benchmarkSelectors.has(only)) {
+  throw new Error(`Unknown benchmark selector: ${only || '(empty)'}`);
+}
 const sourceUrl = (relativePath: string) => pathToFileURL(resolve(sourceRoot, relativePath)).href;
 
 const [{ QueueManager }, { SqliteStorage }, { pack }, { TemporalManager }, { WaiterManager }] =
@@ -53,14 +68,20 @@ const harness = new Harness(runtime, profile, label);
 
 console.log(`bunqueue fix-impact benchmark: ${label} (${profileName})`);
 console.log(`source=${sourceRoot}`);
-benchmarkRecovery(harness);
-await benchmarkInMemoryGetJobs(harness);
-benchmarkSqlGetJobs(harness);
-await benchmarkHeadOfLine(harness);
-await benchmarkStats(harness);
-benchmarkTemporalIndex(harness);
-await benchmarkWaiters(harness);
-benchmarkDelayedHeap(harness);
+if (!only || only === 'sqlite-recovery-active') benchmarkRecovery(harness);
+if (!only || only === 'getjobs') {
+  await benchmarkInMemoryGetJobs(harness);
+  benchmarkSqlGetJobs(harness);
+}
+if (!only || only === 'pull-group-head-of-line') await benchmarkHeadOfLine(harness);
+if (!only || only === 'queue-paths') {
+  await benchmarkUngroupedPath(harness);
+  await benchmarkMixedGroupPath(harness);
+}
+if (!only || only === 'stats') await benchmarkStats(harness);
+if (!only || only === 'temporal') benchmarkTemporalIndex(harness);
+if (!only || only === 'waiter-notify-batch') await benchmarkWaiters(harness);
+if (!only || only === 'delayed-heap-churn') benchmarkDelayedHeap(harness);
 
 const report = {
   schemaVersion: 1,
@@ -69,6 +90,7 @@ const report = {
     revision,
     sourceRoot,
     profile: profileName,
+    only: only ?? null,
     generatedAt: new Date().toISOString(),
     bunVersion: Bun.version,
     platform: process.platform,

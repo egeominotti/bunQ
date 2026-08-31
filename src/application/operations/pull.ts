@@ -4,6 +4,7 @@
  */
 
 import type { Job } from '../../domain/types/job';
+import { assertGroupPullOptions, type GroupPullOptions } from '../../domain/types/group';
 import type { Shard } from '../../domain/queue/shard';
 import { withWriteLock } from '../../shared/lock';
 import { shardIndex } from '../../shared/hash';
@@ -29,6 +30,11 @@ interface BatchPullAttempt {
   nextRunAt: number | null;
 }
 
+interface PullRequestOptions {
+  signal?: AbortSignal;
+  group?: GroupPullOptions;
+}
+
 /** Wait until either a notification arrives, the next delay matures, or the pull deadline. */
 async function waitForNextCandidate(options: {
   shard: Shard;
@@ -51,15 +57,17 @@ export async function pullJob(
   queue: string,
   timeoutMs: number,
   ctx: PullContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  groupOptions?: GroupPullOptions
 ): Promise<Job | null> {
+  assertGroupPullOptions(groupOptions);
   const startNs = Bun.nanoseconds();
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
   const idx = shardIndex(queue);
 
   while (true) {
     if (signal?.aborted) return null;
-    const attempt = await tryPullFromShard(queue, idx, ctx, signal);
+    const attempt = await tryPullFromShard(queue, idx, ctx, signal, groupOptions);
     const job = attempt.job;
 
     if (job) {
@@ -106,7 +114,8 @@ async function tryPullFromShard(
   queue: string,
   idx: number,
   ctx: PullContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  groupOptions?: GroupPullOptions
 ): Promise<PullAttempt> {
   return await withWriteLock(ctx.shardLocks[idx], () => {
     if (signal?.aborted) return { job: null, nextRunAt: null };
@@ -118,7 +127,7 @@ async function tryPullFromShard(
     }
 
     const now = Date.now();
-    const scan = createDequeueScan();
+    const scan = createDequeueScan(groupOptions);
     try {
       const result = tryDequeueNextJob(shard, queue, now, ctx, scan);
       return result.status === 'job'
@@ -138,15 +147,17 @@ export async function pullJobBatch(
   count: number,
   timeoutMs: number,
   ctx: PullContext,
-  signal?: AbortSignal
+  options: PullRequestOptions = {}
 ): Promise<Job[]> {
+  assertGroupPullOptions(options.group);
+  const { signal } = options;
   const startNs = Bun.nanoseconds();
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
   const idx = shardIndex(queue);
 
   while (true) {
     if (signal?.aborted) return [];
-    const attempt = await tryPullBatchFromShard(queue, idx, count, ctx, signal);
+    const attempt = await tryPullBatchFromShard(queue, idx, count, ctx, options);
     const jobs = attempt.jobs;
 
     if (jobs.length > 0) {
@@ -204,8 +215,9 @@ async function tryPullBatchFromShard(
   idx: number,
   count: number,
   ctx: PullContext,
-  signal?: AbortSignal
+  options: PullRequestOptions
 ): Promise<BatchPullAttempt> {
+  const { signal, group: groupOptions } = options;
   return await withWriteLock(ctx.shardLocks[idx], () => {
     if (signal?.aborted) return { jobs: [], nextRunAt: null };
     const shard = ctx.shards[idx];
@@ -215,7 +227,7 @@ async function tryPullBatchFromShard(
     if (state.paused) return { jobs, nextRunAt: null };
 
     const now = Date.now();
-    const scan = createDequeueScan();
+    const scan = createDequeueScan(groupOptions);
 
     try {
       while (jobs.length < count) {

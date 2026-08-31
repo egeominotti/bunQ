@@ -1,5 +1,6 @@
 import type { AtomicFlowJobInput } from '../flow';
 import type { JobInput } from '../job';
+import type { GroupPullOptions } from '../group';
 import type { BaseCommand } from './base';
 
 export interface PushCommand extends BaseCommand {
@@ -69,6 +70,7 @@ export interface PullCommand extends BaseCommand {
   readonly owner?: string;
   readonly lockTtl?: number;
   readonly detach?: boolean;
+  readonly group?: GroupPullOptions;
 }
 
 export interface PullBatchCommand extends BaseCommand {
@@ -78,6 +80,7 @@ export interface PullBatchCommand extends BaseCommand {
   readonly timeout?: number;
   readonly owner?: string;
   readonly lockTtl?: number;
+  readonly group?: GroupPullOptions;
 }
 
 export interface AckCommand extends BaseCommand {

@@ -106,6 +106,7 @@ export class QueueManagerControl extends QueueManagerQueries {
     this.perQueueMetrics.delete(queue);
     this.telemetryJournal.clearQueue(queue);
     this.storage?.deleteQueueState(queue);
+    this.storage?.deleteGroupState(queue);
   }
 
   listQueues(): string[] {

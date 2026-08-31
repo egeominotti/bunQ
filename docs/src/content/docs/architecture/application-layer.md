@@ -144,17 +144,17 @@ and the user-facing [storage guide](/guide/databases/).
 
 <div class="bq-diag">
   <div class="bq-diag-head"><b>PULL flow</b><span>pull(queue, timeoutMs), runs as a loop</span></div>
-  <div class="bq-diag-layer">1. Acquire shard write lock, 2. queue paused, return null, 3. rate limit exceeded, return null, 4. concurrency at limit, return null</div>
+  <div class="bq-diag-layer">1. Acquire shard write lock, 2. queue paused, return null, 3. promote due secondary-index entries</div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-group">
-    <span class="bq-diag-group-label">5. dequeue loop, inspect priority-ordered candidates</span>
+    <span class="bq-diag-group-label">4. select through secondary scheduling indexes</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">TTL expired <i>drop, try next</i></div>
-      <div class="bq-diag-cell">Not ready, delayed <i>temporarily park, track earliest runAt, inspect next candidate</i></div>
-      <div class="bq-diag-cell">FIFO group active <i>temporarily park, inspect work from another eligible group</i></div>
-      <div class="bq-diag-cell">Valid job <i>pop, continue</i></div>
+      <div class="bq-diag-cell">Ungrouped ready <i>serve before grouped work</i></div>
+      <div class="bq-diag-cell">Grouped ready <i>FIFO lane, round-robin cursor, check group limits</i></div>
+      <div class="bq-diag-cell">No candidate <i>track earliest delayed/rate-window wake-up</i></div>
     </div>
-    <p class="bq-diag-note">Parked jobs remain logically queued: counters, temporal indexes and jobIndex do not change. They are restored to the heap before the shard lock is released, so a blocked root cannot hide unrelated ready work.</p>
+    <p class="bq-diag-note">The authoritative priority heap and secondary ungrouped, delayed and per-group indexes change under the same synchronous shard lock. A blocked group requires no heap scan or temporary reinsertion.</p>
   </div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-row">
@@ -162,7 +162,7 @@ and the user-facing [storage guide](/guide/databases/).
     <div class="bq-diag-cell">No job <i>wait for notification, event-based with timeout, then retry loop</i></div>
   </div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">6. Create lock token <i>if useLocks enabled</i>, 7. update jobIndex to 'processing', 8. mark active in SQLite, 9. broadcast 'pulled' event, 10. return job with token</div>
+  <div class="bq-diag-layer">5. Acquire queue and group capacity, 6. remove authoritative job, 7. advance group cursor, 8. create lock token <i>if useLocks enabled</i>, 9. update jobIndex to 'processing', 10. persist/broadcast active, 11. return job with token</div>
 </div>
 
 ## ACK Operation Flow
@@ -177,7 +177,7 @@ and the user-facing [storage guide](/guide/databases/).
     <span class="bq-diag-group-label">3. release shard resources</span>
     <div class="bq-diag-row">
       <div class="bq-diag-cell">Release unique key</div>
-      <div class="bq-diag-cell">Release FIFO group</div>
+      <div class="bq-diag-cell">Release active group capacity</div>
       <div class="bq-diag-cell">Release concurrency slot</div>
     </div>
   </div>

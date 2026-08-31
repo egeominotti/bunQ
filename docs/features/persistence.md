@@ -126,6 +126,9 @@ Key methods (real signatures):
 - Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(): Set<JobId>`, `countPendingJobs()`, `countActiveJobs()`.
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
 - Queue control-state (#100): `saveQueueState(name, { paused, rateLimit, concurrencyLimit, rateLimitDuration?, rateLimitExpiresAt?, stallConfig?, dlqConfig? })`, `loadQueueState()`, `deleteQueueState(name)` (`persistence/sqlite/control.ts:93-150`).
+- Job-group control-state: `save/removeGroupRateLimit`,
+  `save/removeGroupConcurrency`, `loadGroupStates()`, and
+  `deleteGroupStates(queue)`. Rows whose last override is removed are deleted.
 - Queue telemetry: `recordQueueEvent(event,maxEvents,maxMetricDataPoints)`,
   `recordQueueEventsBatch(events,maxEvents,maxMetricDataPoints)`,
   `getQueueMetrics(queue,type,maxMetricDataPoints)`,
@@ -151,7 +154,7 @@ and the batch callback/result types from `types/batch.ts`:
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
 `schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`,
-`SCHEMA_VERSION = 34`, `MIGRATIONS`.
+`SCHEMA_VERSION = 35`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -175,7 +178,7 @@ matching storage call returns successfully.
 
 DB-row types are defined in `statements.ts` and converted to/from domain types in `sqliteSerializer.ts`. See [data-model](../data-model.md) for full domain shapes. Tables (`schema.ts:17-199`):
 
-- `jobs` — `id TEXT PK`, `queue`, `name`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, the four child-failure flags, `stall_timeout`, `last_heartbeat`, `stall_count`, `timeline BLOB`, `stacktrace BLOB`, `dlq_retry_state BLOB`, `extended_options BLOB`.
+- `jobs` — `id TEXT PK`, `queue`, `name`, `data BLOB` (msgpack), `priority`, `created_at`, `run_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `backoff`, `ttl`, `timeout`, `unique_key`, `custom_id`, `depends_on BLOB`, `parent_id`, `children_ids BLOB`, `tags BLOB`, `state` (default `'waiting'`), `lifo`, `group_id`, `progress`, `progress_msg`, `remove_on_complete`, `remove_on_fail`, the four child-failure flags, `stall_timeout`, `last_heartbeat`, `stall_count`, `timeline BLOB`, `stacktrace BLOB`, `dlq_retry_state BLOB`, `extended_options BLOB`. The options blob stores a hidden FIFO ordinal only for grouped jobs so restart cannot reorder equal-time/custom-ID lanes.
 - `flow_failures` — `(parent_id, child_id)` primary key plus child queue,
   failure mode/error and creation time. It is both the durable propagation
   outbox and the live store for ignored/continued child errors.
@@ -190,6 +193,11 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   `concurrency_limit`, rate-window fields, nullable `stall_enabled` /
   `stall_interval` / `max_stalls` / `stall_grace_period`, and nullable
   `dlq_config BLOB` for the effective per-queue DLQ policy.
+- `group_state` — `(queue,group_id)` primary key plus nullable rate,
+  duration, and concurrency overrides. Runtime fixed-window counters remain
+  in memory; recovery restores the configuration before pulls begin. Embedded
+  Queue group operations and grouped single/bulk admission always reopen the
+  Queue's explicit `dataPath` after a shared-manager restart.
 - `queue_events` — autoincrement sequence, queue, event type, job id,
   occurrence timestamp, and MessagePack payload. Append and per-queue bound
   enforcement run in one SQLite transaction. `PUSHB`, `PULLB`, and `ACKB`
@@ -373,7 +381,7 @@ cannot recover an orphaned child or a runnable parent with an unpersisted edge.
 
 Migrations (`persistence/sqlite/state.ts`, `persistence/schema.ts`): on
 construct, the storage ensures the `migrations` table,
-reads `MAX(version)`; if below `SCHEMA_VERSION` (34) it runs the idempotent base
+reads `MAX(version)`; if below `SCHEMA_VERSION` (35) it runs the idempotent base
 schema and applies later migrations in one synchronous transaction. Only exact
 duplicate-column/table/index errors are treated as an already-applied schema
 operation; disk-full, I/O, corruption, syntax, constraint, and other failures
@@ -390,9 +398,9 @@ participate in recovery, plus the outbox parent index. Migration 28 creates the
 the conservative `pinned` ownership bit. Migration 30 adds the MessagePack
 `jobs.dlq_retry_state` used to retain one bounded automatic-DLQ-retry generation
 while its job is waiting or active. Migrations 31–32 separate job names from
-user data, migration 33 creates the event/metrics journal tables, and migration
-34 adds `jobs.extended_options` so repeat-chain and advanced job policies survive
-recovery.
+user data, migration 33 creates the event/metrics journal tables, migration 34
+adds `jobs.extended_options` so repeat-chain and advanced job policies survive
+recovery, and migration 35 creates durable per-group override state.
 
 Close (`persistence/sqlite/lifecycle.ts`): stop the buffer timer, perform a
 final flush, run `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on

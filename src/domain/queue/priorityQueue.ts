@@ -1,45 +1,43 @@
-/**
- * Indexed Priority Queue
- * Combines binary heap for O(log n) priority operations
- * with Map for O(1) lookups by job ID
- */
-
+import { copyGroupFifoOrder } from '../job/groupFifoOrder';
 import type { Job, JobId } from '../types/job';
 import type { HeapEntry, IndexedJob } from '../types/priorityQueue';
 import { comparePriorityEntries } from './priorityQueueOrder';
 
-/**
- * Indexed Priority Queue implementation with 4-ary heap
- * 4-ary provides better cache locality than binary heap
- * O(log₄ n) push, pop, update
- * O(1) find, has
- */
+export interface PriorityQueueHooks {
+  onInsert(job: Job): boolean;
+  onRemove(job: Job): boolean;
+}
+
+export type PriorityQueueComparator = (left: HeapEntry, right: HeapEntry) => number;
+export type PriorityQueueOrder = (job: Job) => bigint | null;
+
+/** Indexed map-backed 4-ary heap with O(log4 n) mutations and O(1) lookup. */
 export class IndexedPriorityQueue {
-  /** Branching factor - 4 provides optimal cache performance */
   private static readonly D = 4;
   private heap: HeapEntry[] = [];
   private readonly index: Map<JobId, IndexedJob> = new Map();
-  // Use BigInt to prevent overflow at extreme throughput
   private generation = 0n;
+  private hooksActive = false;
 
-  /** Get current size */
+  constructor(
+    private readonly hooks?: PriorityQueueHooks,
+    private readonly compare: PriorityQueueComparator = comparePriorityEntries,
+    private readonly order?: PriorityQueueOrder
+  ) {}
+
   get size(): number {
     return this.index.size;
   }
 
-  /** Check if empty */
   get isEmpty(): boolean {
     return this.index.size === 0;
   }
 
-  /** Push a job into the queue */
   push(job: Job): void {
     const gen = this.generation++;
 
-    // Store in index
     this.index.set(job.id, { job, generation: gen });
 
-    // Add to heap
     const entry: HeapEntry = {
       jobId: job.id,
       priority: job.priority,
@@ -47,37 +45,42 @@ export class IndexedPriorityQueue {
       lifo: job.lifo,
       generation: gen,
     };
+    if (this.order) {
+      const groupFifoOrder = this.order(job);
+      if (groupFifoOrder !== null) entry.groupFifoOrder = groupFifoOrder;
+    }
     this.heap.push(entry);
     this.bubbleUp(this.heap.length - 1);
+    if (this.hooks && (this.hooksActive || job.groupId)) {
+      this.hooksActive = this.hooks.onInsert(job);
+    }
   }
 
-  /** Pop the highest priority job */
   pop(): Job | null {
     while (this.heap.length > 0) {
       const entry = this.heap[0];
       const indexed = this.index.get(entry.jobId);
 
-      // Skip stale entries (generation mismatch = updated or removed)
       if (indexed?.generation !== entry.generation) {
         this.removeTop();
         continue;
       }
 
-      // Remove from both structures
       this.removeTop();
       this.index.delete(entry.jobId);
+      if (this.hooks && this.hooksActive) {
+        this.hooksActive = this.hooks.onRemove(indexed.job);
+      }
       return indexed.job;
     }
     return null;
   }
 
-  /** Peek at the highest priority job without removing */
   peek(): Job | null {
     while (this.heap.length > 0) {
       const entry = this.heap[0];
       const indexed = this.index.get(entry.jobId);
 
-      // Skip stale entries
       if (indexed?.generation !== entry.generation) {
         this.removeTop();
         continue;
@@ -88,23 +91,22 @@ export class IndexedPriorityQueue {
     return null;
   }
 
-  /** Find a job by ID - O(1) */
   find(jobId: JobId): Job | null {
     return this.index.get(jobId)?.job ?? null;
   }
 
-  /** Check if job exists - O(1) */
   has(jobId: JobId): boolean {
     return this.index.has(jobId);
   }
 
-  /** Remove a job by ID - O(1) for index, heap cleans lazily */
   remove(jobId: JobId): Job | null {
     const indexed = this.index.get(jobId);
     if (!indexed) return null;
 
     this.index.delete(jobId);
-    // Heap entry becomes stale, will be skipped on pop
+    if (this.hooks && this.hooksActive) {
+      this.hooksActive = this.hooks.onRemove(indexed.job);
+    }
     return indexed.job;
   }
 
@@ -115,17 +117,14 @@ export class IndexedPriorityQueue {
 
     const lifo = newLifo ?? indexed.job.lifo;
 
-    // Create new job with updated priority (immutable pattern)
     const updatedJob: Job = {
       ...indexed.job,
       priority: newPriority,
       lifo,
     };
+    copyGroupFifoOrder(indexed.job, updatedJob);
 
-    // Create new heap entry with new generation
     const gen = this.generation++;
-
-    // Update index with new job and generation
     this.index.set(jobId, { job: updatedJob, generation: gen });
 
     const entry: HeapEntry = {
@@ -135,8 +134,15 @@ export class IndexedPriorityQueue {
       lifo,
       generation: gen,
     };
+    if (this.order) {
+      const groupFifoOrder = this.order(updatedJob);
+      if (groupFifoOrder !== null) entry.groupFifoOrder = groupFifoOrder;
+    }
     this.heap.push(entry);
     this.bubbleUp(this.heap.length - 1);
+    if (this.hooks && (this.hooksActive || updatedJob.groupId)) {
+      this.hooksActive = this.hooks.onInsert(updatedJob);
+    }
 
     return true;
   }
@@ -146,16 +152,13 @@ export class IndexedPriorityQueue {
     const indexed = this.index.get(jobId);
     if (!indexed) return false;
 
-    // Create new job with updated runAt (immutable pattern)
     const updatedJob: Job = {
       ...indexed.job,
       runAt: newRunAt,
     };
+    copyGroupFifoOrder(indexed.job, updatedJob);
 
-    // Create new heap entry with new generation
     const gen = this.generation++;
-
-    // Update index with new job and generation
     this.index.set(jobId, { job: updatedJob, generation: gen });
 
     const entry: HeapEntry = {
@@ -165,22 +168,34 @@ export class IndexedPriorityQueue {
       lifo: updatedJob.lifo,
       generation: gen,
     };
+    if (this.order) {
+      const groupFifoOrder = this.order(updatedJob);
+      if (groupFifoOrder !== null) entry.groupFifoOrder = groupFifoOrder;
+    }
     this.heap.push(entry);
     this.bubbleUp(this.heap.length - 1);
+    if (this.hooks && (this.hooksActive || updatedJob.groupId)) {
+      this.hooksActive = this.hooks.onInsert(updatedJob);
+    }
 
     return true;
   }
 
-  /** Get all jobs (for iteration) */
   values(): Job[] {
     return Array.from(this.index.values()).map((v) => v.job);
   }
 
-  /** Clear the queue */
   clear(): void {
+    if (this.hooks) {
+      for (const { job } of this.index.values()) {
+        if (!this.hooksActive) break;
+        this.hooksActive = this.hooks.onRemove(job);
+      }
+    }
     this.heap = [];
     this.index.clear();
     this.generation = 0n;
+    this.hooksActive = false;
   }
 
   /**
@@ -214,11 +229,8 @@ export class IndexedPriorityQueue {
     this.heapify();
   }
 
-  /** Rebuild heap property from arbitrary array - O(n) */
   private heapify(): void {
     const D = IndexedPriorityQueue.D;
-    // Start from last non-leaf node and bubble down
-    // In D-ary heap, last non-leaf is at floor((n-2)/D)
     for (let i = Math.floor((this.heap.length - 2) / D); i >= 0; i--) {
       this.bubbleDown(i);
     }
@@ -228,8 +240,6 @@ export class IndexedPriorityQueue {
   needsCompaction(threshold: number = 0.2): boolean {
     return this.getStaleRatio() > threshold;
   }
-
-  // ============ Heap Operations ============
 
   private removeTop(): void {
     if (this.heap.length <= 1) {
@@ -245,7 +255,7 @@ export class IndexedPriorityQueue {
     const D = IndexedPriorityQueue.D;
     while (idx > 0) {
       const parentIdx = Math.floor((idx - 1) / D);
-      if (comparePriorityEntries(this.heap[idx], this.heap[parentIdx]) >= 0) {
+      if (this.compare(this.heap[idx], this.heap[parentIdx]) >= 0) {
         break;
       }
       this.swap(idx, parentIdx);
@@ -263,12 +273,11 @@ export class IndexedPriorityQueue {
       const firstChild = D * idx + 1;
       if (firstChild >= length) break;
 
-      // Find minimum among up to D children (cache-friendly sequential access)
       let smallest = idx;
       const lastChild = Math.min(firstChild + D, length);
 
       for (let c = firstChild; c < lastChild; c++) {
-        if (comparePriorityEntries(heap[c], heap[smallest]) < 0) {
+        if (this.compare(heap[c], heap[smallest]) < 0) {
           smallest = c;
         }
       }

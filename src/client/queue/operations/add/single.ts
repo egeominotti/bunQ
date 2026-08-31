@@ -6,7 +6,7 @@ import { toPublicJob } from '../../../types';
 import { jobId } from '../../../../domain/types/job';
 import { createJobProxy } from '../../jobProxy';
 import type { AddContext, ExtendedJobOptions } from '../../types/add';
-import { buildJobData, buildPushPayload, buildRepeatOptions } from './payload';
+import { buildJobData, buildPushPayload, buildRepeatOptions, resolveGroupId } from './payload';
 
 export async function add<T>(
   context: AddContext,
@@ -18,7 +18,7 @@ export async function add<T>(
   const jobData = buildJobData(data, merged);
 
   if (context.embedded) {
-    const manager = getSharedManager();
+    const manager = getSharedManager(context.opts.dataPath);
     const removeOnComplete =
       typeof merged.removeOnComplete === 'boolean' ? merged.removeOnComplete : false;
     const removeOnFail = typeof merged.removeOnFail === 'boolean' ? merged.removeOnFail : false;
@@ -37,7 +37,7 @@ export async function add<T>(
       customId: merged.jobId,
       dependsOn: merged.dependsOn?.map((id: string) => jobId(id)),
       tags: merged.tags,
-      groupId: merged.groupId,
+      groupId: resolveGroupId(merged),
       dedup: merged.deduplication
         ? {
             ttl: merged.deduplication.ttl,

@@ -1,21 +1,20 @@
-/** Core command handlers for push, pull, acknowledgement, and failure. */
-
 import type { Command } from '../../../domain/types/command';
 import type { Response } from '../../../domain/types/response';
 import * as resp from '../../../domain/types/response';
+import { validateGroupPullOptions } from '../../../domain/types/group';
 import { jobId, normalizeLegacyJobPayload } from '../../../domain/types/job';
 import type { HandlerContext } from '../types';
 import { tcpLog } from '../../../shared/logger';
 import { sanitizeServerError, serverErrorDiagnostics } from '../errors';
 import {
   validateQueueName,
+  validateGroupId,
   validateJobData,
   validateJobOptions,
   validateNumericField,
 } from '../protocol';
 import { validatePushBatchJobs, validatePushDependencies } from './pushBatchValidation';
 
-/** Handle PUSH command */
 export async function handlePush(
   cmd: Extract<Command, { cmd: 'PUSH' }>,
   ctx: HandlerContext,
@@ -26,8 +25,9 @@ export async function handlePush(
 
   const dataError = validateJobData(cmd.data);
   if (dataError) return resp.error(dataError, reqId);
+  const groupError = validateGroupId(cmd.groupId);
+  if (groupError) return resp.error(groupError, reqId);
 
-  // Validate numeric fields
   const optionsError = validateJobOptions({
     priority: cmd.priority,
     delay: cmd.delay,
@@ -84,7 +84,6 @@ export async function handlePush(
   }
 }
 
-/** Handle PUSHB (batch push) command */
 export async function handlePushBatch(
   cmd: Extract<Command, { cmd: 'PUSHB' }>,
   ctx: HandlerContext,
@@ -110,7 +109,6 @@ export async function handlePushBatch(
   }
 }
 
-/** Handle PULL command */
 export async function handlePull(
   cmd: Extract<Command, { cmd: 'PULL' }>,
   ctx: HandlerContext,
@@ -119,20 +117,20 @@ export async function handlePull(
   const queueError = validateQueueName(cmd.queue);
   if (queueError) return resp.error(queueError, reqId);
 
-  // Validate timeout
   const timeoutError = validateNumericField(cmd.timeout, 'timeout', { min: 0, max: 60000 });
   if (timeoutError) return resp.error(timeoutError, reqId);
+  const groupError = validateGroupPullOptions(cmd.group);
+  if (groupError) return resp.error(groupError, reqId);
 
-  // If owner is provided, use lock-based pull
   if (cmd.owner) {
     const { job, token } = await ctx.queueManager.pullWithLock(
       cmd.queue,
       cmd.owner,
       cmd.timeout,
       cmd.lockTtl,
-      ctx.signal
+      ctx.signal,
+      cmd.group
     );
-    // Register job with client for connection-based release
     if (job && ctx.clientId) {
       ctx.queueManager.registerClientJob(ctx.clientId, job.id);
     }
@@ -140,14 +138,13 @@ export async function handlePull(
   }
 
   // Standard pull (no lock, but still track for client release unless detached)
-  const job = await ctx.queueManager.pull(cmd.queue, cmd.timeout, ctx.signal);
+  const job = await ctx.queueManager.pull(cmd.queue, cmd.timeout, ctx.signal, cmd.group);
   if (job && ctx.clientId && !cmd.detach) {
     ctx.queueManager.registerClientJob(ctx.clientId, job.id);
   }
   return resp.nullableJob(job, reqId);
 }
 
-/** Handle PULLB (batch pull) command - uses optimized single-lock batch pull */
 export async function handlePullBatch(
   cmd: Extract<Command, { cmd: 'PULLB' }>,
   ctx: HandlerContext,
@@ -156,15 +153,14 @@ export async function handlePullBatch(
   const queueError = validateQueueName(cmd.queue);
   if (queueError) return resp.error(queueError, reqId);
 
-  // Validate count
   const countError = validateNumericField(cmd.count, 'count', { min: 1, max: 1000 });
   if (countError) return resp.error(countError, reqId);
 
-  // Validate timeout (same bound as PULL)
   const timeoutError = validateNumericField(cmd.timeout, 'timeout', { min: 0, max: 60000 });
   if (timeoutError) return resp.error(timeoutError, reqId);
+  const groupError = validateGroupPullOptions(cmd.group);
+  if (groupError) return resp.error(groupError, reqId);
 
-  // If owner is provided, use lock-based pull
   if (cmd.owner) {
     const { jobs, tokens } = await ctx.queueManager.pullBatchWithLock(
       cmd.queue,
@@ -172,9 +168,9 @@ export async function handlePullBatch(
       cmd.owner,
       cmd.timeout ?? 0,
       cmd.lockTtl,
-      ctx.signal
+      ctx.signal,
+      cmd.group
     );
-    // Register all jobs with client for connection-based release
     if (ctx.clientId) {
       for (const job of jobs) {
         ctx.queueManager.registerClientJob(ctx.clientId, job.id);
@@ -185,7 +181,13 @@ export async function handlePullBatch(
 
   // Standard pull (no locks, but still track for client release) — the
   // non-owner branch honors cmd.timeout exactly like the owner branch and PULL.
-  const jobs = await ctx.queueManager.pullBatch(cmd.queue, cmd.count, cmd.timeout ?? 0, ctx.signal);
+  const jobs = await ctx.queueManager.pullBatch(
+    cmd.queue,
+    cmd.count,
+    cmd.timeout ?? 0,
+    ctx.signal,
+    cmd.group
+  );
   if (ctx.clientId) {
     for (const job of jobs) {
       ctx.queueManager.registerClientJob(ctx.clientId, job.id);

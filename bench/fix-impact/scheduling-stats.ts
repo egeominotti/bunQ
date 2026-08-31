@@ -26,10 +26,10 @@ export async function benchmarkHeadOfLine(harness: Harness): Promise<void> {
         timestamp: base + holBlockedJobs + 1,
       });
       await manager.pushBatch(queue, inputs);
-      await manager.pull(queue, 0);
+      await manager.pull(queue, 0, undefined, { concurrency: 1 });
 
       const startedAt = Bun.nanoseconds();
-      const second = await manager.pull(queue, 0);
+      const second = await manager.pull(queue, 0, undefined, { concurrency: 1 });
       samples.push(elapsedMs(startedAt));
       returnedLabels.push(second ? (second.data as { label: string }).label : null);
     }
@@ -43,8 +43,8 @@ export async function benchmarkHeadOfLine(harness: Harness): Promise<void> {
         returnedLabels,
         eligibleJobReturnedEveryTime: returnedLabels.every((value) => value === 'B1'),
       },
-      comparable: false,
-      note: 'The old path is faster only because it returns null without examining the eligible job.',
+      comparable: true,
+      note: 'Models one saturated tenant ahead of another ready tenant with explicit serial group capacity.',
     });
   } finally {
     manager.shutdown();

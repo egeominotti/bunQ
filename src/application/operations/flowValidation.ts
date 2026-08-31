@@ -1,4 +1,5 @@
 import type { AtomicFlowBatchInput } from '../../domain/types/flow';
+import { validateGroupId } from '../../domain/types/group';
 import { normalizeJobPayload, type JobInput } from '../../domain/types/job';
 import { validateFlowTopology } from './flowTopologyValidation';
 
@@ -55,12 +56,8 @@ function validateOptions(input: JobInput): void {
       throw new Error(`${name} must be a boolean`);
     }
   }
-  if (
-    input.groupId !== undefined &&
-    (typeof input.groupId !== 'string' || input.groupId.length > 256)
-  ) {
-    throw new Error('groupId must be a string of at most 256 characters');
-  }
+  const groupError = validateGroupId(input.groupId);
+  if (groupError) throw new Error(groupError);
   if (
     input.tags !== undefined &&
     (!Array.isArray(input.tags) ||

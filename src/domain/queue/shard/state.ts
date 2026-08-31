@@ -4,6 +4,8 @@ import { DependencyTracker } from '../dependencyTracker';
 import { DlqShard } from '../dlqShard';
 import { LimiterManager } from '../limiterManager';
 import { IndexedPriorityQueue } from '../priorityQueue';
+import { GroupLimiterManager } from '../groupLimiterManager';
+import { GroupScheduler } from '../groupScheduler';
 import { ShardCounters } from '../shardCounters';
 import { TemporalManager } from '../temporalManager';
 import { UniqueKeyManager } from '../uniqueKeyManager';
@@ -13,9 +15,12 @@ import { WaiterManager } from '../waiterManager';
 export class ShardState {
   readonly queues = new Map<string, IndexedPriorityQueue>();
   readonly activeGroups = new Map<string, Set<string>>();
+  readonly activeGroupCounts = new Map<string, Map<string, number>>();
   protected readonly uniqueKeyManager = new UniqueKeyManager();
   protected readonly dlqManager: DlqShard;
   protected readonly limiterManager = new LimiterManager();
+  protected readonly groupLimiterManager = new GroupLimiterManager();
+  protected readonly groupScheduler = new GroupScheduler();
   protected readonly dependencyTracker = new DependencyTracker();
   protected readonly temporalManager = new TemporalManager();
   protected readonly waiterManager = new WaiterManager();
@@ -71,7 +76,11 @@ export class ShardState {
   getQueue(name: string): IndexedPriorityQueue {
     let queue = this.queues.get(name);
     if (!queue) {
-      queue = new IndexedPriorityQueue();
+      queue = new IndexedPriorityQueue({
+        onInsert: (job) =>
+          this.groupScheduler.insert(name, job, () => this.queues.get(name)?.values() ?? []),
+        onRemove: (job) => this.groupScheduler.remove(name, job),
+      });
       this.queues.set(name, queue);
     }
     return queue;

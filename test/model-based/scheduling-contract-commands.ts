@@ -5,8 +5,13 @@ import { TcpClient } from '../../src/client/tcp/client';
 import { QueueCommand } from './queue-command';
 import type { QueueModel, RealQueue } from './queue-model-harness';
 
-async function pull(real: RealQueue, queue: string, owner: string) {
-  return real.send({ cmd: 'PULL', lockTtl: 60000, owner, queue, timeout: 0 });
+async function pull(
+  real: RealQueue,
+  queue: string,
+  owner: string,
+  group?: { concurrency: number }
+) {
+  return real.send({ cmd: 'PULL', group, lockTtl: 60000, owner, queue, timeout: 0 });
 }
 
 async function ack(real: RealQueue, response: Record<string, unknown>): Promise<void> {
@@ -148,11 +153,12 @@ class GroupContractCommand extends QueueCommand {
           queue,
         });
       }
-      const first = await pull(real, queue, 'group-worker-1');
+      const group = { concurrency: 1 };
+      const first = await pull(real, queue, 'group-worker-1', group);
       expect((first.job as { id?: string })?.id).toBeDefined();
-      expect((await pull(real, queue, 'group-worker-2')).job).toBeNull();
+      expect((await pull(real, queue, 'group-worker-2', group)).job).toBeNull();
       await ack(real, first);
-      const second = await pull(real, queue, 'group-worker-2');
+      const second = await pull(real, queue, 'group-worker-2', group);
       expect((second.job as { id?: string })?.id).toBeDefined();
       await ack(real, second);
     } finally {

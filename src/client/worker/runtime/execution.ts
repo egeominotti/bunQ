@@ -111,6 +111,7 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
       useLocks: this.opts.useLocks,
       pollTimeout: this.opts.pollTimeout,
       lockDuration: this.opts.lockDuration,
+      group: this.opts.group,
     };
   }
 }

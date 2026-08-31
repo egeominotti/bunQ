@@ -1,6 +1,7 @@
 import type { TransactionSQL } from 'bun';
 import { DEFAULT_DLQ_CONFIG } from '../../../domain/types/dlq';
 import { DEFAULT_STALL_CONFIG } from '../../../domain/types/stall';
+import type { GroupPullOptions } from '../../../domain/types/group';
 import { claimPostgresCandidates } from './claimBatch';
 import { decodePostgresValue } from './codec';
 import { databaseNow, type PostgresContext } from './context';
@@ -9,6 +10,8 @@ import { repairResolvedPostgresDependencyConsumers } from './dependencyPromotion
 import type { ClaimedPostgresJob, PostgresQueueState } from './types';
 import { lockPostgresBrokerSession } from './brokerSessions';
 import { runPostgresTransactionWithRetry } from './transactionRetry';
+import { hasClaimablePostgresGroup } from './claimSelection';
+import { ensurePostgresGroupStates, refreshPostgresGroupRateWindows } from './groupClaims';
 
 interface QueueStateRow {
   queue: string;
@@ -21,9 +24,14 @@ interface QueueStateRow {
   concurrency_limit: number | null;
   stall_config: Uint8Array | null;
   dlq_config: Uint8Array | null;
+  group_sequence: number | string | bigint;
 }
 
-function toQueueState(row: QueueStateRow): PostgresQueueState {
+interface ClaimQueueState extends PostgresQueueState {
+  readonly groupSequence: number;
+}
+
+function toQueueState(row: QueueStateRow): ClaimQueueState {
   return {
     queue: row.queue,
     paused: row.paused,
@@ -36,6 +44,7 @@ function toQueueState(row: QueueStateRow): PostgresQueueState {
     concurrencyLimit: row.concurrency_limit,
     stallConfig: decodePostgresValue(row.stall_config, DEFAULT_STALL_CONFIG, 'stallConfig'),
     dlqConfig: decodePostgresValue(row.dlq_config, DEFAULT_DLQ_CONFIG, 'dlqConfig'),
+    groupSequence: Number(row.group_sequence),
   };
 }
 
@@ -44,19 +53,21 @@ async function lockQueueState(
   ctx: PostgresContext,
   queue: string,
   exclusive: boolean
-): Promise<PostgresQueueState> {
+): Promise<ClaimQueueState> {
   const select = async () =>
     exclusive
       ? await tx<QueueStateRow[]>`
           SELECT queue, paused, rate_limit, rate_duration_ms, rate_window_started_at,
-                 rate_expires_at, rate_count, concurrency_limit, stall_config, dlq_config
+                 rate_expires_at, rate_count, concurrency_limit, stall_config, dlq_config,
+                 group_sequence
           FROM bunqueue_queue_state
           WHERE namespace = ${ctx.config.namespace} AND queue = ${queue}
           FOR UPDATE
         `
       : await tx<QueueStateRow[]>`
           SELECT queue, paused, rate_limit, rate_duration_ms, rate_window_started_at,
-                 rate_expires_at, rate_count, concurrency_limit, stall_config, dlq_config
+                 rate_expires_at, rate_count, concurrency_limit, stall_config, dlq_config,
+                 group_sequence
           FROM bunqueue_queue_state
           WHERE namespace = ${ctx.config.namespace} AND queue = ${queue}
           FOR SHARE
@@ -78,9 +89,9 @@ async function lockQueueState(
 async function refreshRateWindow(
   tx: TransactionSQL,
   ctx: PostgresContext,
-  state: PostgresQueueState,
+  state: ClaimQueueState,
   now: number
-): Promise<PostgresQueueState> {
+): Promise<ClaimQueueState> {
   if (state.rateLimit === null) return state;
   if (state.rateExpiresAt !== null && state.rateExpiresAt <= now) {
     await tx`
@@ -129,11 +140,15 @@ async function activeCount(
 
 export async function claimPostgresJobs(
   ctx: PostgresContext,
-  queue: string,
-  count: number,
-  owner: string,
-  leaseDurationMs: number
+  input: {
+    queue: string;
+    count: number;
+    owner: string;
+    leaseDurationMs: number;
+    groupOptions?: GroupPullOptions;
+  }
 ): Promise<ClaimedPostgresJob[]> {
+  const { queue, count, owner, leaseDurationMs, groupOptions } = input;
   if (count <= 0) return [];
   await expirePendingPostgresJobs(ctx, queue);
 
@@ -158,12 +173,21 @@ export async function claimPostgresJobs(
       if (capacity <= 0) return { claimed: [], retryExclusive: false };
 
       await repairResolvedPostgresDependencyConsumers(tx, ctx, queue, now);
+      const hasGroups = await hasClaimablePostgresGroup(tx, ctx, queue, now);
+      if (!exclusive && hasGroups) return { claimed: [], retryExclusive: true };
+      let groupSequence = state.groupSequence;
+      if (hasGroups) {
+        groupSequence = await ensurePostgresGroupStates(tx, ctx, queue, groupSequence);
+        await refreshPostgresGroupRateWindows(tx, ctx, queue, groupOptions, now);
+      }
       const claimed = await claimPostgresCandidates(tx, ctx, {
         queue,
         capacity,
         owner,
         requestedLeaseMs: leaseDurationMs,
         now,
+        groupOptions,
+        groupSequence,
       });
       if (state.rateLimit !== null && claimed.length > 0) {
         await tx`

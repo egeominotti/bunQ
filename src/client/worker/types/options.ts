@@ -1,4 +1,4 @@
-import type { ConnectionOptions } from '../../types';
+import type { ConnectionOptions, GroupWorkerOptions } from '../../types';
 
 export interface ExtendedWorkerOptions {
   concurrency: number;
@@ -16,4 +16,5 @@ export interface ExtendedWorkerOptions {
   removeOnComplete?: boolean | number | { age?: number; count?: number };
   removeOnFail?: boolean | number | { age?: number; count?: number };
   connection?: ConnectionOptions;
+  group?: GroupWorkerOptions;
 }

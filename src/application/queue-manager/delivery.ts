@@ -1,6 +1,7 @@
 import type { Job, JobId, JobInput, JobLock } from '../../domain/types/job';
 import { DEFAULT_LOCK_TTL } from '../../domain/types/job';
 import type { AtomicFlowBatchInput, AtomicFlowBatchResult } from '../../domain/types/flow';
+import type { GroupPullOptions } from '../../domain/types/group';
 import { EventType } from '../../domain/types/queue';
 import { setDlqRetryState } from '../../domain/types/dlq';
 import { withWriteLock } from '../../shared/lock';
@@ -27,20 +28,39 @@ export class QueueManagerDelivery extends QueueManagerState {
     return pushFlowBatch(batch, this.contextFactory.getPushContext());
   }
 
-  async pull(queue: string, timeoutMs = 0, signal?: AbortSignal): Promise<Job | null> {
-    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
+  async pull(
+    queue: string,
+    timeoutMs = 0,
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
+  ): Promise<Job | null> {
+    const job = await pullJob(
+      queue,
+      timeoutMs,
+      this.contextFactory.getPullContext(),
+      signal,
+      groupOptions
+    );
     if (job) this.scheduleJobTimeout(job);
     return job;
   }
 
+  // oxlint-disable-next-line max-params -- public API includes cancellation and lock policy
   async pullWithLock(
     queue: string,
     owner: string,
     timeoutMs = 0,
     lockTtl = DEFAULT_LOCK_TTL,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<{ job: Job | null; token: string | null }> {
-    const job = await pullJob(queue, timeoutMs, this.contextFactory.getPullContext(), signal);
+    const job = await pullJob(
+      queue,
+      timeoutMs,
+      this.contextFactory.getPullContext(),
+      signal,
+      groupOptions
+    );
     if (!job) return { job: null, token: null };
     const token = lockMgr.createLock(job.id, owner, this.contextFactory.getLockContext(), lockTtl);
     this.scheduleJobTimeout(job);
@@ -51,15 +71,13 @@ export class QueueManagerDelivery extends QueueManagerState {
     queue: string,
     count: number,
     timeoutMs = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<Job[]> {
-    const jobs = await pullJobBatch(
-      queue,
-      count,
-      timeoutMs,
-      this.contextFactory.getPullContext(),
-      signal
-    );
+    const jobs = await pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext(), {
+      signal,
+      group: groupOptions,
+    });
     for (const job of jobs) this.scheduleJobTimeout(job);
     return jobs;
   }
@@ -71,15 +89,13 @@ export class QueueManagerDelivery extends QueueManagerState {
     owner: string,
     timeoutMs = 0,
     lockTtl = DEFAULT_LOCK_TTL,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<{ jobs: Job[]; tokens: string[] }> {
-    const jobs = await pullJobBatch(
-      queue,
-      count,
-      timeoutMs,
-      this.contextFactory.getPullContext(),
-      signal
-    );
+    const jobs = await pullJobBatch(queue, count, timeoutMs, this.contextFactory.getPullContext(), {
+      signal,
+      group: groupOptions,
+    });
     const tokens = jobs.map(
       (job) =>
         lockMgr.createLock(job.id, owner, this.contextFactory.getLockContext(), lockTtl) ?? ''

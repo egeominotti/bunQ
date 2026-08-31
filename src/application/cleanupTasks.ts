@@ -33,7 +33,7 @@ export async function cleanup(ctx: BackgroundContext): Promise<void> {
 
   await cleanOrphanedProcessingEntries(ctx, now, stallTimeout);
   await cleanStaleWaitingDependencies(ctx, now);
-  cleanUniqueKeysAndGroups(ctx);
+  cleanUniqueKeysAndGroups(ctx, now);
   cleanStalledCandidates(ctx);
   await cleanOrphanedJobIndex(ctx);
   cleanOrphanedJobLocks(ctx);
@@ -120,9 +120,10 @@ async function cleanStaleWaitingDependencies(ctx: BackgroundContext, now: number
   }
 }
 
-function cleanUniqueKeysAndGroups(ctx: BackgroundContext): void {
+function cleanUniqueKeysAndGroups(ctx: BackgroundContext, now: number): void {
   for (let i = 0; i < SHARD_COUNT; i++) {
     const shard = ctx.shards[i];
+    shard.cleanExpiredGroupWindows(now);
 
     // Clean expired unique keys
     shard.cleanExpiredUniqueKeys();
@@ -136,19 +137,6 @@ function cleanUniqueKeysAndGroups(ctx: BackgroundContext): void {
           const { value, done } = iter.next();
           if (done) break;
           keys.delete(value);
-        }
-      }
-    }
-
-    // Clean orphaned active groups
-    for (const [_queueName, groups] of shard.activeGroups) {
-      if (groups.size > 1000) {
-        const toRemove = Math.floor(groups.size / 2);
-        const iter = groups.values();
-        for (let j = 0; j < toRemove; j++) {
-          const { value, done } = iter.next();
-          if (done) break;
-          groups.delete(value);
         }
       }
     }
@@ -272,7 +260,7 @@ function cleanEmptyQueues(ctx: BackgroundContext): void {
       shard.dlq.delete(queueName);
       shard.uniqueKeys.delete(queueName);
       shard.queueState.delete(queueName);
-      shard.activeGroups.delete(queueName);
+      shard.clearEmptyGroupRuntime(queueName);
       shard.clearQueueLimiters(queueName);
       shard.stallConfig.delete(queueName);
       shard.dlqConfig.delete(queueName);

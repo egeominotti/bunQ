@@ -7,6 +7,7 @@
 import { type Job, type JobId, type JobTimelineEntry, jobId } from '../../domain/types/job';
 import { type DlqEntry, type DlqRetryState, setDlqRetryState } from '../../domain/types/dlq';
 import { normalizeLegacyJobPayload } from '../../domain/job/payload';
+import { restoreGroupFifoOrder } from '../../domain/job/groupFifoOrder';
 import type { DbJob } from './statements';
 import { decodeJobOptions } from './jobOptionsBlob';
 import { storageLog } from '../../shared/logger';
@@ -193,6 +194,7 @@ export function rowToJob(row: DbJob): Job {
       ? unpack<string[] | null>(row.stacktrace, null, `${jobContext}:stacktrace`)
       : null,
   };
+  restoreGroupFifoOrder(job, extended.groupFifoOrder);
   const dlqRetryState = row.dlq_retry_state
     ? unpack<DlqRetryState | null>(row.dlq_retry_state, null, `${jobContext}:dlqRetryState`)
     : null;

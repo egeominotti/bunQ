@@ -5,6 +5,22 @@ import { shardIndex } from '../../../shared/hash';
 import type { BackgroundContext } from '../../types';
 import { quarantineCorruptDependsOn, RECOVERY_BATCH_SIZE } from './shared';
 
+export function restoreGroupPolicies(
+  ctx: BackgroundContext,
+  groupStates: ReturnType<NonNullable<BackgroundContext['storage']>['loadGroupState']>
+): void {
+  for (const state of groupStates) {
+    const shard = ctx.shards[shardIndex(state.queue)];
+    if (state.rateLimit !== null && state.rateDuration !== null) {
+      shard.setGroupRateLimit(state.queue, state.groupId, state.rateLimit, state.rateDuration);
+    }
+    if (state.concurrencyLimit !== null) {
+      shard.setGroupConcurrency(state.queue, state.groupId, state.concurrencyLimit);
+    }
+    ctx.registerQueueName(state.queue);
+  }
+}
+
 export function restoreRecoveryPolicies(
   ctx: BackgroundContext,
   queueStates: ReturnType<NonNullable<BackgroundContext['storage']>['loadQueueState']>

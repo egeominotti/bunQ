@@ -54,13 +54,14 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 ### Jobs & lifecycle
 
-| Document                                                                   | Purpose                                                                                                                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Job Lifecycle](./features/job-lifecycle.md)                               | The push/pull/ack/fail state machine, including focused single/batch admission modules and the persistence-before-RAM publication boundary shared by TCP and embedded runtimes. |
-| [Job Queries & Queue Control](./features/job-queries-and-control.md)       | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean).                    |
-| [Dead Letter Queue](./features/dead-letter-queue.md)                       | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.          |
-| [Deduplication & Unique Jobs](./features/deduplication-and-unique.md)      | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock.         |
-| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.     |
+| Document                                                                   | Purpose                                                                                                                                                                                              |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Job Lifecycle](./features/job-lifecycle.md)                               | The push/pull/ack/fail state machine, including focused single/batch admission modules and the persistence-before-RAM publication boundary shared by TCP and embedded runtimes.                      |
+| [Job Queries & Queue Control](./features/job-queries-and-control.md)       | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean).                                         |
+| [Dead Letter Queue](./features/dead-letter-queue.md)                       | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.                               |
+| [Deduplication & Unique Jobs](./features/deduplication-and-unique.md)      | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock.                              |
+| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.                          |
+| [Job Groups](./features/job-groups.md)                                     | BullMQ Pro-compatible round-robin groups with durable FIFO claim order, server-authoritative per-group depth, rate limits, concurrency overrides, lazy SQLite indexes/recovery, and PostgreSQL multi-broker coordination. |
 
 ### Scheduling & background work
 

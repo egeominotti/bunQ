@@ -29,6 +29,7 @@ export function recoverPendingJobs(
         corruptPendingJobs.push(job);
         continue;
       }
+      shard.assignGroupFifoOrder(job);
 
       const hasDependencies = job.dependsOn && job.dependsOn.length > 0;
       const recoveredState = persistedJobState(job);

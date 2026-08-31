@@ -3,10 +3,51 @@ import * as countsOps from '../operations/counts';
 import * as addOps from '../operations/add';
 import * as queryOps from '../operations/query';
 import * as queryStateOps from '../operations/queryStates';
+import * as groupOps from '../operations/groups';
 import { QueueState } from './state';
 
 /** Job creation, lookup, state-listing, and count operations. */
 export class QueueQueries<T> extends QueueState<T> {
+  getGroupJobsCount(groupId: string): Promise<number> {
+    return groupOps.getGroupJobsCount(this.ctx, groupId);
+  }
+
+  getGroupsJobsCount(maxCount?: number): Promise<number> {
+    return groupOps.getGroupsJobsCount(this.ctx, maxCount);
+  }
+
+  getGroupActiveCount(groupId: string): Promise<number> {
+    return groupOps.getGroupActiveCount(this.ctx, groupId);
+  }
+
+  setGroupRateLimit(groupId: string, max: number, duration: number): Promise<void> {
+    return groupOps.setGroupRateLimit(this.ctx, groupId, max, duration);
+  }
+
+  getGroupRateLimit(groupId: string): Promise<{ max: number; duration: number } | null> {
+    return groupOps.getGroupRateLimit(this.ctx, groupId);
+  }
+
+  removeGroupRateLimit(groupId: string): Promise<number> {
+    return groupOps.removeGroupRateLimit(this.ctx, groupId);
+  }
+
+  getGroupRateLimitTtl(groupId: string, maxJobs?: number): Promise<number> {
+    return groupOps.getGroupRateLimitTtl(this.ctx, groupId, maxJobs);
+  }
+
+  setGroupConcurrency(groupId: string, concurrency: number): Promise<void> {
+    return groupOps.setGroupConcurrency(this.ctx, groupId, concurrency);
+  }
+
+  getGroupConcurrency(groupId: string): Promise<number | null> {
+    return groupOps.getGroupConcurrency(this.ctx, groupId);
+  }
+
+  removeGroupConcurrency(groupId: string): Promise<number> {
+    return groupOps.removeGroupConcurrency(this.ctx, groupId);
+  }
+
   add(name: string, data: T, opts?: JobOptions): Promise<Job<T>> {
     if (this.addBatcher && !opts?.durable) {
       return this.addBatcher.enqueue(name, data, opts) as Promise<Job<T>>;

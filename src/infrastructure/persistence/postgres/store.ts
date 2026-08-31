@@ -54,6 +54,7 @@ import {
   upsertPostgresCron,
 } from './crons';
 import type { CronJobInput } from '../../../domain/types/cron';
+import { assertGroupPullOptions, type GroupPullOptions } from '../../../domain/types/group';
 import type { Worker } from '../../../domain/types/worker';
 import {
   heartbeatPostgresWorker,
@@ -68,7 +69,7 @@ import type { QueueMetricType } from '../../../domain/types/metrics';
 import { removePostgresChildDependency, updatePostgresJobParent } from './relationships';
 import { cancelPostgresJob, discardPostgresJob, removePostgresDlqJob } from './terminal';
 import type { ClaimedPostgresJob, PostgresCompletionInput, PostgresFailureInput } from './types';
-import { databaseNow, runPostgresPostCommitMaintenance } from './context';
+import { databaseNow, runPostgresPostCommitMaintenance, type PostgresContext } from './context';
 import { completePostgresJobs } from './batchCompletion';
 import { prunePostgresCompletionTombstones } from './completionLifecycle';
 import { loadPostgresLifetimeMetrics } from './lifetimeMetrics';
@@ -76,12 +77,55 @@ import { finalizePostgresLifetimeMetrics } from './lifetimeMetricsFinalizer';
 import { loadPostgresCloudReadModel } from './cloudReadModel';
 import { removePostgresUnprocessedChildren } from './removeUnprocessedChildren';
 import {
+  getPostgresGroupActiveCount,
+  getPostgresGroupConcurrency,
+  getPostgresGroupJobsCount,
+  getPostgresGroupRateLimit,
+  getPostgresGroupRateLimitTtl,
+  removePostgresGroupConcurrency,
+  removePostgresGroupRateLimit,
+  setPostgresGroupConcurrency,
+  setPostgresGroupRateLimit,
+} from './groups';
+import { prunePostgresGroupStates } from './groupStateRetention';
+import {
   loadPostgresJobProjections,
   loadPostgresManagerSnapshot,
   loadPostgresQueueReadModel,
 } from './readModels';
+
+function pruneInactiveGroups(ctx: PostgresContext): Promise<void> {
+  return runPostgresPostCommitMaintenance(ctx, 'group-state-retention', async () => {
+    await prunePostgresGroupStates(ctx);
+  });
+}
+
 /** Database-authoritative PostgreSQL queue store safe for concurrent brokers. */
 export class PostgresQueueStore extends PostgresAdmissionStore {
+  getGroupJobsCount = (queue: string, groupId?: string) =>
+    getPostgresGroupJobsCount(this.context, queue, groupId);
+  getGroupActiveCount = (queue: string, groupId: string) =>
+    getPostgresGroupActiveCount(this.context, queue, groupId);
+  setGroupRateLimit = (queue: string, groupId: string, max: number, duration: number) =>
+    setPostgresGroupRateLimit(this.context, queue, groupId, max, duration);
+  getGroupRateLimit = (queue: string, groupId: string) =>
+    getPostgresGroupRateLimit(this.context, queue, groupId);
+  removeGroupRateLimit = async (queue: string, groupId: string) => {
+    const removed = await removePostgresGroupRateLimit(this.context, queue, groupId);
+    if (removed) await pruneInactiveGroups(this.context);
+    return removed;
+  };
+  getGroupRateLimitTtl = (queue: string, groupId: string, maxJobs?: number) =>
+    getPostgresGroupRateLimitTtl(this.context, queue, groupId, maxJobs);
+  setGroupConcurrency = (queue: string, groupId: string, concurrency: number) =>
+    setPostgresGroupConcurrency(this.context, queue, groupId, concurrency);
+  getGroupConcurrency = (queue: string, groupId: string) =>
+    getPostgresGroupConcurrency(this.context, queue, groupId);
+  removeGroupConcurrency = async (queue: string, groupId: string) => {
+    const removed = await removePostgresGroupConcurrency(this.context, queue, groupId);
+    if (removed) await pruneInactiveGroups(this.context);
+    return removed;
+  };
   async now(): Promise<number> {
     await this.initialize();
     return await databaseNow(this.context.sql);
@@ -90,10 +134,18 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
     queue: string,
     count: number,
     owner = this.config.brokerId,
-    leaseDurationMs = this.config.leaseDurationMs
+    leaseDurationMs = this.config.leaseDurationMs,
+    groupOptions?: GroupPullOptions
   ): Promise<ClaimedPostgresJob[]> {
+    assertGroupPullOptions(groupOptions);
     await this.initialize();
-    return await claimPostgresJobs(this.context, queue, count, owner, leaseDurationMs);
+    return await claimPostgresJobs(this.context, {
+      queue,
+      count,
+      owner,
+      leaseDurationMs,
+      groupOptions,
+    });
   }
 
   async complete(id: JobId, token: string, result?: unknown, remove = false) {
@@ -103,6 +155,9 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
       await runPostgresPostCommitMaintenance(this.context, 'completion-retention', () =>
         prunePostgresCompletionTombstones(this.context)
       );
+    }
+    if (transition.applied && transition.job?.groupId) {
+      await pruneInactiveGroups(this.context);
     }
     return transition;
   }
@@ -115,12 +170,19 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
         prunePostgresCompletionTombstones(this.context)
       );
     }
+    if (transitions.some((transition) => transition.applied && transition.job?.groupId)) {
+      await pruneInactiveGroups(this.context);
+    }
     return transitions;
   }
 
   async fail(input: PostgresFailureInput) {
     await this.initialize();
-    return await failPostgresJob(this.context, input);
+    const transition = await failPostgresJob(this.context, input);
+    if (transition.applied && transition.state === 'failed' && transition.job?.groupId) {
+      await pruneInactiveGroups(this.context);
+    }
+    return transition;
   }
 
   async renew(id: JobId, token: string, durationMs: number): Promise<number | null> {

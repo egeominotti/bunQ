@@ -13,6 +13,7 @@ const GUIDES = {
   'queue/progress.mdx': 2,
   'queue/limits.mdx': 1,
   'rate-limiting.mdx': 5,
+  'queue/job-groups.mdx': 0,
   'queue-group.md': 4,
   'queue/metrics.mdx': 1,
   'queue/advanced.mdx': 4,
@@ -87,7 +88,7 @@ describe('Queue guide snippets', () => {
     }
     expect(groupCount).toBe(33);
     expect(tabFenceCount).toBe(231);
-    expect(standaloneFenceCount).toBe(4);
+    expect(standaloneFenceCount).toBe(10);
   });
 
   test('TypeScript fences do not redeclare block-scoped alternatives', () => {

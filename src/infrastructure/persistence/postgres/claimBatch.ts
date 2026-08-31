@@ -1,10 +1,12 @@
 import type { TransactionSQL } from 'bun';
 import { generateLockToken, MAX_TIMELINE_ENTRIES, type Job } from '../../../domain/types/job';
+import type { GroupPullOptions } from '../../../domain/types/group';
 import { recordPostgresJobEvents } from './batchEvents';
 import { selectPostgresClaimCandidates } from './claimSelection';
 import { decodePostgresJob, encodePostgresValue, postgresByteaBase64 } from './codec';
 import type { PostgresContext } from './context';
 import type { ClaimedPostgresJob, PostgresJobRow } from './types';
+import { commitPostgresGroupClaims } from './groupClaims';
 
 function prepareClaims(
   rows: readonly PostgresJobRow[],
@@ -93,16 +95,31 @@ export async function claimPostgresCandidates(
     owner: string;
     requestedLeaseMs: number;
     now: number;
+    groupOptions?: GroupPullOptions;
+    groupSequence: number;
   }
 ): Promise<ClaimedPostgresJob[]> {
-  const { queue, capacity, owner, requestedLeaseMs, now } = input;
-  const rows = await selectPostgresClaimCandidates(tx, ctx, queue, now, capacity);
+  const { queue, capacity, owner, requestedLeaseMs, now, groupOptions, groupSequence } = input;
+  const rows = await selectPostgresClaimCandidates(tx, ctx, {
+    queue,
+    now,
+    capacity,
+    options: groupOptions,
+  });
   const claimed = prepareClaims(rows, {
     owner,
     requestedLeaseMs,
     now,
     brokerId: ctx.config.brokerId,
   });
-  if (claimed.length > 0) await persistClaims(tx, ctx, claimed, now);
+  if (claimed.length > 0) {
+    await commitPostgresGroupClaims(tx, ctx, {
+      queue,
+      rows,
+      options: groupOptions,
+      sequence: groupSequence,
+    });
+    await persistClaims(tx, ctx, claimed, now);
+  }
   return claimed;
 }

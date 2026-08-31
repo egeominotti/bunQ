@@ -14,6 +14,7 @@ export class ShardLifecycle extends ShardMetrics {
       this.temporalManager.removeDelayed(job.id);
     }
     priorityQueue.clear();
+    this.groupScheduler.clearQueue(queue);
     this.temporalManager.clearIndexForQueue(queue);
     this.counters.adjustQueued(-count);
     this.counters.syncDelayedCount();
@@ -40,7 +41,10 @@ export class ShardLifecycle extends ShardMetrics {
     this.queues.delete(queue);
     this.uniqueKeyManager.clearQueue(queue);
     this.limiterManager.deleteQueue(queue);
+    this.groupScheduler.clearQueue(queue);
+    this.groupLimiterManager.clearQueue(queue);
     this.activeGroups.delete(queue);
+    this.activeGroupCounts.delete(queue);
     return Array.from(removed);
   }
 }

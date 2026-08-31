@@ -53,3 +53,45 @@ export interface GetStallConfigCommand extends BaseCommand {
   readonly cmd: 'GetStallConfig';
   readonly queue: string;
 }
+
+interface GroupCommand extends BaseCommand {
+  readonly queue: string;
+  readonly groupId: string;
+}
+
+export interface GetGroupJobsCountCommand extends GroupCommand {
+  readonly cmd: 'GetGroupJobsCount';
+}
+export interface GetGroupsJobsCountCommand extends BaseCommand {
+  readonly cmd: 'GetGroupsJobsCount';
+  readonly queue: string;
+  readonly maxCount?: number;
+}
+export interface GetGroupActiveCountCommand extends GroupCommand {
+  readonly cmd: 'GetGroupActiveCount';
+}
+export interface SetGroupRateLimitCommand extends GroupCommand {
+  readonly cmd: 'SetGroupRateLimit';
+  readonly max: number;
+  readonly duration: number;
+}
+export interface GetGroupRateLimitCommand extends GroupCommand {
+  readonly cmd: 'GetGroupRateLimit';
+}
+export interface RemoveGroupRateLimitCommand extends GroupCommand {
+  readonly cmd: 'RemoveGroupRateLimit';
+}
+export interface GetGroupRateLimitTtlCommand extends GroupCommand {
+  readonly cmd: 'GetGroupRateLimitTtl';
+  readonly maxJobs?: number;
+}
+export interface SetGroupConcurrencyCommand extends GroupCommand {
+  readonly cmd: 'SetGroupConcurrency';
+  readonly concurrency: number;
+}
+export interface GetGroupConcurrencyCommand extends GroupCommand {
+  readonly cmd: 'GetGroupConcurrency';
+}
+export interface RemoveGroupConcurrencyCommand extends GroupCommand {
+  readonly cmd: 'RemoveGroupConcurrency';
+}

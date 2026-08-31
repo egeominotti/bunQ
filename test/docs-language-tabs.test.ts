@@ -28,7 +28,7 @@ describe('documented SDK language tabs', () => {
   let languageGroupCount = 0;
 
   test('discovers every audited guide and language group', () => {
-    expect(files).toHaveLength(33);
+    expect(files).toHaveLength(34);
     expect(languageGroupCount).toBe(65);
   });
 

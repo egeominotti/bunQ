@@ -72,6 +72,7 @@ export interface PostgresJobRow {
   unique_expires_at: number | string | bigint | null;
   custom_id: string | null;
   group_id: string | null;
+  group_order: number | string | bigint | null;
   parent_id: string | null;
   lease_owner: string | null;
   lease_broker_id: string | null;

@@ -172,8 +172,12 @@ describe('PostgreSQL fast-check distributed invariants', () => {
               const delivered = new Set<JobId>();
               while (delivered.size < total) {
                 const [left, right] = await Promise.all([
-                  a.claim(name, total, `group-a-${delivered.size}`),
-                  b.claim(name, total, `group-b-${delivered.size}`),
+                  a.claim(name, total, `group-a-${delivered.size}`, undefined, {
+                    concurrency: 1,
+                  }),
+                  b.claim(name, total, `group-b-${delivered.size}`, undefined, {
+                    concurrency: 1,
+                  }),
                 ]);
                 const wave = [...left, ...right];
                 expect(wave.length).toBeGreaterThan(0);

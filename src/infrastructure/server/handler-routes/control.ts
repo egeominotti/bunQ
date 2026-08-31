@@ -25,6 +25,7 @@ import {
 } from '../handlers/dlq';
 import { handleDrain, handlePause, handleResume } from '../handlers/management';
 import type { HandlerContext } from '../types';
+import { handleGroupCommand, handleGroupsJobsCount } from '../handlers/groups';
 
 export function routeQueueControlCommand(
   command: Command,
@@ -80,6 +81,18 @@ export function routeRateLimitCommand(
   requestId?: string
 ): Response | Promise<Response> | null {
   switch (command.cmd) {
+    case 'GetGroupsJobsCount':
+      return handleGroupsJobsCount(command, context, requestId);
+    case 'GetGroupJobsCount':
+    case 'GetGroupActiveCount':
+    case 'SetGroupRateLimit':
+    case 'GetGroupRateLimit':
+    case 'RemoveGroupRateLimit':
+    case 'GetGroupRateLimitTtl':
+    case 'SetGroupConcurrency':
+    case 'GetGroupConcurrency':
+    case 'RemoveGroupConcurrency':
+      return handleGroupCommand(command, context, requestId);
     case 'RateLimit':
       return handleRateLimit(command, context, requestId);
     case 'RateLimitClear':

@@ -6,6 +6,7 @@
 import { getSharedManager } from '../manager';
 import type { Job as InternalJob } from '../../domain/types/job';
 import type { TcpConnection } from './types';
+import type { GroupWorkerOptions } from '../types';
 import { parseJobFromResponse } from './jobParser';
 
 export interface PullConfig {
@@ -15,6 +16,7 @@ export interface PullConfig {
   readonly pollTimeout: number;
   /** Lock TTL in ms to request from the server on a lock-based pull. */
   readonly lockDuration?: number;
+  readonly group?: GroupWorkerOptions;
 }
 
 export async function pullEmbedded(
@@ -31,7 +33,9 @@ export async function pullEmbedded(
         config.name,
         config.workerId,
         0,
-        config.lockDuration
+        config.lockDuration,
+        undefined,
+        config.group
       );
       return job ? [{ job, token }] : [];
     }
@@ -40,17 +44,19 @@ export async function pullEmbedded(
       count,
       config.workerId,
       0,
-      config.lockDuration
+      config.lockDuration,
+      undefined,
+      config.group
     );
     return jobs.map((job, i) => ({ job, token: tokens[i] || null }));
   }
 
   // No locks - use regular pull
   if (count === 1) {
-    const job = await manager.pull(config.name, 0);
+    const job = await manager.pull(config.name, 0, undefined, config.group);
     return job ? [{ job, token: null }] : [];
   }
-  const jobs = await manager.pullBatch(config.name, count, 0);
+  const jobs = await manager.pullBatch(config.name, count, 0, undefined, config.group);
   return jobs.map((job) => ({ job, token: null }));
 }
 
@@ -70,6 +76,7 @@ export async function pullTcp(
     timeout: config.pollTimeout,
   };
   if (count > 1) cmd.count = count;
+  if (config.group) cmd.group = config.group;
 
   // Only request lock ownership when useLocks is enabled
   if (config.useLocks) {

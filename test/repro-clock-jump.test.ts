@@ -17,9 +17,9 @@
  *     re-target after a jump until the 60s safety interval).
  *
  * Time-flow map (verified while writing these tests):
- *   - delayed promotion is LAZY: pull peeks the heap and checks
- *     `isReady(job, now)` (`runAt <= Date.now()`), src/application/operations/pull.ts:76.
- *     There is no promotion timer, so jumps are reflected instantly.
+ *   - delayed promotion/demotion is LAZY: pull asks GroupScheduler to classify
+ *     secondary ready/delayed indexes against `Date.now()`. There is no
+ *     promotion timer, so jumps are reflected instantly.
  *   - lock expiry: `checkExpiredLocks` (src/application/lockManager.ts:40) runs on
  *     a real setInterval of `stallCheckMs` and compares `lock.expiresAt` with
  *     `Date.now()`; expired -> requeue with attempts++ and lock deleted.
@@ -274,6 +274,21 @@ describe('CJ2 — backward clock jump: no early runs, no permanent wedge', () =>
     await m.ack(job.id);
     expect(await m.getJobState(job.id)).toBe('completed');
   }, 15_000);
+
+  it('CJ2c: a ready grouped job is also demoted after a backward jump', async () => {
+    const m = open();
+    const Q = 'cj2c-grouped';
+    const t0 = Date.now();
+    const job = await m.push(Q, { data: { n: 1 }, groupId: 'tenant-a' });
+
+    setSystemTime(new Date(t0 - HOUR));
+    expect(await m.getJobState(job.id)).toBe('delayed');
+    expect(await m.pull(Q, 0, undefined, { concurrency: 1 })).toBeNull();
+
+    setSystemTime(new Date(t0 + 1));
+    expect((await m.pull(Q, 0, undefined, { concurrency: 1 }))?.id).toBe(job.id);
+    await m.ack(job.id);
+  });
 });
 
 // ---------------------------------------------------------------------------

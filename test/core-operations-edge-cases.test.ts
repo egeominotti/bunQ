@@ -142,9 +142,7 @@ describe('Pull Operation Edge Cases', () => {
     }
 
     // Concurrent pulls (more than available jobs)
-    const pulls = Array.from({ length: JOB_COUNT * 2 }, () =>
-      qm.pull(QUEUE, 50)
-    );
+    const pulls = Array.from({ length: JOB_COUNT * 2 }, () => qm.pull(QUEUE, 50));
 
     const results = await Promise.all(pulls);
     const pulledJobs = results.filter((r) => r !== null);
@@ -225,12 +223,8 @@ describe('Ack Operation Edge Cases', () => {
     ]);
 
     // Exactly one should succeed
-    const succeeded = [ackResult, failResult].filter(
-      (r) => r.status === 'fulfilled'
-    );
-    const failed = [ackResult, failResult].filter(
-      (r) => r.status === 'rejected'
-    );
+    const succeeded = [ackResult, failResult].filter((r) => r.status === 'fulfilled');
+    const failed = [ackResult, failResult].filter((r) => r.status === 'rejected');
 
     expect(succeeded.length).toBe(1);
     expect(failed.length).toBe(1);
@@ -599,7 +593,10 @@ describe('Job Management Edge Cases', () => {
     const operations = pulledJobs.map((job, i) =>
       i % 2 === 0
         ? qm.discard(job.id).catch(() => false)
-        : qm.ack(job.id).then(() => true).catch(() => false)
+        : qm
+            .ack(job.id)
+            .then(() => true)
+            .catch(() => false)
     );
 
     await Promise.all(operations);
@@ -798,16 +795,17 @@ describe('FIFO Group Blocking', () => {
     const job3 = await qm.push(QUEUE, { data: { order: 3 }, groupId: 'group-a' });
 
     // First pull should get job1
-    const pulled1 = await qm.pull(QUEUE, 0);
+    const group = { concurrency: 1 };
+    const pulled1 = await qm.pull(QUEUE, 0, undefined, group);
     expect((pulled1?.data as { order: number }).order).toBe(1);
 
     // Second pull should return null (group blocked)
-    const pulled2 = await qm.pull(QUEUE, 0);
+    const pulled2 = await qm.pull(QUEUE, 0, undefined, group);
     expect(pulled2).toBeNull();
 
     // After ack, next job should be pullable
     await qm.ack(pulled1!.id);
-    const pulled3 = await qm.pull(QUEUE, 0);
+    const pulled3 = await qm.pull(QUEUE, 0, undefined, group);
     expect((pulled3?.data as { order: number }).order).toBe(2);
   });
 
@@ -1517,11 +1515,7 @@ describe('Batch Operations - Race Conditions', () => {
 
     // Push batch after short delay
     await Bun.sleep(50);
-    await qm.pushBatch(QUEUE, [
-      { data: { i: 0 } },
-      { data: { i: 1 } },
-      { data: { i: 2 } },
-    ]);
+    await qm.pushBatch(QUEUE, [{ data: { i: 0 } }, { data: { i: 1 } }, { data: { i: 2 } }]);
 
     const pulled = await pullPromise;
     expect(pulled).not.toBeNull();

@@ -1,6 +1,6 @@
 ---
-title: "TCP Protocol Reference: Binary MessagePack Commands"
-description: "TCP protocol spec for bunqueue: MessagePack wire format, pipelining, length-prefixed framing, and full command reference for all operations."
+title: 'TCP Protocol Reference: Binary MessagePack Commands'
+description: 'TCP protocol spec for bunqueue: MessagePack wire format, pipelining, length-prefixed framing, and full command reference for all operations.'
 head:
   - tag: meta
     attrs:
@@ -139,7 +139,9 @@ When the server is configured with `AUTH_TOKENS`, all connections must authentic
 **Response (success):**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 **Response (failure):**
@@ -379,7 +381,8 @@ Pull the next available job from a queue. Supports optional long polling and loc
   timeout?: number,    // Long poll timeout in ms (0-60000, default: 0)
   owner?: string,      // Client identifier for lock-based pull
   lockTtl?: number,    // Lock TTL in ms (default: 30000)
-  detach?: boolean     // Don't auto-release the job when this connection closes (CLI usage)
+  detach?: boolean,    // Don't auto-release the job when this connection closes (CLI usage)
+  group?: { concurrency?: number, limit?: { max: number, duration: number } }
 }
 ```
 
@@ -412,7 +415,8 @@ Batch pull multiple jobs from a queue.
   count: number,       // Number of jobs to pull (1-1000)
   timeout?: number,    // Long poll timeout in ms (0-60000, default: 0), with or without owner
   owner?: string,      // Client identifier for lock-based pull
-  lockTtl?: number     // Lock TTL in ms (default: 30000)
+  lockTtl?: number,    // Lock TTL in ms (default: 30000)
+  group?: { concurrency?: number, limit?: { max: number, duration: number } }
 }
 ```
 
@@ -451,7 +455,9 @@ Acknowledge a job as completed.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 If an exact timeout or retired cron generation already finalized before the
@@ -486,7 +492,9 @@ unchanged.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 A timeout may win after the batch's lease preflight. Live positions still
@@ -529,7 +537,9 @@ The optional `stack` is stored on the job and surfaced by `GetJob` and on DLQ en
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 An exact late generation uses the same successful no-op envelope as `ACK`:
@@ -771,7 +781,9 @@ Cancel a waiting or delayed job.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -794,7 +806,9 @@ Update the progress of an active job.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -816,7 +830,9 @@ Update the data payload of an existing job.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -839,7 +855,9 @@ Change the priority of a queued job.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -857,7 +875,9 @@ Move a delayed job to the waiting state immediately.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -880,7 +900,9 @@ Move an active job back to the delayed state.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -902,7 +924,9 @@ administrative discard.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -942,7 +966,9 @@ Pause a queue. Workers will stop pulling new jobs.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -960,7 +986,9 @@ Resume a paused queue.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1014,7 +1042,9 @@ Remove all data for a queue (all jobs in all states).
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1050,7 +1080,9 @@ List the names of all known queues.
 **Request:**
 
 ```typescript
-{ cmd: 'ListQueues' }
+{
+  cmd: 'ListQueues';
+}
 ```
 
 **Response:**
@@ -1269,7 +1301,9 @@ Delete a cron job schedule by name.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1281,7 +1315,9 @@ List all registered cron job schedules.
 **Request:**
 
 ```typescript
-{ cmd: 'CronList' }
+{
+  cmd: 'CronList';
+}
 ```
 
 **Response:**
@@ -1347,7 +1383,9 @@ Connection health check.
 **Request:**
 
 ```typescript
-{ cmd: 'Ping' }
+{
+  cmd: 'Ping';
+}
 ```
 
 **Response:**
@@ -1393,7 +1431,9 @@ Get high-level server statistics.
 **Request:**
 
 ```typescript
-{ cmd: 'Stats' }
+{
+  cmd: 'Stats';
+}
 ```
 
 **Response:**
@@ -1425,7 +1465,9 @@ legacy broker-wide response shown below.
 **Request:**
 
 ```typescript
-{ cmd: 'Metrics' }
+{
+  cmd: 'Metrics';
+}
 ```
 
 **Response:**
@@ -1492,7 +1534,9 @@ Get metrics in Prometheus text exposition format.
 **Request:**
 
 ```typescript
-{ cmd: 'Prometheus' }
+{
+  cmd: 'Prometheus';
+}
 ```
 
 **Response:**
@@ -1510,7 +1554,9 @@ Get the storage/disk health status. Reports whether the disk is full or has erro
 **Request:**
 
 ```typescript
-{ cmd: 'StorageStatus' }
+{
+  cmd: 'StorageStatus';
+}
 ```
 
 **Response:**
@@ -1670,7 +1716,9 @@ List all registered workers and their stats.
 **Request:**
 
 ```typescript
-{ cmd: 'ListWorkers' }
+{
+  cmd: 'ListWorkers';
+}
 ```
 
 **Response:**
@@ -1762,7 +1810,9 @@ List all registered webhooks.
 **Request:**
 
 ```typescript
-{ cmd: 'ListWebhooks' }
+{
+  cmd: 'ListWebhooks';
+}
 ```
 
 **Response:**
@@ -1812,7 +1862,9 @@ Invalid `duration` or `ttl` values (non-finite or not positive) fall back to the
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1830,7 +1882,9 @@ Remove the rate limit from a queue.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1852,7 +1906,9 @@ Set a concurrency limit on a queue (max concurrent active jobs).
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1870,7 +1926,9 @@ Remove the concurrency limit from a queue.
 **Response:**
 
 ```typescript
-{ ok: true }
+{
+  ok: true;
+}
 ```
 
 ---
@@ -1894,6 +1952,45 @@ Read the live rate/concurrency configuration and saturation state.
   }
 }
 ```
+
+---
+
+#### Job group controls and getters
+
+Group depth excludes active jobs and includes waiting, prioritized and delayed
+jobs. Every response below is wrapped in `data`:
+
+```typescript
+{ cmd: 'GetGroupJobsCount', queue, groupId }
+// -> { ok: true, data: { count: number } }
+
+{ cmd: 'GetGroupsJobsCount', queue, maxCount? }
+// -> { ok: true, data: { count: number } }
+
+{ cmd: 'GetGroupActiveCount', queue, groupId }
+// -> { ok: true, data: { count: number } }
+
+{ cmd: 'SetGroupRateLimit', queue, groupId, max, duration }
+{ cmd: 'GetGroupRateLimit', queue, groupId }
+// -> { ok: true, data: { limit: { max, duration } | null } }
+
+{ cmd: 'RemoveGroupRateLimit', queue, groupId }
+// -> { ok: true, data: { removed: 0 | 1 } }
+
+{ cmd: 'GetGroupRateLimitTtl', queue, groupId, maxJobs? }
+// -> { ok: true, data: { ttl: number } }
+
+{ cmd: 'SetGroupConcurrency', queue, groupId, concurrency }
+{ cmd: 'GetGroupConcurrency', queue, groupId }
+// -> { ok: true, data: { concurrency: number | null } }
+
+{ cmd: 'RemoveGroupConcurrency', queue, groupId }
+// -> { ok: true, data: { removed: 0 | 1 } }
+```
+
+Group IDs are non-empty strings of at most 256 characters. `max`, `duration`,
+and `concurrency` must be positive safe integers. Stored overrides affect a
+claim only when `PULL`/`PULLB` carries the corresponding `group` default.
 
 ---
 
@@ -2187,101 +2284,107 @@ Job data payloads are limited to **10 MB** when serialized.
 
 ## Command Summary
 
-| Category | Command | Description |
-|----------|---------|-------------|
-| **Core** | `PUSH` | Add a job to a queue |
-| | `PUSHB` | Batch push multiple jobs |
-| | `PULL` | Pull next job (supports long poll and locks) |
-| | `PULLB` | Batch pull jobs |
-| | `ACK` | Acknowledge job completion |
-| | `ACKB` | Batch acknowledge |
-| | `FAIL` | Mark job as failed |
-| **Query** | `GetJob` | Get job by ID |
-| | `GetState` | Get job state |
-| | `GetResult` | Get job result |
-| | `GetJobs` | List jobs with filtering |
-| | `GetJobCounts` | Count jobs by state |
-| | `GetCountsPerPriority` | Count jobs by priority |
-| | `GetJobByCustomId` | Look up job by custom ID |
-| | `Count` | Total job count for a queue |
-| | `GetProgress` | Get job progress |
-| | `GetChildrenValues` | Get child job return values |
-| | `GetQueueLimits` | Read live queue rate/concurrency status |
-| | `GetDeduplicationJobId` | Resolve a queue-scoped deduplication key |
-| **Control** | `Cancel` | Cancel a job |
-| | `Progress` | Update job progress |
-| | `Update` | Update job data |
-| | `ChangePriority` | Change job priority |
-| | `Promote` | Move delayed job to waiting |
-| | `MoveToDelayed` | Move active job to delayed |
-| | `MoveToWaitingChildren` | Park an active job for children |
-| | `ChangeDelay` | Change a delayed job's delay |
-| | `MoveToWait` | Move a job back to waiting |
-| | `PromoteJobs` | Promote all delayed jobs in a queue |
-| | `Discard` | Move job to DLQ |
-| | `WaitJob` | Wait for job completion |
-| | `ExtendLock` | Extend a job lock |
-| | `ExtendLocks` | Extend job locks (batch) |
-| | `RemoveDeduplicationKey` | Release a queue-scoped deduplication key |
-| | `RemoveJobDeduplicationKey` | Release only a job-owned key |
-| | `Pause` | Pause a queue |
-| | `Resume` | Resume a queue |
-| | `IsPaused` | Check if queue is paused |
-| | `Drain` | Remove all waiting jobs |
-| | `Obliterate` | Remove all queue data |
-| | `Clean` | Remove old jobs |
-| | `ListQueues` | List all queues |
-| **DLQ** | `Dlq` | Get DLQ entries |
-| | `GetDlqStats` | Get aggregate DLQ statistics |
-| | `RetryDlq` | Retry DLQ jobs |
-| | `PurgeDlq` | Clear DLQ |
-| | `RemoveDlqJob` | Permanently delete one DLQ job |
-| | `RetryCompleted` | Re-queue completed jobs |
-| **Cron** | `Cron` | Create/update cron schedule |
-| | `CronDelete` | Delete cron schedule |
-| | `CronList` | List cron schedules |
-| | `CronGet` | Get cron schedule by name |
-| **Monitoring** | `Ping` | Health check |
-| | `Hello` | Protocol negotiation |
-| | `Stats` | Server statistics |
-| | `Metrics` | Detailed metrics |
-| | `TrimEvents` | Trim one queue's lifecycle journal |
-| | `Prometheus` | Prometheus-format metrics |
-| | `StorageStatus` | Get storage/disk health status |
-| | `Heartbeat` | Worker heartbeat |
-| | `JobHeartbeat` | Job heartbeat (stall prevention) |
-| | `JobHeartbeatB` | Batch job heartbeat |
-| **Workers** | `RegisterWorker` | Register a worker |
-| | `UnregisterWorker` | Unregister a worker |
-| | `ListWorkers` | List workers |
-| **Webhooks** | `AddWebhook` | Register a webhook |
-| | `RemoveWebhook` | Remove a webhook |
-| | `ListWebhooks` | List webhooks |
-| | `SetWebhookEnabled` | Enable/disable a webhook |
-| **Rate** | `RateLimit` | Set queue rate limit |
-| | `RateLimitClear` | Clear queue rate limit |
-| | `SetConcurrency` | Set queue concurrency limit |
-| | `ClearConcurrency` | Clear concurrency limit |
-| **Config** | `SetStallConfig` | Set per-queue stall config |
-| | `GetStallConfig` | Get per-queue stall config |
-| | `SetDlqConfig` | Set per-queue DLQ config |
-| | `GetDlqConfig` | Get per-queue DLQ config |
-| **Logs** | `AddLog` | Add job log entry |
-| | `GetLogs` | Get job logs |
-| | `ClearLogs` | Clear job logs |
-| **Flow** | `UpdateParent` | Update a child's parent reference |
-| | `GetFailedChildrenValues` | Failed children values |
-| | `GetIgnoredChildrenFailures` | Ignored children failures |
-| | `RemoveChildDependency` | Remove a child's parent dependency |
-| | `RemoveUnprocessedChildren` | Remove unprocessed children |
-| **Dashboard** | `DashboardOverview` | Aggregated dashboard snapshot |
-| | `DashboardQueues` | All queues with stats |
-| | `DashboardQueue` | Single queue detail |
-| **System** | `CompactMemory` | Trigger memory compaction |
-| **Auth** | `Auth` | Authenticate connection |
+| Category       | Command                                                                  | Description                                  |
+| -------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
+| **Core**       | `PUSH`                                                                   | Add a job to a queue                         |
+|                | `PUSHB`                                                                  | Batch push multiple jobs                     |
+|                | `PULL`                                                                   | Pull next job (supports long poll and locks) |
+|                | `PULLB`                                                                  | Batch pull jobs                              |
+|                | `ACK`                                                                    | Acknowledge job completion                   |
+|                | `ACKB`                                                                   | Batch acknowledge                            |
+|                | `FAIL`                                                                   | Mark job as failed                           |
+| **Query**      | `GetJob`                                                                 | Get job by ID                                |
+|                | `GetState`                                                               | Get job state                                |
+|                | `GetResult`                                                              | Get job result                               |
+|                | `GetJobs`                                                                | List jobs with filtering                     |
+|                | `GetJobCounts`                                                           | Count jobs by state                          |
+|                | `GetCountsPerPriority`                                                   | Count jobs by priority                       |
+|                | `GetJobByCustomId`                                                       | Look up job by custom ID                     |
+|                | `Count`                                                                  | Total job count for a queue                  |
+|                | `GetProgress`                                                            | Get job progress                             |
+|                | `GetChildrenValues`                                                      | Get child job return values                  |
+|                | `GetQueueLimits`                                                         | Read live queue rate/concurrency status      |
+|                | `GetDeduplicationJobId`                                                  | Resolve a queue-scoped deduplication key     |
+| **Control**    | `Cancel`                                                                 | Cancel a job                                 |
+|                | `Progress`                                                               | Update job progress                          |
+|                | `Update`                                                                 | Update job data                              |
+|                | `ChangePriority`                                                         | Change job priority                          |
+|                | `Promote`                                                                | Move delayed job to waiting                  |
+|                | `MoveToDelayed`                                                          | Move active job to delayed                   |
+|                | `MoveToWaitingChildren`                                                  | Park an active job for children              |
+|                | `ChangeDelay`                                                            | Change a delayed job's delay                 |
+|                | `MoveToWait`                                                             | Move a job back to waiting                   |
+|                | `PromoteJobs`                                                            | Promote all delayed jobs in a queue          |
+|                | `Discard`                                                                | Move job to DLQ                              |
+|                | `WaitJob`                                                                | Wait for job completion                      |
+|                | `ExtendLock`                                                             | Extend a job lock                            |
+|                | `ExtendLocks`                                                            | Extend job locks (batch)                     |
+|                | `RemoveDeduplicationKey`                                                 | Release a queue-scoped deduplication key     |
+|                | `RemoveJobDeduplicationKey`                                              | Release only a job-owned key                 |
+|                | `Pause`                                                                  | Pause a queue                                |
+|                | `Resume`                                                                 | Resume a queue                               |
+|                | `IsPaused`                                                               | Check if queue is paused                     |
+|                | `Drain`                                                                  | Remove all waiting jobs                      |
+|                | `Obliterate`                                                             | Remove all queue data                        |
+|                | `Clean`                                                                  | Remove old jobs                              |
+|                | `ListQueues`                                                             | List all queues                              |
+| **DLQ**        | `Dlq`                                                                    | Get DLQ entries                              |
+|                | `GetDlqStats`                                                            | Get aggregate DLQ statistics                 |
+|                | `RetryDlq`                                                               | Retry DLQ jobs                               |
+|                | `PurgeDlq`                                                               | Clear DLQ                                    |
+|                | `RemoveDlqJob`                                                           | Permanently delete one DLQ job               |
+|                | `RetryCompleted`                                                         | Re-queue completed jobs                      |
+| **Cron**       | `Cron`                                                                   | Create/update cron schedule                  |
+|                | `CronDelete`                                                             | Delete cron schedule                         |
+|                | `CronList`                                                               | List cron schedules                          |
+|                | `CronGet`                                                                | Get cron schedule by name                    |
+| **Monitoring** | `Ping`                                                                   | Health check                                 |
+|                | `Hello`                                                                  | Protocol negotiation                         |
+|                | `Stats`                                                                  | Server statistics                            |
+|                | `Metrics`                                                                | Detailed metrics                             |
+|                | `TrimEvents`                                                             | Trim one queue's lifecycle journal           |
+|                | `Prometheus`                                                             | Prometheus-format metrics                    |
+|                | `StorageStatus`                                                          | Get storage/disk health status               |
+|                | `Heartbeat`                                                              | Worker heartbeat                             |
+|                | `JobHeartbeat`                                                           | Job heartbeat (stall prevention)             |
+|                | `JobHeartbeatB`                                                          | Batch job heartbeat                          |
+| **Workers**    | `RegisterWorker`                                                         | Register a worker                            |
+|                | `UnregisterWorker`                                                       | Unregister a worker                          |
+|                | `ListWorkers`                                                            | List workers                                 |
+| **Webhooks**   | `AddWebhook`                                                             | Register a webhook                           |
+|                | `RemoveWebhook`                                                          | Remove a webhook                             |
+|                | `ListWebhooks`                                                           | List webhooks                                |
+|                | `SetWebhookEnabled`                                                      | Enable/disable a webhook                     |
+| **Rate**       | `RateLimit`                                                              | Set queue rate limit                         |
+|                | `RateLimitClear`                                                         | Clear queue rate limit                       |
+|                | `SetConcurrency`                                                         | Set queue concurrency limit                  |
+|                | `ClearConcurrency`                                                       | Clear concurrency limit                      |
+| **Job groups** | `GetGroupJobsCount` / `GetGroupsJobsCount`                               | Read grouped backlog                         |
+|                | `GetGroupActiveCount`                                                    | Read active jobs in one group                |
+|                | `SetGroupRateLimit` / `GetGroupRateLimit` / `RemoveGroupRateLimit`       | Manage one group's rate override             |
+|                | `GetGroupRateLimitTtl`                                                   | Read one group's fixed-window TTL            |
+|                | `SetGroupConcurrency` / `GetGroupConcurrency` / `RemoveGroupConcurrency` | Manage one group's concurrency override      |
+| **Config**     | `SetStallConfig`                                                         | Set per-queue stall config                   |
+|                | `GetStallConfig`                                                         | Get per-queue stall config                   |
+|                | `SetDlqConfig`                                                           | Set per-queue DLQ config                     |
+|                | `GetDlqConfig`                                                           | Get per-queue DLQ config                     |
+| **Logs**       | `AddLog`                                                                 | Add job log entry                            |
+|                | `GetLogs`                                                                | Get job logs                                 |
+|                | `ClearLogs`                                                              | Clear job logs                               |
+| **Flow**       | `UpdateParent`                                                           | Update a child's parent reference            |
+|                | `GetFailedChildrenValues`                                                | Failed children values                       |
+|                | `GetIgnoredChildrenFailures`                                             | Ignored children failures                    |
+|                | `RemoveChildDependency`                                                  | Remove a child's parent dependency           |
+|                | `RemoveUnprocessedChildren`                                              | Remove unprocessed children                  |
+| **Dashboard**  | `DashboardOverview`                                                      | Aggregated dashboard snapshot                |
+|                | `DashboardQueues`                                                        | All queues with stats                        |
+|                | `DashboardQueue`                                                         | Single queue detail                          |
+| **System**     | `CompactMemory`                                                          | Trigger memory compaction                    |
+| **Auth**       | `Auth`                                                                   | Authenticate connection                      |
 
 :::tip[Related]
+
 - [HTTP API Reference](/api/http/) - REST API alternative
 - [TypeScript Types](/api/types/) - Type definitions
 - [TCP Protocol Architecture](/architecture/tcp-protocol/) - Protocol internals
-:::
+  :::

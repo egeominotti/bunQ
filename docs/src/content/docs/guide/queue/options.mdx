@@ -1,6 +1,6 @@
 ---
-title: "JobOptions Reference"
-description: "Every bunqueue JobOptions field with its type and default: priority, delay, attempts, backoff, timeout, jobId, removeOnComplete, durable and the rest."
+title: 'JobOptions Reference'
+description: 'Every bunqueue JobOptions field with its type and default: priority, delay, attempts, backoff, timeout, jobId, removeOnComplete, durable and the rest.'
 head:
   - tag: meta
     attrs:
@@ -9,15 +9,20 @@ head:
   - tag: meta
     attrs:
       name: keywords
-      content: "joboptions, job options reference, priority delay attempts backoff, removeOnComplete, durable job, bunqueue api reference"
+      content: 'joboptions, job options reference, priority delay attempts backoff, removeOnComplete, durable job, bunqueue api reference'
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · queue</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">Every option, <em>with its default.</em></h1>
-  <p class="bq-hero-sub">The complete per-job option surface, what each field changes, and what you get when you leave it out.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    Every option, <em>with its default.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    The complete per-job option surface, what each field changes, and what you get when you leave it
+    out.
+  </p>
 </div>
 
 ## Job Options Reference
@@ -126,22 +131,23 @@ Python uses snake_case keyword arguments and Rust uses snake_case struct
 fields. Go uses a `JobOptions` map; PHP and Elixir use the camelCase protocol
 names shown in the table.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `priority` | `number` | `0` | Higher = processed first |
-| `delay` | `number` | `0` | Delay in ms before processing |
-| `attempts` | `number` | `3` | Max retry attempts |
-| `backoff` | `number \| { type, delay }` | `1000` | Backoff base in ms, or `{ type: 'fixed' \| 'exponential', delay }` |
-| `timeout` | `number` | - | Processing timeout in ms |
-| `jobId` | `string` | - | Custom ID for idempotent adds |
-| `deduplication` | `object` | - | TTL-based dedup (`id`, `ttl`, `extend`, `replace`) |
-| `removeOnComplete` | `boolean` | `false` | Auto-delete after completion |
-| `removeOnFail` | `boolean` | `false` | Auto-delete after failure |
-| `stallTimeout` | `number` | - | Per-job stall timeout override |
-| `repeat` | `object` | - | Repeating job config (`every`, `pattern`, `limit`) |
-| `durable` | `boolean` | `false` | SQLite: bypass its write buffer; PostgreSQL is already transactional |
-| `lifo` | `boolean` | `false` | Process newest first |
-| `parent` | `{ id, queue }` | - | Parent job reference for [flows](/guide/flow/) |
+| Option             | Type                        | Default | Description                                                          |
+| ------------------ | --------------------------- | ------- | -------------------------------------------------------------------- |
+| `priority`         | `number`                    | `0`     | Higher = processed first                                             |
+| `delay`            | `number`                    | `0`     | Delay in ms before processing                                        |
+| `attempts`         | `number`                    | `3`     | Max retry attempts                                                   |
+| `backoff`          | `number \| { type, delay }` | `1000`  | Backoff base in ms, or `{ type: 'fixed' \| 'exponential', delay }`   |
+| `timeout`          | `number`                    | -       | Processing timeout in ms                                             |
+| `jobId`            | `string`                    | -       | Custom ID for idempotent adds                                        |
+| `deduplication`    | `object`                    | -       | TTL-based dedup (`id`, `ttl`, `extend`, `replace`)                   |
+| `removeOnComplete` | `boolean`                   | `false` | Auto-delete after completion                                         |
+| `removeOnFail`     | `boolean`                   | `false` | Auto-delete after failure                                            |
+| `stallTimeout`     | `number`                    | -       | Per-job stall timeout override                                       |
+| `repeat`           | `object`                    | -       | Repeating job config (`every`, `pattern`, `limit`)                   |
+| `durable`          | `boolean`                   | `false` | SQLite: bypass its write buffer; PostgreSQL is already transactional |
+| `lifo`             | `boolean`                   | `false` | Process newest first                                                 |
+| `group`            | `{ id: string \| number }`  | -       | Assign the job to a [fair FIFO job group](/guide/queue/job-groups/)  |
+| `parent`           | `{ id, queue }`             | -       | Parent job reference for [flows](/guide/flow/)                       |
 
 At the same priority, LIFO jobs run newest-first ahead of FIFO jobs. Priority
 always remains authoritative, so a lower-priority LIFO job cannot overtake a
@@ -164,24 +170,26 @@ backend. Use `FlowProducer` when the parent and children must all be created as
 one new graph.
 
 :::tip[Related Guides]
+
 - [Worker API](/guide/worker/), process jobs from queues
 - [Dead Letter Queue](/guide/dlq/), handle failed jobs
 - [Rate Limiting](/guide/rate-limiting/), control processing rates
+- [Job Groups](/guide/queue/job-groups/), per-tenant FIFO and backpressure
 - [Queue Group](/guide/queue-group/), manage multiple queues
-:::
+  :::
 
 ## Where to go next
 
-| | |
-|---|---|
-| [Queue API](/guide/queue/) | Create a queue in embedded or TCP mode |
-| [Adding Jobs](/guide/queue/adding-jobs/) | add, addBulk, priorities, delays, durability |
-| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/) | Idempotent adds, dedup keys, custom job ids |
-| [Querying Jobs](/guide/queue/querying/) | Fetch jobs, states, counts and results |
-| [Queue Control and Maintenance](/guide/queue/control/) | Pause, drain, obliterate, clean and repair |
-| [Progress, Job Logs and Dependencies](/guide/queue/progress/) | Progress, per-job logs and dependencies |
-| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/) | Rate limits and global concurrency caps |
-| [Job Schedulers from the Queue](/guide/queue/schedulers/) | Named repeatable schedules from the queue |
-| [DLQ Operations from the Queue Object](/guide/queue/dlq/) | Failed-job operations from the Queue object |
-| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/) | Registered workers, stats and metrics windows |
-| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward |
+|                                                                           |                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------- |
+| [Queue API](/guide/queue/)                                                | Create a queue in embedded or TCP mode        |
+| [Adding Jobs](/guide/queue/adding-jobs/)                                  | add, addBulk, priorities, delays, durability  |
+| [Deduplication and Idempotent Job Adds](/guide/queue/deduplication/)      | Idempotent adds, dedup keys, custom job ids   |
+| [Querying Jobs](/guide/queue/querying/)                                   | Fetch jobs, states, counts and results        |
+| [Queue Control and Maintenance](/guide/queue/control/)                    | Pause, drain, obliterate, clean and repair    |
+| [Progress, Job Logs and Dependencies](/guide/queue/progress/)             | Progress, per-job logs and dependencies       |
+| [Queue Rate Limiting and Global Concurrency](/guide/queue/limits/)        | Rate limits and global concurrency caps       |
+| [Job Schedulers from the Queue](/guide/queue/schedulers/)                 | Named repeatable schedules from the queue     |
+| [DLQ Operations from the Queue Object](/guide/queue/dlq/)                 | Failed-job operations from the Queue object   |
+| [Workers, Stats and Metrics from the Queue](/guide/queue/metrics/)        | Registered workers, stats and metrics windows |
+| [Namespaces, Auto-Batching and Store-and-Forward](/guide/queue/advanced/) | Namespaces, auto-batching, store-and-forward  |

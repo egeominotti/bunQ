@@ -18,8 +18,8 @@ function countQueuePushes(manager: QueueManager, queueName: string): () => numbe
   return () => pushes;
 }
 
-describe('pullBatch ineligible candidate parking', () => {
-  test('restores blocked FIFO-group jobs only once for the whole batch', async () => {
+describe('pullBatch eligibility paths', () => {
+  test('does not mutate blocked FIFO-group jobs while filling a batch', async () => {
     const manager = new QueueManager();
     const queue = 'batch-single-parking-group';
     const blockedCount = 64;
@@ -47,21 +47,22 @@ describe('pullBatch ineligible candidate parking', () => {
         })),
       ]);
 
-      expect((await manager.pull(queue, 0))?.id).toBe(active.id);
+      const group = { concurrency: 1 };
+      expect((await manager.pull(queue, 0, undefined, group))?.id).toBe(active.id);
       const getPushCount = countQueuePushes(manager, queue);
-      const batch = await manager.pullBatch(queue, batchSize, 0);
+      const batch = await manager.pullBatch(queue, batchSize, 0, undefined, group);
 
       expect(batch.map((job) => (job.data as { kind: string }).kind)).toEqual(
         Array(batchSize).fill('eligible')
       );
-      expect(getPushCount()).toBe(blockedCount);
+      expect(getPushCount()).toBe(0);
       expect(manager.count(queue)).toBe(blockedCount);
     } finally {
       manager.shutdown();
     }
   });
 
-  test('restores future delayed jobs only once for the whole batch', async () => {
+  test('restores ungrouped future jobs only once for the whole batch', async () => {
     const manager = new QueueManager();
     const queue = 'batch-single-parking-delayed';
     const delayedCount = 64;
@@ -95,7 +96,7 @@ describe('pullBatch ineligible candidate parking', () => {
     }
   });
 
-  test('keeps the earliest parked runAt for a delayed long-poll', async () => {
+  test('keeps the earliest parked runAt for an ungrouped delayed long-poll', async () => {
     const manager = new QueueManager();
     const queue = 'batch-single-parking-wakeup';
     const timestamp = Date.now();
@@ -163,7 +164,7 @@ describe('pullBatch ineligible candidate parking', () => {
     }
   });
 
-  test('restores already parked jobs when a later expired-job event throws', async () => {
+  test('restores an already parked job when a later expired-job event throws', async () => {
     const manager = new QueueManager();
     const queue = 'batch-single-parking-finally';
     const timestamp = Date.now() - 10_000;

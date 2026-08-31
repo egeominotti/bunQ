@@ -15,6 +15,7 @@ import type {
 import { PostgresPostCommitMaintenance } from './postCommitMaintenance';
 import { sweepPostgresEventRetention } from './telemetry';
 import { prunePostgresCompletionTombstones } from './completionLifecycle';
+import { prunePostgresGroupStates } from './groupStateRetention';
 import { PostgresMaintenanceFlights } from './maintenanceFlights';
 import { resolvePostgresRuntimeConfig } from './runtimeConfig';
 import { PostgresEventCommitGc } from './eventCommitGc';
@@ -28,7 +29,6 @@ import {
   unregisterPostgresBroker,
 } from './brokerSessions';
 
-/** Connection, schema, event stream, health, and maintenance lifecycle. */
 export class PostgresQueueStoreRuntime {
   readonly context: PostgresContext;
   readonly events: PostgresEventStream;
@@ -239,6 +239,7 @@ export class PostgresQueueStoreRuntime {
       await recoverExpiredPostgresLeases(this.context);
       await repairPostgresDlq(this.context);
       await prunePostgresCompletionTombstones(this.context);
+      await prunePostgresGroupStates(this.context);
       await sweepPostgresEventRetention(this.context);
       await prunePostgresEventCommits(this.context);
       await this.events.start();
@@ -270,6 +271,9 @@ export class PostgresQueueStoreRuntime {
       void this.runMaintenance(() => sweepPostgresEventRetention(this.context), 'event-retention');
       void this.postCommitMaintenance.run('completion-retention', () =>
         prunePostgresCompletionTombstones(this.context)
+      );
+      void this.postCommitMaintenance.run('group-state-retention', () =>
+        prunePostgresGroupStates(this.context)
       );
     }, 60_000);
     this.cronTimer = setInterval(

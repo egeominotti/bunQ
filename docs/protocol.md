@@ -167,6 +167,9 @@ Client MUSTs:
   silently lost.
 - `jobId` is idempotent: re-pushing an existing custom id returns the
   existing job's `id` instead of enqueuing a duplicate.
+- `groupId` is the normalized job-group identifier: a non-empty string of at
+  most 256 characters. Public clients may accept safe integers but MUST encode
+  them as decimal strings on the wire.
 
 ### 6.2 Query
 
@@ -232,20 +235,20 @@ request correlation and MUST NOT resolve an in-flight command with it.
 
 ### 6.3 Consuming (the worker loop)
 
-| Command            | Request                                                                         | Response                                                        |
-| ------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `PULL`             | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?`                         | `{job, token}` — top-level, both `null`-ish when empty          |
-| `PULLB`            | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?`      | `{jobs: [], tokens: []}`                                        |
-| `ACK`              | `id`, `token`, `result?`                                                        | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
-| `ACKB`             | `ids: []`, `tokens: []`, `results?`                                             | `{}` or `{data: {ignoredIds, ignoredIndices}}`                  |
-| `FAIL`             | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool`              | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
-| `Heartbeat`        | `id` (= workerId), `activeJobs`, `processed`, `failed`                          | `{data: {pong}}`                                                |
-| `JobHeartbeatB`    | `ids: []`, `tokens: []`                                                         | `{data: {ok, count}}` — renews the jobs' locks                  |
-| `RegisterWorker`   | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt` | `{data: {...}}`                                                 |
-| `UnregisterWorker` | `workerId`                                                                      | `{}`                                                            |
-| `ExtendLock`       | `id`, `token`, `duration`                                                       | `{}`                                                            |
-| `Progress`         | `id`, `progress` (0..100 by client convention; not server-enforced), `message?` | `{}` — job MUST be active                                       |
-| `AddLog`           | `id`, `message`, `level?` (default `info`)                                      | `{data: {added}}` — **wrapped**; read back via `GetLogs`        |
+| Command            | Request                                                                              | Response                                                        |
+| ------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `PULL`             | `queue`, `owner`, `timeout?` (long-poll ms), `lockTtl?`, `group?`                    | `{job, token}` — top-level, both `null`-ish when empty          |
+| `PULLB`            | `queue`, `count` (**1..1000**), `timeout?` (0..60000), `owner`, `lockTtl?`, `group?` | `{jobs: [], tokens: []}`                                        |
+| `ACK`              | `id`, `token`, `result?`                                                             | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
+| `ACKB`             | `ids: []`, `tokens: []`, `results?`                                                  | `{}` or `{data: {ignoredIds, ignoredIndices}}`                  |
+| `FAIL`             | `id`, `token`, `error`, `stack?: string[]`, `unrecoverable?: bool`                   | `{}` or `{data: {applied: false, reason: "already-finalized"}}` |
+| `Heartbeat`        | `id` (= workerId), `activeJobs`, `processed`, `failed`                               | `{data: {pong}}`                                                |
+| `JobHeartbeatB`    | `ids: []`, `tokens: []`                                                              | `{data: {ok, count}}` — renews the jobs' locks                  |
+| `RegisterWorker`   | `workerId`, `name`, `queues: []`, `concurrency`, `hostname`, `pid`, `startedAt`      | `{data: {...}}`                                                 |
+| `UnregisterWorker` | `workerId`                                                                           | `{}`                                                            |
+| `ExtendLock`       | `id`, `token`, `duration`                                                            | `{}`                                                            |
+| `Progress`         | `id`, `progress` (0..100 by client convention; not server-enforced), `message?`      | `{}` — job MUST be active                                       |
+| `AddLog`           | `id`, `message`, `level?` (default `info`)                                           | `{data: {added}}` — **wrapped**; read back via `GetLogs`        |
 
 Semantics a client MUST implement:
 
@@ -256,6 +259,12 @@ Semantics a client MUST implement:
 - **`PULLB.count` MUST be clamped to 1..1000.** The server rejects larger
   counts; an unclamped worker with high concurrency wedges itself in a
   permanent error loop.
+- `group`, when present, is
+  `{concurrency?: positiveSafeInteger, limit?: {max: positiveSafeInteger,
+duration: positiveSafeInteger}}`. Omission means unlimited group concurrency
+  and no per-group rate window. These are broker defaults for every group, not
+  client-local gates; stored group-specific overrides apply only when the
+  corresponding default is present.
 - `FAIL` and explicit failure paths require the job to be **ACTIVE** (pulled,
   valid token). Likewise `Progress` only works on active jobs.
 - **Stack truncation direction.** The server persists the FIRST
@@ -299,6 +308,31 @@ for the tokenless public `retry()`, `changeDelay(delay)`, and synchronous
 `discard()` methods. For a failed job, PostgreSQL `MoveToWait` executes the
 durable DLQ retry transaction; memory/SQLite retains the existing synchronous
 retry path.
+
+#### Job groups
+
+All group getters and controls require `queue` and a normalized `groupId`,
+except `GetGroupsJobsCount`, which needs only `queue` and accepts compatibility
+field `maxCount?`:
+
+| Command                  | Additional request fields | Wrapped `data` response            |
+| ------------------------ | ------------------------- | ---------------------------------- |
+| `GetGroupJobsCount`      | —                         | `{count}`                          |
+| `GetGroupsJobsCount`     | `maxCount?`               | `{count}`                          |
+| `GetGroupActiveCount`    | —                         | `{count}`                          |
+| `SetGroupRateLimit`      | `max`, `duration`         | none                               |
+| `GetGroupRateLimit`      | —                         | `{limit: {max, duration} \| null}` |
+| `RemoveGroupRateLimit`   | —                         | `{removed: 0 \| 1}`                |
+| `GetGroupRateLimitTtl`   | `maxJobs?`                | `{ttl}`                            |
+| `SetGroupConcurrency`    | `concurrency`             | none                               |
+| `GetGroupConcurrency`    | —                         | `{concurrency: number \| null}`    |
+| `RemoveGroupConcurrency` | —                         | `{removed: 0 \| 1}`                |
+
+`max`, `duration`, and `concurrency` are positive safe integers. Group depth
+counts waiting, prioritized, and delayed grouped jobs, excluding active jobs.
+The scheduler serves ungrouped work first, then FIFO within each group and
+round-robin across groups. PostgreSQL makes rotation and capacity
+database-authoritative across brokers.
 
 ### 6.5 DLQ
 
@@ -367,7 +401,8 @@ entries.
 Wrapped in `data`: `GetLogs → data.logs`, `ListWorkers → data.workers`,
 `GetChildrenValues → data.values`, `AddWebhook → data.webhookId`,
 `ListWebhooks → data.webhooks`, `Ping`/`Heartbeat → data.pong`,
-`RegisterWorker → data`.
+`RegisterWorker → data`, and every job-group getter/control result listed in
+section 6.4.
 
 Top-level: `IsPaused → paused`, `CronGet → cron`, `CronList → crons`,
 `GetProgress → progress/message`, `PULL → job+token`, `PULLB → jobs+tokens`,
@@ -427,15 +462,15 @@ NOT silently accept unverified peers.
 
 ## 10. Server limits and defaults (informative)
 
-| Item                       | Value                                                                        |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| Default attempts / backoff | 3 / 1000 ms                                                                  |
-| Default lock TTL           | 30000 ms                                                                     |
-| `stackTraceLimit` default  | 10 (first N lines kept)                                                      |
+| Item                       | Value                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Default attempts / backoff | 3 / 1000 ms                                                                                                        |
+| Default lock TTL           | 30000 ms                                                                                                           |
+| `stackTraceLimit` default  | 10 (first N lines kept)                                                                                            |
 | SQLite write buffer flush  | ~10 ms (SQLite jobs pushed non-`durable` can be lost in a crash within this window; PostgreSQL has no such buffer) |
-| Frame cap                  | 64 MiB                                                                       |
-| Max `PULLB` count          | 1000                                                                         |
-| Max long-poll / WaitJob    | 60 s / 600 s                                                                 |
+| Frame cap                  | 64 MiB                                                                                                             |
+| Max `PULLB` count          | 1000                                                                                                               |
+| Max long-poll / WaitJob    | 60 s / 600 s                                                                                                       |
 
 ## 11. Conformance
 

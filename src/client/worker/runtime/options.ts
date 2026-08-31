@@ -1,4 +1,5 @@
 import type { ConnectionOptions, WorkerOptions } from '../../types';
+import { assertGroupPullOptions } from '../../../domain/types/group';
 import { resolveToken } from '../../resolveToken';
 import { TcpConnectionPool } from '../../tcpPool';
 import { WORKER_CONSTANTS } from '../constants';
@@ -8,6 +9,7 @@ export function resolveWorkerOptions(
   options: WorkerOptions,
   embedded: boolean
 ): ExtendedWorkerOptions {
+  assertGroupPullOptions(options.group);
   return {
     concurrency: options.concurrency ?? 1,
     autorun: options.autorun ?? true,
@@ -24,6 +26,7 @@ export function resolveWorkerOptions(
     removeOnComplete: options.removeOnComplete,
     removeOnFail: options.removeOnFail,
     connection: options.connection,
+    group: options.group,
   };
 }
 

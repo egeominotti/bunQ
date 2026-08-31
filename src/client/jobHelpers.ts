@@ -112,6 +112,7 @@ export function buildJobOpts(job: InternalJob): JobOptions {
       job.debounceId && job.debounceTtl !== null
         ? { id: job.debounceId, ttl: job.debounceTtl }
         : undefined,
+    group: job.groupId ? { id: job.groupId } : undefined,
   };
 }
 

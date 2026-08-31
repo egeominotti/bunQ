@@ -516,6 +516,18 @@ interface JobOptions {
 
   /** Debounce configuration */
   debounce?: DebounceOptions;
+
+  /** Round-robin/FIFO job group membership */
+  group?: GroupJobOptions;
+}
+```
+
+### GroupJobOptions
+
+```typescript
+interface GroupJobOptions {
+  /** Non-empty group identifier; safe integers are normalized to strings */
+  id: string | number;
 }
 ```
 
@@ -838,6 +850,9 @@ interface WorkerOptions {
   /** Rate limiter configuration for controlling job processing rate */
   limiter?: RateLimiterOptions;
 
+  /** Broker-authoritative job-group defaults; omitted means unlimited/disabled */
+  group?: GroupWorkerOptions;
+
   /** Lock duration in ms (default: 30000). Sent to the server on pull; also used by stall detection. */
   lockDuration?: number;
 
@@ -867,6 +882,18 @@ interface WorkerOptions {
    * [Namespace Isolation](/guide/queue/advanced/#namespace-isolation-prefixkey) guide.
    */
   prefixKey?: string;
+}
+```
+
+### GroupWorkerOptions
+
+```typescript
+interface GroupWorkerOptions {
+  /** Maximum active jobs per group; omitted means unlimited */
+  concurrency?: number;
+
+  /** Fixed-window starts allowed independently for every group */
+  limit?: { max: number; duration: number };
 }
 ```
 

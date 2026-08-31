@@ -37,6 +37,7 @@ function assertIdsAvailable(batch: AtomicFlowBatchInput, ctx: PushContext): void
 function prepareJobs(batch: AtomicFlowBatchInput, ctx: PushContext, now: number): Job[] {
   return batch.jobs.map((planned) => {
     const job = createJob(planned.id, planned.queue, planned.input, now);
+    ctx.shards[shardIndex(planned.queue)].assignGroupFifoOrder(job);
     job.timeline.push({ state: initialJobState(job, ctx, now), timestamp: now });
     return job;
   });

@@ -4,15 +4,67 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added BullMQ Pro-compatible job groups to the Bun Queue/Worker API: FIFO
+  claim order within each group, fair round-robin scheduling across groups,
+  ungrouped-job precedence, server-side group depth/active getters, fixed-window
+  per-group rate limits, and per-group concurrency defaults and local overrides.
+  The same behavior is available through TCP, embedded SQLite, and the
+  PostgreSQL multi-broker driver.
+
+### Changed
+
+- SQLite schema version 35 persists per-group rate/concurrency overrides.
+  PostgreSQL schema version 19 adds a `BIGINT` grouped-admission order, exact
+  FIFO/rotation indexes, group state, bounded safe retention, and a full catalog
+  fingerprint. Group rotation, active capacity, rate windows, and configuration
+  are database-authoritative; every broker in a cluster must be upgraded
+  together.
+- Group control values are validated as positive safe integers before any
+  mutation. PostgreSQL stores limits, counters, and concurrency in `BIGINT`, so
+  it neither rounds fractional inputs nor rejects values accepted by embedded
+  mode.
+
 ### Fixed
 
-- PostgreSQL notification-driven event retention no longer waits behind an
-  in-flight writer for the full database lock timeout. Automatic sweeps use a
-  non-blocking per-queue advisory-lock attempt and retain one coalesced retry
-  capped at 250 ms, while manual trim and crash recovery remain blocking and
-  exact. Expected contention stays healthy, retry timers are cancelled during
-  shutdown, and the retained event window now converges promptly after a
-  high-contention multi-broker burst.
+- Embedded Queue group operations and grouped `add`/`addBulk` now reuse the
+  Queue's explicit `dataPath` when the shared manager is recreated. Group
+  configuration and admission no longer switch silently to the default in-
+  memory manager after an application-managed broker restart.
+- Group FIFO order now follows a hidden monotonic admission ordinal instead of
+  timestamp/job-ID ties. It survives SQLite restart, PostgreSQL broker changes,
+  1,000-row batch boundaries, priority/delay mutations, retry, and recovery.
+- Embedded group-control writes now commit SQLite before publishing runtime
+  policy or waking waiters. Override removal resets the policy columns and
+  conditionally deletes the empty row in one transaction, so a failure in
+  either statement leaves both SQLite and memory unchanged. Every direct
+  QueueManager group operation uses the same canonical ID validation as Queue,
+  TCP, and PostgreSQL.
+- Periodic cleanup no longer drops live group ownership above 1,000 groups, so
+  the active set, authoritative per-group counts, scheduling, and telemetry stay
+  coherent. The client entrypoint now exports the documented
+  `GroupJobOptions` and `GroupWorkerOptions` types.
+
+### Performance
+
+- Embedded group pulls now use lazy synchronized ungrouped/delayed indexes,
+  FIFO group lanes, and an O(1) circular rotation instead of scanning and
+  temporarily reinserting blocked global-heap entries. Plain queues allocate no
+  group scheduler state; group depth totals are maintained incrementally.
+- In the native A-B-B-A comparison against `c39facb9`, pulling past a saturated
+  group with 5,000 queued jobs fell from 1.427042ms to 0.019542ms median
+  (**73.02x**) and from 2.762375ms to 0.083417ms p95 (**33.12x**) across 14
+  samples per revision;
+  all 28 measured pulls returned the correct independently eligible job.
+- A companion 20,000-job regression campaign measured ordinary queue medians
+  as effectively neutral (ungrouped push -3.12%, pull +0.88%) and exposed the
+  real grouped-index cost: half-grouped median admission +43.18% and median
+  claim +5.64%. The candidate passed the strengthened exact mixed-order oracle
+  in 14/14 samples; `c39facb9` passed 0/14, so mixed deltas are directional cost
+  evidence rather than a same-semantics speed comparison. The raw A-B-B-A
+  reports mark those incorrect baseline samples non-comparable and are archived
+  with the dated methodology.
 
 ## [2.9.2] - 2026-08-30
 
@@ -22,6 +74,14 @@ All notable changes to bunqueue are documented here.
 
 ### Performance
 
+- PostgreSQL notification-driven event retention now uses a non-blocking
+  per-queue advisory-lock attempt instead of occupying a pool connection behind
+  an in-flight writer for up to the configured lock timeout (5 seconds by
+  default). Contended sweeps coalesce into one retry capped at 250 ms, removing
+  lock convoys from high-contention multi-broker bursts and letting the retained
+  event window converge promptly. Manual trim and crash recovery remain
+  blocking and exact; expected contention stays healthy, and shutdown cancels
+  the pending retry.
 - Batched `PUSHB`, `PULLB`, and `ACKB` telemetry writes into one transaction,
   with deterministic event order, bounded retention, aggregated terminal
   metrics, and scalar fallback when a row is rejected.

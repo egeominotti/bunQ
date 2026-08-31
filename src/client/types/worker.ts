@@ -6,6 +6,11 @@ export interface RateLimiterOptions {
   groupKey?: string;
 }
 
+export interface GroupWorkerOptions {
+  concurrency?: number;
+  limit?: { max: number; duration: number };
+}
+
 export interface WorkerOptions {
   concurrency?: number;
   autorun?: boolean;
@@ -18,6 +23,7 @@ export interface WorkerOptions {
   pollTimeout?: number;
   useLocks?: boolean;
   limiter?: RateLimiterOptions;
+  group?: GroupWorkerOptions;
   lockDuration?: number;
   maxStalledCount?: number;
   skipStalledCheck?: boolean;

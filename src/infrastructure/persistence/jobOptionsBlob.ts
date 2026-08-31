@@ -1,4 +1,5 @@
 import type { BackoffConfig, Job, RepeatConfig } from '../../domain/types/job';
+import { getGroupFifoOrder } from '../../domain/job/groupFifoOrder';
 import { storageLog } from '../../shared/logger';
 import { decodeMessagePack, encodeMessagePack } from '../../shared/msgpack';
 
@@ -14,6 +15,7 @@ export interface StoredJobOptions {
   debounceId: string | null;
   debounceTtl: number | null;
   durable: boolean;
+  groupFifoOrder: string | null;
 }
 
 const DEFAULTS: StoredJobOptions = {
@@ -28,11 +30,16 @@ const DEFAULTS: StoredJobOptions = {
   debounceId: null,
   debounceTtl: null,
   durable: false,
+  groupFifoOrder: null,
 };
+
+function validStoredOrder(value: unknown): string | null {
+  return typeof value === 'string' && /^[1-9]\d*$/.test(value) ? value : null;
+}
 
 /** Persist generation policies that do not have dedicated legacy columns. */
 export function encodeJobOptions(job: Job): Uint8Array {
-  return encodeMessagePack({
+  const options = {
     backoffConfig: job.backoffConfig,
     repeat: job.repeat,
     stackTraceLimit: job.stackTraceLimit,
@@ -44,7 +51,11 @@ export function encodeJobOptions(job: Job): Uint8Array {
     debounceId: job.debounceId,
     debounceTtl: job.debounceTtl,
     durable: job.durable ?? false,
-  } satisfies StoredJobOptions);
+  } satisfies Omit<StoredJobOptions, 'groupFifoOrder'>;
+  const order = getGroupFifoOrder(job);
+  return encodeMessagePack(
+    order === null ? options : { ...options, groupFifoOrder: String(order) }
+  );
 }
 
 /** Decode current blobs while giving pre-v34 rows their historical defaults. */
@@ -64,6 +75,7 @@ export function decodeJobOptions(blob: Uint8Array | null, context: string): Stor
       debounceId: decoded.debounceId ?? null,
       debounceTtl: decoded.debounceTtl ?? null,
       durable: decoded.durable ?? false,
+      groupFifoOrder: validStoredOrder(decoded.groupFifoOrder),
     };
   } catch (error) {
     storageLog.error('Job options decode error', { context, error: String(error) });

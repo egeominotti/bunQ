@@ -6,8 +6,89 @@ import { shardIndex, SHARD_COUNT } from '../../shared/hash';
 import * as dlqOps from '../dlqManager';
 import * as queryOps from '../operations/queryOperations';
 import { QueueManagerControl } from './control';
+import {
+  assertGroupId,
+  assertPositiveSafeInteger,
+  type GroupRateLimitOverride,
+} from '../../domain/types/group';
 
 export class QueueManagerLimits extends QueueManagerControl {
+  getGroupJobsCount(queue: string, groupId: string): number | Promise<number> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].getGroupJobsCount(queue, groupId);
+  }
+
+  getGroupsJobsCount(queue: string): number | Promise<number> {
+    return this.shards[shardIndex(queue)].getGroupsJobsCount(queue);
+  }
+
+  getGroupActiveCount(queue: string, groupId: string): number | Promise<number> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].getGroupActiveCount(queue, groupId);
+  }
+
+  setGroupRateLimit(
+    queue: string,
+    groupId: string,
+    max: number,
+    duration: number
+  ): void | Promise<void> {
+    assertGroupId(groupId);
+    assertPositiveSafeInteger(max, 'max');
+    assertPositiveSafeInteger(duration, 'duration');
+    const shard = this.shards[shardIndex(queue)];
+    this.storage?.saveGroupRateLimit(queue, groupId, max, duration);
+    shard.setGroupRateLimit(queue, groupId, max, duration);
+    shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
+  }
+
+  getGroupRateLimit(
+    queue: string,
+    groupId: string
+  ): GroupRateLimitOverride | null | Promise<GroupRateLimitOverride | null> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].getGroupRateLimit(queue, groupId);
+  }
+
+  removeGroupRateLimit(queue: string, groupId: string): number | Promise<number> {
+    assertGroupId(groupId);
+    const shard = this.shards[shardIndex(queue)];
+    if (!shard.getGroupRateLimit(queue, groupId)) return 0;
+    this.storage?.removeGroupRateLimit(queue, groupId);
+    const removed = shard.removeGroupRateLimit(queue, groupId);
+    shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
+    return removed;
+  }
+
+  getGroupRateLimitTtl(queue: string, groupId: string, maxJobs?: number): number | Promise<number> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].getGroupRateLimitTtl(queue, groupId, maxJobs);
+  }
+
+  setGroupConcurrency(queue: string, groupId: string, concurrency: number): void | Promise<void> {
+    assertGroupId(groupId);
+    assertPositiveSafeInteger(concurrency, 'concurrency');
+    const shard = this.shards[shardIndex(queue)];
+    this.storage?.saveGroupConcurrency(queue, groupId, concurrency);
+    shard.setGroupConcurrency(queue, groupId, concurrency);
+    shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
+  }
+
+  getGroupConcurrency(queue: string, groupId: string): number | null | Promise<number | null> {
+    assertGroupId(groupId);
+    return this.shards[shardIndex(queue)].getGroupConcurrency(queue, groupId);
+  }
+
+  removeGroupConcurrency(queue: string, groupId: string): number | Promise<number> {
+    assertGroupId(groupId);
+    const shard = this.shards[shardIndex(queue)];
+    if (shard.getGroupConcurrency(queue, groupId) === null) return 0;
+    this.storage?.removeGroupConcurrency(queue, groupId);
+    const removed = shard.removeGroupConcurrency(queue, groupId);
+    shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
+    return removed;
+  }
+
   getCountsPerPriority(queue: string): Record<number, number> {
     const counts = this.shards[shardIndex(queue)].getCountsPerPriority(queue);
     return Object.fromEntries(counts);

@@ -5,6 +5,7 @@ import {
   createJob,
   normalizeJobPayload,
 } from '../../domain/types/job';
+import { assertOptionalGroupId } from '../../domain/types/group';
 import { EventType } from '../../domain/types/queue';
 import { shardIndex } from '../../shared/hash';
 import { releaseDependencyCompletionPins } from '../dependencyCompletions';
@@ -30,6 +31,7 @@ export async function pushJobBatch(
   ctx: PushContext
 ): Promise<JobId[]> {
   for (const input of inputs) {
+    assertOptionalGroupId(input.groupId);
     validateRepeatJobInput(input);
     normalizeJobPayload(input);
   }
@@ -65,6 +67,7 @@ export async function pushJobBatch(
           resultIds.push(dedupResult.existingId);
           continue;
         }
+        shard.assignGroupFifoOrder(job);
 
         const target = { queue, shard, shardIdx: idx };
         let storageHandled = false;

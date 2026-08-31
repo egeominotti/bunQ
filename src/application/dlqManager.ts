@@ -267,6 +267,7 @@ function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
     timeline,
   };
   setDlqRetryState(requeued, null);
+  shard.assignGroupFifoOrder(requeued);
 
   // Commit the durable transition before publishing the new in-memory state.
   // A SQLite failure therefore leaves the completed generation authoritative.

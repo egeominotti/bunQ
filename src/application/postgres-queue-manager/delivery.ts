@@ -1,4 +1,5 @@
 import type { AtomicFlowBatchInput, AtomicFlowBatchResult } from '../../domain/types/flow';
+import { assertGroupPullOptions, type GroupPullOptions } from '../../domain/types/group';
 import {
   createJob,
   DEFAULT_LOCK_TTL,
@@ -55,26 +56,34 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
     });
   }
 
-  override async pull(queue: string, timeoutMs = 0, signal?: AbortSignal): Promise<Job | null> {
+  override async pull(
+    queue: string,
+    timeoutMs = 0,
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
+  ): Promise<Job | null> {
     const claims = await this.claimUntil(
       queue,
       1,
       this.postgresStore.config.brokerId,
       timeoutMs,
       undefined,
-      signal
+      signal,
+      groupOptions
     );
     return claims[0]?.job ?? null;
   }
 
+  // oxlint-disable-next-line max-params -- public API includes cancellation and lease policy
   override async pullWithLock(
     queue: string,
     owner: string,
     timeoutMs = 0,
     lockTtl = DEFAULT_LOCK_TTL,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<{ job: Job | null; token: string | null }> {
-    const claims = await this.claimUntil(queue, 1, owner, timeoutMs, lockTtl, signal);
+    const claims = await this.claimUntil(queue, 1, owner, timeoutMs, lockTtl, signal, groupOptions);
     const claim = claims[0];
     return claim ? { job: claim.job, token: claim.token } : { job: null, token: null };
   }
@@ -83,7 +92,8 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
     queue: string,
     count: number,
     timeoutMs = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<Job[]> {
     const claims = await this.claimUntil(
       queue,
@@ -91,7 +101,8 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
       this.postgresStore.config.brokerId,
       timeoutMs,
       undefined,
-      signal
+      signal,
+      groupOptions
     );
     return claims.map((claim) => claim.job);
   }
@@ -103,9 +114,18 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
     owner: string,
     timeoutMs = 0,
     lockTtl = DEFAULT_LOCK_TTL,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ): Promise<{ jobs: Job[]; tokens: string[] }> {
-    const claims = await this.claimUntil(queue, count, owner, timeoutMs, lockTtl, signal);
+    const claims = await this.claimUntil(
+      queue,
+      count,
+      owner,
+      timeoutMs,
+      lockTtl,
+      signal,
+      groupOptions
+    );
     return {
       jobs: claims.map((claim) => claim.job),
       tokens: claims.map((claim) => claim.token),
@@ -119,14 +139,22 @@ export class PostgresQueueManagerDelivery extends PostgresQueueManagerTerminalDe
     owner: string,
     timeoutMs: number,
     leaseDurationMs?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    groupOptions?: GroupPullOptions
   ) {
+    assertGroupPullOptions(groupOptions);
     await this.postgresReady;
     await this.flushPostgresWrites();
     const deadline = Date.now() + Math.max(0, timeoutMs);
     do {
       const claims = await this.runPostgresOperation(async () => {
-        const admitted = await this.postgresStore.claim(queue, count, owner, leaseDurationMs);
+        const admitted = await this.postgresStore.claim(
+          queue,
+          count,
+          owner,
+          leaseDurationMs,
+          groupOptions
+        );
         for (const claim of admitted) {
           this.applyPostgresClaim(claim);
         }

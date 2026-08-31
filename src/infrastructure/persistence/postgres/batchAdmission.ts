@@ -39,6 +39,7 @@ type BatchAdmissionRecord = Record<PropertyKey, unknown> & {
   readonly unique_expires_at: number | null;
   readonly custom_id: string | null;
   readonly group_id: string | null;
+  readonly group_order: number | string | bigint | null;
 };
 
 export class PostgresBatchAdmissionConflict extends Error {
@@ -104,9 +105,10 @@ function prepareAdmissions(jobs: readonly Job[], now: number): PreparedAdmission
 function toRecords(
   prepared: readonly PreparedAdmission[],
   namespace: string,
-  now: number
+  now: number,
+  groupOrders: ReadonlyMap<number, number | string | bigint>
 ): BatchAdmissionRecord[] {
-  return prepared.map(({ job, state }) => ({
+  return prepared.map(({ job, state }, position) => ({
     namespace,
     id: String(job.id),
     queue: job.queue,
@@ -127,7 +129,29 @@ function toRecords(
       job.uniqueKey && job.deduplicationTtl !== null ? now + job.deduplicationTtl : null,
     custom_id: job.customId,
     group_id: job.groupId,
+    group_order: groupOrders.get(position) ?? null,
   }));
+}
+
+async function allocateGroupOrders(
+  tx: TransactionSQL,
+  prepared: readonly PreparedAdmission[]
+): Promise<Map<number, number | string | bigint>> {
+  const positions = prepared.flatMap(({ job }, position) =>
+    job.groupId === null ? [] : [position]
+  );
+  if (positions.length === 0) return new Map();
+  const rows = await tx<Array<{ position: number; group_order: number | string | bigint }>>`
+    WITH ordered AS MATERIALIZED (
+      SELECT position
+      FROM unnest(${tx.array(positions, 'INTEGER')}) AS requested(position)
+      ORDER BY position
+    )
+    SELECT position, nextval('bunqueue_group_order_seq') AS group_order
+    FROM ordered
+    ORDER BY position
+  `;
+  return new Map(rows.map(({ position, group_order }) => [position, group_order]));
 }
 
 async function insertRows(
@@ -136,7 +160,8 @@ async function insertRows(
   prepared: readonly PreparedAdmission[],
   now: number
 ): Promise<void> {
-  const records = toRecords(prepared, ctx.config.namespace, now);
+  const groupOrders = await allocateGroupOrders(tx, prepared);
+  const records = toRecords(prepared, ctx.config.namespace, now, groupOrders);
   let insertedCount = 0;
   for (let offset = 0; offset < records.length; offset += 1000) {
     const batch = records.slice(offset, offset + 1000);
@@ -161,7 +186,8 @@ async function insertRows(
         'unique_key',
         'unique_expires_at',
         'custom_id',
-        'group_id'
+        'group_id',
+        'group_order'
       )}
       ON CONFLICT DO NOTHING
       RETURNING id

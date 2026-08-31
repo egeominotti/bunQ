@@ -8,6 +8,10 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let releaseGroups = () => undefined;
+  const groupGate = new Promise<void>((resolve) => {
+    releaseGroups = resolve;
+  });
 
   try {
     const queue = harness.queue<{ value: number }>('limits');
@@ -82,6 +86,85 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
     ensure(ttl > 0 && ttl <= 2_000, `getRateLimitTtl returned ${ttl}`);
     await queue.removeGlobalRateLimitAsync();
 
+    const groupQueue = harness.queue<{ value: number }>('job-groups');
+    const grouped = await groupQueue.addBulk([
+      { name: 'A1', data: { value: 1 }, opts: { group: { id: 'A' }, durable: true } },
+      { name: 'A2', data: { value: 2 }, opts: { group: { id: 'A' }, durable: true } },
+      { name: 'B1', data: { value: 3 }, opts: { group: { id: 'B' }, durable: true } },
+    ]);
+    const groupDepth = await tracker.invoke('Queue', 'getGroupJobsCount', () =>
+      groupQueue.getGroupJobsCount('A')
+    );
+    ensure(groupDepth === 2, `getGroupJobsCount returned ${groupDepth}`);
+    const groupedDepth = await tracker.invoke('Queue', 'getGroupsJobsCount', () =>
+      groupQueue.getGroupsJobsCount(1)
+    );
+    ensure(groupedDepth === 3, `getGroupsJobsCount returned ${groupedDepth}`);
+
+    await tracker.invoke('Queue', 'setGroupRateLimit', () =>
+      groupQueue.setGroupRateLimit('A', 1, 60_000)
+    );
+    ensureEqual(
+      await tracker.invoke('Queue', 'getGroupRateLimit', () => groupQueue.getGroupRateLimit('A')),
+      { max: 1, duration: 60_000 },
+      'getGroupRateLimit mismatch'
+    );
+    await tracker.invoke('Queue', 'setGroupConcurrency', () =>
+      groupQueue.setGroupConcurrency('A', 1)
+    );
+    ensure(
+      (await tracker.invoke('Queue', 'getGroupConcurrency', () =>
+        groupQueue.getGroupConcurrency('A')
+      )) === 1,
+      'getGroupConcurrency missed the override'
+    );
+
+    const groupWorker = harness.worker<{ value: number }>(
+      groupQueue.name,
+      async () => {
+        await groupGate;
+      },
+      {
+        concurrency: 3,
+        batchSize: 3,
+        group: { concurrency: 2, limit: { max: 2, duration: 60_000 } },
+      }
+    );
+    await groupWorker.waitUntilReady();
+    await eventually(
+      () => groupQueue.getGroupActiveCount('A'),
+      (value) => value === 1,
+      'group A did not reach its local concurrency override'
+    );
+    const groupActive = await tracker.invoke('Queue', 'getGroupActiveCount', () =>
+      groupQueue.getGroupActiveCount('A')
+    );
+    ensure(groupActive === 1, `getGroupActiveCount returned ${groupActive}`);
+    const groupTtl = await tracker.invoke('Queue', 'getGroupRateLimitTtl', () =>
+      groupQueue.getGroupRateLimitTtl('A', 1)
+    );
+    ensure(groupTtl > 0 && groupTtl <= 60_000, `getGroupRateLimitTtl returned ${groupTtl}`);
+
+    const removedGroupRate = await tracker.invoke('Queue', 'removeGroupRateLimit', () =>
+      groupQueue.removeGroupRateLimit('A')
+    );
+    ensure(removedGroupRate === 1, `removeGroupRateLimit returned ${removedGroupRate}`);
+    const removedGroupConcurrency = await tracker.invoke('Queue', 'removeGroupConcurrency', () =>
+      groupQueue.removeGroupConcurrency('A')
+    );
+    ensure(
+      removedGroupConcurrency === 1,
+      `removeGroupConcurrency returned ${removedGroupConcurrency}`
+    );
+    ensure((await groupQueue.getGroupRateLimit('A')) === null, 'group rate override remained');
+    ensure((await groupQueue.getGroupConcurrency('A')) === null, 'group concurrency remained');
+    releaseGroups();
+    await eventually(
+      async () => await Promise.all(grouped.map((job) => groupQueue.getJobState(job.id))),
+      (states) => (states as string[]).every((state) => state === 'completed'),
+      'group fixtures did not complete'
+    );
+
     const deduplicationId = crypto.randomUUID();
     const owner = await queue.add(
       'dedup',
@@ -143,6 +226,7 @@ export async function runQueueLimitsWorkerContract(mode: CoreE2eMode): Promise<C
     ensure(retrimmed === 0, `trimEvents was not idempotent: ${retrimmed}`);
   } finally {
     release();
+    releaseGroups();
     await harness.close();
   }
 

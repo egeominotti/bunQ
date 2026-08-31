@@ -121,12 +121,16 @@ describe('PostgreSQL schema guard', () => {
         const [ids] = await sql<
           Array<{
             event_index: number | string | bigint;
+            group_ready_index: number | string | bigint;
+            group_rotation_index: number | string | bigint;
             replay_index: number | string | bigint;
             watermark_index: number | string | bigint;
           }>
         >`
           SELECT
             to_regclass('bunqueue_events_transaction_idx')::oid AS event_index,
+            to_regclass('bunqueue_jobs_group_ready_idx')::oid AS group_ready_index,
+            to_regclass('bunqueue_group_state_rotation_idx')::oid AS group_rotation_index,
             to_regclass('bunqueue_event_commits_replay_idx')::oid AS replay_index,
             to_regclass('bunqueue_event_prune_watermarks_commit_idx')::oid
               AS watermark_index
@@ -138,6 +142,104 @@ describe('PostgreSQL schema guard', () => {
       await initializePostgresSchema(ctx);
 
       expect(await objectIds()).toEqual(before);
+    });
+  });
+
+  test.skipIf(!postgresUrl)('repairs complete group-state table drift', async () => {
+    await withIsolatedDatabase(async (sql, url) => {
+      const ctx = context(sql, url);
+      await initializePostgresSchema(ctx);
+      await sql
+        .unsafe(
+          `ALTER TABLE bunqueue_group_state
+             DROP CONSTRAINT bunqueue_group_state_pkey;
+           ALTER TABLE bunqueue_group_state
+             DROP COLUMN rate_duration_ms;
+           ALTER TABLE bunqueue_group_state
+             ALTER COLUMN rate_window_started_at TYPE TEXT
+             USING rate_window_started_at::text;
+           ALTER TABLE bunqueue_jobs
+             ALTER COLUMN group_order TYPE TEXT USING group_order::text;
+           ALTER SEQUENCE bunqueue_group_order_seq CACHE 8;
+           DROP INDEX bunqueue_jobs_group_ready_idx;
+           CREATE INDEX bunqueue_jobs_group_ready_idx
+             ON bunqueue_jobs(namespace, queue, id);
+           DROP INDEX bunqueue_group_state_rotation_idx;
+           CREATE UNIQUE INDEX bunqueue_group_state_rotation_idx
+             ON bunqueue_group_state(namespace, queue, last_served DESC, group_id);`
+        )
+        .simple();
+
+      await initializePostgresSchema(ctx);
+      const [state] = await sql<
+        Array<{
+          duration_type: string | null;
+          group_order_type: string | null;
+          group_ready_definition: string | null;
+          primary_columns: string[] | null;
+          rotation_definition: string | null;
+          sequence_cache: number | string | bigint | null;
+          window_type: string | null;
+        }>
+      >`
+        SELECT
+          (
+            SELECT format_type(attribute.atttypid, attribute.atttypmod)
+            FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = to_regclass('bunqueue_group_state')
+              AND attribute.attname = 'rate_duration_ms'
+              AND NOT attribute.attisdropped
+          ) AS duration_type,
+          (
+            SELECT format_type(attribute.atttypid, attribute.atttypmod)
+            FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = to_regclass('bunqueue_jobs')
+              AND attribute.attname = 'group_order'
+              AND NOT attribute.attisdropped
+          ) AS group_order_type,
+          pg_get_indexdef(to_regclass('bunqueue_jobs_group_ready_idx'))
+            AS group_ready_definition,
+          (
+            SELECT ARRAY_AGG(attribute.attname::text ORDER BY key.position)
+            FROM pg_constraint AS constraint_state
+            CROSS JOIN LATERAL
+              unnest(constraint_state.conkey) WITH ORDINALITY AS key(attnum, position)
+            JOIN pg_attribute AS attribute
+              ON attribute.attrelid = constraint_state.conrelid
+             AND attribute.attnum = key.attnum
+            WHERE constraint_state.conrelid = to_regclass('bunqueue_group_state')
+              AND constraint_state.contype = 'p'
+          ) AS primary_columns,
+          pg_get_indexdef(to_regclass('bunqueue_group_state_rotation_idx'))
+            AS rotation_definition,
+          (
+            SELECT seqcache FROM pg_sequence
+            WHERE seqrelid = to_regclass('bunqueue_group_order_seq')
+          ) AS sequence_cache,
+          (
+            SELECT format_type(attribute.atttypid, attribute.atttypmod)
+            FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = to_regclass('bunqueue_group_state')
+              AND attribute.attname = 'rate_window_started_at'
+              AND NOT attribute.attisdropped
+          ) AS window_type
+      `;
+      expect(state).toEqual({
+        duration_type: 'bigint',
+        group_order_type: 'bigint',
+        group_ready_definition: state.group_ready_definition,
+        primary_columns: ['namespace', 'queue', 'group_id'],
+        rotation_definition: state.rotation_definition,
+        sequence_cache: state.sequence_cache,
+        window_type: 'bigint',
+      });
+      expect(state.group_ready_definition).toContain(
+        '(namespace, queue, group_id, run_at, group_order, id)'
+      );
+      expect(state.rotation_definition).toContain('(namespace, queue, last_served, group_id)');
+      expect(state.rotation_definition).not.toContain('UNIQUE');
+      expect(state.rotation_definition).not.toContain('DESC');
+      expect(Number(state.sequence_cache)).toBe(1);
     });
   });
 

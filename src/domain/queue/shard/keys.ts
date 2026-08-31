@@ -32,7 +32,7 @@ export class ShardKeys extends ShardState {
     return this.uniqueKeyManager.getMap();
   }
   isGroupActive(queue: string, groupId: string): boolean {
-    return this.activeGroups.get(queue)?.has(groupId) ?? false;
+    return (this.activeGroupCounts.get(queue)?.get(groupId) ?? 0) > 0;
   }
   activateGroup(queue: string, groupId: string): void {
     let groups = this.activeGroups.get(queue);
@@ -41,8 +41,28 @@ export class ShardKeys extends ShardState {
       this.activeGroups.set(queue, groups);
     }
     groups.add(groupId);
+    let counts = this.activeGroupCounts.get(queue);
+    if (!counts) {
+      counts = new Map();
+      this.activeGroupCounts.set(queue, counts);
+    }
+    counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
   }
   releaseGroup(queue: string, groupId: string): void {
-    this.activeGroups.get(queue)?.delete(groupId);
+    const counts = this.activeGroupCounts.get(queue);
+    const count = (counts?.get(groupId) ?? 0) - 1;
+    if (count > 0) {
+      counts?.set(groupId, count);
+    } else {
+      counts?.delete(groupId);
+      const groups = this.activeGroups.get(queue);
+      groups?.delete(groupId);
+      if (groups?.size === 0) this.activeGroups.delete(queue);
+    }
+    if (counts?.size === 0) this.activeGroupCounts.delete(queue);
+    this.notify(queue);
+  }
+  getGroupActiveCount(queue: string, groupId: string): number {
+    return this.activeGroupCounts.get(queue)?.get(groupId) ?? 0;
   }
 }

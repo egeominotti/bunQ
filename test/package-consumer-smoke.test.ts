@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -98,6 +99,33 @@ describe('published package consumer contract', () => {
 
     expect(run([process.execPath, '-e', probe], consumer)).toBe(
       'function function function function function'
+    );
+
+    const typeProbe = join(consumer, 'group-types.ts');
+    writeFileSync(
+      typeProbe,
+      [
+        "import type { GroupJobOptions, GroupWorkerOptions } from 'bunqueue/client';",
+        "const job: GroupJobOptions = { id: 'tenant-a' };",
+        'const worker: GroupWorkerOptions = { concurrency: 2, limit: { max: 10, duration: 1000 } };',
+        'void [job, worker];',
+      ].join('\n')
+    );
+    run(
+      [
+        join(root, 'node_modules/.bin/tsc'),
+        '--noEmit',
+        '--strict',
+        '--skipLibCheck',
+        '--target',
+        'ESNext',
+        '--module',
+        'ESNext',
+        '--moduleResolution',
+        'bundler',
+        typeProbe,
+      ],
+      consumer
     );
 
     // `./mcp` is the one entrypoint with an optional peer. A consumer without

@@ -162,6 +162,10 @@ export async function obliteratePostgresQueue(
       `;
     }
     await tx`
+      DELETE FROM bunqueue_group_state
+      WHERE namespace = ${ctx.config.namespace} AND queue = ${queue}
+    `;
+    await tx`
       DELETE FROM bunqueue_queue_state
       WHERE namespace = ${ctx.config.namespace} AND queue = ${queue}
     `;

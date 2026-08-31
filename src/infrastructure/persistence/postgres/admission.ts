@@ -117,14 +117,17 @@ async function insertRow(
     INSERT INTO bunqueue_jobs (
       namespace, id, queue, payload, state, priority, lifo, run_at, created_at,
       started_at, completed_at, attempts, max_attempts, ttl, timeout, unique_key,
-      unique_expires_at, custom_id, group_id, parent_id
+      unique_expires_at, custom_id, group_id, group_order, parent_id
     ) VALUES (
       ${ctx.config.namespace}, ${String(job.id)}, ${job.queue}, ${encodePostgresValue(job)},
       ${state}, ${job.priority}, ${job.lifo}, ${job.runAt}, ${job.createdAt},
       ${job.startedAt}, ${job.completedAt}, ${job.attempts}, ${job.maxAttempts}, ${job.ttl},
       ${job.timeout}, ${job.uniqueKey},
       ${job.uniqueKey && job.deduplicationTtl !== null ? now + job.deduplicationTtl : null},
-      ${job.customId}, ${job.groupId}, ${job.parentId}
+      ${job.customId}, ${job.groupId},
+      CASE WHEN CAST(${job.groupId} AS TEXT) IS NULL
+        THEN NULL ELSE nextval('bunqueue_group_order_seq') END,
+      ${job.parentId}
     )
   `;
   await insertDependencies(tx, ctx, job);

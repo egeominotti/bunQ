@@ -53,7 +53,7 @@ Token comparison uses **constant-time equality** (`crypto.timingSafeEqual` equiv
 | `GET /health`               | Load balancer health checks must work without credentials     |
 | `GET /healthz`, `GET /live` | Kubernetes liveness probes                                    |
 | `GET /ready`                | Kubernetes readiness probes                                   |
-| `GET /prometheus`           | Public by default; protected when `METRICS_AUTH=true`          |
+| `GET /prometheus`           | Public by default; protected when `METRICS_AUTH=true`         |
 | `OPTIONS *`                 | CORS preflight must respond before auth headers are available |
 
 The `GET /prometheus` endpoint optionally requires auth when `requireAuthForMetrics: true` is set in the server configuration. This allows Prometheus to scrape without credentials in trusted networks, while requiring auth in public-facing deployments.
@@ -233,7 +233,7 @@ curl -X POST http://localhost:6790/queues/emails/jobs \
 | `uniqueKey`        | `string`             | -            | Deduplication key. If a job with the same `uniqueKey` already exists in the queue, the push is silently ignored.                                                                         |
 | `jobId`            | `string`             | -            | Broker-wide custom job ID. If a live job with this ID already exists in any queue, the push is idempotent and returns the existing ID.                                                   |
 | `tags`             | `string[]`           | `[]`         | Metadata tags for filtering and querying.                                                                                                                                                |
-| `groupId`          | `string`             | -            | Group identifier for per-group concurrency limiting. Jobs in the same group are processed sequentially.                                                                                  |
+| `groupId`          | `string`             | -            | Job-group identifier. Claims are FIFO within a group and round-robin across groups; execution is concurrent unless a Worker supplies a group concurrency cap.                            |
 | `lifo`             | `boolean`            | `false`      | Last-in-first-out ordering. When true, the job is processed before other jobs at the same priority.                                                                                      |
 | `removeOnComplete` | `boolean`            | `false`      | Automatically remove the job from memory after completion. Saves memory for fire-and-forget jobs.                                                                                        |
 | `removeOnFail`     | `boolean`            | `false`      | Automatically remove the job after final failure (after all retries exhausted).                                                                                                          |
@@ -1491,7 +1491,7 @@ curl -X POST http://localhost:6790/crons \
 | `data`           | `any`     | Yes      | Job payload pushed on each execution.                                                                                                             |
 | `schedule`       | `string`  | *        | Cron expression (`"*/5 * * * *"`, `"0 2 * * *"`).                                                                                                 |
 | `repeatEvery`    | `number`  | *        | Positive safe-integer interval in ms (alternative to cron expression).                                                                            |
-| `timezone`       | `string`  | No       | IANA timezone. Raw HTTP uses the server/system timezone when omitted.                                                                              |
+| `timezone`       | `string`  | No       | IANA timezone. Raw HTTP uses the server/system timezone when omitted.                                                                             |
 | `priority`       | `number`  | No       | Priority for generated jobs.                                                                                                                      |
 | `maxLimit`       | `number`  | No       | Max total executions. Cron is removed after reaching this count.                                                                                  |
 | `immediately`    | `boolean` | No       | Fire once on creation, then continue on schedule (default `false`).                                                                               |

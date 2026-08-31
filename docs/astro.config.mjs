@@ -178,6 +178,7 @@ export default defineConfig({
             { label: 'Progress, Logs & Dependencies', link: '/guide/queue/progress/' },
             { label: 'Rate Limits & Concurrency', link: '/guide/queue/limits/' },
             { label: 'Rate Limiting in Depth', link: '/guide/rate-limiting/' },
+            { label: 'Job Groups', link: '/guide/queue/job-groups/' },
             { label: 'Queue Groups', link: '/guide/queue-group/' },
             { label: 'Workers & Metrics', link: '/guide/queue/metrics/' },
             { label: 'Namespaces & Batching', link: '/guide/queue/advanced/' },

@@ -36,8 +36,9 @@ describe('FIFO group head-of-line regression', () => {
         timestamp: baseTimestamp + 2,
       });
 
-      const first = await qm.pull('group-hol-single', 0);
-      const second = await qm.pull('group-hol-single', 0);
+      const group = { concurrency: 1 };
+      const first = await qm.pull('group-hol-single', 0, undefined, group);
+      const second = await qm.pull('group-hol-single', 0, undefined, group);
 
       expect(first?.id).toBe(a1.id);
       expect(second?.id).toBe(b1.id);
@@ -68,7 +69,9 @@ describe('FIFO group head-of-line regression', () => {
         timestamp: baseTimestamp + 2,
       });
 
-      const batch = await qm.pullBatch('group-hol-batch', 3, 0);
+      const batch = await qm.pullBatch('group-hol-batch', 3, 0, undefined, {
+        concurrency: 1,
+      });
 
       expect(batch.map((job) => job.id)).toEqual([a1.id, b1.id]);
       expect(await qm.getJobState(a2.id)).toBe('waiting');
@@ -91,11 +94,12 @@ describe('FIFO group head-of-line regression', () => {
       });
       qm.setRateLimit('group-hol-rate-limit', 2);
 
-      expect((await qm.pull('group-hol-rate-limit', 0))?.id).toBe(a1.id);
-      expect(await qm.pull('group-hol-rate-limit', 0)).toBeNull();
+      const group = { concurrency: 1 };
+      expect((await qm.pull('group-hol-rate-limit', 0, undefined, group))?.id).toBe(a1.id);
+      expect(await qm.pull('group-hol-rate-limit', 0, undefined, group)).toBeNull();
 
       await qm.ack(a1.id, {});
-      expect((await qm.pull('group-hol-rate-limit', 0))?.id).toBe(a2.id);
+      expect((await qm.pull('group-hol-rate-limit', 0, undefined, group))?.id).toBe(a2.id);
     } finally {
       qm.shutdown();
     }
@@ -114,10 +118,11 @@ describe('FIFO group head-of-line regression', () => {
         groupId: 'group-a',
       });
 
-      expect((await qm.pull('group-hol-wakeup', 0))?.id).toBe(a1.id);
+      const group = { concurrency: 1 };
+      expect((await qm.pull('group-hol-wakeup', 0, undefined, group))?.id).toBe(a1.id);
 
       const startedAt = Date.now();
-      const nextPull = qm.pull('group-hol-wakeup', 1_500);
+      const nextPull = qm.pull('group-hol-wakeup', 1_500, undefined, group);
       await Bun.sleep(25);
       await qm.ack(a1.id, {});
 
@@ -164,14 +169,15 @@ describe('FIFO group head-of-line regression', () => {
         data: { label: 'second' },
         groupId: 'serial',
       });
-      expect((await qm.pull(targetQueue, 0))?.id).toBe(first.id);
+      const group = { concurrency: 1 };
+      expect((await qm.pull(targetQueue, 0, undefined, group))?.id).toBe(first.id);
 
       // Register the unrelated waiter first so a shard-global FIFO notifier
       // would incorrectly hand it the target queue's wake-up.
       const unrelatedPull = qm.pull(otherQueue, 800);
       await Bun.sleep(20);
       const startedAt = Date.now();
-      const targetPull = qm.pull(targetQueue, 800);
+      const targetPull = qm.pull(targetQueue, 800, undefined, group);
       await Bun.sleep(20);
       await qm.ack(first.id, {});
 

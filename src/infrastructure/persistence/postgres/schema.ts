@@ -1,6 +1,7 @@
 import { POSTGRES_EVENT_JOURNAL_SCHEMA } from './eventJournalSchema';
+import { POSTGRES_GROUP_SCHEMA } from './groupSchema';
 
-export const POSTGRES_SCHEMA_VERSION = 18;
+export const POSTGRES_SCHEMA_VERSION = 19;
 
 /** PostgreSQL schema for the database-authoritative distributed queue engine. */
 export const POSTGRES_SCHEMA = `
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS bunqueue_jobs (
   unique_expires_at BIGINT,
   custom_id TEXT,
   group_id TEXT,
+  group_order BIGINT,
   parent_id TEXT,
   lease_owner TEXT,
   lease_broker_id TEXT,
@@ -59,9 +61,6 @@ CREATE INDEX IF NOT EXISTS bunqueue_jobs_lease_idx
 CREATE INDEX IF NOT EXISTS bunqueue_jobs_parent_idx
   ON bunqueue_jobs(namespace, parent_id)
   WHERE parent_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS bunqueue_jobs_group_ready_idx
-  ON bunqueue_jobs(namespace, queue, group_id, priority DESC, run_at ASC, id ASC)
-  WHERE group_id IS NOT NULL AND state IN ('waiting', 'prioritized', 'delayed');
 CREATE INDEX IF NOT EXISTS bunqueue_jobs_group_active_idx
   ON bunqueue_jobs(namespace, queue, group_id, lease_until)
   WHERE group_id IS NOT NULL AND state = 'active';
@@ -203,11 +202,16 @@ CREATE TABLE IF NOT EXISTS bunqueue_queue_state (
   concurrency_limit INTEGER,
   stall_config BYTEA,
   dlq_config BYTEA,
+  group_sequence BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (namespace, queue)
 );
 
 ALTER TABLE bunqueue_queue_state
   ADD COLUMN IF NOT EXISTS rate_expires_at BIGINT;
+ALTER TABLE bunqueue_queue_state
+  ADD COLUMN IF NOT EXISTS group_sequence BIGINT NOT NULL DEFAULT 0;
+
+${POSTGRES_GROUP_SCHEMA}
 
 INSERT INTO bunqueue_queue_state (namespace, queue)
 SELECT DISTINCT namespace, queue FROM bunqueue_jobs

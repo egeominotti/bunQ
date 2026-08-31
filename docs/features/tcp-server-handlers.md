@@ -40,7 +40,9 @@ Internal:
 - `src/domain/types/command.ts` — the discriminated `Command` union (switch key is `cmd.cmd`).
 - `src/domain/types/response.ts` — the `Response` union and the `resp.*` builders (`ok`, `error`, `batch`, `job`, `nullableJob`, `pulledJob`, `pulledJobs`, `jobs`, `counts`, `stats`, `metrics`, `data`, `hello`).
 - `src/domain/types/job.ts` — `jobId()` branding of wire strings to the `JobId` type.
-- `src/infrastructure/server/protocol.ts` — `validateQueueName`, `validateJobData`, `validateJobOptions`, `validateNumericField`, `validateWebhookUrl`.
+- `src/infrastructure/server/protocol.ts` — `validateQueueName`,
+  `validateGroupId`, `validateJobData`, `validateJobOptions`,
+  `validateNumericField`, `validateWebhookUrl`.
 - `src/shared/hash.ts` — `constantTimeEqual` (auth), `SHARD_COUNT` (bootstrap banner/events).
 - `src/shared/pausedView.ts` — `pausedView` (paused-aware count bucketing, #92).
 - `src/shared/storageHealth.ts` — common degraded-state predicate and the
@@ -72,7 +74,10 @@ TCP commands handled (exact `cmd.cmd` values), by router:
 - **Management** (`routeManagementCommand`): `Cancel`, `Progress`, `Update`, `UpdateParent`, `ChangePriority`, `Promote`, `MoveToDelayed`, `MoveToWaitingChildren`, `Discard`, `WaitJob`, `ChangeDelay`, `MoveToWait`, `PromoteJobs`, `ExtendLock`, `ExtendLocks`, `GetFailedChildrenValues`, `GetIgnoredChildrenFailures`, `RemoveChildDependency`, `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`, `RemoveUnprocessedChildren`.
 - **Queue control** (`routeQueueControlCommand`): `Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`.
 - **DLQ** (`routeDlqCommand`): `Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RemoveDlqJob`, `RetryCompleted`.
-- **Rate** (`routeRateLimitCommand`): `RateLimit`, `RateLimitClear`, `SetConcurrency`, `ClearConcurrency`.
+- **Rate/groups** (`routeRateLimitCommand`): `RateLimit`, `RateLimitClear`,
+  `SetConcurrency`, `ClearConcurrency`, `GetGroupJobsCount`,
+  `GetGroupsJobsCount`, `GetGroupActiveCount`, `Set/Get/RemoveGroupRateLimit`,
+  `GetGroupRateLimitTtl`, and `Set/Get/RemoveGroupConcurrency`.
 - **Config** (`routeConfigCommand`): `SetStallConfig`, `GetStallConfig`, `SetDlqConfig`, `GetDlqConfig`.
 - **Cron** (`routeCronCommand`): `Cron`, `CronGet`, `CronDelete`, `CronList`.
 - **Monitoring** (`routeMonitoringCommand`): `Stats`, `Metrics` (global or
@@ -148,8 +153,16 @@ Core paths:
   exclusive failure policies, 10,000 jobs, 10 MB per job and 64 MB total flow
   data. Success uses `resp.data({ jobs })`; any validation, ownership, or
   persistence error rejects the whole command.
-- `handlePull` (`src/infrastructure/server/handlers/core.ts:126-161`): caps `timeout` to `[0, 60000]`. If `cmd.owner` is set, uses `pullWithLock` and returns the lock `token` (`resp.pulledJob`); otherwise plain `pull` returning `resp.nullableJob`. Either way the job is registered against `ctx.clientId` for connection-loss release — unless the plain pull set `cmd.detach` (`:155-159`).
-- `handlePullBatch` (`src/infrastructure/server/handlers/core.ts:163-208`): caps `count` to `[1, 1000]` and `timeout` to `[0, 60000]` (same bound as `PULL`); lock and non-lock branches both honor `cmd.timeout` (the plain branch calls `pullBatch(queue, count, cmd.timeout ?? 0)`, so a non-lock `PULLB` long-polls like `PULL`) and register every returned job with the client.
+- `handlePull` (`src/infrastructure/server/handlers/core.ts`): caps `timeout`
+  to `[0, 60000]`, validates optional group defaults, and forwards them to the
+  manager. If `cmd.owner` is set, it uses `pullWithLock` and returns the lock
+  token; otherwise it uses plain `pull`. Either way the job is registered
+  against `ctx.clientId` for connection-loss release unless the plain pull set
+  `cmd.detach`.
+- `handlePullBatch` (`src/infrastructure/server/handlers/core.ts`): caps
+  `count` to `[1, 1000]` and `timeout` to `[0, 60000]`, validates/forwards the
+  same group defaults as `PULL`, and registers every returned job with the
+  client in both lock and non-lock branches.
 - `handleAck` / `handleAckBatch` (`src/infrastructure/server/handlers/core.ts`): ack with optional result/token; `ackBatchWithResults` is used only when `results.length === ids.length`, else the result-less `ackBatch`. Applied positions are unregistered from client tracking. Exact retired timeout/cron generations return structured ignored evidence and stay registered, so a duplicate ID cannot unregister a newer active lease.
 - `handleFail` (`src/infrastructure/server/handlers/core.ts`): defensively coerces `cmd.stack` to `string[]` and slices to 100 elements before it reaches the domain (#74); the authoritative cap is later in `failJob` via `job.stackTraceLimit`. It propagates the same `applied:false` retired-generation envelope as ACK and unregisters only an applied transition.
 
@@ -162,6 +175,10 @@ Notable management/advanced flows:
   `waiting`/`prioritized`→no-op success, anything else→error.
 - `handleMoveToWaitingChildren` requires an active job and delegates the full resource/index/persistence transition to `QueueManager`; a non-active id returns an error.
 - The introspection handlers return live queue-limit status and owner-aware deduplication lookup/removal through `DataResponse` payloads.
+- `handlers/groups.ts` validates queue/group IDs and positive numeric values,
+  then maps group depth, active-count, rate, TTL, and concurrency operations to
+  wrapped `DataResponse` payloads. PostgreSQL implementations may be async; the
+  same router remains synchronous for in-memory/SQLite getters.
 - `handleDlq` returns both jobs and full filtered entries; `handleGetDlqStats` returns the authoritative aggregate. Filtered retries and completed retries pass their `count`/`timestamp` selectors to the manager instead of dropping them. `handleRemoveDlqJob` returns `data.removed` from the durable, idempotent selective deletion; thrown persistence errors are converted by the top-level handler into an error response rather than a false miss.
 - `handleProgress` / `handleGetProgress` / `handleMoveToDelayed`: on failure they re-query `getJobState` to disambiguate "Job not found" (state `unknown`) from "not active" (`management.ts:36-42`, `management.ts:61-65`, `src/infrastructure/server/handlers/advanced/jobs.ts:69-85`).
 - `handleWaitJob` (`src/infrastructure/server/handlers/advanced/jobs.ts`): caps

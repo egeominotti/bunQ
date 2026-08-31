@@ -6,7 +6,7 @@ import {
 } from '../../domain/types/dlq';
 import type { Job, JobId } from '../../domain/types/job';
 import type { PostgresCounts } from '../../infrastructure/persistence/postgres';
-import { PostgresQueueManagerState } from './state';
+import { PostgresQueueManagerGroupQueries } from './groupQueries';
 
 function jobCounts(
   counts: PostgresCounts,
@@ -25,7 +25,7 @@ function jobCounts(
   };
 }
 
-export class PostgresQueueManagerQueries extends PostgresQueueManagerState {
+export class PostgresQueueManagerQueries extends PostgresQueueManagerGroupQueries {
   override getJobIndex() {
     return this.postgresSnapshot.locations();
   }

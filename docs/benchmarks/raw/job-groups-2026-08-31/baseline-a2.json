@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "label": "baseline-a2",
+    "revision": "c39facb9",
+    "sourceRoot": "/private/tmp/bunqueue-baseline.PtViBb",
+    "profile": "full",
+    "only": "queue-paths",
+    "generatedAt": "2026-08-31T05:38:34.657Z",
+    "bunVersion": "1.4.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "profileConfig": {
+      "recoveryJobs": 10001,
+      "recoverySamples": 3,
+      "memoryQueryJobs": 50000,
+      "sqlNormalJobs": 20000,
+      "sqlPriorityJobs": 5000,
+      "querySamples": 21,
+      "holBlockedJobs": 5000,
+      "holSamples": 7,
+      "ungroupedJobs": 20000,
+      "mixedJobs": 20000,
+      "mixedGroups": 100,
+      "queuePathSamples": 7,
+      "statsQueues": 200,
+      "statsJobs": 50000,
+      "statsSamples": 15,
+      "temporalUnrelatedJobs": 500000,
+      "temporalQuerySamples": 31,
+      "temporalRemovalSamples": 15,
+      "waiterCount": 10000,
+      "waiterSamples": 5,
+      "delayedChurnJobs": 100000,
+      "delayedSamples": 5
+    },
+    "sink": 0
+  },
+  "results": [
+    {
+      "id": "queue-ungrouped-push-batch",
+      "category": "scheduling",
+      "operation": "push-batch",
+      "workload": {
+        "jobsPerSample": 20000
+      },
+      "samples": [
+        53.513292,
+        36.489083,
+        38.98825,
+        41.150875,
+        47.773792,
+        35.142917,
+        35.455166
+      ],
+      "correctness": {
+        "correctSamples": 7,
+        "totalSamples": 7,
+        "allCorrect": true
+      },
+      "comparable": true,
+      "note": "Fresh plain queue per sample; admission and a complete batch claim are timed separately.",
+      "unit": "ms",
+      "direction": "lower-is-better",
+      "distribution": {
+        "count": 7,
+        "min": 35.143,
+        "median": 38.988,
+        "p95": 53.513,
+        "max": 53.513,
+        "mad": 3.533
+      }
+    },
+    {
+      "id": "queue-ungrouped-pull-batch",
+      "category": "scheduling",
+      "operation": "pull-batch",
+      "workload": {
+        "jobsPerSample": 20000
+      },
+      "samples": [
+        41.681917,
+        34.806916,
+        34.763833,
+        36.941375,
+        34.798375,
+        34.689542,
+        34.421208
+      ],
+      "correctness": {
+        "correctSamples": 7,
+        "totalSamples": 7,
+        "allCorrect": true
+      },
+      "comparable": true,
+      "note": "Fresh plain queue per sample; admission and a complete batch claim are timed separately.",
+      "unit": "ms",
+      "direction": "lower-is-better",
+      "distribution": {
+        "count": 7,
+        "min": 34.421,
+        "median": 34.798,
+        "p95": 41.682,
+        "max": 41.682,
+        "mad": 0.109
+      }
+    },
+    {
+      "id": "queue-mixed-groups-push-batch",
+      "category": "scheduling",
+      "operation": "push-batch",
+      "workload": {
+        "jobsPerSample": 20000,
+        "groupedJobs": 10000,
+        "groups": 100,
+        "plainJobs": 10000
+      },
+      "samples": [
+        37.714833,
+        34.496417,
+        34.1345,
+        38.239791,
+        34.672958,
+        34.737167,
+        35.143083
+      ],
+      "correctness": {
+        "correctSamples": 0,
+        "totalSamples": 7,
+        "allCorrect": false
+      },
+      "comparable": false,
+      "note": "Half plain work and half grouped work; the claim takes every plain job and one serial turn per tenant.",
+      "unit": "ms",
+      "direction": "lower-is-better",
+      "distribution": {
+        "count": 7,
+        "min": 34.135,
+        "median": 34.737,
+        "p95": 38.24,
+        "max": 38.24,
+        "mad": 0.406
+      }
+    },
+    {
+      "id": "queue-mixed-groups-pull-batch",
+      "category": "scheduling",
+      "operation": "pull-batch",
+      "workload": {
+        "jobsPerSample": 20000,
+        "groupedJobs": 10000,
+        "groups": 100,
+        "plainJobs": 10000
+      },
+      "samples": [
+        21.759875,
+        22.270041,
+        24.8795,
+        22.437333,
+        22.047708,
+        22.033292,
+        24.621375
+      ],
+      "correctness": {
+        "correctSamples": 0,
+        "totalSamples": 7,
+        "allCorrect": false
+      },
+      "comparable": false,
+      "note": "Half plain work and half grouped work; the claim takes every plain job and one serial turn per tenant.",
+      "unit": "ms",
+      "direction": "lower-is-better",
+      "distribution": {
+        "count": 7,
+        "min": 21.76,
+        "median": 22.27,
+        "p95": 24.88,
+        "max": 24.88,
+        "mad": 0.237
+      }
+    }
+  ]
+}

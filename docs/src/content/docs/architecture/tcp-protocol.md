@@ -189,8 +189,8 @@ Token comparison uses constant-time algorithm to prevent timing attacks.
 | ------- | -------------- | ----------------------------------------- | ----------------------------------------------- |
 | `PUSH`  | Add single job | `{ cmd, queue, data, priority?, delay? }` | `{ ok, id }`                                    |
 | `PUSHB` | Add batch      | `{ cmd, queue, jobs }`                    | `{ ok, ids }`                                   |
-| `PULL`  | Get single job | `{ cmd, queue, timeout? }`                | `{ ok, job, token? }`                           |
-| `PULLB` | Get batch      | `{ cmd, queue, count, timeout? }`         | `{ ok, jobs, tokens? }`                         |
+| `PULL`  | Get single job | `{ cmd, queue, timeout?, group? }`        | `{ ok, job, token? }`                           |
+| `PULLB` | Get batch      | `{ cmd, queue, count, timeout?, group? }` | `{ ok, jobs, tokens? }`                         |
 | `ACK`   | Complete job   | `{ cmd, id, result?, token? }`            | `{ ok, data?: { applied, reason } }`            |
 | `ACKB`  | Complete batch | `{ cmd, ids, results?, tokens? }`         | `{ ok, data?: { ignoredIds, ignoredIndices } }` |
 | `FAIL`  | Fail job       | `{ cmd, id, error?, token? }`             | `{ ok, data?: { applied, reason } }`            |
@@ -208,6 +208,14 @@ Token comparison uses constant-time algorithm to prevent timing attacks.
 | `GetCountsPerPriority` | Counts grouped by priority |
 | `GetProgress`          | Get job progress           |
 | `Count`                | Count jobs in queue        |
+
+### Job Group Commands
+
+`GetGroupJobsCount`, `GetGroupsJobsCount`, and `GetGroupActiveCount` expose
+server-authoritative depth. `Set/Get/RemoveGroupRateLimit`,
+`GetGroupRateLimitTtl`, and `Set/Get/RemoveGroupConcurrency` manage local group
+overrides. Results are wrapped in `data`; see the [wire reference](/api/tcp/)
+for exact shapes.
 
 ### Control Commands
 

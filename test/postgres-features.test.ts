@@ -120,11 +120,16 @@ describe('PostgreSQL distributed queue features', () => {
           createJob(generateJobId(), 'groups', { data: { index }, groupId: 'serial' })
         );
         await a.insertMany(groupJobs);
-        const grouped = await Promise.all([a.claim('groups', 1), b.claim('groups', 1)]);
+        const grouped = await Promise.all([
+          a.claim('groups', 1, undefined, undefined, { concurrency: 1 }),
+          b.claim('groups', 1, undefined, undefined, { concurrency: 1 }),
+        ]);
         expect(grouped.flat()).toHaveLength(1);
         const held = grouped.flat()[0];
         await a.complete(held.job.id, held.token);
-        expect(await b.claim('groups', 1)).toHaveLength(1);
+        expect(await b.claim('groups', 1, undefined, undefined, { concurrency: 1 })).toHaveLength(
+          1
+        );
       } finally {
         await Promise.allSettled([a.close(), b.close()]);
       }

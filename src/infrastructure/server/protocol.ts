@@ -9,6 +9,7 @@ export { FrameParser, FrameSizeError, MAX_FRAME_SIZE } from './protocol/framePar
 export { LineBuffer } from './protocol/lineBuffer';
 export {
   validateBackoffField,
+  validateGroupId,
   validateJobData,
   validateJobOptions,
   validateNumericField,

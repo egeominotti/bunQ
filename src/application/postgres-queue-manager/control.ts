@@ -27,6 +27,43 @@ function normalizeDlq(current: DlqConfig, patch: Record<string, unknown>): DlqCo
 
 /** Durable queue controls and policies shared by every PostgreSQL broker. */
 export class PostgresQueueManagerControl extends PostgresQueueManagerMaintenance {
+  override async setGroupRateLimit(
+    queue: string,
+    groupId: string,
+    max: number,
+    duration: number
+  ): Promise<void> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      await this.postgresStore.setGroupRateLimit(queue, groupId, max, duration);
+    });
+  }
+
+  override async removeGroupRateLimit(queue: string, groupId: string): Promise<number> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.removeGroupRateLimit(queue, groupId);
+    });
+  }
+
+  override async setGroupConcurrency(
+    queue: string,
+    groupId: string,
+    concurrency: number
+  ): Promise<void> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      await this.postgresStore.setGroupConcurrency(queue, groupId, concurrency);
+    });
+  }
+
+  override async removeGroupConcurrency(queue: string, groupId: string): Promise<number> {
+    return await this.runPostgresOperation(async () => {
+      await this.postgresReady;
+      return await this.postgresStore.removeGroupConcurrency(queue, groupId);
+    });
+  }
+
   override pause(queue: string): void {
     this.operations.runSync(() => {
       this.setLocalQueueState(queue, { paused: true });

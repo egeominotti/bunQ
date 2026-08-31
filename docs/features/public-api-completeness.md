@@ -20,17 +20,17 @@ persistence paths in embedded and TCP modes.
 The audit found **39 previously exposed public methods or method families**
 with a missing, partial, or mode-dependent implementation:
 
-| Area | Public methods or method families | Count | Completed behavior |
-| --- | --- | ---: | --- |
-| Queue limits | `getGlobalConcurrency`, `getGlobalRateLimit`, `getRateLimitTtl`, `isMaxed` | 4 | Read live limiter and concurrency state in embedded and TCP modes. |
-| Deduplication | `Queue.getDeduplicationJobId`, `Queue.removeDeduplicationKey`, `Job.removeDeduplicationKey` | 3 | Resolve and release unique keys through owner-aware manager and wire operations. |
-| Dependencies | `getDependencies`, `getJobDependencies`, `getJobDependenciesCount`, `getWaitingChildren`, `getWaitingChildrenCount`, `moveJobToWaitingChildren` | 6 | Read actual cross-queue dependencies, paginate deterministically, return empty results for a missing queried parent in either runtime, and persist the waiting-children transition. |
-| Worker discovery | `getWorkers`, `getWorkersCount` | 2 | Read queue-filtered live workers from the embedded registry or TCP response. |
-| Queue groups | `listQueues`, `pauseAll`, `resumeAll`, `drainAll`, `obliterateAll` | 5 | The awaitable `*Async` counterparts operate on queues created through a group in either runtime. |
-| DLQ | `getDlq`, `getDlqStats`, `retryDlqByFilter`, `retryCompleted` | 4 | The authoritative async variants return full metadata/counts over TCP; completed retry also works without SQLite. |
-| Bulk retry | `retryJobs` | 1 | Supports both exposed states and honors `count` and terminal `timestamp` cutoffs. |
-| State query options | `getJobs`, `getJobsAsync`, the ten sync/async aliases for waiting, delayed, active, completed, and failed, plus `getPrioritized` and `getPrioritizedCount` | 14 | `end: -1` is exhaustive in embedded mode and drains consecutive TCP pages; `getJobs[Async]` honors `asc`; prioritized count reads the authoritative state counter. |
-| **Total** |  | **39** |  |
+| Area                | Public methods or method families                                                                                                                          |  Count | Completed behavior                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Queue limits        | `getGlobalConcurrency`, `getGlobalRateLimit`, `getRateLimitTtl`, `isMaxed`                                                                                 |      4 | Read live limiter and concurrency state in embedded and TCP modes.                                                                                                                  |
+| Deduplication       | `Queue.getDeduplicationJobId`, `Queue.removeDeduplicationKey`, `Job.removeDeduplicationKey`                                                                |      3 | Resolve and release unique keys through owner-aware manager and wire operations.                                                                                                    |
+| Dependencies        | `getDependencies`, `getJobDependencies`, `getJobDependenciesCount`, `getWaitingChildren`, `getWaitingChildrenCount`, `moveJobToWaitingChildren`            |      6 | Read actual cross-queue dependencies, paginate deterministically, return empty results for a missing queried parent in either runtime, and persist the waiting-children transition. |
+| Worker discovery    | `getWorkers`, `getWorkersCount`                                                                                                                            |      2 | Read queue-filtered live workers from the embedded registry or TCP response.                                                                                                        |
+| Queue groups        | `listQueues`, `pauseAll`, `resumeAll`, `drainAll`, `obliterateAll`                                                                                         |      5 | The awaitable `*Async` counterparts operate on queues created through a group in either runtime.                                                                                    |
+| DLQ                 | `getDlq`, `getDlqStats`, `retryDlqByFilter`, `retryCompleted`                                                                                              |      4 | The authoritative async variants return full metadata/counts over TCP; completed retry also works without SQLite.                                                                   |
+| Bulk retry          | `retryJobs`                                                                                                                                                |      1 | Supports both exposed states and honors `count` and terminal `timestamp` cutoffs.                                                                                                   |
+| State query options | `getJobs`, `getJobsAsync`, the ten sync/async aliases for waiting, delayed, active, completed, and failed, plus `getPrioritized` and `getPrioritizedCount` |     14 | `end: -1` is exhaustive in embedded mode and drains consecutive TCP pages; `getJobs[Async]` honors `asc`; prioritized count reads the authoritative state counter.                  |
+| **Total**           |                                                                                                                                                            | **39** |                                                                                                                                                                                     |
 
 `getWaitingChildren` and `getWaitingChildrenCount` had the same bounded-read
 defect, but they are already included in the six dependency methods above and
@@ -52,12 +52,12 @@ A second defect was concentrated in one object-construction path: a
 placeholder fallbacks. Fixing the factory made these **32 non-serialization
 methods** live in both embedded and TCP modes:
 
-| Concern | Methods |
-| --- | --- |
-| State and mutation | `updateProgress`, `log`, `getState`, `remove`, `retry`, `getChildrenValues`, `updateData`, `promote`, `changeDelay`, `changePriority`, `extendLock`, `clearLogs` |
-| State predicates | `isWaiting`, `isActive`, `isDelayed`, `isCompleted`, `isFailed`, `isWaitingChildren` |
-| Dependencies and transitions | `getDependencies`, `getDependenciesCount`, `moveToCompleted`, `moveToFailed`, `moveToWait`, `moveToDelayed`, `moveToWaitingChildren`, `waitUntilFinished` |
-| Failure and ownership helpers | `discard`, `getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeChildDependency`, `removeDeduplicationKey`, `removeUnprocessedChildren` |
+| Concern                       | Methods                                                                                                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State and mutation            | `updateProgress`, `log`, `getState`, `remove`, `retry`, `getChildrenValues`, `updateData`, `promote`, `changeDelay`, `changePriority`, `extendLock`, `clearLogs` |
+| State predicates              | `isWaiting`, `isActive`, `isDelayed`, `isCompleted`, `isFailed`, `isWaitingChildren`                                                                             |
+| Dependencies and transitions  | `getDependencies`, `getDependenciesCount`, `moveToCompleted`, `moveToFailed`, `moveToWait`, `moveToDelayed`, `moveToWaitingChildren`, `waitUntilFinished`        |
+| Failure and ownership helpers | `discard`, `getFailedChildrenValues`, `getIgnoredChildrenFailures`, `removeChildDependency`, `removeDeduplicationKey`, `removeUnprocessedChildren`               |
 
 `toJSON` and `asJSON` were already real serialization methods and are not part
 of this count. `removeDeduplicationKey` overlaps the direct deduplication audit,
@@ -107,8 +107,8 @@ pause mutation or use finite pages with application-level reconciliation.
 
 The exhaustive successor to this focused remediation audit is the
 [Core Public API End-to-End Matrix](./core-public-api-e2e.md). It automatically
-discovers all 308 callable instance methods on exported core client objects and
-requires exact, no-test-double coverage in every applicable runtime. The 272
+discovers all 320 callable instance methods on exported core client objects and
+requires exact, no-test-double coverage in every applicable runtime. The 284
 dual-mode methods run against embedded SQLite and a real TCP/SQLite broker; the
 13 `TcpConnectionPool` methods are TCP-only and 23 synchronous snapshot methods
 have async TCP counterparts. Those boundaries carry explicit `N/A` cells. A

@@ -217,43 +217,50 @@ Helper predicates: `isDelayed`, `isReady`, `isExpired`, `isTimedOut`,
 `JobInput` (`src/domain/types/jobs/model.ts:92-137`) is the creation-time shape. Defaults are applied
 by `createJob` (`src/domain/job/create.ts:77-118`) using `JOB_DEFAULTS` (`src/domain/job/constants.ts:5-13`).
 
-| Option                      | Type                                                | Default      |
-| --------------------------- | --------------------------------------------------- | ------------ |
-| `data`                      | `unknown` (required)                                | —            |
-| `priority`                  | `number`                                            | `0`          |
-| `delay`                     | `number` (ms)                                       | `0`          |
-| `maxAttempts`               | `number`                                            | `3`          |
-| `backoff`                   | `number \| { type: 'fixed'\|'exponential'; delay }` | `1000`       |
-| `ttl`                       | `number \| null`                                    | `null`       |
-| `timeout`                   | `number \| null`                                    | `null`       |
-| `uniqueKey`                 | `string \| null`                                    | `null`       |
-| `customId`                  | `string \| null`                                    | `null`       |
-| `dependsOn`                 | `JobId[]`                                           | `[]`         |
-| `childrenIds`               | `JobId[]`                                           | `[]`         |
-| `parentId`                  | `JobId \| null`                                     | `null`       |
-| `tags`                      | `string[]`                                          | `[]`         |
-| `groupId`                   | `string \| null`                                    | `null`       |
-| `lifo`                      | `boolean`                                           | `false`      |
-| `removeOnComplete`          | `boolean` (coerced, #90)                            | `false`      |
-| `removeOnFail`              | `boolean` (coerced, #90)                            | `false`      |
-| `stallTimeout`              | `number \| null`                                    | `null`       |
-| `repeat`                    | `{ every?, limit?, pattern?, count?, tz?, … }`      | `null`       |
-| `dedup`                     | `{ ttl?, extend?, replace? }`                       | see below    |
+| Option                      | Type                                                                | Default      |
+| --------------------------- | ------------------------------------------------------------------- | ------------ |
+| `data`                      | `unknown` (required)                                                | —            |
+| `priority`                  | `number`                                                            | `0`          |
+| `delay`                     | `number` (ms)                                                       | `0`          |
+| `maxAttempts`               | `number`                                                            | `3`          |
+| `backoff`                   | `number \| { type: 'fixed'\|'exponential'; delay }`                 | `1000`       |
+| `ttl`                       | `number \| null`                                                    | `null`       |
+| `timeout`                   | `number \| null`                                                    | `null`       |
+| `uniqueKey`                 | `string \| null`                                                    | `null`       |
+| `customId`                  | `string \| null`                                                    | `null`       |
+| `dependsOn`                 | `JobId[]`                                                           | `[]`         |
+| `childrenIds`               | `JobId[]`                                                           | `[]`         |
+| `parentId`                  | `JobId \| null`                                                     | `null`       |
+| `tags`                      | `string[]`                                                          | `[]`         |
+| `groupId`                   | `string \| null`                                                    | `null`       |
+| `lifo`                      | `boolean`                                                           | `false`      |
+| `removeOnComplete`          | `boolean` (coerced, #90)                                            | `false`      |
+| `removeOnFail`              | `boolean` (coerced, #90)                                            | `false`      |
+| `stallTimeout`              | `number \| null`                                                    | `null`       |
+| `repeat`                    | `{ every?, limit?, pattern?, count?, tz?, … }`                      | `null`       |
+| `dedup`                     | `{ ttl?, extend?, replace? }`                                       | see below    |
 | `durable`                   | `boolean` (SQLite: bypass buffer; PostgreSQL: no durability change) | `false`      |
-| `stackTraceLimit`           | `number`                                            | `10`         |
-| `keepLogs`                  | `number \| null`                                    | `null`       |
-| `sizeLimit`                 | `number \| null`                                    | `null`       |
-| `failParentOnFailure`       | `boolean`                                           | `false`      |
-| `removeDependencyOnFailure` | `boolean`                                           | `false`      |
-| `continueParentOnFailure`   | `boolean`                                           | `false`      |
-| `ignoreDependencyOnFailure` | `boolean`                                           | `false`      |
-| `debounceId`                | `string \| null`                                    | `null`       |
-| `debounceTtl`               | `number \| null`                                    | `null`       |
-| `timestamp`                 | `number` (overrides `createdAt`)                    | `Date.now()` |
+| `stackTraceLimit`           | `number`                                                            | `10`         |
+| `keepLogs`                  | `number \| null`                                                    | `null`       |
+| `sizeLimit`                 | `number \| null`                                                    | `null`       |
+| `failParentOnFailure`       | `boolean`                                                           | `false`      |
+| `removeDependencyOnFailure` | `boolean`                                                           | `false`      |
+| `continueParentOnFailure`   | `boolean`                                                           | `false`      |
+| `ignoreDependencyOnFailure` | `boolean`                                                           | `false`      |
+| `debounceId`                | `string \| null`                                                    | `null`       |
+| `debounceTtl`               | `number \| null`                                                    | `null`       |
+| `timestamp`                 | `number` (overrides `createdAt`)                                    | `Date.now()` |
 
 `dedup` maps onto job fields via `parseBullMQV5Options` (`src/domain/job/create.ts:60-74`):
 `deduplicationTtl = dedup.ttl ?? null`, `deduplicationExtend = dedup.extend ??
 false`, `deduplicationReplace = dedup.replace ?? false`.
+
+The client-facing `JobOptions` uses `group?: { id: string | number }`.
+`normalizeGroupId` rejects empty/over-256-character values, NUL characters,
+unsafe numbers, and non-string/non-number coercion, then maps the ID to internal
+`JobInput.groupId: string | null`. `add`, `addBulk`, and flow admission all
+perform the same conversion. Group membership persists in `jobs.group_id` and
+is exposed again as `job.opts.group`.
 
 See [Deduplication & Unique Jobs](./features/deduplication-and-unique.md).
 
@@ -303,6 +310,21 @@ Supporting enums/types:
 
 See [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md),
 [Concurrency & Locking](./features/concurrency-and-locking.md).
+
+### Job group pull policy
+
+```typescript
+interface GroupWorkerOptions {
+  concurrency?: number;
+  limit?: { max: number; duration: number };
+}
+```
+
+`WorkerOptions.group` travels with every `PULL`/`PULLB`. Both fields are
+positive safe integers when supplied. Omission means unlimited group
+concurrency and no group rate limit. Stored per-group overrides replace a
+corresponding Worker default but do not enable a policy whose default was
+omitted. See [Job Groups](./features/job-groups.md).
 
 ---
 
@@ -649,7 +671,9 @@ Command families (each is a `cmd`-tagged interface under `src/domain/types/comma
 `RemoveDeduplicationKey`, `RemoveJobDeduplicationKey`), **Queue Control**
 (`Pause`, `Resume`, `IsPaused`, `Drain`, `Obliterate`, `ListQueues`, `Clean`),
 **DLQ** (`Dlq`, `GetDlqStats`, `RetryDlq`, `PurgeDlq`, `RemoveDlqJob`, `RetryCompleted`), **Rate/Concurrency**
-(`RateLimit`, `SetConcurrency`, `*Clear`), **Config** (`Set/GetStallConfig`,
+(`RateLimit`, `SetConcurrency`, `*Clear`, `GetGroupJobsCount`,
+`GetGroupsJobsCount`, `GetGroupActiveCount`, `Set/Get/RemoveGroupRateLimit`,
+`GetGroupRateLimitTtl`, and `Set/Get/RemoveGroupConcurrency`), **Config** (`Set/GetStallConfig`,
 `Set/GetDlqConfig`), **Cron** (`Cron`, `CronDelete`, `CronList`, `CronGet`),
 **Logs** (`AddLog`, `GetLogs`, `ClearLogs`), **Heartbeat/Workers** (`Heartbeat`,
 `JobHeartbeat`, `JobHeartbeatB`, `Ping`, `Register/UnregisterWorker`,
@@ -855,12 +879,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 The row type `DbJob` mirrors this (BLOB → `Uint8Array`). `extended_options`
 persists object backoff, repeat-chain configuration, advanced log/size options,
-dedup/debounce policy, and the durable-write flag; a missing legacy blob uses
-safe defaults. `childrenCompleted` remains a reconstructed runtime field. The four
-flow flags map directly to their `_on_failure` columns; legacy rows receive safe
-false defaults through migrations 23–26. `stallCount` maps to
-`jobs.stall_count`; legacy rows receive the migration's safe zero default once,
-then every recovery retry persists its increment.
+dedup/debounce policy, and the durable-write flag; for grouped jobs it also
+stores the hidden positive-decimal `groupFifoOrder`. A missing legacy blob uses
+safe defaults. The order is restored as `bigint` and stays internal: ungrouped
+jobs omit it and public job serialization does not expose it.
+`childrenCompleted` remains a reconstructed runtime field. The four flow flags
+map directly to their `_on_failure` columns; legacy rows receive safe false
+defaults through migrations 23–26. `stallCount` maps to `jobs.stall_count`;
+legacy rows receive the migration's safe zero default once, then every recovery
+retry persists its increment.
 
 `clearJobUniqueKey(jobId)` updates only `jobs.unique_key`. It is called after
 an owner-aware in-memory release, preventing startup recovery from restoring a
@@ -1015,6 +1042,25 @@ limits with their remaining time. The four nullable stall columns persist a
 complete custom `StallConfig`; recovery applies it before classifying active
 rows, so the same `maxStalls` bound governs the crash that triggered recovery.
 
+### `group_state`
+
+```sql
+CREATE TABLE IF NOT EXISTS group_state (
+    queue TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    rate_limit INTEGER,
+    rate_duration INTEGER,
+    concurrency_limit INTEGER,
+    PRIMARY KEY (queue, group_id)
+);
+```
+
+Stores durable local rate and concurrency overrides for job groups. Rows with
+neither override are deleted. Embedded fixed-window timestamps/counts remain
+runtime state, consistent with the existing in-memory queue limiter; startup
+reapplies the stored configuration before workers pull. `obliterate(queue)`
+deletes the queue's group rows.
+
 ### `queue_events`, `queue_metrics_meta`, and `queue_metric_buckets`
 
 ```sql
@@ -1067,7 +1113,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 
 ### Migrations (`src/infrastructure/persistence/migrations.ts:5-121`)
 
-`SCHEMA_VERSION = 34`. The migrate routine reads
+`SCHEMA_VERSION = 35`. The migrate routine reads
 `MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
 `CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
 above the stored version in one synchronous transaction. It suppresses only
@@ -1110,6 +1156,7 @@ version and is retried on reopen (`src/infrastructure/persistence/sqlite/state.t
 | 32      | `cron_jobs.job_name` (scheduled operation name separated from data)                                                   |
 | 33      | Queue event journal and per-queue metric tables/indexes                                                               |
 | 34      | `jobs.extended_options` (repeat and advanced generation policy across restart)                                        |
+| 35      | `group_state` durable per-group rate/concurrency overrides                                                            |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -1132,8 +1179,12 @@ PostgreSQL server major.
 
 Schema initialization runs inside a transaction guarded by a domain-separated
 64-bit `hashtextextended` advisory key. The current
-`POSTGRES_SCHEMA_VERSION` is **18**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+`POSTGRES_SCHEMA_VERSION` is **19**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
 EXISTS` statements upgrade earlier development schemas before version insertion.
+The v19 group-schema repair also fingerprints catalog semantics after the
+version marker is current: sequence configuration, column types/nullability/
+defaults, the exact group-state primary key, index columns/order, and predicates.
+Drift is repaired under the schema transaction and advisory lock.
 The v17 migration upgrades the commit sequencer and runtime lock protocol to
 length-prefixed, domain-separated 64-bit identities; old and new brokers must
 not overlap during this coordinated migration. The v16 migration adds broker
@@ -1151,7 +1202,7 @@ Primary key: `(namespace, id)`. One row is the authoritative job generation.
 | Identity       | `namespace`, `id`, `queue`                                                                                             |
 | Encoded model  | `payload BYTEA` — complete MessagePack `Job`                                                                           |
 | Lifecycle      | `state`, `run_at`, `created_at`, `started_at`, `completed_at`, `attempts`, `max_attempts`, `ttl`, `timeout`, `version` |
-| Ordering       | `priority`, `lifo`, `group_id`                                                                                         |
+| Ordering       | `priority`, `lifo`, `group_id`, nullable `group_order BIGINT`                                                          |
 | Idempotency    | `unique_key`, `unique_expires_at`, `custom_id`                                                                         |
 | Relationships  | `parent_id`                                                                                                            |
 | Lease fence    | `lease_owner`, `lease_broker_id`, `lease_broker_session_id`, `lease_token`, `lease_until`, `lease_renewals`            |
@@ -1162,6 +1213,11 @@ Primary key: `(namespace, id)`. One row is the authoritative job generation.
 not a stored job state. `lease_token` is the opaque fencing credential;
 `lease_until` is compared against the PostgreSQL clock, and `lease_renewals`
 distinguishes an initial client-owned lease from one transferred by a heartbeat.
+`group_order` is allocated from `bunqueue_group_order_seq` only for grouped
+admissions. The sequence is `BIGINT INCREMENT 1 CACHE 1`; batch admission
+allocates all grouped positions in input order before splitting inserts into
+1,000-row chunks. Existing grouped rows missing the value are backfilled
+deterministically during migration.
 
 Indexes:
 
@@ -1171,17 +1227,19 @@ Indexes:
 - partial `bunqueue_jobs_lease_idx(namespace, lease_until)` for active rows;
 - partial `bunqueue_jobs_broker_session_lease_idx(namespace, lease_broker_id, lease_broker_session_id, id)` for exact-session shutdown cleanup;
 - partial `bunqueue_jobs_parent_idx(namespace, parent_id)`;
-- partial `bunqueue_jobs_group_ready_idx` and
-  `bunqueue_jobs_group_active_idx` for grouped candidate/head ownership;
+- partial `bunqueue_jobs_group_ready_idx(namespace, queue, group_id, run_at,
+  group_order, id)` and `bunqueue_jobs_group_active_idx` for durable grouped
+  FIFO candidates and active capacity;
 - partial `bunqueue_jobs_lifo_ready_idx` for the mixed-order probe;
 - partial `bunqueue_jobs_ttl_pending_idx` for pending-expiry scans; and
 - unique partial `bunqueue_jobs_live_unique_key_idx(namespace, queue,
 unique_key)` for live states.
 
-The common FIFO claim follows `bunqueue_jobs_ready_idx` ordering directly and
-locks narrow ID/order tuples before payload retrieval. Indexed probes select the
-mixed FIFO/LIFO or grouped path only when those features are present. All paths
-use `FOR UPDATE SKIP LOCKED` and recheck current-row eligibility.
+The common ungrouped FIFO claim follows `bunqueue_jobs_ready_idx` ordering
+directly and locks narrow ID/order tuples before payload retrieval. Grouped
+candidate windows partition by `group_id` and order by `run_at`, `group_order`,
+then `id`; round-robin `last_served` chooses among lane heads. All paths use
+`FOR UPDATE SKIP LOCKED` and recheck current-row eligibility.
 
 ### Relationship and completion tables
 
@@ -1234,7 +1292,9 @@ Primary key: `(namespace, queue)`. The row serializes distributed control state:
 - `paused`;
 - `rate_limit`, `rate_duration_ms`, `rate_window_started_at`,
   `rate_expires_at`, and `rate_count`;
-- `concurrency_limit`; and
+- `concurrency_limit`;
+- `group_sequence`, the monotonic cursor used to assign durable round-robin
+  positions; and
 - MessagePack `stall_config` and `dlq_config`.
 
 Claim transactions ensure this row exists. Default-policy claims hold `FOR
@@ -1245,6 +1305,37 @@ unpaused/unlimited policy and is recreated idempotently. Rate-limit duration and
 TTL use the same normalization as SQLite: non-positive/non-finite duration is
 stored as `NULL` and claims use the effective 1,000 ms default; a
 non-positive/non-finite TTL is stored as `NULL` and does not expire.
+
+### `bunqueue_group_state`
+
+Primary key: `(namespace, queue, group_id)`. PostgreSQL schema v19 stores:
+
+- configured `rate_limit` and `rate_duration_ms` overrides;
+- `rate_window_started_at`, `rate_count`, `rate_effective_max`, and
+  `rate_effective_duration_ms` for the active database-authoritative fixed
+  window;
+- optional `concurrency_limit`; and
+- `last_served`, the group's durable rotation position.
+
+`rate_limit`, `rate_count`, `rate_effective_max`, and `concurrency_limit` are
+`BIGINT`; duration and timestamp fields are also `BIGINT`. This preserves the
+public positive-safe-integer contract instead of allowing PostgreSQL `INTEGER`
+casts to round fractions or reject valid JavaScript safe integers. Shared
+validation runs before every configuration write, so an invalid update cannot
+reset a live window or replace an existing override.
+
+`bunqueue_group_state_rotation_idx(namespace, queue, last_served, group_id)`
+supports deterministic round-robin selection. Claim transactions refresh
+windows with database time, calculate remaining rate/concurrency capacity from
+live leases, lock candidate jobs with `FOR UPDATE SKIP LOCKED`, and commit the
+budget plus the new cursor with the active transitions. Configuration and depth
+getters read these same tables; queue destruction removes the rows.
+
+Bounded retention selects at most 1,000 inactive rows per transaction (up to 10
+batches per sweep). It resets obsolete `last_served` positions and deletes a row
+only when no queued/active job, explicit rate/concurrency override, or live
+effective fixed window still owns it. Retention runs after terminal outcomes
+and override removal, during startup, and every 60 seconds.
 
 ### Cron, worker, and broker coordination
 
@@ -1321,13 +1412,16 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v18 adds the
+namespaces share the same physical tables. PostgreSQL engine schema v19 adds
+durable group rotation and shared group limit state. Schema v18 adds the
 per-queue `self_pruned_commit_seq` frontier and the commit sequencer that
 records it, v17 upgrades the advisory-lock protocol, v16 adds broker-session
 fencing, v15 backfills durable queue registry rows, v14 adds
 bounded-completion query indexes, and v13 adds the commit-ordered journal.
-Because v18 replaces the shared `bunqueue_assign_event_commit` function, a
-broker built against v17 refuses to start once v18 is applied.
+Because schema migrations are database-global, a broker supporting at most v18
+refuses to start once v19 is applied; all brokers in a cluster must be upgraded
+together. The same fail-closed rule protected the v18 commit-trigger change
+from v17 binaries.
 Initialization rejects a recorded version newer than the runtime and verifies
 the journal tables, columns, indexes, functions, and
 enabled triggers before skipping DDL. The guard verifies definitions rather than

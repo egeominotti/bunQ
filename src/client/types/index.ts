@@ -36,11 +36,12 @@ export type {
   BackoffOptions,
   DebounceOptions,
   DeduplicationOptions,
+  GroupJobOptions,
   JobOptions,
   KeepJobs,
   ParentOpts,
   RepeatOptions,
 } from './options';
-export type { RateLimiterOptions, StallConfig, WorkerOptions } from './worker';
+export type { GroupWorkerOptions, RateLimiterOptions, StallConfig, WorkerOptions } from './worker';
 export { createPublicJob, toDlqEntry, toPublicJob } from '../jobConversion';
 export type { CreatePublicJobOptions, ToPublicJobOptions } from '../jobConversion';

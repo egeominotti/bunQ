@@ -5,6 +5,8 @@ export function validateQueueName(name: string): string | null {
   return null;
 }
 
+export { validateGroupId } from '../../../domain/types/group';
+
 export function validateJobData(data: unknown): string | null {
   let json: string | undefined;
   try {

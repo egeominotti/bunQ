@@ -1,0 +1,154 @@
+---
+title: 'Job Groups: FIFO, Fairness and Backpressure'
+description: 'Partition one bunqueue queue by tenant or webhook destination with round-robin FIFO scheduling, per-group depth, rate limits and concurrency.'
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/queue/job-groups.png
+  - tag: meta
+    attrs:
+      name: keywords
+      content: 'job groups, per tenant queue rate limit, fifo groups, webhook backpressure, bullmq pro groups alternative'
+---
+
+<div class="bq-wrap bq-hero">
+  <span class="bq-eyebrow">guide · queue</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">Fair streams, <em>one queue.</em></h1>
+  <p class="bq-hero-sub">Put each tenant, webhook destination or customer in a group. bunqueue keeps FIFO order inside that stream, rotates fairly across streams and enforces backpressure at the broker.</p>
+</div>
+
+:::note[Job groups, not QueueGroup]
+This page covers jobs in one queue that use `group: { id }`. The separate
+[Queue Groups](/guide/queue-group/) helper applies one operation to several
+different queues.
+:::
+
+## Add grouped jobs
+
+The Bun client supports the group API in embedded and TCP mode:
+
+```typescript
+import { Queue, Worker } from 'bunqueue/client';
+
+const queue = new Queue('webhooks');
+
+await queue.add('deliver', { event: 'created' }, { group: { id: 'tenant-a' } });
+await queue.add('deliver', { event: 'updated' }, { group: { id: 'tenant-a' } });
+await queue.add('deliver', { event: 'created' }, { group: { id: 'tenant-b' } });
+```
+
+When both groups are ready, claims rotate `tenant-a`, `tenant-b`,
+`tenant-a`. Jobs inside each group stay FIFO. Ready jobs without a group are
+served before grouped jobs.
+
+Group IDs may be non-empty strings or safe integers and may contain at most 256
+characters. NUL characters are rejected. Numeric IDs are normalized to strings;
+objects and fractional or unsafe numeric IDs are not coerced.
+
+## FIFO does not mean concurrency one
+
+FIFO controls which job is claimed first. By default, multiple jobs from the
+same group may execute at once. Set the broker-side group concurrency when you
+need serial or bounded work per tenant:
+
+```typescript
+const worker = new Worker('webhooks', deliverWebhook, {
+  concurrency: 50,
+  group: {
+    concurrency: 2, // at most two active jobs per group
+  },
+});
+```
+
+Use `concurrency: 1` for strictly serial execution per group. The ordinary
+Worker `concurrency` still caps total parallel work in this process.
+
+## Per-group rate limits
+
+`group.limit` gives every group its own fixed window, enforced when the broker
+claims a job:
+
+```typescript
+const worker = new Worker('webhooks', deliverWebhook, {
+  concurrency: 100,
+  group: {
+    limit: { max: 20, duration: 1000 }, // 20 starts/s for each group
+  },
+});
+```
+
+The budget is shared by all Workers. In PostgreSQL multi-broker mode it is
+stored and consumed transactionally in PostgreSQL, so several brokers still
+share one exact budget per group.
+
+All Workers consuming the queue should use the same group defaults. A Worker
+that omits `group.limit` has no group rate limiting; one that omits
+`group.concurrency` has unlimited group concurrency.
+
+## Override one noisy group
+
+Local overrides let one tenant use a different policy without changing the
+Worker defaults:
+
+```typescript
+await queue.setGroupRateLimit('tenant-a', 5, 1000);
+await queue.setGroupConcurrency('tenant-a', 1);
+
+console.log(await queue.getGroupRateLimit('tenant-a'));
+// { max: 5, duration: 1000 }
+
+console.log(await queue.getGroupConcurrency('tenant-a'));
+// 1
+```
+
+An override is effective only when the Worker supplied the corresponding
+default. This matches BullMQ Pro's local group override behavior: a stored rate
+override does not turn rate limiting on by itself, and a stored concurrency
+override does not turn group concurrency on by itself.
+
+Remove overrides with:
+
+```typescript
+await queue.removeGroupRateLimit('tenant-a');
+await queue.removeGroupConcurrency('tenant-a');
+```
+
+## Depth and autoscaling signals
+
+```typescript
+const tenantDepth = await queue.getGroupJobsCount('tenant-a');
+const groupedDepth = await queue.getGroupsJobsCount();
+const tenantActive = await queue.getGroupActiveCount('tenant-a');
+const retryIn = await queue.getGroupRateLimitTtl('tenant-a', 5);
+```
+
+`getGroupJobsCount` and `getGroupsJobsCount` count queued grouped jobs in the
+waiting, prioritized and delayed states. They exclude active jobs; add
+`getGroupActiveCount` when an autoscaler needs both backlog and in-flight work.
+`getGroupRateLimitTtl` returns the remaining window in milliseconds, `0` when
+the optional `maxJobs` threshold still has room, and `-2` when no live window
+exists.
+
+These are server-authoritative reads. Embedded mode maintains O(1) mirrored
+depth counters. PostgreSQL queries the durable job/group state, so a read from
+one broker includes work admitted or claimed through another.
+
+## Persistence and cleanup
+
+SQLite persists group-specific rate/concurrency configuration across broker
+restarts; its current fixed-window counter resets with the process, like the
+existing SQLite queue-level limiter. PostgreSQL persists configuration, live
+fixed-window accounting, immutable grouped admission order and round-robin
+position. Inactive PostgreSQL scheduler rows are reclaimed only after their
+jobs, overrides and live rate window are gone. `queue.obliterateAsync()` removes
+the jobs and all group configuration for that queue.
+
+## Where to go next
+
+| | |
+| --- | --- |
+| [Rate Limits & Concurrency](/guide/queue/limits/) | Queue-wide limits and how they compose with group limits |
+| [Worker Concurrency](/guide/worker/concurrency/) | Total Worker parallelism and batch pulling |
+| [SQLite / PostgreSQL](/guide/databases/) | Share group order and budgets across brokers |
+| [Job Options](/guide/queue/options/) | All per-job options, including `group` |

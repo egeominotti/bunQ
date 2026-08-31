@@ -6,6 +6,7 @@ export interface HeapEntry {
   runAt: number;
   lifo: boolean;
   generation: bigint;
+  groupFifoOrder?: bigint;
 }
 
 export interface IndexedJob {

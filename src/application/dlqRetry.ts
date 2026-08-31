@@ -52,6 +52,7 @@ function retryEntry(
 ): Job | null {
   if (!canRetry(queue, entry.job, ctx)) return null;
   const job = prepareRetry(entry.job, now);
+  ctx.shards[shardIndex(queue)].assignGroupFifoOrder(job);
   prepareState(job);
   ctx.storage?.requeueDlqJob(job);
   const removed = ctx.shards[shardIndex(queue)].removeFromDlq(queue, entry.job.id);

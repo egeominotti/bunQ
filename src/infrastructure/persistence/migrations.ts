@@ -120,4 +120,15 @@ CREATE INDEX IF NOT EXISTS idx_queue_metric_buckets_window
 `,
   // Persist repeat-chain and advanced per-generation job policies.
   34: 'ALTER TABLE jobs ADD COLUMN extended_options BLOB;',
+  // Persist per-group rate and concurrency overrides.
+  35: `
+CREATE TABLE IF NOT EXISTS group_state (
+    queue TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    rate_limit INTEGER,
+    rate_duration INTEGER,
+    concurrency_limit INTEGER,
+    PRIMARY KEY (queue, group_id)
+);
+`,
 };

@@ -72,6 +72,8 @@ export { TcpConnectionPool, getSharedPool, closeAllSharedPools } from './tcpPool
 export type {
   Job,
   JobOptions,
+  GroupJobOptions,
+  GroupWorkerOptions,
   JobJson,
   JobJsonRaw,
   QueueOptions,

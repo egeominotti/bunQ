@@ -4,6 +4,7 @@
  */
 
 import { type Job, type JobId, type JobInput, createJob } from '../../domain/types/job';
+import { assertOptionalGroupId } from '../../domain/types/group';
 import { EventType } from '../../domain/types/queue';
 import { shardIndex } from '../../shared/hash';
 import { latencyTracker } from '../latencyTracker';
@@ -30,6 +31,7 @@ export { pushJobBatch } from './pushBatch';
  * NOTE: customId check happens INSIDE lock to prevent race conditions
  */
 export async function pushJob(queue: string, input: JobInput, ctx: PushContext): Promise<Job> {
+  assertOptionalGroupId(input.groupId);
   validateRepeatJobInput(input);
   const startNs = Bun.nanoseconds();
   const idx = shardIndex(queue);
@@ -73,6 +75,7 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
       };
       return;
     }
+    shard.assignGroupFifoOrder(job);
 
     const target = { queue, shard, shardIdx: idx };
     let storageHandled = false;

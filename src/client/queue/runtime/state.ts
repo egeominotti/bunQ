@@ -91,6 +91,7 @@ export class QueueState<T> {
       embedded: this.embedded,
       tcp: this.tcpPool,
       prefixKey: this.prefixKey,
+      dataPath: this.opts.dataPath,
     };
   }
 

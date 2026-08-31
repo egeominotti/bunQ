@@ -63,6 +63,16 @@ export type Command =
   | Limits.ClearConcurrencyCommand
   | Limits.SetStallConfigCommand
   | Limits.GetStallConfigCommand
+  | Limits.GetGroupJobsCountCommand
+  | Limits.GetGroupsJobsCountCommand
+  | Limits.GetGroupActiveCountCommand
+  | Limits.SetGroupRateLimitCommand
+  | Limits.GetGroupRateLimitCommand
+  | Limits.RemoveGroupRateLimitCommand
+  | Limits.GetGroupRateLimitTtlCommand
+  | Limits.SetGroupConcurrencyCommand
+  | Limits.GetGroupConcurrencyCommand
+  | Limits.RemoveGroupConcurrencyCommand
   | Cron.CronCommand
   | Cron.CronDeleteCommand
   | Cron.CronListCommand

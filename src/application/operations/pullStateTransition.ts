@@ -10,6 +10,7 @@ import {
   isReady,
   MAX_TIMELINE_ENTRIES,
 } from '../../domain/types/job';
+import type { GroupPullOptions } from '../../domain/types/group';
 import type { EventType, JobEvent, JobLocation } from '../../domain/types/queue';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { processingShardIndex } from '../../shared/hash';
@@ -38,12 +39,13 @@ export interface PullContext {
 export interface DequeueScan {
   parked: Job[];
   nextRunAt: number | null;
+  groupOptions?: GroupPullOptions;
 }
 
 export type DequeueResult = { status: 'job'; job: Job } | { status: 'stop' };
 
-export function createDequeueScan(): DequeueScan {
-  return { parked: [], nextRunAt: null };
+export function createDequeueScan(groupOptions?: GroupPullOptions): DequeueScan {
+  return { parked: [], nextRunAt: null, groupOptions };
 }
 
 /** Restore physical heap membership without changing logical queue state. */
@@ -54,11 +56,9 @@ export function restoreParkedJobs(shard: Shard, queue: string, scan: DequeueScan
 }
 
 /**
- * Remove the best eligible job while retaining ineligible roots in `scan`.
- *
- * A batch reuses one scan, because readiness cannot change while the synchronous
- * shard critical section is held: time is fixed and active FIFO groups only
- * grow. Its parked jobs therefore need to be restored only once after the batch.
+ * Remove the best eligible job from the shard's secondary group indexes.
+ * A batch reuses the same fixed timestamp and group defaults while its
+ * synchronous shard critical section is held.
  */
 export function tryDequeueNextJob(
   shard: Shard,
@@ -70,14 +70,20 @@ export function tryDequeueNextJob(
   const priorityQueue = shard.getQueue(queue);
 
   while (true) {
-    const job = priorityQueue.peek();
+    const grouped = shard.hasGroupScheduler(queue);
+    const candidate = grouped
+      ? shard.peekGroupCandidate(queue, now, scan.groupOptions)
+      : { job: priorityQueue.peek(), nextRunAt: null };
+    if (grouped) scan.nextRunAt = candidate.nextRunAt;
+    const job = candidate.job;
     if (!job) return { status: 'stop' };
 
     if (isExpired(job, now)) {
       // Persistence is removed first so a failed durable delete leaves the
       // in-memory job available for a later attempt.
       ctx.storage?.deleteJob(job.id);
-      priorityQueue.pop();
+      if (grouped) priorityQueue.remove(job.id);
+      else priorityQueue.pop();
       shard.decrementQueued(job.id);
       ctx.jobIndex.delete(job.id);
       ctx.dashboardEmit?.('job:expired', {
@@ -89,16 +95,10 @@ export function tryDequeueNextJob(
       continue;
     }
 
-    if (!isReady(job, now)) {
+    if (!grouped && !isReady(job, now)) {
       const delayed = priorityQueue.pop();
       if (delayed) scan.parked.push(delayed);
       scan.nextRunAt = scan.nextRunAt === null ? job.runAt : Math.min(scan.nextRunAt, job.runAt);
-      continue;
-    }
-
-    if (job.groupId && shard.isGroupActive(queue, job.groupId)) {
-      const blocked = priorityQueue.pop();
-      if (blocked) scan.parked.push(blocked);
       continue;
     }
 
@@ -113,14 +113,20 @@ export function tryDequeueNextJob(
       return { status: 'stop' };
     }
 
-    const dequeued = priorityQueue.pop();
+    if (job.groupId && !shard.acquireGroup(queue, job.groupId, scan.groupOptions, now)) {
+      shard.releaseConcurrency(queue);
+      return { status: 'stop' };
+    }
+
+    const dequeued = grouped ? priorityQueue.remove(job.id) : priorityQueue.pop();
     if (!dequeued) {
+      if (job.groupId) shard.releaseGroup(queue, job.groupId);
       shard.releaseConcurrency(queue);
       return { status: 'stop' };
     }
     shard.decrementQueued(dequeued.id);
 
-    if (dequeued.groupId) shard.activateGroup(queue, dequeued.groupId);
+    if (dequeued.groupId) shard.advanceGroup(queue, dequeued.groupId);
 
     dequeued.startedAt = now;
     dequeued.lastHeartbeat = now;

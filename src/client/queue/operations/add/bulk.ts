@@ -4,7 +4,13 @@ import type { Job, JobOptions } from '../../../types';
 import { jobId } from '../../../../domain/types/job';
 import { createJobProxy, createSimpleJob } from '../../jobProxy';
 import type { AddContext, ExtendedJobOptions } from '../../types/add';
-import { buildJobData, buildRepeatOptions, compact, reflectionMeta } from './payload';
+import {
+  buildJobData,
+  buildRepeatOptions,
+  compact,
+  reflectionMeta,
+  resolveGroupId,
+} from './payload';
 
 export async function addBulk<T>(
   context: AddContext,
@@ -18,7 +24,7 @@ export async function addBulk<T>(
   }));
 
   if (context.embedded) {
-    const manager = getSharedManager();
+    const manager = getSharedManager(context.opts.dataPath);
     const inputs = jobs.map(({ name, data }, index) => {
       const options = merged[index];
       const removeOnComplete =
@@ -38,7 +44,7 @@ export async function addBulk<T>(
         dependsOn: options.dependsOn?.map((id: string) => jobId(id)),
         parentId: options.parent ? jobId(options.parent.id) : undefined,
         tags: options.tags,
-        groupId: options.groupId,
+        groupId: resolveGroupId(options),
         stallTimeout: options.stallTimeout,
         timestamp: options.timestamp,
         removeOnComplete,
@@ -97,7 +103,7 @@ export async function addBulk<T>(
       ttl: options.ttl,
       customId: options.jobId,
       tags: options.tags,
-      groupId: options.groupId,
+      groupId: resolveGroupId(options),
       dependsOn: options.dependsOn?.map((id: string) => jobId(id)),
       parentId: options.parent ? jobId(options.parent.id) : undefined,
       uniqueKey: options.deduplication?.id,

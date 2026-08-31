@@ -7,7 +7,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 import { cleanup } from '../src/application/cleanupTasks';
 import { createJob, jobId, type Job, type JobId } from '../src/domain/types/job';
-import { processingShardIndex, SHARD_COUNT } from '../src/shared/hash';
+import { processingShardIndex, shardIndex, SHARD_COUNT } from '../src/shared/hash';
 import type { BackgroundContext } from '../src/application/types';
 import type { Shard } from '../src/domain/queue/shard';
 
@@ -218,7 +218,7 @@ describe('CleanupTasks', () => {
       expect(sizeAfter).toBeLessThanOrEqual(50);
     });
 
-    test('should trim active groups when exceeding 1000', async () => {
+    test('should preserve active groups when exceeding 1000', async () => {
       const shard = ctx.shards[0];
 
       // Activate more than 1000 groups
@@ -232,9 +232,8 @@ describe('CleanupTasks', () => {
 
       await cleanup(ctx);
 
-      const afterSize = shard.activeGroups.get('group-queue')?.size ?? 0;
-      expect(afterSize).toBeLessThan(1100);
-      expect(afterSize).toBeGreaterThan(0);
+      expect(shard.activeGroups.get('group-queue')?.size).toBe(1100);
+      expect(shard.activeGroupCounts.get('group-queue')?.size).toBe(1100);
     });
 
     test('should not trim active groups when under 1000', async () => {
@@ -249,6 +248,35 @@ describe('CleanupTasks', () => {
       await cleanup(ctx);
 
       expect(shard.activeGroups.get('small-group-queue')?.size).toBe(10);
+    });
+
+    test('preserves ownership and scheduling for more than 1000 genuinely active groups', async () => {
+      const queue = 'many-live-groups';
+      const inputs = [
+        { data: { group: 0, ordinal: 0 }, groupId: 'group-0' },
+        { data: { group: 0, ordinal: 1 }, groupId: 'group-0' },
+        ...Array.from({ length: 1099 }, (_, index) => ({
+          data: { group: index + 1, ordinal: 0 },
+          groupId: `group-${index + 1}`,
+        })),
+      ];
+      await qm.pushBatch(queue, inputs);
+      const active = await qm.pullBatch(queue, 1100, 0, undefined, { concurrency: 1 });
+      expect(active).toHaveLength(1100);
+
+      const shard = ctx.shards[shardIndex(queue)];
+      expect(shard.activeGroups.get(queue)?.size).toBe(1100);
+      expect(shard.activeGroupCounts.get(queue)?.size).toBe(1100);
+
+      await cleanup(ctx);
+
+      expect(shard.activeGroups.get(queue)?.size).toBe(1100);
+      expect(shard.activeGroupCounts.get(queue)?.size).toBe(1100);
+      expect(await qm.getGroupActiveCount(queue, 'group-0')).toBe(1);
+      expect(qm.getCloudTelemetry([queue]).perQueue[queue]?.activeGroups).toBe(1100);
+      expect(await qm.pull(queue, 0, undefined, { concurrency: 1 })).toBeNull();
+
+      await qm.ackBatch(active.map((job) => job.id));
     });
   });
 
@@ -531,7 +559,7 @@ describe('CleanupTasks', () => {
       expect(ctx.jobLocks.size).toBe(0);
     });
 
-    test('should clean unique keys and groups proportionally', async () => {
+    test('should trim unique keys without dropping live group ownership', async () => {
       const shard = ctx.shards[0];
 
       // Add 1500 unique keys
@@ -546,14 +574,14 @@ describe('CleanupTasks', () => {
 
       await cleanup(ctx);
 
-      // Both should be trimmed (roughly half removed)
+      // Unique-key retention is bounded, but active ownership must remain exact.
       const uniqueSize = shard.uniqueKeys.get('bound-queue')?.size ?? 0;
       const groupSize = shard.activeGroups.get('bound-queue')?.size ?? 0;
 
       expect(uniqueSize).toBeLessThan(1500);
       expect(uniqueSize).toBeGreaterThan(0);
-      expect(groupSize).toBeLessThan(1500);
-      expect(groupSize).toBeGreaterThan(0);
+      expect(groupSize).toBe(1500);
+      expect(shard.activeGroupCounts.get('bound-queue')?.size).toBe(1500);
     });
   });
 

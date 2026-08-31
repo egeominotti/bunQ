@@ -16,15 +16,73 @@ head:
 
 ## Unreleased
 
+### Added
+
+- Added first-class job groups to the Bun Queue and Worker APIs. Jobs accept
+  `group: { id }`; ready ungrouped work has precedence, grouped work rotates
+  fairly across IDs, and each group's claims remain FIFO. New Queue getters
+  expose queued depth per group, total grouped depth, and active depth. Workers
+  can supply broker-authoritative per-group concurrency and fixed-window rate
+  defaults, while Queue methods set/get/remove local overrides and inspect rate
+  TTL. Overrides intentionally require the corresponding Worker default, and
+  FIFO claim order does not imply serial execution: group concurrency remains
+  unlimited unless configured. Real TCP/Worker E2E coverage verifies ordering,
+  overrides, input validation, SQLite restart recovery, and obliterate cleanup.
+
+### Changed
+
+- SQLite schema version 35 adds durable `group_state` configuration. PostgreSQL
+  schema version 19 adds a `BIGINT CACHE 1` grouped-admission sequence,
+  `group_order`, exact FIFO/rotation indexes, and durable group state for
+  configuration, effective fixed windows, active-capacity calculation, and
+  `last_served`. Group claims, budgets, leases, and cursor movement commit in
+  one transaction, so independent brokers share one exact order and capacity.
+  Startup fingerprints every group column, primary-key semantic, index and
+  sequence setting; bounded retention preserves live windows/overrides while
+  reclaiming inactive rotation state.
+  A v18 broker refuses to start against the upgraded schema; upgrade every
+  broker in the cluster together.
+- Group limit, duration, and concurrency controls now share positive-safe-
+  integer validation before any state change. PostgreSQL uses `BIGINT` for the
+  corresponding limits, counters, and concurrency state, preserving parity
+  with embedded mode instead of rounding fractions at the database boundary.
+
 ### Fixed
 
-- PostgreSQL notification-driven event retention no longer waits behind an
-  in-flight writer for the full database lock timeout. Automatic sweeps use a
-  non-blocking per-queue advisory-lock attempt and retain one coalesced retry
-  capped at 250 ms, while manual trim and crash recovery remain blocking and
-  exact. Expected contention stays healthy, retry timers are cancelled during
-  shutdown, and the retained event window now converges promptly after a
-  high-contention multi-broker burst.
+- Embedded Queue group operations and grouped `add`/`addBulk` now reopen the
+  Queue's explicit SQLite `dataPath` after the shared manager is restarted,
+  rather than silently recreating an unrelated default in-memory manager.
+- Group FIFO order now uses a hidden monotonic admission ordinal. It remains
+  stable across reverse-sorting custom IDs, equal timestamps, priority/delay
+  changes, SQLite restart, PostgreSQL broker restart, and batch chunk boundaries.
+- Embedded group controls now validate direct QueueManager calls and commit
+  SQLite before changing runtime policy or waking waiters. Policy-column reset
+  and conditional empty-row deletion share one transaction, so a failure in
+  either statement leaves durable and runtime policy unchanged. Cleanup
+  preserves exact active set/count ownership above 1,000 concurrent groups,
+  and `bunqueue/client` exports the documented group option types.
+
+### Performance
+
+- Memory/SQLite group scheduling no longer scans and parks an ineligible prefix
+  of the authoritative priority heap. Synchronous insert/remove hooks maintain
+  lazy ungrouped/delayed heaps, a FIFO lane per group, O(1) circular rotation,
+  and O(1) depth counters under the existing shard lock. Plain queues allocate
+  no group scheduler state; blocked groups create no primary-heap reinsert churn.
+- A native macOS arm64 A-B-B-A campaign against `c39facb9` placed 5,000 queued
+  jobs from a saturated group ahead of another ready group. Across 14 samples
+  per revision, scheduler median improved from 1.427042ms to 0.019542ms (73.02x)
+  and p95 from 2.762375ms to 0.083417ms (33.12x), with the eligible job in every
+  measured pull. These are dated host engineering measurements, not container
+  or end-to-end application latency claims.
+- The companion ordinary/mixed campaign records the cost as well as the win.
+  Ungrouped median push/pull changed -3.12%/+0.88%; a 20,000-job half-grouped
+  batch changed +43.18% for admission and +5.64% for claim. The candidate passed
+  the strengthened mixed-order oracle in 14/14 samples while the old revision
+  passed 0/14, so mixed timings are directional rather than same-contract. Raw
+  reports mark the incorrect baseline samples non-comparable and are archived
+  with the dated methodology. The optimization targets blocked-tenant scans,
+  not every group workload.
 
 ## [2.9.2] - 2026-08-30
 
@@ -76,6 +134,14 @@ head:
 
 ### Performance
 
+- PostgreSQL notification-driven event retention now uses a non-blocking
+  per-queue advisory-lock attempt instead of occupying a pool connection behind
+  an in-flight writer for up to the configured lock timeout (5 seconds by
+  default). Contended sweeps coalesce into one retry capped at 250 ms, removing
+  lock convoys from high-contention multi-broker bursts and letting the retained
+  event window converge promptly. Manual trim and crash recovery remain
+  blocking and exact; expected contention stays healthy, and shutdown cancels
+  the pending retry.
 - SQLite lifecycle telemetry now batches `PUSHB`, `PULLB`, and `ACKB` journal
   writes in one transaction. Events retain their input order, journal retention
   runs once per affected queue, and completed/failed metric mutations are

@@ -120,7 +120,7 @@ Bunqueue.Worker.run(worker)
 </TabItem>
 </Tabs>
 
-The Bun, TypeScript, and Python workers start polling immediately (`autorun`); the PHP, Go, Rust, and Elixir workers start when you call their run function. If your processor throws, the job is retried automatically (up to the job's `attempts`, default 3) and then moved to the dead letter queue, a holding area for jobs that keep failing.
+The Bun, TypeScript, and Python workers start polling immediately (`autorun`); the PHP, Go, Rust, and Elixir workers start when you call their run function. If your processor throws, the job is retried automatically (until the job's `attempts` total executions are used up; the default 3 means 1 run + 2 retries) and then moved to the dead letter queue, a holding area for jobs that keep failing.
 
 :::caution[Embedded vs TCP]
 `embedded: true` runs in-process alongside an embedded Queue and is a Bun (`bunqueue/client`) feature. Without it, the Worker connects to a bunqueue server on `localhost:6789`. Worker and Queue must use the same mode. The external SDKs are TCP-only.

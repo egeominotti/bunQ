@@ -117,13 +117,15 @@ JSON output looks like:
 
 ```json
 {
+  "timestamp": "2024-01-15T10:30:00.000Z",
   "level": "info",
-  "msg": "Server started",
-  "tcp": 6789,
-  "http": 6790,
-  "ts": "2024-01-15T10:30:00Z"
+  "component": "Server",
+  "message": "Received SIGTERM, shutting down..."
 }
 ```
+
+Structured fields appear nested under a `data` key; the startup banner itself
+is plain text, not a JSON record.
 
 ## S3 backup
 

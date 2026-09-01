@@ -187,7 +187,7 @@ metrics snapshot.
 | `timeout` | `number` | `30000` | Per-job timeout in ms (0 = disabled) |
 | `autoRestart` | `boolean` | `true` | Auto-restart crashed threads |
 | `maxRestarts` | `number` | `10` | Restart budget per thread; the counter increments before the check, so `10` allows 9 actual restarts |
-| `pollInterval` | `number` | `10` | Job poll interval in ms |
+| `pollInterval` | `number` | `10` | Sleep in ms when no idle thread is available; job pulls themselves use a fixed 1000 ms broker long-poll |
 | `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat for stall detection and lock renewal; non-positive disables it |
 | `idleTimeout` | `number` | `0` | Stop the pool after this many idle ms (0 = disabled) |
 | `idleRecycleMs` | `number` | `30000` | Recycle idle threads after this many ms (0 = disabled) |

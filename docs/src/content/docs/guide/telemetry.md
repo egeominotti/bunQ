@@ -75,7 +75,7 @@ curl http://localhost:6790/stats
 }
 ```
 
-The real response also includes `delayed`, `dlq`, `completed`, `failed`, `uptime`, the `total*` counters, and a `memory` block; the example is trimmed to the rate fields.
+The real response's `stats` object also includes `prioritized`, `delayed`, `dlq`, `completed`, `waiting-children`, `uptime`, the `total*` counters (failure counts appear only as `totalFailed`/`failPerSec` — there is no `failed` field), and `cronJobs`/`cronPending`; `memory` and `collections` are top-level siblings of `stats`. The example is trimmed to the rate fields.
 
 These rates are not part of the `/prometheus` output. In Prometheus, derive rates from the counters instead:
 

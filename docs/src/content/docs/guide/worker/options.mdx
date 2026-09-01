@@ -139,7 +139,7 @@ The table below documents the Bun client's options; the external SDK worker opti
 | `lockDuration`      | `number`                                       | `30000`          | Job lock TTL in ms                                                                                                                                                                                                                  |
 | `maxStalledCount`   | `number`                                       | `1`              | Accepted for BullMQ compatibility, but not applied by the Worker. Configure the broker's per-queue `maxStalls` policy with `Queue.setStallConfig()` or the HTTP API instead                                                         |
 | `skipStalledCheck`  | `boolean`                                      | `false`          | In embedded or TCP mode, skip only this Worker's subscription to `stalled` notifications. It does not disable broker-side stall detection or recovery                                                                               |
-| `skipLockRenewal`   | `boolean`                                      | `false`          | Skip lock renewal via heartbeat                                                                                                                                                                                                     |
+| `skipLockRenewal`   | `boolean`                                      | `false`          | Suppress the per-job heartbeat timer entirely (no `JobHeartbeat` sent), so both lock renewal and broker-side stall freshness stop; only the worker-registration heartbeat keeps running                                              |
 | `drainDelay`        | `number`                                       | `50`             | Delay between polls when the queue is empty (ms)                                                                                                                                                                                    |
 | `removeOnComplete`  | `boolean \| number \| KeepJobs`                | `false`          | Auto-remove completed jobs. Only `true` is honored; `number` / `{ age?, count? }` are accepted for BullMQ type compatibility but ignored — the job's own `removeOnComplete` option still applies                                     |
 | `removeOnFail`      | `boolean \| number \| KeepJobs`                | `false`          | Same behavior as `removeOnComplete`: only `true` is honored, other values are ignored and the job-level `removeOnFail` option still applies                                                                                                                                                                                  |
@@ -171,8 +171,10 @@ signal. See [Worker Concurrency and Batch Pulling](/guide/worker/concurrency/#na
 `maxStalledCount` and `skipStalledCheck` do not change when the broker recovers
 an unresponsive job. Use the queue-level `stallInterval`, `maxStalls`,
 `gracePeriod`, and `enabled` settings described in [Stall Detection](/guide/stall-detection/).
-`skipLockRenewal`, by contrast, does stop this Worker's automatic lock-renewal
-heartbeats and can therefore cause long-running jobs to be redelivered.
+`skipLockRenewal`, by contrast, suppresses this Worker's per-job heartbeats
+altogether — locks stop being renewed and the broker also stops seeing job
+heartbeats for stall detection (even with `useLocks: false`) — so long-running
+jobs can be marked stalled and redelivered.
 :::
 
 ## Where to go next

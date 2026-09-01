@@ -18,6 +18,22 @@ head:
 
 ### Documentation
 
+- Audited the 12 server/operations guide pages and re-audited the Worker pages
+  against the source, correcting: `/health` returning HTTP 503 with the
+  `storage` object only when degraded; the config-file `timeouts.worker`,
+  `timeouts.lock`, and `webhooks` keys documented as currently ignored (env
+  vars `WORKER_TIMEOUT_MS`, `LOCK_TIMEOUT_MS`, `WEBHOOK_MAX_RETRIES`,
+  `WEBHOOK_RETRY_DELAY_MS` are the working knobs); the JSON log example
+  rewritten to the real `{timestamp, level, component, message, data?}` shape;
+  the `/stats` field list (no `failed` key; `memory`/`collections` are
+  top-level); `skipLockRenewal` suppressing the whole per-job heartbeat (stall
+  freshness included, even with `useLocks: false`); SandboxedWorker
+  `pollInterval` paced only when no idle thread exists (pulls use a fixed 1s
+  long-poll); stall detection floor corrected to ~35–40s; the PHP worker
+  leasing its full `batchSize` up front and processing sequentially;
+  `cancelJob` returning `false` for pulled-but-not-started jobs; and the
+  Worker overview stating `attempts` as total executions.
+
 - Audited the 24 Queue and Worker guide pages against the source and corrected
   every claim that contradicted the implementation: `attempts` documented as
   total executions (not retries) and numeric `backoff` as the exponential base

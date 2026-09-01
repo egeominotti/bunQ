@@ -16,7 +16,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   <p class="bq-hero-sub">If a worker crashes or hangs mid-job, the job is not lost. bunqueue notices the silence, retries the job, and parks repeat offenders in the dead letter queue.</p>
 
   <div class="bq-proof">
-    <span><b>30s+</b> of heartbeat silence marks a job stalled (confirmed over two 5s sweeps, so ~30–40s in practice)</span>
+    <span><b>30s+</b> of heartbeat silence marks a job stalled (confirmed over two 5s sweeps, so ~35–40s in practice)</span>
     <span><b>3</b> stalls before a job moves to the DLQ</span>
     <span><b>5s</b> grace period after a job starts</span>
   </div>
@@ -30,7 +30,7 @@ thresholds when one uninterrupted work segment can block heartbeats for more
 than 30 seconds, or when you need a different recovery budget. Detection is
 poll-driven and two-phase: a job must exceed `stallInterval` in two consecutive
 5-second sweeps before it is marked stalled, so the earliest detection is
-roughly `stallInterval` plus one to two sweeps (~30–40s at the defaults).
+roughly `stallInterval` plus one to two sweeps (~35–40s at the defaults).
 
 ## Configuration
 

@@ -350,6 +350,7 @@ HEALTHCHECK --interval=30s --timeout=3s \
   CMD wget --spider -q http://127.0.0.1:6790/health || exit 1
 
 EXPOSE 6789 6790
+# "start" is your own package.json script (e.g. "bunqueue start")
 CMD ["bun", "run", "start"]
 ```
 

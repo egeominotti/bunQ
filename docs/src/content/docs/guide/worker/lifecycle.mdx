@@ -129,7 +129,7 @@ const worker = new Worker('downloads', async (job, context) => {
   return await fetch(job.data.url, { signal: context?.signal });
 });
 
-worker.cancelJob(jobId, 'request withdrawn'); // false when this Worker does not own it
+worker.cancelJob(jobId, 'request withdrawn'); // false unless this Worker is currently executing that job (pulled-but-not-started jobs return false too)
 worker.cancelAllJobs('service is shutting down');
 worker.isJobCancelled(jobId); // true while its cancelled delivery remains active here
 ```

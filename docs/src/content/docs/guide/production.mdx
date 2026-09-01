@@ -28,7 +28,7 @@ import { Aside } from '@astrojs/starlight/components';
 | Server killed hard (`kill -9`)                 | Jobs written to disk survive and recover on restart. Jobs accepted in the last ~10 ms may be lost, unless they were added with `durable: true`.                  |
 | Server restarted gracefully (SIGTERM, deploys) | After shutdown completes successfully, buffered SQLite writes are flushed before exit. A flush error or forced termination follows the hard-kill row instead.   |
 | Job fails repeatedly                           | After its retry attempts are exhausted it moves to the DLQ (dead letter queue, a parking lot for failed jobs you can inspect and retry). See [DLQ](/guide/dlq/). |
-| Disk fills up                                  | The server stays up and reports itself `degraded` on `/health`. Durable pushes fail explicitly instead of pretending to succeed.                                 |
+| Disk fills up                                  | The server stays up and `/health` reports `degraded` with HTTP 503. Durable pushes fail explicitly instead of pretending to succeed.                                 |
 | The whole machine is lost                      | You restore the last S3 snapshot. Your maximum data loss is the backup interval.                                                                                 |
 
 </div>
@@ -145,7 +145,7 @@ Restore validates before it replaces: it verifies sizes and checksum, runs an in
 
 | Endpoint                | What it gives you                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`           | `healthy` or `degraded`, uptime, version, job counts, memory, and persistent-storage health; SQLite also exposes `storage.diskFull`         |
+| `GET /health`           | `healthy` (200) or `degraded` (503), uptime, version, job counts, memory; only degraded responses include the `storage` object (with `diskFull` on SQLite) |
 | `GET /healthz`, `/live` | Bare liveness probes; remain 200 while the process responds                                                                                 |
 | `GET /ready`            | Readiness; returns 503 when persistent storage is degraded                                                                                  |
 | `GET /prometheus`       | Metrics in Prometheus text format: job counts, totals, latency, bounded per-queue gauges, process/connections, storage and backup freshness |

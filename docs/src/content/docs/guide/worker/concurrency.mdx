@@ -213,7 +213,7 @@ worker = Worker(
 
 ```php
 $worker = new Worker('queue', $processor, [
-    'batchSize' => 100,       // Request up to 100; free slots cap the pull
+    'batchSize' => 100,       // Always requests 100; jobs are leased at once and processed sequentially
     'pollTimeoutMs' => 5000,  // Wait up to 5s for jobs (long polling)
 ]);
 ```

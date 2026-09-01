@@ -204,24 +204,20 @@ defineConfig({
   timeouts: {
     shutdown: 30000, // Graceful shutdown timeout in ms (default: 30000)
     stats: 300000, // Stats logging interval in ms (default: 300000)
-    worker: 30000, // Worker timeout (default: 30000)
-    lock: 5000, // Lock timeout (default: 5000)
   },
 });
 ```
+
+Only `shutdown` and `stats` are read from the config file. The type also
+accepts `worker` and `lock`, but those values are currently ignored — set the
+`WORKER_TIMEOUT_MS` and `LOCK_TIMEOUT_MS` environment variables instead.
 
 ### `webhooks`
 
-Delivery retries for [webhooks](/guide/webhooks/).
-
-```typescript
-defineConfig({
-  webhooks: {
-    maxRetries: 3, // Max delivery retries (default: 3)
-    retryDelay: 1000, // Retry delay in ms (default: 1000)
-  },
-});
-```
+Delivery retries for [webhooks](/guide/webhooks/) are configured via the
+`WEBHOOK_MAX_RETRIES` (default: 3) and `WEBHOOK_RETRY_DELAY_MS` (default: 1000)
+environment variables. The config-file type accepts a `webhooks` key for
+forward compatibility, but its values are currently ignored.
 
 ### `logging`
 

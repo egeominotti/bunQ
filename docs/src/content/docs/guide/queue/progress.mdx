@@ -219,7 +219,8 @@ queue.retry_job("job-id")?;
 </TabItem>
 </Tabs>
 
-*The full token-bound transition set is available in TypeScript and Python;
+*The full token-bound transition set is available in TypeScript and Python
+(except `moveJobToWaitingChildren`, which is Bun-only);
 PHP and Go expose `moveJobToFailed`, Elixir exposes `move_to_delayed` and
 `retry_job`, and Rust intentionally leaves completion/failure acknowledgements
 to `Worker` while exposing queue-level retry.*

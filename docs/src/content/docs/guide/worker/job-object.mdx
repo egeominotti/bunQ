@@ -32,7 +32,7 @@ const worker = new Worker('queue', async (job) => {
   job.id;           // Job ID
   job.name;         // Job name
   job.data;         // Job data (typed if you use Worker<T>)
-  job.attemptsMade; // Current attempt number
+  job.attemptsMade; // Attempts consumed so far (0 on the first attempt)
   job.timestamp;    // When the job was created
 
   await job.updateProgress(50, 'Halfway done');  // Report progress

@@ -23,8 +23,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 ## SandboxedWorker
 
 :::danger[Experimental, not recommended for production]
-`SandboxedWorker` is marked **experimental by bunqueue** and most of its historical
-test suites are currently disabled. Treat it as an opt-in Bun-only feature, pin
+Most of `SandboxedWorker`'s historical test suites are currently disabled. Treat it as an opt-in Bun-only feature, pin
 and test the Bun version you deploy, and prefer a standard `Worker` plus a
 supervised process pool for production workloads.
 :::
@@ -187,7 +186,7 @@ metrics snapshot.
 | `maxMemory` | `number` | `256` | Compatibility hint: values `<= 64` enable Bun's `smol` Worker mode. This implementation does **not** enforce an MB memory limit |
 | `timeout` | `number` | `30000` | Per-job timeout in ms (0 = disabled) |
 | `autoRestart` | `boolean` | `true` | Auto-restart crashed threads |
-| `maxRestarts` | `number` | `10` | Max restart attempts per thread |
+| `maxRestarts` | `number` | `10` | Restart budget per thread; the counter increments before the check, so `10` allows 9 actual restarts |
 | `pollInterval` | `number` | `10` | Job poll interval in ms |
 | `heartbeatInterval` | `number` | `5000` (embedded) / `10000` (TCP) | Heartbeat for stall detection and lock renewal; non-positive disables it |
 | `idleTimeout` | `number` | `0` | Stop the pool after this many idle ms (0 = disabled) |
@@ -198,9 +197,10 @@ metrics snapshot.
 
 SandboxedWorker emits eight local events: `ready`, `active`, `completed`,
 `failed`, `progress`, `log`, `error`, and `closed`. It does **not** emit
-`stalled`, `drained`, or `cancelled`. `completed`/`failed` describe the local
-processor outcome; the implementation sends the broker ACK/FAIL asynchronously,
-so observe queue state or QueueEvents when broker confirmation matters.
+`stalled`, `drained`, or `cancelled`. `completed`/`failed` fire only after the
+broker confirms the ACK/FAIL as applied; if the broker reports the job as
+already finalized no event fires, and an ACK/FAIL transport error emits `error`
+instead.
 
 ### Worker vs SandboxedWorker
 

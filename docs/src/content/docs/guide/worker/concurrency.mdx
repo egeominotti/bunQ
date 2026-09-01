@@ -294,8 +294,10 @@ waiting for `minSize`.
 
 A Worker `limiter` still counts job starts, not processor calls: a ready batch
 atomically consumes one slot per member, and a batch waiting for `minSize`
-consumes no slots. If the processor throws synchronously, it is invoked once and
-the same failure is applied to every unmarked member.
+consumes no slots. If the processor throws, it is invoked once and the same
+failure is applied to every member — including members already marked with
+`setAsFailed()`, whose per-member error only wins when the shared invocation
+resolves.
 
 Cancellation is shared by the processor invocation. Cancelling or timing out
 any active member aborts the processor context signal, so cooperative processor

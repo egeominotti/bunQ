@@ -16,6 +16,29 @@ head:
 
 ## Unreleased
 
+### Documentation
+
+- Audited the 24 Queue and Worker guide pages against the source and corrected
+  every claim that contradicted the implementation: `attempts` documented as
+  total executions (not retries) and numeric `backoff` as the exponential base
+  capped at 1h; `drain()` noted to also remove delayed jobs; `getJobCounts()`
+  no longer listed as embedded-only; `getWaitingChildren` inclusive `end`;
+  dedup `extend` rejection when the key owner is no longer pending, and the
+  Node SDK's `getDeduplicationJobId()`; embedded `addBulk` accepted-prefix
+  behavior under group `maxSize`; the nine previously missing `JobOptions`
+  fields in the reference table; PostgreSQL `getRateLimitTtl` returning `0`;
+  `RATE_LIMIT_*` env vars described as protocol-level request limiting; stall
+  detection two-phase ~35s timing, backoff-delayed heartbeat-stall retry,
+  `max_attempts_exceeded` precedence over `stalled`, `job:stalled` SSE event
+  name, and external SDK `getDlq` returning raw jobs without `reason`;
+  Worker `removeOnComplete`/`removeOnFail` non-boolean values ignored rather
+  than treated as `false`; `attemptsMade` as attempts consumed so far; batch
+  processor throw semantics vs `setAsFailed()`; SandboxedWorker
+  `completed`/`failed` events emitted after broker confirmation,
+  `maxRestarts` off-by-one budget, and removal of the unverifiable
+  "experimental by bunqueue" wording; Elixir bulk `promote_jobs/1`; and the
+  Bun-only `moveJobToWaitingChildren`.
+
 ### Added
 
 - Added the BullMQ Pro compatibility layer without telemetry or NestJS:

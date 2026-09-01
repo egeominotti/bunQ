@@ -209,7 +209,7 @@ Two strategies change what happens when a duplicate arrives:
 <TabItem label="Bun">
 
 ```typescript
-// extend: keep the existing job, reset its TTL (debouncing, "keep quiet while active")
+// extend: keep the pending job, reset its TTL (debouncing); rejects if the owner is no longer pending (e.g. active)
 await queue.add('sync-task', { action: 'sync' }, {
   deduplication: { id: 'sync-task', ttl: 60000, extend: true }
 });
@@ -224,7 +224,7 @@ await queue.add('latest-data', { data: newData }, {
 <TabItem label="Node.js / Deno">
 
 ```typescript
-// extend: keep the existing job, reset its TTL (debouncing, "keep quiet while active")
+// extend: keep the pending job, reset its TTL (debouncing); rejects if the owner is no longer pending (e.g. active)
 await queue.add('sync-task', { action: 'sync' }, {
   deduplication: { id: 'sync-task', ttl: 60000, extend: true }
 });
@@ -323,7 +323,7 @@ true = first.id == duplicate.id
 |--------|------|---------|-------------|
 | `id` | `string` | (required) | Unique deduplication key |
 | `ttl` | `number` | - | Time in ms before the key expires |
-| `extend` | `boolean` | `false` | Reset TTL on duplicate, keep existing job |
+| `extend` | `boolean` | `false` | Reset TTL on duplicate and keep the pending job; if the key owner is no longer pending, the add rejects with `Duplicate unique_key (extended TTL)` |
 | `replace` | `boolean` | `false` | Remove pending job, create a new one (new internal id) |
 
 :::caution[Replace details]
@@ -427,9 +427,10 @@ job_id = if job, do: job.id, else: nil
 
 *The Bun queue lookup/removal methods work in embedded and TCP modes. Job-level
 removal is generation-safe: a stale job cannot clear a key already transferred
-to a replacement job. Direct TTL deduplication-key lookup and removal are
-currently Bun-only. A custom `jobId` is a separate value: network SDKs can look
-it up, but that query never resolves `deduplication.id`.*
+to a replacement job. Direct TTL deduplication-key removal is currently
+Bun-only; the Node.js/Deno SDK exposes `getDeduplicationJobId()` for lookup. A
+custom `jobId` is a separate value: network SDKs can look it up, but that query
+never resolves `deduplication.id`.*
 
 ## Where to go next
 

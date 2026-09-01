@@ -58,10 +58,11 @@ await queue.add('deliver', payload, {
 
 `maxSize` counts pending jobs in waiting, prioritized, and delayed states; an
 active job no longer consumes that pending-cap slot. The broker performs the
-count and insert as one admission decision. A full group rejects a single add,
-the complete `addBulk`, or the complete atomic FlowProducer graph without
-leaving partial jobs. The same guarantee is transactionally serialized across
-PostgreSQL brokers.
+count and insert as one admission decision. A full group rejects a single add
+or the complete atomic FlowProducer graph without leaving partial jobs, and
+PostgreSQL `addBulk` is one transaction. The embedded (memory/SQLite) `addBulk`
+instead follows the accepted-prefix contract: jobs before the one that hits the
+cap are admitted and persisted, then the rejection is thrown.
 
 ## FIFO does not mean concurrency one
 

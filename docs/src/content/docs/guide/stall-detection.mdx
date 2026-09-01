@@ -16,7 +16,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   <p class="bq-hero-sub">If a worker crashes or hangs mid-job, the job is not lost. bunqueue notices the silence, retries the job, and parks repeat offenders in the dead letter queue.</p>
 
   <div class="bq-proof">
-    <span><b>30s</b> without a heartbeat marks a job stalled</span>
+    <span><b>30s+</b> of heartbeat silence marks a job stalled (confirmed over two 5s sweeps, so ~30–40s in practice)</span>
     <span><b>3</b> stalls before a job moves to the DLQ</span>
     <span><b>5s</b> grace period after a job starts</span>
   </div>
@@ -27,7 +27,10 @@ While a worker processes a job it sends periodic **heartbeats**, small "I'm stil
 **Stall detection is on by default with sensible defaults.** A job may run for
 hours without stalling as long as automatic heartbeats continue. Tune these
 thresholds when one uninterrupted work segment can block heartbeats for more
-than 30 seconds, or when you need a different recovery budget.
+than 30 seconds, or when you need a different recovery budget. Detection is
+poll-driven and two-phase: a job must exceed `stallInterval` in two consecutive
+5-second sweeps before it is marked stalled, so the earliest detection is
+roughly `stallInterval` plus one to two sweeps (~30–40s at the defaults).
 
 ## Configuration
 
@@ -363,8 +366,8 @@ Two things reset the stall timer: the worker's automatic heartbeat (every `heart
 
 ## What happens when a job stalls
 
-1. **Retry**: the job goes back to waiting with its stall count incremented, and waiting workers are notified immediately, so it is picked up without delay.
-2. **DLQ**: the job becomes terminal when either its cumulative stall count reaches `maxStalls` or the interrupted delivery consumes its final normal `attempts` slot. A stall-budget terminal is classified as `stalled`; an attempts-budget terminal is classified as `max_attempts_exceeded`.
+1. **Retry**: the path depends on how the stall was detected. Heartbeat-stall recovery re-queues the job with its stall count incremented and `runAt` pushed out by the job's exponential backoff, without waking blocked pullers, so pickup waits for the backoff plus the next poll. Lock-expiry recovery re-queues without backoff and notifies waiting workers immediately.
+2. **DLQ**: the job becomes terminal when either its cumulative stall count reaches `maxStalls` or the interrupted delivery consumes its final normal `attempts` slot. The attempts check wins ties: since each stall also consumes an attempt, with the defaults (`maxStalls: 3`, `attempts: 3`) a repeatedly stalling job lands in the DLQ as `max_attempts_exceeded`. The `stalled` classification appears only when `maxStalls` is lower than the job's remaining `attempts` budget.
 
 ## Listening for stalls
 
@@ -390,7 +393,8 @@ events.on('stalled', ({ jobId }) => {
 <TabItem label="Node.js / Deno">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -400,7 +404,8 @@ curl -N http://localhost:6790/events/queues/my-queue
 <TabItem label="Python">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -410,7 +415,8 @@ curl -N http://localhost:6790/events/queues/my-queue
 <TabItem label="PHP">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -420,7 +426,8 @@ curl -N http://localhost:6790/events/queues/my-queue
 <TabItem label="Go">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -430,7 +437,8 @@ curl -N http://localhost:6790/events/queues/my-queue
 <TabItem label="Rust">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -440,7 +448,8 @@ curl -N http://localhost:6790/events/queues/my-queue
 <TabItem label="Elixir">
 
 The network SDK does not receive broker-side stall events. Subscribe to the
-queue's SSE stream and handle frames whose `eventType` is `stalled`:
+queue's SSE stream and handle frames whose SSE `event` name is `job:stalled`
+(the JSON `data` carries `queue`, `jobId`, `timestamp`):
 
 ```bash
 curl -N http://localhost:6790/events/queues/my-queue
@@ -474,60 +483,60 @@ const stalledJobs = queue.getDlq({ reason: 'stalled' });
 <TabItem label="Node.js / Deno">
 
 ```typescript
-const entries = await queue.getDlq();
-const stalledJobs = entries.filter((entry) => entry.reason === 'stalled');
+// getDlq() returns raw jobs; the `reason` field lives on the DLQ entry,
+// which this SDK does not expose. Use the Bun client to filter by reason.
+const jobs = await queue.getDlq();
 ```
 
 </TabItem>
 <TabItem label="Python">
 
 ```python
-entries = queue.get_dlq()
-stalled_jobs = [entry for entry in entries if entry.get("reason") == "stalled"]
+# get_dlq() returns raw jobs without a `reason` field.
+# Use the Bun client to filter by reason.
+jobs = queue.get_dlq()
 ```
 
 </TabItem>
 <TabItem label="PHP">
 
 ```php
-$entries = $queue->getDlq();
-$stalledJobs = array_filter(
-    $entries,
-    fn ($entry) => ($entry['reason'] ?? null) === 'stalled'
-);
+// getDlq() returns raw jobs without a `reason` field.
+// Use the Bun client to filter by reason.
+$jobs = $queue->getDlq();
 ```
 
 </TabItem>
 <TabItem label="Go">
 
 ```go
-entries, err := queue.GetDlq(0) // 0 means no explicit count bound
-stalledJobs := make([]map[string]any, 0)
-for _, entry := range entries {
-    if entry["reason"] == "stalled" { stalledJobs = append(stalledJobs, entry) }
-}
+// GetDlq returns raw jobs without a `reason` field.
+// Use the Bun client to filter by reason.
+jobs, err := queue.GetDlq(0) // 0 means no explicit count bound
 ```
 
 </TabItem>
 <TabItem label="Rust">
 
 ```rust
-// Entries are MessagePack maps; inspect each map's `reason` field.
-let entries = queue.get_dlq(None)?;
+// get_dlq returns raw jobs without a `reason` field.
+// Use the Bun client to filter by reason.
+let jobs = queue.get_dlq(None)?;
 ```
 
 </TabItem>
 <TabItem label="Elixir">
 
 ```elixir
-{:ok, entries} = Bunqueue.Queue.dlq(queue)
-stalled_jobs = Enum.filter(entries, &(&1["reason"] == "stalled"))
+# dlq/1 returns raw jobs without a `reason` field.
+# Use the Bun client to filter by reason.
+{:ok, jobs} = Bunqueue.Queue.dlq(queue)
 ```
 
 </TabItem>
 </Tabs>
 
-*The aggregate `getDlqStats()` and the `reason` filter are Bun-client conveniences. The external SDKs list DLQ entries with `getDlq(count?)` / `get_dlq()` / `GetDlq(count)` and each entry carries a `reason` field (`'stalled'` for stall evictions) you can filter on client-side.*
+*The aggregate `getDlqStats()` and the `reason` filter are Bun-client only. The external SDKs list DLQ contents with `getDlq(count?)` / `get_dlq()` / `GetDlq(count)`, but they return the raw job objects and discard the DLQ entry metadata, so `reason` (`'stalled'`, `'max_attempts_exceeded'`, …) is not available there.*
 
 ## SandboxedWorker
 

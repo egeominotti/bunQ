@@ -32,8 +32,8 @@ const basicJob = await queue.add('job-name', { key: 'value' });
 const configuredJob = await queue.add('job-name', data, {
   priority: 10, // Higher = processed first
   delay: 5000, // Wait 5s before processing
-  attempts: 5, // Max retries if the processor throws (default: 3)
-  backoff: 2000, // Wait between retries in ms (default: 1000, jitter applied)
+  attempts: 5, // Max total executions, first run included (default: 3)
+  backoff: 2000, // Exponential base delay in ms (default: 1000, jitter applied, capped at 1h)
   // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
   timeout: 30000, // Fail the job if processing takes longer
   jobId: 'custom-id', // Custom ID, makes the add idempotent (see Deduplication)
@@ -51,8 +51,8 @@ const basicJob = await queue.add('job-name', { key: 'value' });
 const configuredJob = await queue.add('job-name', data, {
   priority: 10, // Higher = processed first
   delay: 5000, // Wait 5s before processing
-  attempts: 5, // Max retries if the processor throws (default: 3)
-  backoff: 2000, // Wait between retries in ms (default: 1000)
+  attempts: 5, // Max total executions, first run included (default: 3)
+  backoff: 2000, // Exponential base delay in ms (default: 1000)
   // OR: backoff: { type: 'exponential', delay: 2000 }  // 'fixed' | 'exponential'
   timeout: 30000, // Fail the job if processing takes longer
   jobId: 'custom-id', // Custom ID, makes the add idempotent (see Deduplication)
@@ -72,8 +72,8 @@ job = queue.add(
     data,
     priority=10,              # Higher = processed first
     delay=5000,               # Wait 5s before processing
-    attempts=5,               # Max retries if the processor raises (default: 3)
-    backoff=2000,             # Wait between retries in ms (default: 1000)
+    attempts=5,               # Max total executions, first run included (default: 3)
+    backoff=2000,             # Exponential base delay in ms (default: 1000)
     # OR: backoff={"type": "exponential", "delay": 2000}
     timeout=30000,            # Fail the job if processing takes longer
     job_id="custom-id",       # Custom ID, makes the add idempotent
@@ -91,7 +91,7 @@ $job = $queue->add('job-name', ['key' => 'value']);
 $job = $queue->add('job-name', $data, [
     'priority' => 10,           // Higher = processed first
     'delay' => 5000,            // Wait 5s before processing
-    'attempts' => 5,            // Max retries (default: 3)
+    'attempts' => 5,            // Max total executions (default: 3)
     'backoff' => 2000,          // Or ['type' => 'exponential', 'delay' => 2000]
     'timeout' => 30000,         // Fail the job if processing takes longer
     'jobId' => 'custom-id',     // Custom ID, makes the add idempotent
@@ -109,7 +109,7 @@ job, err := queue.Add("job-name", map[string]any{"key": "value"}, nil)
 job, err = queue.Add("job-name", data, bunqueue.JobOptions{
     "priority":         10,          // Higher = processed first
     "delay":            5000,        // Wait 5s before processing
-    "attempts":         5,           // Max retries (default: 3)
+    "attempts":         5,           // Max total executions (default: 3)
     "backoff":          2000,        // Or map[string]any{"type": "exponential", "delay": 2000}
     "timeout":          30000,       // Fail the job if processing takes longer
     "jobId":            "custom-id", // Custom ID, makes the add idempotent
@@ -127,7 +127,7 @@ use bunqueue_client::{Backoff, JobOptions};
 let job = queue.add("job-name", data, JobOptions {
     priority: Some(10),               // Higher = processed first
     delay: Some(5000),                // Wait 5s before processing
-    attempts: Some(5),                // Max retries (default: 3)
+    attempts: Some(5),                // Max total executions (default: 3)
     backoff: Some(Backoff::Milliseconds(2000)),
     // OR: Backoff::Strategy { kind: "exponential".into(), delay: 2000, max_delay: None }
     timeout: Some(30_000),            // Fail the job if processing takes longer
@@ -148,7 +148,7 @@ let job = queue.add("job-name", data, JobOptions {
   Bunqueue.Queue.add(queue, "job-name", data,
     priority: 10,           # Higher = processed first
     delay: 5000,            # Wait 5s before processing
-    attempts: 5,            # Max retries (default: 3)
+    attempts: 5,            # Max total executions (default: 3)
     backoff: 2000,          # Or %{type: "exponential", delay: 2000}
     timeout: 30_000,        # Fail the job if processing takes longer
     jobId: "custom-id",     # Custom ID, makes the add idempotent

@@ -130,7 +130,7 @@ names shown in the table.
 | ------------------ | --------------------------- | ------- | -------------------------------------------------------------------- |
 | `priority`         | `number`                    | `0`     | Higher = processed first                                             |
 | `delay`            | `number`                    | `0`     | Delay in ms before processing                                        |
-| `attempts`         | `number`                    | `3`     | Max retry attempts                                                   |
+| `attempts`         | `number`                    | `3`     | Max total executions, first run included (`3` = 1 run + 2 retries)   |
 | `backoff`          | `number \| { type, delay }` | `1000`  | Backoff base in ms, or `{ type: 'fixed' \| 'exponential', delay }`   |
 | `timeout`          | `number`                    | -       | Processing timeout in ms                                             |
 | `jobId`            | `string`                    | -       | Custom ID for idempotent adds                                        |
@@ -143,6 +143,15 @@ names shown in the table.
 | `lifo`             | `boolean`                   | `false` | Process newest first                                                 |
 | `group`            | `{ id, priority?, maxSize? }` | -       | Assign a [fair job group](/guide/queue/job-groups/), optional 0-first intra-group priority, and atomic pending-depth cap |
 | `parent`           | `{ id, queue }`             | -       | Parent job reference for [flows](/guide/flow/)                       |
+| `stackTraceLimit`  | `number`                    | `10`    | Max stacktrace lines stored per failure                              |
+| `keepLogs`         | `number`                    | -       | BullMQ-compat metadata: stored on the job, not applied automatically. Log trimming happens only when a clear-logs call passes its own `keepLogs` |
+| `timestamp`        | `number`                    | now     | Override the job's creation timestamp (`createdAt`)                  |
+| `failParentOnFailure` | `boolean`                | `false` | Flow: a terminal child failure fails the parent                      |
+| `continueParentOnFailure` | `boolean`            | `false` | Flow: parent continues despite this child's terminal failure         |
+| `ignoreDependencyOnFailure` | `boolean`          | `false` | Flow: parent ignores this failed child's dependency                  |
+| `removeDependencyOnFailure` | `boolean`          | `false` | Flow: remove this child from the parent's dependencies on failure    |
+| `sizeLimit`        | `number`                    | -       | BullMQ-compat metadata: stored on the job, not enforced by the broker |
+| `debounce`         | `{ id, ttl }`               | -       | Legacy BullMQ alias: stored on the job, not enforced — use `deduplication` |
 
 At the same priority, LIFO jobs run newest-first ahead of FIFO jobs. Priority
 always remains authoritative, so a lower-priority LIFO job cannot overtake a

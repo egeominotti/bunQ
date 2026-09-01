@@ -121,7 +121,7 @@ queue.clear_rate_limit()?;
 :::note[Read-back semantics]
 - `rateLimit(ms)` throws on non-positive or non-finite `ms`. The expiry lives on the server, so it also survives your process exiting.
 - `getGlobalConcurrency()` and `getGlobalRateLimit()` return the live configured values in embedded and TCP modes.
-- `getRateLimitTtl(maxJobs?)` returns `-2` when no rate limit exists; otherwise it reports the temporary-limit lifetime or token wait.
+- `getRateLimitTtl(maxJobs?)` returns `-2` when no rate limit exists (the PostgreSQL multi-broker backend returns `0` instead and ignores `maxJobs`); otherwise it reports the temporary-limit lifetime or token wait.
 - `isMaxed()` reports whether the queue's global concurrency slots are all occupied.
 :::
 

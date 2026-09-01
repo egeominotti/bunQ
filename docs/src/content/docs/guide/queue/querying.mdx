@@ -147,7 +147,7 @@ let failed = queue.get_jobs(Value::from("failed"), 0, 50)?;
 </TabItem>
 </Tabs>
 
-Most read methods come in two flavors: a sync version that only works in embedded mode (`getJobCounts()`, `getJobs()`, `getCountsPerPriority()`, `count()`, `isPaused()`) and an async version that works in both modes (`getJobCountsAsync()`, `getJobsAsync()`, `getCountsPerPriorityAsync()`, `countAsync()`, `isPausedAsync()`). Prefer the async ones unless you know you're embedded.
+Most read methods come in two flavors: a sync version that only works in embedded mode (`getJobs()`, `getCountsPerPriority()`, `count()`, `isPaused()`; `getJobCounts()` instead delegates to the async path in TCP mode, returning a Promise of the real server-side counts — await it there) and an async version that works in both modes (`getJobCountsAsync()`, `getJobsAsync()`, `getCountsPerPriorityAsync()`, `countAsync()`, `isPausedAsync()`). Prefer the async ones unless you know you're embedded.
 
 Jobs returned by `getJob()` and `getJobsAsync()` reflect the authoritative
 broker generation in both modes. In particular, `attemptsMade`,
@@ -287,7 +287,8 @@ On the Bun client, `end: -1` is an explicit exhaustive read for `getJobs`,
 `getJobsAsync`, every sync/async state shortcut, `getPrioritized`, and
 `getWaitingChildren`. TCP mode requests 1,000-row pages until exhaustion and
 removes duplicate IDs defensively; a finite `end` still denotes the exclusive
-end of one page. `getJobs[Async]({ asc: false })` reverses the stable
+end of one page — except for `getWaitingChildren`, which treats a finite `end`
+as inclusive (`getWaitingChildren(0, 10)` returns up to 11 jobs). `getJobs[Async]({ asc: false })` reverses the stable
 createdAt/job-id order before that pagination. Because the broker protocol uses numeric offsets rather than a
 snapshot cursor, concurrent inserts/removals can shift later pages. Pause
 mutation or reconcile IDs in application code when a stable snapshot is

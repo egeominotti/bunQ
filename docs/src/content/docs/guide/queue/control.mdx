@@ -28,7 +28,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 ```typescript
 queue.pause();            // Workers stop pulling (fire-and-forget)
 queue.resume();           // Back to normal (fire-and-forget)
-queue.drain();            // Remove all waiting jobs (fire-and-forget)
+queue.drain();            // Remove all waiting/delayed jobs (fire-and-forget)
 queue.obliterate();       // Remove ALL queue data (fire-and-forget)
 
 await queue.pauseAsync();      // Pause and wait for it
@@ -49,7 +49,7 @@ queue.close();                     // Close TCP connection (no-op in embedded mo
 ```typescript
 await queue.pause();           // Workers stop pulling
 await queue.resume();          // Back to normal
-const n = await queue.drain(); // Remove all waiting jobs, get removed count
+const n = await queue.drain(); // Remove all waiting/delayed jobs, get removed count
 await queue.obliterate();      // Remove ALL queue data
 
 await queue.remove('job-id');  // Remove one job
@@ -64,7 +64,7 @@ queue.close();                 // Close the TCP connection
 ```python
 queue.pause()             # Workers stop pulling
 queue.resume()            # Back to normal
-n = queue.drain()         # Remove all waiting jobs, get removed count
+n = queue.drain()         # Remove all waiting/delayed jobs, get removed count
 queue.obliterate()        # Remove ALL queue data
 
 queue.remove("job-id")    # Remove one job
@@ -79,7 +79,7 @@ queue.close()             # Close the TCP connection
 ```php
 $queue->pause();            // Workers stop pulling
 $queue->resume();           // Back to normal
-$n = $queue->drain();       // Remove all waiting jobs, get removed count
+$n = $queue->drain();       // Remove all waiting/delayed jobs, get removed count
 $queue->obliterate();       // Remove ALL queue data
 
 $queue->remove('job-id');   // Remove one job
@@ -93,7 +93,7 @@ $queue->close();            // Close the TCP connection
 ```go
 queue.Pause()            // Workers stop pulling
 queue.Resume()           // Back to normal
-n, _ := queue.Drain()    // Remove all waiting jobs, get removed count
+n, _ := queue.Drain()    // Remove all waiting/delayed jobs, get removed count
 queue.Obliterate()       // Remove ALL queue data
 
 queue.Remove("job-id")   // Remove one job
@@ -107,7 +107,7 @@ queue.Close()            // Close the TCP connection
 ```rust
 queue.pause()?;            // Workers stop pulling
 queue.resume()?;           // Back to normal
-let n = queue.drain()?;    // Remove all waiting jobs, get removed count
+let n = queue.drain()?;    // Remove all waiting/delayed jobs, get removed count
 queue.obliterate()?;       // Remove ALL queue data
 
 queue.remove("job-id")?;   // Remove one job
@@ -121,7 +121,7 @@ queue.close();             // Close the TCP connection
 ```elixir
 :ok = Bunqueue.Queue.pause(queue)        # Workers stop pulling
 :ok = Bunqueue.Queue.resume(queue)       # Back to normal
-{:ok, n} = Bunqueue.Queue.drain(queue)   # Remove all waiting jobs, get removed count
+{:ok, n} = Bunqueue.Queue.drain(queue)   # Remove all waiting/delayed jobs, get removed count
 :ok = Bunqueue.Queue.obliterate(queue)   # Remove ALL queue data
 
 :ok = Bunqueue.Queue.close(queue)        # Close the TCP connection
@@ -254,7 +254,7 @@ queue.retry_job("job-id")?;
 </TabItem>
 </Tabs>
 
-*Bulk `retryJobs`, `retryCompleted`, and counted `promoteJobs` are available in TypeScript and Python; PHP, Go, Rust, and Elixir act per job (`promote`, `retryJob`).*
+*Bulk `retryJobs`, `retryCompleted`, and counted `promoteJobs` are available in TypeScript and Python; PHP, Go, and Rust act per job (`promote`, `retryJob`); Elixir exposes an uncounted bulk `promote_jobs/1`.*
 
 Retrying a completed job starts a new waiting execution. Its previous
 `returnvalue`, progress/message, `processedOn`, and `finishedOn` are cleared;

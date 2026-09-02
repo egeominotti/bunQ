@@ -140,12 +140,25 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
 
 ### PUSH (`pushJob`, `src/application/operations/push.ts`)
 
+Before single or batch admission begins, the manager reference-counts the
+target queue as pending and registers its name. The count is installed before
+registration callbacks and remains nonzero across asynchronous lock waits;
+`finally` releases it on every success or error path. This transient ownership
+prevents the periodic empty-queue sweep from unregistering a queue between its
+name becoming visible and its first job being published. If `obliterate`
+linearizes while the count is nonzero, it records a queue tombstone. The final
+release keeps a post-obliterate admission that really published state, or
+unregisters the name immediately when obliteration removed the complete
+admission.
+
 1. Compute `idx = shardIndex(queue)` and acquire every target, custom-ID owner,
    and parent shard write lock required by the request in ascending order.
 2. **Inspect custom-ID idempotency** (`handleCustomId`, `customId.ts`). A live
    generation is an idempotent skip. Reusing a completed, DLQ, or
    payload-free dependency-completion generation produces a retirement plan;
-   it does not delete the old generation yet.
+   it does not delete the old generation yet. When a completed generation has
+   left the bounded hot cache, the lookup consults SQLite so its row and stale
+   result are still retired atomically.
 3. Create the candidate job, then inspect unique-key deduplication
    (`pushDeduplication.ts`). Default/extend suppression returns the existing id.
    Replace records the exact pending or active owner without changing heap,
@@ -154,25 +167,28 @@ See [data-model](../data-model.md) for full definitions. The central shape is `J
    publishing them (`pushInsert.ts`). A normal candidate is
    `waiting`/`prioritized`/`delayed`, while an unresolved dependency candidate
    is `waiting-children`. A `parentId` also prepares the child/parent topology.
-5. **Commit persistence before visibility whenever admission can reject.** A
-   durable insert, terminal-ID retirement, completion pin, dedup replacement,
-   active-key transfer, or parent link goes through the matching SQLite
-   admission transaction. Terminal cleanup (`jobs`, result, DLQ,
+5. **Commit persistence or buffer ownership before visibility.** Every
+   storage-backed candidate enters either the immediate durable transaction or
+   the `WriteBuffer` before RAM publication. Terminal-ID retirement, completion
+   pin, dedup replacement, active-key transfer, and parent links use the
+   matching SQLite admission transaction. Terminal cleanup (`jobs`, result, DLQ,
    dependency-completion and flow-failure rows), completion pins, the candidate
    insert, and parent updates commit together where applicable. If SQLite
    rejects the transaction, including `SQLITE_FULL`, the old generation and all
    RAM structures remain unchanged and the candidate is neither queryable nor
    executable.
-6. Publish the committed plan to RAM: retire the old custom-ID generation,
-   transfer dedup ownership, install dependency pins/edges, insert into the heap
-   or wait set, update `jobIndex` and counters, then notify the queue. This
-   publication contains no expected throwing persistence operation. Dashboard
-   callbacks are guarded so observability cannot turn an accepted job into a
-   client-visible rejection.
-7. Plain non-durable inserts without admission metadata keep the throughput
-   path: publish in RAM and enqueue the row in the 10 ms `WriteBuffer`. Durable
-   inserts bypass that buffer. Only accepted jobs increment push telemetry and
-   emit `pushed`.
+6. Publish the committed plan to RAM: retire the old custom-ID generation and
+   its result/log ownership, transfer dedup ownership, install dependency
+   pins/edges, insert into the heap or wait set, update `jobIndex` and counters,
+   then notify the queue. This
+   publication contains no expected throwing persistence operation. The
+   dashboard `job:waiting-children` callback runs only after the complete
+   single, accepted batch prefix, or flow graph is persisted and published; a
+   reentrant `obliterate` therefore cannot be followed by a buffered or RAM-only
+   tail. Dashboard errors remain guarded from the client result.
+7. Plain non-durable inserts keep the throughput path by entering the normal
+   10 ms `WriteBuffer` before publication; durable inserts bypass that buffer.
+   Only accepted jobs increment push telemetry and emit `pushed`.
 
 `pushJobBatch` lives in `src/application/operations/pushBatch.ts` and preserves
 ordered accepted-prefix semantics. Each item completes the same admission
@@ -239,7 +255,8 @@ the job. Lock order shard → processing matches the documented hierarchy.
 2. Under `shardLocks[idx]`, `releaseJobResources(queue, uniqueKey, groupId, job.id)` frees the concurrency slot/group and releases the unique key only if this job generation still owns it.
 3. Release `customId` from `customIdMap` so it can be reused.
 4. If `!removeOnComplete`: set `completedAt`, append `completed` timeline, add
-   to `completedJobs` + `completedJobsData`, store a defined result, set
+   to `completedJobs` + `completedJobsData`, store a defined result together
+   with its queue in the paired bounded `jobResultQueues` ownership index, set
    `jobIndex` to completed, and persist the completed row. If
    `removeOnComplete`: `commitRemovedCompletion` atomically deletes the
    jobs/result rows and inserts a payload-free `dependency_completions` record.
@@ -280,8 +297,8 @@ wrong token remains an error. Positional evidence prevents duplicate job IDs
 from hiding which generation was retired.
 `removeOnComplete` entries use the same delete-plus-proof transaction in both
 optimized variants, including result-bearing ACKB. For retained jobs,
-`jobResults.set` happens before `completedJobs.add`, so a live dependent never
-observes completion before its in-memory result. When every extracted job is
+`jobResults.set` and its queue owner happen before `completedJobs.add`, so a
+live dependent never observes completion before its in-memory result. When every extracted job is
 retained and no defined result must be stored, `finalizeBatchAck` precomputes
 the capped completion timelines and commits all rows through one
 `markCompletedBatch` transaction. A failed batch rolls back before the original
@@ -339,7 +356,7 @@ detached CLI, and durable recovery paths.
 
 ## Edge Cases & Failure Modes
 
-- **Idempotent push**: a live `customId` returns the existing job (no insert). A recycled terminal `customId` evicts the stale completed row or DLQ entry first, including persisted terminal state and counters, so state queries expose only the new generation; timeout markers are cleared too (#33/#75).
+- **Idempotent push**: a live `customId` returns the existing job (no insert). A recycled terminal `customId` evicts the stale completed row or DLQ entry first, including persisted terminal state, counters, result, logs, and their bounded owner indexes, so state queries and auxiliary reads expose only the new generation; timeout markers are cleared too (#33/#75).
 - **Dedup of active jobs**: default strategy treats an active job (in `jobIndex`, not in queue) as a duplicate and returns its id without inserting (`src/application/operations/pushDeduplication.ts:96-110`); the returned placeholder carries the correct existing id (`src/application/operations/push.ts:76-85`).
 - **Pull loss prevention**: `requeueJob` restores any job that fails to move to processing.
 - **Expired (TTL) jobs** are silently dropped during pull (`isExpired`) and never delivered. Their SQLite row (or pending buffered INSERT) is deleted before the heap/counter/index removal, preventing restart resurrection while keeping the shard critical section synchronous.
@@ -354,9 +371,19 @@ detached CLI, and durable recovery paths.
   events for those outcomes. Missing IDs, missing/wrong tokens, and duplicate
   outcomes against ordinary completed jobs still throw and cannot release a
   newer lease.
+- **Obliterate during terminal extraction:** once ACK/ACKB/FAIL removes a job
+  from the processing map, the queue-bearing `jobIndex` remains authoritative.
+  The terminal path revalidates it after any shard-lock wait and immediately
+  before synchronous publication. If queue obliteration removed that owner in
+  the gap, the transition returns ignored/not-found and cannot resurrect the
+  old generation.
 - **Retry vs. terminal**: `canRetry` uses `attempts < maxAttempts` after `attempts++`; `unrecoverable=true` (from `failJob`) forces the terminal path regardless of attempts.
 - **Stack trace persistence** (#74): the last failure's stack is normalized and capped at `stackTraceLimit` before branching; an absent stack (old clients) leaves any prior stack intact; `stackTraceLimit: 0` yields `null`.
-- **Memory bounds**: `timeline` is capped at 20 entries (older transitions are not recorded once full). `completedJobs`, `jobResults`, `customIdMap` are bounded LRU/FIFO collections (eviction in [Core Queue Engine](./core-queue-engine.md) / [Background Tasks](./background-tasks.md)).
+- **Memory bounds**: `timeline` is capped at 20 entries (older transitions are
+  not recorded once full). `completedJobs`, `jobResults`, `jobLogs`, and
+  `customIdMap` are bounded LRU/FIFO collections; result/log queue-owner maps
+  follow the same evictions (see [Core Queue Engine](./core-queue-engine.md) /
+  [Background Tasks](./background-tasks.md)).
 - **removeOnComplete + dependencies**: the full job is dropped but its bare ID
   enters the two-tier `depCompletions` tracker. Proofs referenced by
   `waitingDeps` stay pinned even when a batch is larger than

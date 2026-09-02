@@ -37,10 +37,13 @@ export interface QueueManagerStateView {
   retiredCronLeaseTokens: BoundedMap<JobId, string>;
   timeoutScheduler: JobTimeoutScheduler;
   jobResults: LRUMap<JobId, unknown>;
+  jobResultQueues: Map<JobId, string>;
   dependencyResults: DependencyResultTracker;
   customIdMap: LRUMap<string, JobId>;
   jobLogs: LRUMap<JobId, JobLogEntry[]>;
+  jobLogQueues: Map<JobId, string>;
   pendingDepChecks: Set<JobId>;
+  pendingQueueAdmissions: Map<string, number>;
   stalledCandidates: Set<JobId>;
   jobLocks: Map<JobId, JobLock>;
   clientJobs: Map<string, Set<JobId>>;
@@ -75,6 +78,7 @@ export interface QueueManagerRuntimeApi {
   ): Promise<AckOutcome>;
   registerQueueName(queue: string): void;
   unregisterQueueName(queue: string): void;
+  onQueueAdmissionsDrained(queue: string): void;
   onJobCompleted(jobId: JobId): void;
   onJobFailed(jobId: JobId): void;
   onJobsCompleted(jobIds: JobId[]): void;

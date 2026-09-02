@@ -2,6 +2,8 @@
 export interface QueueManagerConfig {
   dataPath?: string;
   maxCompletedJobs?: number;
+  /** Delete retained completed jobs after this age; null/undefined disables automatic retention. */
+  completedRetentionMs?: number | null;
   maxJobResults?: number;
   maxJobLogs?: number;
   maxCustomIds?: number;
@@ -23,6 +25,7 @@ export interface QueueManagerConfig {
 
 export const DEFAULT_CONFIG = {
   maxCompletedJobs: 50_000,
+  completedRetentionMs: null as number | null,
   maxJobResults: 10_000,
   maxJobLogs: 10_000,
   maxCustomIds: 50_000,
@@ -36,3 +39,9 @@ export const DEFAULT_CONFIG = {
   stallCheckMs: 5_000,
   dlqMaintenanceMs: 60_000,
 };
+
+export function normalizeCompletedRetentionMs(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return null;
+  const normalized = Math.floor(value);
+  return Number.isSafeInteger(normalized) ? normalized : null;
+}

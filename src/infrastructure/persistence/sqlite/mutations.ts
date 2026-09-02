@@ -1,12 +1,24 @@
 import { getDlqRetryState } from '../../../domain/types/dlq';
 import type { Job, JobId } from '../../../domain/types/job';
+import type { DependencyCompletionRecord } from '../dependencyCompletionStore';
 import type { DurableAdmissionMetadata } from '../types/admission';
 import { pack, persistedStallCount } from '../sqliteSerializer';
 import { SqliteJobs } from './jobs';
+import {
+  DELETE_QUEUE_FLOW_FAILURES_SQL,
+  DELETE_QUEUE_JOB_RESULTS_FROM_DLQ_SQL,
+  DELETE_QUEUE_JOB_RESULTS_FROM_JOBS_SQL,
+} from './queueDeletionSql';
+
+export interface QueueDeletionResult {
+  bufferedJobIds: JobId[];
+  dependencyCompletions: DependencyCompletionRecord[];
+}
 
 /** Non-terminal job field and scheduling mutations. */
 export abstract class SqliteMutations extends SqliteJobs {
   updateForRetry(job: Job): void {
+    this.writeBuffer.setPendingState(job.id, job.runAt > Date.now() ? 'delayed' : 'waiting');
     const dlqRetryState = getDlqRetryState(job);
     this.safeWrite(() => {
       this.db
@@ -52,7 +64,7 @@ export abstract class SqliteMutations extends SqliteJobs {
             dlqRetryState ? pack(dlqRetryState) : null,
             job.id
           );
-        if (result.changes !== 1) {
+        if (result.changes === 0) {
           throw new Error(`Completed job is not persisted: ${String(job.id)}`);
         }
         this.statements.get('deleteJobResult')!.run(job.id);
@@ -69,6 +81,40 @@ export abstract class SqliteMutations extends SqliteJobs {
       });
       transaction(jobId);
     });
+  }
+
+  /** Commit every durable queue-owned deletion before removing buffered jobs. */
+  deleteJobsForQueue(
+    queue: string,
+    referencedDependencyIds: ReadonlySet<JobId>,
+    dependencyRetentionLimit: number
+  ): QueueDeletionResult {
+    let dependencyCompletions: DependencyCompletionRecord[] = [];
+    this.safeWrite(() => {
+      this.db.transaction(() => {
+        this.db.prepare(DELETE_QUEUE_JOB_RESULTS_FROM_JOBS_SQL).run(queue, queue);
+        this.db.prepare(DELETE_QUEUE_JOB_RESULTS_FROM_DLQ_SQL).run(queue, queue, queue);
+        this.db
+          .prepare(DELETE_QUEUE_FLOW_FAILURES_SQL)
+          .run(queue, queue, queue, queue, queue, queue, queue, queue);
+        this.db.prepare('DELETE FROM jobs WHERE queue = ?').run(queue);
+        this.db.prepare('DELETE FROM dlq WHERE queue = ?').run(queue);
+        this.db.prepare('DELETE FROM dependency_completions WHERE queue = ?').run(queue);
+        dependencyCompletions = this.dependencyCompletionStore.reconcilePinsInTransaction(
+          referencedDependencyIds,
+          dependencyRetentionLimit
+        );
+        this.db.prepare('DELETE FROM queue_events WHERE queue = ?').run(queue);
+        this.db.prepare('DELETE FROM queue_metrics_meta WHERE queue = ?').run(queue);
+        this.db.prepare('DELETE FROM queue_metric_buckets WHERE queue = ?').run(queue);
+        this.db.prepare('DELETE FROM queue_state WHERE name = ?').run(queue);
+        this.db.prepare('DELETE FROM group_state WHERE queue = ?').run(queue);
+      })();
+    });
+    return {
+      bufferedJobIds: this.writeBuffer.removePendingForQueue(queue),
+      dependencyCompletions,
+    };
   }
 
   replaceJob(
@@ -184,9 +230,10 @@ export abstract class SqliteMutations extends SqliteJobs {
   }
 
   updateRunAt(jobId: JobId, runAt: number): void {
+    const state = runAt > Date.now() ? 'delayed' : 'waiting';
+    this.writeBuffer.setPendingState(jobId, state);
     this.flushIfBuffered(jobId);
     this.safeWrite(() => {
-      const state = runAt > Date.now() ? 'delayed' : 'waiting';
       this.db
         .prepare('UPDATE jobs SET run_at = ?, state = ?, started_at = NULL WHERE id = ?')
         .run(runAt, state, jobId);

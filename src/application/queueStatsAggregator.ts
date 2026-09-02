@@ -57,6 +57,14 @@ export function getAllQueueJobCounts(
     result.set(name, counts);
   }
 
+  if (ctx.storage) {
+    const persistedCompleted = ctx.storage.countCompletedJobsByQueue(result.keys());
+    for (const [queue, completed] of persistedCompleted) {
+      const counts = result.get(queue);
+      if (counts) counts.completed = completed;
+    }
+  }
+
   for (const processing of ctx.processingShards) {
     for (const job of processing.values()) {
       const counts = result.get(job.queue);
@@ -64,10 +72,12 @@ export function getAllQueueJobCounts(
     }
   }
 
-  for (const [jobId, location] of ctx.jobIndex) {
-    if (location.type !== 'completed' || !ctx.completedJobs.has(jobId)) continue;
-    const counts = result.get(location.queueName);
-    if (counts) counts.completed++;
+  if (!ctx.storage) {
+    for (const [jobId, location] of ctx.jobIndex) {
+      if (location.type !== 'completed' || !ctx.completedJobs.has(jobId)) continue;
+      const counts = result.get(location.queueName);
+      if (counts) counts.completed++;
+    }
   }
 
   for (let i = 0; i < SHARD_COUNT; i++) {

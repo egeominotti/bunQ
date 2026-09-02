@@ -48,8 +48,18 @@ export class Logger {
     this.log('debug', message, data);
   }
 
+  /** Emit debug diagnostics on stderr while preserving level filtering. */
+  debugToStderr(message: string, data?: Record<string, unknown>): void {
+    this.log('debug', message, data, true);
+  }
+
   info(message: string, data?: Record<string, unknown>): void {
     this.log('info', message, data);
+  }
+
+  /** Emit informational diagnostics on stderr without inflating their severity. */
+  infoToStderr(message: string, data?: Record<string, unknown>): void {
+    this.log('info', message, data, true);
   }
 
   warn(message: string, data?: Record<string, unknown>): void {
@@ -60,7 +70,12 @@ export class Logger {
     this.log('error', message, data);
   }
 
-  private log(level: LogLevel, message: string, data?: Record<string, unknown>): void {
+  private log(
+    level: LogLevel,
+    message: string,
+    data?: Record<string, unknown>,
+    forceStderr = false
+  ): void {
     if (LOG_LEVEL_PRIORITY[level] < LOG_LEVEL_PRIORITY[Logger.level]) return;
 
     if (Logger.jsonMode) {
@@ -71,16 +86,19 @@ export class Logger {
         message,
         ...(data && { data }),
       };
-      console.log(JSON.stringify(entry));
+      if (forceStderr) console.error(JSON.stringify(entry));
+      else console.log(JSON.stringify(entry));
     } else {
       const prefix = `[${this.component}]`;
       const dataStr = data ? ` ${JSON.stringify(data)}` : '';
       switch (level) {
         case 'debug':
-          console.debug(`${prefix} ${message}${dataStr}`);
+          if (forceStderr) console.error(`${prefix} ${message}${dataStr}`);
+          else console.debug(`${prefix} ${message}${dataStr}`);
           break;
         case 'info':
-          console.log(`${prefix} ${message}${dataStr}`);
+          if (forceStderr) console.error(`${prefix} ${message}${dataStr}`);
+          else console.log(`${prefix} ${message}${dataStr}`);
           break;
         case 'warn':
           console.warn(`${prefix} ${message}${dataStr}`);

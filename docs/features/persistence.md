@@ -1,6 +1,6 @@
 # Persistence (SQLite, WriteBuffer, ReadThrough)
 
-> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/` (including `telemetryWrites.ts`), `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts` (compatibility facade), `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/migrations.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
+> **Category:** Infrastructure · **Source:** `src/infrastructure/persistence/sqlite.ts`, `src/infrastructure/persistence/sqlite/` (including `jobLifecycle.ts`, `completed.ts`, and `telemetryWrites.ts`), `src/infrastructure/persistence/types/`, `src/infrastructure/persistence/sqliteBatch.ts` (compatibility facade), `src/infrastructure/persistence/batchInsert.ts`, `src/infrastructure/persistence/writeBuffer.ts`, `src/infrastructure/persistence/writeBufferPending.ts`, `src/infrastructure/persistence/schema.ts`, `src/infrastructure/persistence/migrations.ts`, `src/infrastructure/persistence/sqliteMigration.ts`, `src/infrastructure/persistence/legacyNameMigration.ts`, `src/infrastructure/persistence/statements.ts`, `src/infrastructure/persistence/sqliteSerializer.ts`
 
 ## Purpose
 
@@ -31,6 +31,8 @@ Owns:
 - Results, DLQ rows, cron rows, queue control-state rows, the durable
   flow-failure outbox, and `removeOnComplete` dependency evidence with bounded
   recent retention plus live-edge pin ownership.
+- SQLite-authoritative, deterministic completed-row cleanup plus exact retained
+  completion counts maintained by lifecycle triggers.
 - A bounded per-queue lifecycle journal, cumulative terminal metric metadata,
   and bounded one-minute completed/failed buckets. Scalar events use
   `SqliteTelemetry`; lifecycle batches use the same semantics through
@@ -62,7 +64,11 @@ Internal:
 - `shared/logger` (`storageLog`).
 - Sibling modules in this folder: `schema.ts`, `migrations.ts`, `statements.ts`,
   `sqliteSerializer.ts`, `batchInsert.ts`, `writeBuffer.ts`,
-  `dependencyCompletionSchema.ts`, and `dependencyCompletionStore.ts`.
+  `writeBufferPending.ts`, `sqlite/jobLifecycle.ts`,
+  `dependencyCompletionSchema.ts`, `dependencyCompletionStore.ts`,
+  `completedJobCountSchema.ts`, `migrationProgressSchema.ts`, and
+  `sqliteMigration.ts`; guarded queue-owned auxiliary deletion SQL lives in
+  `sqlite/queueDeletionSql.ts`.
 
 External/runtime:
 
@@ -111,6 +117,11 @@ Key methods (real signatures):
   `updateRunAt(jobId, runAt)` (persists moveToDelayed/changeDelay, re-deriving
   `state` from `run_at`), `updateJobChildrenIds(jobId, childrenIds)`,
   `clearJobUniqueKey(jobId)`, `deleteJob(jobId)`.
+- Queue destruction: `deleteJobsForQueue(queue, postDeleteReferences, limit)`
+  transactionally deletes durable jobs/results, DLQ, flow failures, completion
+  proofs, telemetry, and queue/group state, while reconciling proof pins to the
+  post-obliterate dependency set. It then removes only that queue's pending
+  buffered inserts and does not build an unbounded historical job-ID list.
 - Flow transactions: `commitFailedJob(jobId, dlqEntry, flowFailure)`,
   `updateFlowLink(child, parent, state)`, `removeFlowLink(child, parent, state)`,
   `updateFlowParentResolution(parent)`, `saveFlowFailure(record)`,
@@ -123,7 +134,12 @@ Key methods (real signatures):
 - Results: `storeResult(jobId, result)`, `getResult(jobId)`, `hasResult(jobId)`.
 - DLQ: `saveDlqEntry(entry)`, atomic `requeueDlqJob(job)`, `deleteDlqEntry(jobId)`, `clearDlqQueue(queue)`, transactional `purgeDlqEntries(queue, dlqJobIds, terminalJobIds, clearQueue)`, `loadDlq(): Map<string, DlqEntry[]>`, `getDlqEntry(jobId)`, `hasDlqEntry(jobId)`, `loadDlqJobIds(): Set<JobId>`.
 - Queries: `getJob(id)`, `getJobStateRaw(jobId)`, `queryJobs(queue, {state|states, limit, offset, asc})`.
-- Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(): Set<JobId>`, `countPendingJobs()`, `countActiveJobs()`.
+- Recovery loads: `loadPendingJobs(limit=10000, offset=0)`, `loadActiveJobs(limit=10000, offset=0)`, `loadCompletedJobs(limit=10000, offset=0)`, `loadCompletedJobIds(requested): Set<JobId>`, `loadCompletedQueueNames()`, `countPendingJobs()`, `countActiveJobs()`.
+- Completed maintenance: `cleanCompletedJobs(queue, completedBefore, limit,
+isProtected?)` returns committed `{ jobId, queue }` ownership records;
+  `loadCompletedJobsForRetry(...)` keyset-pages cold retained rows;
+  `countCompletedJobs()` and `countCompletedJobsByQueue(queueNames)` read exact
+  trigger-maintained counts.
 - Cron: `saveCron(cron)`, `loadCronJobs(): CronJob[]`, `deleteCron(name)`, `updateCron(name, executions, nextRun)`.
 - Queue control-state (#100): `saveQueueState(name, { paused, rateLimit, concurrencyLimit, rateLimitDuration?, rateLimitExpiresAt?, stallConfig?, dlqConfig? })`, `loadQueueState()`, `deleteQueueState(name)` (`persistence/sqlite/control.ts:93-150`).
 - Job-group control-state: `save/removeGroupRateLimit`,
@@ -144,17 +160,19 @@ Key methods (real signatures):
 and the batch callback/result types from `types/batch.ts`:
 
 - `class BatchInsertManager` — `insertJobsBatch(jobs: Job[]): BatchInsertResult` (never throws).
-- `class WriteBuffer` — `add`, `addBatch`, `flush(): number`, `hasPending(id)`, `removePending(id)`, `pendingCount`, `stop()`, `stopGracefully(timeoutMs=5000): Promise<number>`, `getRetryState()`.
+- `class WriteBuffer` — `add`, `addBatch`, explicit `flush(): number`, backoff-aware `flushIfReady(): number`, `hasPending(id)`, `getPendingJob(s)`, `setPendingState`, `removePending(id)`, `pendingCount`, `stop()`, `stopGracefully(timeoutMs=5000): Promise<number>`, `getRetryState()`.
 - Types: `BatchInsertResult { transient: Job[]; conflicts: Job[]; error?: Error }`, `WriteBufferErrorCallback`, `CriticalErrorCallback`.
 
 `sqliteSerializer.ts` exports:
 
 - `pack(data): Uint8Array`, `unpack<T>(buffer, fallback, context): T`.
 - `rowToJob(row: DbJob): Job`, `reconstructDlqEntry(entry: DlqEntry): DlqEntry`.
+- `persistedJobStateForWrite(job)` plus the buffer-only lifecycle override used
+  when a job changes state before its delayed INSERT succeeds.
 - `CORRUPT_DEPENDS_ON: symbol`, `isCorruptDependsOn(job): boolean`.
 
 `schema.ts` exports: `PRAGMA_SETTINGS`, `SCHEMA`, `MIGRATION_TABLE`,
-`SCHEMA_VERSION = 35`, `MIGRATIONS`.
+`SCHEMA_VERSION = 37`, `MIGRATIONS`.
 `statements.ts` exports: `SQL_STATEMENTS`, `prepareStatements(db)`, `StatementName`, and DB-row types `DbJob`, `DbCron`, `DbQueueState`.
 
 No TCP commands, HTTP endpoints, CLI commands, or events are emitted directly by this module — it is a library consumed by the application layer.
@@ -186,6 +204,9 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   `queue`, `completed_at`, and `pinned`; a payload-free proof for removed
   completed jobs. Unpinned rows are FIFO-bounded; pinned rows are owned by live
   waiting dependency edges.
+- `completed_job_counts` — one exact retained-completed count per queue,
+  maintained by `jobs` insert/update/delete triggers. Empty queue rows are
+  removed.
 - `job_results` — `job_id TEXT PK`, `result BLOB`, `completed_at`.
 - `dlq` — `id INTEGER PK AUTOINCREMENT`, `job_id`, `queue`, `entry BLOB` (full `DlqEntry`), `entered_at`. Note `dlq` is append-only by `id`; a single `job_id` can have multiple rows.
 - `cron_jobs` — keyed by `name`, includes `dedup BLOB`, `skip_missed_on_restart`, `skip_if_no_worker`, `prevent_overlap` (default 1), `job_options BLOB`.
@@ -207,6 +228,9 @@ DB-row types are defined in `statements.ts` and converted to/from domain types i
   pruned to the configured minute window without resetting the cumulative
   total.
 - `migrations` — `version PK`, `applied_at`.
+- `migration_progress` — `(version,phase)` primary key plus the last key,
+  processed row/byte counts, total rows, and timestamps for resumable data
+  migrations. A row is deleted atomically when its migration version completes.
 
 All blob columns store MessagePack. Encoding and decoding use the canonical
 `src/shared/msgpack.ts` codec. Its normal path remains msgpackr's fast decoder;
@@ -220,18 +244,24 @@ dedup/debounce flags, etc.).
 
 Buffered write (default path):
 
-1. `insertJob(job)` in `persistence/sqlite/jobs.ts` calls
+1. `insertJob(job)` in `persistence/sqlite/jobLifecycle.ts` calls
    `writeBuffer.add(job)` (`persistence/writeBuffer.ts`).
 2. The buffer auto-flushes every `writeBufferFlushMs` (10ms), or immediately
    when `activeBuffer.length >= bufferSize` (`persistence/writeBuffer.ts`).
-3. `flush()` atomically swaps the active and flush buffers under a reentrancy
+3. A synchronous `pushBatch` defers threshold-triggered flushes across the
+   complete admission loop, including nested deferrals, then performs at most
+   one automatic threshold flush when the outer scope exits. Explicit
+   lifecycle or snapshot operations remain separate flush boundaries.
+   Sub-threshold jobs remain buffer-owned and are exposed to queries without
+   forcing a write.
+4. `flush()` atomically swaps the active and flush buffers under a reentrancy
    guard, then calls `BatchInsertManager.insertJobsBatch`.
-4. `BatchInsertManager` (`persistence/batchInsert.ts`) runs one transaction of
-   multi-row upserts chunked at `floor(999/29) = 34` rows and caches prepared
+5. `BatchInsertManager` (`persistence/batchInsert.ts`) runs one transaction of
+   multi-row upserts chunked at `floor(999/38) = 26` rows and caches prepared
    statements for common chunk sizes.
 
 Durable write (`durable: true`): bypasses the buffer entirely.
-`insertJobImmediate` in `persistence/sqlite/jobs.ts` runs the prepared insert
+`insertJobImmediate` in `persistence/sqlite/jobLifecycle.ts` runs the prepared insert
 under `safeWrite`; `insertJobsBatch(jobs, true)` in
 `persistence/sqlite/records.ts` runs the whole batch inside one explicit
 transaction so a mid-batch failure rolls back all rows.
@@ -271,23 +301,30 @@ the field existed while retaining the schema's
 `stall_count INTEGER NOT NULL DEFAULT 0` invariant; current domain-created jobs
 still always provide the field explicitly.
 
-State transitions and the flush-before-update invariant:
+State transitions and the buffered-lifecycle invariant:
 `markActive`/`markWaitingChildren`/`markCompleted`/`markFailed`, `updateJobData`,
-`updateJobPriority`, `updateJobProgress`, and delay updates first call
-`flushIfBuffered(jobId)` (`sqlite.ts`). If the row's INSERT is still buffered,
-the `UPDATE` would match 0 rows and the later buffered INSERT would overwrite
-the mutation. Progress persists the clamped value, effective message, and
+`updateJobPriority`, `updateJobProgress`, retry, flow-resolution, and delay
+updates attempt `flushIfBuffered(jobId)`. Lifecycle methods first stamp an
+explicit state on any pending buffer object. Automatic materialization uses
+`flushIfReady`, so a scheduled retry backoff is never bypassed merely because
+the job is pulled, ACKed, promoted, parked, or requeued. If the INSERT remains
+buffered and the SQL `UPDATE` matches zero rows, its eventual upsert carries
+the current state and execution fields rather than resurrecting the original
+waiting state. This remains correct even after the bounded timeline is full.
+Progress persists the clamped value, effective message, and
 heartbeat in one synchronous update. Priority persistence writes both
 `priority` and the effective `lifo` tie-break so recovery reconstructs the same
 heap order. `moveActiveToWait` also uses `updateRunAt`, clearing the persisted
 active marker so restart recovery cannot treat a manual requeue as a crash.
-`markWaitingChildren` similarly flushes a buffered insert, writes the dedicated
-state, clears `started_at`, and persists the transition timeline. Explicit
+`markWaitingChildren` similarly records the dedicated buffered state, clears
+`started_at`, and persists the transition timeline when a row is available. Explicit
 deduplication-key release uses `clearJobUniqueKey` after its owner-aware
 in-memory mutation so recovery cannot recreate the removed key.
 
-`markActiveBatch` and `markCompletedBatch` preserve that invariant for every
-input ID before opening one transaction. Timeline payloads are MessagePack
+`markActiveBatch` and `markCompletedBatch` stamp every pending input, make at
+most one backoff-aware materialization attempt for the batch, then open one
+transaction. A ten-job lifecycle operation therefore cannot consume ten retry
+attempts during one outage. Timeline payloads are MessagePack
 encoded before the transaction; its synchronous critical section only reuses
 the prepared state statement for each row. `markCompletedBatch` also applies
 the scalar completion side effects (`progress=100` and
@@ -322,6 +359,18 @@ row, then deletes the job and result atomically. DLQ rows are deliberately not
 cascaded; terminal failure commits the DLQ entry before deleting the live job
 row (`persistence/sqlite/jobs.ts`).
 
+Queue destruction uses `deleteJobsForQueue`. Its synchronous transaction clears
+results before jobs, removes `flow_failures` by stored `child_queue`, live-job
+ownership, or queue-owned DLQ IDs, and deletes jobs, DLQ rows, completion proofs,
+telemetry, and queue/group state together. DLQ-derived result/outbox deletion is
+guarded when a persisted same-ID job or DLQ generation belongs to another
+queue; job-derived auxiliary deletion applies the reciprocal DLQ guard. The
+transaction also reconciles completion pins against dependencies that will survive the
+obliterate. Only bounded buffer-owned IDs and the retained completion-proof
+snapshot needed by RAM are returned; historical job IDs are never materialized.
+The manager invokes this before any runtime mutation, so any SQLite failure
+leaves memory unchanged and an obliterate retry is idempotent.
+
 Permanent DLQ cleanup uses `purgeDlqEntries`. It first removes pending buffered
 terminal inserts, then transactionally deletes either the selected
 `(queue, jobId)` rows or the queue's complete DLQ together with terminal
@@ -348,14 +397,18 @@ all use this operation. A parent accepted after the child completed pins any
 recent proof before registering its wait edges. `obliterate(queue)` removes
 the source queue's hidden proofs; parent removal releases pin ownership.
 
-Recovery (consumer side, `application/background/recovery/index.ts`): `recover()` first loads all
-`dependency_completions` into temporary classification state without pruning.
-It rebuilds pending parents and their reverse indexes, checkpoints ready
-parents, then reconciles `pinned` from the authoritative indexes, prunes only
-unreferenced rows, and hydrates the exact recent/pinned RAM tiers. This order
-also survives a deployment that lowers `maxCompletedJobs`. A `job_results` row
-alone is not completion evidence because a crash may leave it beside an
-`active` job.
+Recovery (consumer side, `application/background/recovery/index.ts`):
+`recover()` loads payload-free `dependency_completions` into temporary
+classification state without pruning. For each pending page it asks SQLite
+only for the dependency IDs referenced by that page instead of materializing
+every retained completed job ID. It rebuilds pending parents and their reverse
+indexes, checkpoints ready parents, then reconciles `pinned` from the
+authoritative indexes, prunes only unreferenced rows, and hydrates the exact
+recent/pinned RAM tiers. This order also survives a deployment that lowers
+`maxCompletedJobs`. A `job_results` row alone is not completion evidence because
+a crash may leave it beside an `active` job. Structured start, phase-progress,
+and completion diagnostics are emitted at debug level on stderr before listeners
+bind, keeping normal command stdout machine-readable.
 Recovery restores stall/DLQ policies before classifying interrupted active
 jobs, then repeatedly reads active jobs from offset zero. Every handled active
 row leaves `state='active'`, so advancing an offset over that shrinking result
@@ -379,16 +432,19 @@ the parent row still exists before commit. In-memory heap/index changes happen
 only afterward while the same child/parent shard locks remain held, so restart
 cannot recover an orphaned child or a runnable parent with an unpersisted edge.
 
-Migrations (`persistence/sqlite/state.ts`, `persistence/schema.ts`): on
-construct, the storage ensures the `migrations` table,
-reads `MAX(version)`; if below `SCHEMA_VERSION` (35) it runs the idempotent base
-schema and applies later migrations in one synchronous transaction. Only exact
-duplicate-column/table/index errors are treated as an already-applied schema
-operation; disk-full, I/O, corruption, syntax, constraint, and other failures
-abort and roll back the upgrade without advancing the version. Reopening then
-retries the same migration. Multi-statement migration 6 retains explicit
-statement boundaries so a historically partial upgrade can skip its existing
-column and still add the missing one. Migration 17 adds `jobs.stall_count`;
+Migrations (`persistence/sqliteMigration.ts`, `persistence/schema.ts`): on
+construct, storage first rejects a recorded version newer than
+`SCHEMA_VERSION = 37`, then creates the bookkeeping tables, reads
+`MAX(version)`, and idempotently ensures the complete base schema so partial
+historical databases remain upgradeable. Each pending schema version commits
+and receives its own marker before the next begins. Only exact
+duplicate-column/table/index/trigger errors are treated as an already-applied
+schema operation; disk-full, I/O, corruption, syntax, constraint, and other
+failures abort the current step without marking it complete. Reopening retries
+that version. Multi-statement migration 6
+retains explicit statement boundaries so a historically partial upgrade can
+skip its existing column and still add the missing one. Migration 17 adds
+`jobs.stall_count`;
 migrations 18–21 persist the four `StallConfig` fields; migration 22 adds the
 atomic MessagePack `queue_state.dlq_config` policy blob; migrations 23–26 add
 the four flow failure-policy flags; migration 27 creates `flow_failures`, and
@@ -398,9 +454,27 @@ participate in recovery, plus the outbox parent index. Migration 28 creates the
 the conservative `pinned` ownership bit. Migration 30 adds the MessagePack
 `jobs.dlq_retry_state` used to retain one bounded automatic-DLQ-retry generation
 while its job is waiting or active. Migrations 31–32 separate job names from
-user data, migration 33 creates the event/metrics journal tables, migration 34
-adds `jobs.extended_options` so repeat-chain and advanced job policies survive
-recovery, and migration 35 creates durable per-group override state.
+user data; their backfills use keyset checkpoints and transactions bounded to
+500 rows or 8 MiB of source payload, with one individually oversized row
+processed alone, and structured row/byte progress at least every five seconds.
+Migration start, progress, and completion records keep info severity but are
+written to stderr, so a long upgrade is visible without contaminating stdout.
+The cursor is committed with each batch, so interruption rolls forward by
+restarting the same or a newer binary. Migration 33 creates
+the event/metrics journal tables, migration 34 adds `jobs.extended_options` so
+repeat-chain and advanced job policies survive recovery, migrations 35–36 add
+durable per-group override/pause state, and migration 37 adds exact completed
+counts plus deterministic retention and recovery indexes. Listeners bind after migration
+and recovery; they do not serve a temporary HTTP 503 during this synchronous
+startup phase. Downgrade after any committed payload rewrite is unsupported;
+restore the pre-upgrade backup or roll forward.
+
+If any post-storage initialization step throws, manager initialization runs all
+registered cleanup in reverse order: events, workers, cron/timeout/interval
+owners, telemetry memory, and SQLite are stopped or closed before the original
+error is rethrown. Invalid manager configuration and structurally corrupt data
+therefore fail startup promptly instead of leaving the process alive behind an
+unbound listener.
 
 Close (`persistence/sqlite/lifecycle.ts`): stop the buffer timer, perform a
 final flush, run `PRAGMA wal_checkpoint(TRUNCATE)` to avoid stale WAL locks on
@@ -414,6 +488,12 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - `WriteBuffer.flushing` is a reentrancy guard: a concurrent `flush()` returns
   zero. The timer also skips while a backoff retry is pending
   (`persistence/writeBuffer.ts`).
+- Threshold additions, nested deferral exit, and lifecycle-triggered flushes
+  use the same backoff-aware gate. Only explicit administrative flushes such as
+  snapshot/shutdown attempts may bypass the scheduled delay. A successful
+  explicit flush cancels the obsolete retry timer so automatic flushing resumes
+  immediately; retry exhaustion and removal of the last buffered job clear it
+  for the same reason.
 - The double-buffer swap (`activeBuffer` ↔ `flushBuffer`) is the atomicity primitive: new `add()`s land in a fresh active buffer while the snapshot is written, so no job is written twice or missed across a flush boundary.
 - All mutations are wrapped in `safeWrite()` which toggles the disk-full flag and re-throws.
 
@@ -455,18 +535,55 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
   `pendingCount` remains non-zero after its flush attempt. This is expected
   during storage retry/backoff and prevents an incomplete S3 recovery point
   from being published.
-- **Memory bounds.** Recovery loads are paginated (default batch 10,000) to avoid memory spikes; active recovery drains offset zero because it mutates the scanned state, while non-mutating pending/completed loads advance stable pages. Completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
+- **Buffered reads are immediate and non-destructive.** `getBufferedJobs(queue)`
+  exposes both active and in-flight buffer ownership for that queue.
+  SQLite-backed queries resolve each pending ID through current `jobIndex`,
+  heap/wait/processing/completed membership, exclude any stale persisted copy,
+  then merge and paginate once. Completed buffer rows evicted from the bounded
+  hot cache remain reachable by ID and keep their queue registered. A read
+  never flushes the buffer.
+- **Memory bounds.** Recovery loads are paginated (default batch 10,000) to avoid memory spikes; active recovery drains offset zero because it mutates the scanned state, while non-mutating pending/completed loads advance stable pages. Pending dependency completion checks are scoped to each page. Completed-job recovery is capped at `maxCompletedJobs`. Retained critical-loss records are capped at 100.
 - **Removed-completion bounds.** SQLite and the in-memory tracker retain at
   most `maxCompletedJobs` unpinned recent proofs. Proofs referenced by live
   `waitingDeps` edges remain pinned outside that FIFO cap until the final
   consumer is durably promoted or removed; interrupted unpins are reconciled
   on recovery. Rows contain no payload/result and remain invisible to normal
   job queries.
-- **Eviction is not durable deletion.**
+- **Hot-cache eviction is not durable deletion.**
   `test/repro-retention-boundary-invariants.test.ts` runs with
   `maxCompletedJobs=3` and `maxJobResults=2`, completes twelve durable jobs,
   then verifies before and after restart that all states, payloads, and results
   still resolve through SQLite while the hot collections remain capped.
+  Durable deletion is instead explicit through SQLite-authoritative
+  `clean('completed')` or opt-in `completedRetentionMs` cleanup. Both scan
+  oldest-first with `(completed_at/created_at,id)` keyset ordering and protect
+  results still owned by live dependency consumers. The in-memory fallback
+  compares Unicode code points in SQLite `BINARY` UTF-8 order for equal
+  timestamps rather than depending on JavaScript UTF-16 or the host locale.
+  Job/custom IDs containing isolated UTF-16 surrogates are rejected before
+  admission because Bun SQLite cannot round-trip such TEXT values losslessly.
+- **Generation-safe completed cleanup and queue destruction.** Each completed
+  deletion returns its persisted queue owner before in-memory convergence.
+  Result/log owner maps and the current `jobIndex` are checked before deleting
+  a projection, so cleanup or obliteration of an old row cannot erase a newer
+  same-ID job or DLQ generation in another queue. The owner maps share their
+  payload LRU eviction and therefore remain bounded. Completed cleanup also
+  preserves result/outbox rows whenever any same-ID DLQ generation survives,
+  including one in the cleaned queue. Cold custom-ID reuse asks
+  SQLite or the current write buffer for an evicted completed generation and
+  retires its pending row and stale result in the same admission boundary as
+  the successor.
+- **Cold completed retry.** Bulk retry reads at most 500 completed rows per
+  oldest-first `(retained timestamp,id)` keyset page, and a specific-ID retry
+  uses a primary-key SQLite lookup constrained by `state='completed'`. Completion
+  state, not nullable `completed_at`, is authoritative; legacy rows use
+  `created_at` for ordering. Each durable completed-to-waiting transition commits
+  before the waiting heap and indexes are published.
+- **Trigger-aware mutation counts.** Bun's SQLite `changes` result includes the
+  counter-table writes performed by completion triggers. Completed-to-waiting
+  retry therefore treats zero changes as not found instead of requiring exactly
+  one total change; the job update and old-result deletion remain one
+  transaction.
 
 ## Configuration
 
@@ -474,7 +591,17 @@ This module is not lock-coordinated with the shard locks documented in [Concurre
 - **PRAGMAs** (`schema.ts:6-14`, fixed at startup): `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000` (~64 MB), `temp_store=MEMORY`, `mmap_size=268435456` (256 MB), `page_size=4096`, `busy_timeout=5000`.
 - **WriteBuffer**: `writeBufferSize` (default 100 rows → force flush), `writeBufferFlushMs` (effective default 10 ms). Throughput/durability trade-off: buffered ≈ up to 10 ms of loss on process crash; `durable: true` bypasses that application buffer and commits before return at lower throughput. SQLite runs with `synchronous=NORMAL`, so power-loss durability still depends on the host, filesystem, and storage device.
 - **`onCriticalLoss`** callback for surfacing dropped jobs to ops tooling.
-- Indexes maintained by the schema: `idx_jobs_queue_state`, `idx_jobs_queue_created`, `idx_jobs_queue_state_created`, partial `idx_jobs_run_at WHERE state IN ('waiting','prioritized','waiting-children','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority` over the same four pending states, `idx_jobs_completed_order`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
+- **Completed retention:** `maxCompletedJobs` (default `50_000`) bounds only the
+  hot cache. `completedRetentionMs` defaults to `null`; when configured, each
+  10-second cleanup tick deletes at most 1,000 eligible SQLite rows. Completed
+  queue counts are queried by primary key in batches of at most 500 names for
+  stats and empty-queue reconciliation; database errors fail the cleanup pass
+  instead of being interpreted as zero completions. Deleted pages return to
+  SQLite's freelist for reuse, so steady workloads stop extending the file once
+  that space is reused; SQLite does not automatically shrink an already large
+  database file. Reclaiming existing filesystem space requires an operator-run
+  `VACUUM` during a maintenance window with enough temporary free space.
+- Indexes maintained by the schema: `idx_jobs_queue_state`, `idx_jobs_queue_created`, `idx_jobs_queue_state_created`, partial `idx_jobs_run_at WHERE state IN ('waiting','prioritized','waiting-children','delayed')`, `idx_jobs_unique`, `idx_jobs_custom_id`, `idx_jobs_parent`, `idx_jobs_state_started`, `idx_jobs_group_id`, `idx_jobs_pending_priority` over the same four pending states, `idx_jobs_completed_order` on `(completed_at DESC, id DESC)`, queue-scoped `idx_jobs_completed_retention`, global `idx_jobs_completed_retention_global`, and `dlq` indexes on `queue`/`job_id`/`entered_at`.
 
 ## Related Docs
 

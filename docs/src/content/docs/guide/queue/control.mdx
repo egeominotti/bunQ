@@ -256,6 +256,14 @@ queue.retry_job("job-id")?;
 
 *Bulk `retryJobs`, `retryCompleted`, and counted `promoteJobs` are available in TypeScript and Python; PHP, Go, and Rust act per job (`promote`, `retryJob`); Elixir exposes an uncounted bulk `promote_jobs/1`.*
 
+For SQLite queues, completed cleanup queries the database rather than only the
+bounded in-memory cache. It removes the oldest eligible rows first with `id` as
+a deterministic tie-breaker, so repeated calls page through all retained
+history even when it exceeds `maxCompletedJobs`. The job, result, and related
+flow-failure rows are deleted in one transaction; the returned IDs are exactly
+the committed deletions. A completed dependency whose result is still needed
+by a live consumer is skipped until that consumer is removed or resolved.
+
 Retrying a completed job starts a new waiting execution. Its previous
 `returnvalue`, progress/message, `processedOn`, and `finishedOn` are cleared;
 attempts restart at zero, while the diagnostic stacktrace and timeline history

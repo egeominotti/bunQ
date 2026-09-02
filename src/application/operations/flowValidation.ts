@@ -1,6 +1,6 @@
 import type { AtomicFlowBatchInput } from '../../domain/types/flow';
 import { validateGroupId, validateGroupPriority } from '../../domain/types/group';
-import { normalizeJobPayload, type JobInput } from '../../domain/types/job';
+import { isWellFormedJobId, normalizeJobPayload, type JobInput } from '../../domain/types/job';
 import { validateFlowTopology } from './flowTopologyValidation';
 
 const MAX_FLOW_JOBS = 10_000;
@@ -124,7 +124,10 @@ function validateIdList(value: unknown, name: string): void {
   if (
     value !== undefined &&
     (!Array.isArray(value) ||
-      value.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 1_024))
+      value.some(
+        (id) =>
+          typeof id !== 'string' || id.length === 0 || id.length > 1_024 || !isWellFormedJobId(id)
+      ))
   ) {
     throw new Error(`${name} must be an array of valid string job ids`);
   }
@@ -146,7 +149,9 @@ export function validateAtomicFlowBatch(batch: AtomicFlowBatchInput): void {
     if (!job || typeof job !== 'object') throw new Error(`flow jobs[${index}] must be an object`);
     if (typeof job.id !== 'string') throw new Error('flow job id must be a string');
     const id = job.id;
-    if (!id || id.length > 1_024) throw new Error('flow job id is invalid');
+    if (!id || id.length > 1_024 || !isWellFormedJobId(id)) {
+      throw new Error('flow job id is invalid or is not well-formed Unicode');
+    }
     if (id.includes(':')) throw new Error('flow job id cannot contain a colon');
     if (ids.has(id)) throw new Error(`duplicate flow job id: ${id}`);
     ids.add(id);
@@ -169,7 +174,9 @@ export function validateAtomicFlowBatch(batch: AtomicFlowBatchInput): void {
     }
     if (
       job.input.parentId !== undefined &&
-      (typeof job.input.parentId !== 'string' || job.input.parentId.length === 0)
+      (typeof job.input.parentId !== 'string' ||
+        job.input.parentId.length === 0 ||
+        !isWellFormedJobId(job.input.parentId))
     ) {
       throw new Error(`flow parent id is invalid: ${id}`);
     }

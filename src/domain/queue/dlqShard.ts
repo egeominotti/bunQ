@@ -21,6 +21,25 @@ export interface DlqStatsCallback {
   onEvict?(entry: DlqEntry): void;
 }
 
+function isDefaultDlqConfig(config: DlqConfig): boolean {
+  return (
+    config.autoRetry === DEFAULT_DLQ_CONFIG.autoRetry &&
+    config.autoRetryInterval === DEFAULT_DLQ_CONFIG.autoRetryInterval &&
+    config.maxAutoRetries === DEFAULT_DLQ_CONFIG.maxAutoRetries &&
+    config.maxAge === DEFAULT_DLQ_CONFIG.maxAge &&
+    config.maxEntries === DEFAULT_DLQ_CONFIG.maxEntries
+  );
+}
+
+function isDefaultStallConfig(config: StallConfig): boolean {
+  return (
+    config.enabled === DEFAULT_STALL_CONFIG.enabled &&
+    config.stallInterval === DEFAULT_STALL_CONFIG.stallInterval &&
+    config.maxStalls === DEFAULT_STALL_CONFIG.maxStalls &&
+    config.gracePeriod === DEFAULT_STALL_CONFIG.gracePeriod
+  );
+}
+
 /**
  * Manages Dead Letter Queue operations for a shard
  */
@@ -235,6 +254,18 @@ export class DlqShard {
   /** Get all queue names with DLQ entries */
   getQueueNames(): string[] {
     return Array.from(this.dlq.keys());
+  }
+
+  /** Get queue names with persisted DLQ or stall policy. */
+  getConfiguredQueueNames(): string[] {
+    const configured = new Set<string>();
+    for (const [queue, config] of this.dlqConfig) {
+      if (!isDefaultDlqConfig(config)) configured.add(queue);
+    }
+    for (const [queue, config] of this.stallConfig) {
+      if (!isDefaultStallConfig(config)) configured.add(queue);
+    }
+    return Array.from(configured);
   }
 
   /** Delete queue data */

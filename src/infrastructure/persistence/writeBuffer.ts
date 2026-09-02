@@ -1,12 +1,19 @@
-import type { Job } from '../../domain/types/job';
+import type { Job, JobId } from '../../domain/types/job';
 import type { BatchInsertManager } from './batchInsert';
 import type {
   BatchInsertResult,
   CriticalErrorCallback,
   WriteBufferErrorCallback,
 } from './types/batch';
+import type { PersistedJobState } from './sqliteSerializer';
+import {
+  findPendingJob,
+  listPendingJobs,
+  removePendingJob,
+  removePendingQueue,
+  setPendingJobState,
+} from './writeBufferPending';
 
-/** Double-buffered job insert queue with bounded exponential retry. */
 export class WriteBuffer {
   private activeBuffer: Job[] = [];
   private flushBuffer: Job[] = [];
@@ -24,6 +31,7 @@ export class WriteBuffer {
   private readonly maxRetries = 10;
   private lastError: Error | null = null;
   private backoffTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoFlushDeferrals = 0;
 
   constructor(
     batchManager: BatchInsertManager,
@@ -38,22 +46,60 @@ export class WriteBuffer {
     this.onCriticalError = onCriticalError;
     this.timer = setInterval(() => {
       if (this.stopped || this.backoffTimer) return;
-      try {
-        this.flush();
-      } catch {
-        // Error already handled by flush.
-      }
+      this.flushBestEffort();
     }, flushIntervalMs);
   }
 
   add(job: Job): void {
     this.activeBuffer.push(job);
-    if (this.activeBuffer.length >= this.bufferSize) this.flush();
+    if (this.autoFlushDeferrals === 0 && this.activeBuffer.length >= this.bufferSize) {
+      this.flushIfReady();
+    }
   }
 
   addBatch(jobs: Job[]): void {
     for (const job of jobs) this.activeBuffer.push(job);
-    if (this.activeBuffer.length >= this.bufferSize) this.flush();
+    if (this.autoFlushDeferrals === 0 && this.activeBuffer.length >= this.bufferSize) {
+      this.flushIfReady();
+    }
+  }
+
+  withDeferredAutoFlush<T>(operation: () => T): T {
+    this.autoFlushDeferrals++;
+    let result: T | undefined;
+    let operationFailed = false;
+    let operationError: unknown;
+    try {
+      result = operation();
+    } catch (error) {
+      operationFailed = true;
+      operationError = error;
+    } finally {
+      this.autoFlushDeferrals--;
+    }
+    let flushFailed = false;
+    let flushError: unknown;
+    if (
+      this.autoFlushDeferrals === 0 &&
+      !this.stopped &&
+      this.activeBuffer.length >= this.bufferSize
+    ) {
+      try {
+        this.flushIfReady();
+      } catch (error) {
+        flushFailed = true;
+        flushError = error;
+      }
+    }
+    if (operationFailed && flushFailed) {
+      throw new AggregateError(
+        [operationError, flushError],
+        'Batch admission and buffer flush failed'
+      );
+    }
+    if (operationFailed) throw operationError;
+    if (flushFailed) throw flushError;
+    return result as T;
   }
 
   flush(): number {
@@ -95,6 +141,7 @@ export class WriteBuffer {
         if (this.retryCount >= this.maxRetries) {
           const lostJobs = [...this.activeBuffer];
           this.activeBuffer = [];
+          this.clearBackoffRetry();
           if (this.onCriticalError) {
             this.onCriticalError(lostJobs, flushError, this.retryCount);
           }
@@ -103,9 +150,7 @@ export class WriteBuffer {
             nextBackoffMs: 0,
             maxRetries: this.maxRetries,
           });
-          this.retryCount = 0;
-          this.currentBackoffMs = this.initialBackoffMs;
-          this.lastError = null;
+          this.resetRetryState();
         } else {
           const nextBackoffMs = Math.min(this.currentBackoffMs * 2, this.maxBackoffMs);
           this.onError(flushError, transient.length, {
@@ -118,86 +163,84 @@ export class WriteBuffer {
         return jobCount - transient.length - conflicts.length;
       }
 
-      this.retryCount = 0;
-      this.currentBackoffMs = this.initialBackoffMs;
-      this.lastError = null;
+      this.resetRetryState();
       return jobCount - conflicts.length;
     } finally {
       this.flushing = false;
     }
   }
 
+  flushIfReady(): number {
+    return this.backoffTimer ? 0 : this.flush();
+  }
+
   private scheduleBackoffRetry(): void {
-    if (this.backoffTimer) clearTimeout(this.backoffTimer);
+    this.clearBackoffRetry();
     this.currentBackoffMs = Math.min(this.currentBackoffMs * 2, this.maxBackoffMs);
     this.backoffTimer = setTimeout(() => {
       this.backoffTimer = null;
-      try {
-        this.flush();
-      } catch {
-        // Error already handled by flush.
-      }
+      this.flushBestEffort();
     }, this.currentBackoffMs);
   }
 
   get pendingCount(): number {
     return this.activeBuffer.length + this.flushBuffer.length;
   }
-
   removePending(jobId: string): void {
-    this.activeBuffer = this.activeBuffer.filter((job) => job.id !== jobId);
-    this.flushBuffer = this.flushBuffer.filter((job) => job.id !== jobId);
+    [this.activeBuffer, this.flushBuffer] = removePendingJob(
+      [this.activeBuffer, this.flushBuffer],
+      jobId as JobId
+    );
+    if (this.pendingCount === 0) this.resetRetryState();
+  }
+  removePendingForQueue(queue: string): JobId[] {
+    const result = removePendingQueue([this.activeBuffer, this.flushBuffer], queue);
+    [this.activeBuffer, this.flushBuffer] = result.buffers;
+    if (this.pendingCount === 0) this.resetRetryState();
+    return result.removed;
+  }
+  hasPending(jobId: string): boolean {
+    return this.getPendingJob(jobId as JobId) !== null;
   }
 
-  hasPending(jobId: string): boolean {
-    for (const job of this.activeBuffer) if (job.id === jobId) return true;
-    for (const job of this.flushBuffer) if (job.id === jobId) return true;
-    return false;
+  getPendingJob(jobId: JobId): Job | null {
+    return findPendingJob([this.activeBuffer, this.flushBuffer], jobId);
+  }
+
+  setPendingState(jobId: JobId, state: PersistedJobState): boolean {
+    return setPendingJobState([this.activeBuffer, this.flushBuffer], jobId, state);
+  }
+
+  getPendingJobs(queue?: string): Job[] {
+    return listPendingJobs([this.activeBuffer, this.flushBuffer], queue);
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
     if (this.pendingCount > 0) {
-      try {
-        this.flush();
-      } catch {
-        // Remaining jobs are reported below.
-      }
+      this.flushBestEffort();
     }
     this.stopped = true;
-    if (this.backoffTimer) {
-      clearTimeout(this.backoffTimer);
-      this.backoffTimer = null;
-    }
+    this.clearBackoffRetry();
     this.reportLostJobs();
   }
 
   async stopGracefully(timeoutMs = 5000): Promise<number> {
-    if (this.backoffTimer) {
-      clearTimeout(this.backoffTimer);
-      this.backoffTimer = null;
-    }
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-
+    this.clearBackoffRetry();
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
     const pending = this.pendingCount;
     if (pending === 0) {
       this.stopped = true;
       return 0;
     }
-
     return new Promise<number>((resolve) => {
       const timeout = setTimeout(() => {
         this.stopped = true;
         this.reportLostJobs();
         resolve(-1);
       }, timeoutMs);
-
       try {
         const flushed = this.flush();
         clearTimeout(timeout);
@@ -205,16 +248,33 @@ export class WriteBuffer {
         if (this.pendingCount > 0) this.reportLostJobs();
         resolve(flushed);
       } catch {
-        if (this.backoffTimer) {
-          clearTimeout(this.backoffTimer);
-          this.backoffTimer = null;
-        }
+        this.clearBackoffRetry();
         clearTimeout(timeout);
         this.stopped = true;
         this.reportLostJobs();
         resolve(0);
       }
     });
+  }
+
+  private clearBackoffRetry(): void {
+    if (this.backoffTimer) clearTimeout(this.backoffTimer);
+    this.backoffTimer = null;
+  }
+
+  private resetRetryState(): void {
+    this.clearBackoffRetry();
+    this.retryCount = 0;
+    this.currentBackoffMs = this.initialBackoffMs;
+    this.lastError = null;
+  }
+
+  private flushBestEffort(): void {
+    try {
+      this.flush();
+    } catch {
+      // Flush callbacks already receive persistence failures.
+    }
   }
 
   private reportLostJobs(): void {

@@ -1,4 +1,9 @@
 import { DEPENDENCY_COMPLETION_SCHEMA } from './dependencyCompletionSchema';
+import {
+  COMPLETED_JOB_COUNTS_TABLE,
+  COMPLETED_JOB_COUNT_TRIGGERS,
+  COMPLETED_JOB_RETENTION_INDEX,
+} from './completedJobCountSchema';
 /** SQLite PRAGMA settings for optimal performance */
 export const PRAGMA_SETTINGS = `
 PRAGMA journal_mode = WAL;
@@ -120,7 +125,11 @@ CREATE INDEX IF NOT EXISTS idx_jobs_pending_priority
 
 -- Completed jobs: index for recovery ordering (issue #84)
 CREATE INDEX IF NOT EXISTS idx_jobs_completed_order
-    ON jobs(completed_at DESC) WHERE state = 'completed';
+    ON jobs(completed_at DESC, id DESC) WHERE state = 'completed';
+${COMPLETED_JOB_RETENTION_INDEX}
+
+${COMPLETED_JOB_COUNTS_TABLE}
+${COMPLETED_JOB_COUNT_TRIGGERS}
 
 -- Cron jobs (BLOB for MessagePack)
 CREATE TABLE IF NOT EXISTS cron_jobs (
@@ -211,4 +220,4 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 `;
 /** Current schema version */
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;

@@ -78,9 +78,9 @@ export class LimiterManager {
    * acquire path and from limit reads, so no timer is needed and an expired
    * limit can never throttle a pull.
    */
-  expireRateLimitIfNeeded(queue: string): void {
+  expireRateLimitIfNeeded(queue: string, now = Date.now()): void {
     const expiresAt = this.queueState.get(queue)?.rateLimitExpiresAt;
-    if (expiresAt !== null && expiresAt !== undefined && Date.now() >= expiresAt) {
+    if (expiresAt !== null && expiresAt !== undefined && now >= expiresAt) {
       this.clearRateLimit(queue);
     }
   }
@@ -159,6 +159,18 @@ export class LimiterManager {
   /** Get all queue names with state */
   getQueueNames(): string[] {
     return Array.from(this.queueState.keys());
+  }
+
+  /** Get queues whose state contains an explicit policy rather than read-created defaults. */
+  getConfiguredQueueNames(now = Date.now()): string[] {
+    const configured: string[] = [];
+    for (const [queue, state] of this.queueState) {
+      this.expireRateLimitIfNeeded(queue, now);
+      if (state.paused || state.rateLimit !== null || state.concurrencyLimit !== null) {
+        configured.push(queue);
+      }
+    }
+    return configured;
   }
 
   /** Delete queue data */

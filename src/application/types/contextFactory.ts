@@ -33,13 +33,16 @@ export interface ContextDependencies {
   retiredCronLeaseTokens: BoundedMap<JobId, string>;
   timeoutScheduler: JobTimeoutScheduler;
   jobResults: LRUMap<JobId, unknown>;
+  jobResultQueues: Map<JobId, string>;
   dependencyResults: DependencyResultTracker;
   customIdMap: LRUMap<string, JobId>;
   jobLogs: LRUMap<JobId, JobLogEntry[]>;
+  jobLogQueues: Map<JobId, string>;
   jobLocks: Map<JobId, JobLock>;
   clientJobs: Map<string, Set<JobId>>;
   stalledCandidates: Set<JobId>;
   pendingDepChecks: Set<JobId>;
+  pendingQueueAdmissions: Map<string, number>;
   queueNamesCache: Set<string>;
   repeatChain: Map<JobId, JobId>;
   eventsManager: EventsManager;
@@ -61,6 +64,7 @@ export interface ContextCallbacks {
   fail: (jobId: JobId, error?: string, failureReason?: FailureReason) => Promise<void>;
   registerQueueName: (queue: string) => void;
   unregisterQueueName: (queue: string) => void;
+  onQueueAdmissionsDrained: (queue: string) => void;
   onJobCompleted: (completedId: JobId) => void;
   onJobFailed?: (failedId: JobId) => void;
   onJobsCompleted: (completedIds: JobId[]) => void;

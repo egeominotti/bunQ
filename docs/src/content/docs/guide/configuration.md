@@ -112,9 +112,25 @@ defineConfig({
   storage: {
     driver: 'sqlite', // 'memory' | 'sqlite' | 'postgres'
     dataPath: './data/queue.db', // required for explicit SQLite
+    maxCompletedJobs: 50_000, // completed-job hot cache/recovery window
+    completedRetentionMs: 7 * 24 * 60 * 60 * 1000, // optional durable retention
   },
 });
 ```
+
+`maxCompletedJobs` bounds the in-memory completed-job projection; it does not
+delete SQLite rows. Set `completedRetentionMs` to opt into age-based durable
+cleanup (up to 1,000 oldest eligible rows per 10-second cleanup tick). The
+default is `null`, so completed rows remain until `queue.clean(...)`,
+`obliterate`, or another explicit policy removes them. Results still needed by
+live dependency consumers are protected until the consumer leaves the graph.
+Finite non-negative values are rounded down to whole milliseconds. Negative,
+non-finite, and unsafe integer values disable automatic retention (`null`) in
+both server configuration and direct embedded `QueueManager` construction.
+
+The server CLI equivalents are `--max-completed-jobs` and
+`--completed-retention-ms`; environment equivalents are documented in the
+[environment reference](/guide/env-vars/).
 
 Without `driver`, a PostgreSQL URL selects PostgreSQL, a data path selects
 SQLite, and neither selects in-memory storage. PostgreSQL configuration:

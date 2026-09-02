@@ -5,6 +5,7 @@
 
 import { hostname } from 'os';
 import type { BunqueueConfig } from './types';
+import { normalizeCompletedRetentionMs } from '../application/types/config';
 import type { CloudConfig } from '../infrastructure/cloud/types';
 import type { S3BackupConfig } from '../infrastructure/backup/s3BackupConfig';
 import { DEFAULTS as S3_DEFAULTS } from '../infrastructure/backup/s3BackupConfig';
@@ -34,6 +35,8 @@ export interface ResolvedConfig {
   postgresMaxQueuedOperations: number;
   postgresMaxSnapshotJobs: number;
   postgresMaxSnapshotPayloadBytes: number;
+  maxCompletedJobs: number;
+  completedRetentionMs: number | null;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
   maxPrometheusQueues: number;
@@ -61,6 +64,13 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
       : fc?.storage?.dataPath
         ? 'sqlite'
         : resolveStorageDriver(Bun.env.BUNQUEUE_STORAGE_DRIVER, postgresUrl, dataPath);
+  const configuredRetention = fc?.storage?.completedRetentionMs;
+  const retentionValue =
+    configuredRetention !== undefined
+      ? configuredRetention
+      : parseOptionalInteger(
+          Bun.env.BUNQUEUE_COMPLETED_RETENTION_MS ?? Bun.env.COMPLETED_RETENTION_MS
+        );
   return {
     tcpPort: fc?.server?.tcpPort ?? parseInt(Bun.env.TCP_PORT ?? '6789', 10),
     httpPort: fc?.server?.httpPort ?? parseInt(Bun.env.HTTP_PORT ?? '6790', 10),
@@ -124,6 +134,12 @@ export function resolveServerConfig(fileConfig: BunqueueConfig | null): Resolved
         parseInt(Bun.env.BUNQUEUE_POSTGRES_MAX_SNAPSHOT_PAYLOAD_BYTES ?? '268435456', 10),
       256 * 1024 * 1024
     ),
+    maxCompletedJobs: positiveInteger(
+      fc?.storage?.maxCompletedJobs ??
+        parseInt(Bun.env.BUNQUEUE_MAX_COMPLETED_JOBS ?? Bun.env.MAX_COMPLETED_JOBS ?? '50000', 10),
+      50_000
+    ),
+    completedRetentionMs: normalizeCompletedRetentionMs(retentionValue),
     corsOrigins: fc?.cors?.origins ?? Bun.env.CORS_ALLOW_ORIGIN?.split(',').filter(Boolean) ?? [],
     requireAuthForMetrics: fc?.auth?.requireAuthForMetrics ?? Bun.env.METRICS_AUTH === 'true',
     maxPrometheusQueues: nonNegativeInteger(
@@ -158,6 +174,11 @@ function nonNegativeInteger(value: number, fallback: number): number {
 
 function positiveInteger(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function parseOptionalInteger(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === '') return null;
+  return parseInt(value, 10);
 }
 
 /**

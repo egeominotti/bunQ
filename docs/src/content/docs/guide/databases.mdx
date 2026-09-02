@@ -12,8 +12,13 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <div class="bq-wrap bq-hero">
   <span class="bq-eyebrow">guide · storage</span>
-  <h1 class="bq-hero-h1 bq-bench-h1">One-file SQLite. PostgreSQL for <em>many brokers.</em></h1>
-  <p class="bq-hero-sub">Keep the zero-infrastructure SQLite engine for embedded and single-broker deployments, or opt into PostgreSQL 15–18 when several bunqueue servers must share one authoritative queue.</p>
+  <h1 class="bq-hero-h1 bq-bench-h1">
+    One-file SQLite. PostgreSQL for <em>many brokers.</em>
+  </h1>
+  <p class="bq-hero-sub">
+    Keep the zero-infrastructure SQLite engine for embedded and single-broker deployments, or opt
+    into PostgreSQL 15–18 when several bunqueue servers must share one authoritative queue.
+  </p>
 </div>
 
 The storage choice is explicit and deployment-specific. SQLite behavior has not
@@ -259,6 +264,46 @@ restored to an earlier point can legitimately replay jobs whose later ACK was
 not part of that recovery point, so processors must remain idempotent and use
 application-level deduplication for external effects.
 
+## SQLite retention and schema upgrades
+
+`maxCompletedJobs` is a hot-cache/recovery bound, not a database-retention
+policy. `queue.clean(..., 'completed')` is SQLite-authoritative and deletes the
+oldest eligible retained rows even after they leave that cache. For automatic
+retention, set `storage.completedRetentionMs`,
+`BUNQUEUE_COMPLETED_RETENTION_MS`, or `--completed-retention-ms`; it is disabled
+by default and removes at most 1,000 rows per cleanup tick. Live dependency
+consumers protect the completed rows and results they still require.
+Completed-only queues remain visible in queue listings while any durable row
+exists, including after restart; the cleanup tick unregisters the name after
+the last row is committed away. Invalid direct retention values cannot make
+that deletion immediate: negative, non-finite, and unsafe values disable the
+policy, while finite non-negative fractions are floored to milliseconds.
+
+Deleting retained rows makes their SQLite pages reusable, which bounds future
+growth for a steady workload, but it does not automatically shrink a database
+file that is already large. To return that existing free space to the
+filesystem, stop bunqueue and run SQLite `VACUUM` in a maintenance window. The
+operation rewrites the database, so provision enough temporary free disk space
+and take a backup first.
+
+SQLite schema upgrades run before TCP and HTTP listeners bind. Startup logs the
+source/target schema versions, database size, each migration step, periodic
+row/byte progress for legacy payload rewrites, completion duration, and a
+structured failure if a step cannot finish. The legacy name backfills commit
+at most 500 rows or 8 MiB of source payload per transaction (one larger row is
+processed alone) and checkpoint the cursor in the same commit. After
+interruption, restart with the same or a newer bunqueue version to continue
+from that checkpoint.
+
+Do not downgrade an in-place, partially or fully migrated database: once a
+payload-rewrite batch commits, an older binary may no longer understand those
+rows. Roll forward, or restore the pre-upgrade backup together with the old
+binary. A database whose recorded schema is newer than the running binary is
+rejected before startup configuration can mutate it. Because listeners bind
+only after migration and recovery, this process does not serve HTTP 503 during
+the upgrade; use process logs and your supervisor's readiness state until the
+server starts listening.
+
 The rest of this page covers hosts where the disk does not survive restarts.
 
 ## Deploying without a durable local disk
@@ -397,28 +442,28 @@ Clients exist for Node.js, Deno, Python, PHP, Go, Rust, Elixir, and Cloudflare W
 
 ### Choosing
 
-| Your situation                                       | Use                           |
-| ---------------------------------------------------- | ----------------------------- |
-| Container with an attachable disk                    | Persistent volume (Option 1)  |
-| Intermittent uplink plus a persistent local volume   | Store-and-forward (Option 2)  |
-| Scale-to-zero instance with no durable local disk    | Direct central server (Option 3) |
-| Many stateless workers, one durable host             | Central TCP server (Option 3) |
-| Multiple active bunqueue brokers sharing state       | PostgreSQL 15–18 backend      |
+| Your situation                                     | Use                              |
+| -------------------------------------------------- | -------------------------------- |
+| Container with an attachable disk                  | Persistent volume (Option 1)     |
+| Intermittent uplink plus a persistent local volume | Store-and-forward (Option 2)     |
+| Scale-to-zero instance with no durable local disk  | Direct central server (Option 3) |
+| Many stateless workers, one durable host           | Central TCP server (Option 3)    |
+| Multiple active bunqueue brokers sharing state     | PostgreSQL 15–18 backend         |
 
 ## Guarantees and boundaries
 
-| Capability                       | Memory / SQLite                             | PostgreSQL 15–18          |
-| -------------------------------- | ------------------------------------------- | ------------------------- |
-| Embedded mode                    | Yes                                         | No                        |
-| Standalone server                | Yes                                         | Yes                       |
-| Active brokers sharing one queue | One                                         | Multiple                  |
-| Authority                        | Process memory + optional SQLite durability | PostgreSQL transactions   |
-| Claim coordination               | In-process locks                            | Row locks + `SKIP LOCKED` |
-| Lease clock                      | Broker process                              | PostgreSQL                |
+| Capability                       | Memory / SQLite                             | PostgreSQL 15–18             |
+| -------------------------------- | ------------------------------------------- | ---------------------------- |
+| Embedded mode                    | Yes                                         | No                           |
+| Standalone server                | Yes                                         | Yes                          |
+| Active brokers sharing one queue | One                                         | Multiple                     |
+| Authority                        | Process memory + optional SQLite durability | PostgreSQL transactions      |
+| Claim coordination               | In-process locks                            | Row locks + `SKIP LOCKED`    |
+| Lease clock                      | Broker process                              | PostgreSQL                   |
 | Job-group ordering and capacity  | In-process; SQLite persists config/order    | Transactional across brokers |
-| Group pause/manual deadline      | Pause persists; live deadline is in memory  | Both persist in PostgreSQL |
-| Built-in S3 snapshots            | SQLite only                                 | No; use database backups  |
-| MySQL compatibility              | No                                          | No                        |
+| Group pause/manual deadline      | Pause persists; live deadline is in memory  | Both persist in PostgreSQL   |
+| Built-in S3 snapshots            | SQLite only                                 | No; use database backups     |
+| MySQL compatibility              | No                                          | No                           |
 
 The existing SQLite performance figures apply only to SQLite. PostgreSQL
 functional validation is not a benchmark, and its throughput depends on network,

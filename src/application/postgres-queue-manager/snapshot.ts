@@ -183,7 +183,11 @@ export class PostgresQueueSnapshot {
     const locations = new Map<JobId, JobLocation>();
     for (const [id, row] of this.jobs) {
       if (row.state === 'active') {
-        locations.set(id, { type: 'processing', shardIdx: processingShardIndex(id) });
+        locations.set(id, {
+          type: 'processing',
+          shardIdx: processingShardIndex(id),
+          queueName: row.job.queue,
+        });
       } else if (row.state === 'completed') {
         locations.set(id, { type: 'completed', queueName: row.job.queue });
       } else if (row.state === 'failed') {

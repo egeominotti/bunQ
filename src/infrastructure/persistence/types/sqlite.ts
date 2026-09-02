@@ -1,4 +1,16 @@
-import type { Job } from '../../../domain/types/job';
+import type { Job, JobId, JobTimelineEntry } from '../../../domain/types/job';
+
+export interface ActiveJobWrite {
+  jobId: JobId;
+  startedAt: number;
+  timeline?: JobTimelineEntry[];
+}
+
+export interface CompletedJobWrite {
+  jobId: JobId;
+  completedAt: number;
+  timeline?: JobTimelineEntry[];
+}
 
 export type SqliteCriticalLossCallback = (jobs: Job[], lastError: Error, attempts: number) => void;
 

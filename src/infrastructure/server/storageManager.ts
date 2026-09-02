@@ -18,6 +18,8 @@ function localAdapter(driver: 'memory' | 'sqlite'): ServerStorageAdapter {
       Promise.resolve(
         new QueueManager({
           ...(driver === 'sqlite' && { dataPath: config.dataPath }),
+          maxCompletedJobs: config.maxCompletedJobs,
+          completedRetentionMs: config.completedRetentionMs,
           maxPrometheusQueues: config.maxPrometheusQueues,
         })
       ),
@@ -47,6 +49,7 @@ const postgresAdapter: ServerStorageAdapter = {
     if (!config.postgresUrl) throw new Error('PostgreSQL storage URL is missing');
     const manager = new PostgresQueueManager({
       maxPrometheusQueues: config.maxPrometheusQueues,
+      maxCompletedJobs: config.maxCompletedJobs,
       postgres: {
         url: config.postgresUrl,
         namespace: config.postgresNamespace,

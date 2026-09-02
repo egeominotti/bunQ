@@ -49,7 +49,9 @@ export class QueueManagerConfiguration extends QueueManagerLimits {
   }
 
   setStallConfig(queue: string, config: Record<string, unknown>): void {
-    this.shards[shardIndex(queue)].setStallConfig(queue, config);
+    const shard = this.shards[shardIndex(queue)];
+    shard.setStallConfig(queue, config);
+    if (shard.getConfiguredQueueNames().includes(queue)) this.registerQueueName(queue);
     this.persistQueueState(queue);
   }
 
@@ -58,7 +60,9 @@ export class QueueManagerConfiguration extends QueueManagerLimits {
   }
 
   setDlqConfig(queue: string, config: Record<string, unknown>): void {
-    this.shards[shardIndex(queue)].setDlqConfig(queue, config);
+    const shard = this.shards[shardIndex(queue)];
+    shard.setDlqConfig(queue, config);
+    if (shard.getConfiguredQueueNames().includes(queue)) this.registerQueueName(queue);
     this.persistQueueState(queue);
   }
 

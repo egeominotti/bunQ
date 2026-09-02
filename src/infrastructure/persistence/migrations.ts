@@ -1,4 +1,5 @@
 import { DEPENDENCY_COMPLETION_SCHEMA } from './dependencyCompletionSchema';
+import { COMPLETED_JOB_MAINTENANCE_MIGRATION } from './completedJobCountSchema';
 import { SCHEMA } from './schema';
 
 export type MigrationSql = string | readonly string[];
@@ -133,4 +134,6 @@ CREATE TABLE IF NOT EXISTS group_state (
 `,
   // Persist per-group pause state.
   36: 'ALTER TABLE group_state ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;',
+  // Make completed cleanup and current retained counts SQLite-authoritative.
+  37: COMPLETED_JOB_MAINTENANCE_MIGRATION,
 };

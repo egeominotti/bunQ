@@ -9,6 +9,7 @@ import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import type { MapLike, SetLike } from '../../shared/lru';
 import { shardIndex, SHARD_COUNT } from '../../shared/hash';
 import type { DependencyResultTracker } from '../dependencyResultTracker';
+import { cleanCompletedJobs } from '../completedCleanup';
 
 /** Context for queue control operations */
 export interface QueueControlContext {
@@ -18,7 +19,9 @@ export interface QueueControlContext {
   completedJobs?: SetLike<JobId>;
   completedJobsData?: MapLike<JobId, Job>;
   jobResults?: MapLike<JobId, unknown>;
+  jobResultQueues?: Map<JobId, string>;
   jobLogs?: MapLike<JobId, unknown>;
+  jobLogQueues?: Map<JobId, string>;
   dependencyResults: DependencyResultTracker;
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
@@ -133,25 +136,11 @@ function cleanCompleted(
 ): JobId[] {
   if (!ctx.completedJobs || !ctx.completedJobsData) return [];
   const threshold = Date.now() - graceMs;
-  const toRemove: JobId[] = [];
-  for (const [jid, loc] of ctx.jobIndex) {
-    if (loc.type !== 'completed' || loc.queueName !== queue) continue;
-    const job = ctx.completedJobsData.get(jid) ?? ctx.storage?.getJob(jid) ?? null;
-    const ts = job?.completedAt ?? job?.createdAt ?? 0;
-    if (ts && ts > threshold) continue;
-    toRemove.push(jid);
-    if (toRemove.length >= maxJobs) break;
-  }
-  for (const jid of toRemove) {
-    ctx.completedJobs.delete(jid);
-    ctx.completedJobsData.delete(jid);
-    ctx.jobResults?.delete(jid);
-    ctx.jobLogs?.delete(jid);
-    ctx.jobIndex.delete(jid);
-    ctx.dependencyResults.releaseConsumer(jid);
-    safeDeleteJob(ctx, jid);
-  }
-  return toRemove;
+  return cleanCompletedJobs(queue, threshold, maxJobs, {
+    ...ctx,
+    completedJobs: ctx.completedJobs,
+    completedJobsData: ctx.completedJobsData,
+  });
 }
 
 function cleanFailed(
@@ -176,7 +165,9 @@ function cleanFailed(
     ctx.jobIndex.delete(jid);
     ctx.dependencyResults.releaseConsumer(jid);
     ctx.jobResults?.delete(jid);
+    ctx.jobResultQueues?.delete(jid);
     ctx.jobLogs?.delete(jid);
+    ctx.jobLogQueues?.delete(jid);
     safeDeleteDlqEntry(ctx, jid);
     safeDeleteJob(ctx, jid);
   }
@@ -198,7 +189,9 @@ export function cleanQueue(
   state?: string,
   limit?: number
 ): JobId[] {
-  const maxJobs = limit ?? 1000;
+  const requestedLimit = limit ?? 1000;
+  const maxJobs = Number.isFinite(requestedLimit) ? Math.max(0, Math.trunc(requestedLimit)) : 0;
+  if (maxJobs === 0) return [];
   const normalized = normalizeCleanState(state);
 
   switch (normalized) {

@@ -13,7 +13,12 @@ import { type DlqConfig, DEFAULT_DLQ_CONFIG, FailureReason } from '../src/domain
 import { createJob, jobId, type Job, type JobId } from '../src/domain/types/job';
 import { DEFAULT_STALL_CONFIG } from '../src/domain/types/stall';
 import { processPendingDependencies } from '../src/application/dependencyProcessor';
-import { addJobLog, getJobLogs, clearJobLogs, type JobLogsContext } from '../src/application/jobLogsManager';
+import {
+  addJobLog,
+  getJobLogs,
+  clearJobLogs,
+  type JobLogsContext,
+} from '../src/application/jobLogsManager';
 import type { JobLocation } from '../src/domain/types/queue';
 import { Shard } from '../src/domain/queue/shard';
 import { RWLock } from '../src/shared/lock';
@@ -23,7 +28,11 @@ import { SHARD_COUNT } from '../src/shared/hash';
 // ============ Helpers ============
 
 /** Create a mock stats callback that tracks increment/decrement calls */
-function createMockStats(): DlqStatsCallback & { increments: number; decrements: number; decrementAmounts: number[] } {
+function createMockStats(): DlqStatsCallback & {
+  increments: number;
+  decrements: number;
+  decrementAmounts: number[];
+} {
   const mock = {
     increments: 0,
     decrements: 0,
@@ -799,7 +808,11 @@ describe('DependencyProcessor', () => {
 
     await processPendingDependencies(ctx);
 
-    const location = ctx.jobIndex.get(jid(2)) as { type: 'queue'; shardIdx: number; queueName: string };
+    const location = ctx.jobIndex.get(jid(2)) as {
+      type: 'queue';
+      shardIdx: number;
+      queueName: string;
+    };
     expect(location.type).toBe('queue');
     expect(location.shardIdx).toBe(0);
     expect(location.queueName).toBe('my-queue');
@@ -817,6 +830,7 @@ describe('JobLogsManager (direct)', () => {
     ctx = {
       jobIndex: new Map<JobId, JobLocation>(),
       jobLogs: new LRUMap<JobId, any>(1000),
+      jobLogQueues: new Map<JobId, string>(),
       maxLogsPerJob: 5,
     };
   });
@@ -840,6 +854,7 @@ describe('JobLogsManager (direct)', () => {
       expect(logs!.length).toBe(1);
       expect(logs![0].message).toBe('hello');
       expect(logs![0].level).toBe('info');
+      expect(ctx.jobLogQueues.get(jid(1))).toBe('test');
     });
 
     test('defaults to info level', () => {
@@ -922,7 +937,7 @@ describe('JobLogsManager (direct)', () => {
     });
 
     test('works with different job locations (processing, completed)', () => {
-      ctx.jobIndex.set(jid(1), { type: 'processing', shardIdx: 0 });
+      ctx.jobIndex.set(jid(1), { type: 'processing', shardIdx: 0, queueName: 'test' });
       expect(addJobLog(jid(1), 'processing log', ctx)).toBe(true);
 
       ctx.jobIndex.set(jid(2), { type: 'completed', queueName: 'test' });
@@ -969,6 +984,7 @@ describe('JobLogsManager (direct)', () => {
 
       clearJobLogs(jid(1), ctx);
       expect(getJobLogs(jid(1), ctx)).toEqual([]);
+      expect(ctx.jobLogQueues.has(jid(1))).toBe(false);
     });
 
     test('clears all logs when keepLogs is 0', () => {

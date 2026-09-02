@@ -10,7 +10,11 @@ function captureLog(fn: () => void): string {
   const logs: string[] = [];
   const origLog = console.log;
   console.log = (...args: unknown[]) => logs.push(args.join(' '));
-  try { fn(); } finally { console.log = origLog; }
+  try {
+    fn();
+  } finally {
+    console.log = origLog;
+  }
   return logs.join('\n');
 }
 
@@ -25,8 +29,14 @@ describe('CLI Extended', () => {
     test('should build AddWebhook command with all options', async () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
       const cmd = buildWebhookCommand([
-        'add', 'https://hooks.example.com/callback',
-        '-e', 'job.completed,job.failed', '-q', 'emails', '-s', 'my-secret-key',
+        'add',
+        'https://hooks.example.com/callback',
+        '-e',
+        'job.completed,job.failed',
+        '-q',
+        'emails',
+        '-s',
+        'my-secret-key',
       ]);
       expect(cmd.cmd).toBe('AddWebhook');
       expect(cmd.url).toBe('https://hooks.example.com/callback');
@@ -91,9 +101,9 @@ describe('CLI Extended', () => {
 
     test('should throw on invalid URL format', async () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
-      expect(() =>
-        buildWebhookCommand(['add', 'not-a-url', '-e', 'job.completed'])
-      ).toThrow('Invalid URL');
+      expect(() => buildWebhookCommand(['add', 'not-a-url', '-e', 'job.completed'])).toThrow(
+        'Invalid URL'
+      );
     });
 
     test('should throw on non-http protocol URL', async () => {
@@ -111,12 +121,12 @@ describe('CLI Extended', () => {
     test('should accept all valid event types', async () => {
       const { buildWebhookCommand } = await import('../src/cli/commands/webhook');
       const cmd = buildWebhookCommand([
-        'add', 'https://example.com/hook', '-e',
+        'add',
+        'https://example.com/hook',
+        '-e',
         'job.pushed,job.started,job.completed,job.failed',
       ]);
-      expect(cmd.events).toEqual([
-        'job.pushed', 'job.started', 'job.completed', 'job.failed',
-      ]);
+      expect(cmd.events).toEqual(['job.pushed', 'job.started', 'job.completed', 'job.failed']);
     });
   });
 
@@ -172,10 +182,20 @@ describe('CLI Extended', () => {
       const { printHelp } = await import('../src/cli/help');
       const output = captureLog(() => printHelp());
       for (const section of [
-        'USAGE:', 'SERVER MODE:', 'CORE COMMANDS:', 'JOB COMMANDS:',
-        'QUEUE COMMANDS:', 'DLQ COMMANDS:', 'CRON COMMANDS:', 'WORKER COMMANDS:',
-        'WEBHOOK COMMANDS:', 'MONITORING:', 'BACKUP (S3):', 'GLOBAL OPTIONS:',
-        'EXAMPLES:', 'RATE LIMITING:',
+        'USAGE:',
+        'SERVER MODE:',
+        'CORE COMMANDS:',
+        'JOB COMMANDS:',
+        'QUEUE COMMANDS:',
+        'DLQ COMMANDS:',
+        'CRON COMMANDS:',
+        'WORKER COMMANDS:',
+        'WEBHOOK COMMANDS:',
+        'MONITORING:',
+        'BACKUP (S3):',
+        'GLOBAL OPTIONS:',
+        'EXAMPLES:',
+        'RATE LIMITING:',
       ]) {
         expect(output).toContain(section);
       }
@@ -201,7 +221,15 @@ describe('CLI Extended', () => {
     test('printServerHelp output contains server options', async () => {
       const { printServerHelp } = await import('../src/cli/help');
       const output = captureLog(() => printServerHelp());
-      for (const opt of ['--tcp-port', '--http-port', '--host', '--data-path', '--auth-tokens']) {
+      for (const opt of [
+        '--tcp-port',
+        '--http-port',
+        '--host',
+        '--data-path',
+        '--auth-tokens',
+        '--max-completed-jobs',
+        '--completed-retention-ms',
+      ]) {
         expect(output).toContain(opt);
       }
     });
@@ -209,7 +237,14 @@ describe('CLI Extended', () => {
     test('printPushHelp output contains push options', async () => {
       const { printPushHelp } = await import('../src/cli/help');
       const output = captureLog(() => printPushHelp());
-      for (const opt of ['--priority', '--delay', '--max-attempts', '--unique-key', '--job-id', '--tags']) {
+      for (const opt of [
+        '--priority',
+        '--delay',
+        '--max-attempts',
+        '--unique-key',
+        '--job-id',
+        '--tags',
+      ]) {
         expect(output).toContain(opt);
       }
     });
@@ -217,7 +252,14 @@ describe('CLI Extended', () => {
     test('printCronAddHelp output contains cron options', async () => {
       const { printCronAddHelp } = await import('../src/cli/help');
       const output = captureLog(() => printCronAddHelp());
-      for (const opt of ['--queue', '--data', '--schedule', '--every', '--priority', '--max-limit']) {
+      for (const opt of [
+        '--queue',
+        '--data',
+        '--schedule',
+        '--every',
+        '--priority',
+        '--max-limit',
+      ]) {
         expect(output).toContain(opt);
       }
     });

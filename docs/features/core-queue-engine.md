@@ -124,7 +124,7 @@ See [data-model](../data-model.md) for full definitions. Most relevant here:
 
 - `JobLocation` (`src/domain/types/queue.ts`) — discriminated union stored in `jobIndex`:
   - `{ type: 'queue'; shardIdx: number; queueName: string }`
-  - `{ type: 'processing'; shardIdx: number }`
+  - `{ type: 'processing'; shardIdx: number; queueName: string }`
   - `{ type: 'completed'; queueName: string }`
   - `{ type: 'dlq'; queueName: string }`
 - `QueueState` (`src/domain/types/queue.ts:7-17`) — `{ name; paused; rateLimit; rateLimitDuration; rateLimitExpiresAt; concurrencyLimit; activeCount }`, per-queue control state held in the shard's `LimiterManager`.
@@ -142,12 +142,16 @@ See [data-model](../data-model.md) for full definitions. Most relevant here:
 3. Allocate `SHARD_COUNT` shards, each with its own `RWLock` for the waiting/delayed queue and a separate `RWLock` + `Map` for processing.
 4. Wire `CronScheduler` push/persist/worker-check callbacks; construct `WebhookManager`/`WorkerManager`/`EventsManager`.
 5. Build `ContextFactory` from `getContextDependencies()` + `getContextCallbacks()`.
-6. `bgTasks.recover(...)` reloads persisted jobs/queues; record `recoveryStats`; load crons; `startBackgroundTasks(...)`.
+6. `bgTasks.recover(...)` reloads persisted jobs/queues; record `recoveryStats`;
+   load crons; `startBackgroundTasks(...)`. Any exception after storage opens —
+   including configuration validation, recovery, cron restore, or partial
+   background startup — runs registered cleanup in reverse order, closes
+   storage/timers/services, and rethrows the original startup error.
 
 **Sharding:** `shardIndex(queue)` routes a queue name to a single shard; the
 waiting/delayed state for that queue lives only there
 (`queue-manager/state.ts`, `queue-manager/delivery.ts`). `processingShards` is
-indexed by the job's *location* (`loc.shardIdx`), captured when the job was
+indexed by the job's _location_ (`loc.shardIdx`), captured when the job was
 pulled — not re-derived from the queue name. `SHARD_COUNT` is computed once at
 module load as the next power of two ≥ `navigator.hardwareConcurrency`
 (fallback 4), capped at 64 (`shared/hash.ts`); `SHARD_MASK = SHARD_COUNT - 1`
@@ -158,6 +162,20 @@ capability class either builds the appropriate context through `ContextFactory`
 and calls a stateless operation, or owns one cohesive orchestration concern.
 Context contracts are isolated in `application/types/`, so operation modules do
 not close over the concrete manager.
+
+**Admission ownership:** `push`, `pushBatch`, and `pushFlow` reference-count
+every unique target queue in `pendingQueueAdmissions` before registration can
+invoke a callback or the operation can wait for a custom-ID/shard lock. All
+flow queues are counted before the first `queue:created` callback. A `finally`
+decrements each count after success, validation failure, lock timeout, or
+persistence failure, so concurrent operations on one queue cannot release each
+other's cleanup protection.
+
+For buffered `pushBatch`, threshold auto-flush is deferred across the complete
+synchronous admission loop and coalesced once when the outer scope exits. This
+prevents a large batch from fragmenting into repeated threshold flushes while a
+shard lock is held. Jobs still below the threshold remain buffer-owned but are
+merged into SQLite-backed queries immediately; querying does not force a flush.
 
 **ACK/FAIL with lock & recovery paths (`queue-manager/ack.ts`,
 `queue-manager/delivery.ts`):** If a token is supplied and `verifyLock` fails,
@@ -171,7 +189,10 @@ applies and a wrong or missing token still fails. Batch ACKs report exact
 positionally unambiguous. A requeued non-timeout stall generation can still use
 `completeStallRetriedJob` to prevent duplicate execution (Issue #33). The
 retired-generation check is repeated after the processing claim to close the
-validation-to-claim race.
+validation-to-claim race. ACK, ACKB, and FAIL also revalidate the queue-bearing
+processing location after extraction and before terminal publication; an
+obliterate that wins this gap cannot be followed by a resurrected completion,
+retry, or DLQ entry.
 
 **Dependency flush (`queue-manager/dependency-runtime.ts`):** On job completion,
 IDs accumulate in `pendingDepChecks`. `scheduleDependencyFlush` coalesces
@@ -179,12 +200,20 @@ multiple completions in a tick via `queueMicrotask`; `runDependencyFlush` loops
 `processPendingDependencies` until the set drains, with a reentrancy guard
 (`depFlushRunning`) and re-scheduling if new IDs arrive mid-flush.
 
-**Obliterate (`queue-manager/control.ts`):** Clears the shard's waiting/delayed
-queue and DLQ, then explicitly sweeps every global index (`jobIndex`,
+**Obliterate (`queue-manager/control.ts`):** First commits one queue-wide SQLite
+transaction for jobs/results, DLQ, flow outbox, completion proofs/pins,
+telemetry, and queue/group state, then removes buffered inserts without
+materializing all historical job IDs. It then clears the shard's waiting/delayed queue and DLQ and
+explicitly sweeps every global index (`jobIndex`,
 `completedJobs`, `completedJobsData`, `jobResults`, `jobLogs`, `jobLocks`, flow
 maps, `repeatChain`, `customIdMap`), purges per-queue metrics + persisted
-queue-state row, deletes processing-shard entries for the queue, and removes
-SQLite rows. This is the documented way to reclaim ALL state for a queue.
+queue/group-state rows, and deletes processing-shard entries for the queue.
+Result/log ownership indexes expose cold LRU entries without an unbounded scan.
+A failure at any durable deletion step leaves all runtime state intact and a
+retry is idempotent; same-ID job or DLQ generations owned by another queue are
+preserved. If destruction occurs reentrantly during admission, a tombstone is
+reconciled when the final admission owner exits: surviving post-destruction
+state keeps the name, while a fully removed admission unregisters immediately.
 
 **Counters and snapshots:** `incrementQueued`/`decrementQueued` keep shard totals in sync and feed `TemporalManager`. Public global/per-queue state snapshots still classify current `runAt` values so a matured delayed job cannot be counted as both delayed and ready before the periodic counter refresh. `queueStatsAggregator.ts` batches all requested queue counts into one pass over shared collections; WS/SSE count events are coalesced by `QueueCountsScheduler`.
 
@@ -199,7 +228,7 @@ The processing map has its own `processingLocks[idx]`.
 
 The documented acquisition order is `jobIndex` → `completedJobs` → `shards[N]`
 → `processingShards[N]`: read prerequisite global-index state first, then take
-the shard write lock. Flow paths re-check `jobIndex.get(id)?.type` *inside* the
+the shard write lock. Flow paths re-check `jobIndex.get(id)?.type` _inside_ the
 shard lock as a TOCTOU guard before mutating (`queue-manager/flow-failures.ts`,
 `flow-options.ts`, `dependencies.ts`).
 
@@ -222,9 +251,12 @@ newer `startedAt`, so a stale token is rejected). See
   rows; the last consumer release moves a pin into the recent FIFO and
   re-applies the cap. `jobResults`, `customIdMap`, `jobLogs`, and
   `perQueueMetrics` use `LRUMap`, which evicts **one** tail entry per insert at
-  capacity. `jobIndex` is a plain `Map`, kept bounded indirectly: the
+  capacity. `jobResultQueues` and `jobLogQueues` mirror their corresponding LRU
+  insertion, deletion, and eviction lifecycle, so queue ownership stays bounded
+  and cold auxiliary entries can be purged safely. `jobIndex` is a plain `Map`, kept bounded indirectly: the
   `completedJobs` eviction callback deletes the corresponding `jobIndex` and
-  `completedJobsData` entries.
+  `completedJobsData` entries. This is hot-cache eviction only: exact SQLite
+  counts and completed cleanup remain database-authoritative for cold rows.
 - **Stale-token / duplicate execution.** Issue #33 (lock removed but job still
   present), #75 (lock expired + requeued), and #101 (expired-but-owned grace)
   are handled in `queue-manager/ack.ts` and `delivery.ts`. Exact retired
@@ -236,7 +268,10 @@ newer `startedAt`, so a stale token is rejected). See
 - **`removeOnComplete`.** Completed jobs with `removeOnComplete` are dropped
   from normal indexes; their bare ID is kept as recent evidence, or pinned
   while a waiting parent owns it. Recovery reconstructs ownership before
-  pruning, so lowering the cap cannot strand an accepted parent.
+  pruning, so lowering the cap cannot strand an accepted parent. The memory
+  tracker also retains the source queue in a bounded owner map, allowing
+  memory-only obliterate to remove the selected queue's hidden proofs without
+  touching another queue.
 - **Repeat-chain leak guard.** `repeatChain` is capped at 10,000 entries; the
   oldest key is evicted past the cap (`queue-manager/context.ts`).
 - **Flow-failure map leak guard.** `failedChildrenValues` /
@@ -258,22 +293,23 @@ newer `startedAt`, so a stale token is rejected). See
 
 `QueueManagerConfig` / `DEFAULT_CONFIG` (`src/application/types/config.ts`):
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| `dataPath` | _(unset)_ | Enables `SqliteStorage`; unset ⇒ in-memory only |
-| `maxCompletedJobs` | `50_000` | Size of `completedJobs`, `completedJobsData`, and `timedOutJobs`; exact cap for recent removed-completion proofs. Proofs owned by live waiting edges stay pinned outside the recent cap until release. |
-| `maxJobResults` | `10_000` | Size of `jobResults` LRU |
-| `maxJobLogs` | `10_000` | Size of `jobLogs` LRU |
-| `maxCustomIds` | `50_000` | Size of `customIdMap` and `perQueueMetrics` LRU |
-| `maxWaitingDeps` | `10_000` | Compatibility setting; currently not enforced as an admission or eviction bound |
-| `maxQueueEvents` | `10_000` | Retained lifecycle journal entries per queue, in memory or SQLite |
-| `maxMetricDataPoints` | `20_160` | Retained one-minute buckets per queue and terminal state; cumulative totals are not pruned |
-| `cleanupIntervalMs` | `10_000` | Background cleanup cadence |
-| `jobTimeoutCheckMs` | `5_000` | Retry delay after a timeout transition error |
-| `dependencyCheckMs` | `30_000` | Safety fallback (event-driven flush is the fast path) |
-| `stallCheckMs` | `5_000` | Stall-detection cadence |
-| `dlqMaintenanceMs` | `60_000` | DLQ auto-retry / expiry cadence |
-| `validateWebhookUrls` | _(unset)_ | Passed to `WebhookManager` |
+| Option                 | Default   | Effect                                                                                                                                                                                                                                                  |
+| ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dataPath`             | _(unset)_ | Enables `SqliteStorage`; unset ⇒ in-memory only                                                                                                                                                                                                         |
+| `maxCompletedJobs`     | `50_000`  | Size of `completedJobs`, `completedJobsData`, and `timedOutJobs`; exact cap for recent removed-completion proofs. Proofs owned by live waiting edges stay pinned outside the recent cap until release.                                                  |
+| `completedRetentionMs` | `null`    | Optional durable completed-row age. Finite non-negative inputs are floored; negative, non-finite, or unsafe values normalize to `null`. Each cleanup tick removes at most 1,000 oldest eligible SQLite rows while protecting live dependency consumers. |
+| `maxJobResults`        | `10_000`  | Size of `jobResults` LRU                                                                                                                                                                                                                                |
+| `maxJobLogs`           | `10_000`  | Size of `jobLogs` LRU                                                                                                                                                                                                                                   |
+| `maxCustomIds`         | `50_000`  | Size of `customIdMap` and `perQueueMetrics` LRU                                                                                                                                                                                                         |
+| `maxWaitingDeps`       | `10_000`  | Compatibility setting; currently not enforced as an admission or eviction bound                                                                                                                                                                         |
+| `maxQueueEvents`       | `10_000`  | Retained lifecycle journal entries per queue, in memory or SQLite                                                                                                                                                                                       |
+| `maxMetricDataPoints`  | `20_160`  | Retained one-minute buckets per queue and terminal state; cumulative totals are not pruned                                                                                                                                                              |
+| `cleanupIntervalMs`    | `10_000`  | Background cleanup cadence                                                                                                                                                                                                                              |
+| `jobTimeoutCheckMs`    | `5_000`   | Retry delay after a timeout transition error                                                                                                                                                                                                            |
+| `dependencyCheckMs`    | `30_000`  | Safety fallback (event-driven flush is the fast path)                                                                                                                                                                                                   |
+| `stallCheckMs`         | `5_000`   | Stall-detection cadence                                                                                                                                                                                                                                 |
+| `dlqMaintenanceMs`     | `60_000`  | DLQ auto-retry / expiry cadence                                                                                                                                                                                                                         |
+| `validateWebhookUrls`  | _(unset)_ | Passed to `WebhookManager`                                                                                                                                                                                                                              |
 
 `SHARD_COUNT` is not configurable at runtime — it is derived once from `navigator.hardwareConcurrency` (power of two, capped at 64) at module load (`hash.ts:28-44`). Server-level env vars (`BUNQUEUE_DATA_PATH`, etc.) are resolved by the entrypoint and surface here as `config.dataPath`; see [Configuration & Entrypoint](./configuration.md).
 

@@ -231,7 +231,14 @@ Client-affecting env vars / flags (defaults in parentheses):
 - Connection timeout 5000 ms (`src/cli/client.ts:171-176`); command timeout has a 30000 ms base (`src/cli/client.ts:44-48`).
 - `backup` data path ← `BUNQUEUE_DATA_PATH` / `BQ_DATA_PATH` / `DATA_PATH` / `SQLITE_PATH` plus S3 vars consumed by `S3BackupManager.fromEnv`.
 
-Server-start flags (`bunqueue start`, merged over `bunqueue.config.ts`, CLI wins): `--tcp-port` (6789), `--http-port` (6790), `--host` (0.0.0.0), `--data-path`, `--auth-tokens`, `--tls-cert`, `--tls-key`, `--config`/`-c`. Env fallbacks resolved in `resolveServerConfig`. See [Configuration & Entrypoint](./configuration.md) and [Security: TLS, Auth, CORS](./security-tls-auth.md).
+Server-start flags (`bunqueue start`, merged over `bunqueue.config.ts`, CLI
+wins): `--tcp-port` (6789), `--http-port` (6790), `--host` (0.0.0.0),
+`--data-path`, `--max-completed-jobs` (positive hot-cache bound),
+`--completed-retention-ms` (non-negative, opt-in durable SQLite retention),
+`--auth-tokens`, `--tls-cert`, `--tls-key`, `--config`/`-c`. Env fallbacks are
+resolved in `resolveServerConfig`. See
+[Configuration & Entrypoint](./configuration.md) and
+[Security: TLS, Auth, CORS](./security-tls-auth.md).
 
 ## Related Docs
 - [TCP Wire Protocol & Framing](./tcp-protocol.md), [TCP Server Command Handlers](./tcp-server-handlers.md)

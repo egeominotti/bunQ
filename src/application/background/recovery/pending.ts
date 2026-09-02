@@ -10,7 +10,7 @@ import { quarantineCorruptDependsOn, RECOVERY_BATCH_SIZE } from './shared';
 
 export function recoverPendingJobs(
   ctx: BackgroundContext,
-  completedInDatabase: Set<JobId>,
+  completionProofs: ReadonlySet<JobId>,
   now: number
 ): void {
   if (!ctx.storage) return;
@@ -20,6 +20,13 @@ export function recoverPendingJobs(
   while (true) {
     const jobs = ctx.storage.loadPendingJobs(RECOVERY_BATCH_SIZE, offset);
     if (jobs.length === 0) break;
+    const requestedDependencies = new Set<JobId>();
+    for (const job of jobs) {
+      for (const dependencyId of job.dependsOn) {
+        if (!completionProofs.has(dependencyId)) requestedDependencies.add(dependencyId);
+      }
+    }
+    const completedInBatch = ctx.storage.loadCompletedJobIds(requestedDependencies);
 
     for (const job of jobs) {
       const shardIndexValue = shardIndex(job.queue);
@@ -42,7 +49,9 @@ export function recoverPendingJobs(
         !wasAlreadyPromoted &&
         !job.dependsOn.every(
           (dependencyId) =>
-            ctx.completedJobs.has(dependencyId) || completedInDatabase.has(dependencyId)
+            ctx.completedJobs.has(dependencyId) ||
+            completionProofs.has(dependencyId) ||
+            completedInBatch.has(dependencyId)
         );
       const manuallyWaitingChildren = recoveredState === 'waiting-children' && !hasDependencies;
 

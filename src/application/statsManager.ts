@@ -86,7 +86,7 @@ export function getStats(
     delayed,
     active,
     dlq,
-    completed: ctx.completedJobs.size,
+    completed: ctx.storage?.countCompletedJobs() ?? ctx.completedJobs.size,
     'waiting-children': waitingChildren,
     totalPushed: ctx.metrics.totalPushed.value,
     totalPulled: ctx.metrics.totalPulled.value,

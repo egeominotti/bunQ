@@ -21,6 +21,8 @@ interface CliFlags {
   configPath?: string;
   tlsCertFile?: string;
   tlsKeyFile?: string;
+  maxCompletedJobs?: number;
+  completedRetentionMs?: number;
 }
 
 /** Validate port number */
@@ -31,6 +33,15 @@ function validatePort(value: string, name: string, defaultPort: number): number 
     return defaultPort;
   }
   return port;
+}
+
+function validateInteger(value: string, name: string, minimum: number): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum) {
+    console.warn(`Warning: Invalid ${name} "${value}". Ignoring it.`);
+    return undefined;
+  }
+  return parsed;
 }
 
 /** Parse CLI flags (without env var fallback — that happens in resolveServerConfig) */
@@ -45,6 +56,8 @@ function parseCliFlags(args: string[]): CliFlags {
       'auth-tokens': { type: 'string' },
       'tls-cert': { type: 'string' },
       'tls-key': { type: 'string' },
+      'max-completed-jobs': { type: 'string' },
+      'completed-retention-ms': { type: 'string' },
       config: { type: 'string', short: 'c' },
     },
     allowPositionals: false,
@@ -73,6 +86,20 @@ function parseCliFlags(args: string[]): CliFlags {
   if (values['tls-key']) {
     flags.tlsKeyFile = values['tls-key'] as string;
   }
+  if (values['max-completed-jobs']) {
+    flags.maxCompletedJobs = validateInteger(
+      values['max-completed-jobs'] as string,
+      'completed-job cache limit',
+      1
+    );
+  }
+  if (values['completed-retention-ms']) {
+    flags.completedRetentionMs = validateInteger(
+      values['completed-retention-ms'] as string,
+      'completed-job retention',
+      0
+    );
+  }
   if (values.config) {
     flags.configPath = values.config as string;
   }
@@ -88,6 +115,8 @@ function applyCliFlags(fileConfig: BunqueueConfig | null, flags: CliFlags): Bunq
     flags.host !== undefined ||
     flags.dataPath !== undefined ||
     flags.authTokens !== undefined ||
+    flags.maxCompletedJobs !== undefined ||
+    flags.completedRetentionMs !== undefined ||
     flags.tlsCertFile !== undefined ||
     flags.tlsKeyFile !== undefined;
   if (!hasFlags && !fileConfig) return null;
@@ -106,6 +135,12 @@ function applyCliFlags(fileConfig: BunqueueConfig | null, flags: CliFlags): Bunq
     storage: {
       ...base.storage,
       ...(flags.dataPath !== undefined && { dataPath: flags.dataPath }),
+      ...(flags.maxCompletedJobs !== undefined && {
+        maxCompletedJobs: flags.maxCompletedJobs,
+      }),
+      ...(flags.completedRetentionMs !== undefined && {
+        completedRetentionMs: flags.completedRetentionMs,
+      }),
     },
     auth: {
       ...base.auth,

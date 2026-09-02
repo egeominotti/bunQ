@@ -475,6 +475,7 @@ describe('job group regressions', () => {
       await cleanup(context);
 
       expect(shard.queues.has(queue)).toBe(false);
+      expect(manager.listQueues()).toContain(queue);
       expect(shard.groupScheduler.queues.has(queue)).toBe(false);
       expect([...shard.groupLimiterManager.windows.keys()]).not.toContain(`${queue}\0A`);
     } finally {

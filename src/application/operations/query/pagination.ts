@@ -43,6 +43,96 @@ function mergePage(sqlJobs: Job[], extras: Job[], start: number, end: number, as
   return merged.slice(start, end);
 }
 
+function querySqlitePage(
+  storage: NonNullable<GetJobsContext['storage']>,
+  queue: string,
+  opts: {
+    start: number;
+    end: number;
+    asc: boolean;
+    excludedIds: ReadonlySet<JobId>;
+  }
+): Job[] {
+  if (opts.excludedIds.size === 0) {
+    return storage.queryJobs(queue, {
+      limit: opts.end - opts.start,
+      offset: opts.start,
+      asc: opts.asc,
+    });
+  }
+  return storage
+    .queryJobs(queue, { limit: opts.end + opts.excludedIds.size, offset: 0, asc: opts.asc })
+    .filter((job) => !opts.excludedIds.has(job.id))
+    .slice(opts.start, opts.end);
+}
+
+interface BufferedOverlay {
+  readonly jobs: Job[];
+  readonly currentIds: Set<JobId>;
+}
+
+function readyState(job: Job, paused: boolean, explicitStates: boolean, now: number): string {
+  if (job.runAt > now) return 'delayed';
+  if (paused && explicitStates) return 'paused';
+  return job.priority > 0 ? 'prioritized' : 'waiting';
+}
+
+function projectBufferedJob(
+  buffered: Job,
+  states: string[] | null,
+  paused: boolean,
+  now: number,
+  ctx: GetJobsContext
+): { job: Job; state: string } | null {
+  const location = ctx.jobIndex.get(buffered.id);
+  if (!location) {
+    return buffered.completedAt === null ? null : { job: buffered, state: 'completed' };
+  }
+  if (location.queueName !== buffered.queue) return null;
+
+  if (location.type === 'processing') {
+    const job = ctx.processingShards[location.shardIdx]?.get(buffered.id);
+    return job?.queue === buffered.queue ? { job, state: 'active' } : null;
+  }
+  if (location.type === 'completed') {
+    const job = ctx.completedJobsData.get(buffered.id) ?? buffered;
+    return job.queue === buffered.queue ? { job, state: 'completed' } : null;
+  }
+  if (location.type !== 'queue') return null;
+
+  const shard = ctx.shards[location.shardIdx];
+  const waitingChildren =
+    shard.waitingDeps.get(buffered.id) ?? shard.waitingChildren.get(buffered.id);
+  if (waitingChildren?.queue === buffered.queue) {
+    return { job: waitingChildren, state: 'waiting-children' };
+  }
+  const queued = shard.queues.get(buffered.queue)?.find(buffered.id);
+  return queued ? { job: queued, state: readyState(queued, paused, states !== null, now) } : null;
+}
+
+function collectBufferedOverlay(
+  storage: NonNullable<GetJobsContext['storage']>,
+  queue: string,
+  opts: {
+    states: string[] | null;
+    paused: boolean;
+    now: number;
+    ctx: GetJobsContext;
+  }
+): BufferedOverlay {
+  const jobs: Job[] = [];
+  const currentIds = new Set<JobId>();
+  for (const buffered of storage.getBufferedJobs(queue)) {
+    const projection = projectBufferedJob(buffered, opts.states, opts.paused, opts.now, opts.ctx);
+    if (!projection) continue;
+    currentIds.add(buffered.id);
+    if (!opts.states || opts.states.includes(projection.state)) {
+      jobs.push(...tagState([projection.job], projection.state));
+    }
+  }
+  return { jobs, currentIds };
+}
+
 export function getJobs(
   queue: string,
   shardIdx: number,
@@ -68,14 +158,22 @@ export function getJobs(
   if (ctx.storage) {
     const shard = ctx.shards[shardIdx];
     const isPaused = shard.getState(queue).paused;
+    const buffered = collectBufferedOverlay(ctx.storage, queue, {
+      states,
+      paused: isPaused,
+      now,
+      ctx,
+    });
 
     if (!states) {
       const dlq = tagState(shard.getDlq(queue), 'failed');
-      if (dlq.length === 0) {
+      const extras = [...dlq, ...buffered.jobs];
+      const excludedIds = new Set<JobId>([...buffered.currentIds, ...dlq.map((job) => job.id)]);
+      if (extras.length === 0) {
         return ctx.storage.queryJobs(queue, { limit, offset: start, asc });
       }
-      const all = ctx.storage.queryJobs(queue, { limit: end, offset: 0, asc });
-      return mergePage(all, dlq, start, end, asc);
+      const all = querySqlitePage(ctx.storage, queue, { start: 0, end, asc, excludedIds });
+      return mergePage(all, extras, start, end, asc);
     }
 
     const sqlFilteredStates = states.filter(
@@ -89,8 +187,7 @@ export function getJobs(
       states.includes('waiting-children') || sqlFilteredStates.length > 0
         ? collectWaitingChildrenJobs(shard, queue)
         : [];
-    const parkedIds = new Set(parkedJobs.map((job) => job.id));
-    const extras: Job[] = [];
+    const extras: Job[] = [...buffered.jobs];
 
     if (states.includes('failed')) extras.push(...tagState(shard.getDlq(queue), 'failed'));
     if (states.includes('waiting-children')) {
@@ -106,6 +203,12 @@ export function getJobs(
       extras.push(...tagState(pausedJobs, 'paused'));
     }
 
+    const excludedIds = new Set<JobId>([
+      ...buffered.currentIds,
+      ...parkedJobs.map((job) => job.id),
+      ...extras.map((job) => job.id),
+    ]);
+
     if (extras.length === 0) {
       return sqlFilteredStates.length > 0
         ? querySqliteByLogicalState(ctx.storage, queue, sqlFilteredStates, {
@@ -113,7 +216,7 @@ export function getJobs(
             offset: start,
             asc,
             now,
-            excludedIds: parkedIds,
+            excludedIds,
           })
         : [];
     }
@@ -125,7 +228,7 @@ export function getJobs(
             offset: 0,
             asc,
             now,
-            excludedIds: parkedIds,
+            excludedIds,
           })
         : [];
 

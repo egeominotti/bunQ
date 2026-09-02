@@ -17,6 +17,14 @@ export interface PushTarget {
   shardIdx: number;
 }
 
+export interface CapturedPushError {
+  readonly value: unknown;
+}
+
+export function capturePushError(value: unknown): CapturedPushError {
+  return { value };
+}
+
 interface PublishPreparedJobOptions {
   job: Job;
   input: JobInput;
@@ -54,7 +62,7 @@ export function publishPreparedJob(options: PublishPreparedJobOptions): void {
   insertPreparedJobToShard(job, target, ctx, prepared);
 }
 
-/** Persist first whenever admission can fail, then expose the job in RAM. */
+/** Persist or buffer every storage-backed admission before exposing it in RAM. */
 export function acceptStandardJob(
   job: Job,
   input: JobInput,
@@ -64,7 +72,7 @@ export function acceptStandardJob(
 ): { storageHandled: boolean } {
   const prepared = prepareJobInsertion(job, ctx);
   const admission = admissionMetadata(customId, prepared);
-  const mustPersistBeforePublish = Boolean(ctx.storage && (input.durable || admission));
+  const mustPersistBeforePublish = ctx.storage !== null;
   if (mustPersistBeforePublish) {
     ctx.storage?.insertJob(job, input.durable, admission);
   }
@@ -72,8 +80,15 @@ export function acceptStandardJob(
   return { storageHandled: mustPersistBeforePublish };
 }
 
-export function throwPushErrors(errors: unknown[], message: string): void {
-  const present = errors.filter((error) => error !== undefined);
-  if (present.length === 1) throw present[0];
-  if (present.length > 1) throw new AggregateError(present, message);
+export function throwPushErrors(
+  errors: Array<CapturedPushError | undefined>,
+  message: string
+): void {
+  const present = errors.filter((error): error is CapturedPushError => error !== undefined);
+  if (present.length === 1) throw present[0].value;
+  if (present.length > 1)
+    throw new AggregateError(
+      present.map(({ value }) => value),
+      message
+    );
 }

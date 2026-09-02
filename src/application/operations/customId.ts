@@ -1,6 +1,14 @@
 import type { Shard } from '../../domain/queue/shard';
-import { type Job, type JobId, type JobInput, generateJobId, jobId } from '../../domain/types/job';
+import {
+  assertWellFormedJobId,
+  type Job,
+  type JobId,
+  type JobInput,
+  generateJobId,
+  jobId,
+} from '../../domain/types/job';
 import type { JobLocation } from '../../domain/types/queue';
+import type { JobLogEntry } from '../../domain/types/worker';
 import type { SqliteStorage } from '../../infrastructure/persistence/sqlite';
 import { shardIndex } from '../../shared/hash';
 import type { MapLike, SetLike } from '../../shared/lru';
@@ -18,6 +26,9 @@ export interface CustomIdContext {
   retiredTimeoutLeaseTokens?: MapLike<string, RetiredTimeoutGeneration>;
   retiredCronLeaseTokens?: MapLike<JobId, string>;
   jobResults: MapLike<JobId, unknown>;
+  jobResultQueues: Map<JobId, string>;
+  jobLogs: MapLike<JobId, JobLogEntry[]>;
+  jobLogQueues: Map<JobId, string>;
   customIdMap: MapLike<string, JobId>;
   jobIndex: Map<JobId, JobLocation>;
 }
@@ -47,6 +58,7 @@ export function handleCustomId(
     return { skip: false, id: generateJobId() };
   }
 
+  assertWellFormedJobId(input.customId, 'custom ID');
   const id = jobId(input.customId);
   const existing = ctx.customIdMap.get(input.customId);
 
@@ -69,7 +81,11 @@ export function handleCustomId(
     }
   }
 
-  const completed = ctx.completedJobs.has(id);
+  const buffered = ctx.storage?.getBufferedJob(id);
+  const completed =
+    ctx.completedJobs.has(id) ||
+    Boolean(ctx.storage?.getCompletedJob(id)) ||
+    Boolean(buffered && buffered.completedAt !== null);
 
   const terminalLocation = ctx.jobIndex.get(id);
   let dlqQueue: string | undefined;
@@ -109,7 +125,6 @@ export function commitCustomIdAdmission(
   if (retirement?.completed) {
     ctx.completedJobs.delete(id);
     ctx.completedJobsData.delete(id);
-    ctx.jobResults.delete(id);
     ctx.jobIndex.delete(id);
   }
   if (retirement?.dlqQueue) {
@@ -118,6 +133,15 @@ export function commitCustomIdAdmission(
     ctx.jobIndex.delete(id);
   }
   if (retirement?.dependencyCompletion) ctx.depCompletions?.delete(id);
+
+  // A deterministic ID is a new generation after admission commits. No
+  // generation-scoped result, log, or owner metadata may cross that boundary.
+  if (input.customId) {
+    ctx.jobResults.delete(id);
+    ctx.jobResultQueues.delete(id);
+    ctx.jobLogs.delete(id);
+    ctx.jobLogQueues.delete(id);
+  }
 
   // A recycled deterministic ID starts with no timeout or retired-lease state.
   const timedOutGeneration = ctx.timedOutJobs?.get(id);

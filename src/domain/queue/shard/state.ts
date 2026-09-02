@@ -110,4 +110,14 @@ export class ShardState {
     for (const name of this.limiterManager.getQueueNames()) names.add(name);
     return Array.from(names);
   }
+
+  getConfiguredQueueNames(): string[] {
+    return Array.from(
+      new Set([
+        ...this.limiterManager.getConfiguredQueueNames(),
+        ...this.dlqManager.getConfiguredQueueNames(),
+        ...this.groupLimiterManager.getQueueNames(),
+      ])
+    );
+  }
 }

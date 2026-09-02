@@ -36,8 +36,9 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
   // cost); a colliding id overwrites the existing row in place. This makes durable
   // inserts idempotent against ORPHAN rows — a jobs row that outlived its in-memory
   // tracking when obliterate() or a buffer flush raced an in-flight insert — without
-  // any per-push delete on the hot path. jobs has no triggers/FKs, so DO UPDATE has
-  // no cascade side effects (unlike REPLACE = DELETE+INSERT).
+  // any per-push delete on the hot path. jobs has no foreign keys; DO UPDATE avoids
+  // REPLACE's DELETE+INSERT semantics while the completion-count UPDATE triggers
+  // intentionally account for state/queue transitions.
   insertJob: `
     INSERT INTO jobs (
       id, queue, name, data, priority, created_at, run_at, attempts,
@@ -46,12 +47,14 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       remove_on_complete, remove_on_fail, fail_parent_on_failure,
       remove_dependency_on_failure, continue_parent_on_failure,
       ignore_dependency_on_failure, stall_timeout, stall_count, timeline,
-      dlq_retry_state, extended_options
+      dlq_retry_state, extended_options, started_at, completed_at, progress,
+      progress_msg, last_heartbeat, stacktrace
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       queue=excluded.queue, name=excluded.name, data=excluded.data, priority=excluded.priority,
@@ -68,10 +71,9 @@ export const SQL_STATEMENTS: Record<StatementName, string> = {
       stall_timeout=excluded.stall_timeout, stall_count=excluded.stall_count,
       timeline=excluded.timeline, dlq_retry_state=excluded.dlq_retry_state,
       extended_options=excluded.extended_options,
-      -- Per-execution columns are NOT in the INSERT column list, so excluded.<col>
-      -- resolves to each column's DEFAULT (NULL / 0) — i.e. the fresh-job value. Reset
-      -- them too, otherwise an upsert over an ORPHAN row would leave a brand-new job
-      -- carrying the prior life's progress=100 / completed_at / stacktrace etc.
+      -- Fresh admissions supply the normal NULL/0 execution values, while a
+      -- delayed WriteBuffer retry supplies the Job's current lifecycle values.
+      -- Either form must overwrite an ORPHAN generation completely.
       started_at=excluded.started_at, completed_at=excluded.completed_at,
       progress=excluded.progress, progress_msg=excluded.progress_msg,
       last_heartbeat=excluded.last_heartbeat, stacktrace=excluded.stacktrace

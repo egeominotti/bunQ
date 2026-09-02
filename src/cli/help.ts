@@ -144,6 +144,8 @@ Options:
   --http-port <port>      HTTP server port (default: 6790, env: HTTP_PORT)
   --host <host>           Bind address (default: 0.0.0.0, env: HOST)
   --data-path <path>      SQLite database path (env: BUNQUEUE_DATA_PATH, DATA_PATH)
+  --max-completed-jobs <n> Hot completed-job cache (env: BUNQUEUE_MAX_COMPLETED_JOBS)
+  --completed-retention-ms <ms> Delete completed rows after this age (disabled by default)
   --auth-tokens <list>    Comma-separated auth tokens (env: AUTH_TOKENS)
   --tls-cert <file>       PEM certificate for native TLS (env: TLS_CERT_FILE)
   --tls-key <file>        PEM private key for native TLS (env: TLS_KEY_FILE)

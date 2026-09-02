@@ -121,9 +121,13 @@ export class QueueTelemetryJournal {
   }
 
   clearQueue(queue: string): void {
+    this.clearQueueMemory(queue);
+    this.storage?.clearQueueTelemetry(queue);
+  }
+
+  clearQueueMemory(queue: string): void {
     this.events.delete(queue);
     this.metrics.delete(queue);
-    this.storage?.clearQueueTelemetry(queue);
   }
 
   clearMemory(): void {

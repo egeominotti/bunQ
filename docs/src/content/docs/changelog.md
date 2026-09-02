@@ -16,6 +16,31 @@ head:
 
 ## Unreleased
 
+_No changes yet._
+
+## [2.9.3] - 2026-09-02
+
+> **SQLite safety and queue-control release.** Completed history remains
+> reachable after hot-cache eviction, cleanup and statistics use durable
+> authority, and long schema upgrades are observable, bounded, and resumable.
+> This release also completes BullMQ Pro-compatible job groups and native batch
+> processing across embedded, TCP, and PostgreSQL runtimes.
+
+### Upgrade notes
+
+- Back up SQLite before upgrading. Schema 37 is applied before TCP/HTTP bind;
+  legacy payload rewrites are restart-safe and resume from their last committed
+  checkpoint, but a database with committed 2.9.3 migration batches must not be
+  opened by an older binary. Roll forward, or restore the pre-upgrade database
+  and binary together.
+- `maxCompletedJobs` remains the hot-memory/recovery cap; it is not a disk
+  retention policy. Configure `completedRetentionMs` when automatic expiry is
+  desired. Deleted pages are reused by SQLite, but shrinking an already large
+  file still requires an offline `VACUUM` with sufficient temporary space.
+- PostgreSQL group support advances its schema to version 20. Upgrade all
+  brokers in a cluster together; older brokers reject the newer schema instead
+  of serving with mixed scheduling semantics.
+
 ### Documentation
 
 - Audited the 12 server/operations guide pages and re-audited the Worker pages
@@ -57,6 +82,21 @@ head:
 
 ### Added
 
+- Added opt-in durable completed-job retention through
+  `storage.completedRetentionMs`, `BUNQUEUE_COMPLETED_RETENTION_MS`, and the
+  `--completed-retention-ms` server flag. The cleanup tick removes bounded,
+  oldest-first SQLite batches while protecting results owned by live
+  dependency consumers.
+- Added observable, resumable SQLite startup migrations with per-version
+  markers, durable row/byte checkpoints for legacy payload rewrites, bounded
+  500-row/8 MiB transactions, progress and duration logs, and a fail-fast guard
+  for databases created by newer binaries. TCP and HTTP listeners now bind only
+  after migration and recovery complete, so no partially initialized service is
+  advertised during a long upgrade. Migration info records go to stderr while
+  stdout remains machine-readable; recovery phase diagnostics use debug level.
+  Any failure after storage opens also closes partial runtime timers, services,
+  and SQLite before rethrowing, so invalid configuration or corrupt data exits
+  promptly instead of wedging before listener bind.
 - Added the BullMQ Pro compatibility layer without telemetry or NestJS:
   persistent group pause/resume, atomic group `maxSize`, intra-group priority,
   group job/priority queries, manual group rate limits, native batch processors
@@ -79,6 +119,12 @@ head:
 
 ### Changed
 
+- SQLite schema version 37 adds exact per-queue retained-completion counters,
+  queue-scoped/global deterministic retention indexes, a binary-ID tie-break
+  for completed hot-cache recovery, and durable migration-progress bookkeeping.
+  Completed totals now reflect SQLite authority rather than the bounded hot
+  cache, and recovery probes only dependency IDs requested by each pending
+  page.
 - Updated the root README, internal architecture/feature references, protocol
   contract, public API types, Queue/Worker/Flow guides, migration/comparison
   matrices, and regenerated TypeDoc reference for the complete BullMQ Pro
@@ -107,6 +153,75 @@ head:
 
 ### Fixed
 
+- Fixed accepted SQLite-buffer jobs exposing or persisting their original
+  waiting state after they had become active, waiting-children, delayed,
+  retried, promoted, or completed. Pending lifecycle state is now explicit,
+  survives a full timeline, and is used by point/list queries and eventual
+  upserts. Automatic threshold/lifecycle flushes respect an outstanding
+  exponential backoff, while batch transitions make at most one materialization
+  attempt instead of exhausting all retries in one call. Evicted buffered
+  completions remain queryable and keep their queue registered; reusing their
+  custom ID retires the pending generation and stale result before admitting
+  its successor. Stable mixed pagination now uses SQLite-compatible Unicode
+  ordering, and non-round-trippable isolated-surrogate job IDs reject before
+  admission.
+- Fixed explicit `undefined` exceptions being mistaken for “no error” by batch
+  admission and deferred buffer scopes. Error capture now tracks presence
+  separately from the thrown value, preserving JavaScript throw semantics.
+- Fixed completed SQLite rows becoming unreachable after eviction from
+  `maxCompletedJobs`: `clean(..., 'completed')` now pages across cold database
+  history and atomically removes jobs, results, and flow-failure records. This
+  prevents unbounded disk growth when a retention policy is used and restores
+  exact global/per-queue completed statistics. Trigger side effects are also
+  accounted for when retrying completed jobs, preserving the atomic
+  completed-to-waiting transition in embedded and TCP modes. Equal-timestamp
+  in-memory cleanup now uses SQLite-compatible binary ID ordering instead of
+  locale-sensitive sorting. Specific and bulk completed retry also reach cold
+  SQLite rows; bulk selection uses bounded 500-row oldest-first keyset pages.
+  Cleanup carries persisted queue ownership into cache convergence, preventing
+  an old completion from deleting a newer same-ID generation in another queue.
+- Fixed queue obliteration leaving cold results, logs, buffered jobs, or orphan
+  child/parent-owned flow-failure rows behind. One storage-first transaction now
+  clears jobs/results, DLQ, flow outbox, completion proofs/pins, telemetry, and
+  queue/group state without materializing every historical job ID. Paired
+  result/log owner indexes stay bounded with their LRUs, and a write failure at
+  any deletion step leaves runtime state intact for an idempotent retry. ACK,
+  ACKB, and FAIL revalidate processing ownership before terminal publication,
+  so obliteration cannot race a late completion into resurrection. Buffered
+  jobs now enter storage ownership before RAM publication, waiting-children
+  callbacks run after complete single/batch/flow publication, and an admission
+  tombstone removes the queue name immediately when a reentrant obliterate wins.
+  Buffered batches coalesce threshold flushing at the outer admission boundary,
+  and SQLite-backed queries merge still-buffered rows before stable pagination;
+  exhaustive embedded reads therefore cannot truncate the unflushed tail.
+  Same-ID guards cover both job and DLQ owners in another queue, including
+  job-derived result and flow-failure deletion. Completed cleanup likewise
+  preserves shared auxiliary rows whenever a same-ID DLQ generation survives.
+- Fixed completed-only queue registration across cleanup and restart. Queue
+  names now reconcile against exact SQLite counts in bounded batches, retain
+  `waiting-children`, processing-transition, and queue/group-policy ownership,
+  and disappear only after their last durable completion is removed. The
+  `queue:removed` events are deferred until the reconciliation is complete, so
+  synchronous recreation of the same or another queue cannot lose the new
+  registration. Pending single, batch, and multi-queue flow admissions are now
+  reference-counted across callbacks and lock waits; expired temporary rate
+  limits and default-equivalent DLQ/stall settings no longer keep empty queues
+  registered forever. Policy mutators register the queue before a durable write
+  can throw, and empty/recovered queues delete stale queue/group state rows
+  before unregistering their runtime name. Completed-only and policy-only names
+  remain discoverable while their empty heap and secondary group runtime are
+  reclaimed.
+- Fixed memory-only `removeOnComplete` evidence retaining no source owner:
+  obliterate now removes only the selected queue's bounded proofs, including
+  after eviction and same-ID reuse. Memory-only cleanup also preserves a live
+  completed-only queue. Reusing a completed custom ID that is cold in SQLite
+  now retires its stale result atomically before publishing the successor.
+  Every terminal custom-ID reuse also clears generation-scoped results, logs,
+  and their bounded queue-owner indexes before the successor becomes visible,
+  including completed and DLQ reuse across queues.
+- Invalid programmatic `completedRetentionMs` values can no longer trigger
+  destructive expiry: direct and server configuration now share the same
+  finite, non-negative, safe-integer normalization.
 - Native batches now reserve one Worker limiter slot per member only when the
   batch is ready, so `minSize` accumulation consumes no capacity and concurrent
   batches cannot exceed the configured start budget. A synchronously throwing

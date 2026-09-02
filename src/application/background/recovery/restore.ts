@@ -36,7 +36,11 @@ export function restoreQueueState(ctx: BackgroundContext, queueStates: QueueStat
     if (queueState.concurrencyLimit !== null) {
       shard.setConcurrency(queueState.name, queueState.concurrencyLimit);
     }
-    ctx.registerQueueName(queueState.name);
+    if (shard.getConfiguredQueueNames().includes(queueState.name)) {
+      ctx.registerQueueName(queueState.name);
+    } else {
+      ctx.storage?.deleteQueueState(queueState.name);
+    }
   }
 }
 

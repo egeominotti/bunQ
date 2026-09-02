@@ -22,6 +22,22 @@ export interface PreparedJobInsertion {
   completionPins: JobId[];
 }
 
+/** Emit only after the complete admission is persisted and published. */
+export function emitWaitingChildrenAdmission(job: Job, ctx: PushInsertContext): void {
+  if (job.timeline.at(-1)?.state !== 'waiting-children') return;
+  const location = ctx.jobIndex.get(job.id);
+  if (location?.type !== 'queue' || location.queueName !== job.queue) return;
+  try {
+    ctx.dashboardEmit?.('job:waiting-children', {
+      jobId: String(job.id),
+      queue: job.queue,
+      dependsOn: job.dependsOn.map(String),
+    });
+  } catch (error) {
+    console.error('[Push] Dashboard event failed after job admission', { error });
+  }
+}
+
 /** Resolve the first externally visible state without mutating queue structures. */
 export function initialJobState(
   job: Job,
@@ -77,18 +93,6 @@ export function insertPreparedJobToShard(
   for (const dependencyId of job.dependsOn) {
     if (ctx.jobResults.has(dependencyId)) {
       ctx.dependencyResults.retain(dependencyId, ctx.jobResults.get(dependencyId));
-    }
-  }
-
-  if (state === 'waiting-children') {
-    try {
-      ctx.dashboardEmit?.('job:waiting-children', {
-        jobId: String(job.id),
-        queue,
-        dependsOn: job.dependsOn.map(String),
-      });
-    } catch (error) {
-      console.error('[Push] Dashboard event failed after job admission', { error });
     }
   }
 }

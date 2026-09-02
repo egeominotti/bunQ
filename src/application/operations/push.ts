@@ -16,8 +16,14 @@ import { throughputTracker } from '../throughputTracker';
 import { handleCustomId } from './customId';
 import { acceptParentedJob, validateParentLinkInputs } from './parentLink';
 import { isParentLinkInput } from './parentLinkInput';
-import { acceptStandardJob, throwPushErrors } from './pushAdmission';
+import {
+  acceptStandardJob,
+  capturePushError,
+  type CapturedPushError,
+  throwPushErrors,
+} from './pushAdmission';
 import { withPushWriteLocks } from './pushLocks';
+import { emitWaitingChildrenAdmission } from './pushInsert';
 import { releaseDependencyCompletionPins } from '../dependencyCompletions';
 import {
   handleDeduplication,
@@ -131,25 +137,25 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
     };
   });
 
-  let cleanupError: unknown;
+  let cleanupError: CapturedPushError | undefined;
   try {
     releaseDependencyCompletionPins(releasedDependencies, ctx);
   } catch (error) {
-    cleanupError = error;
+    cleanupError = capturePushError(error);
   }
 
   if (!result) {
-    if (cleanupError) throw cleanupError;
+    if (cleanupError) throw cleanupError.value;
     console.error('[Push] Push failed unexpectedly', { queue, input });
     throw new Error('Push failed');
   }
 
-  let persistenceError: unknown;
+  let persistenceError: CapturedPushError | undefined;
   if (result.persisted) {
     try {
       if (!result.storageHandled) ctx.storage?.insertJob(result.job, input.durable);
     } catch (error) {
-      persistenceError = error;
+      persistenceError = capturePushError(error);
     }
     ctx.totalPushed.value++;
     throughputTracker.pushRate.increment();
@@ -162,6 +168,7 @@ export async function pushJob(queue: string, input: JobInput, ctx: PushContext):
   }
 
   latencyTracker.push.observe((Bun.nanoseconds() - startNs) / 1e6);
+  if (result.persisted && !persistenceError) emitWaitingChildrenAdmission(result.job, ctx);
   throwPushErrors([cleanupError, persistenceError], 'Push failed while finalizing an accepted job');
   return result.job;
 }

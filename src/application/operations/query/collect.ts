@@ -1,14 +1,14 @@
 import type { Shard } from '../../../domain/queue/shard';
 import type { Job } from '../../../domain/types/job';
+import { compareSqliteBinaryText } from '../../../shared/serialization';
 import type { GetJobsContext } from '../../types/query';
 
 export function compareJobsByCreatedAt(a: Job, b: Job, asc: boolean): number {
   if (a.createdAt !== b.createdAt) {
     return asc ? a.createdAt - b.createdAt : b.createdAt - a.createdAt;
   }
-  if (a.id === b.id) return 0;
-  if (asc) return a.id < b.id ? -1 : 1;
-  return a.id > b.id ? -1 : 1;
+  const byId = compareSqliteBinaryText(String(a.id), String(b.id));
+  return asc ? byId : -byId;
 }
 
 function collectCompletedJobs(queue: string, ctx: GetJobsContext): Job[] {

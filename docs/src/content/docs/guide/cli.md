@@ -21,11 +21,18 @@ bunqueue start                                      # defaults: TCP 6789, HTTP 6
 bunqueue start --tcp-port 7000 --http-port 7001    # custom ports
 bunqueue start --host 127.0.0.1 -p 6789            # bind to a specific host
 bunqueue start --data-path ./data/production.db    # persistent storage
+bunqueue start --data-path ./data/production.db \
+  --completed-retention-ms 604800000               # retain completions for 7 days
 AUTH_TOKENS=secret-token bunqueue start             # with authentication
 bunqueue start --config ./bunqueue.config.ts       # with a config file
 ```
 
 On startup the server prints its ports, data path, and enabled features (TLS, auth, S3 backup, cloud, shard count).
+
+`--max-completed-jobs` bounds only the completed-job hot cache (default
+50,000). `--completed-retention-ms` separately opts SQLite into durable
+age-based cleanup; without it, completed rows remain until an explicit clean or
+obliterate operation.
 
 :::tip[Configuration File]
 Instead of CLI flags and env vars, you can centralize all settings in a typed `bunqueue.config.ts`. See [Configuration File](/guide/configuration/).

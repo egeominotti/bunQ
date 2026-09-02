@@ -19,7 +19,12 @@ import { throughputTracker } from '../throughputTracker';
 import { handleCustomId } from './customId';
 import { acceptParentedJob, validateParentLinkInputs } from './parentLink';
 import { isParentLinkInput } from './parentLinkInput';
-import { acceptStandardJob, throwPushErrors } from './pushAdmission';
+import {
+  acceptStandardJob,
+  capturePushError,
+  type CapturedPushError,
+  throwPushErrors,
+} from './pushAdmission';
 import type { PushContext } from './pushContext';
 import {
   handleDeduplication,
@@ -27,6 +32,7 @@ import {
   replacePendingDedupJob,
 } from './pushDeduplication';
 import { withPushWriteLocks } from './pushLocks';
+import { emitWaitingChildrenAdmission } from './pushInsert';
 
 interface PendingInsert {
   job: Job;
@@ -59,7 +65,7 @@ export async function pushJobBatch(
   const jobsToInsert: PendingInsert[] = [];
   let jobsToInsertById: Map<JobId, PendingInsert> | null = null;
   let pendingInsertCount = 0;
-  let batchError: unknown;
+  let batchError: CapturedPushError | undefined;
 
   const supersedePendingInsert = (id: JobId): void => {
     const index =
@@ -77,102 +83,106 @@ export async function pushJobBatch(
       const shard = ctx.shards[idx];
       validateParentLinkInputs(inputs, ctx);
 
-      for (const input of inputs) {
-        const linkParent = isParentLinkInput(input);
-        const customIdResult = handleCustomId(input, ctx, lockedShardIndexes);
-        if (customIdResult.skip) {
-          resultIds.push(
-            'existingJob' in customIdResult
-              ? customIdResult.existingJob.id
-              : customIdResult.existingId
-          );
-          continue;
-        }
+      const admit = (): void => {
+        for (const input of inputs) {
+          const linkParent = isParentLinkInput(input);
+          const customIdResult = handleCustomId(input, ctx, lockedShardIndexes);
+          if (customIdResult.skip) {
+            resultIds.push(
+              'existingJob' in customIdResult
+                ? customIdResult.existingJob.id
+                : customIdResult.existingId
+            );
+            continue;
+          }
 
-        const job = createJob(customIdResult.id, queue, input, now);
-        const dedupResult = handleDeduplication(job, input, queue, shard, ctx);
-        if (dedupResult.skip) {
-          resultIds.push(dedupResult.existingId);
-          continue;
-        }
-        if (
-          job.groupId &&
-          input.groupMaxSize !== undefined &&
-          !dedupResult.replacement &&
-          shard.getGroupJobsCount(queue, job.groupId) >= input.groupMaxSize
-        ) {
-          throw new Error(
-            `Group ${job.groupId} has reached its maximum size of ${input.groupMaxSize}`
-          );
-        }
-        shard.assignGroupFifoOrder(job);
+          const job = createJob(customIdResult.id, queue, input, now);
+          const dedupResult = handleDeduplication(job, input, queue, shard, ctx);
+          if (dedupResult.skip) {
+            resultIds.push(dedupResult.existingId);
+            continue;
+          }
+          if (
+            job.groupId &&
+            input.groupMaxSize !== undefined &&
+            !dedupResult.replacement &&
+            shard.getGroupJobsCount(queue, job.groupId) >= input.groupMaxSize
+          ) {
+            throw new Error(
+              `Group ${job.groupId} has reached its maximum size of ${input.groupMaxSize}`
+            );
+          }
+          shard.assignGroupFifoOrder(job);
 
-        const target = { queue, shard, shardIdx: idx };
-        let storageHandled = false;
-        if (linkParent) {
-          releasedDependencies.push(
-            ...acceptParentedJob({
+          const target = { queue, shard, shardIdx: idx };
+          let storageHandled = false;
+          if (linkParent) {
+            releasedDependencies.push(
+              ...acceptParentedJob({
+                job,
+                input,
+                target,
+                dedup: dedupResult,
+                customId: customIdResult,
+                ctx,
+              })
+            );
+            if (dedupResult.replacement) {
+              supersedePendingInsert(dedupResult.replacement.job.id);
+            }
+            storageHandled = true;
+          } else if (dedupResult.replacement) {
+            releasedDependencies.push(
+              ...replacePendingDedupJob(dedupResult.replacement, job, input, target, {
+                ctx,
+                customId: customIdResult,
+              })
+            );
+            supersedePendingInsert(dedupResult.replacement.job.id);
+            storageHandled = true;
+          } else if (dedupResult.activeOwnerId) {
+            replaceActiveDedupJob(dedupResult.activeOwnerId, job, input, target, {
+              ctx,
+              customId: customIdResult,
+            });
+            storageHandled = true;
+          } else {
+            storageHandled = acceptStandardJob(
               job,
               input,
               target,
-              dedup: dedupResult,
-              customId: customIdResult,
-              ctx,
-            })
-          );
-          if (dedupResult.replacement) {
-            supersedePendingInsert(dedupResult.replacement.job.id);
+              customIdResult,
+              ctx
+            ).storageHandled;
           }
-          storageHandled = true;
-        } else if (dedupResult.replacement) {
-          releasedDependencies.push(
-            ...replacePendingDedupJob(dedupResult.replacement, job, input, target, {
-              ctx,
-              customId: customIdResult,
-            })
-          );
-          supersedePendingInsert(dedupResult.replacement.job.id);
-          storageHandled = true;
-        } else if (dedupResult.activeOwnerId) {
-          replaceActiveDedupJob(dedupResult.activeOwnerId, job, input, target, {
-            ctx,
-            customId: customIdResult,
-          });
-          storageHandled = true;
-        } else {
-          storageHandled = acceptStandardJob(
+          const pending = {
             job,
-            input,
-            target,
-            customIdResult,
-            ctx
-          ).storageHandled;
+            durable: Boolean(input.durable),
+            storageHandled,
+            superseded: false,
+          };
+          jobsToInsert.push(pending);
+          jobsToInsertById?.set(job.id, pending);
+          pendingInsertCount++;
+          acceptedJobs.push(job);
+          resultIds.push(job.id);
         }
-        const pending = {
-          job,
-          durable: Boolean(input.durable),
-          storageHandled,
-          superseded: false,
-        };
-        jobsToInsert.push(pending);
-        jobsToInsertById?.set(job.id, pending);
-        pendingInsertCount++;
-        acceptedJobs.push(job);
-        resultIds.push(job.id);
-      }
+      };
+      if (ctx.storage) ctx.storage.withDeferredBufferFlush(admit);
+      else admit();
     });
   } catch (error) {
-    batchError = error;
+    batchError = capturePushError(error);
   }
 
-  let cleanupError: unknown;
+  let cleanupError: CapturedPushError | undefined;
   try {
     releaseDependencyCompletionPins(releasedDependencies, ctx);
   } catch (error) {
-    cleanupError = error;
+    cleanupError = capturePushError(error);
   }
 
-  let persistenceError: unknown;
+  let persistenceError: CapturedPushError | undefined;
   if (acceptedJobs.length > 0) {
     const pendingPersistence = jobsToInsert.filter(
       ({ storageHandled, superseded }) => !storageHandled && !superseded
@@ -183,7 +193,7 @@ export async function pushJobBatch(
       if (bufferedJobs.length > 0) ctx.storage?.insertJobsBatch(bufferedJobs);
       if (durableJobs.length > 0) ctx.storage?.insertJobsBatch(durableJobs, true);
     } catch (error) {
-      persistenceError = error;
+      persistenceError = capturePushError(error);
     }
     ctx.totalPushed.value += BigInt(acceptedJobs.length);
     throughputTracker.pushRate.increment(acceptedJobs.length);
@@ -201,7 +211,12 @@ export async function pushJobBatch(
   }
   if (pendingInsertCount > 0) ctx.shards[idx].notifyBatch(queue, pendingInsertCount);
 
-  if (!batchError && !persistenceError && acceptedJobs.length > 0 && inputs.length > 1) {
+  if (
+    batchError === undefined &&
+    persistenceError === undefined &&
+    acceptedJobs.length > 0 &&
+    inputs.length > 1
+  ) {
     ctx.dashboardEmit?.('batch:pushed', {
       queue,
       total: inputs.length,
@@ -211,6 +226,9 @@ export async function pushJobBatch(
   }
 
   latencyTracker.push.observe((Bun.nanoseconds() - startNs) / 1e6);
+  if (persistenceError === undefined) {
+    for (const job of acceptedJobs) emitWaitingChildrenAdmission(job, ctx);
+  }
   throwPushErrors(
     [batchError, cleanupError, persistenceError],
     'Batch push failed while finalizing its accepted prefix'

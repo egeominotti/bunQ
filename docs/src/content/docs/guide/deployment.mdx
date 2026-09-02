@@ -555,7 +555,7 @@ driver is rejected at startup.
 | `S3_BACKUP_ENABLED`                             | Turn on S3 snapshots                                                                                      | `0`         |
 | `SHUTDOWN_TIMEOUT_MS`                           | How long a graceful shutdown waits for active jobs                                                        | `30000`     |
 
-The full list, including all S3 and cloud variables, lives in [Environment Variables](/guide/env-vars/). The same options are available as CLI flags: `bunqueue start --tcp-port --http-port --data-path --auth-tokens --tls-cert --tls-key`.
+The full list, including all S3 and cloud variables, lives in [Environment Variables](/guide/env-vars/). Server CLI flags include `bunqueue start --tcp-port --http-port --data-path --max-completed-jobs --completed-retention-ms --auth-tokens --tls-cert --tls-key`.
 
 ## Sizing by backend
 

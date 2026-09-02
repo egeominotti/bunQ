@@ -5,8 +5,8 @@ import type { LockGuard } from '../../shared/lock';
 import { shardIndex } from '../../shared/hash';
 import { latencyTracker } from '../latencyTracker';
 import { throughputTracker } from '../throughputTracker';
-import { initialJobState, insertJobToShard } from './pushInsert';
-import type { PushContext } from './push';
+import { emitWaitingChildrenAdmission, initialJobState, insertJobToShard } from './pushInsert';
+import { type PushContext, withPendingQueueAdmissions } from './pushContext';
 import { validateAtomicFlowBatch } from './flowValidation';
 
 function existingJobError(id: JobId): Error {
@@ -108,42 +108,45 @@ export async function pushFlowBatch(
   const startNs = Bun.nanoseconds();
   validateAtomicFlowBatch(batch);
   if (batch.jobs.length === 0) return { jobs: [] };
-  for (const queue of new Set(batch.jobs.map((job) => job.queue))) {
-    ctx.registerQueueName?.(queue);
-  }
+  return withPendingQueueAdmissions(
+    batch.jobs.map((job) => job.queue),
+    ctx,
+    async () => {
+      const guards = await acquireFlowLocks(batch, ctx);
+      let jobs: Job[];
+      let notifications: Map<string, number>;
+      try {
+        assertIdsAvailable(batch, ctx);
+        const now = Date.now();
+        jobs = prepareJobs(batch, ctx, now);
+        assertGroupCapacity(batch, jobs, ctx);
+        ctx.storage?.insertJobsBatch(jobs, true);
+        notifications = publishJobs(jobs, ctx);
+      } finally {
+        for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
+      }
 
-  const guards = await acquireFlowLocks(batch, ctx);
-  let jobs: Job[];
-  let notifications: Map<string, number>;
-  try {
-    assertIdsAvailable(batch, ctx);
-    const now = Date.now();
-    jobs = prepareJobs(batch, ctx, now);
-    assertGroupCapacity(batch, jobs, ctx);
-    ctx.storage?.insertJobsBatch(jobs, true);
-    notifications = publishJobs(jobs, ctx);
-  } finally {
-    for (let index = guards.length - 1; index >= 0; index--) guards[index].release();
-  }
-
-  for (const [queue, count] of notifications) {
-    ctx.shards[shardIndex(queue)].notifyBatch(queue, count);
-  }
-  ctx.totalPushed.value += BigInt(jobs.length);
-  throughputTracker.pushRate.increment(jobs.length);
-  const timestamp = Date.now();
-  for (const job of jobs) {
-    ctx.broadcast({
-      eventType: EventType.Pushed,
-      queue: job.queue,
-      jobId: job.id,
-      timestamp,
-    });
-  }
-  ctx.dashboardEmit?.('flow:pushed', {
-    jobs: jobs.length,
-    queues: notifications.size,
-  });
-  latencyTracker.push.observe((Bun.nanoseconds() - startNs) / 1e6);
-  return { jobs };
+      for (const [queue, count] of notifications) {
+        ctx.shards[shardIndex(queue)].notifyBatch(queue, count);
+      }
+      ctx.totalPushed.value += BigInt(jobs.length);
+      throughputTracker.pushRate.increment(jobs.length);
+      const timestamp = Date.now();
+      for (const job of jobs) {
+        ctx.broadcast({
+          eventType: EventType.Pushed,
+          queue: job.queue,
+          jobId: job.id,
+          timestamp,
+        });
+      }
+      ctx.dashboardEmit?.('flow:pushed', {
+        jobs: jobs.length,
+        queues: notifications.size,
+      });
+      latencyTracker.push.observe((Bun.nanoseconds() - startNs) / 1e6);
+      for (const job of jobs) emitWaitingChildrenAdmission(job, ctx);
+      return { jobs };
+    }
+  );
 }

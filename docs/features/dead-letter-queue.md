@@ -237,9 +237,14 @@ same chain instead of resetting it. Backoff is
 
 ### `retryCompleted`
 
-`retryCompletedJobs` is a sibling, **not** a DLQ operation. It re-queues
-completed jobs from the in-memory completed-job data map, falling back to
-SQLite when needed. It creates a fresh waiting-generation snapshot, resets
+`retryCompletedJobs` in `application/completedRetry.ts` is a sibling, **not** a
+DLQ operation. With persistence, a specific ID uses a primary-key SQLite read
+constrained by `state='completed'`; nullable `completed_at` is ordering metadata,
+not the state discriminator. Bulk
+retry keyset-pages SQLite in bounded 500-row `(completed timestamp,id)` order,
+oldest first, so completions evicted from the hot cache remain reachable without
+materializing the full table. Memory-only mode scans the bounded map. It creates
+a fresh waiting-generation snapshot, resets
 attempts, progress/message, processing/completion timestamps, and the heartbeat,
 while preserving the diagnostic stacktrace and bounded timeline before appending
 the new `waiting` entry. `SqliteStorage.requeueCompletedJob` changes the durable
@@ -250,8 +255,8 @@ same generation and ownership preflight used by DLQ retry rejects a retry when
 another live job owns the unique key. A rejected SQLite write therefore leaves
 the completed generation authoritative, and a successful retry cannot expose
 the old `returnvalue`, accept a duplicate custom ID as new work, or recover
-completed metadata after restart. Selection is stable and accepts an optional
-job id, non-negative `limit`, and terminal `timestamp` cutoff. This keeps
+completed metadata after restart. Selection accepts an optional job id,
+non-negative `limit`, and terminal `timestamp` cutoff. This keeps
 `queue.retryJobs({ state: 'completed', count, timestamp })` consistent in
 memory-only, persisted embedded, and TCP deployments.
 

@@ -9,11 +9,14 @@ function resolveStateFromStorage(
 ): JobState | 'unknown' {
   if (!storage) return 'unknown';
   if (storage.hasDlqEntry(jobId)) return JobState.Failed;
-  const persisted = storage.getJobStateRaw(jobId);
+  const persisted = storage.getBufferedJobState(jobId) ?? storage.getJobStateRaw(jobId);
   if (persisted === 'completed') return JobState.Completed;
   if (persisted === 'active') return JobState.Active;
-  if (persisted !== 'waiting' && persisted !== 'delayed') return 'unknown';
-  const row = storage.getJob(jobId);
+  if (persisted === 'waiting-children') return 'waiting-children' as JobState;
+  if (persisted !== 'waiting' && persisted !== 'delayed' && persisted !== 'prioritized') {
+    return 'unknown';
+  }
+  const row = storage.getBufferedJob(jobId) ?? storage.getJob(jobId);
   if (!row) return 'unknown';
   if (row.runAt > Date.now()) return JobState.Delayed;
   return row.priority > 0 ? JobState.Prioritized : JobState.Waiting;

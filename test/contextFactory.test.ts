@@ -53,12 +53,15 @@ function createTestDependencies(overrides?: Partial<ContextDependencies>): Conte
     completedJobs: new BoundedSet<JobId>(DEFAULT_CONFIG.maxCompletedJobs),
     completedJobsData: new BoundedMap<JobId, Job>(DEFAULT_CONFIG.maxCompletedJobs),
     jobResults: new BoundedMap<JobId, unknown>(DEFAULT_CONFIG.maxJobResults),
+    jobResultQueues: new Map<JobId, string>(),
     customIdMap: new LRUMap<string, JobId>(DEFAULT_CONFIG.maxCustomIds),
     jobLogs: new LRUMap<JobId, JobLogEntry[]>(DEFAULT_CONFIG.maxJobLogs),
+    jobLogQueues: new Map<JobId, string>(),
     jobLocks: new Map<JobId, JobLock>(),
     clientJobs: new Map<string, Set<JobId>>(),
     stalledCandidates: new Set<JobId>(),
     pendingDepChecks: new Set<JobId>(),
+    pendingQueueAdmissions: new Map<string, number>(),
     queueNamesCache: new Set<string>(),
     eventsManager,
     webhookManager,
@@ -406,9 +409,13 @@ describe('ContextFactory', () => {
       expect(ctx.startTime).toBe(deps.startTime);
     });
 
-    test('should not include unrelated fields like storage or callbacks', () => {
+    test('should return storage for authoritative persisted statistics', () => {
       const ctx = factory.getStatsContext();
-      expect((ctx as any).storage).toBeUndefined();
+      expect(ctx.storage).toBe(deps.storage);
+    });
+
+    test('should not include unrelated callbacks or managers', () => {
+      const ctx = factory.getStatsContext();
       expect((ctx as any).fail).toBeUndefined();
       expect((ctx as any).webhookManager).toBeUndefined();
     });
@@ -440,6 +447,14 @@ describe('ContextFactory', () => {
     test('should return context with customIdMap', () => {
       const ctx = factory.getPushContext();
       expect(ctx.customIdMap).toBe(deps.customIdMap);
+    });
+
+    test('should return generation-scoped result and log ownership', () => {
+      const ctx = factory.getPushContext();
+      expect(ctx.jobResults).toBe(deps.jobResults);
+      expect(ctx.jobResultQueues).toBe(deps.jobResultQueues);
+      expect(ctx.jobLogs).toBe(deps.jobLogs);
+      expect(ctx.jobLogQueues).toBe(deps.jobLogQueues);
     });
 
     test('should return context with jobIndex', () => {
@@ -805,11 +820,13 @@ describe('ContextFactory', () => {
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
       expect(keys).toContain('jobResults');
+      expect(keys).toContain('jobResultQueues');
       expect(keys).toContain('dependencyResults');
       expect(keys).toContain('customIdMap');
       expect(keys).toContain('jobLogs');
+      expect(keys).toContain('jobLogQueues');
       expect(keys).toContain('storage');
-      expect(keys.length).toBe(7);
+      expect(keys.length).toBe(9);
     });
   });
 
@@ -844,14 +861,16 @@ describe('ContextFactory', () => {
     test('should extend DlqContext with completed job data and results', () => {
       const ctx = factory.getRetryCompletedContext();
       const keys = Object.keys(ctx);
-      expect(keys.length).toBe(9);
+      expect(keys.length).toBe(11);
       expect(keys).toContain('shards');
       expect(keys).toContain('jobIndex');
       expect(keys).toContain('jobLogs');
+      expect(keys).toContain('jobLogQueues');
       expect(keys).toContain('storage');
       expect(keys).toContain('completedJobs');
       expect(keys).toContain('completedJobsData');
       expect(keys).toContain('jobResults');
+      expect(keys).toContain('jobResultQueues');
       expect(ctx.dependencyResults).toBe(deps.dependencyResults);
       expect(ctx.customIdMap).toBe(deps.customIdMap);
     });
@@ -882,10 +901,12 @@ describe('ContextFactory', () => {
       expect(ctx.maxLogsPerJob).toBe(50);
     });
 
-    test('should have exactly 3 fields', () => {
+    test('should include the bounded log ownership index', () => {
       const ctx = factory.getLogsContext();
       const keys = Object.keys(ctx);
-      expect(keys.length).toBe(3);
+      expect(keys).toContain('jobLogQueues');
+      expect(ctx.jobLogQueues).toBe(deps.jobLogQueues);
+      expect(keys.length).toBe(4);
     });
   });
 
@@ -974,6 +995,14 @@ describe('ContextFactory', () => {
       expect(dlq.jobIndex).toBe(sameRef);
       expect(logs.jobIndex).toBe(sameRef);
       expect(queueCtrl.jobIndex).toBe(sameRef);
+    });
+
+    test('pending queue admissions should be shared by push and background contexts', () => {
+      const push = factory.getPushContext();
+      const background = factory.getBackgroundContext();
+
+      expect(push.pendingQueueAdmissions).toBe(deps.pendingQueueAdmissions);
+      expect(background.pendingQueueAdmissions).toBe(deps.pendingQueueAdmissions);
     });
 
     test('mutations to shared data should be visible across contexts', () => {

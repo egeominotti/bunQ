@@ -146,6 +146,21 @@ export class GroupLimiterManager {
     this.manualRateLimits.set(key(queue, groupId), now + duration);
   }
 
+  getQueueNames(): string[] {
+    const queues = new Set<string>();
+    for (const collection of [
+      this.rateOverrides,
+      this.concurrencyOverrides,
+      this.windows,
+      this.manualRateLimits,
+    ]) {
+      for (const groupKey of collection.keys())
+        queues.add(groupKey.slice(0, groupKey.indexOf('\0')));
+    }
+    for (const groupKey of this.paused) queues.add(groupKey.slice(0, groupKey.indexOf('\0')));
+    return Array.from(queues);
+  }
+
   clearQueue(queue: string): void {
     const prefix = `${queue}\0`;
     for (const map of [

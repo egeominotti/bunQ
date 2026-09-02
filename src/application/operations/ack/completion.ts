@@ -26,11 +26,19 @@ export async function ackJob(
   if (!job) return false;
 
   const index = shardIndex(job.queue);
+  let stillOwned = false;
   await withWriteLock(ctx.shardLocks[index], () => {
+    const location = ctx.jobIndex.get(jobId);
+    if (location?.type !== 'processing' || location.queueName !== job.queue) return;
+    stillOwned = true;
     const shard = ctx.shards[index];
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
     shard.notify(job.queue);
   });
+  const location = ctx.jobIndex.get(jobId);
+  if (!stillOwned || location?.type !== 'processing' || location.queueName !== job.queue) {
+    return false;
+  }
 
   if (job.customId && ctx.customIdMap) ctx.customIdMap.delete(job.customId);
   setDlqRetryState(job, null);
@@ -45,6 +53,7 @@ export async function ackJob(
     ctx.completedJobsData.set(jobId, job);
     if (result !== undefined) {
       ctx.jobResults.set(jobId, result);
+      ctx.jobResultQueues.set(jobId, job.queue);
       ctx.storage?.storeResult(jobId, result);
     }
     ctx.jobIndex.set(jobId, { type: 'completed', queueName: job.queue });

@@ -115,12 +115,18 @@ export class DependencyCompletionStore {
     referenced: ReadonlySet<JobId>,
     retentionLimit: number
   ): DependencyCompletionRecord[] {
-    return this.db.transaction(() => {
-      this.unpinAll.run();
-      for (const jobId of referenced) this.pinOne.run(jobId);
-      this.prune(retentionLimit);
-      return this.loadRecords();
-    })();
+    return this.db.transaction(() => this.reconcilePinsInTransaction(referenced, retentionLimit))();
+  }
+
+  /** Reconcile inside a transaction already owned by the caller. */
+  reconcilePinsInTransaction(
+    referenced: ReadonlySet<JobId>,
+    retentionLimit: number
+  ): DependencyCompletionRecord[] {
+    this.unpinAll.run();
+    for (const jobId of referenced) this.pinOne.run(jobId);
+    this.prune(retentionLimit);
+    return this.loadRecords();
   }
 
   private prune(retentionLimit: number): void {

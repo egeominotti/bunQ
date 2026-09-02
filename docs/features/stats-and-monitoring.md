@@ -106,6 +106,12 @@ The capacity denominator for overload calculations is configured concurrency
 slots across workers whose heartbeat is still active, not the number of worker
 registrations.
 
+In SQLite mode, the global `completed` state and per-queue completed counts are
+read from `completed_job_counts`, an exact trigger-maintained projection of
+retained `jobs` rows. They therefore remain accurate when the bounded
+`completedJobs` hot cache evicts older rows. Memory mode continues to count its
+in-memory set; PostgreSQL uses its database-authoritative projection.
+
 Five labelled gauges provide per-queue state:
 
 ```text

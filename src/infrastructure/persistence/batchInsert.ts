@@ -1,10 +1,11 @@
 import type { Database } from 'bun:sqlite';
 import type { Job } from '../../domain/types/job';
+import { getDlqRetryState } from '../../domain/types/dlq';
 import { encodeJobOptions } from './jobOptionsBlob';
-import { pack, persistedInitialState, persistedStallCount } from './sqliteSerializer';
+import { pack, persistedJobStateForWrite, persistedStallCount } from './sqliteSerializer';
 import type { BatchInsertResult } from './types/batch';
 
-const COLUMNS_PER_ROW = 31;
+const COLUMNS_PER_ROW = 38;
 const MAX_ROWS_PER_INSERT = Math.floor(999 / COLUMNS_PER_ROW);
 
 function isConstraintError(error: Error): boolean {
@@ -57,8 +58,7 @@ export class BatchInsertManager {
   private getBatchInsertStmt(size: number): ReturnType<Database['prepare']> {
     let statement = this.cache.get(size);
     if (!statement) {
-      const rowPlaceholder =
-        '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      const rowPlaceholder = `(${Array(COLUMNS_PER_ROW).fill('?').join(', ')})`;
       const placeholders = Array(size).fill(rowPlaceholder).join(', ');
       const sql = `INSERT INTO jobs (
         id, queue, name, data, priority, created_at, run_at, attempts, max_attempts,
@@ -66,7 +66,8 @@ export class BatchInsertManager {
         children_ids, tags, state, lifo, group_id, remove_on_complete, remove_on_fail,
         fail_parent_on_failure, remove_dependency_on_failure,
         continue_parent_on_failure, ignore_dependency_on_failure,
-        stall_timeout, stall_count, timeline, extended_options
+        stall_timeout, stall_count, timeline, dlq_retry_state, extended_options,
+        started_at, completed_at, progress, progress_msg, last_heartbeat, stacktrace
       ) VALUES ${placeholders}
       ON CONFLICT(id) DO UPDATE SET
         queue=excluded.queue, name=excluded.name, data=excluded.data, priority=excluded.priority,
@@ -96,6 +97,8 @@ export class BatchInsertManager {
     const statement = this.getBatchInsertStmt(jobs.length);
     const values: unknown[] = [];
     for (const job of jobs) {
+      const state = persistedJobStateForWrite(job, now);
+      const dlqRetryState = getDlqRetryState(job);
       values.push(
         job.id,
         job.queue,
@@ -115,7 +118,7 @@ export class BatchInsertManager {
         job.parentId,
         job.childrenIds.length > 0 ? pack(job.childrenIds) : null,
         job.tags.length > 0 ? pack(job.tags) : null,
-        persistedInitialState(job, now),
+        state,
         job.lifo ? 1 : 0,
         job.groupId,
         job.removeOnComplete ? 1 : 0,
@@ -127,7 +130,14 @@ export class BatchInsertManager {
         job.stallTimeout,
         persistedStallCount(job),
         job.timeline.length > 0 ? pack(job.timeline) : null,
-        encodeJobOptions(job)
+        dlqRetryState ? pack(dlqRetryState) : null,
+        encodeJobOptions(job),
+        job.startedAt,
+        job.completedAt,
+        state === 'completed' ? 100 : (job.progress ?? 0),
+        job.progressMessage ?? null,
+        job.lastHeartbeat ?? job.createdAt,
+        job.stacktrace ? pack(job.stacktrace) : null
       );
     }
     statement.run(...(values as (string | number | bigint | null | Uint8Array)[]));

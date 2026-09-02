@@ -5,6 +5,7 @@ import type { SetLike } from '../shared/lru';
 
 interface CompletionRecord {
   jobId: JobId;
+  queue: string;
   pinned: boolean;
 }
 
@@ -16,6 +17,7 @@ interface CompletionRecord {
 export class DependencyCompletionTracker implements SetLike<JobId> {
   private readonly recent = new Set<JobId>();
   private readonly pinned = new Set<JobId>();
+  private readonly owners = new Map<JobId, string>();
   private readonly maxRecent: number;
 
   constructor(
@@ -25,34 +27,37 @@ export class DependencyCompletionTracker implements SetLike<JobId> {
     this.maxRecent = Math.max(1, Math.trunc(maxRecent));
   }
 
-  add(jobId: JobId): void {
+  add(jobId: JobId, queue?: string): void {
+    if (queue !== undefined) this.owners.set(jobId, queue);
     if (this.pinned.has(jobId) || this.recent.has(jobId)) return;
     if (this.recent.size >= this.maxRecent) {
       const oldest = this.recent.values().next().value;
       if (oldest !== undefined) {
         this.recent.delete(oldest);
+        this.owners.delete(oldest);
         this.onRecentEvict?.(oldest);
       }
     }
     this.recent.add(jobId);
   }
 
-  pin(jobId: JobId): void {
+  pin(jobId: JobId, queue?: string): void {
+    if (queue !== undefined) this.owners.set(jobId, queue);
     this.recent.delete(jobId);
     this.pinned.add(jobId);
   }
 
   unpin(jobId: JobId, retainAsRecent: boolean): void {
     this.pinned.delete(jobId);
-    if (retainAsRecent) this.recent.add(jobId);
-    else this.recent.delete(jobId);
+    if (retainAsRecent) this.add(jobId);
+    else this.delete(jobId);
   }
 
   hydrate(records: Iterable<CompletionRecord>): void {
     this.clear();
     for (const record of records) {
-      if (record.pinned) this.pin(record.jobId);
-      else this.add(record.jobId);
+      if (record.pinned) this.pin(record.jobId, record.queue);
+      else this.add(record.jobId, record.queue);
     }
   }
 
@@ -66,12 +71,24 @@ export class DependencyCompletionTracker implements SetLike<JobId> {
 
   delete(jobId: JobId): boolean {
     const wasPinned = this.pinned.delete(jobId);
-    return this.recent.delete(jobId) || wasPinned;
+    const deleted = this.recent.delete(jobId) || wasPinned;
+    this.owners.delete(jobId);
+    return deleted;
+  }
+
+  deleteForQueue(queue: string): JobId[] {
+    const removed: JobId[] = [];
+    for (const [jobId, owner] of this.owners) {
+      if (owner !== queue) continue;
+      if (this.delete(jobId)) removed.push(jobId);
+    }
+    return removed;
   }
 
   clear(): void {
     this.recent.clear();
     this.pinned.clear();
+    this.owners.clear();
   }
 
   get size(): number {
@@ -98,8 +115,8 @@ export function commitRemovedCompletion(
 ): void {
   const pinned = hasDependencyWaiters(ctx.shards, job.id);
   ctx.storage?.commitRemovedCompletion(job, ctx.maxDependencyCompletions, pinned, completedAt);
-  if (pinned) ctx.depCompletions?.pin(job.id);
-  else ctx.depCompletions?.add(job.id);
+  if (pinned) ctx.depCompletions?.pin(job.id, job.queue);
+  else ctx.depCompletions?.add(job.id, job.queue);
 }
 
 /**

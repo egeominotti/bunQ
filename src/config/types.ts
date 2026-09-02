@@ -40,6 +40,10 @@ export interface BunqueueConfig {
     maxQueuedOperations?: number;
     maxSnapshotJobs?: number;
     maxSnapshotPayloadBytes?: number;
+    /** Hot in-memory completed-job window; this is not durable retention. */
+    maxCompletedJobs?: number;
+    /** Automatic age-based completed-job retention in milliseconds; null disables it. */
+    completedRetentionMs?: number | null;
   };
   telemetry?: {
     /** Maximum queue label values exposed to Prometheus; zero disables per-queue series. */

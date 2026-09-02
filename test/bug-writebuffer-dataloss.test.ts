@@ -9,7 +9,7 @@
  * 3. Error callback: Now includes retry count and backoff information
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import {
   WriteBuffer,
   BatchInsertManager,
@@ -418,6 +418,201 @@ describe('WriteBuffer Fixes', () => {
   });
 
   describe('Concurrent Operations', () => {
+    test('automatic flush triggers respect an outstanding retry backoff', () => {
+      let flushCalls = 0;
+      let criticalLosses = 0;
+      const mockBatchManager = {
+        insertJobsBatch: (jobs: Job[]) => {
+          flushCalls++;
+          return {
+            transient: [...jobs],
+            conflicts: [],
+            error: new Error('temporary outage'),
+          };
+        },
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(
+        mockBatchManager,
+        1,
+        60_000,
+        () => {},
+        () => {
+          criticalLosses++;
+        }
+      );
+
+      try {
+        buffer.add(createMockJob(1));
+        expect(flushCalls).toBe(1);
+        expect(buffer.getRetryState().retryCount).toBe(1);
+
+        buffer.addBatch(Array.from({ length: 12 }, (_, index) => createMockJob(index + 2)));
+        buffer.withDeferredAutoFlush(() => {
+          buffer.add(createMockJob(20));
+        });
+
+        expect(flushCalls).toBe(1);
+        expect(buffer.getRetryState().retryCount).toBe(1);
+        expect(buffer.pendingCount).toBe(14);
+        expect(criticalLosses).toBe(0);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('an explicit successful flush clears the obsolete retry backoff', () => {
+      let shouldFail = true;
+      let flushCalls = 0;
+      const mockBatchManager = {
+        insertJobsBatch: (jobs: Job[]) => {
+          flushCalls++;
+          return shouldFail
+            ? { transient: [...jobs], conflicts: [], error: new Error('temporary outage') }
+            : { transient: [], conflicts: [] };
+        },
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 1, 60_000, () => {});
+
+      try {
+        buffer.add(createMockJob(1));
+        expect(flushCalls).toBe(1);
+        shouldFail = false;
+        expect(buffer.flush()).toBe(1);
+        buffer.add(createMockJob(2));
+        expect(flushCalls).toBe(3);
+        expect(buffer.pendingCount).toBe(0);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('removing the last failed job clears its obsolete retry backoff', () => {
+      let shouldFail = true;
+      let flushCalls = 0;
+      const mockBatchManager = {
+        insertJobsBatch: (jobs: Job[]) => {
+          flushCalls++;
+          return shouldFail
+            ? { transient: [...jobs], conflicts: [], error: new Error('temporary outage') }
+            : { transient: [], conflicts: [] };
+        },
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 1, 60_000, () => {});
+
+      try {
+        const failed = createMockJob(1);
+        buffer.add(failed);
+        buffer.removePending(failed.id);
+        expect(buffer.pendingCount).toBe(0);
+        expect(buffer.getRetryState().retryCount).toBe(0);
+
+        shouldFail = false;
+        buffer.add(createMockJob(2));
+        expect(flushCalls).toBe(2);
+        expect(buffer.pendingCount).toBe(0);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('removing the last failed queue clears its obsolete retry backoff', () => {
+      let shouldFail = true;
+      let flushCalls = 0;
+      const mockBatchManager = {
+        insertJobsBatch: (jobs: Job[]) => {
+          flushCalls++;
+          return shouldFail
+            ? { transient: [...jobs], conflicts: [], error: new Error('temporary outage') }
+            : { transient: [], conflicts: [] };
+        },
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 1, 60_000, () => {});
+
+      try {
+        const failed = createMockJob(1);
+        buffer.add(failed);
+        expect(buffer.removePendingForQueue(failed.queue)).toEqual([failed.id]);
+        expect(buffer.pendingCount).toBe(0);
+        expect(buffer.getRetryState().retryCount).toBe(0);
+
+        shouldFail = false;
+        buffer.add(createMockJob(2));
+        expect(flushCalls).toBe(2);
+        expect(buffer.pendingCount).toBe(0);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('nested auto-flush deferrals coalesce one oversized admission batch', () => {
+      const flushSizes: number[] = [];
+      const mockBatchManager = {
+        insertJobsBatch: (jobs: Job[]) => {
+          flushSizes.push(jobs.length);
+        },
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 3, 60_000, () => {});
+
+      try {
+        buffer.withDeferredAutoFlush(() => {
+          buffer.add(createMockJob(1));
+          buffer.withDeferredAutoFlush(() => {
+            buffer.add(createMockJob(2));
+            buffer.add(createMockJob(3));
+          });
+          expect(flushSizes).toEqual([]);
+          buffer.add(createMockJob(4));
+        });
+
+        expect(flushSizes).toEqual([4]);
+        expect(buffer.pendingCount).toBe(0);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('a deferred batch below the threshold remains buffered and queryable', () => {
+      const mockBatchManager = {
+        insertJobsBatch: () => undefined,
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 5, 60_000, () => {});
+
+      try {
+        buffer.withDeferredAutoFlush(() => {
+          buffer.add(createMockJob(1));
+          buffer.add({ ...createMockJob(2), queue: 'other-queue' });
+        });
+
+        expect(buffer.pendingCount).toBe(2);
+        expect(buffer.getPendingJobs('test-queue').map((job) => job.id)).toEqual([1n]);
+        expect(buffer.getPendingJobs('other-queue').map((job) => job.id)).toEqual([2n]);
+      } finally {
+        buffer.stop();
+      }
+    });
+
+    test('deferred execution preserves an explicitly thrown undefined value', () => {
+      const mockBatchManager = {
+        insertJobsBatch: () => undefined,
+      } as unknown as BatchInsertManager;
+      const buffer = new WriteBuffer(mockBatchManager, 5, 60_000, () => {});
+      let escaped = false;
+
+      try {
+        try {
+          buffer.withDeferredAutoFlush(() => {
+            throw undefined;
+          });
+        } catch (error) {
+          escaped = true;
+          expect(error).toBeUndefined();
+        }
+        expect(escaped).toBe(true);
+      } finally {
+        buffer.stop();
+      }
+    });
+
     test('concurrent add during flush still works correctly', async () => {
       let flushCount = 0;
       const flushSizes: number[] = [];

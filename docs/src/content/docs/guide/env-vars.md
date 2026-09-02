@@ -27,6 +27,8 @@ A typed `bunqueue.config.ts` can replace most of these, with IntelliSense and ev
 | `HOST`                                          | string               | `0.0.0.0`   | Bind address (`127.0.0.1` for local-only)                                      |
 | `BUNQUEUE_STORAGE_DRIVER`                       | string               | inferred    | `memory`, `sqlite`, or `postgres`                                              |
 | `BUNQUEUE_DATA_PATH`                            | string               | (in-memory) | SQLite database path. Without it or a PostgreSQL URL, jobs are lost on restart |
+| `BUNQUEUE_MAX_COMPLETED_JOBS`                   | positive integer     | `50000`     | Completed-job hot cache/recovery window; does not delete durable rows          |
+| `BUNQUEUE_COMPLETED_RETENTION_MS`               | non-negative integer | disabled    | Age after which the background cleanup may delete completed SQLite rows        |
 | `BUNQUEUE_POSTGRES_URL`                         | string               | (none)      | PostgreSQL connection URL; implies the `postgres` driver when no driver is set |
 | `BUNQUEUE_POSTGRES_NAMESPACE`                   | string               | `default`   | Isolates independent bunqueue installations in one PostgreSQL database         |
 | `BUNQUEUE_BROKER_ID`                            | string               | generated   | Stable unique ID for this PostgreSQL broker process                            |
@@ -50,6 +52,13 @@ BUNQUEUE_DATA_PATH=/var/lib/queue.db TCP_PORT=6789 bunqueue start
 ```
 
 **Data path aliases.** Four names are read for the SQLite path, in priority order: `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH`. They are equivalent; prefer `BUNQUEUE_DATA_PATH`.
+
+**Completed-job retention.** `BUNQUEUE_MAX_COMPLETED_JOBS` (legacy alias:
+`MAX_COMPLETED_JOBS`) only bounds the hot in-memory projection. Durable
+retention is opt-in through `BUNQUEUE_COMPLETED_RETENTION_MS` (legacy alias:
+`COMPLETED_RETENTION_MS`); when unset, completed SQLite rows are retained until
+an explicit clean or obliterate operation. `0` makes every unprotected
+completed row eligible on the next cleanup tick.
 
 **Storage selection.** An explicit driver wins. Otherwise a PostgreSQL URL
 selects PostgreSQL, a data path selects SQLite, and neither selects memory.

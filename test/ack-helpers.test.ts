@@ -108,6 +108,7 @@ function createFinalizeContext(overrides?: Partial<FinalizeContext>): FinalizeCo
     depCompletions: new DependencyCompletionTracker(DEFAULT_CONFIG.maxCompletedJobs),
     maxDependencyCompletions: DEFAULT_CONFIG.maxCompletedJobs,
     jobResults: new Map<JobId, unknown>() as any,
+    jobResultQueues: new Map<JobId, string>(),
     jobIndex: new Map<JobId, JobLocation>(),
     totalCompleted: { value: 0n },
     broadcast: mock(() => {}),
@@ -658,7 +659,7 @@ describe('finalizeBatchAck', () => {
     const job1 = fakeJob({ id: id1, queue: 'q1', removeOnComplete: true });
 
     // Pre-populate jobIndex to verify deletion
-    finalizeCtx.jobIndex.set(id1, { type: 'processing', shardIdx: 0 });
+    finalizeCtx.jobIndex.set(id1, { type: 'processing', shardIdx: 0, queueName: 'q1' });
 
     const extracted: ExtractedJob[] = [{ id: id1, job: job1 }];
 

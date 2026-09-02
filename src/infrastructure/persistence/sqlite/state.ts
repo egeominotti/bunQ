@@ -1,12 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { createDlqEntry, FailureReason, type DlqEntry } from '../../../domain/types/dlq';
-import type { Job } from '../../../domain/types/job';
+import type { Job, JobId } from '../../../domain/types/job';
 import { storageLog } from '../../../shared/logger';
 import { BatchInsertManager, WriteBuffer } from '../sqliteBatch';
 import { DependencyCompletionStore } from '../dependencyCompletionStore';
-import { migrateLegacyCronJobNames, migrateLegacyJobNames } from '../legacyNameMigration';
-import { MIGRATIONS } from '../migrations';
-import { MIGRATION_TABLE, PRAGMA_SETTINGS, SCHEMA, SCHEMA_VERSION } from '../schema';
+import { PRAGMA_SETTINGS } from '../schema';
+import { assertSupportedSqliteSchema, migrateSqliteDatabase } from '../sqliteMigration';
+import { persistedJobStateForWrite } from '../sqliteSerializer';
 import { prepareStatements, type StatementName } from '../statements';
 import type { SqliteConfig, SqliteCriticalLoss, SqliteCriticalLossCallback } from '../types/sqlite';
 
@@ -14,14 +14,6 @@ function isSqliteFullError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
     error.message.includes('SQLITE_FULL') || error.message.includes('database or disk is full')
-  );
-}
-
-function isIdempotentMigrationError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return (
-    /^duplicate column name: [A-Za-z_][A-Za-z0-9_]*$/i.test(error.message) ||
-    /^(?:index|table) [A-Za-z_][A-Za-z0-9_]* already exists$/i.test(error.message)
   );
 }
 
@@ -43,41 +35,51 @@ export abstract class SqliteState {
 
   constructor(config: SqliteConfig) {
     this.db = new Database(config.path, { create: true });
-    try {
-      this.db.run(PRAGMA_SETTINGS);
-    } catch (error) {
-      storageLog.error('Failed to apply PRAGMA settings', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    this.migrate();
-    this.dependencyCompletionStore = new DependencyCompletionStore(this.db);
-    this.statements = prepareStatements(this.db);
     this._onCriticalLoss = config.onCriticalLoss;
-    this.batchManager = new BatchInsertManager(this.db);
-    this.writeBuffer = new WriteBuffer(
-      this.batchManager,
-      config.writeBufferSize ?? 100,
-      config.writeBufferFlushMs ?? 10,
-      (error, jobCount) => {
-        if (isSqliteFullError(error)) this.setDiskFull(error.message);
-        if (/constraint failed/i.test(error.message)) {
-          storageLog.error('Write buffer rejected jobs (constraint violation, dropped)', {
-            rejectedJobCount: jobCount,
-            error: error.message,
-          });
-        } else {
-          storageLog.error('Write buffer flush failed', {
-            jobCount,
-            error: error.message,
-            diskFull: this._diskFull,
-          });
-        }
-      },
-      (jobs, lastError, attempts) => {
-        this.handleCriticalLoss(jobs, lastError, attempts);
+    try {
+      assertSupportedSqliteSchema(this.db);
+      try {
+        this.db.run(PRAGMA_SETTINGS);
+      } catch (error) {
+        storageLog.error('Failed to apply PRAGMA settings', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-    );
+      migrateSqliteDatabase(this.db, config.path);
+      this.dependencyCompletionStore = new DependencyCompletionStore(this.db);
+      this.statements = prepareStatements(this.db);
+      this.batchManager = new BatchInsertManager(this.db);
+      this.writeBuffer = new WriteBuffer(
+        this.batchManager,
+        config.writeBufferSize ?? 100,
+        config.writeBufferFlushMs ?? 10,
+        (error, jobCount) => {
+          if (isSqliteFullError(error)) this.setDiskFull(error.message);
+          if (/constraint failed/i.test(error.message)) {
+            storageLog.error('Write buffer rejected jobs (constraint violation, dropped)', {
+              rejectedJobCount: jobCount,
+              error: error.message,
+            });
+          } else {
+            storageLog.error('Write buffer flush failed', {
+              jobCount,
+              error: error.message,
+              diskFull: this._diskFull,
+            });
+          }
+        },
+        (jobs, lastError, attempts) => {
+          this.handleCriticalLoss(jobs, lastError, attempts);
+        }
+      );
+    } catch (error) {
+      try {
+        this.db.close();
+      } catch {
+        // Preserve the initialization error.
+      }
+      throw error;
+    }
   }
 
   private handleCriticalLoss(jobs: Job[], lastError: Error, attempts: number): void {
@@ -194,35 +196,20 @@ export abstract class SqliteState {
     return flushed;
   }
 
-  private migrate(): void {
-    this.db.run(MIGRATION_TABLE);
-    const currentVersion =
-      this.db.query<{ version: number }, []>('SELECT MAX(version) as version FROM migrations').get()
-        ?.version ?? 0;
+  withDeferredBufferFlush<T>(operation: () => T): T {
+    return this.writeBuffer.withDeferredAutoFlush(operation);
+  }
 
-    if (currentVersion < SCHEMA_VERSION) {
-      const applyMigrations = this.db.transaction(() => {
-        this.db.run(SCHEMA);
-        for (const [version, sql] of Object.entries(MIGRATIONS)) {
-          const numericVersion = Number(version);
-          if (numericVersion > currentVersion && numericVersion > 1) {
-            const statements = typeof sql === 'string' ? [sql] : sql;
-            for (const statement of statements) {
-              try {
-                this.db.run(statement);
-              } catch (error) {
-                if (!isIdempotentMigrationError(error)) throw error;
-              }
-            }
-          }
-        }
-        migrateLegacyJobNames(this.db);
-        migrateLegacyCronJobNames(this.db);
-        this.db
-          .prepare('INSERT INTO migrations (version, applied_at) VALUES (?, ?)')
-          .run(SCHEMA_VERSION, Date.now());
-      });
-      applyMigrations();
-    }
+  getBufferedJobs(queue?: string): Job[] {
+    return this.writeBuffer.getPendingJobs(queue);
+  }
+
+  getBufferedJob(jobId: JobId): Job | null {
+    return this.writeBuffer.getPendingJob(jobId);
+  }
+
+  getBufferedJobState(jobId: JobId): string | null {
+    const job = this.writeBuffer.getPendingJob(jobId);
+    return job ? persistedJobStateForWrite(job) : null;
   }
 }

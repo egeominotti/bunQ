@@ -4,8 +4,41 @@ All notable changes to bunqueue are documented here.
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [2.9.3] - 2026-09-02
+
+> **SQLite safety and queue-control release.** Completed history remains
+> reachable after hot-cache eviction, cleanup and statistics use durable
+> authority, and long schema upgrades are observable, bounded, and resumable.
+> This release also completes BullMQ Pro-compatible job groups and native batch
+> processing across embedded, TCP, and PostgreSQL runtimes.
+
+### Upgrade notes
+
+- Back up SQLite before upgrading. Schema 37 is applied before TCP/HTTP bind;
+  legacy payload rewrites are restart-safe and resume from their last committed
+  checkpoint, but a database with committed 2.9.3 migration batches must not be
+  opened by an older binary. Roll forward, or restore the pre-upgrade database
+  and binary together.
+- `maxCompletedJobs` remains the hot-memory/recovery cap; it is not a disk
+  retention policy. Configure `completedRetentionMs` when automatic expiry is
+  desired. Deleted pages are reused by SQLite, but shrinking an already large
+  file still requires an offline `VACUUM` with sufficient temporary space.
+- PostgreSQL group support advances its schema to version 20. Upgrade all
+  brokers in a cluster together; older brokers reject the newer schema instead
+  of serving with mixed scheduling semantics.
+
 ### Added
 
+- Added opt-in age-based retention for durable completed jobs through
+  `storage.completedRetentionMs`, `BUNQUEUE_COMPLETED_RETENTION_MS`, and
+  `--completed-retention-ms`. Cleanup runs in bounded oldest-first pages and
+  protects results that still have live dependency consumers.
+- Added restart-safe SQLite migration checkpoints, structured start/step/
+  progress/completion/failure logs, 500-row/8 MiB legacy rewrite batches, and a
+  fail-fast guard for databases created by newer bunqueue versions. TCP and
+  HTTP listeners bind only after migration and recovery finish.
 - Added BullMQ Pro-compatible job groups to the Bun Queue/Worker API: FIFO
   claim order within each group, fair round-robin scheduling across groups,
   ungrouped-job precedence, server-side group depth/active getters, fixed-window
@@ -15,6 +48,11 @@ All notable changes to bunqueue are documented here.
 
 ### Changed
 
+- SQLite schema version 37 adds exact per-queue completed counters,
+  deterministic cleanup/recovery indexes, and durable migration progress.
+  `maxCompletedJobs` now has one explicit responsibility: bounding the hot
+  in-memory window rather than defining what durable history can be queried or
+  cleaned.
 - SQLite schema version 35 persists per-group rate/concurrency overrides.
   PostgreSQL schema version 19 adds a `BIGINT` grouped-admission order, exact
   FIFO/rotation indexes, group state, bounded safe retention, and a full catalog
@@ -28,6 +66,30 @@ All notable changes to bunqueue are documented here.
 
 ### Fixed
 
+- Fixed [#118](https://github.com/egeominotti/bunqueue/issues/118): completed
+  jobs evicted from the hot window no longer become unreachable SQLite rows.
+  Completed clean, counts, stats, queries, custom-ID reuse, and specific/bulk
+  retry now consult SQLite authority, including deterministic cold-history
+  pagination. Queue obliteration removes cold jobs, results, logs, completion
+  proofs, flow-failure rows, telemetry, and queue/group state in one
+  storage-first boundary.
+- Fixed cross-generation and reentrancy races around cleanup and obliteration.
+  Result/log ownership is queue-aware, ACK/ACKB/FAIL revalidate ownership before
+  terminal publication, completed-only queues remain registered while durable
+  rows exist, and a failed storage deletion leaves runtime state intact for an
+  idempotent retry.
+- Fixed buffered SQLite jobs persisting stale lifecycle state after activation,
+  delay, dependency promotion, retry, or completion. Pending transitions now
+  survive write backoff; explicit success, retry exhaustion, and removal of the
+  last failed pending job cancel obsolete retry timers. Mixed persisted/buffered
+  queries paginate once with SQLite-compatible binary text ordering.
+- Fixed [#119](https://github.com/egeominotti/bunqueue/issues/119): first boot
+  after a SQLite schema upgrade is no longer silent or all-or-nothing. Legacy
+  payload rewrites commit a cursor with every bounded batch and resume from the
+  last checkpoint after interruption. Operators receive database size,
+  source/target version, row/byte progress, per-step duration, completion, and
+  structured failure logs; downgrade safety and the intentionally unbound
+  listener state are documented.
 - The embedded heartbeat-token regression now advances a controlled wall clock
   and asserts the renewed lease metadata directly. It still proves single,
   acknowledgement, and batch behavior past the original expiry, without a

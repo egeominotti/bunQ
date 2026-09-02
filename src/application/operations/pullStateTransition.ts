@@ -137,7 +137,7 @@ export function tryDequeueNextJob(
     // Queue -> processing is atomic for observers while the shard lock is held.
     const procIdx = processingShardIndex(dequeued.id);
     ctx.processingShards[procIdx].set(dequeued.id, dequeued);
-    ctx.jobIndex.set(dequeued.id, { type: 'processing', shardIdx: procIdx });
+    ctx.jobIndex.set(dequeued.id, { type: 'processing', shardIdx: procIdx, queueName: queue });
 
     return { status: 'job', job: dequeued };
   }

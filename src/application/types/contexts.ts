@@ -26,9 +26,11 @@ export interface QueueManagerState {
   readonly jobIndex: Map<JobId, JobLocation>;
   readonly completedJobs: BoundedSet<JobId>;
   readonly jobResults: LRUMap<JobId, unknown>;
+  readonly jobResultQueues: Map<JobId, string>;
   readonly dependencyResults: DependencyResultTracker;
   readonly customIdMap: LRUMap<string, JobId>;
   readonly jobLogs: LRUMap<JobId, JobLogEntry[]>;
+  readonly jobLogQueues: Map<JobId, string>;
   readonly jobLocks: Map<JobId, JobLock>;
   readonly timedOutJobs: MapLike<JobId, RetiredTimeoutGeneration>;
   readonly retiredTimeoutLeaseTokens: MapLike<string, RetiredTimeoutGeneration>;
@@ -37,6 +39,7 @@ export interface QueueManagerState {
   readonly clientJobs: Map<string, Set<JobId>>;
   readonly stalledCandidates: Set<JobId>;
   readonly pendingDepChecks: Set<JobId>;
+  readonly pendingQueueAdmissions: Map<string, number>;
   readonly queueNamesCache: Set<string>;
   readonly eventsManager: EventsManager;
   readonly webhookManager: WebhookManager;
@@ -82,6 +85,7 @@ export interface BackgroundContext extends QueueManagerState {
 }
 
 export interface StatsContext {
+  storage?: SqliteStorage | null;
   shards: Shard[];
   processingShards: Map<JobId, Job>[];
   completedJobs: SetLike<JobId>;

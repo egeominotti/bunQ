@@ -53,8 +53,27 @@ export function persistedStallCount(job: Pick<Job, 'stallCount'>): number {
   return job.stallCount ?? 0;
 }
 
-/** Derive the durable initial state from the authoritative timeline. */
-export function persistedInitialState(job: Job, now: number = Date.now()): string {
+export type PersistedJobState =
+  | 'active'
+  | 'completed'
+  | 'delayed'
+  | 'prioritized'
+  | 'waiting'
+  | 'waiting-children';
+
+const bufferedJobStates = new WeakMap<Job, PersistedJobState>();
+
+/** Override inference after a buffered job changes lifecycle before its insert succeeds. */
+export function setBufferedJobState(job: Job, state: PersistedJobState): void {
+  bufferedJobStates.set(job, state);
+}
+
+/** Derive the current durable state when a buffered job is eventually inserted. */
+export function persistedJobStateForWrite(job: Job, now: number = Date.now()): PersistedJobState {
+  const bufferedState = bufferedJobStates.get(job);
+  if (bufferedState) return bufferedState;
+  if (job.completedAt !== null) return 'completed';
+  if (job.startedAt !== null) return 'active';
   const latest = job.timeline[job.timeline.length - 1]?.state;
   if (
     latest === 'waiting-children' ||
@@ -83,14 +102,6 @@ export function persistedInitialState(job: Job, now: number = Date.now()): strin
  */
 export const CORRUPT_DEPENDS_ON = Symbol('bunqueue.corruptDependsOn');
 const PERSISTED_JOB_STATE = Symbol('bunqueue.persistedJobState');
-
-export type PersistedJobState =
-  | 'active'
-  | 'completed'
-  | 'delayed'
-  | 'prioritized'
-  | 'waiting'
-  | 'waiting-children';
 
 /** Read the authoritative SQLite state carried by a recovered job. */
 export function persistedJobState(job: Job): PersistedJobState | undefined {

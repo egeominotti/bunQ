@@ -3,13 +3,15 @@
  * Tests for periodic maintenance and garbage collection functions
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, setSystemTime } from 'bun:test';
 import { QueueManager } from '../src/application/queueManager';
 import { cleanup } from '../src/application/cleanupTasks';
-import { createJob, jobId, type Job, type JobId } from '../src/domain/types/job';
-import { processingShardIndex, shardIndex, SHARD_COUNT } from '../src/shared/hash';
+import { DEFAULT_DLQ_CONFIG } from '../src/domain/types/dlq';
+import { createJob, jobId, type Job } from '../src/domain/types/job';
+import { DEFAULT_STALL_CONFIG } from '../src/domain/types/stall';
+import { processingShardIndex, shardIndex } from '../src/shared/hash';
+import type { RWLock } from '../src/shared/lock';
 import type { BackgroundContext } from '../src/application/types';
-import type { Shard } from '../src/domain/queue/shard';
 
 /**
  * Helper to extract a BackgroundContext from a QueueManager instance.
@@ -330,7 +332,7 @@ describe('CleanupTasks', () => {
     test('should not run when jobIndex is small (under 100k)', async () => {
       // Add a few entries to jobIndex that point to nonexistent locations
       const fakeId = jobId('orphan-1');
-      ctx.jobIndex.set(fakeId, { type: 'processing', shardIdx: 0 });
+      ctx.jobIndex.set(fakeId, { type: 'processing', shardIdx: 0, queueName: 'orphan-queue' });
 
       const sizeBefore = ctx.jobIndex.size;
 
@@ -411,7 +413,10 @@ describe('CleanupTasks', () => {
   describe('cleanEmptyQueues', () => {
     test('should remove empty queues with no DLQ entries', async () => {
       // Create a queue by pushing and acking a job
-      const pushed = await qm.push('ephemeral-queue', { data: { msg: 'temp' } });
+      const pushed = await qm.push('ephemeral-queue', {
+        data: { msg: 'temp' },
+        removeOnComplete: true,
+      });
       const pulled = await qm.pull('ephemeral-queue');
       expect(pulled?.id).toBe(pushed.id);
       await qm.ack(pulled!.id, { done: true });
@@ -453,6 +458,305 @@ describe('CleanupTasks', () => {
       // The queue name should still exist (either in queues or via DLQ)
       const dlqJobs = qm.getDlq('dlq-queue');
       expect(dlqJobs.length).toBe(1);
+    });
+
+    test('should not unregister a queue with a waiting-children job', async () => {
+      const pushed = await qm.push('waiting-children-queue', { data: { parent: true } });
+      expect((await qm.pull('waiting-children-queue'))?.id).toBe(pushed.id);
+      expect(await qm.moveToWaitingChildren(pushed.id)).toBe(true);
+
+      await cleanup(ctx);
+
+      expect(qm.listQueues()).toContain('waiting-children-queue');
+      expect(await qm.getJobState(pushed.id)).toBe('waiting-children');
+    });
+
+    test('should keep an empty queue registered while queue or group policies remain', async () => {
+      const queue = 'configured-empty-queue';
+      const pushed = await qm.push(queue, { data: { configured: true } });
+      expect((await qm.pull(queue))?.id).toBe(pushed.id);
+      await qm.ack(pushed.id);
+      qm.setConcurrency(queue, 2);
+      await qm.setGroupConcurrency(queue, 'configured-group', 1);
+
+      await cleanup(ctx);
+
+      expect(qm.listQueues()).toContain(queue);
+      expect(qm.getQueueLimits(queue).concurrencyLimit).toBe(2);
+      expect(qm.getGroupConcurrency(queue, 'configured-group')).toBe(1);
+    });
+
+    test('should remove an empty queue after its temporary rate limit expires', async () => {
+      const queue = 'expired-rate-limit-queue';
+      const now = Date.now();
+      setSystemTime(new Date(now));
+      try {
+        const pushed = await qm.push(queue, {
+          data: { temporary: true },
+          removeOnComplete: true,
+        });
+        expect((await qm.pull(queue))?.id).toBe(pushed.id);
+        await qm.ack(pushed.id);
+        qm.setRateLimit(queue, 1, 1_000, 500);
+
+        setSystemTime(new Date(now + 501));
+        await cleanup(ctx);
+
+        expect(qm.listQueues()).not.toContain(queue);
+      } finally {
+        setSystemTime();
+      }
+    });
+
+    test('should not retain empty queues configured with default DLQ or stall policies', async () => {
+      const dlqQueue = 'default-dlq-policy-queue';
+      const stallQueue = 'default-stall-policy-queue';
+      for (const queue of [dlqQueue, stallQueue]) {
+        const pushed = await qm.push(queue, {
+          data: { defaultPolicy: true },
+          removeOnComplete: true,
+        });
+        expect((await qm.pull(queue))?.id).toBe(pushed.id);
+        await qm.ack(pushed.id);
+      }
+      qm.setDlqConfig(dlqQueue, { ...DEFAULT_DLQ_CONFIG });
+      qm.setStallConfig(stallQueue, { ...DEFAULT_STALL_CONFIG });
+
+      await cleanup(ctx);
+
+      expect(qm.listQueues()).not.toContain(dlqQueue);
+      expect(qm.listQueues()).not.toContain(stallQueue);
+    });
+
+    test('should preserve the queue during the processing-map to completed transition gap', async () => {
+      const queue = 'processing-transition-queue';
+      const pushed = await qm.push(queue, { data: { transitioning: true } });
+      expect((await qm.pull(queue))?.id).toBe(pushed.id);
+      const location = ctx.jobIndex.get(pushed.id);
+      expect(location?.type).toBe('processing');
+      if (location?.type !== 'processing') throw new Error('expected processing location');
+      ctx.processingShards[location.shardIdx].delete(pushed.id);
+
+      await cleanup(ctx);
+
+      expect(qm.listQueues()).toContain(queue);
+    });
+
+    test('should preserve a queue while push admission waits for the custom ID lock', async () => {
+      const queue = 'pending-custom-id-push';
+      const customIdLock = (
+        qm as unknown as {
+          customIdLock: RWLock;
+        }
+      ).customIdLock;
+      const guard = await customIdLock.acquireWrite();
+      const pending = qm.push(queue, {
+        data: { pending: true },
+        customId: 'pending-custom-id',
+      });
+
+      try {
+        expect(customIdLock.getState().writerWaiting).toBe(1);
+        expect(qm.listQueues()).toContain(queue);
+        await cleanup(ctx);
+        expect(qm.listQueues()).toContain(queue);
+      } finally {
+        guard.release();
+        await pending;
+      }
+
+      expect(ctx.pendingQueueAdmissions.size).toBe(0);
+      expect(qm.listQueues()).toContain(queue);
+      expect(qm.getQueueJobCounts(queue).waiting).toBe(1);
+    });
+
+    test('should preserve a queue while batch admission waits for the custom ID lock', async () => {
+      const queue = 'pending-custom-id-batch';
+      const customIdLock = (
+        qm as unknown as {
+          customIdLock: RWLock;
+        }
+      ).customIdLock;
+      const guard = await customIdLock.acquireWrite();
+      const pending = qm.pushBatch(queue, [
+        { data: { pending: true }, customId: 'pending-custom-id-batch-job' },
+      ]);
+
+      try {
+        expect(customIdLock.getState().writerWaiting).toBe(1);
+        expect(qm.listQueues()).toContain(queue);
+        await cleanup(ctx);
+        expect(qm.listQueues()).toContain(queue);
+      } finally {
+        guard.release();
+        await pending;
+      }
+
+      expect(ctx.pendingQueueAdmissions.size).toBe(0);
+      expect(qm.listQueues()).toContain(queue);
+      expect(qm.getQueueJobCounts(queue).waiting).toBe(1);
+    });
+
+    test('should retain concurrent admission ownership until the last push finishes', async () => {
+      const queue = 'concurrent-pending-pushes';
+      const customIdLock = (
+        qm as unknown as {
+          customIdLock: RWLock;
+        }
+      ).customIdLock;
+      const guard = await customIdLock.acquireWrite();
+      const blocked = qm.push(queue, {
+        data: { blocked: true },
+        customId: 'blocked-concurrent-push',
+      });
+
+      try {
+        const admitted = await qm.push(queue, { data: { blocked: false } });
+        expect((await qm.pull(queue))?.id).toBe(admitted.id);
+        await qm.ack(admitted.id);
+        expect(qm.getQueueJobCounts(queue).waiting).toBe(0);
+
+        await cleanup(ctx);
+
+        expect(qm.listQueues()).toContain(queue);
+      } finally {
+        guard.release();
+        await blocked;
+      }
+
+      expect(ctx.pendingQueueAdmissions.size).toBe(0);
+    });
+
+    test('should not unregister a queue when obliterate races a pending admission', async () => {
+      const queue = 'obliterate-pending-admission';
+      const customIdLock = (
+        qm as unknown as {
+          customIdLock: RWLock;
+        }
+      ).customIdLock;
+      const guard = await customIdLock.acquireWrite();
+      const pending = qm.push(queue, {
+        data: { pending: true },
+        customId: 'obliterate-pending-admission-job',
+      });
+
+      try {
+        expect(ctx.pendingQueueAdmissions.get(queue)).toBe(1);
+        qm.obliterate(queue);
+        expect(qm.listQueues()).toContain(queue);
+      } finally {
+        guard.release();
+        await pending;
+      }
+
+      expect(qm.listQueues()).toContain(queue);
+      expect(qm.getQueueJobCounts(queue).waiting).toBe(1);
+    });
+
+    test('should preserve every flow queue while admission waits for the custom ID lock', async () => {
+      const queues = ['pending-flow-a', 'pending-flow-b'];
+      const firstId = jobId('pending-flow-first');
+      const customIdLock = (
+        qm as unknown as {
+          customIdLock: RWLock;
+        }
+      ).customIdLock;
+      const guard = await customIdLock.acquireWrite();
+      const pending = qm.pushFlow({
+        jobs: [
+          {
+            id: firstId,
+            queue: queues[0],
+            input: { data: { pending: true }, customId: firstId },
+          },
+          {
+            id: jobId('pending-flow-second'),
+            queue: queues[1],
+            input: { data: { pending: true } },
+          },
+          {
+            id: jobId('pending-flow-third'),
+            queue: queues[0],
+            input: { data: { pending: true } },
+          },
+        ],
+      });
+
+      try {
+        expect(customIdLock.getState().writerWaiting).toBe(1);
+        expect(qm.listQueues()).toEqual(expect.arrayContaining(queues));
+        await cleanup(ctx);
+        expect(qm.listQueues()).toEqual(expect.arrayContaining(queues));
+      } finally {
+        guard.release();
+        await pending;
+      }
+
+      expect(ctx.pendingQueueAdmissions.size).toBe(0);
+      expect(qm.listQueues()).toEqual(expect.arrayContaining(queues));
+      expect(qm.getQueueJobCounts(queues[0]).waiting).toBe(2);
+      expect(qm.getQueueJobCounts(queues[1]).waiting).toBe(1);
+    });
+
+    test('should release admission ownership when validation rejects a push', async () => {
+      const queue = 'rejected-push-admission';
+
+      await expect(
+        qm.push(queue, {
+          data: { rejected: true },
+          groupId: 'rejected-group',
+          priority: 1.5,
+        })
+      ).rejects.toThrow();
+
+      expect(ctx.pendingQueueAdmissions.has(queue)).toBe(false);
+      expect(qm.listQueues()).toContain(queue);
+      await cleanup(ctx);
+      expect(qm.listQueues()).not.toContain(queue);
+    });
+
+    test('should not unregister a queue recreated synchronously by queue:removed', async () => {
+      const queue = 'reentrant-queue-removal';
+      const pushed = await qm.push(queue, { data: { first: true }, removeOnComplete: true });
+      expect((await qm.pull(queue))?.id).toBe(pushed.id);
+      await qm.ack(pushed.id);
+      let recreated: Promise<Job> | null = null;
+      qm.setDashboardEmit((event) => {
+        if (event === 'queue:removed' && recreated === null) {
+          recreated = qm.push(queue, { data: { recreated: true } });
+        }
+      });
+
+      await cleanup(ctx);
+      await recreated;
+
+      expect(qm.listQueues()).toContain(queue);
+      expect(qm.getQueueJobCounts(queue).waiting).toBe(1);
+    });
+
+    test('should finish reconciliation before queue:removed listeners recreate another queue', async () => {
+      const triggerQueue = 'reentrant-removal-trigger';
+      const targetQueue = 'reentrant-removal-target';
+      for (const queue of [triggerQueue, targetQueue]) {
+        const pushed = await qm.push(queue, {
+          data: { initial: true },
+          removeOnComplete: true,
+        });
+        expect((await qm.pull(queue))?.id).toBe(pushed.id);
+        await qm.ack(pushed.id);
+      }
+      let recreated: Promise<Job> | null = null;
+      qm.setDashboardEmit((event, data) => {
+        if (event === 'queue:removed' && data.queue === triggerQueue) {
+          recreated = qm.push(targetQueue, { data: { recreated: true } });
+        }
+      });
+
+      await cleanup(ctx);
+      await recreated;
+
+      expect(qm.listQueues()).toContain(targetQueue);
+      expect(qm.getQueueJobCounts(targetQueue).waiting).toBe(1);
     });
   });
 

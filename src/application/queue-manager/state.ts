@@ -15,6 +15,7 @@ import { EventsManager } from '../eventsManager';
 import { createMonitoringState, type MonitoringState } from '../monitoringChecks';
 import type { OperationalMetrics } from '../metricsExporter';
 import { DEFAULT_CONFIG, type QueueManagerConfig } from '../types';
+import { normalizeCompletedRetentionMs } from '../types/config';
 import * as bgTasks from '../backgroundTasks';
 import { ContextFactory } from '../contextFactory';
 import { DependencyResultTracker } from '../dependencyResultTracker';
@@ -44,10 +45,14 @@ export abstract class QueueManagerState {
   protected readonly retiredCronLeaseTokens: BoundedMap<JobId, string>;
   protected readonly timeoutScheduler = new JobTimeoutScheduler();
   protected readonly jobResults: LRUMap<JobId, unknown>;
+  protected readonly jobResultQueues = new Map<JobId, string>();
   protected readonly dependencyResults = new DependencyResultTracker();
   protected readonly customIdMap: LRUMap<string, JobId>;
   protected readonly jobLogs: LRUMap<JobId, JobLogEntry[]>;
+  protected readonly jobLogQueues = new Map<JobId, string>();
   protected readonly pendingDepChecks = new Set<JobId>();
+  protected readonly pendingQueueAdmissions = new Map<string, number>();
+  protected readonly pendingQueueObliterations = new Set<string>();
   protected readonly stalledCandidates = new Set<JobId>();
   protected depFlushScheduled = false;
   protected depFlushRunning = false;
@@ -96,94 +101,108 @@ export abstract class QueueManagerState {
   }
 
   constructor(config: QueueManagerConfig = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...config,
+      completedRetentionMs: normalizeCompletedRetentionMs(config.completedRetentionMs),
+    };
     this.storage = config.dataPath ? new SqliteStorage({ path: config.dataPath }) : null;
-    let persistedCrons: CronJob[];
+    const cleanupFailedInitialization: Array<() => void> = [() => this.storage?.close()];
     try {
-      persistedCrons = this.storage?.loadCronJobs() ?? [];
+      const persistedCrons: CronJob[] = this.storage?.loadCronJobs() ?? [];
       assertPersistedCronsSupported(persistedCrons);
+      this.telemetryJournal = new QueueTelemetryJournal(
+        this.storage,
+        this.config.maxQueueEvents,
+        this.config.maxMetricDataPoints
+      );
+      cleanupFailedInitialization.push(() => this.telemetryJournal.clearMemory());
+      this.completedJobsData = new BoundedMap(this.config.maxCompletedJobs);
+      this.completedJobs = new BoundedSet(this.config.maxCompletedJobs, (id) => {
+        this.jobIndex.delete(id);
+        this.completedJobsData.delete(id);
+      });
+      this.depCompletions = new DependencyCompletionTracker(this.config.maxCompletedJobs, (id) => {
+        this.storage?.deleteDependencyCompletion(id);
+      });
+      this.timedOutJobs = new BoundedMap(this.config.maxCompletedJobs);
+      this.retiredTimeoutLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
+      this.retiredCronLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
+      this.perQueueMetrics = new LRUMap(this.config.maxCustomIds);
+      this.jobResults = new LRUMap(this.config.maxJobResults, (id) => {
+        this.jobResultQueues.delete(id);
+      });
+      this.customIdMap = new LRUMap(this.config.maxCustomIds);
+      this.jobLogs = new LRUMap(this.config.maxJobLogs, (id) => {
+        this.jobLogQueues.delete(id);
+      });
+
+      const runtime = managerRuntime(this);
+      for (let index = 0; index < SHARD_COUNT; index++) {
+        this.shards.push(new Shard({ onDlqEvicted: (entry) => runtime.onDlqEvicted(entry) }));
+        this.shardLocks.push(new RWLock());
+        this.processingShards.push(new Map());
+        this.processingLocks.push(new RWLock());
+      }
+
+      this.cronScheduler = new CronScheduler();
+      cleanupFailedInitialization.push(() => this.cronScheduler.stop());
+      this.cronScheduler.setPushCallback(async (queue, input) => {
+        await runtime.push(queue, input);
+      });
+      if (this.storage) {
+        const storage = this.storage;
+        this.cronScheduler.setPersistCallback((name, executions, nextRun) => {
+          storage.updateCron(name, executions, nextRun);
+        });
+      }
+
+      this.webhookManager = new WebhookManager({ validateUrls: config.validateWebhookUrls });
+      this.workerManager = new WorkerManager();
+      cleanupFailedInitialization.push(() => this.workerManager.stop());
+      this.cronScheduler.setWorkerCheckCallback(
+        (queue) => this.workerManager.getForQueue(queue).length > 0
+      );
+      this.eventsManager = new EventsManager(this.webhookManager);
+      cleanupFailedInitialization.push(() => this.eventsManager.clear());
+      this.eventsManager.subscribe(
+        (event) => this.telemetryJournal.record(event),
+        (events) => this.telemetryJournal.recordBatch(events)
+      );
+      this.contextFactory = new ContextFactory(
+        createContextDependencies(managerRuntime(this)),
+        createContextCallbacks(runtime)
+      );
+
+      bgTasks.recover(this.contextFactory.getBackgroundContext());
+      if (this.storage) {
+        recoverFlowFailures({
+          storage: this.storage,
+          shards: this.shards,
+          jobIndex: this.jobIndex,
+          completedJobs: this.completedJobs,
+          depCompletions: this.depCompletions,
+          maxDependencyCompletions: this.config.maxCompletedJobs,
+          dependencyResults: this.dependencyResults,
+          failedChildrenValues: this.failedChildrenValues,
+          ignoredChildrenFailures: this.ignoredChildrenFailures,
+        });
+      }
+      this.recoveryStats = { queues: this.queueNamesCache.size, jobs: this.jobIndex.size };
+      if (this.storage) this.cronScheduler.load(persistedCrons);
+      this.backgroundTaskHandles = bgTasks.startBackgroundTasks(
+        this.contextFactory.getBackgroundContext(),
+        this.cronScheduler
+      );
     } catch (error) {
-      try {
-        this.storage?.close();
-      } catch {
-        // Preserve the read/validation error that made construction fail.
+      for (let index = cleanupFailedInitialization.length - 1; index >= 0; index--) {
+        try {
+          cleanupFailedInitialization[index]();
+        } catch {
+          // Preserve the initialization error.
+        }
       }
       throw error;
     }
-    this.telemetryJournal = new QueueTelemetryJournal(
-      this.storage,
-      this.config.maxQueueEvents,
-      this.config.maxMetricDataPoints
-    );
-    this.completedJobsData = new BoundedMap(this.config.maxCompletedJobs);
-    this.completedJobs = new BoundedSet(this.config.maxCompletedJobs, (id) => {
-      this.jobIndex.delete(id);
-      this.completedJobsData.delete(id);
-    });
-    this.depCompletions = new DependencyCompletionTracker(this.config.maxCompletedJobs, (id) => {
-      this.storage?.deleteDependencyCompletion(id);
-    });
-    this.timedOutJobs = new BoundedMap(this.config.maxCompletedJobs);
-    this.retiredTimeoutLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
-    this.retiredCronLeaseTokens = new BoundedMap(this.config.maxCompletedJobs);
-    this.perQueueMetrics = new LRUMap(this.config.maxCustomIds);
-    this.jobResults = new LRUMap(this.config.maxJobResults);
-    this.customIdMap = new LRUMap(this.config.maxCustomIds);
-    this.jobLogs = new LRUMap(this.config.maxJobLogs);
-
-    const runtime = managerRuntime(this);
-    for (let index = 0; index < SHARD_COUNT; index++) {
-      this.shards.push(new Shard({ onDlqEvicted: (entry) => runtime.onDlqEvicted(entry) }));
-      this.shardLocks.push(new RWLock());
-      this.processingShards.push(new Map());
-      this.processingLocks.push(new RWLock());
-    }
-
-    this.cronScheduler = new CronScheduler();
-    this.cronScheduler.setPushCallback(async (queue, input) => {
-      await runtime.push(queue, input);
-    });
-    if (this.storage) {
-      const storage = this.storage;
-      this.cronScheduler.setPersistCallback((name, executions, nextRun) => {
-        storage.updateCron(name, executions, nextRun);
-      });
-    }
-
-    this.webhookManager = new WebhookManager({ validateUrls: config.validateWebhookUrls });
-    this.workerManager = new WorkerManager();
-    this.cronScheduler.setWorkerCheckCallback(
-      (queue) => this.workerManager.getForQueue(queue).length > 0
-    );
-    this.eventsManager = new EventsManager(this.webhookManager);
-    this.eventsManager.subscribe(
-      (event) => this.telemetryJournal.record(event),
-      (events) => this.telemetryJournal.recordBatch(events)
-    );
-    this.contextFactory = new ContextFactory(
-      createContextDependencies(managerRuntime(this)),
-      createContextCallbacks(runtime)
-    );
-
-    bgTasks.recover(this.contextFactory.getBackgroundContext());
-    if (this.storage) {
-      recoverFlowFailures({
-        storage: this.storage,
-        shards: this.shards,
-        jobIndex: this.jobIndex,
-        completedJobs: this.completedJobs,
-        depCompletions: this.depCompletions,
-        maxDependencyCompletions: this.config.maxCompletedJobs,
-        dependencyResults: this.dependencyResults,
-        failedChildrenValues: this.failedChildrenValues,
-        ignoredChildrenFailures: this.ignoredChildrenFailures,
-      });
-    }
-    this.recoveryStats = { queues: this.queueNamesCache.size, jobs: this.jobIndex.size };
-    if (this.storage) this.cronScheduler.load(persistedCrons);
-    this.backgroundTaskHandles = bgTasks.startBackgroundTasks(
-      this.contextFactory.getBackgroundContext(),
-      this.cronScheduler
-    );
   }
 }

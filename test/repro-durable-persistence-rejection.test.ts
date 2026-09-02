@@ -67,6 +67,42 @@ describe('durable persistence rejection is not an in-memory acceptance', () => {
     expect(manager.getQueueJobCounts(queue).waiting).toBe(1);
   });
 
+  test('failed terminal custom-ID reuse preserves the committed generation auxiliaries', async () => {
+    const oldQueue = 'durable-rejection-generation-old';
+    const newQueue = 'durable-rejection-generation-new';
+    const old = await manager.push(oldQueue, {
+      customId: 'durable-rejection-generation-id',
+      data: { generation: 'old' },
+      durable: true,
+    });
+    expect(manager.addLog(old.id, 'committed old log')).toBe(true);
+    expect((await manager.pull(oldQueue, 0))?.id).toBe(old.id);
+    await manager.ack(old.id, { generation: 'old' });
+
+    const storage = storageOf(manager);
+    const insertJob = storage.insertJob.bind(storage);
+    storage.insertJob = () => {
+      throw new Error('injected generation admission failure');
+    };
+    try {
+      await expect(
+        manager.push(newQueue, {
+          customId: String(old.id),
+          data: { generation: 'rejected' },
+          durable: true,
+        })
+      ).rejects.toThrow('injected generation admission failure');
+    } finally {
+      storage.insertJob = insertJob;
+    }
+
+    expect(await manager.getJobState(old.id)).toBe('completed');
+    expect(manager.getResult(old.id)).toEqual({ generation: 'old' });
+    expect(manager.getLogs(old.id).map((entry) => entry.message)).toEqual(['committed old log']);
+    expect(manager.getQueueJobCounts(oldQueue).completed).toBe(1);
+    expect(manager.getQueueJobCounts(newQueue).waiting).toBe(0);
+  });
+
   test('batch rejection leaves no phantom accepted prefix or reserved identities', async () => {
     const queue = 'durable-rejection-batch';
     const storage = storageOf(manager);

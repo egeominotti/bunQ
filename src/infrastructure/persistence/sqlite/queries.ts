@@ -1,10 +1,10 @@
 import type { Job } from '../../../domain/types/job';
 import { rowToJob } from '../sqliteSerializer';
 import type { DbJob } from '../statements';
-import { SqliteRecords } from './records';
+import { SqliteCompleted } from './completed';
 
 /** Persisted and logical-state job queries used by recovery and public pagination. */
-export abstract class SqliteQueries extends SqliteRecords {
+export abstract class SqliteQueries extends SqliteCompleted {
   queryJobs(
     queue: string,
     options: { state?: string; states?: string[]; limit: number; offset: number; asc: boolean }
@@ -107,7 +107,7 @@ export abstract class SqliteQueries extends SqliteRecords {
   loadCompletedJobs(limit: number = 10000, offset: number = 0): Job[] {
     const rows = this.db
       .query<DbJob, [number, number]>(
-        "SELECT * FROM jobs WHERE state = 'completed' ORDER BY completed_at DESC LIMIT ? OFFSET ?"
+        "SELECT * FROM jobs WHERE state = 'completed' ORDER BY completed_at DESC, id DESC LIMIT ? OFFSET ?"
       )
       .all(limit, offset);
     return rows.map((row) => rowToJob(row));

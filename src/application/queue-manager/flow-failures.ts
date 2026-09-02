@@ -17,7 +17,9 @@ export class QueueManagerFlowFailures extends QueueManagerDependencyRuntime {
     if (ownsTerminal) {
       this.jobIndex.delete(entry.job.id);
       this.jobResults.delete(entry.job.id);
+      this.jobResultQueues.delete(entry.job.id);
       this.jobLogs.delete(entry.job.id);
+      this.jobLogQueues.delete(entry.job.id);
       this.dependencyResults.releaseConsumer(entry.job.id);
       if (entry.job.customId && this.customIdMap.get(entry.job.customId) === entry.job.id) {
         this.customIdMap.delete(entry.job.customId);

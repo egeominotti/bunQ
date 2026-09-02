@@ -12,6 +12,7 @@ import type { MapLike } from '../shared/lru';
 export interface JobLogsContext {
   jobIndex: Map<JobId, JobLocation>;
   jobLogs: MapLike<JobId, JobLogEntry[]>;
+  jobLogQueues: Map<JobId, string>;
   maxLogsPerJob: number;
 }
 
@@ -34,6 +35,7 @@ export function addJobLog(
   }
 
   ctx.jobLogs.set(jobId, logs);
+  ctx.jobLogQueues.set(jobId, location.queueName);
   return true;
 }
 
@@ -46,6 +48,7 @@ export function getJobLogs(jobId: JobId, ctx: JobLogsContext): JobLogEntry[] {
 export function clearJobLogs(jobId: JobId, ctx: JobLogsContext, keepLogs?: number): void {
   if (keepLogs === undefined || keepLogs <= 0) {
     ctx.jobLogs.delete(jobId);
+    ctx.jobLogQueues.delete(jobId);
   } else {
     const logs = ctx.jobLogs.get(jobId);
     if (logs && logs.length > keepLogs) {

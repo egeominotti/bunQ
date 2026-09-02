@@ -105,8 +105,9 @@ be claimed.
   are split into `jobMoveOperations.ts` (state/resource transitions) and
   `jobClaim.ts` (lease/client ownership cleanup). Houses DLQ, Events, Worker,
   JobLogs, Stats managers, and the batch `QueueStatsAggregator`. DLQ reads/purge
-  live in `dlqManager.ts`; manual and automatic retry transitions live in
-  `dlqRetry.ts`. Selective permanent DLQ removal is durable-first, removes all
+  live in `dlqManager.ts`; manual and automatic DLQ retry transitions live in
+  `dlqRetry.ts`, while cold completed retry lives in
+  [`completedRetry.ts`](../src/application/completedRetry.ts). Selective permanent DLQ removal is durable-first, removes all
   recovered duplicates for the selected ID, and generation-guards cleanup of
   global custom-ID, dependency-result, result/log, job-index, and flow-failure
   ownership. Completion-chained repeat calculation and validation live in
@@ -120,7 +121,14 @@ be claimed.
   [`pullFinalization.ts`](../src/application/operations/pullFinalization.ts),
   respectively. It also owns the
   [`DependencyResultTracker`](../src/application/dependencyResultTracker.ts) for
-  live flow-result retention, and background-task wiring.
+  live flow-result retention, background-task wiring, and the synchronous
+  [`emptyQueueCleanup.ts`](../src/application/emptyQueueCleanup.ts) reconciliation
+  between registered names, runtime states, queue policies, and durable
+  completed counts. `operations/pushContext.ts` reference-counts every target
+  queue before admission callbacks or lock waits and releases ownership in a
+  `finally`, closing cleanup races for single, batch, and atomic-flow pushes.
+  Queue destruction records a tombstone while such ownership exists; the final
+  release reconciles the name against the post-destruction projection.
 - **`infrastructure/`** — The ten-line `SqliteStorage` façade composes focused
   lifecycle, job, query, mutation, flow, control and record capabilities under
   `persistence/sqlite/`; persistence contracts live in `persistence/types/`.
@@ -255,7 +263,7 @@ wrappers select the transport, preventing the two implementations from drifting.
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  WriteBuffer (10ms / 100-job double-buffer) ─► SQLite (WAL, msgpack)     │   │
 │   │  Recovery ◄─ jobs · flow_failures · dep_proofs · results · dlq · cron     │   │
-│   │              · queue_state · queue event/metric journal                    │   │
+│   │              · queue_state · exact completion counts · event/metrics       │   │
 │   └────────────────────────────────────────────────────────────────────────┘   │
 │   ┌────────────────────────────────────────────────────────────────────────┐   │
 │   │  Background tasks: CronScheduler · stall · lock-expiry · DLQ maint ·     │   │
@@ -349,16 +357,17 @@ IoT/edge that must tolerate intermittent connectivity. See
    locks, the application inspects custom-ID, unique-key, dependency-completion
    and optional existing-parent state and builds a mutation plan without
    exposing the candidate.
-5. When admission can reject synchronously, SQLite commits the candidate and
-   all prerequisite retirement/pin/link changes first. A durable insert,
+5. Every SQLite-backed admission owns either its buffered row or immediate
+   transaction before RAM publication. SQLite commits all prerequisite
+   retirement/pin/link changes first. A durable insert,
    terminal deterministic-ID reuse, dedup replacement, active-key transfer, or
    parent link therefore fails closed: an error leaves the old durable and RAM
    state authoritative, with no executable candidate or half-edge.
-6. After commit, the application publishes heap/wait-set membership,
-   `jobIndex`, counters and ownership maps together and emits `pushed`. A plain
-   non-durable insert without admission metadata instead uses the normal 10 ms
-   `WriteBuffer`; `pushJobBatch` applies the same sequence per item and retains
-   its ordered accepted-prefix contract.
+6. After commit or buffer insertion, the application publishes heap/wait-set
+   membership, `jobIndex`, counters and ownership maps together and emits
+   `pushed`. Plain non-durable inserts use the normal 10 ms `WriteBuffer`.
+   `job:waiting-children` is deferred until the complete admission is published,
+   and `pushJobBatch` retains its ordered accepted-prefix contract.
 7. PostgreSQL mode takes a separate database-authoritative path: the override
    commits admission, ownership constraints, queue registration, and durable
    events in PostgreSQL, then refreshes the accepting broker's local projection
@@ -545,6 +554,10 @@ proceed during the writer's flush.
   the flush batch is committed in one synchronous transaction. The swap preserves
   retry ordering and keeps new writes out of the in-flight batch
   ([`writeBuffer.ts`](../src/infrastructure/persistence/writeBuffer.ts)).
+  Pending lookup/removal/state stamping is isolated in
+  [`writeBufferPending.ts`](../src/infrastructure/persistence/writeBufferPending.ts),
+  and [`sqlite/jobLifecycle.ts`](../src/infrastructure/persistence/sqlite/jobLifecycle.ts)
+  persists the current state when a job transitions before its insert succeeds.
 - **Durable.** `add(..., { durable: true })` bypasses the buffer for an immediate
   synchronous commit — no bunqueue process-crash buffer window, at lower
   throughput. Host, filesystem, and physical-media durability still apply.
@@ -556,13 +569,46 @@ proceed during the writer's flush.
   MessagePack blobs ([`sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts)).
 - **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, bounded
   dependency-completion proofs, results, DLQ, cron, and queue control-state
-  back into memory before serving traffic
+  back into memory before serving traffic. Pending pages query completion state
+  only for their referenced dependency IDs, and structured phase logs expose
+  recovery duration
   ([`background/recovery/index.ts`](../src/application/background/recovery/index.ts)).
+- **Completed retention.**
+  [`application/completedCleanup.ts`](../src/application/completedCleanup.ts)
+  and
+  [`persistence/sqlite/completed.ts`](../src/infrastructure/persistence/sqlite/completed.ts)
+  keep exact per-queue retained-completion
+  counters outside the hot cache. Manual and opt-in age-based cleanup scan
+  queue-scoped or global deterministic retention indexes oldest-first and
+  commit job/result/outbox deletion before converging in-memory projections.
+  Each committed removal carries its queue owner, so cleanup cannot erase a
+  newer in-memory generation that reused the same ID in another queue.
+  The final cleanup reconciliation reads those counters in 500-name primary-key
+  batches, so completed-only queues remain listed until their last durable row
+  is removed and then disappear consistently before and after restart. Without
+  SQLite it derives the same ownership once from completed `jobIndex` entries
+  validated against the bounded completed set. It also
+  preserves reference-counted admissions and live non-default policies, while
+  expiring temporary rate limits and ignoring default-equivalent DLQ/stall
+  configuration.
+- **Queue destruction.** SQLite queue obliteration removes buffered inserts and
+  atomically deletes durable jobs/results, DLQ, flow failures, completion
+  proofs/pins, telemetry, and queue/group state without materializing an
+  unbounded historical job-ID list. Only after it commits does the runtime clear
+  queue-owned projections. Bounded result/log owner indexes make cold auxiliary
+  entries discoverable without coupling them to the completed hot cache; a
+  storage error leaves the in-memory queue intact for retry.
+- **Migration startup.**
+  [`sqliteMigration.ts`](../src/infrastructure/persistence/sqliteMigration.ts)
+  rejects future schemas, records
+  each completed version, and checkpoints legacy payload rewrites in bounded
+  row/byte transactions with progress logs. TCP/HTTP bind only after migration
+  and recovery finish.
 
 Persisted tables: `jobs`, `flow_failures`, `dependency_completions`,
-`job_results`, `dlq`, `cron_jobs`, `queue_state`, `queue_events`,
-`queue_metrics_meta`, `queue_metric_buckets` (plus the `migrations`
-bookkeeping table) — see
+`completed_job_counts`, `job_results`, `dlq`, `cron_jobs`, `queue_state`,
+`queue_events`, `queue_metrics_meta`, `queue_metric_buckets` (plus
+`migrations` and `migration_progress` bookkeeping) — see
 [Persistence](./features/persistence.md) and [`./data-model.md`](./data-model.md).
 
 ### PostgreSQL multi-broker path
@@ -829,6 +875,13 @@ Memory bounds enforced by the bounded collections (cleanup evicts ~10% when full
 | `jobResults`                 | 10,000 | LRU                                                |
 | `jobLogs`                    | 10,000 | LRU                                                |
 | `customIdMap`                | 50,000 | LRU                                                |
+
+`completedJobs` is a hot projection only. SQLite durable retention is disabled
+by default and is controlled separately by `completedRetentionMs`; exact
+completed gauges come from `completed_job_counts`, not this 50,000-entry bound.
+`jobResultQueues` and `jobLogQueues` are paired ownership indexes with the same
+LRU eviction lifecycle as their payload caches; they add no independent
+unbounded retention.
 
 See [Background Tasks](./features/background-tasks.md) and
 [Scheduler & Cron](./features/scheduler-and-cron.md).

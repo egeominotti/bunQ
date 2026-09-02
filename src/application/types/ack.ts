@@ -21,6 +21,7 @@ export interface AckContext {
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
   jobResults: MapLike<JobId, unknown>;
+  jobResultQueues: Map<JobId, string>;
   dependencyResults: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
   customIdMap?: MapLike<string, JobId>;
@@ -93,6 +94,7 @@ export interface FinalizeContext {
   depCompletions?: DependencyCompletionTracker;
   maxDependencyCompletions: number;
   jobResults: MapLike<JobId, unknown>;
+  jobResultQueues: Map<JobId, string>;
   dependencyResults?: DependencyResultTracker;
   jobIndex: Map<JobId, JobLocation>;
   customIdMap?: MapLike<string, JobId>;

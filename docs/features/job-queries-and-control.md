@@ -208,17 +208,29 @@ See [data-model](../data-model.md) for full `Job` and the events shape. Most rel
 ### getJobState (`src/application/operations/query/state.ts:22-57`)
 
 1. Fast path: `completedJobs.has(jobId)` → `Completed`.
-2. No index entry → `resolveStateFromStorage` (`src/application/operations/query/state.ts:6-19`): DLQ → `Failed`; raw state `completed`/`active` map through; `waiting`/`delayed` load the row and decide `Delayed` (future `runAt`), else `Prioritized` (priority > 0) vs `Waiting`.
+2. No index entry → `resolveStateFromStorage` (`src/application/operations/query/state.ts`): DLQ → `Failed`; a current buffered row is checked before SQLite, then `completed`/`active`/`waiting-children` map directly and ready states use `runAt`/priority. This keeps a buffered completion reachable after bounded hot-cache eviction.
 3. `queue` location → under read lock, classify by map membership and `runAt`/`priority`; `processing` → `Active`; `dlq` → `Failed`.
 4. Same stale-snapshot chase as `getJob`: a `queue`-location miss with a changed index entry retries at the fresh location instead of reporting a false `'unknown'` mid-pull.
 
 ### getJobs (`src/application/operations/query/pagination.ts`)
 
-The hard part is correct pagination when results come from multiple non-offset-aware sources (SQLite jobs table + in-memory DLQ, `waiting-children` maps, and the paused view).
+The hard part is correct pagination when results come from multiple
+non-offset-aware sources (SQLite jobs table + current write-buffer ownership +
+in-memory DLQ, `waiting-children` maps, and the paused view).
 
 - Normalizes `state` (string | string[] | empty → `null` = unfiltered).
 - Storage path: SQL applies the requested logical-state predicate, stable ordering, and pagination together. `waiting`, `prioritized`, and `delayed` are translated to predicates over persisted `state`, `run_at`, and `priority`; ordering is `(created_at, id)` in the requested direction and uses the schema-v14 queue indexes.
-- If a derived source contributes (DLQ, paused jobs, or `waiting-children`), every source is gathered from index zero, deduplicated by job ID, globally sorted by `(createdAt, id)`, and sliced `[start, end)` exactly once. Pushing an offset into only one source would drop or duplicate rows across pages.
+- Accepted jobs can still be owned by SQLite's `WriteBuffer`, including a
+  sub-threshold batch. For each ID, `jobIndex` and actual heap, dependency,
+  processing, or completed membership are authoritative over the buffered
+  object's original admission state. Queries exclude a stale SQLite copy,
+  merge the current job without flushing, and include it in the same stable
+  order.
+- If a derived source contributes (buffered jobs, DLQ, paused jobs, or
+  `waiting-children`), every source is gathered from index zero, deduplicated by
+  job ID, globally sorted by `(createdAt, id)`, and sliced `[start, end)` exactly
+  once. Pushing an offset into only one source would drop or duplicate rows
+  across pages.
 - Dependency-gated jobs in `waitingDeps` may retain their ready-state row, while jobs explicitly moved into `waitingChildren` persist `state='waiting-children'`. In-memory membership is authoritative while running; their IDs are deduplicated against SQL before global pagination, and they appear only when that logical state is requested.
 - Paused semantics: `resolveStateNeeds` (`src/application/operations/query/collect.ts:96-109`) suppresses explicit `waiting`/`prioritized` queries on a paused queue; those jobs are returned only under `paused` (`src/application/operations/query/collect.ts:111-149`). An unfiltered query still lists them by their temporal state.
 - In-memory path (embedded, no storage): `collectJobsByState` gathers every matching source before sorting and slicing; it never truncates insertion order before applying descending order.
@@ -260,8 +272,27 @@ the pool under the command, and duplicate calls share one transition.
 ### Queue control
 
 - `drainQueue` (`queueControl.ts:45`): `shard.drain` returns `{count, jobIds}`; the operation then deletes each `jobIndex` entry and calls `safeDeleteJob` so a buffered/on-disk add cannot resurrect a drained job.
-- `cleanQueue` (`queueControl.ts:188`): normalizes `wait`→`waiting`, dispatches to `cleanWaitingLike` (`:100`, also covers `delayed`/`prioritized`/`paused`/undefined), `cleanCompleted` (`:124`), or `cleanFailed` (`:152`). Each respects `graceMs` (age threshold) and `maxJobs` (default 1000). Returns removed `JobId[]`.
-- `obliterateQueue` (`queueControl.ts:60`): calls `shard.obliterate(queue)`, which clears the run queue, DLQ, dependency-gated `waitingDeps`/`waitingChildren` jobs, reverse dependency registrations, unique keys, limiters, and temporal indexes. It returns every removed id so `QueueManagerControl.obliterate` can purge global indexes and SQLite even if a prior inconsistency left an id out of `jobIndex`. The manager also discovers and purges processing/completed/results/logs/locks/customIdMap/metrics/queue-state (`queue-manager/control.ts`).
+- `cleanQueue` (`queueControl.ts`): normalizes `wait`→`waiting`, dispatches to
+  waiting-like, completed, or failed cleanup, and normalizes the default limit
+  to 1000. SQLite completed cleanup is database-authoritative: it keyset-scans
+  `(completed timestamp,id)` oldest-first beyond the bounded hot cache, skips
+  results owned by live dependency consumers, and transactionally deletes the
+  job, result, and related flow-failure rows before returning exact committed
+  ownership records. Memory projections are removed only when they still belong
+  to that completed queue, so a newer generation that reused the ID in another
+  queue survives. Memory mode compares UTF-8 ID bytes with SQLite `BINARY`
+  semantics, so equal-timestamp pages use the same deterministic order.
+- `obliterateQueue` (`queueControl.ts`): `QueueManagerControl.obliterate`
+  first calls the storage-level `deleteJobsForQueue`, which removes pending
+  buffered inserts and atomically clears durable jobs/results, DLQ,
+  flow failures, completion proofs/pins, telemetry, and queue/group state without
+  loading every historical ID. Only after that transaction succeeds does `shard.obliterate`
+  clear the run queue, DLQ, dependency-gated jobs, reverse indexes, unique keys,
+  limiters and temporal indexes. Bounded result/log owner maps discover cold
+  auxiliary entries; processing jobs already extracted by ACK/FAIL remain
+  discoverable through their queue-bearing `jobIndex` location. A storage error
+  at any durable deletion step is propagated with all runtime state intact, and
+  retrying the operation is safe.
 
 ## Concurrency & Locking
 
@@ -288,6 +319,26 @@ are PostgreSQL-specific and do not alter the synchronous SQLite implementation.
 - **Paused double-count avoidance (#92):** `pausedView` and `resolveStateNeeds` guarantee a single job is reported in exactly one bucket. Verified by the shared `pausedView` helper used across SDK/TCP/dashboard so surfaces cannot drift.
 - **Pagination correctness:** logical-state filtering happens before SQL `LIMIT/OFFSET`; derived sources are merged and deduplicated before one final slice. `(created_at, id)` is the deterministic tie-breaker for both ascending and descending pages.
 - **`cleanQueue` with `state='active'` is intentionally unsupported** (`queueControl.ts:189-216`): cleaning in-flight jobs would race the worker ack path and leak concurrency/uniqueKey/group slots. Use `cancelJob` or `fail` instead. Unknown states also return `[]`.
+- **Completed cleanup failure ordering:** SQLite deletion commits before any
+  completed cache/index/result/log projection is removed. A storage error is
+  propagated with memory unchanged, so retry is safe; protected dependencies
+  are scanned past and do not consume the requested deletion limit. Returned
+  queue ownership also fences same-ID reuse: cleanup of an old completion never
+  removes a newer generation in another queue. If a same-ID DLQ generation
+  survives the completed-row deletion, its shared result and flow-failure state
+  survive too.
+- **Policy publication and empty-queue cleanup:** queue-level pause, rate,
+  concurrency, stall, and DLQ mutators publish the queue name before attempting
+  their durable state write. If SQLite throws, the name remains reachable for
+  inspection/retry. Single, batch, and flow pushes separately reference-count
+  queue admissions until their `finally`, so cleanup cannot unregister a name
+  while an admission callback or lock wait is in flight. An obliterate during
+  that window leaves a tombstone: the final admission release re-registers only
+  if post-obliterate state exists, otherwise it synchronously removes the name.
+- **Obliterate versus terminal publication:** ACK/ACKB/FAIL revalidate queue
+  ownership after processing extraction and before publishing the terminal
+  generation. If obliteration wins that gap, the late transition is ignored
+  instead of resurrecting a completed or failed job.
 - **Idempotency / not-found:** all mutations return `false` (or `[]`) when the job is absent or in the wrong location; `cancelJob`/`promoteJob`/`changeJobPriority` only act on queued jobs, and `updateJobProgress` plus the low-level `moveJobToDelayed` claim operation require an active job. The public manager-level `moveToDelayed`/`changeDelay` dispatcher supports both queued and active jobs as described above. `promoteJob` no-ops if `runAt <= now` (already due).
 - **Progress clamping and durability:** `updateJobProgress` clamps to `[0,100]`,
   preserves the prior message when a later update omits one, refreshes
@@ -302,9 +353,16 @@ are PostgreSQL-specific and do not alter the synchronous SQLite implementation.
   Restart therefore reloads the job as ready work without charging a phantom
   crash attempt.
 - **`updateJobData` repeat-chain follow:** when the target id is completed/missing, it follows `repeatChain` to patch the successor job created by `handleRepeat` (`src/application/operations/jobManagement.ts:231-260`).
-- **SQLite write failures swallowed:** `safeDeleteJob`/`safeDeleteDlqEntry` (`queueControl.ts:83`) catch errors (e.g. `SQLITE_FULL`); in-memory state is already cleared and the orphan row is GC'd by crash-recovery on restart.
+- **Other SQLite cleanup failures swallowed:** waiting/failed cleanup still
+  uses `safeDeleteJob`/`safeDeleteDlqEntry` and catches errors (for example
+  `SQLITE_FULL`) after clearing memory. Completed cleanup uses the
+  storage-first transaction described above and propagates failures.
 - **Memory-bound visibility:** completed-job queries depend on bounded LRU/Set collections — `completedJobs` (50k), `jobResults` (10k), `jobLogs` (10k), `customIdMap` (50k). Once evicted, results/custom-id lookups fall back to SQLite or return `null`. `getJobByCustomId` returns `null` if the LRU has evicted the mapping.
 - **Dependency-safe obliterate:** `shard.obliterate` removes queue-owned jobs from both `waitingDeps` and `waitingChildren`. Removing a `waitingDeps` job goes through `DependencyTracker.removeWaitingJob`, so its waiter id is also deleted from every reverse `dependencyIndex` entry. The returned id set then drives global-index and SQLite cleanup; no `waiting-children` ghost remains queryable after the operation.
+- **Memory-only completion ownership:** payload-free `removeOnComplete` evidence
+  retains its source queue alongside the bounded ID. Memory-only obliteration
+  deletes just that queue's proofs, while eviction, hydration, and same-ID reuse
+  transfer or clear the owner with the proof.
 - **PostgreSQL completion-only obliterate:** queue-owned completion tombstones
   are candidates even when their full job rows have already been removed.
   Obliteration therefore cannot leave an old generation observable, while a
@@ -316,7 +374,7 @@ are PostgreSQL-specific and do not alter the synchronous SQLite implementation.
 
 - `cleanQueue` `limit` default: 1000 (`queueControl.ts:195`); `getJobs` default `end`: 100. An explicit `end: -1` is exhaustive: embedded reads use an effectively unbounded end, while the TCP client drains 1,000-row pages until exhaustion.
 - `LOCK_TIMEOUT_MS` (default 5000) bounds the read/write locks taken by these operations.
-- Memory-bound sizes (affect query result availability): `completedJobs=50000`, `jobResults=10000`, `jobLogs=10000`, `customIdMap=50000`; cleanup runs every 10s. See [Configuration & Entrypoint](./configuration.md).
+- Memory-bound sizes (affect query result availability): `completedJobs=50000`, `jobResults=10000`, `jobLogs=10000`, `customIdMap=50000`; cleanup runs every 10s. `completedRetentionMs` is separately disabled by default and enables bounded durable SQLite cleanup when set. See [Configuration & Entrypoint](./configuration.md).
 - `BUNQUEUE_DATA_PATH` (and the `BQ_DATA_PATH`/`DATA_PATH`/`SQLITE_PATH` fallbacks) determine whether the SQLite fallback paths in queries are active.
 
 ## Related Docs

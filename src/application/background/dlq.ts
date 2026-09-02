@@ -7,9 +7,11 @@ export function performDlqMaintenance(ctx: BackgroundContext): void {
     shards: ctx.shards,
     jobIndex: ctx.jobIndex,
     jobResults: ctx.jobResults,
+    jobResultQueues: ctx.jobResultQueues,
     dependencyResults: ctx.dependencyResults,
     customIdMap: ctx.customIdMap,
     jobLogs: ctx.jobLogs,
+    jobLogQueues: ctx.jobLogQueues,
     storage: ctx.storage,
   };
 

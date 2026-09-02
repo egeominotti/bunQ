@@ -31,6 +31,13 @@ function alignApplied(jobIds: JobId[], appliedIds: JobId[]): boolean[] {
   });
 }
 
+function retainOwnedProcessing<T extends { id: JobId; job: Job }>(jobs: T[], ctx: AckContext): T[] {
+  return jobs.filter(({ id, job }) => {
+    const location = ctx.jobIndex.get(id);
+    return location?.type === 'processing' && location.queueName === job.queue;
+  });
+}
+
 export async function ackJobBatch(
   jobIds: JobId[],
   ctx: AckContext,
@@ -54,10 +61,11 @@ export async function ackJobBatch(
   const byQueueShard = groupByQueueShard(extractedJobs);
   await releaseResources(byQueueShard, batchContext);
   for (const [index, jobs] of byQueueShard) notifyReleasedQueues(ctx.shards[index], jobs);
-  finalizeBatchAck(extractedJobs, ctx, false);
+  const ownedJobs = retainOwnedProcessing(extractedJobs, ctx);
+  finalizeBatchAck(ownedJobs, ctx, false);
   return alignApplied(
     jobIds,
-    extractedJobs.map((entry) => entry.id)
+    ownedJobs.map((entry) => entry.id)
   );
 }
 
@@ -83,9 +91,10 @@ export async function ackJobBatchWithResults(
   const byQueueShard = groupByQueueShard(extractedJobs);
   await releaseResources(byQueueShard, batchContext);
   for (const [index, jobs] of byQueueShard) notifyReleasedQueues(ctx.shards[index], jobs);
-  finalizeBatchAck(extractedJobs, ctx, true);
+  const ownedJobs = retainOwnedProcessing(extractedJobs, ctx);
+  finalizeBatchAck(ownedJobs, ctx, true);
   return alignApplied(
     items.map((item) => item.id),
-    extractedJobs.map((entry) => entry.id)
+    ownedJobs.map((entry) => entry.id)
   );
 }

@@ -20,6 +20,7 @@ interface ManagerInternals {
   shards: Shard[];
   storage: SqliteStorage | null;
   jobResults: { delete(id: string): boolean };
+  jobResultQueues: Map<JobId, string>;
   dependencyResults: { releaseConsumer(id: string): void };
   customIdMap: {
     get(id: string): JobId | undefined;
@@ -27,6 +28,7 @@ interface ManagerInternals {
     delete(id: string): boolean;
   };
   jobLogs: { delete(id: string): boolean };
+  jobLogQueues: Map<JobId, string>;
 }
 
 /** Extract shards from manager (embedded mode only, accesses private property) */
@@ -46,9 +48,11 @@ export function getDlqContext(manager: ReturnType<typeof getSharedManager>): dlq
     shards: getShards(manager),
     jobIndex: manager.getJobIndex(),
     jobResults: (manager as unknown as ManagerInternals).jobResults,
+    jobResultQueues: (manager as unknown as ManagerInternals).jobResultQueues,
     dependencyResults: (manager as unknown as ManagerInternals).dependencyResults,
     customIdMap: (manager as unknown as ManagerInternals).customIdMap,
     jobLogs: (manager as unknown as ManagerInternals).jobLogs,
+    jobLogQueues: (manager as unknown as ManagerInternals).jobLogQueues,
     // #110-class: without storage, retryDlqByFilter's deleteDlqEntry/insertJob
     // silently no-op — filtered retries were never persisted in embedded mode
     // (dlq rows resurrected the jobs into the DLQ on restart).

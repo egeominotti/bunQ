@@ -18,10 +18,14 @@ export class QueueManagerLifecycle extends QueueManagerDependencies {
     this.retiredTimeoutLeaseTokens.clear();
     this.retiredCronLeaseTokens.clear();
     this.jobResults.clear();
+    this.jobResultQueues.clear();
     this.dependencyResults.clear();
     this.jobLogs.clear();
+    this.jobLogQueues.clear();
     this.customIdMap.clear();
     this.pendingDepChecks.clear();
+    this.pendingQueueAdmissions.clear();
+    this.pendingQueueObliterations.clear();
     this.queueNamesCache.clear();
     this.jobLocks.clear();
     this.stalledCandidates.clear();

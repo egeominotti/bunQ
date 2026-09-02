@@ -1,5 +1,5 @@
 import type { DlqEntry } from '../../../domain/types/dlq';
-import type { Job, JobId } from '../../../domain/types/job';
+import { assertWellFormedJobId, type Job, type JobId } from '../../../domain/types/job';
 import type { DependencyCompletionRecord } from '../dependencyCompletionStore';
 import { pack, reconstructDlqEntry, rowToJob, unpack } from '../sqliteSerializer';
 import type { DbJob } from '../statements';
@@ -60,13 +60,19 @@ export abstract class SqliteRecords extends SqliteFlows {
     return row?.state ?? null;
   }
 
-  loadCompletedJobIds(): Set<JobId> {
+  loadCompletedJobIds(requested: Iterable<JobId>): Set<JobId> {
+    const requestedIds = [...new Set(requested)];
     const ids = new Set<JobId>();
-    const stateRows = this.db
-      .query<{ id: string }, []>("SELECT id FROM jobs WHERE state = 'completed'")
-      .all();
-    for (const row of stateRows) ids.add(row.id as JobId);
-    for (const record of this.dependencyCompletionStore.load()) ids.add(record.jobId);
+    for (let offset = 0; offset < requestedIds.length; offset += 500) {
+      const chunk = requestedIds.slice(offset, offset + 500);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = this.db
+        .query<{ id: string }, string[]>(
+          `SELECT id FROM jobs WHERE state = 'completed' AND id IN (${placeholders})`
+        )
+        .all(...chunk);
+      for (const row of rows) ids.add(row.id as JobId);
+    }
     return ids;
   }
 
@@ -134,6 +140,7 @@ export abstract class SqliteRecords extends SqliteFlows {
   }
 
   insertJobsBatch(jobs: Job[], durable?: boolean): void {
+    for (const job of jobs) assertWellFormedJobId(job.id);
     if (durable) {
       this.safeWrite(() => {
         const transaction = this.db.transaction((batch: Job[]) => {

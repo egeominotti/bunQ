@@ -47,6 +47,23 @@ describe('Logger', () => {
       expect(consoleDebugSpy).toHaveBeenCalled();
     });
 
+    test('debugToStderr should not write human-readable diagnostics to stdout', () => {
+      const logger = new Logger('TestComponent');
+      logger.debugToStderr('Debug diagnostic');
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[TestComponent] Debug diagnostic');
+      expect(consoleDebugSpy).not.toHaveBeenCalled();
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+    });
+
+    test('infoToStderr should preserve info severity on the stderr channel', () => {
+      const logger = new Logger('TestComponent');
+      logger.infoToStderr('Info diagnostic');
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[TestComponent] Info diagnostic');
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+    });
+
     test('should log warn messages', () => {
       const logger = new Logger('TestComponent');
       logger.warn('Warning message');
@@ -125,6 +142,16 @@ describe('Logger', () => {
 
       const levels = consoleLogSpy.mock.calls.map((call) => JSON.parse(call[0]).level);
       expect(levels).toEqual(['debug', 'info', 'warn', 'error']);
+    });
+
+    test('stderr helpers keep their original JSON severity off stdout', () => {
+      const logger = new Logger('TestComponent');
+      logger.debugToStderr('debug diagnostic');
+      logger.infoToStderr('info diagnostic');
+
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+      const entries = consoleErrorSpy.mock.calls.map((call) => JSON.parse(call[0]));
+      expect(entries.map((entry) => entry.level)).toEqual(['debug', 'info']);
     });
   });
 

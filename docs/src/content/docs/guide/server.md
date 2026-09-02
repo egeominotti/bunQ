@@ -37,6 +37,11 @@ bunqueue start
 
 Always select durable storage in production: set a SQLite `--data-path`, or configure `BUNQUEUE_POSTGRES_URL` for the server-only multi-broker backend. Without either, jobs live in memory and are lost on restart. PostgreSQL 15–18 is tested in CI and 18.6 is recommended; see [Storage backends](/guide/databases/).
 
+For bounded completed-job history on SQLite, add
+`--completed-retention-ms <age>` (or the equivalent config/environment
+setting). `--max-completed-jobs` only sizes the in-memory hot window and does
+not reclaim disk space.
+
 ## Connect from your app
 
 Drop the `embedded` option and clients connect to `localhost:6789` automatically:
@@ -117,7 +122,7 @@ tag when the server and client must move together:
 ```bash
 docker run -d -p 6789:6789 -p 6790:6790 \
   -v bunqueue-data:/app/data \
-  ghcr.io/egeominotti/bunqueue:2.9.2
+  ghcr.io/egeominotti/bunqueue:2.9.3
 ```
 
 PostgreSQL storage needs a 2.9 image or newer: a 2.8.x image ignores the

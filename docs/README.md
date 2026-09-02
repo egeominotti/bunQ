@@ -54,13 +54,13 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 
 ### Jobs & lifecycle
 
-| Document                                                                   | Purpose                                                                                                                                                                                              |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Job Lifecycle](./features/job-lifecycle.md)                               | The push/pull/ack/fail state machine, including focused single/batch admission modules and the persistence-before-RAM publication boundary shared by TCP and embedded runtimes.                      |
-| [Job Queries & Queue Control](./features/job-queries-and-control.md)       | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean).                                         |
-| [Dead Letter Queue](./features/dead-letter-queue.md)                       | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.                               |
-| [Deduplication & Unique Jobs](./features/deduplication-and-unique.md)      | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock.                              |
-| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.                          |
+| Document                                                                   | Purpose                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Job Lifecycle](./features/job-lifecycle.md)                               | The push/pull/ack/fail state machine, including focused single/batch admission modules and the persistence-before-RAM publication boundary shared by TCP and embedded runtimes.                                                         |
+| [Job Queries & Queue Control](./features/job-queries-and-control.md)       | Read/control surface of the engine: point/list job queries, single-job mutations, and queue-wide lifecycle operations (pause/resume/drain/obliterate/clean).                                                                            |
+| [Dead Letter Queue](./features/dead-letter-queue.md)                       | Terminal sink for jobs that exhausted retries / stalled / lost their lock, with inspect/filter/retry/purge plus opt-in time-based auto-retry and age-based auto-purge.                                                                  |
+| [Deduplication & Unique Jobs](./features/deduplication-and-unique.md)      | Prevents duplicate jobs via custom job-ID idempotency and TTL-scoped unique keys with reject/extend/replace strategies, checked atomically inside the shard write lock.                                                                 |
+| [Rate Limiting & Concurrency](./features/rate-limiting-and-concurrency.md) | Per-queue rate limits and concurrency caps, enforced server-side and honored by workers, via the `RateLimit`/`RateLimitClear`/`SetConcurrency`/`ClearConcurrency` commands.                                                             |
 | [Job Groups](./features/job-groups.md)                                     | BullMQ Pro-compatible round-robin groups with durable priority/FIFO claim order, atomic `maxSize`, pause/resume, manual and fixed-window rate limits, concurrency overrides, SQLite recovery, and PostgreSQL multi-broker coordination. |
 
 ### Scheduling & background work
@@ -104,7 +104,7 @@ Each module has one file documenting its purpose, responsibilities, dependencies
 | Document                                                               | Purpose                                                                                                                                                               |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Client Transport](./features/client-transport.md)                     | Wire-level TCP transport (pool, pipelining, reconnect, health, TLS, add-batching) used by the Queue and Worker SDKs.                                                  |
-| [Client SDK: Queue](./features/client-queue-sdk.md)                    | Producer-side BullMQ-style `Queue<T>` SDK with Pro group admission, queries and controls over embedded or TCP backends, plus `QueuePro`/`QueueEventsPro` aliases.       |
+| [Client SDK: Queue](./features/client-queue-sdk.md)                    | Producer-side BullMQ-style `Queue<T>` SDK with Pro group admission, queries and controls over embedded or TCP backends, plus `QueuePro`/`QueueEventsPro` aliases.     |
 | [Client SDK: Worker](./features/client-worker-sdk.md)                  | BullMQ-style consumer with Pro native batches, group controls, AbortSignal/Observable processors, coalesced polling, embedded/TCP execution, and `WorkerPro`.         |
 | [Public API Completeness](./features/public-api-completeness.md)       | Audited public-method contract, exact missing/partial-method count, embedded/TCP parity rules, and per-method regression/E2E coverage.                                |
 | [Core Public API End-to-End Matrix](./features/core-public-api-e2e.md) | Automatically discovers callable core client instance methods and requires successful no-mock scenarios in every applicable embedded or real-TCP runtime.             |
@@ -168,6 +168,33 @@ and [`operations/pullFinalization.ts`](../src/application/operations/pullFinaliz
 SQLite batch telemetry semantics live in
 [`persistence/sqlite/telemetryWrites.ts`](../src/infrastructure/persistence/sqlite/telemetryWrites.ts);
 both are documented in the same lifecycle and persistence references.
+Buffered admission/state transitions are isolated in
+[`persistence/sqlite/jobLifecycle.ts`](../src/infrastructure/persistence/sqlite/jobLifecycle.ts),
+while [`writeBufferPending.ts`](../src/infrastructure/persistence/writeBufferPending.ts)
+owns pending-buffer lookup, removal, and explicit lifecycle-state stamping.
+SQLite-authoritative completed cleanup is split between
+[`application/completedCleanup.ts`](../src/application/completedCleanup.ts) and
+[`persistence/sqlite/completed.ts`](../src/infrastructure/persistence/sqlite/completed.ts),
+with exact counters/triggers in
+[`completedJobCountSchema.ts`](../src/infrastructure/persistence/completedJobCountSchema.ts).
+Cold completed-job retry is isolated in
+[`application/completedRetry.ts`](../src/application/completedRetry.ts); it
+reads SQLite in bounded oldest-first pages instead of depending on the hot
+completed cache.
+The final queue-name reconciliation lives in
+[`application/emptyQueueCleanup.ts`](../src/application/emptyQueueCleanup.ts): it
+keeps durable completed-only queues discoverable while removing their names
+after the last row disappears, without discarding live jobs, explicit policies,
+or push/batch/flow admissions that are still in flight. Expired temporary rate
+limits and DLQ/stall configurations equal to the defaults do not pin an empty
+queue.
+Observable resumable startup upgrades are coordinated by
+[`sqliteMigration.ts`](../src/infrastructure/persistence/sqliteMigration.ts),
+using the durable table from
+[`migrationProgressSchema.ts`](../src/infrastructure/persistence/migrationProgressSchema.ts).
+These modules are covered by [Persistence](./features/persistence.md),
+[Background Tasks](./features/background-tasks.md), and
+[Stats, Metrics & Monitoring](./features/stats-and-monitoring.md).
 The optional server-only PostgreSQL runtime lives under
 `persistence/postgres/`, with its manager adapter under
 `application/postgres-queue-manager/`; see

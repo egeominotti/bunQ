@@ -227,6 +227,7 @@ export function finalizeBatchAck<T>(
       // 1. Store result first (if any) - must happen before completedJobs.add()
       if (includeResults && result !== undefined) {
         ctx.jobResults.set(jobId, result);
+        ctx.jobResultQueues.set(jobId, job.queue);
         if (hasStorage) storage.storeResult(jobId, result);
       }
       // 2. Update job index and store job data for completed listing

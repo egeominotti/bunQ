@@ -13,7 +13,7 @@ import {
   SCHEMA_VERSION,
 } from '../src/infrastructure/persistence/schema';
 import { SqliteStorage } from '../src/infrastructure/persistence/sqlite';
-import { unlinkSync, existsSync, mkdirSync } from 'fs';
+import { unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -40,8 +40,8 @@ describe('SQLite Performance Indexes', () => {
     }
   });
 
-  test('schema version is 36', () => {
-    expect(SCHEMA_VERSION).toBe(36);
+  test('schema version is 37', () => {
+    expect(SCHEMA_VERSION).toBe(37);
   });
 
   test('bounded dependency-completion table and queue index exist', () => {
@@ -129,6 +129,20 @@ describe('SQLite Performance Indexes', () => {
     expect(indexes.map((row) => row.name)).toEqual([
       'idx_jobs_queue_created',
       'idx_jobs_queue_state_created',
+    ]);
+  });
+
+  test('completed recovery index includes the deterministic descending ID tie-break', () => {
+    const columns = db
+      .query<{ name: string | null; desc: number; key: number }, []>(
+        "PRAGMA index_xinfo('idx_jobs_completed_order')"
+      )
+      .all()
+      .filter((column) => column.key === 1);
+
+    expect(columns.map(({ name, desc }) => ({ name, desc }))).toEqual([
+      { name: 'completed_at', desc: 1 },
+      { name: 'id', desc: 1 },
     ]);
   });
 
@@ -245,6 +259,9 @@ describe('SQLite Performance Indexes', () => {
       CREATE INDEX idx_jobs_pending_priority
         ON jobs(queue, state, priority DESC, run_at ASC)
         WHERE state IN ('waiting', 'delayed');
+      DROP INDEX idx_jobs_completed_order;
+      CREATE INDEX idx_jobs_completed_order
+        ON jobs(completed_at DESC) WHERE state = 'completed';
       INSERT INTO migrations(version, applied_at) VALUES (22, 0);
     `);
     legacy.close();
@@ -280,6 +297,12 @@ describe('SQLite Performance Indexes', () => {
         .all()
         .map((row) => row.name);
       expect(columns).toContain('pinned');
+      const completedIndex = migrated
+        .query<{ sql: string }, []>(
+          "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_jobs_completed_order'"
+        )
+        .get();
+      expect(completedIndex?.sql).toContain('completed_at DESC, id DESC');
     } finally {
       migrated.close();
       for (const suffix of ['', '-wal', '-shm']) {

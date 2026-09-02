@@ -55,14 +55,17 @@ export class ContextFactory {
       retiredTimeoutLeaseTokens: this.deps.retiredTimeoutLeaseTokens,
       timeoutScheduler: this.deps.timeoutScheduler,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       jobLocks: this.deps.jobLocks,
       retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       clientJobs: this.deps.clientJobs,
       stalledCandidates: this.deps.stalledCandidates,
       pendingDepChecks: this.deps.pendingDepChecks,
+      pendingQueueAdmissions: this.deps.pendingQueueAdmissions,
       queueNamesCache: this.deps.queueNamesCache,
       eventsManager: this.deps.eventsManager,
       webhookManager: this.deps.webhookManager,
@@ -81,6 +84,7 @@ export class ContextFactory {
 
   getStatsContext(): StatsContext {
     return {
+      storage: this.deps.storage,
       shards: this.deps.shards,
       processingShards: this.deps.processingShards,
       completedJobs: this.deps.completedJobs,
@@ -112,14 +116,19 @@ export class ContextFactory {
       retiredTimeoutLeaseTokens: this.deps.retiredTimeoutLeaseTokens,
       retiredCronLeaseTokens: this.deps.retiredCronLeaseTokens,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
+      jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobIndex: this.deps.jobIndex,
+      pendingQueueAdmissions: this.deps.pendingQueueAdmissions,
       totalPushed: this.deps.metrics.totalPushed,
       broadcast: this.deps.eventsManager.broadcast.bind(this.deps.eventsManager),
       broadcastBatch: this.deps.eventsManager.broadcastBatch.bind(this.deps.eventsManager),
       dashboardEmit: this.callbacks.emitDashboardEvent,
       registerQueueName: this.callbacks.registerQueueName,
+      onQueueAdmissionsDrained: this.callbacks.onQueueAdmissionsDrained,
     };
   }
 
@@ -151,6 +160,7 @@ export class ContextFactory {
       depCompletions: this.deps.depCompletions,
       maxDependencyCompletions: this.deps.config.maxCompletedJobs,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
       dependencyResults: this.deps.dependencyResults,
       jobIndex: this.deps.jobIndex,
       customIdMap: this.deps.customIdMap,
@@ -212,9 +222,11 @@ export class ContextFactory {
       shards: this.deps.shards,
       jobIndex: this.deps.jobIndex,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
       jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       storage: this.deps.storage,
     };
   }
@@ -224,10 +236,12 @@ export class ContextFactory {
       shards: this.deps.shards,
       jobIndex: this.deps.jobIndex,
       jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       storage: this.deps.storage,
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
       dependencyResults: this.deps.dependencyResults,
       customIdMap: this.deps.customIdMap,
     };
@@ -237,6 +251,7 @@ export class ContextFactory {
     return {
       jobIndex: this.deps.jobIndex,
       jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       maxLogsPerJob: this.deps.maxLogsPerJob,
     };
   }
@@ -249,8 +264,10 @@ export class ContextFactory {
       completedJobs: this.deps.completedJobs,
       completedJobsData: this.deps.completedJobsData,
       jobResults: this.deps.jobResults,
+      jobResultQueues: this.deps.jobResultQueues,
       dependencyResults: this.deps.dependencyResults,
       jobLogs: this.deps.jobLogs,
+      jobLogQueues: this.deps.jobLogQueues,
       storage: this.deps.storage,
     };
   }

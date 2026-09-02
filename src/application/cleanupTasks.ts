@@ -8,6 +8,8 @@ import { processingShardIndex, SHARD_COUNT } from '../shared/hash';
 import { withWriteLock } from '../shared/lock';
 import type { BackgroundContext } from './types';
 import { releaseDependencyCompletionPins } from './dependencyCompletions';
+import { cleanCompletedJobs } from './completedCleanup';
+import { cleanEmptyQueues } from './emptyQueueCleanup';
 
 /**
  * Main cleanup function - called periodically to maintain system health
@@ -16,6 +18,14 @@ import { releaseDependencyCompletionPins } from './dependencyCompletions';
 export async function cleanup(ctx: BackgroundContext): Promise<void> {
   const now = Date.now();
   const stallTimeout = 30 * 60 * 1000; // 30 minutes max for processing
+
+  const retention = ctx.config.completedRetentionMs;
+  if (retention !== null && retention !== undefined) {
+    const removed = cleanCompletedJobs(null, now - retention, 1_000, ctx);
+    if (removed.length > 0) {
+      ctx.dashboardEmit?.('cleanup:completed-removed', { count: removed.length });
+    }
+  }
 
   // Refresh delayed counters
   for (let i = 0; i < SHARD_COUNT; i++) {
@@ -213,67 +223,5 @@ function cleanOrphanedJobLocks(ctx: BackgroundContext): void {
     if (loc?.type !== 'processing') {
       ctx.jobLocks.delete(jobId);
     }
-  }
-}
-
-/** Check if any processing shard has a job belonging to the given queue */
-function hasProcessingJobsForQueue(ctx: BackgroundContext, queueName: string): boolean {
-  for (let i = 0; i < SHARD_COUNT; i++) {
-    for (const job of ctx.processingShards[i].values()) {
-      if (job.queue === queueName) return true;
-    }
-  }
-  return false;
-}
-
-/** Check if any shard has waitingDeps jobs belonging to the given queue */
-function hasWaitingDepsForQueue(ctx: BackgroundContext, queueName: string): boolean {
-  for (let i = 0; i < SHARD_COUNT; i++) {
-    for (const job of ctx.shards[i].waitingDeps.values()) {
-      if (job.queue === queueName) return true;
-    }
-  }
-  return false;
-}
-
-function cleanEmptyQueues(ctx: BackgroundContext): void {
-  for (let i = 0; i < SHARD_COUNT; i++) {
-    const shard = ctx.shards[i];
-    const emptyQueues: string[] = [];
-
-    for (const [queueName, queue] of shard.queues) {
-      // `shard.dlq` is a getter that rebuilds a Map of EVERY queue's DLQ entries
-      // on each access — calling it once per queue in this loop was O(Q²) per
-      // shard per tick. getDlqCount(queueName) is an O(1) counter lookup.
-      if (
-        queue.size === 0 &&
-        shard.getDlqCount(queueName) === 0 &&
-        !hasProcessingJobsForQueue(ctx, queueName) &&
-        !hasWaitingDepsForQueue(ctx, queueName)
-      ) {
-        emptyQueues.push(queueName);
-      }
-    }
-
-    for (const queueName of emptyQueues) {
-      shard.queues.delete(queueName);
-      shard.dlq.delete(queueName);
-      shard.uniqueKeys.delete(queueName);
-      shard.queueState.delete(queueName);
-      shard.clearEmptyGroupRuntime(queueName);
-      shard.clearQueueLimiters(queueName);
-      shard.stallConfig.delete(queueName);
-      shard.dlqConfig.delete(queueName);
-      // NOTE: perQueueMetrics is intentionally NOT pruned here — it is an
-      // LRU-bounded map and these counters are cumulative, so they must survive
-      // a transient drain (a busy queue momentarily empty must not reset to 0).
-      // obliterate() reclaims it explicitly; the LRU cap bounds growth for
-      // ephemeral/dynamically-named queues.
-      ctx.dashboardEmit?.('queue:removed', { queue: queueName });
-      ctx.unregisterQueueName(queueName);
-    }
-
-    // Clean orphaned temporal index entries
-    shard.cleanOrphanedTemporalEntries();
   }
 }

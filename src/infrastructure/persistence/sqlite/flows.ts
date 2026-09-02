@@ -31,6 +31,7 @@ export abstract class SqliteFlows extends SqliteMutations {
     if (mode.type === 'update' && admission !== undefined) {
       throw new Error('Durable admission metadata requires an inserting flow-link mode');
     }
+    this.writeBuffer.setPendingState(parent.id, parentState);
     if (mode.type === 'update') this.flushIfBuffered(child.id);
     if (mode.type === 'replace') this.flushIfBuffered(mode.previousJobId);
     this.flushIfBuffered(parent.id);
@@ -151,6 +152,7 @@ export abstract class SqliteFlows extends SqliteMutations {
     parent: Pick<Job, 'id' | 'childrenIds' | 'dependsOn' | 'data' | 'runAt'>,
     parentState: 'waiting-children' | 'waiting' | 'prioritized'
   ): void {
+    this.writeBuffer.setPendingState(parent.id, parentState);
     this.flushIfBuffered(child.id);
     this.flushIfBuffered(parent.id);
     this.safeWrite(() => {
@@ -242,7 +244,6 @@ export abstract class SqliteFlows extends SqliteMutations {
     job: Pick<Job, 'id' | 'dependsOn' | 'runAt' | 'priority' | 'timeline'>,
     stateOverride?: 'waiting-children' | 'waiting' | 'prioritized' | 'delayed'
   ): void {
-    this.flushIfBuffered(job.id);
     const state =
       stateOverride ??
       (job.dependsOn.length > 0
@@ -252,6 +253,8 @@ export abstract class SqliteFlows extends SqliteMutations {
           : job.priority > 0
             ? 'prioritized'
             : 'waiting');
+    this.writeBuffer.setPendingState(job.id, state);
+    this.flushIfBuffered(job.id);
     this.safeWrite(() => {
       this.db
         .prepare('UPDATE jobs SET depends_on = ?, run_at = ?, state = ?, timeline = ? WHERE id = ?')

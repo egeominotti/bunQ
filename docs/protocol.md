@@ -212,9 +212,10 @@ Client MUSTs:
 - `GetJobs.asc=false` reverses the total createdAt/job-id ordering before
   applying `offset` and `limit`. A paginating client MUST send the same value
   on every page; omitting it preserves ascending order.
-- In SQLite mode, `GetJobs` reads from SQLite behind a ~10 ms write buffer, so
-  it is eventually consistent with respect to a just-issued non-durable
-  `PUSH`. `durable: true` bypasses that buffer.
+- In SQLite mode, `GetJobs` merges the authoritative runtime projection of
+  accepted write-buffer jobs with persisted rows before stable pagination. A
+  just-issued non-durable `PUSH` is therefore immediately visible without
+  forcing a flush; `durable: true` still bypasses the application buffer.
 - In PostgreSQL mode, `GetJobs` reads the broker's local projection of the
   authoritative database. The broker accepting a `PUSH`/`PUSHB` refreshes that
   projection before acknowledging the command. Other brokers converge through

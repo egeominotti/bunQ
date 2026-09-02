@@ -900,9 +900,9 @@ describe('SQL_STATEMENTS', () => {
       expect(SQL_STATEMENTS.insertJob).toContain('jobs');
     });
 
-    test('should have 32 placeholder parameters', () => {
+    test('should have 38 placeholder parameters', () => {
       const paramCount = (SQL_STATEMENTS.insertJob.match(/\?/g) || []).length;
-      expect(paramCount).toBe(32);
+      expect(paramCount).toBe(38);
     });
 
     test('should include all required columns', () => {
@@ -940,6 +940,12 @@ describe('SQL_STATEMENTS', () => {
         'timeline',
         'dlq_retry_state',
         'extended_options',
+        'started_at',
+        'completed_at',
+        'progress',
+        'progress_msg',
+        'last_heartbeat',
+        'stacktrace',
       ];
       for (const col of requiredColumns) {
         expect(sql).toContain(col);
@@ -1159,7 +1165,13 @@ describe('prepareStatements', () => {
         0, // stall_count
         null, // timeline
         null, // dlq_retry_state
-        null // extended_options
+        null, // extended_options
+        null, // started_at
+        null, // completed_at
+        0, // progress
+        null, // progress_msg
+        now, // last_heartbeat
+        null // stacktrace
       );
     }).not.toThrow();
   });
@@ -1372,6 +1384,12 @@ describe('end-to-end pack/unpack via SQLite', () => {
       2,
       null,
       null,
+      null,
+      null,
+      null,
+      42,
+      'sending',
+      now,
       null
     );
 
@@ -1405,6 +1423,9 @@ describe('end-to-end pack/unpack via SQLite', () => {
     expect(job.removeOnFail).toBe(true);
     expect(job.stallTimeout).toBe(15000);
     expect(job.stallCount).toBe(2);
+    expect(job.progress).toBe(42);
+    expect(job.progressMessage).toBe('sending');
+    expect(job.lastHeartbeat).toBe(now);
   });
 
   test('should handle a job with all null optional fields', () => {
@@ -1442,6 +1463,12 @@ describe('end-to-end pack/unpack via SQLite', () => {
       0,
       null,
       null,
+      null,
+      null,
+      null,
+      0,
+      null,
+      now,
       null
     );
 

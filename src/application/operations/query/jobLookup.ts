@@ -8,6 +8,8 @@ export async function getJob(jobId: JobId, ctx: QueryContext): Promise<Job | nul
     const location = ctx.jobIndex.get(jobId);
     if (!location) {
       if (ctx.storage) {
+        const buffered = ctx.storage.getBufferedJob(jobId);
+        if (buffered) return buffered;
         const job = ctx.storage.getJob(jobId);
         if (job) return job;
         const dlqEntry = ctx.storage.getDlqEntry(jobId);

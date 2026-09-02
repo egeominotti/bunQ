@@ -112,8 +112,13 @@ export interface Job {
 `customId` is a broker-wide identity key, not a per-queue key. When supplied it
 also becomes `jobs.id`, whose SQLite primary key is global. Re-adding a live
 custom ID from any queue returns the existing generation; after a terminal
-generation, reuse first retires the completed/DLQ record and then admits one new
-generation. At no point may two rows or two live jobs share the same custom ID.
+generation, reuse first retires the completed/DLQ record and its result/log
+ownership, then admits one new generation. At no point may two rows or two live
+jobs share the same custom ID.
+Persisted job IDs must be well-formed Unicode. Standalone custom IDs and every
+planned atomic-flow ID are rejected if they contain an isolated UTF-16
+surrogate, because such values do not round-trip through Bun SQLite TEXT and
+could otherwise alias the replacement character after restart.
 `FlowProducer` is stricter than standalone `Queue.add`: every planned flow ID
 must be unowned by live state, SQLite/DLQ rows, retained completion/timeout
 tombstones, retained results, or unresolved reverse-dependency entries. Reuse
@@ -168,9 +173,10 @@ the `JobState` enum (see `JobCounts`, `src/domain/types/responses/model.ts:50-59
 - `paused` — present in `JobCounts` for BullMQ parity; pausing is a queue-level
   flag (`QueueState.paused`), jobs are not individually re-stated.
 
-`getJobState` (`src/application/operations/query/state.ts:22-57`) derives the state from where the
+`getJobState` (`src/application/operations/query/state.ts`) derives the state from where the
 job currently lives (jobIndex location → shard sub-collection → SQLite fallback
-via `resolveStateFromStorage`, `src/application/operations/query/state.ts:6-19`). If the index entry
+via `resolveStateFromStorage`). The fallback checks a current buffered job
+before its SQLite row, including completed jobs evicted from the hot cache. If the index entry
 moves mid-lookup (a concurrent pull flipping queue to processing), it chases the
 fresh location for up to 4 passes instead of reporting a false `unknown` (2.8.31).
 
@@ -287,9 +293,10 @@ export interface QueueState {
 `activeCount:0`). This is the row persisted in `queue_state` (see schema) for
 control-state recovery (#100). `rateLimitDuration` makes the limit mean
 "`rateLimit` per `duration` ms" (refill rate = `limit / (duration/1000)`
-tokens/sec); `rateLimitExpiresAt` is checked lazily on acquire and on limit
-reads — an expired limit clears itself broker-side, and recovery skips
-already-expired rows (restoring live ones with their remaining TTL).
+tokens/sec); `rateLimitExpiresAt` is checked lazily on acquire, limit reads, and
+empty-queue policy reconciliation — an expired limit clears itself broker-side,
+and recovery skips already-expired rows (restoring live ones with their
+remaining TTL).
 
 Two runtime limiter classes back the config:
 
@@ -301,7 +308,7 @@ Two runtime limiter classes back the config:
 Supporting enums/types:
 
 - `JobLocation` (`src/domain/types/queue.ts:121-126`) — the jobIndex value:
-  `{type:'queue',shardIdx,queueName}` | `{type:'processing',shardIdx}` |
+  `{type:'queue',shardIdx,queueName}` | `{type:'processing',shardIdx,queueName}` |
   `{type:'completed',queueName}` | `{type:'dlq',queueName}`.
 - `EventType` (`src/domain/types/queue.ts:129-145`) — 14 event types: `pushed`, `pulled`,
   `completed`, `failed`, `progress`, `stalled`, `removed`, `delayed`,
@@ -908,7 +915,9 @@ CREATE INDEX idx_jobs_parent             ON jobs(parent_id) WHERE parent_id IS N
 CREATE INDEX idx_jobs_state_started      ON jobs(state, started_at) WHERE state = 'active';
 CREATE INDEX idx_jobs_group_id           ON jobs(group_id) WHERE group_id IS NOT NULL;
 CREATE INDEX idx_jobs_pending_priority   ON jobs(queue, state, priority DESC, run_at ASC) WHERE state IN ('waiting','prioritized','waiting-children','delayed');
-CREATE INDEX idx_jobs_completed_order    ON jobs(completed_at DESC) WHERE state = 'completed';
+CREATE INDEX idx_jobs_completed_order    ON jobs(completed_at DESC, id DESC) WHERE state = 'completed';
+CREATE INDEX idx_jobs_completed_retention ON jobs(queue, COALESCE(completed_at, created_at), id) WHERE state = 'completed';
+CREATE INDEX idx_jobs_completed_retention_global ON jobs(COALESCE(completed_at, created_at), id) WHERE state = 'completed';
 ```
 
 ### `flow_failures`
@@ -931,7 +940,11 @@ child failures. A terminal child and its outbox row commit together. Startup
 replays rows before workers can observe recovered parents. `fail` and `remove`
 rows are deleted after application; `ignore` and `continue` remain readable
 while the parent is live and are deleted when it reaches a terminal state or is
-removed.
+removed. Queue obliteration also matches `child_queue` directly and parent/child
+IDs stored only in that queue's DLQ, so an orphan outbox row is removed even
+when its owning `jobs` row was already retired. A persisted newer same-ID job or
+DLQ generation in another queue fences auxiliary deletion derived from a stale
+job or DLQ row.
 
 ### `dependency_completions`
 
@@ -954,9 +967,11 @@ This table is the payload-free completion proof for a
 unreferenced proofs. `pinned=1` means at least one live `waitingDeps` reverse
 edge still owns the proof; such a row is exempt from FIFO pruning until every
 consumer is durably promoted, detached, cancelled, cleaned, or obliterated.
-The RAM tracker mirrors this as an exact-size recent FIFO plus a pinned set.
-Thus `recent <= maxCompletedJobs`, while pinned rows are proportional to
-distinct completed dependency IDs referenced by live waiters.
+The RAM tracker mirrors this as an exact-size recent FIFO plus a pinned set and
+a queue-owner map with exactly the same lifetime. Thus
+`recent <= maxCompletedJobs`, while pinned rows are proportional to distinct
+completed dependency IDs referenced by live waiters. Memory-only obliteration
+uses the owner map to delete the selected queue's hidden proofs.
 
 Recovery deliberately loads the full table into temporary classification
 state before applying a possibly smaller configured cap. After pending jobs
@@ -964,6 +979,21 @@ and reverse indexes are rebuilt, it reconciles `pinned` from those indexes,
 prunes only unpinned rows, and hydrates the two RAM tiers. The record never
 makes the removed job visible through Job/state/result/stats queries, and
 `queue` exists so `obliterate(queue)` can delete the hidden state it owns.
+
+### `completed_job_counts`
+
+```sql
+CREATE TABLE IF NOT EXISTS completed_job_counts (
+    queue TEXT PRIMARY KEY,
+    count INTEGER NOT NULL CHECK (count >= 0)
+);
+```
+
+Four `jobs` triggers maintain this exact retained-completed count on insert,
+state/queue transition, and delete. A zero count removes the queue row. Migration
+37 backfills from `jobs` before the triggers become authoritative. Global and
+per-queue runtime statistics read this table, so the bounded completed-job hot
+cache cannot cap the reported SQLite total.
 
 ### `job_results` (schema.ts:66-70)
 
@@ -1041,6 +1071,10 @@ Persists queue control-state for recovery (#100); row type `DbQueueState`
 limits with their remaining time. The four nullable stall columns persist a
 complete custom `StallConfig`; recovery applies it before classifying active
 rows, so the same `maxStalls` bound governs the crash that triggered recovery.
+After expiry/default normalization, a row with no effective policy is deleted
+instead of registering an empty queue. Empty-queue reconciliation deletes both
+queue and group state synchronously before unregistering the queue name; a
+storage error leaves the runtime registration intact.
 
 ### `group_state`
 
@@ -1112,17 +1146,41 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 ```
 
+### `migration_progress`
+
+```sql
+CREATE TABLE IF NOT EXISTS migration_progress (
+    version INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    last_key TEXT,
+    processed_rows INTEGER NOT NULL DEFAULT 0,
+    processed_bytes INTEGER NOT NULL DEFAULT 0,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (version, phase)
+);
+```
+
+Legacy payload rewrites update their cursor and row/byte totals in the same
+transaction as each data batch. Completing a schema version inserts its
+`migrations` marker and deletes that version's progress row atomically.
+
 ### Migrations (`src/infrastructure/persistence/migrations.ts:5-121`)
 
-`SCHEMA_VERSION = 35`. The migrate routine reads
-`MAX(version)`; if below current, runs the full `SCHEMA` (idempotent
-`CREATE … IF NOT EXISTS`) then applies each incremental `ALTER`/`CREATE INDEX`
-above the stored version in one synchronous transaction. It suppresses only
-exact duplicate schema-object errors, rolls back every other failure, and
-records `SCHEMA_VERSION` only after schema changes and legacy backfills finish.
-Migration 6 is represented as two explicit statements so a partial historical
-upgrade resumes at the missing column. A failed upgrade therefore keeps its old
-version and is retried on reopen (`src/infrastructure/persistence/sqlite/state.ts`).
+`SCHEMA_VERSION = 37`. Before applying PRAGMAs or schema changes, the runner
+rejects a recorded version newer than the binary supports. It idempotently
+ensures the complete base schema, then applies each pending version in order and
+records that version separately. Schema statements are transactional and
+suppress only exact duplicate schema-object errors. Legacy v31/v32 name
+backfills use keyset pages bounded to 500 rows and 8 MiB of source payload per
+transaction (one oversized row is processed alone); progress logs report rows,
+bytes, and elapsed time, and the durable cursor makes reopening resume the
+unfinished version.
+Migration 6 remains two explicit statements so a partial historical upgrade can
+resume at the missing column. Listeners bind only after migration and recovery,
+and an interrupted payload rewrite must roll forward with the same/newer binary
+or restore a pre-upgrade backup rather than downgrade.
 
 | Version | Change                                                                                                                |
 | ------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -1159,6 +1217,7 @@ version and is retried on reopen (`src/infrastructure/persistence/sqlite/state.t
 | 34      | `jobs.extended_options` (repeat and advanced generation policy across restart)                                        |
 | 35      | `group_state` durable per-group rate/concurrency overrides                                                            |
 | 36      | `group_state.paused` durable per-group pause state                                                                    |
+| 37      | Exact `completed_job_counts`, lifecycle triggers, and deterministic completed recovery/retention indexes              |
 
 (Versions 2–4 are unused gaps; only the keys present in `MIGRATIONS` run.)
 
@@ -1463,11 +1522,15 @@ its context interfaces in `src/application/types/contexts.ts`, and sized by
 | `timedOutJobs`              | `BoundedMap<JobId, RetiredTimeoutGeneration>`  | 50,000                    | FIFO batch                                   |
 | `retiredTimeoutLeaseTokens` | `BoundedMap<string, RetiredTimeoutGeneration>` | 50,000                    | FIFO batch                                   |
 | `waitingDeps`               | per-shard map                                  | unbounded*                | follows live dependency waiters              |
+| `pendingQueueAdmissions`    | `Map<string, number>`                          | transient*                | reference-counted `finally` release          |
 | `telemetryJournal.events`   | per-queue arrays                               | 10,000 each               | oldest event first                           |
 | terminal metric buckets     | per queue/type map or SQLite rows              | 20,160 each               | minutes older than newest window             |
 
 \* `jobIndex` and `waitingDeps` are keyed by live jobs; entries are removed with
-their lifecycle or dependency edges rather than capped by size. The
+their lifecycle or dependency edges rather than capped by size.
+`pendingQueueAdmissions` contains only queue names currently crossing an
+asynchronous single, batch, or flow admission boundary; concurrent operations
+share a count and each releases exactly once. The
 `maxWaitingDeps` compatibility option has a default of `10_000` but is not
 currently an admission or eviction limit. The other caps above reflect the
 source defaults in `src/application/types/config.ts` (for example

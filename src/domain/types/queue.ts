@@ -121,7 +121,7 @@ export class ConcurrencyLimiter {
 /** Job location for indexing */
 export type JobLocation =
   | { type: 'queue'; shardIdx: number; queueName: string }
-  | { type: 'processing'; shardIdx: number }
+  | { type: 'processing'; shardIdx: number; queueName: string }
   | { type: 'completed'; queueName: string }
   | { type: 'dlq'; queueName: string };
 

@@ -100,20 +100,25 @@ export async function failJob(
   }
 
   await withWriteLock(ctx.shardLocks[index], () => {
+    const location = ctx.jobIndex.get(jobId);
+    if (location?.type !== 'processing' || location.queueName !== job.queue) {
+      throw new Error(`Job not found or not in processing state: ${jobId}`);
+    }
     const shard = ctx.shards[index];
     shard.releaseJobResources(job.queue, job.uniqueKey, job.groupId, job.id);
 
     if (willRetry) {
       const now = Date.now();
       job.runAt = now + calculateBackoff(job);
+      job.startedAt = null;
+      if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
+        job.timeline.push({ state: 'waiting', timestamp: now, attempt: job.attempts + 1 });
+      }
       shard.getQueue(job.queue).push(job);
       shard.incrementQueued(jobId, true, job.createdAt, job.queue, job.runAt);
       ctx.jobIndex.set(jobId, { type: 'queue', shardIdx: index, queueName: job.queue });
       ctx.storage?.updateForRetry(job);
       wasRetried = true;
-      if (job.timeline.length < MAX_TIMELINE_ENTRIES) {
-        job.timeline.push({ state: 'waiting', timestamp: now, attempt: job.attempts + 1 });
-      }
     } else if (job.removeOnFail || removeOnFail === true) {
       ctx.jobIndex.delete(jobId);
       ctx.storage?.commitFailedJob(jobId, null, flowFailure);

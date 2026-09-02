@@ -5,6 +5,22 @@
 
 import type { Job } from '../domain/types/job';
 
+/** Compare Unicode text in the same code-point order as SQLite BINARY UTF-8 text. */
+export function compareSqliteBinaryText(left: string, right: string): number {
+  if (left === right) return 0;
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPoint = left.codePointAt(leftIndex);
+    const rightPoint = right.codePointAt(rightIndex);
+    if (leftPoint === undefined || rightPoint === undefined) break;
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
+    leftIndex += leftPoint > 0xffff ? 2 : 1;
+    rightIndex += rightPoint > 0xffff ? 2 : 1;
+  }
+  return left.length - leftIndex - (right.length - rightIndex);
+}
+
 /**
  * Serialize a Job for JSON output
  * Converts BigInt IDs to strings

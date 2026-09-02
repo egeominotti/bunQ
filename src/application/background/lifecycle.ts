@@ -29,67 +29,68 @@ export function startBackgroundTasks(
   ctx: BackgroundContext,
   cronScheduler: CronScheduler
 ): BackgroundTaskHandles {
-  const cleanupInterval = setInterval(() => {
-    cleanup(ctx)
-      .then(() => {
-        handleTaskSuccess('cleanup');
-        runMonitoringChecks({
-          queueNamesCache: ctx.queueNamesCache,
-          shards: ctx.shards,
-          processingShards: ctx.processingShards,
-          workerManager: ctx.workerManager,
-          storage: ctx.storage,
-          dashboardEmit: ctx.dashboardEmit,
-          state: ctx.monitoringState,
-        });
-      })
-      .catch((error: unknown) => {
-        handleTaskError('cleanup', error);
-      });
-  }, ctx.config.cleanupIntervalMs);
-
   const timeoutScheduler = ctx.timeoutScheduler;
-  timeoutScheduler.start(ctx);
+  const intervals: ReturnType<typeof setInterval>[] = [];
+  try {
+    const cleanupInterval = setInterval(() => {
+      cleanup(ctx)
+        .then(() => {
+          handleTaskSuccess('cleanup');
+          runMonitoringChecks({
+            queueNamesCache: ctx.queueNamesCache,
+            shards: ctx.shards,
+            processingShards: ctx.processingShards,
+            workerManager: ctx.workerManager,
+            storage: ctx.storage,
+            dashboardEmit: ctx.dashboardEmit,
+            state: ctx.monitoringState,
+          });
+        })
+        .catch((error: unknown) => {
+          handleTaskError('cleanup', error);
+        });
+    }, ctx.config.cleanupIntervalMs);
+    intervals.push(cleanupInterval);
 
-  const depCheckInterval = setInterval(() => {
-    if (ctx.pendingDepChecks.size === 0) return;
-    processPendingDependencies(ctx)
-      .then(() => {
-        handleTaskSuccess('dependency');
-      })
-      .catch((error: unknown) => {
-        handleTaskError('dependency', error);
-      });
-  }, ctx.config.dependencyCheckMs);
+    timeoutScheduler.start(ctx);
+    const depCheckInterval = setInterval(() => {
+      if (ctx.pendingDepChecks.size === 0) return;
+      processPendingDependencies(ctx)
+        .then(() => handleTaskSuccess('dependency'))
+        .catch((error: unknown) => handleTaskError('dependency', error));
+    }, ctx.config.dependencyCheckMs);
+    intervals.push(depCheckInterval);
 
-  const stallCheckInterval = setInterval(() => {
-    checkStalledJobs(ctx);
-  }, ctx.config.stallCheckMs);
+    const stallCheckInterval = setInterval(() => checkStalledJobs(ctx), ctx.config.stallCheckMs);
+    intervals.push(stallCheckInterval);
+    const dlqMaintenanceInterval = setInterval(
+      () => performDlqMaintenance(ctx),
+      ctx.config.dlqMaintenanceMs
+    );
+    intervals.push(dlqMaintenanceInterval);
+    const lockCheckInterval = setInterval(() => {
+      checkExpiredLocks(getLockContext(ctx))
+        .then(() => handleTaskSuccess('lockExpiration'))
+        .catch((error: unknown) => handleTaskError('lockExpiration', error));
+    }, ctx.config.stallCheckMs);
+    intervals.push(lockCheckInterval);
 
-  const dlqMaintenanceInterval = setInterval(() => {
-    performDlqMaintenance(ctx);
-  }, ctx.config.dlqMaintenanceMs);
-
-  const lockCheckInterval = setInterval(() => {
-    checkExpiredLocks(getLockContext(ctx))
-      .then(() => {
-        handleTaskSuccess('lockExpiration');
-      })
-      .catch((error: unknown) => {
-        handleTaskError('lockExpiration', error);
-      });
-  }, ctx.config.stallCheckMs);
-
-  cronScheduler.start();
-  return {
-    cleanupInterval,
-    timeoutScheduler,
-    depCheckInterval,
-    stallCheckInterval,
-    dlqMaintenanceInterval,
-    lockCheckInterval,
-    cronScheduler,
-  };
+    cronScheduler.start();
+    return {
+      cleanupInterval,
+      timeoutScheduler,
+      depCheckInterval,
+      stallCheckInterval,
+      dlqMaintenanceInterval,
+      lockCheckInterval,
+      cronScheduler,
+    };
+  } catch (error) {
+    for (const interval of intervals) clearInterval(interval);
+    timeoutScheduler.stop();
+    cronScheduler.stop();
+    throw error;
+  }
 }
 
 export function stopBackgroundTasks(handles: BackgroundTaskHandles): void {

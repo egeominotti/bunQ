@@ -6,22 +6,22 @@ import { EventType } from '../../domain/types/queue';
 import { setDlqRetryState } from '../../domain/types/dlq';
 import { withWriteLock } from '../../shared/lock';
 import { pushJob, pushJobBatch } from '../operations/push';
+import { withPendingQueueAdmissions } from '../operations/pushContext';
 import { pushFlowBatch } from '../operations/flowPush';
 import { pullJob, pullJobBatch } from '../operations/pull';
 import { commitRemovedCompletion } from '../dependencyCompletions';
 import * as lockMgr from '../lockManager';
-import { managerRuntime } from './context';
 import { QueueManagerState } from './state';
 
 export class QueueManagerDelivery extends QueueManagerState {
   async push(queue: string, input: JobInput): Promise<Job> {
-    managerRuntime(this).registerQueueName(queue);
-    return pushJob(queue, input, this.contextFactory.getPushContext());
+    const ctx = this.contextFactory.getPushContext();
+    return withPendingQueueAdmissions([queue], ctx, () => pushJob(queue, input, ctx));
   }
 
   async pushBatch(queue: string, inputs: JobInput[]): Promise<JobId[]> {
-    managerRuntime(this).registerQueueName(queue);
-    return pushJobBatch(queue, inputs, this.contextFactory.getPushContext());
+    const ctx = this.contextFactory.getPushContext();
+    return withPendingQueueAdmissions([queue], ctx, () => pushJobBatch(queue, inputs, ctx));
   }
 
   async pushFlow(batch: AtomicFlowBatchInput): Promise<AtomicFlowBatchResult> {
@@ -179,8 +179,12 @@ export class QueueManagerDelivery extends QueueManagerState {
       }
     });
     if (!job) return false;
-
     const completedJob = job as Job;
+    const currentLocation = this.jobIndex.get(jobId);
+    if (currentLocation?.type !== 'queue' || currentLocation.queueName !== completedJob.queue) {
+      return false;
+    }
+
     setDlqRetryState(completedJob, null);
     const ctx = this.contextFactory.getAckContext();
     if (!(completedJob.removeOnComplete || removeOnComplete === true)) {
@@ -188,6 +192,7 @@ export class QueueManagerDelivery extends QueueManagerState {
       ctx.completedJobsData.set(jobId, completedJob);
       if (result !== undefined) {
         ctx.jobResults.set(jobId, result);
+        ctx.jobResultQueues.set(jobId, completedJob.queue);
         ctx.storage?.storeResult(jobId, result);
       }
       ctx.jobIndex.set(jobId, { type: 'completed', queueName: completedJob.queue });

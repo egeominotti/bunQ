@@ -39,6 +39,7 @@ export class QueueManagerLimits extends QueueManagerControl {
     const shard = this.shards[shardIndex(queue)];
     this.storage?.saveGroupRateLimit(queue, groupId, max, duration);
     shard.setGroupRateLimit(queue, groupId, max, duration);
+    this.registerQueueName(queue);
     shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
   }
 
@@ -71,6 +72,7 @@ export class QueueManagerLimits extends QueueManagerControl {
     const shard = this.shards[shardIndex(queue)];
     this.storage?.saveGroupConcurrency(queue, groupId, concurrency);
     shard.setGroupConcurrency(queue, groupId, concurrency);
+    this.registerQueueName(queue);
     shard.notifyBatch(queue, Math.max(1, shard.getGroupJobsCount(queue, groupId)));
   }
 
@@ -93,7 +95,10 @@ export class QueueManagerLimits extends QueueManagerControl {
     assertGroupId(groupId);
     const shard = this.shards[shardIndex(queue)];
     const changed = shard.pauseGroup(queue, groupId);
-    if (changed) this.storage?.saveGroupPaused(queue, groupId, true);
+    if (changed) {
+      this.registerQueueName(queue);
+      this.storage?.saveGroupPaused(queue, groupId, true);
+    }
     return changed;
   }
 
@@ -117,6 +122,7 @@ export class QueueManagerLimits extends QueueManagerControl {
     assertGroupId(groupId);
     assertPositiveSafeInteger(duration, 'duration');
     this.shards[shardIndex(queue)].rateLimitGroup(queue, groupId, duration);
+    this.registerQueueName(queue);
   }
 
   getCountsPerPriority(queue: string): Record<number, number> {
@@ -183,6 +189,7 @@ export class QueueManagerLimits extends QueueManagerControl {
 
   setRateLimit(queue: string, limit: number, durationMs?: number, ttlMs?: number): void {
     this.shards[shardIndex(queue)].setRateLimit(queue, limit, durationMs, ttlMs);
+    this.registerQueueName(queue);
     this.persistQueueState(queue);
   }
 
@@ -193,6 +200,7 @@ export class QueueManagerLimits extends QueueManagerControl {
 
   setConcurrency(queue: string, limit: number): void {
     this.shards[shardIndex(queue)].setConcurrency(queue, limit);
+    this.registerQueueName(queue);
     this.persistQueueState(queue);
   }
 

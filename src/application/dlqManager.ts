@@ -4,11 +4,10 @@
  */
 
 import type { Job, JobId } from '../domain/types/job';
-import { MAX_TIMELINE_ENTRIES } from '../domain/types/job';
 import type { JobLocation } from '../domain/types/queue';
 import type { Shard } from '../domain/queue/shard';
 import type { DlqEntry, DlqConfig, DlqFilter, DlqStats } from '../domain/types/dlq';
-import { FailureReason, setDlqRetryState } from '../domain/types/dlq';
+import { FailureReason } from '../domain/types/dlq';
 import { shardIndex } from '../shared/hash';
 import type { SqliteStorage } from '../infrastructure/persistence/sqlite';
 
@@ -17,6 +16,7 @@ export interface DlqContext {
   shards: Shard[];
   jobIndex: Map<JobId, JobLocation>;
   jobResults: { delete(id: JobId): boolean };
+  jobResultQueues: Map<JobId, string>;
   dependencyResults: { releaseConsumer(id: JobId): void };
   customIdMap: {
     get(id: string): JobId | undefined;
@@ -24,12 +24,14 @@ export interface DlqContext {
     delete(id: string): boolean;
   };
   jobLogs: { delete(id: JobId): boolean };
+  jobLogQueues: Map<JobId, string>;
   // Required (nullable): see LockContext.storage — an optional field lets a
   // builder silently drop persistence (#110-class bug).
   storage: SqliteStorage | null;
 }
 
 export { processAutoRetry, retryDlqByFilter, retryDlqJob, retryDlqJobs } from './dlqRetry';
+export { retryCompletedJobs, type RetryCompletedContext } from './completedRetry';
 
 /** Get jobs from DLQ (backward compatible) */
 export function getDlqJobs(queue: string, ctx: DlqContext, count?: number): Job[] {
@@ -159,7 +161,9 @@ function cleanupTerminalEntries(
     const location = ctx.jobIndex.get(jobId);
     if (location?.type === 'dlq' && location.queueName === queue) ctx.jobIndex.delete(jobId);
     ctx.jobResults.delete(jobId);
+    ctx.jobResultQueues.delete(jobId);
     ctx.jobLogs.delete(jobId);
+    ctx.jobLogQueues.delete(jobId);
     ctx.dependencyResults.releaseConsumer(jobId);
   }
 }
@@ -196,103 +200,4 @@ export function configureDlq(queue: string, ctx: DlqContext, config: Partial<Dlq
 export function getDlqConfig(queue: string, ctx: DlqContext): DlqConfig {
   const idx = shardIndex(queue);
   return ctx.shards[idx].getDlqConfig(queue);
-}
-
-/** Extended context for retryCompleted */
-export interface RetryCompletedContext extends DlqContext {
-  completedJobs: { has(id: JobId): boolean; delete(id: JobId): boolean } & Iterable<JobId>;
-  completedJobsData: {
-    get(id: JobId): Job | undefined;
-    delete(id: JobId): boolean;
-  };
-  jobResults: { delete(id: JobId): boolean };
-}
-
-/** Retry completed jobs */
-export function retryCompletedJobs(
-  queue: string,
-  ctx: RetryCompletedContext,
-  jobId?: JobId,
-  options: { limit?: number; timestamp?: number } = {}
-): number {
-  if (jobId) {
-    if (!ctx.completedJobs.has(jobId)) return 0;
-    const job = ctx.completedJobsData.get(jobId) ?? ctx.storage?.getJob(jobId);
-    if (job?.queue !== queue) return 0;
-    return requeueCompletedJob(job, ctx);
-  }
-
-  const limit =
-    options.limit === undefined
-      ? Number.POSITIVE_INFINITY
-      : Number.isFinite(options.limit) && options.limit > 0
-        ? Math.floor(options.limit)
-        : 0;
-  if (limit === 0) return 0;
-
-  const timestamp = options.timestamp ?? Number.POSITIVE_INFINITY;
-  let count = 0;
-  for (const id of [...ctx.completedJobs]) {
-    if (count >= limit) break;
-    const job = ctx.completedJobsData.get(id) ?? ctx.storage?.getJob(id);
-    if (job?.queue === queue && job.completedAt !== null && job.completedAt <= timestamp) {
-      count += requeueCompletedJob(job, ctx);
-    }
-  }
-  return count;
-}
-
-/** Requeue a single completed job */
-function requeueCompletedJob(job: Job, ctx: RetryCompletedContext): number {
-  const currentLocation = ctx.jobIndex.get(job.id);
-  if (currentLocation?.type !== 'completed' || currentLocation.queueName !== job.queue) return 0;
-  const shard = ctx.shards[shardIndex(job.queue)];
-  const keyOwner = job.uniqueKey ? shard.getUniqueKeyEntry(job.queue, job.uniqueKey) : null;
-  if (keyOwner && keyOwner.jobId !== job.id) return 0;
-
-  const now = Date.now();
-  const timeline = [...job.timeline];
-  if (timeline.length < MAX_TIMELINE_ENTRIES) {
-    timeline.push({ state: 'waiting', timestamp: now });
-  }
-  const requeued: Job = {
-    ...job,
-    attempts: 0,
-    startedAt: null,
-    completedAt: null,
-    runAt: now,
-    progress: 0,
-    progressMessage: null,
-    lastHeartbeat: now,
-    timeline,
-  };
-  setDlqRetryState(requeued, null);
-  shard.assignGroupFifoOrder(requeued);
-
-  // Commit the durable transition before publishing the new in-memory state.
-  // A SQLite failure therefore leaves the completed generation authoritative.
-  ctx.storage?.requeueCompletedJob(requeued);
-
-  const idx = shardIndex(requeued.queue);
-  shard.getQueue(requeued.queue).push(requeued);
-  shard.incrementQueued(requeued.id, false, requeued.createdAt, requeued.queue, requeued.runAt);
-  ctx.jobIndex.set(requeued.id, {
-    type: 'queue',
-    shardIdx: idx,
-    queueName: requeued.queue,
-  });
-  ctx.completedJobs.delete(requeued.id);
-  ctx.completedJobsData.delete(requeued.id);
-  ctx.jobResults.delete(requeued.id);
-  if (requeued.customId) ctx.customIdMap.set(requeued.customId, requeued.id);
-  if (requeued.uniqueKey) {
-    shard.registerUniqueKeyWithTtl(
-      requeued.queue,
-      requeued.uniqueKey,
-      requeued.id,
-      requeued.deduplicationTtl ?? undefined
-    );
-  }
-  shard.notify(requeued.queue);
-  return 1;
 }

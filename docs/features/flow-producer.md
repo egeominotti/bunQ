@@ -35,6 +35,10 @@ The Bun client has a strong creation contract:
 
 This is implemented by the `PUSHF` command. The Bun client and all six official
 external SDKs plan the complete graph locally and submit that single command.
+After whole-graph validation, the broker reference-counts every unique target
+queue before registering any of them or awaiting the flow locks. Cleanup cannot
+drop an earlier flow queue while a `queue:created` callback runs for a later
+queue, and all counts are released in `finally` on commit or failure.
 `UpdateParent` remains protocol-compatible for previously published clients
 that composed flows from multiple `PUSH` calls, but it cannot turn those
 already-observable calls into an atomic batch retroactively.

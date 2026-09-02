@@ -20,7 +20,7 @@ Owns:
 - Job-timeout enforcement and explicit failure classification (`background/timeouts.ts`).
 - DLQ maintenance dispatch in `background/dlq.ts`.
 - Startup recovery, split by lifecycle state under `background/recovery/`.
-- Memory-bound cleanup of orphaned processing entries, stale waiting-deps, unique keys/groups, stalled candidates, orphaned `jobIndex`/`jobLocks`, and empty queues (`cleanup`, `cleanupTasks.ts:15`).
+- Memory-bound cleanup of orphaned processing entries, stale waiting-deps, unique keys/groups, stalled candidates, orphaned `jobIndex`/`jobLocks`, and empty queues (`cleanupTasks.ts` plus the focused `emptyQueueCleanup.ts` reconciler).
 - Dependency resolution as a safety fallback to the event-driven fast path (`processPendingDependencies`, `dependencyProcessor.ts:16`).
 - Dashboard threshold monitoring and hysteresis state (`runMonitoringChecks`, `monitoringChecks.ts:56`).
 - Circuit-breaker error tracking for the `cleanup`, `dependency`, and `lockExpiration` tasks (`taskErrorTracking.ts`).
@@ -79,7 +79,7 @@ export function checkJobTimeouts(ctx: BackgroundContext): Promise<void>;
 export function recover(ctx: BackgroundContext): void;
 
 // Re-exports
-export { getTaskErrorStats };          // from taskErrorTracking
+export { getTaskErrorStats }; // from taskErrorTracking
 export { processPendingDependencies }; // from dependencyProcessor
 ```
 
@@ -130,9 +130,11 @@ Emitted via `ctx.dashboardEmit?.(event, data)` (consumed by [bunqueue Cloud Dash
 
 - `job:timeout` — `checkJobTimeouts` (`background/timeouts.ts`)
 - `dlq:auto-retried`, `dlq:expired` — `performDlqMaintenance` (`background/dlq.ts`)
+- `cleanup:completed-removed` — bounded automatic SQLite retention
+  (`cleanupTasks.ts`)
 - `cleanup:orphans-removed` — `cleanOrphanedProcessingEntries` (`cleanupTasks.ts:69`)
 - `cleanup:stale-deps-removed` — `cleanStaleWaitingDependencies` (`cleanupTasks.ts:91`)
-- `queue:removed` — `cleanEmptyQueues` (`cleanupTasks.ts:257`)
+- `queue:removed` — `cleanEmptyQueues` (`emptyQueueCleanup.ts`)
 - `job:dependencies-resolved` — `promoteJobsToQueue` (`dependencyProcessor.ts:105`)
 - `queue:idle`, `queue:threshold`, `worker:overloaded`, `server:memory-warning`, `storage:size-warning` — `monitoringChecks.ts`
 
@@ -164,7 +166,11 @@ See [data-model](../data-model.md) for full definitions. The most relevant shape
 
 ### Startup: `recover(ctx)` (`background/recovery/index.ts`)
 
-Runs once before the intervals start (called from the `QueueManagerState` constructor in `queue-manager/state.ts`). No-op if `ctx.storage` is null (in-memory mode). It loads `loadCompletedJobIds()` and `loadDlqJobIds()` up front, then:
+Runs once before the intervals start (called from the `QueueManagerState`
+constructor in `queue-manager/state.ts`). No-op if `ctx.storage` is null
+(in-memory mode). It loads payload-free dependency proofs, DLQ IDs, queue/group
+state, and cold completed queue names up front, then emits structured start,
+phase-progress, and completion diagnostics at debug level on stderr:
 
 1. **Phase 1 — active jobs** (`background/recovery/active.ts`): before scanning, recovery restores each
    persisted custom `StallConfig` and `DlqConfig` from `queue_state`, because
@@ -172,24 +178,35 @@ Runs once before the intervals start (called from the `QueueManagerState` constr
    interrupted work. It then repeatedly loads the first
    `RECOVERY_BATCH_SIZE = 10000` rows. Every handled row leaves the active result
    set, so incrementing `OFFSET` over the shrinking set would skip rows.
-2. **Phase 2 — pending jobs** (`background/recovery/pending.ts`): paginated by deterministic `priority DESC, run_at ASC, id ASC`. This phase is the single authoritative enqueue path for both original pending jobs and retries persisted by Phase 1, preventing duplicate heap entries/counter increments. Corrupt-deps are quarantined; unsatisfied dependencies enter `waitingDeps`; dedup mappings are restored.
+2. **Phase 2 — pending jobs** (`background/recovery/pending.ts`): paginated by deterministic `priority DESC, run_at ASC, id ASC`. Each page collects only its referenced dependency IDs and asks SQLite which of those IDs are retained completions; it never materializes the full completed table. This phase is the single authoritative enqueue path for both original pending jobs and retries persisted by Phase 1, preventing duplicate heap entries/counter increments. Corrupt-deps are quarantined; unsatisfied dependencies enter `waitingDeps`; dedup mappings are restored.
 3. **DLQ restore** (`background/recovery/restore.ts`): `loadDlq()` restores every persisted entry into memory exactly once (this is why `quarantineCorruptDependsOn` deliberately does NOT touch in-memory DLQ — it only persists + drops the job row).
-4. **Queue control-state restore** (`background/recovery/restore.ts:18-40`, issue #100): the `loadQueueState()` snapshot used before Phase 1 for stall/DLQ policy is reused to apply `paused`, rate-limit capacity/window/remaining TTL, and `concurrencyLimit` directly to the owning shard. Already-expired temporary rate limits are skipped; live ones resume with their remaining lifetime. Recovery is in-memory only and has no write-back loop.
-5. **Phase 3 — completed jobs** (`background/recovery/restore.ts`): loads up to `maxCompletedJobs` rows into `completedJobs`/`completedJobsData` so `clean('completed')`, stats, and lookups work post-restart (issue #84). `customIdMap` is intentionally NOT populated here to avoid LRU-evicting pending-job mappings.
+4. **Queue control-state restore** (`background/recovery/restore.ts`, issue
+   #100): the `loadQueueState()` snapshot used before Phase 1 for stall/DLQ
+   policy is reused to apply `paused`, rate-limit capacity/window/remaining TTL,
+   and `concurrencyLimit` directly to the owning shard. Already-expired temporary
+   rate limits are skipped; live ones resume with their remaining lifetime. If
+   expiry/default normalization leaves no effective policy, recovery deletes
+   the stale `queue_state` row instead of registering an empty queue forever.
+5. **Phase 3 — completed hot cache** (`background/recovery/restore.ts`): loads up to `maxCompletedJobs` rows into `completedJobs`/`completedJobsData` for low-latency lookups. SQLite cleanup and completed statistics remain database-authoritative beyond this window. `customIdMap` is intentionally NOT populated here to avoid LRU-evicting pending-job mappings.
+
+If any recovery phase, flow-outbox replay, or cron restore throws, constructor
+unwinding closes the SQLite write-buffer timer and stops the partially-created
+cron, worker, event, and telemetry services before rethrowing. The process can
+therefore fail fast before listener bind even when the database is corrupt.
 
 ### `startBackgroundTasks` (`background/lifecycle.ts`)
 
 Registers five maintenance intervals, starts the timeout deadline scheduler,
 and calls `cronScheduler.start()`:
 
-| Interval handle | Config key | Default | Body |
-| --- | --- | --- | --- |
-| `cleanupInterval` | `cleanupIntervalMs` | 10s | `cleanup(ctx)` → on success `handleTaskSuccess('cleanup')` + `runMonitoringChecks(...)`; on reject `handleTaskError('cleanup', err)` |
-| `timeoutScheduler` | each active job's `startedAt + timeout` | exact deadline | One bounded timer tracks the earliest registered deadline |
-| `depCheckInterval` | `dependencyCheckMs` | 30s | early-return if `pendingDepChecks.size === 0`, else `processPendingDependencies(ctx)` with `dependency` error tracking |
-| `stallCheckInterval` | `stallCheckMs` | 5s | `checkStalledJobs(ctx)` |
-| `dlqMaintenanceInterval` | `dlqMaintenanceMs` | 60s | `performDlqMaintenance(ctx)` |
-| `lockCheckInterval` | `stallCheckMs` | 5s | `checkExpiredLocks(getLockContext(ctx))` with `lockExpiration` error tracking |
+| Interval handle          | Config key                              | Default        | Body                                                                                                                   |
+| ------------------------ | --------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `cleanupInterval`        | `cleanupIntervalMs`                     | 10s            | Optional bounded completed retention, memory cleanup, then monitoring; success/error tracking wraps the full pass      |
+| `timeoutScheduler`       | each active job's `startedAt + timeout` | exact deadline | One bounded timer tracks the earliest registered deadline                                                              |
+| `depCheckInterval`       | `dependencyCheckMs`                     | 30s            | early-return if `pendingDepChecks.size === 0`, else `processPendingDependencies(ctx)` with `dependency` error tracking |
+| `stallCheckInterval`     | `stallCheckMs`                          | 5s             | `checkStalledJobs(ctx)`                                                                                                |
+| `dlqMaintenanceInterval` | `dlqMaintenanceMs`                      | 60s            | `performDlqMaintenance(ctx)`                                                                                           |
+| `lockCheckInterval`      | `stallCheckMs`                          | 5s             | `checkExpiredLocks(getLockContext(ctx))` with `lockExpiration` error tracking                                          |
 
 Note: monitoring runs on the cleanup tick (10s), not its own timer — it is invoked inside the `cleanup().then()` callback in `background/lifecycle.ts`. The dependency interval is a **safety fallback only**; the fast path is event-driven in `QueueManager` (the 30s default and the `pendingDepChecks.size` guard reflect this — it is not a 100ms hot loop).
 
@@ -217,9 +234,24 @@ ordinary enforcement does not scan every processing shard on a fixed cadence.
 
 For each queue in `queueNamesCache`, calls `processAutoRetry` (re-queues entries whose retry schedule is due, when `autoRetry` is enabled) and `purgeExpiredDlq` (drops entries past `maxAge`), emitting `dlq:auto-retried`/`dlq:expired` with the counts. Per-queue `try/catch` logs `DLQ maintenance failed` and continues — one bad queue cannot stall the rest.
 
-### `cleanup` (`cleanupTasks.ts:15`)
+### `cleanup` (`cleanupTasks.ts`)
 
 Runs in order each tick: refresh delayed counters per shard; compact any priority queue with `needsCompaction(0.2)` (>20% tombstones); then `cleanOrphanedProcessingEntries`, `cleanStaleWaitingDependencies`, `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobIndex`, `cleanOrphanedJobLocks`, `cleanEmptyQueues`. A dependency-gated job older than one hour is removed under its shard write lock after a TOCTOU age re-check. Its SQLite row or pending buffered insert is deleted first, then the reverse dependency index, `jobIndex`, owned unique/custom ID reservations, and dependency-result consumer edges are released together.
+
+`cleanEmptyQueues` snapshots registered names, reads exact SQLite completion
+counts with 500-name primary-key batches, and precomputes occupied/configured
+queue sets once. It preserves queued, processing, DLQ, waiting-dependency,
+`waiting-children`, completed-only, policy-only, and asynchronously admitting
+queues. Admission ownership is a per-queue reference count, so one completed
+concurrent push cannot expose another push that is still waiting for a lock.
+Policy discovery applies temporary rate-limit expiry and retains only
+non-default DLQ/stall configuration. A completed-only or policy-only name stays
+registered, but its empty priority heap and secondary group runtime are still
+reclaimed. Every fully unowned name is unregistered and its durable queue/group
+state rows are deleted before the remaining runtime is reclaimed. A storage
+failure therefore aborts that removal with the queue still registered. Events
+are emitted only after reconciliation, so a synchronous listener that recreates
+this or another queue cannot be erased by the remainder of the old cleanup.
 
 ### `processPendingDependencies` (`dependencyProcessor.ts:16`)
 
@@ -249,7 +281,7 @@ The lock hierarchy is `jobIndex → completedJobs → shards[N] → processingSh
   recovery, cleanup, obliterate, and shutdown invalidate the matching entry.
   The expiry transition revalidates `jobIndex`, the processing map, `startedAt`,
   and entry identity before failing a job.
-- `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, `cleanOrphanedJobLocks`, and `cleanEmptyQueues` run without locks and tolerate benign staleness. Stale dependency removal does take the shard write lock because it updates ownership, persistence, and reverse indexes as one lifecycle.
+- `cleanUniqueKeysAndGroups`, `cleanStalledCandidates`, and `cleanOrphanedJobLocks` run without locks. `cleanEmptyQueues` is also lock-free, but its database read, set construction, and removals form one synchronous no-`await` turn. Processing `JobLocation` entries carry `queueName`, so an ACK between processing-map removal and completed publication still protects the owning queue. Push, batch, and flow entry points increment all unique target-queue admission counts before the first registration callback or `await`, then decrement them in `finally`; cleanup therefore sees every lock waiter and callback-reentrant admission. Stale dependency removal does take the shard write lock because it updates ownership, persistence, and reverse indexes as one lifecycle.
 - `recover` runs in the constructor before any concurrent traffic, so it is lock-free by construction.
 
 Stall detection uses two-phase confirmation (a job must be flagged in two consecutive 5s cycles via `stalledCandidates`) so a brief GC pause does not trigger a false stall. Lock expiry and stall detection both reset `startedAt`, bump `attempts`/`stallCount`, and call `releaseJobResources` to free the concurrency slot + group + unique key before re-pushing or moving to DLQ. Both reclaim paths enforce `attempts < maxAttempts` and `stallCount < maxStalls` before requeueing; `updateForRetry` persists both counters so a restart cannot replenish either budget.
@@ -264,38 +296,39 @@ Stall detection uses two-phase confirmation (a job must be flagged in two consec
 - **Corrupt `depends_on`:** quarantined to DLQ on recovery so a job with unrecoverable dependency metadata is never enqueued as ready (out-of-order execution) nor parked in `waitingDeps` forever (unbounded leak).
 - **Stale `active`/DLQ rows from legacy DBs:** Phase 1 drops orphan rows for jobs already present in the DLQ table so they are not double-counted (predates the `failJob` DLQ-row cleanup fix; issue #97 lineage).
 - **Cron `preventOverlap` jobs:** never re-queued by recovery, stall, or lock-expiry paths — they are deleted and left to the scheduler to recreate (issues #73/#75).
-- **Memory bounds:** cleanup compacts priority queues at >20% tombstones; trims `uniqueKeys`/`activeGroups` by half when a queue exceeds 1000 entries; only walks `jobIndex` when `size > 100_000` (the full scan is expensive); evicts via `BoundedSet`/`LRUMap` caps elsewhere.
-- **`perQueueMetrics` not pruned on empty-queue removal** (`cleanupTasks.ts:252`): intentional — counters are cumulative and must survive a transient drain; growth is bounded by the LRU cap and `obliterate()` reclaims explicitly.
+- **Memory and disk bounds:** cleanup compacts priority queues at >20% tombstones; trims `uniqueKeys`/`activeGroups` by half when a queue exceeds 1000 entries; only walks `jobIndex` when `size > 100_000` (the full scan is expensive); evicts via `BoundedSet`/`LRUMap` caps elsewhere. When `completedRetentionMs` is configured, it also deletes at most 1,000 oldest eligible SQLite completions per tick. Hot-cache eviction alone never deletes durable rows.
+- **`perQueueMetrics` not pruned on empty-queue removal:** intentional — counters are cumulative and must survive a transient drain; growth is bounded by the LRU cap and explicit queue obliteration reclaims it.
 - **Completion-proof pinning:** recent `depCompletions` self-bound to
   `maxCompletedJobs`, but proofs referenced by waiting parents are excluded
   from pruning. Promotion, cancel, stale cleanup, failure-policy detach,
   explicit unlink, and parent-queue obliteration release pins only after the
   owning reverse edge and durable parent state have moved together.
 - **Stale dependency persistence ordering:** the SQLite/write-buffer delete runs before in-memory removal. If storage throws, the lifecycle remains live in memory and can be retried on the next cleanup tick instead of leaving disk as the only surviving copy.
-- **`recover` partial state:** if `ctx.storage` is null the whole pass is skipped. Active recovery drains offset zero because its dataset mutates; pending/completed scans use deterministic pages. Phase 3 is hard-capped at `maxCompletedJobs`.
+- **`recover` partial state:** if `ctx.storage` is null the whole pass is skipped. Active recovery drains offset zero because its dataset mutates; pending/completed scans use deterministic pages. Phase 3 is hard-capped at `maxCompletedJobs`, while dependency-state probes are bounded to IDs referenced by the current pending page.
 
 ## Configuration
 
 Interval timings come from `DEFAULT_CONFIG` (`src/application/types/config.ts`), overridable via the `QueueManagerConfig` passed to `QueueManager`:
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| `cleanupIntervalMs` | `10_000` | Cleanup + monitoring tick |
-| `jobTimeoutCheckMs` | `5_000` | Retry delay after a deadline transition fails; normal timeout precision comes from the job deadline |
-| `dependencyCheckMs` | `30_000` | Dependency-resolution **safety fallback** (fast path is event-driven) |
-| `stallCheckMs` | `5_000` | Stall detection **and** lock-expiry checks (shared) |
-| `dlqMaintenanceMs` | `60_000` | DLQ auto-retry + expiry |
-| `maxCompletedJobs` | `50_000` | Cap for Phase 3 completed-job recovery |
+| Option                 | Default  | Effect                                                                                                                                                                  |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cleanupIntervalMs`    | `10_000` | Cleanup + monitoring tick                                                                                                                                               |
+| `jobTimeoutCheckMs`    | `5_000`  | Retry delay after a deadline transition fails; normal timeout precision comes from the job deadline                                                                     |
+| `dependencyCheckMs`    | `30_000` | Dependency-resolution **safety fallback** (fast path is event-driven)                                                                                                   |
+| `stallCheckMs`         | `5_000`  | Stall detection **and** lock-expiry checks (shared)                                                                                                                     |
+| `dlqMaintenanceMs`     | `60_000` | DLQ auto-retry + expiry                                                                                                                                                 |
+| `maxCompletedJobs`     | `50_000` | Hot completed cache and Phase 3 recovery cap; not disk retention                                                                                                        |
+| `completedRetentionMs` | `null`   | Optional completed-row age; finite non-negative values are floored to milliseconds, invalid values disable retention, and each tick deletes at most 1,000 eligible rows |
 
 Monitoring thresholds are read from env vars at module load (`monitoringChecks.ts:36`), and a value of `0` disables that check:
 
-| Env var | Default | Effect |
-| --- | --- | --- |
-| `QUEUE_IDLE_THRESHOLD_MS` | `30000` | Emit `queue:idle` after this idle duration (`<=0` disables) |
-| `QUEUE_SIZE_THRESHOLD` | `0` (disabled) | Emit `queue:threshold` when waiting count reaches it |
-| `WORKER_OVERLOAD_THRESHOLD_MS` | `30000` | Emit `worker:overloaded` after sustained at-capacity duration |
-| `MEMORY_WARNING_MB` | `0` (disabled) | Emit `server:memory-warning` when heap reaches it (re-arms below 90%) |
-| `STORAGE_WARNING_MB` | `0` (disabled) | Emit `storage:size-warning` when SQLite size reaches it (re-arms below 90%) |
+| Env var                        | Default        | Effect                                                                      |
+| ------------------------------ | -------------- | --------------------------------------------------------------------------- |
+| `QUEUE_IDLE_THRESHOLD_MS`      | `30000`        | Emit `queue:idle` after this idle duration (`<=0` disables)                 |
+| `QUEUE_SIZE_THRESHOLD`         | `0` (disabled) | Emit `queue:threshold` when waiting count reaches it                        |
+| `WORKER_OVERLOAD_THRESHOLD_MS` | `30000`        | Emit `worker:overloaded` after sustained at-capacity duration               |
+| `MEMORY_WARNING_MB`            | `0` (disabled) | Emit `server:memory-warning` when heap reaches it (re-arms below 90%)       |
+| `STORAGE_WARNING_MB`           | `0` (disabled) | Emit `storage:size-warning` when SQLite size reaches it (re-arms below 90%) |
 
 DLQ behavior (`autoRetry`, `maxAge`) is configured per queue via `setDlqConfig`; see [Dead Letter Queue](./dead-letter-queue.md). Stall behavior (`maxStalls`, `stallInterval`, `gracePeriod`) is per queue via `setStallConfig`. General env vars live in [Configuration & Entrypoint](./configuration.md).
 

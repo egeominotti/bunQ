@@ -125,6 +125,8 @@ interface ResolvedConfig {
   postgresMaxQueuedOperations: number;
   postgresMaxSnapshotJobs: number;
   postgresMaxSnapshotPayloadBytes: number;
+  maxCompletedJobs: number;
+  completedRetentionMs: number | null;
   corsOrigins: string[];
   requireAuthForMetrics: boolean;
   maxPrometheusQueues: number;
@@ -174,6 +176,17 @@ Every field follows **config file > env var > default**. Key cases:
   lease/poll timing, SQL deadlines, operation admission bounds, and snapshot
   budgets, with their `BUNQUEUE_POSTGRES_*` environment equivalents. Numeric
   values are normalized before the runtime applies its safety minimums.
+- `maxCompletedJobs` resolves from `storage.maxCompletedJobs`,
+  `BUNQUEUE_MAX_COMPLETED_JOBS` / `MAX_COMPLETED_JOBS`, then `50_000`. It is a
+  positive hot-cache/recovery bound, not SQLite retention.
+- `completedRetentionMs` resolves from `storage.completedRetentionMs`,
+  `BUNQUEUE_COMPLETED_RETENTION_MS` / `COMPLETED_RETENTION_MS`, then `null`
+  (disabled). Non-negative values opt the local SQLite manager into bounded
+  age-based cleanup; PostgreSQL ignores this local policy. The shared
+  normalizer floors finite non-negative values to whole milliseconds.
+  Negative, non-finite, and larger-than-safe-integer values become `null`,
+  including when `QueueManagerConfig` is supplied directly, so an invalid
+  programmatic value cannot turn into destructive immediate expiry.
 - `authTokens` / `corsOrigins`: comma-split env, `.filter(Boolean)`, default `[]` (`resolve.ts:43`, `:50`).
 - `s3BackupEnabled`: `S3_BACKUP_ENABLED` accepts `'1'` or `'true'` (`resolve.ts:52-54`).
 - `requireAuthForMetrics`: `METRICS_AUTH === 'true'` (`resolve.ts:51`).
@@ -260,6 +273,8 @@ Resolved by `resolveServerConfig` (defaults in parentheses):
 | `AUTH_TOKENS` (comma-split)                                         | `auth.tokens`                      | `[]`                         |
 | `BUNQUEUE_STORAGE_DRIVER`                                           | `storage.driver`                   | inferred from URL/data path  |
 | `BUNQUEUE_DATA_PATH` > `BQ_DATA_PATH` > `DATA_PATH` > `SQLITE_PATH` | `storage.dataPath`                 | `undefined` (in-memory)      |
+| `BUNQUEUE_MAX_COMPLETED_JOBS` / `MAX_COMPLETED_JOBS`                | `storage.maxCompletedJobs`         | `50000`                      |
+| `BUNQUEUE_COMPLETED_RETENTION_MS` / `COMPLETED_RETENTION_MS`        | `storage.completedRetentionMs`     | `null` (disabled)            |
 | `BUNQUEUE_POSTGRES_URL`                                             | `storage.url`                      | `undefined`                  |
 | `BUNQUEUE_POSTGRES_NAMESPACE`                                       | `storage.namespace`                | `default`                    |
 | `BUNQUEUE_BROKER_ID`                                                | `storage.brokerId`                 | generated host/PID/random ID |

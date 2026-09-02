@@ -28,6 +28,13 @@ import {
 } from './pushDeduplication';
 import { withPushWriteLocks } from './pushLocks';
 
+interface PendingInsert {
+  job: Job;
+  durable: boolean;
+  storageHandled: boolean;
+  superseded: boolean;
+}
+
 /** Push an ordered batch while preserving its accepted-prefix contract. */
 export async function pushJobBatch(
   queue: string,
@@ -49,8 +56,21 @@ export async function pushJobBatch(
   const resultIds: JobId[] = [];
   const releasedDependencies: JobId[] = [];
   const acceptedJobs: Job[] = [];
-  const jobsToInsert: Array<{ job: Job; durable: boolean; storageHandled: boolean }> = [];
+  const jobsToInsert: PendingInsert[] = [];
+  let jobsToInsertById: Map<JobId, PendingInsert> | null = null;
+  let pendingInsertCount = 0;
   let batchError: unknown;
+
+  const supersedePendingInsert = (id: JobId): void => {
+    const index =
+      jobsToInsertById ?? new Map(jobsToInsert.map((pending) => [pending.job.id, pending]));
+    jobsToInsertById = index;
+    const pending = index.get(id);
+    if (!pending) return;
+    pending.superseded = true;
+    index.delete(id);
+    pendingInsertCount--;
+  };
 
   try {
     await withPushWriteLocks(queue, inputs, ctx, (lockedShardIndexes) => {
@@ -100,10 +120,9 @@ export async function pushJobBatch(
               ctx,
             })
           );
-          const supersededIndex = jobsToInsert.findIndex(
-            ({ job: pending }) => pending.id === dedupResult.replacement?.job.id
-          );
-          if (supersededIndex !== -1) jobsToInsert.splice(supersededIndex, 1);
+          if (dedupResult.replacement) {
+            supersedePendingInsert(dedupResult.replacement.job.id);
+          }
           storageHandled = true;
         } else if (dedupResult.replacement) {
           releasedDependencies.push(
@@ -112,10 +131,7 @@ export async function pushJobBatch(
               customId: customIdResult,
             })
           );
-          const supersededIndex = jobsToInsert.findIndex(
-            ({ job: pending }) => pending.id === dedupResult.replacement?.job.id
-          );
-          if (supersededIndex !== -1) jobsToInsert.splice(supersededIndex, 1);
+          supersedePendingInsert(dedupResult.replacement.job.id);
           storageHandled = true;
         } else if (dedupResult.activeOwnerId) {
           replaceActiveDedupJob(dedupResult.activeOwnerId, job, input, target, {
@@ -132,7 +148,15 @@ export async function pushJobBatch(
             ctx
           ).storageHandled;
         }
-        jobsToInsert.push({ job, durable: Boolean(input.durable), storageHandled });
+        const pending = {
+          job,
+          durable: Boolean(input.durable),
+          storageHandled,
+          superseded: false,
+        };
+        jobsToInsert.push(pending);
+        jobsToInsertById?.set(job.id, pending);
+        pendingInsertCount++;
         acceptedJobs.push(job);
         resultIds.push(job.id);
       }
@@ -150,7 +174,9 @@ export async function pushJobBatch(
 
   let persistenceError: unknown;
   if (acceptedJobs.length > 0) {
-    const pendingPersistence = jobsToInsert.filter(({ storageHandled }) => !storageHandled);
+    const pendingPersistence = jobsToInsert.filter(
+      ({ storageHandled, superseded }) => !storageHandled && !superseded
+    );
     const durableJobs = pendingPersistence.filter(({ durable }) => durable).map(({ job }) => job);
     const bufferedJobs = pendingPersistence.filter(({ durable }) => !durable).map(({ job }) => job);
     try {
@@ -173,7 +199,7 @@ export async function pushJobBatch(
       for (const event of events) ctx.broadcast(event);
     }
   }
-  if (jobsToInsert.length > 0) ctx.shards[idx].notifyBatch(queue, jobsToInsert.length);
+  if (pendingInsertCount > 0) ctx.shards[idx].notifyBatch(queue, pendingInsertCount);
 
   if (!batchError && !persistenceError && acceptedJobs.length > 0 && inputs.length > 1) {
     ctx.dashboardEmit?.('batch:pushed', {

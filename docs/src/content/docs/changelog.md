@@ -230,6 +230,12 @@ head:
 
 ### Performance
 
+- In-batch deduplication replacements now lazily index pending persistence rows
+  and tombstone superseded generations instead of repeatedly scanning and
+  splicing the accepted array. On native macOS arm64 with Bun 1.4.0, the median
+  reverse-order replacement batch of 20,000 inputs improved from 364.858ms to
+  60.202ms (6.06x throughput), while the ordinary 20,000-input batch remained
+  neutral at 38.428ms versus 37.594ms.
 - Memory/SQLite group scheduling no longer scans and parks an ineligible prefix
   of the authoritative priority heap. Synchronous insert/remove hooks maintain
   lazy ungrouped/delayed heaps, a FIFO lane per group, O(1) circular rotation,

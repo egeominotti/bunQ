@@ -181,6 +181,16 @@ remain accepted and recoverable according to their durability mode; item N and
 all later items remain absent. A rejection of the first durable item therefore
 leaves no phantom batch in either Embedded or TCP mode.
 
+Pending batch persistence keeps the append-only array fast path for ordinary
+jobs. The first in-batch deduplication replacement lazily builds a job-ID index;
+later replacements tombstone and remove their superseded pending rows from that
+index in O(1), while the surviving rows retain accepted order. Building the
+index once plus the final tombstone filter makes this bookkeeping O(n) instead
+of repeatedly scanning and splicing the pending array. The persisted and
+notified counts exclude tombstones. `test/push-batch-dedup-index.test.ts` covers
+reverse-order replacements and verifies the surviving generations after an
+SQLite restart.
+
 ### PULL (`pullJob`, `pull.ts`)
 
 1. `deadline = timeoutMs > 0 ? now + timeoutMs : 0`. Loop:

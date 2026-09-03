@@ -100,7 +100,7 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
       if (this.groupLimiter) this.groupLimiter.increment(delivery.job);
     }
 
-    void Promise.all(
+    void Promise.allSettled(
       deliveries.map((delivery, index) => {
         const jobId = String(delivery.job.id);
         const controller = this.createAbortController(jobId);
@@ -124,6 +124,8 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
           token: this.opts.useLocks ? delivery.token : undefined,
           removeOnComplete: this.opts.removeOnComplete === true ? true : undefined,
           removeOnFail: this.opts.removeOnFail === true ? true : undefined,
+          onAckQueued: () => this.queueAckCandidate(delivery),
+          onAckUnavailable: () => this.retireAckCandidate(delivery),
           shouldAbandonOutcome: () =>
             timedOut || this._forceClose || !this.isCurrentDelivery(delivery),
           abortController: controller,
@@ -131,9 +133,9 @@ export class WorkerExecution<T = unknown, R = unknown> extends WorkerPolling<T, 
             if (ok) this.processedCount++;
             else this.failedCount++;
           },
-        });
+        }).finally(() => this.retireAckCandidate(delivery));
       })
-    ).finally(() => {
+    ).then(() => {
       for (const timer of timers) clearTimeout(timer);
       for (const { id, controller } of abortControllers) {
         this.releaseAbortController(id, controller);

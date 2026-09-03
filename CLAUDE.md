@@ -603,6 +603,30 @@ const mem = queueManager.getMemoryStats();
 // jobIndex, completedJobs, processingTotal, queuedTotal, temporalIndexTotal
 ```
 
+## CPU and Memory Profiling
+
+- Profile a representative full workload for long enough to collect meaningful
+  samples; a smoke run only validates the harness. Use fresh process/state and a
+  separate unprofiled baseline. Profiled timings are diagnostic, not publishable
+  benchmark results.
+- Generate both CPU views in one native run:
+  `bun --cpu-prof --cpu-prof-md --cpu-prof-dir=<artifact-dir> <workload>`.
+  Triage self/total time and callers in Markdown, then inspect the `.cpuprofile`
+  in Chrome DevTools or VS Code.
+- Generate heap formats in separate native runs because `--heap-prof-md`
+  overrides `--heap-prof` when combined:
+  `bun --heap-prof --heap-prof-dir=<artifact-dir> <workload>` and
+  `bun --heap-prof-md --heap-prof-dir=<artifact-dir> <workload>`. Exercise cleanup
+  and exit normally so the snapshots are written.
+- Prove leaks with repeated workload/cleanup cycles at equivalent checkpoints.
+  After `Bun.gc(true)`, record `bun:jsc` `heapStats()`, `process.memoryUsage()`, and
+  `QueueManager.getMemoryStats()`; compare retained types and retainer chains, not
+  RSS alone.
+- Bun has separate JavaScriptCore and native heaps. Use snapshots/stats for JS
+  retention and opt-in `Bun.unsafe.mimallocDump()` for native allocation. Never
+  expose profiles through an unauthenticated endpoint: snapshots may contain job
+  payloads or secrets. Keep outputs under ignored `artifacts/`.
+
 ## Background Tasks
 
 | Task            | Interval | Purpose                        |

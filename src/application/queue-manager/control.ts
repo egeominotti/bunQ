@@ -200,6 +200,7 @@ export class QueueManagerControl extends QueueManagerQueries {
 
   protected unregisterQueueName(queue: string): void {
     this.queueNamesCache.delete(queue);
+    this.telemetryJournal.clearQueueEventsMemory(queue);
   }
 
   protected releaseCompletionPins(dependencyIds: Iterable<JobId>): void {

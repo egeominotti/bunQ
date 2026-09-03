@@ -135,6 +135,9 @@ be claimed.
   `sqlite/admission.ts` applies terminal-generation retirement and dependency-
   completion pins inside the same transaction as persistence-sensitive job
   admission; its ID-only contract lives in `types/admission.ts`.
+  `sqlite/telemetryStore.ts` owns cached telemetry statements, reusable
+  transactions, and exact committed event-retention counts, while
+  `sqlite/telemetryWrites.ts` applies ordered event and metric mutations.
   The optional `PostgresQueueStore` façade composes focused async modules under
   `persistence/postgres/`; `application/postgres-queue-manager/` adapts that
   database-authoritative store to the transport-facing `QueueManager` surface.
@@ -462,10 +465,11 @@ For in-memory/SQLite `PUSHB`, `PULLB`, and `ACKB`, lifecycle emission uses
 `EventsManager.broadcastBatch`. The manager-owned `QueueTelemetryJournal`
 commits the ordered batch through `SqliteStorage.recordQueueEventsBatch`, while
 ordinary event subscribers, completion waiters, and webhooks still receive
-individual events in order. Journal retention runs once per affected queue and
-terminal metric mutations are aggregated per queue/type after an exact
-in-memory simulation of scalar bucket pruning. Job-state writes use their own
-`markActiveBatch`/`markCompletedBatch` transactions, so best-effort
+individual events in order. Cached exact counts skip journal-retention SQL until
+an affected queue exceeds its cap; the overflow path deletes exactly the oldest
+excess rows. Terminal metric mutations are aggregated per queue/type after an
+exact in-memory simulation of scalar bucket pruning. Job-state writes use their
+own `markActiveBatch`/`markCompletedBatch` transactions, so best-effort
 observability remains isolated from durable scheduling state.
 
 **FAIL** (error)
@@ -567,6 +571,13 @@ proceed during the writer's flush.
   exhausted batches surface via an `onCriticalLoss` callback.
 - **Serialization.** Job payloads, results, and DLQ entries are stored as
   MessagePack blobs ([`sqliteSerializer.ts`](../src/infrastructure/persistence/sqliteSerializer.ts)).
+- **Telemetry.**
+  [`sqlite/telemetryStore.ts`](../src/infrastructure/persistence/sqlite/telemetryStore.ts)
+  prepares all event/metric statements and transactions once per storage
+  lifetime. It loads exact per-queue event counts after migration, updates them
+  only after a successful commit, and refreshes or invalidates them on trim,
+  clear, and queue destruction. Retention SQL therefore runs only for actual
+  overflow and removes the known excess oldest rows.
 - **Recovery.** On startup `bgTasks.recover()` batch-reads jobs, bounded
   dependency-completion proofs, results, DLQ, cron, and queue control-state
   back into memory before serving traffic. Pending pages query completion state

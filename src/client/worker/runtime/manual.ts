@@ -116,12 +116,15 @@ export abstract class WorkerManual<T = unknown, R = unknown> extends WorkerContr
         ackBatcher: this.ackBatcher,
         emitter: this,
         token: this.opts.useLocks ? delivery.token : undefined,
+        onAckQueued: () => this.queueAckCandidate(delivery),
+        onAckUnavailable: () => this.retireAckCandidate(delivery),
         shouldAbandonOutcome: () =>
           timedOut || this._forceClose || !this.isCurrentDelivery(delivery),
         abortController,
       });
       if (fetchNextCallback) return await fetchNextCallback();
     } finally {
+      this.retireAckCandidate(delivery);
       if (timeout !== null) clearTimeout(timeout);
       this.releaseAbortController(jobId, abortController);
       this.activeJobs--;

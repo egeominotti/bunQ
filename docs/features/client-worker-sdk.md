@@ -1,6 +1,6 @@
 # Client SDK: Worker (& sandboxed)
 
-> **Category:** Client SDK · **Source:** `src/client/worker/worker.ts`, `src/client/worker/runtime/`, `src/client/worker/types/`, `src/client/worker/handlers/`, `src/client/worker/processor.ts`, `src/client/worker/processorOutcome.ts`, `src/client/worker/processorResult.ts`, `src/client/worker/batchExecution.ts`, `src/client/worker/ackBatcher.ts`, `src/client/worker/workerPull.ts`, `src/client/worker/workerHeartbeat.ts`, `src/client/queue-events/tcpSubscription.ts`, `src/client/sandboxed/worker.ts`, `src/client/sandboxed/runtime/`, `src/client/sandboxed/types/`, `src/client/sandboxed/wrapper.ts`, `src/client/sandboxed/queueOps.ts`
+> **Category:** Client SDK · **Source:** `src/client/worker/worker.ts`, `src/client/worker/runtime/`, `src/client/worker/types/`, `src/client/worker/handlers/`, `src/client/worker/processor.ts`, `src/client/worker/processorOutcome.ts`, `src/client/worker/processorResult.ts`, `src/client/worker/batchExecution.ts`, `src/client/worker/ackBatcher.ts`, `src/client/worker/ackFrontier.ts`, `src/client/worker/workerPull.ts`, `src/client/worker/workerHeartbeat.ts`, `src/client/queue-events/tcpSubscription.ts`, `src/client/sandboxed/worker.ts`, `src/client/sandboxed/runtime/`, `src/client/sandboxed/types/`, `src/client/sandboxed/wrapper.ts`, `src/client/sandboxed/queueOps.ts`
 
 ## Purpose
 
@@ -18,7 +18,8 @@ Owns:
 - One-invocation native batch processing with per-member outcomes
   (`batchExecution.ts`), structural Observable completion (`processorResult.ts`),
   and AbortSignal cancellation for active delivery generations.
-- ACK batching with backpressure and retry (`ackBatcher.ts`).
+- ACK batching with backpressure, retry, and a reachable-outcome frontier
+  (`ackBatcher.ts`, `ackFrontier.ts`).
 - Job and worker heartbeats / lock renewal (`workerHeartbeat.ts`,
   `runtime/control.ts`, `runtime/execution.ts`).
 - Worker registration/unregistration with the server, and re-registration on
@@ -370,7 +371,7 @@ process alive; `autoStart` can watch the queue after an idle stop.
 - **Pull errors**: `handlePullError` in `worker/runtime/polling.ts` emits
   `error` with `consecutiveErrors` / `context:'pull'` and backs off
   exponentially from 100ms to 30s. A successful pick resets the counter.
-- **ACK batching/backpressure** (`ackBatcher.ts`): flush triggers at `config.batchSize` or after `interval` (`DEFAULT_ACK_INTERVAL=50ms`). The buffer is bounded at `MAX_PENDING_ACKS=10000`; `queue()` blocks (awaits in-flight, then flushes) rather than dropping acks. `sendBatchWithRetry` retries transient failures up to `maxRetries=3` with exponential backoff (`100,200,400ms`). A valid structured `ignoredIndices` response settles only those exact pending positions as `false` without retry or error; malformed/unknown evidence is rejected. On true exhaustion it logs `(N acks lost)` and rejects each pending promise. `stop()` clears any still-queued acks _without settling their promises_ (callers are expected to `flush()` + `waitForInFlight()` first, as `Worker.close()` does); a batch already mid-retry when `stop()` lands is rejected with `AckBatcher stopped`.
+- **ACK batching/backpressure** (`ackBatcher.ts`, `ackFrontier.ts`): flush triggers at the configured batch size, capped in TCP mode by an event-driven reachable-outcome frontier, or after `interval` (`DEFAULT_ACK_INTERVAL=50ms`). The frontier is the ACKs already pending plus started delivery generations that can still ACK plus scalar buffered deliveries that can start without first settling a pending ACK. Buffered eligibility observes runtime concurrency, rate capacity, and simulated per-group reservations; a sealed native batch contributes its exact started members rather than its configured maximum. A generation transfers synchronously from the unqueued set into the pending batch, while failure, an applied manual transition, pause, rate-limit changes, concurrency changes, and close re-evaluate a reduced frontier. ACKs assigned to an in-flight flush no longer contribute to later batches. The buffer is bounded at `MAX_PENDING_ACKS=10000`; `queue()` blocks (awaits in-flight, then flushes) rather than dropping acks. `sendBatchWithRetry` retries transient failures up to `maxRetries=3` with exponential backoff (`100,200,400ms`). A valid structured `ignoredIndices` response settles only those exact pending positions as `false` without retry or error; malformed/unknown evidence is rejected. On true exhaustion it logs `(N acks lost)` and rejects each pending promise. `stop()` clears any still-queued acks _without settling their promises_ (callers are expected to `flush()` + `waitForInFlight()` first, as `Worker.close()` does); a batch already mid-retry when `stop()` lands is rejected with `AckBatcher stopped`.
 - **Graceful close** (`worker/runtime/lifecycle.ts`): `close(false)` stops
   timers, moves buffered leased jobs back to waiting, waits only for active
   processors, flushes ACKs, unregisters, and closes the pool. `close(true)`

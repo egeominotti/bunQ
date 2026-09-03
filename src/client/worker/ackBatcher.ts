@@ -13,6 +13,7 @@ export interface AckBatcherConfig {
   batchSize: number;
   interval: number;
   embedded: boolean;
+  maxBatchSize?: (pendingCount: number) => number;
   maxRetries?: number;
   retryDelayMs?: number;
 }
@@ -47,7 +48,8 @@ export class AckBatcher {
     id: string,
     result: unknown,
     token?: string,
-    removeOnComplete?: boolean
+    removeOnComplete?: boolean,
+    onQueued?: () => void
   ): Promise<boolean> {
     // Backpressure: never silently drop accepted ACKs. When the buffer is at/over
     // capacity, force a flush of the pending ACKs (sending them to the server)
@@ -61,14 +63,14 @@ export class AckBatcher {
       // while-loop already re-checks `stopped`, so at most one extra flush runs
       // if stop() lands during the await above (flushing on shutdown is fine).
       if (this.pendingAcks.length >= this.MAX_PENDING_ACKS) {
-        const flushPromise = this.flush();
-        this.inFlightFlushes.add(flushPromise);
-        void flushPromise.finally(() => this.inFlightFlushes.delete(flushPromise));
-        await flushPromise;
+        await this.startTrackedFlush();
       }
     }
 
     return new Promise<boolean>((resolve, reject) => {
+      // Transfer the delivery from the Worker's unqueued frontier into this
+      // pending batch in one synchronous turn.
+      onQueued?.();
       this.pendingAcks.push({
         id,
         result,
@@ -78,20 +80,18 @@ export class AckBatcher {
         reject,
       });
 
-      if (this.pendingAcks.length >= this.config.batchSize) {
-        // Track in-flight flush
-        const flushPromise = this.flush();
-        this.inFlightFlushes.add(flushPromise);
-        void flushPromise.finally(() => this.inFlightFlushes.delete(flushPromise));
-      } else {
+      if (!this.flushIfThresholdReached()) {
         this.ackTimer ??= setTimeout(() => {
           this.ackTimer = null;
-          const flushPromise = this.flush();
-          this.inFlightFlushes.add(flushPromise);
-          void flushPromise.finally(() => this.inFlightFlushes.delete(flushPromise));
+          void this.startTrackedFlush();
         }, this.config.interval);
       }
     });
+  }
+
+  /** Re-evaluate a dynamic batch ceiling after worker capacity changes. */
+  notifyCapacityChanged(): void {
+    this.flushIfThresholdReached();
   }
 
   /** Flush pending ACKs with retry logic */
@@ -201,5 +201,29 @@ export class AckBatcher {
   async waitForInFlight(): Promise<void> {
     if (this.inFlightFlushes.size === 0) return;
     await Promise.all(this.inFlightFlushes);
+  }
+
+  private effectiveBatchSize(): number {
+    const maximum = this.config.maxBatchSize?.(this.pendingAcks.length);
+    return maximum === undefined ? this.config.batchSize : Math.min(this.config.batchSize, maximum);
+  }
+
+  private flushIfThresholdReached(): boolean {
+    if (
+      this.stopped ||
+      this.pendingAcks.length === 0 ||
+      this.pendingAcks.length < this.effectiveBatchSize()
+    ) {
+      return false;
+    }
+    void this.startTrackedFlush();
+    return true;
+  }
+
+  private startTrackedFlush(): Promise<void> {
+    const flushPromise = this.flush();
+    this.inFlightFlushes.add(flushPromise);
+    void flushPromise.finally(() => this.inFlightFlushes.delete(flushPromise));
+    return flushPromise;
   }
 }

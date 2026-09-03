@@ -23,21 +23,29 @@ queue.getMetrics('completed' | 'failed', (start = 0), (end = -1));
 queue.trimEvents(maxLength);
 ```
 
-`QueueTelemetryJournal` records every lifecycle event in a per-queue journal
-and updates completed/failed counters only for terminal outcomes; a failed
-attempt that will retry is not counted as a terminal failure. Metric data is a
+`QueueTelemetryJournal` tracks bounded lifecycle-event retention per queue and
+updates completed/failed counters only for terminal outcomes; a failed attempt
+that will retry is not counted as a terminal failure. In memory-only mode it
+stores only the retained event count needed by `trimEvents`, not event payloads;
+subscribers still receive the original events synchronously. This keeps trim
+semantics exact without retaining payload objects or front-splicing arrays.
+Automatic empty-queue cleanup releases that event count while preserving the
+queue's cumulative metric history; `obliterate` clears both. Metric data is a
 continuous sequence of one-minute buckets in newest-first order, including the
 current minute and zero-filled gaps. `start`/`end` are inclusive list indexes;
 `end=-1` selects through the oldest retained bucket. `meta.count` is cumulative,
 while top-level `count` is the pre-pagination bucket count.
 
 SQLite lifecycle batches (`PUSHB`, `PULLB`, and `ACKB`) reach the journal as one
-ordered batch. They append in one transaction, trim once per affected queue,
-and aggregate terminal bucket mutations by queue/type while simulating the
-scalar retention order. External event subscribers, completion waiters, and
-webhooks still observe each individual event in input order. If the batch
-transaction fails, telemetry falls back to isolated scalar writes so one bad
-event does not suppress the remainder.
+ordered batch. SQLite prepares the journal statements and transactions once per
+storage lifetime, maintains exact committed event counts, and runs an
+oldest-first limited delete only when a queue crosses its cap. The batch also
+aggregates terminal bucket mutations by queue/type while simulating the scalar
+retention order. External event subscribers, completion waiters, and webhooks
+still observe each individual event in input order. Count-cache updates happen
+only after commit and explicit trim/clear/obliterate refresh or invalidate them.
+If the batch transaction fails, telemetry falls back to isolated scalar writes
+so one bad event does not suppress the remainder.
 
 With SQLite, `queue_events`, `queue_metrics_meta`, and
 `queue_metric_buckets` survive restart. Defaults retain 10,000 journal entries

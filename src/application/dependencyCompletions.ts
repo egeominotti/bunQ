@@ -16,6 +16,11 @@ interface CompletionRecord {
  */
 export class DependencyCompletionTracker implements SetLike<JobId> {
   private readonly recent = new Set<JobId>();
+  private recentOrder: JobId[] = [];
+  private recentOrderTokens: number[] = [];
+  private readonly recentTokens = new Map<JobId, number>();
+  private recentOrderHead = 0;
+  private nextRecentToken = 0;
   private readonly pinned = new Set<JobId>();
   private readonly owners = new Map<JobId, string>();
   private readonly maxRecent: number;
@@ -30,20 +35,22 @@ export class DependencyCompletionTracker implements SetLike<JobId> {
   add(jobId: JobId, queue?: string): void {
     if (queue !== undefined) this.owners.set(jobId, queue);
     if (this.pinned.has(jobId) || this.recent.has(jobId)) return;
-    if (this.recent.size >= this.maxRecent) {
-      const oldest = this.recent.values().next().value;
-      if (oldest !== undefined) {
-        this.recent.delete(oldest);
-        this.owners.delete(oldest);
-        this.onRecentEvict?.(oldest);
-      }
-    }
+    if (this.recent.size >= this.maxRecent) this.evictOldestRecent();
+    if (this.nextRecentToken >= Number.MAX_SAFE_INTEGER) this.compactRecentOrder(true);
+
+    const token = this.nextRecentToken++;
     this.recent.add(jobId);
+    this.recentTokens.set(jobId, token);
+    this.recentOrder.push(jobId);
+    this.recentOrderTokens.push(token);
   }
 
   pin(jobId: JobId, queue?: string): void {
     if (queue !== undefined) this.owners.set(jobId, queue);
-    this.recent.delete(jobId);
+    if (this.recent.delete(jobId)) {
+      this.recentTokens.delete(jobId);
+      this.compactRecentOrder();
+    }
     this.pinned.add(jobId);
   }
 
@@ -71,9 +78,13 @@ export class DependencyCompletionTracker implements SetLike<JobId> {
 
   delete(jobId: JobId): boolean {
     const wasPinned = this.pinned.delete(jobId);
-    const deleted = this.recent.delete(jobId) || wasPinned;
+    const wasRecent = this.recent.delete(jobId);
+    if (wasRecent) {
+      this.recentTokens.delete(jobId);
+      this.compactRecentOrder();
+    }
     this.owners.delete(jobId);
-    return deleted;
+    return wasRecent || wasPinned;
   }
 
   deleteForQueue(queue: string): JobId[] {
@@ -87,12 +98,58 @@ export class DependencyCompletionTracker implements SetLike<JobId> {
 
   clear(): void {
     this.recent.clear();
+    this.recentOrder = [];
+    this.recentOrderTokens = [];
+    this.recentTokens.clear();
+    this.recentOrderHead = 0;
+    this.nextRecentToken = 0;
     this.pinned.clear();
     this.owners.clear();
   }
 
   get size(): number {
     return this.recent.size + this.pinned.size;
+  }
+
+  private evictOldestRecent(): void {
+    while (this.recentOrderHead < this.recentOrder.length) {
+      const index = this.recentOrderHead++;
+      const oldest = this.recentOrder[index];
+      const token = this.recentOrderTokens[index];
+      if (this.recentTokens.get(oldest) !== token) continue;
+
+      this.recent.delete(oldest);
+      this.recentTokens.delete(oldest);
+      this.owners.delete(oldest);
+      this.compactRecentOrder();
+      this.onRecentEvict?.(oldest);
+      return;
+    }
+  }
+
+  private compactRecentOrder(force = false): void {
+    const pending = this.recentOrder.length - this.recentOrderHead;
+    if (!force && this.recentOrderHead < this.maxRecent && pending < this.maxRecent * 2) return;
+
+    const order: JobId[] = [];
+    const tokens: number[] = [];
+    for (let index = this.recentOrderHead; index < this.recentOrder.length; index++) {
+      const jobId = this.recentOrder[index];
+      const token = this.recentOrderTokens[index];
+      if (this.recentTokens.get(jobId) !== token) continue;
+      const compactedToken = order.length;
+      order.push(jobId);
+      tokens.push(compactedToken);
+    }
+
+    this.recentTokens.clear();
+    for (let index = 0; index < order.length; index++) {
+      this.recentTokens.set(order[index], tokens[index]);
+    }
+    this.recentOrder = order;
+    this.recentOrderTokens = tokens;
+    this.recentOrderHead = 0;
+    this.nextRecentToken = order.length;
   }
 }
 

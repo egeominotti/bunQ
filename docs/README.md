@@ -166,7 +166,9 @@ The pull split between orchestration, atomic dequeue state, and durable handoff
 is implemented by `operations/pull.ts`, `operations/pullStateTransition.ts`,
 and [`operations/pullFinalization.ts`](../src/application/operations/pullFinalization.ts).
 SQLite batch telemetry semantics live in
-[`persistence/sqlite/telemetryWrites.ts`](../src/infrastructure/persistence/sqlite/telemetryWrites.ts);
+[`persistence/sqlite/telemetryWrites.ts`](../src/infrastructure/persistence/sqlite/telemetryWrites.ts),
+with statement/transaction lifetime and exact retention counts isolated in
+[`persistence/sqlite/telemetryStore.ts`](../src/infrastructure/persistence/sqlite/telemetryStore.ts);
 both are documented in the same lifecycle and persistence references.
 Buffered admission/state transitions are isolated in
 [`persistence/sqlite/jobLifecycle.ts`](../src/infrastructure/persistence/sqlite/jobLifecycle.ts),

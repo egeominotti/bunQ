@@ -388,7 +388,9 @@ detached CLI, and durable recovery paths.
   enters the two-tier `depCompletions` tracker. Proofs referenced by
   `waitingDeps` stay pinned even when a batch is larger than
   `maxCompletedJobs`; after the last reverse edge is durably resolved or
-  removed, the proof becomes recent and ordinary FIFO pruning applies.
+  removed, the proof becomes recent and ordinary FIFO pruning applies. Recent
+  proof eviction uses a stale-aware explicit order, so sustained completion
+  churn remains amortized O(1) after the retention cap is reached.
 - **PostgreSQL completion generations:** a `removeOnComplete` proof is tied to
   one custom-ID generation. Reuse retires the old proof only when it has no live
   consumer. Unreferenced tombstones are retained newest-first up to

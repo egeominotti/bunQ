@@ -3,7 +3,7 @@ import type { QueueMetricType } from '../../../domain/types/metrics';
 import { EventType, type JobEvent } from '../../../domain/types/queue';
 import { pack } from '../sqliteSerializer';
 
-interface PreparedQueueEvent {
+export interface PreparedQueueEvent {
   event: JobEvent;
   metricType: QueueMetricType | null;
   minute: number;
@@ -15,7 +15,7 @@ interface MetricEvent {
   timestamp: number;
 }
 
-interface MetricGroup {
+export interface MetricGroup {
   queue: string;
   type: QueueMetricType;
   events: MetricEvent[];
@@ -38,7 +38,7 @@ function eventPayload(event: JobEvent): Uint8Array {
   });
 }
 
-function prepareQueueEvents(events: readonly JobEvent[]): PreparedQueueEvent[] {
+export function prepareQueueEvents(events: readonly JobEvent[]): PreparedQueueEvent[] {
   return events.map((event) => ({
     event,
     metricType: terminalMetricType(event),
@@ -47,7 +47,7 @@ function prepareQueueEvents(events: readonly JobEvent[]): PreparedQueueEvent[] {
   }));
 }
 
-function groupMetricEvents(events: readonly PreparedQueueEvent[]): MetricGroup[] {
+export function groupMetricEvents(events: readonly PreparedQueueEvent[]): MetricGroup[] {
   const byQueue = new Map<string, Map<QueueMetricType, MetricGroup>>();
   for (const entry of events) {
     if (!entry.metricType) continue;
@@ -66,102 +66,119 @@ function groupMetricEvents(events: readonly PreparedQueueEvent[]): MetricGroup[]
   return [...byQueue.values()].flatMap((byType) => [...byType.values()]);
 }
 
-/** Apply events in input order inside one transaction, preserving scalar semantics. */
-export function writeQueueEvents(
-  db: Database,
-  events: readonly JobEvent[],
-  maxEvents: number,
-  maxMetricDataPoints: number
-): void {
-  if (events.length === 0) return;
-  const preparedEvents = prepareQueueEvents(events);
-  const metricGroups = groupMetricEvents(preparedEvents);
-  const eventLimit = Math.max(0, Math.floor(maxEvents));
-  const metricLimit = Math.max(0, Math.floor(maxMetricDataPoints));
-  const insertEvent = db.prepare(
-    'INSERT INTO queue_events (queue, event_type, job_id, occurred_at, payload) VALUES (?, ?, ?, ?, ?)'
-  );
-  const trimEvents = db.prepare(
-    'DELETE FROM queue_events WHERE queue = ? AND id IN (SELECT id FROM queue_events WHERE queue = ? ORDER BY id DESC LIMIT -1 OFFSET ?)'
-  );
-  const incrementBucket = db.prepare(
-    `INSERT INTO queue_metric_buckets (queue, type, minute, count)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(queue, type, minute) DO UPDATE SET count = count + excluded.count`
-  );
-  const readBucket = db.query<{ count: number }, [string, QueueMetricType, number]>(
-    'SELECT count FROM queue_metric_buckets WHERE queue = ? AND type = ? AND minute = ?'
-  );
-  const updateMeta = db.prepare(
-    `INSERT INTO queue_metrics_meta (queue, type, total_count, prev_ts, prev_count)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(queue, type) DO UPDATE SET
-       total_count = total_count + excluded.total_count,
-       prev_ts = excluded.prev_ts,
-       prev_count = excluded.prev_count`
-  );
-  const clearBuckets = db.prepare('DELETE FROM queue_metric_buckets WHERE queue = ? AND type = ?');
-  const readNewest = db.query<{ minute: number | null }, [string, QueueMetricType]>(
-    'SELECT MAX(minute) AS minute FROM queue_metric_buckets WHERE queue = ? AND type = ?'
-  );
-  const trimBuckets = db.prepare(
-    'DELETE FROM queue_metric_buckets WHERE queue = ? AND type = ? AND minute < ?'
-  );
+type TelemetryStatement = ReturnType<Database['prepare']>;
 
-  const transaction = db.transaction((batch: readonly PreparedQueueEvent[]) => {
-    const affectedQueues = new Set<string>();
-    for (const { event, payload } of batch) {
-      insertEvent.run(event.queue, event.eventType, String(event.jobId), event.timestamp, payload);
-      affectedQueues.add(event.queue);
+export interface TelemetryWriteStatements {
+  insertEvent: TelemetryStatement;
+  trimEvents: TelemetryStatement;
+  evictOldestEvents: TelemetryStatement;
+  incrementBucket: TelemetryStatement;
+  readBucket: TelemetryStatement;
+  updateMeta: TelemetryStatement;
+  clearBuckets: TelemetryStatement;
+  readNewest: TelemetryStatement;
+  trimBuckets: TelemetryStatement;
+}
+
+export interface QueueEventCountUpdate {
+  queue: string;
+  count: number;
+}
+
+export interface QueueEventWrite {
+  statements: TelemetryWriteStatements;
+  batch: readonly PreparedQueueEvent[];
+  metricGroups: readonly MetricGroup[];
+  eventLimit: number;
+  metricLimit: number;
+  eventCounts: ReadonlyMap<string, number>;
+}
+
+/** Apply prepared events inside an existing transaction, preserving scalar semantics. */
+export function applyQueueEvents(write: QueueEventWrite): QueueEventCountUpdate[] {
+  const { statements, batch, metricGroups, eventLimit, metricLimit, eventCounts } = write;
+  const insertedByQueue = new Map<string, number>();
+  const affectedQueues = new Set<string>();
+  for (const { event, payload } of batch) {
+    affectedQueues.add(event.queue);
+    if (eventLimit === 0) continue;
+    const inserted = statements.insertEvent.run(
+      event.queue,
+      event.eventType,
+      String(event.jobId),
+      event.timestamp,
+      payload
+    ).changes;
+    insertedByQueue.set(event.queue, (insertedByQueue.get(event.queue) ?? 0) + inserted);
+  }
+
+  const eventCountUpdates: QueueEventCountUpdate[] = [];
+  for (const queue of affectedQueues) {
+    let count = (eventCounts.get(queue) ?? 0) + (insertedByQueue.get(queue) ?? 0);
+    if (count > eventLimit) {
+      count -= statements.evictOldestEvents.run(queue, queue, count - eventLimit).changes;
     }
-    for (const queue of affectedQueues) trimEvents.run(queue, queue, eventLimit);
+    eventCountUpdates.push({ queue, count });
+  }
 
-    for (const group of metricGroups) {
-      const eventMinutes = new Set(group.events.map((event) => event.minute));
-      const counts = new Map<number, number>();
-      for (const minute of eventMinutes) {
-        const count = readBucket.get(group.queue, group.type, minute)?.count;
-        if (count !== undefined) counts.set(minute, count);
-      }
+  for (const group of metricGroups) {
+    const eventMinutes = new Set(group.events.map((event) => event.minute));
+    const counts = new Map<number, number>();
+    for (const minute of eventMinutes) {
+      const row = statements.readBucket.get(group.queue, group.type, minute) as {
+        count: number;
+      } | null;
+      const count = row?.count;
+      if (count !== undefined) counts.set(minute, count);
+    }
 
-      let newest = readNewest.get(group.queue, group.type)?.minute ?? null;
-      const increments = new Map<number, number>();
-      let lastTimestamp = 0;
-      let lastCount = 0;
-      let cutoff: number | null = null;
+    const newestRow = statements.readNewest.get(group.queue, group.type) as {
+      minute: number | null;
+    } | null;
+    let newest = newestRow?.minute ?? null;
+    const increments = new Map<number, number>();
+    let lastTimestamp = 0;
+    let lastCount = 0;
+    let cutoff: number | null = null;
 
-      for (const event of group.events) {
-        lastCount = (counts.get(event.minute) ?? 0) + 1;
-        lastTimestamp = event.timestamp;
-        counts.set(event.minute, lastCount);
-        increments.set(event.minute, (increments.get(event.minute) ?? 0) + 1);
+    for (const event of group.events) {
+      lastCount = (counts.get(event.minute) ?? 0) + 1;
+      lastTimestamp = event.timestamp;
+      counts.set(event.minute, lastCount);
+      increments.set(event.minute, (increments.get(event.minute) ?? 0) + 1);
 
-        if (metricLimit === 0) {
-          counts.clear();
-          increments.clear();
-          newest = null;
-          continue;
-        }
-
-        newest = newest === null ? event.minute : Math.max(newest, event.minute);
-        cutoff = newest - metricLimit + 1;
-        for (const minute of counts.keys()) {
-          if (minute >= cutoff) continue;
-          counts.delete(minute);
-          increments.delete(minute);
-        }
-      }
-
-      updateMeta.run(group.queue, group.type, group.events.length, lastTimestamp, lastCount);
       if (metricLimit === 0) {
-        clearBuckets.run(group.queue, group.type);
+        counts.clear();
+        increments.clear();
+        newest = null;
         continue;
       }
-      for (const [minute, count] of increments) {
-        incrementBucket.run(group.queue, group.type, minute, count);
+
+      newest = newest === null ? event.minute : Math.max(newest, event.minute);
+      cutoff = newest - metricLimit + 1;
+      for (const minute of counts.keys()) {
+        if (minute >= cutoff) continue;
+        counts.delete(minute);
+        increments.delete(minute);
       }
-      if (cutoff !== null) trimBuckets.run(group.queue, group.type, cutoff);
     }
-  });
-  transaction(preparedEvents);
+
+    statements.updateMeta.run(
+      group.queue,
+      group.type,
+      group.events.length,
+      lastTimestamp,
+      lastCount
+    );
+    if (metricLimit === 0) {
+      statements.clearBuckets.run(group.queue, group.type);
+      continue;
+    }
+    for (const [minute, count] of increments) {
+      statements.incrementBucket.run(group.queue, group.type, minute, count);
+    }
+    if (cutoff !== null) statements.trimBuckets.run(group.queue, group.type, cutoff);
+  }
+
+  return eventCountUpdates;
 }

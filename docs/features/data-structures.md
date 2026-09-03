@@ -9,6 +9,7 @@ This module provides the in-memory data structures the engine is built on: an in
 ## Responsibilities & Scope
 
 Owns:
+
 - `IndexedPriorityQueue` — the per-(shard, queue) ready-job ordering and O(1) lookup-by-id index.
 - `TemporalManager` — the `createdAt`-ordered cleanup index and the `runAt`-ordered delayed-job tracker (min-heap + sets).
 - `TemporalIndex` — one skip list per queue plus a reverse job-ID map for queue-local range scans and direct removal.
@@ -18,6 +19,7 @@ Owns:
 - `Histogram` — fixed-bucket latency histogram for Prometheus output.
 
 Does NOT own:
+
 - Shard locking, job state transitions, or which job to pull — see [Core Queue Engine](./core-queue-engine.md) and [Job Lifecycle](./job-lifecycle.md).
 - Persistence of any of these structures; they are pure in-memory. Durability is [Persistence](./persistence.md).
 - Cron scheduling logic (only lends `MinHeap` to it) — see [Scheduler & Cron](./scheduler-and-cron.md).
@@ -26,6 +28,7 @@ Does NOT own:
 ## Dependencies
 
 Internal:
+
 - `IndexedPriorityQueue` and `TemporalManager` depend only on `src/domain/types/job` (`Job`, `JobId`).
 - `TemporalManager` depends on `MinHeap` and `TemporalIndex`; `TemporalIndex` depends on `SkipList`.
 - `TTLMap` depends on `MinHeap`.
@@ -37,7 +40,9 @@ External/runtime: none beyond standard JS `Map`/`Set`, `Math.random` (skip-list 
 ## Public Interface
 
 ### `IndexedPriorityQueue` (`src/domain/queue/priorityQueue.ts`)
+
 Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<JobId, { job, generation }>` index.
+
 - `get size: number`, `get isEmpty: boolean`
 - `push(job: Job): void` — O(log₄ n)
 - `pop(): Job | null` — pops highest-priority job, skipping stale heap entries
@@ -51,6 +56,7 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - `getStaleRatio(): number`, `needsCompaction(threshold = 0.2): boolean`, `compact(): void`
 
 ### `TemporalManager` (`src/domain/queue/temporalManager.ts`)
+
 - `addToIndex(createdAt, jobId, queue): void` — O(log n)
 - `getOldJobs(queue, thresholdMs, limit): Array<{ jobId, createdAt }>` — O(log n + k)
 - `removeFromIndex(jobId): void`, `clearIndexForQueue(queue): void`
@@ -61,6 +67,7 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - Exported type: `interface TemporalEntry { createdAt: number; jobId: JobId; queue: string }`
 
 ### `TemporalIndex` (`src/domain/queue/temporalIndex.ts`)
+
 - `add(createdAt, jobId, queue): void`
 - `getOldJobs(queue, threshold, limit): Array<{ jobId, createdAt }>` — O(log q + k), where `q` is that queue's index size
 - `remove(jobId): void` — reverse lookup plus O(log q) skip-list deletion
@@ -68,11 +75,13 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - `get size: number`
 
 ### `MinHeap<T>` (`src/shared/minHeap.ts`)
+
 - `constructor(compare: (a: T, b: T) => number)`
 - `get size`, `get isEmpty`, `push(item)`, `pop(): T | undefined`, `peek(): T | undefined`
 - `clear()`, `toArray(): T[]`, `buildFrom(items: T[])` — O(n) heapify, `removeWhere(predicate): T | undefined` — O(n)
 
 ### `SkipList<T>` (`src/shared/skipList.ts`)
+
 - `constructor(compare, maxLevel = 16, probability = 0.5, equals?)`
 - `insert(value): boolean`, `delete(value): boolean`, `deleteWhere(predicate): T | null`
 - `find(value): T | null`, `has(value): boolean`, `first(): T | null`, `shift(): T | null`
@@ -81,6 +90,7 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - `get size`, `get isEmpty`
 
 ### Eviction-bounded containers (`src/shared/`)
+
 - `LRUMap<K,V>` implements `MapLike<K,V>`; `constructor(maxSize, onEvict?)`; doubly-linked list, O(1) `get`/`set` with move-to-front; evicts tail (least recent).
 - `LRUSet<T>` implements `SetLike<T>`; same eviction model for membership.
 - `BoundedMap<K,V>` / `BoundedSet<T>` — FIFO batch eviction, no recency tracking; `evictBatchSize = max(1, floor(maxSize * 0.1))`.
@@ -88,6 +98,7 @@ Backed by a 4-ary heap (`D = 4`) of lightweight `HeapEntry` records plus a `Map<
 - `MapLike<K,V>` and `SetLike<T>` interfaces are exported for substitutability.
 
 ### `Histogram` (`src/shared/histogram.ts`)
+
 - `constructor(buckets = DEFAULT_BUCKETS)` — buckets sorted ascending, `+Inf` bucket appended.
 - `observe(value): void` — O(log b) bucket find + cumulative increment
 - `getSum()`, `getCount()`, `percentile(p)`, `toPrometheus(name, help): string`, `reset()`
@@ -99,6 +110,7 @@ This module exposes no TCP commands, HTTP endpoints, CLI commands, or events dir
 `Job` (`src/domain/types/jobs/model.ts:41`) is the payload stored in `IndexedPriorityQueue`; the ordering reads `priority` (`:46`), `lifo` (`:48`), `runAt` (`:49`), and `id` (`JobId`, a branded `string`, `:1`). Full definition in [data-model](../data-model.md).
 
 Internal shapes:
+
 - `HeapEntry { jobId, priority, runAt, lifo, generation: bigint }` — lightweight metadata held in the heap array; the full `Job` lives only in the index map.
 - `TemporalEntry { createdAt, jobId, queue }` — skip-list node value, ordered by `(createdAt, jobId)`.
 - `DelayedEntry { jobId, runAt }` — `MinHeap` entry for delayed jobs.
@@ -106,6 +118,7 @@ Internal shapes:
 ## Business Logic / Control Flow
 
 ### Priority ordering (`compareEntries`, `priorityQueue.ts:27`)
+
 1. Higher `priority` first (`b.priority - a.priority`).
 2. At equal priority, `lifo` entries form a deterministic partition ahead of
    FIFO entries. LIFO entries use descending `jobId` order (default IDs are
@@ -113,7 +126,9 @@ Internal shapes:
    `jobId`. This makes mixed FIFO/LIFO comparisons total and transitive.
 
 ### Lazy invalidation via generations (`priorityQueue.ts`)
+
 Each `push`/`updatePriority`/`updateRunAt` assigns a monotonically increasing `bigint` generation and stores it in both the index entry and a new heap entry. `pop`/`peek` (`:99`, `:119`) compare the top heap entry's generation against the index entry; on mismatch (`:105`) the entry is dropped via `removeTop()` and the scan continues. Consequences:
+
 - `remove` (`:146`) and updates do **not** touch the heap — they only mutate the index, so the heap accumulates stale entries.
 - `compact()` (`:244`) filters out stale entries and rebuilds via O(n) `heapify` (`:262`); `needsCompaction(threshold)` returns `getStaleRatio() > threshold`. Background tasks trigger this: `cleanupTasks.ts:28` uses threshold `0.2`, `statsManager.ts:160` uses `0.1`.
 - `generation` is `bigint`, deliberately overflow-proof at extreme throughput.
@@ -124,22 +139,27 @@ by `src/application/operations/*` (for example `push.ts:193-216` and completion
 resource release at `ack/completion.ts:38-45`).
 
 ### Temporal index & delayed refresh
+
 - `TemporalIndex` owns a `SkipList<TemporalEntry>` per queue, ordered by the total key `createdAt → jobId`. A reverse `Map<JobId, TemporalEntry[]>` locates removals without scanning unrelated queues. `getOldJobs` starts directly in the requested queue's list and stops at the age threshold, preserving O(log q + k) multi-queue cleanup.
 - Delayed jobs are tracked in three structures kept in sync: `delayedJobIds: Set`, `delayedHeap: MinHeap<DelayedEntry>` (by `runAt`), and `delayedRunAt: Map<JobId, number>` (current `runAt`). `refreshDelayed(now)` pops due entries and verifies `delayedRunAt` to reject stale removals or old deadlines.
 - Delayed removal remains lazy, but `maybeCompactDelayedHeap` bounds retained stale entries. It clears immediately when no delayed jobs remain; otherwise, once at least 256 entries are stale and stale entries are at least as numerous as live entries, it rebuilds in O(n) with `MinHeap.buildFrom()`.
 
 ### Heaps
+
 `MinHeap` and `IndexedPriorityQueue` are both 4-ary (`D = 4`): parent at `floor((idx-1)/4)`, children at `4*idx+1 .. 4*idx+4`. 4-ary is chosen for cache locality (children contiguous, fewer levels). `bubbleDown` scans up to 4 children sequentially picking the smallest (`minHeap.ts:114`). `MinHeap` backs `TemporalManager.delayedHeap`, `TTLMap.expiryHeap` (`ttlMap.ts:42`), and `CronScheduler.cronHeap` (`src/infrastructure/scheduler/cron/runtime.ts:22-25`).
 
 ### Skip list
+
 Probabilistic levels via `randomLevel()` (`skipList.ts:74`), `maxLevel = 16`, `probability = 0.5`. `insert` (`:89`) finds position per level, and when an `equals` fn is supplied scans the run of compare-equal nodes for a true duplicate (`:107`-`:116`), returning `false` if found. `delete` (`:156`) unlinks at each level then lowers `level`. Range/scan helpers (`rangeUntil`, `takeWhile`, `values`) walk level-0 forward pointers.
 
 ### Eviction containers
+
 - `LRUMap.set` (`lruMap.ts:85`): existing key updates value + `moveToFront`; new key evicts `tail` (least recent) when `size >= maxSize`, firing `onEvict`, then `addToFront`. Iteration is tail→head (oldest→newest) to mimic native `Map` order.
 - `BoundedMap`/`BoundedSet`: existing key is a fast no-op/update; at capacity, `evictBatch` removes the oldest 10% in one pass (`boundedMap.ts:44`, `boundedSet.ts:37`) to amortize iterator cost.
 - `TTLMap`: `set` stamps `expiresAt = now + ttl` and pushes onto `expiryHeap`; updating an existing key increments `staleCount` (`ttlMap.ts:143`). `get` (`:126`) lazily evicts expired keys. `cleanup` (`:75`) pops the heap while `expiresAt <= now`, verifying the cache entry's `expiresAt` still matches before deleting (stale entries just decrement `staleCount`). `maybeCompact` (`:105`) rebuilds the heap once `staleCount / heapSize > 0.5` and `heapSize >= 100`.
 
 ### Histogram
+
 `observe` (`histogram.ts:22`) binary-searches the bucket boundary then increments every bucket `>= value` (cumulative semantics). `percentile(p)` returns the first bucket whose cumulative count reaches `(p/100)*count`. `toPrometheus` emits `_bucket{le=...}`, `_sum`, `_count` lines including the `+Inf` bucket. Consumed by `LatencyTracker` (`latencyTracker.ts:10`-`:12`) for `bunqueue_push/pull/ack_duration_ms`.
 
 ## Concurrency & Locking
@@ -162,7 +182,10 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
   `jobResults`/`customIdMap`/`jobLogs`/`perQueueMetrics` (`LRUMap`). The
   completion tracker uses exact one-at-a-time FIFO eviction for recent IDs and
   a separate pinned set whose members correspond to live reverse dependency
-  ownership.
+  ownership. Its FIFO is an explicit head-indexed order with per-occurrence
+  tokens: eviction is amortized O(1), and stale slots left by pin, delete, or
+  same-ID reuse cannot evict a newer occurrence. Periodic compaction bounds the
+  order storage without restarting an iterator over deleted `Set` slots.
 - **`Histogram.percentile`** returns `0` for an empty histogram and clamps to the largest finite bucket for high percentiles; it reports bucket boundaries, not interpolated values.
 - **Unused-in-`src` containers:** `LRUSet` and `TTLMap` are exported and unit-tested but currently have no production call site in `src/` (only `test/lru.test.ts`); they remain part of the public toolkit.
 
@@ -170,14 +193,14 @@ These structures are **not internally synchronized**. Bun/JS is single-threaded 
 
 These structures take sizes as constructor arguments; defaults that bind them come from `DEFAULT_CONFIG` (`src/application/types/config.ts`):
 
-| Collection (consumer) | Container | Default cap | Source |
-| --- | --- | --- | --- |
-| `completedJobs`, `completedJobsData`, `timedOutJobs`, `retiredTimeoutLeaseTokens`, `retiredCronLeaseTokens` | `BoundedSet`/`BoundedMap` | `maxCompletedJobs = 50_000` | `application/types/config.ts` |
-| `depCompletions` recent tier | `DependencyCompletionTracker` | `maxCompletedJobs = 50_000` | `dependencyCompletions.ts` |
-| `depCompletions` pinned tier | `Set` | Live completed IDs referenced by `waitingDeps` | `dependencyCompletions.ts` |
-| `jobResults` | `LRUMap` | `maxJobResults = 10_000` | `application/types/config.ts` |
-| `jobLogs` | `LRUMap` | `maxJobLogs = 10_000` | `application/types/config.ts` |
-| `customIdMap` | `LRUMap` | `maxCustomIds = 50_000` | `application/types/config.ts` |
+| Collection (consumer)                                                                                       | Container                     | Default cap                                    | Source                        |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------- | ----------------------------- |
+| `completedJobs`, `completedJobsData`, `timedOutJobs`, `retiredTimeoutLeaseTokens`, `retiredCronLeaseTokens` | `BoundedSet`/`BoundedMap`     | `maxCompletedJobs = 50_000`                    | `application/types/config.ts` |
+| `depCompletions` recent tier                                                                                | `DependencyCompletionTracker` | `maxCompletedJobs = 50_000`                    | `dependencyCompletions.ts`    |
+| `depCompletions` pinned tier                                                                                | `Set`                         | Live completed IDs referenced by `waitingDeps` | `dependencyCompletions.ts`    |
+| `jobResults`                                                                                                | `LRUMap`                      | `maxJobResults = 10_000`                       | `application/types/config.ts` |
+| `jobLogs`                                                                                                   | `LRUMap`                      | `maxJobLogs = 10_000`                          | `application/types/config.ts` |
+| `customIdMap`                                                                                               | `LRUMap`                      | `maxCustomIds = 50_000`                        | `application/types/config.ts` |
 
 Other tunables: `SkipList` `maxLevel = 16`, `probability = 0.5`; `MinHeap`/`IndexedPriorityQueue` branching `D = 4`; delayed-heap compaction minimum `256` stale entries with `stale >= live`; `TTLMap` `cleanupIntervalMs = 60_000`, compaction `threshold = 0.5` / `minSize = 100`; priority-queue compaction thresholds `0.2` (cleanup) and `0.1` (stats); `Histogram` `DEFAULT_BUCKETS` `[0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` ms. No environment variables affect this module directly.
 

@@ -132,7 +132,7 @@ throughput.
   <div class="bq-diag-head"><b>ACK batching</b><span>job completes</span></div>
   <div class="bq-diag-layer">AckBatcher.queue(id, result)</div>
   <div class="bq-diag-arrow">↓</div>
-  <div class="bq-diag-layer">Buffer pending ACKs <i>max 10 or 50ms timeout</i></div>
+  <div class="bq-diag-layer">Buffer pending ACKs <i>min(configured size, reachable-outcome frontier), or 50ms timeout</i></div>
   <div class="bq-diag-arrow">↓</div>
   <div class="bq-diag-row">
     <div class="bq-diag-cell">Batch full</div>

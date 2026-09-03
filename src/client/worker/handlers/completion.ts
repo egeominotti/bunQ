@@ -77,6 +77,7 @@ interface MoveToCompletedHandlerOptions {
   internalJob: InternalJob;
   token: string | null | undefined;
   removeOnComplete: boolean | undefined;
+  onAckQueued?: () => void;
   onCalled: (value: unknown) => void;
   onIgnored: () => void;
 }
@@ -84,8 +85,16 @@ interface MoveToCompletedHandlerOptions {
 export function createMoveToCompletedHandler(
   options: MoveToCompletedHandlerOptions
 ): (id: string, returnValue: unknown, _lockToken?: string) => Promise<unknown> {
-  const { embedded, ackBatcher, internalJob, token, removeOnComplete, onCalled, onIgnored } =
-    options;
+  const {
+    embedded,
+    ackBatcher,
+    internalJob,
+    token,
+    removeOnComplete,
+    onAckQueued,
+    onCalled,
+    onIgnored,
+  } = options;
   return async (_id: string, returnValue: unknown, _lockToken?: string) => {
     let applied = true;
     if (embedded) {
@@ -99,7 +108,8 @@ export function createMoveToCompletedHandler(
         String(internalJob.id),
         returnValue,
         token ?? undefined,
-        removeOnComplete
+        removeOnComplete,
+        onAckQueued
       );
     }
     if (!applied) {

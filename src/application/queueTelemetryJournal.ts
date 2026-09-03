@@ -23,7 +23,7 @@ function assertNonNegativeInteger(value: number, name: string): void {
 
 /** Per-queue bounded event journal and cumulative minute metrics. */
 export class QueueTelemetryJournal {
-  private readonly events = new Map<string, JobEvent[]>();
+  private readonly eventCounts = new Map<string, number>();
   private readonly metrics = new Map<string, Map<QueueMetricType, MetricState>>();
   private readonly maxEvents: number;
   private readonly maxMetricDataPoints: number;
@@ -45,12 +45,10 @@ export class QueueTelemetryJournal {
       return;
     }
 
-    const queueEvents = this.events.get(event.queue) ?? [];
-    queueEvents.push(event);
-    if (queueEvents.length > this.maxEvents) {
-      queueEvents.splice(0, queueEvents.length - this.maxEvents);
+    if (this.maxEvents > 0) {
+      const retained = this.eventCounts.get(event.queue) ?? 0;
+      if (retained < this.maxEvents) this.eventCounts.set(event.queue, retained + 1);
     }
-    this.events.set(event.queue, queueEvents);
 
     const type = metricType(event);
     if (!type) return;
@@ -112,11 +110,11 @@ export class QueueTelemetryJournal {
   trimEvents(queue: string, maxLength: number): number {
     assertNonNegativeInteger(maxLength, 'maxLength');
     if (this.storage) return this.storage.trimQueueEvents(queue, maxLength);
-    const events = this.events.get(queue);
-    if (!events || events.length <= maxLength) return 0;
-    const removed = events.length - maxLength;
-    events.splice(0, removed);
-    if (events.length === 0) this.events.delete(queue);
+    const retained = this.eventCounts.get(queue) ?? 0;
+    if (retained <= maxLength) return 0;
+    const removed = retained - maxLength;
+    if (maxLength === 0) this.eventCounts.delete(queue);
+    else this.eventCounts.set(queue, maxLength);
     return removed;
   }
 
@@ -126,12 +124,16 @@ export class QueueTelemetryJournal {
   }
 
   clearQueueMemory(queue: string): void {
-    this.events.delete(queue);
+    this.clearQueueEventsMemory(queue);
     this.metrics.delete(queue);
   }
 
+  clearQueueEventsMemory(queue: string): void {
+    this.eventCounts.delete(queue);
+  }
+
   clearMemory(): void {
-    this.events.clear();
+    this.eventCounts.clear();
     this.metrics.clear();
   }
 

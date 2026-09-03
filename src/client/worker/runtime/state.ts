@@ -4,6 +4,7 @@ import type { Job, Processor, WorkerOptions } from '../../types';
 import { getSharedManager } from '../../manager';
 import type { TcpConnectionPool } from '../../tcpPool';
 import { AckBatcher } from '../ackBatcher';
+import { countImmediatelyStartableAckDeliveries } from '../ackFrontier';
 import { FORCE_EMBEDDED, WORKER_CONSTANTS } from '../constants';
 import { GroupConcurrencyLimiter } from '../groupConcurrency';
 import type { HeartbeatDeps } from '../workerHeartbeat';
@@ -50,6 +51,7 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   private deliverySequence = 0;
   private readonly currentDeliveries = new Map<string, WorkerDelivery>();
   private readonly activeDeliveries = new Map<string, Set<number>>();
+  private readonly unqueuedAckCandidates = new Set<number>();
   protected heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   protected workerHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
   protected processedCount = 0;
@@ -125,6 +127,9 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
       batchSize: options.batchSize ?? 10,
       interval: WORKER_CONSTANTS.DEFAULT_ACK_INTERVAL,
       embedded: this.embedded,
+      maxBatchSize: this.embedded
+        ? undefined
+        : (pendingCount) => pendingCount + this.reachableUnqueuedAckCount(),
     });
 
     if (this.embedded) {
@@ -175,6 +180,17 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
       this.activeDeliveries.set(jobId, generations);
     }
     generations.add(delivery.generation);
+    if (!this.embedded) this.unqueuedAckCandidates.add(delivery.generation);
+  }
+
+  protected queueAckCandidate(delivery: WorkerDelivery): void {
+    this.unqueuedAckCandidates.delete(delivery.generation);
+  }
+
+  protected retireAckCandidate(delivery: WorkerDelivery): void {
+    if (this.unqueuedAckCandidates.delete(delivery.generation)) {
+      this.ackBatcher.notifyCapacityChanged();
+    }
   }
 
   protected finishDelivery(delivery: WorkerDelivery): void {
@@ -209,6 +225,7 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
   protected clearDeliveries(): void {
     this.currentDeliveries.clear();
     this.activeDeliveries.clear();
+    this.unqueuedAckCandidates.clear();
     for (const controllers of this.abortControllers.values()) {
       for (const controller of controllers) controller.abort(new Error('Worker closed'));
     }
@@ -244,6 +261,24 @@ export abstract class WorkerState<T = unknown, R = unknown> extends EventEmitter
     this.pollTimer = null;
     this.pollDeadline = null;
     if (timer !== null) clearTimeout(timer);
+  }
+
+  private reachableUnqueuedAckCount(): number {
+    return (
+      this.unqueuedAckCandidates.size +
+      countImmediatelyStartableAckDeliveries({
+        activeExecutions: this.activeJobs,
+        concurrency: this.opts.concurrency,
+        running: this.running,
+        closing: this._closing,
+        nativeBatch: this.opts.batch !== undefined,
+        rateSlots: this.rateLimiter.getAvailableSlots(),
+        deliveries: this.pendingJobs,
+        head: this.pendingJobsHead,
+        isCurrent: (delivery) => this.isCurrentDelivery(delivery),
+        groupLimiter: this.groupLimiter,
+      })
+    );
   }
 
   abstract run(): void;

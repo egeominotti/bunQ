@@ -20,6 +20,7 @@ export abstract class WorkerLifecycle<T = unknown, R = unknown> extends WorkerMa
     this.running = false;
     this.paused = false;
     this.clearPollTimer();
+    this.ackBatcher.notifyCapacityChanged();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

@@ -337,12 +337,17 @@ Lifecycle telemetry batching is separate from job-state durability. Batch
 operations build an ordered `JobEvent` array and `EventsManager.broadcastBatch`
 routes the manager-owned telemetry subscriber through
 `QueueTelemetryJournal.recordBatch`; ordinary subscribers, completion waiters,
-and webhooks still receive every event in order. `telemetryWrites.ts` packs all
-payloads before opening the transaction, appends events in input order, trims
-the journal once per affected queue, and groups terminal work by
-`(queue, completed|failed)`. Its in-memory bucket simulation applies events in
-their original per-group order before emitting aggregate increments and one
-retention trim, so out-of-order timestamps, a zero metric window,
+and webhooks still receive every event in order. `telemetryStore.ts` owns the
+prepared statements and reusable write/clear transactions for the storage
+lifetime; `telemetryWrites.ts` packs payloads before entering that transaction
+and groups terminal work by `(queue, completed|failed)`. Exact per-queue event
+counts avoid issuing a retention delete before the configured cap is crossed;
+at overflow, one oldest-first limited delete removes precisely the excess.
+Counts change only after commit and are refreshed or invalidated by explicit
+trim, clear, and queue destruction. Zero event retention skips journal inserts
+while terminal metrics remain active. The in-memory bucket simulation applies
+events in their original per-group order before emitting aggregate increments
+and one retention trim, so out-of-order timestamps, a zero metric window,
 `prev_ts`/`prev_count`, and cumulative totals match scalar writes exactly. A
 batch SQL failure rolls back atomically; the journal then retries events one by
 one and isolates a rejected payload/row without suppressing later telemetry.

@@ -1,18 +1,7 @@
 import type { QueueMetricsMeta, QueueMetricType } from '../../../domain/types/metrics';
 import type { JobEvent } from '../../../domain/types/queue';
 import { SqliteControl } from './control';
-import { writeQueueEvents } from './telemetryWrites';
-
-interface MetricBucketRow {
-  minute: number;
-  count: number;
-}
-
-interface MetricMetaRow {
-  total_count: number;
-  prev_ts: number;
-  prev_count: number;
-}
+import type { MetricBucketRow } from './telemetryStore';
 
 export interface PersistedQueueMetrics {
   meta: QueueMetricsMeta;
@@ -22,7 +11,9 @@ export interface PersistedQueueMetrics {
 /** Durable lifecycle journal and minute-bucket metrics. */
 export abstract class SqliteTelemetry extends SqliteControl {
   recordQueueEvent(event: JobEvent, maxEvents: number, maxMetricDataPoints: number): void {
-    this.safeWrite(() => writeQueueEvents(this.db, [event], maxEvents, maxMetricDataPoints));
+    this.safeWrite(() =>
+      this.telemetryStore.writeQueueEvents([event], maxEvents, maxMetricDataPoints)
+    );
   }
 
   recordQueueEventsBatch(
@@ -30,7 +21,9 @@ export abstract class SqliteTelemetry extends SqliteControl {
     maxEvents: number,
     maxMetricDataPoints: number
   ): void {
-    this.safeWrite(() => writeQueueEvents(this.db, events, maxEvents, maxMetricDataPoints));
+    this.safeWrite(() =>
+      this.telemetryStore.writeQueueEvents(events, maxEvents, maxMetricDataPoints)
+    );
   }
 
   getQueueMetrics(
@@ -38,20 +31,9 @@ export abstract class SqliteTelemetry extends SqliteControl {
     type: QueueMetricType,
     maxMetricDataPoints: number
   ): PersistedQueueMetrics {
-    const metaRow = this.db
-      .query<MetricMetaRow, [string, QueueMetricType]>(
-        'SELECT total_count, prev_ts, prev_count FROM queue_metrics_meta WHERE queue = ? AND type = ?'
-      )
-      .get(queue, type);
+    const metaRow = this.telemetryStore.getMetricMeta(queue, type);
     const limit = Math.max(0, Math.floor(maxMetricDataPoints));
-    const rows =
-      limit === 0
-        ? []
-        : this.db
-            .query<MetricBucketRow, [string, QueueMetricType, number]>(
-              'SELECT minute, count FROM queue_metric_buckets WHERE queue = ? AND type = ? ORDER BY minute DESC LIMIT ?'
-            )
-            .all(queue, type, limit);
+    const rows = limit === 0 ? [] : this.telemetryStore.getMetricBuckets(queue, type, limit);
     return {
       meta: {
         count: metaRow?.total_count ?? 0,
@@ -65,33 +47,18 @@ export abstract class SqliteTelemetry extends SqliteControl {
   trimQueueEvents(queue: string, maxLength: number): number {
     let removed = 0;
     this.safeWrite(() => {
-      removed = this.db
-        .prepare(
-          'DELETE FROM queue_events WHERE queue = ? AND id IN (SELECT id FROM queue_events WHERE queue = ? ORDER BY id DESC LIMIT -1 OFFSET ?)'
-        )
-        .run(queue, queue, maxLength).changes;
+      removed = this.telemetryStore.trimQueueEvents(queue, maxLength);
     });
     return removed;
   }
 
   countQueueEvents(queue: string): number {
-    return (
-      this.db
-        .query<{ count: number }, [string]>(
-          'SELECT COUNT(*) AS count FROM queue_events WHERE queue = ?'
-        )
-        .get(queue)?.count ?? 0
-    );
+    return this.telemetryStore.countQueueEvents(queue);
   }
 
   clearQueueTelemetry(queue: string): void {
     this.safeWrite(() => {
-      const transaction = this.db.transaction(() => {
-        this.db.prepare('DELETE FROM queue_events WHERE queue = ?').run(queue);
-        this.db.prepare('DELETE FROM queue_metrics_meta WHERE queue = ?').run(queue);
-        this.db.prepare('DELETE FROM queue_metric_buckets WHERE queue = ?').run(queue);
-      });
-      transaction();
+      this.telemetryStore.clearQueueTelemetry(queue);
     });
   }
 

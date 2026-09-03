@@ -104,13 +104,12 @@ export abstract class SqliteMutations extends SqliteJobs {
           referencedDependencyIds,
           dependencyRetentionLimit
         );
-        this.db.prepare('DELETE FROM queue_events WHERE queue = ?').run(queue);
-        this.db.prepare('DELETE FROM queue_metrics_meta WHERE queue = ?').run(queue);
-        this.db.prepare('DELETE FROM queue_metric_buckets WHERE queue = ?').run(queue);
+        this.telemetryStore.deleteQueueTelemetryRows(queue);
         this.db.prepare('DELETE FROM queue_state WHERE name = ?').run(queue);
         this.db.prepare('DELETE FROM group_state WHERE queue = ?').run(queue);
       })();
     });
+    this.telemetryStore.markQueueTelemetryCleared(queue);
     return {
       bufferedJobIds: this.writeBuffer.removePendingForQueue(queue),
       dependencyCompletions,

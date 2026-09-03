@@ -9,6 +9,7 @@ import { assertSupportedSqliteSchema, migrateSqliteDatabase } from '../sqliteMig
 import { persistedJobStateForWrite } from '../sqliteSerializer';
 import { prepareStatements, type StatementName } from '../statements';
 import type { SqliteConfig, SqliteCriticalLoss, SqliteCriticalLossCallback } from '../types/sqlite';
+import { SqliteTelemetryStore } from './telemetryStore';
 
 function isSqliteFullError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -24,6 +25,7 @@ export abstract class SqliteState {
   protected readonly batchManager: BatchInsertManager;
   protected readonly writeBuffer: WriteBuffer;
   protected readonly dependencyCompletionStore: DependencyCompletionStore;
+  protected readonly telemetryStore: SqliteTelemetryStore;
   protected _diskFull = false;
   protected _lastDiskFullError: string | null = null;
   protected _lastDiskFullAt: number | null = null;
@@ -48,6 +50,7 @@ export abstract class SqliteState {
       migrateSqliteDatabase(this.db, config.path);
       this.dependencyCompletionStore = new DependencyCompletionStore(this.db);
       this.statements = prepareStatements(this.db);
+      this.telemetryStore = new SqliteTelemetryStore(this.db);
       this.batchManager = new BatchInsertManager(this.db);
       this.writeBuffer = new WriteBuffer(
         this.batchManager,

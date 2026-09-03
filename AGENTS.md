@@ -238,6 +238,30 @@ and assert both the returned result and any affected counters/state.
   Docker Compose is only for functional tests requiring external services and
   must use a unique project name and disposable volumes.
 
+## CPU and memory profiling
+
+- Profile a representative full workload for long enough to collect meaningful
+  samples; a short smoke run is only a harness check. Use fresh process/state and
+  record a separate unprofiled baseline. Profiled timings are diagnostic, never
+  publishable benchmark results.
+- Generate both CPU views in one native run:
+  `bun --cpu-prof --cpu-prof-md --cpu-prof-dir=<artifact-dir> <workload>`.
+  Use Markdown for self/total time and caller/callee triage, then the
+  `.cpuprofile` in Chrome DevTools or VS Code for interactive flame analysis.
+- Generate heap formats in separate native runs because `--heap-prof-md`
+  overrides `--heap-prof` when combined:
+  `bun --heap-prof --heap-prof-dir=<artifact-dir> <workload>` and
+  `bun --heap-prof-md --heap-prof-dir=<artifact-dir> <workload>`. Both snapshots
+  are written on process exit, so exercise cleanup and terminate normally.
+- Confirm leaks with repeated workload/cleanup cycles at equivalent checkpoints:
+  call `Bun.gc(true)`, record `bun:jsc` `heapStats()`, `process.memoryUsage()`, and
+  `QueueManager.getMemoryStats()`, then compare retained types and retainer chains.
+  RSS growth alone is not proof of a leak.
+- Bun has separate JavaScriptCore and native heaps. Use heap snapshots/stats for
+  JavaScript retention and opt-in `Bun.unsafe.mimallocDump()` for native allocator
+  diagnosis. Never expose profiling as an unauthenticated endpoint; snapshots may
+  contain job payloads or secrets. Store outputs only under ignored `artifacts/`.
+
 ## Commits and handoff
 
 - Before every authorized `git commit`, update

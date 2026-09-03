@@ -61,6 +61,7 @@ export async function processJob<T, R>(
   // Use a mutable holder so TS does not narrow through callback mutation.
   const manualMove: ManualMove = { result: null };
   const onTransitionApplied = () => {
+    config.onAckUnavailable?.();
     manualMove.result = { type: 'transitioned' };
   };
 
@@ -71,9 +72,11 @@ export async function processJob<T, R>(
     token,
     removeOnFail: config.removeOnFail,
     onCalled: (error: Error) => {
+      config.onAckUnavailable?.();
       manualMove.result = { type: 'failed', error };
     },
     onIgnored: () => {
+      config.onAckUnavailable?.();
       manualMove.result = { type: 'ignored' };
     },
   });
@@ -84,10 +87,12 @@ export async function processJob<T, R>(
     internalJob,
     token,
     removeOnComplete: config.removeOnComplete,
+    onAckQueued: config.onAckQueued,
     onCalled: (value: unknown) => {
       manualMove.result = { type: 'completed', value };
     },
     onIgnored: () => {
+      config.onAckUnavailable?.();
       manualMove.result = { type: 'ignored' };
     },
   });
@@ -127,6 +132,7 @@ export async function processJob<T, R>(
       token: token ?? undefined,
       onPending: (pending) => {
         if (manualMove.result !== null) return;
+        config.onAckUnavailable?.();
         manualMove.result = { type: 'pending-transition', context: 'discard', pending };
       },
     }),
@@ -146,7 +152,10 @@ export async function processJob<T, R>(
       processor(job, { signal: abortController.signal }),
       abortController.signal
     );
-    if (config.shouldAbandonOutcome?.()) return;
+    if (config.shouldAbandonOutcome?.()) {
+      config.onAckUnavailable?.();
+      return;
+    }
 
     // An explicit broker disposition owns the generation, so skip auto-ACK.
     if (await handleManualMove(manualMove, job, config, internalJob)) return;
@@ -167,7 +176,8 @@ export async function processJob<T, R>(
           jobIdStr,
           result,
           token ?? undefined,
-          config.removeOnComplete
+          config.removeOnComplete,
+          config.onAckQueued
         );
       }
       if (!applied) return;
@@ -188,6 +198,7 @@ export async function processJob<T, R>(
     config.onOutcome?.(true);
     emitter.emit('completed', job, result);
   } catch (error) {
+    config.onAckUnavailable?.();
     if (config.shouldAbandonOutcome?.()) return;
     // An explicit broker disposition also suppresses catch-path auto-FAIL.
     if (await handleManualMove(manualMove, job, config, internalJob)) return;

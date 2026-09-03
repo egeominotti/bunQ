@@ -88,6 +88,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
     this.running = false;
     this.paused = true;
     this.clearPollTimer();
+    this.ackBatcher.notifyCapacityChanged();
   }
 
   resume(): void {
@@ -116,6 +117,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
     const clamped = Math.max(1, value);
     const previous = this.opts.concurrency;
     (this.opts as { concurrency: number }).concurrency = clamped;
+    this.ackBatcher.notifyCapacityChanged();
     if (clamped > previous && this.running && !this._closing) this.poll();
   }
 
@@ -159,6 +161,7 @@ export abstract class WorkerControl<T = unknown, R = unknown> extends WorkerStat
 
   rateLimit(expireTimeMs: number): void {
     this.rateLimiter.rateLimit(expireTimeMs);
+    this.ackBatcher.notifyCapacityChanged();
   }
 
   isRateLimited(): boolean {

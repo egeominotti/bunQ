@@ -14,6 +14,8 @@ export interface ProcessorConfig<T, R> {
   removeOnComplete?: boolean;
   removeOnFail?: boolean;
   onOutcome?: (succeeded: boolean) => void;
+  onAckQueued?: () => void;
+  onAckUnavailable?: () => void;
   shouldAbandonOutcome?: () => boolean;
   abortController?: AbortController;
 }

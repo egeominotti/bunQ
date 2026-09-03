@@ -254,15 +254,19 @@ describe('Issue #94: half-open TCP connection recovery', () => {
     // A correctly-recovering client opens a fresh connection (which the server
     // serves normally) and Ping succeeds again. A stuck client never reconnects
     // and every Ping times out forever.
-    const recovered = await waitFor(async () => {
-      if (mock.connectionsAccepted() < 2) return false;
-      try {
-        const r = await client.send({ cmd: 'Ping' });
-        return (r.data as { pong?: boolean }).pong === true;
-      } catch {
-        return false;
-      }
-    }, 6000, 100);
+    const recovered = await waitFor(
+      async () => {
+        if (mock.connectionsAccepted() < 2) return false;
+        try {
+          const r = await client.send({ cmd: 'Ping' });
+          return (r.data as { pong?: boolean }).pong === true;
+        } catch {
+          return false;
+        }
+      },
+      6000,
+      100
+    );
 
     client.close();
 
@@ -298,14 +302,18 @@ describe('Issue #94: half-open TCP connection recovery', () => {
     // Keep issuing commands like a worker's pull loop. Each rejects with
     // "Command timeout" while the socket is half-open. The client must conclude
     // the link is dead from the timeouts alone and open a fresh connection.
-    const recovered = await waitFor(async () => {
-      try {
-        const r = await client.send({ cmd: 'Ping' });
-        return (r.data as { pong?: boolean }).pong === true && mock.connectionsAccepted() >= 2;
-      } catch {
-        return false;
-      }
-    }, 6000, 60);
+    const recovered = await waitFor(
+      async () => {
+        try {
+          const r = await client.send({ cmd: 'Ping' });
+          return (r.data as { pong?: boolean }).pong === true && mock.connectionsAccepted() >= 2;
+        } catch {
+          return false;
+        }
+      },
+      6000,
+      60
+    );
 
     client.close();
 
@@ -334,6 +342,11 @@ describe('Issue #94: half-open TCP connection recovery', () => {
         },
       }
     );
+    // A half-open link is expected to surface transient command timeouts before
+    // the health tracker forces a reconnect. Workers use EventEmitter error
+    // semantics, so keep the required listener attached while asserting that
+    // throughput recovers after those transport errors.
+    worker.on('error', () => undefined);
 
     // Warm-up: confirm the worker is actually pulling and processing.
     const warmed = await waitFor(() => processed > 3, 4000, 50);

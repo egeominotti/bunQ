@@ -290,6 +290,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { label: 'Benchmarks', link: '/guide/benchmarks/' },
+            { label: 'v2.9.4 Performance', link: '/guide/version-performance-2-9-4/' },
             { label: 'SDK Performance', link: '/guide/sdk-benchmarks/' },
             { label: 'bunqueue vs BullMQ', link: '/guide/comparison/' },
           ],

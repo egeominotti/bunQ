@@ -16,7 +16,11 @@ head:
 
 ## Unreleased
 
-_No changes yet._
+### Documentation
+
+- Added a dedicated [bunqueue 2.9.4 performance comparison](/guide/version-performance-2-9-4/)
+  with a native, integrity-checked 11-version Embedded and TCP SQLite lifecycle campaign,
+  methodology, resource results, interpretation guidance, and explicit limitations.
 
 ## [2.9.4] - 2026-09-03
 

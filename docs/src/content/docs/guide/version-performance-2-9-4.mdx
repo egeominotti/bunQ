@@ -1,0 +1,206 @@
+---
+title: 'bunqueue 2.9.4 Performance: Comparison Against Ten Previous Releases'
+description: A controlled native comparison of bunqueue 2.9.4 against the ten preceding releases across realistic Embedded and TCP SQLite job lifecycles.
+template: splash
+head:
+  - tag: meta
+    attrs:
+      property: og:image
+      content: https://bunqueue.dev/og/guide/benchmarks.png
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<div class="bq-wrap bq-hero bq-bench-hero">
+  <span class="bq-eyebrow">release performance · native campaign · 2026-09-03</span>
+  <h1 class="bq-hero-h1 bq-bench-h1">2.9.4 removes the<br/><em>completion-path wait.</em></h1>
+  <p class="bq-hero-sub">A controlled comparison against ten preceding releases, using complete durable job lifecycles rather than isolated internal operations. Every sample includes admission, SQLite persistence, delivery, retries, result persistence and terminal-state verification.</p>
+
+  <div class="bq-proof">
+    <span><b>10.87×</b> TCP throughput versus 2.9.3</span>
+    <span><b>+18.0%</b> Embedded throughput versus 2.9.3</span>
+    <span><b>88K</b> measured jobs, zero loss or duplication</span>
+  </div>
+</div>
+
+<Aside type="caution">
+  These figures characterize one native host and one defined workload. They are engineering
+  evidence, not an SLA or a substitute for measurement on production hardware.
+</Aside>
+
+## Executive summary
+
+bunqueue 2.9.4 is the fastest release in this 11-version campaign in both
+tested modes:
+
+- **TCP on-disk:** 1,465 jobs/s, **10.87× the throughput of 2.9.3**, with
+  median elapsed time reduced from 4,453 ms to 410 ms.
+- **Embedded on-disk:** 1,469 jobs/s, **18.0% more throughput than 2.9.3** and
+  5.0% more than the previous Embedded leader, 2.9.2.
+- **Embedded resource use:** median CPU time fell by 17.5% and median peak RSS
+  by 13.6% versus 2.9.3 for this workload.
+- **Correctness:** all 88,000 measured jobs reached the expected terminal
+  state exactly once. The workers executed 1,760 planned retry attempts, with
+  no missing or duplicate job completions.
+
+The TCP step change is the most important operational result. Earlier workers
+could wait for a 50 ms ACK fallback on each completion wave when configured
+batch capacity exceeded the outcomes that could currently reach that batch.
+Version 2.9.4 tracks the reachable ACK frontier and flushes a partial or final
+cohort as soon as every reachable outcome is buffered. The wire format,
+persistence schema and public defaults are unchanged.
+
+## Results at a glance
+
+Each value is the median of five measured fresh-process samples after one
+discarded warm-up per version. “Gain” compares 2.9.4 throughput with the named
+release; higher is better.
+
+### Embedded SQLite lifecycle
+
+|   Release | Median elapsed |   Median throughput |  2.9.4 gain | Median CPU | Median peak RSS |
+| --------: | -------------: | ------------------: | ----------: | ---------: | --------------: |
+| **2.9.4** |  **680.56 ms** | **1,469.37 jobs/s** |           — | **632 ms** |    **92.9 MiB** |
+|     2.9.3 |      803.20 ms |     1,245.02 jobs/s | **+18.02%** |     766 ms |       107.5 MiB |
+|     2.9.2 |      714.91 ms |     1,398.78 jobs/s |  **+5.05%** |     696 ms |       105.2 MiB |
+|     2.9.1 |    1,001.24 ms |       998.77 jobs/s | **+47.12%** |     914 ms |       100.7 MiB |
+|     2.9.0 |    1,001.51 ms |       998.50 jobs/s | **+47.16%** |     912 ms |       100.1 MiB |
+|    2.8.61 |      990.91 ms |     1,009.17 jobs/s | **+45.60%** |     903 ms |        73.7 MiB |
+|    2.8.60 |    1,005.82 ms |       994.21 jobs/s | **+47.79%** |     894 ms |        74.2 MiB |
+|    2.8.59 |    1,002.65 ms |       997.36 jobs/s | **+47.33%** |     901 ms |        74.5 MiB |
+|    2.8.58 |    1,011.31 ms |       988.82 jobs/s | **+48.60%** |     910 ms |        74.6 MiB |
+|    2.8.57 |    1,003.38 ms |       996.63 jobs/s | **+47.43%** |     907 ms |        73.2 MiB |
+|   2.8.56¹ |      997.28 ms |     1,002.73 jobs/s | **+46.54%** |     898 ms |        74.0 MiB |
+
+¹ Version 2.8.56 completed this narrow happy-path workload, but its release is
+marked **do not use** because of separate packaging and CI failures. Its row is
+retained only to keep the requested ten-release historical window complete.
+
+The measured elapsed-time range for 2.9.4 was 639.55–683.06 ms. For 2.9.3 it
+was 773.74–829.08 ms, and for 2.9.2 it was 689.07–742.01 ms. The ranges show
+that the 2.9.4 result is clearly separated from 2.9.3, while the smaller lead
+over 2.9.2 should be treated more conservatively.
+
+### TCP + SQLite lifecycle
+
+|   Release | Median elapsed |   Median throughput | 2.9.4 ratio |        Elapsed range |
+| --------: | -------------: | ------------------: | ----------: | -------------------: |
+| **2.9.4** |  **409.52 ms** | **1,465.14 jobs/s** |           — |     392.26–445.81 ms |
+|     2.9.3 |    4,453.00 ms |       134.74 jobs/s |  **10.87×** | 4,399.61–4,483.33 ms |
+|     2.9.2 |    4,372.78 ms |       137.21 jobs/s |  **10.68×** | 4,342.30–4,396.76 ms |
+|     2.9.1 |    4,635.26 ms |       129.44 jobs/s |  **11.32×** | 4,569.39–4,697.78 ms |
+|     2.9.0 |    4,627.86 ms |       129.65 jobs/s |  **11.30×** | 4,599.78–4,638.30 ms |
+|    2.8.61 |    4,466.54 ms |       134.33 jobs/s |  **10.91×** | 4,425.35–4,489.56 ms |
+|    2.8.60 |    4,443.06 ms |       135.04 jobs/s |  **10.85×** | 4,404.47–4,513.26 ms |
+|    2.8.59 |    4,423.38 ms |       135.64 jobs/s |  **10.80×** | 4,400.58–4,464.23 ms |
+|    2.8.58 |    4,423.86 ms |       135.63 jobs/s |  **10.80×** | 4,366.65–4,465.89 ms |
+|    2.8.57 |    4,394.49 ms |       136.53 jobs/s |  **10.73×** | 4,352.05–4,452.49 ms |
+|   2.8.56¹ |    4,398.56 ms |       136.41 jobs/s |  **10.74×** | 4,385.17–4,468.68 ms |
+
+The complete 2.9.4 TCP range is separated from every measured sample of every
+earlier release. Median elapsed time is 90.8% lower than 2.9.3. This is a
+specific improvement to low-concurrency completion acknowledgement; it should
+not be generalized into a claim that every TCP operation is eleven times
+faster.
+
+## What changed in 2.9.4
+
+### Completion acknowledgement without the fixed-delay tax
+
+The TCP worker now determines how many outcomes can actually reach the pending
+ACK batch. Full waves still coalesce, but constrained, partial and final waves
+flush immediately when their reachable frontier is complete. This removes the
+repeated fallback delay exposed by `concurrency=8` and `batchSize=20` in this
+campaign while preserving batching under sustained load.
+
+### Amortized O(1) completion evidence
+
+Recent-completion tracking previously restarted a `Set` iterator while
+evicting historical entries. Sustained churn at the retention cap could turn
+that path effectively quadratic. Version 2.9.4 uses ordered occurrence tokens,
+a head index and bounded stale-slot compaction, retaining exact FIFO eviction
+semantics with amortized O(1) work.
+
+### Lower telemetry retention and SQLite overhead
+
+The in-memory event journal now retains exact per-queue counts instead of full
+payload object graphs. SQLite telemetry reuses prepared statements and exact
+committed retention counts, and only runs retention deletion when a queue
+actually exceeds its cap. These changes reduce avoidable allocation, object
+retention and repeated database setup without changing subscriber delivery or
+terminal metrics.
+
+Read the [2.9.4 release notes](/changelog/#294---2026-09-03) for the complete
+implementation and validation record.
+
+## Realistic workload definition
+
+“Realistic” here means a complete, mixed queue lifecycle using public APIs and
+durable state—not that the synthetic processor models every production
+application.
+
+| Property            |                  Embedded sample |                       TCP sample |
+| ------------------- | -------------------------------: | -------------------------------: |
+| Completed jobs      |                            1,000 |                              600 |
+| Persistence         |            Fresh SQLite database |     Fresh broker SQLite database |
+| Payload             |                        512 bytes |                        512 bytes |
+| Worker concurrency  |                                8 |                                8 |
+| ACK batch size      |                               20 |                               20 |
+| Delayed jobs        |                               5% |                               5% |
+| Jobs retried once   |                               2% |                               2% |
+| Samples per release | 1 discarded warm-up + 5 measured | 1 discarded warm-up + 5 measured |
+
+Jobs were inserted in bulk while the worker was active, used a priority mix,
+persisted their result and finished only after authoritative terminal state was
+observed. Every sample used a new process, queue, database and—over TCP—a
+dynamic port and new broker process. Version order was interlaced between
+rounds to reduce systematic thermal and time-order bias.
+
+## Test environment and revisions
+
+| Property          | Value                      |
+| ----------------- | -------------------------- |
+| Host              | Apple M1 Max, native arm64 |
+| Logical CPU cores | 10                         |
+| Memory            | 32 GiB                     |
+| Operating system  | Darwin 25.6.0              |
+| Runtime           | Bun 1.4.0                  |
+| Power             | AC                         |
+
+| Release | Git revision | Release | Git revision |
+| ------: | ------------ | ------: | ------------ |
+|   2.9.4 | `b83dd7bc`   |  2.8.61 | `808f015d`   |
+|   2.9.3 | `3fbfde2c`   |  2.8.60 | `52d3fb06`   |
+|   2.9.2 | `c39facb9`   |  2.8.59 | `2bb5b95d`   |
+|   2.9.1 | `90856560`   |  2.8.58 | `07cbf5cd`   |
+|   2.9.0 | `30eb3a16`   |  2.8.57 | `7b6da8c0`   |
+|  2.8.56 | `fcc98904`   |         |              |
+
+## How to interpret the comparison
+
+- **The result is release-level evidence.** It measures the exact published
+  revisions; it does not isolate every individual commit as a causal variable.
+- **2.9.3 is not the Embedded baseline leader.** Its durable history and
+  telemetry work added useful behavior but cost throughput in this small
+  lifecycle. Version 2.9.4 recovers that cost and exceeds 2.9.2 by 5.0%.
+- **Lower historical RSS is not automatically better scalability.** The 2.8.x
+  releases retain fewer feature and state structures and show roughly 74 MiB
+  peak RSS here. Version 2.9.4 is materially lower than 2.9.3 and 2.9.2, but
+  this campaign does not measure memory slope or long-lived retention.
+- **RSS is not a leak test.** JavaScriptCore heap snapshots, forced-GC retained
+  object counts and repeated-process checkpoints are required before making a
+  memory-leak claim.
+
+## Scope and limitations
+
+The campaign uses five measured samples per cell on one Apple Silicon host. It
+does not include PostgreSQL, multi-broker contention, WAN latency, large
+payloads, CPU-heavy handlers, sustained multi-hour retention, confidence
+intervals or a production storage device. The Embedded and TCP workloads also
+use different job counts, so compare versions within a mode—not absolute
+Embedded versus TCP rates.
+
+For capacity planning, reproduce the topology with the production payload,
+handler duration, durability policy, retention settings, network and storage.
+Use the broader [engineering benchmark methodology](/guide/benchmarks/) for
+publication-grade campaigns.

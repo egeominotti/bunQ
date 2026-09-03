@@ -6,6 +6,38 @@ All notable changes to bunqueue are documented here.
 
 _No changes yet._
 
+## [2.9.4] - 2026-09-03
+
+> **Queue hot-path performance release.** Faster TCP acknowledgements,
+> amortized completion eviction, and lower telemetry overhead improve throughput
+> without changing scheduling semantics, persistence schemas, or the wire format.
+
+### Changed
+
+- TCP workers now flush every reachable ACK cohort immediately instead of
+  waiting for the 50 ms fallback when concurrency, rate limits, or groups make a
+  configured full batch unreachable.
+- Recent completion eviction is now amortized O(1), including stale-slot,
+  hydration, pin/unpin, deletion, and same-ID reuse paths.
+- In-memory telemetry retains exact event counts instead of payload object
+  graphs, reducing retained memory while preserving synchronous subscribers.
+- SQLite telemetry reuses prepared statements and exact committed counts, and
+  performs oldest-first retention only when a queue exceeds its cap.
+- Profiling guidance now separates CPU, JavaScript heap, native allocator, and
+  RSS evidence so performance and leak investigations remain reproducible.
+
+### Performance
+
+- The profiled low-concurrency TCP workload improved from 19 to 2,711 jobs/s;
+  the one-million-job in-memory lifecycle improved by 11.3x.
+- Completion-tracker churn improved by 89.4x, retained event bytes fell by 82%,
+  and the representative SQLite scalar lifecycle completed 44.4% faster.
+
+### Compatibility
+
+- No public API, wire-format, persistence-schema, scheduling, retry, or default
+  configuration changes.
+
 ## [2.9.3] - 2026-09-02
 
 > **SQLite safety and queue-control release.** Completed history remains

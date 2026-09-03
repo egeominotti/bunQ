@@ -1,6 +1,6 @@
 {
   "name": "bunqueue",
-  "version": "2.9.3",
+  "version": "2.9.4",
   "description": "High-performance job queue for Bun and AI agents. Memory or one-file SQLite, optional PostgreSQL 15–18 multi-broker persistence, cron, retries, DLQ, and MCP.",
   "keywords": [
     "agentic",

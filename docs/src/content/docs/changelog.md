@@ -16,6 +16,10 @@ head:
 
 ## Unreleased
 
+_No changes yet._
+
+## [2.9.4] - 2026-09-03
+
 > **Deep-profiled queue hot paths and TCP ACK latency.** This change set removes
 > the quadratic completion-evidence eviction path, stops the in-memory telemetry
 > journal from retaining event payload graphs, reuses SQLite telemetry statements

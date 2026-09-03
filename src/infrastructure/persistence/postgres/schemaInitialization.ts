@@ -6,6 +6,10 @@ import {
   POSTGRES_REGISTER_EVENT_ROWS_BODY,
   POSTGRES_REGISTER_WATERMARK_ROWS_BODY,
 } from './eventJournalSchema';
+import {
+  POSTGRES_TRACK_EVENT_DELETIONS_BODY,
+  POSTGRES_TRACK_EVENT_INSERTIONS_BODY,
+} from './eventRetentionSchema';
 import { POSTGRES_SCHEMA, POSTGRES_SCHEMA_VERSION } from './schema';
 import { hasCurrentPostgresGroupSchema } from './groupSchemaFingerprint';
 
@@ -19,6 +23,8 @@ const EXPECTED_FUNCTION_BODIES = new Map([
   ['bunqueue_register_event_rows', POSTGRES_REGISTER_EVENT_ROWS_BODY],
   ['bunqueue_register_watermark_rows', POSTGRES_REGISTER_WATERMARK_ROWS_BODY],
   ['bunqueue_assign_event_commit', POSTGRES_ASSIGN_EVENT_COMMIT_BODY],
+  ['bunqueue_track_event_insertions', POSTGRES_TRACK_EVENT_INSERTIONS_BODY],
+  ['bunqueue_track_event_deletions', POSTGRES_TRACK_EVENT_DELETIONS_BODY],
 ]);
 
 function normalizeFunctionBody(value: string): string {
@@ -63,48 +69,66 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
         ('bunqueue_brokers', 'session_id', 'text', FALSE, 'none'),
         ('bunqueue_jobs', 'lease_broker_session_id', 'text', FALSE, 'none'),
         ('bunqueue_workers', 'broker_session_id', 'text', FALSE, 'none'),
-        ('bunqueue_queue_state', 'group_sequence', 'bigint', TRUE, 'zero')
+        ('bunqueue_queue_state', 'group_sequence', 'bigint', TRUE, 'zero'),
+        ('bunqueue_event_retention_state', 'namespace', 'text', TRUE, 'none'),
+        ('bunqueue_event_retention_state', 'queue', 'text', TRUE, 'none'),
+        ('bunqueue_event_retention_state', 'retained_count', 'bigint', TRUE, 'zero'),
+        ('bunqueue_event_retention_state', 'last_event_id', 'bigint', TRUE, 'zero'),
+        ('bunqueue_event_retention_deltas', 'namespace', 'text', TRUE, 'none'),
+        ('bunqueue_event_retention_deltas', 'queue', 'text', TRUE, 'none'),
+        ('bunqueue_event_retention_deltas', 'transaction_id', 'bigint', TRUE, 'none'),
+        ('bunqueue_event_retention_deltas', 'delta_count', 'bigint', TRUE, 'none'),
+        ('bunqueue_event_retention_deltas', 'last_event_id', 'bigint', TRUE, 'none')
     ), expected_indexes(
-      index_name, table_name, columns, descending, predicate, is_unique
+      index_name, table_name, columns, descending, predicate, is_unique, is_primary
     ) AS (
       VALUES
         ('bunqueue_events_transaction_idx', 'bunqueue_events',
-         ARRAY['namespace', 'transaction_id', 'id'], ARRAY[FALSE, FALSE, FALSE], '', FALSE),
+         ARRAY['namespace', 'transaction_id', 'id'], ARRAY[FALSE, FALSE, FALSE], '', FALSE, FALSE),
         ('bunqueue_event_commits_replay_idx', 'bunqueue_event_commits',
          ARRAY['namespace', 'commit_seq', 'transaction_id'], ARRAY[FALSE, FALSE, FALSE],
-         'commit_seqisnotnull', FALSE),
+         'commit_seqisnotnull', FALSE, FALSE),
         ('bunqueue_event_prune_watermarks_commit_idx', 'bunqueue_event_prune_watermarks',
          ARRAY['namespace', 'queue', 'commit_seq'], ARRAY[FALSE, FALSE, TRUE],
-         'commit_seqisnotnull', FALSE),
+         'commit_seqisnotnull', FALSE, FALSE),
         ('bunqueue_event_prune_watermarks_pending_commit_idx',
          'bunqueue_event_prune_watermarks', ARRAY['namespace', 'transaction_id'],
-         ARRAY[FALSE, FALSE], 'commit_seqisnull', FALSE),
+         ARRAY[FALSE, FALSE], 'commit_seqisnull', FALSE, FALSE),
         ('bunqueue_event_prune_watermarks_transaction_idx',
          'bunqueue_event_prune_watermarks', ARRAY['namespace', 'transaction_id'],
-         ARRAY[FALSE, FALSE], '', FALSE),
+         ARRAY[FALSE, FALSE], '', FALSE, FALSE),
         ('bunqueue_jobs_broker_session_lease_idx', 'bunqueue_jobs',
          ARRAY['namespace', 'lease_broker_id', 'lease_broker_session_id', 'id'],
-         ARRAY[FALSE, FALSE, FALSE, FALSE], 'state=''active''::text', FALSE),
+         ARRAY[FALSE, FALSE, FALSE, FALSE], 'state=''active''::text', FALSE, FALSE),
         ('bunqueue_workers_broker_session_idx', 'bunqueue_workers',
          ARRAY['namespace', 'broker_id', 'broker_session_id', 'client_id'],
-         ARRAY[FALSE, FALSE, FALSE, FALSE], '', FALSE),
+         ARRAY[FALSE, FALSE, FALSE, FALSE], '', FALSE, FALSE),
+        ('bunqueue_event_retention_state_pkey', 'bunqueue_event_retention_state',
+         ARRAY['namespace', 'queue'], ARRAY[FALSE, FALSE], '', TRUE, TRUE),
+        ('bunqueue_event_retention_deltas_pkey', 'bunqueue_event_retention_deltas',
+         ARRAY['namespace', 'queue', 'transaction_id'],
+         ARRAY[FALSE, FALSE, FALSE], '', TRUE, TRUE),
         ('bunqueue_jobs_live_unique_key_idx', 'bunqueue_jobs',
          ARRAY['namespace', 'queue', 'unique_key'], ARRAY[FALSE, FALSE, FALSE],
          'unique_keyisnotnullandstate=anyarray[''waiting''::text,''prioritized''::text,' ||
-         '''delayed''::text,''waiting-children''::text,''active''::text]', TRUE)
+         '''delayed''::text,''waiting-children''::text,''active''::text]', TRUE, FALSE)
     ), expected_triggers(
-      trigger_name, table_name, function_name, trigger_type, new_table,
+      trigger_name, table_name, function_name, trigger_type, new_table, old_table,
       is_constraint, is_deferrable
     ) AS (
       VALUES
         ('bunqueue_events_register_commit', 'bunqueue_events',
-         'bunqueue_register_event_rows', 4, 'new_event_rows', FALSE, FALSE),
+         'bunqueue_register_event_rows', 4, 'new_event_rows', NULL, FALSE, FALSE),
+        ('bunqueue_events_track_retention_insert', 'bunqueue_events',
+         'bunqueue_track_event_insertions', 4, 'new_event_rows', NULL, FALSE, FALSE),
+        ('bunqueue_events_track_retention_delete', 'bunqueue_events',
+         'bunqueue_track_event_deletions', 8, NULL, 'old_event_rows', FALSE, FALSE),
         ('bunqueue_watermarks_insert_register_commit', 'bunqueue_event_prune_watermarks',
-         'bunqueue_register_watermark_rows', 4, 'new_watermark_rows', FALSE, FALSE),
+         'bunqueue_register_watermark_rows', 4, 'new_watermark_rows', NULL, FALSE, FALSE),
         ('bunqueue_watermarks_update_register_commit', 'bunqueue_event_prune_watermarks',
-         'bunqueue_register_watermark_rows', 16, 'new_watermark_rows', FALSE, FALSE),
+         'bunqueue_register_watermark_rows', 16, 'new_watermark_rows', NULL, FALSE, FALSE),
         ('bunqueue_assign_event_commit', 'bunqueue_event_commits',
-         'bunqueue_assign_event_commit', 5, NULL, TRUE, TRUE)
+         'bunqueue_assign_event_commit', 5, NULL, NULL, TRUE, TRUE)
     )
     SELECT
       EXISTS (
@@ -150,6 +174,8 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
           indexes.indrelid = to_regclass(expected.table_name)
           AND indexes.indisvalid AND indexes.indisready
           AND indexes.indisunique = expected.is_unique
+          AND indexes.indisprimary = expected.is_primary
+          AND indexes.indimmediate
           AND NOT indexes.indisexclusion
           AND indexes.indnkeyatts = cardinality(expected.columns)
           AND indexes.indnatts = indexes.indnkeyatts
@@ -187,7 +213,7 @@ async function hasCurrentSchema(tx: TransactionSQL): Promise<boolean> {
             AND NOT trigger.tgisinternal AND trigger.tgenabled = 'O'
             AND trigger.tgtype = expected.trigger_type
             AND trigger.tgnewtable IS NOT DISTINCT FROM expected.new_table
-            AND trigger.tgoldtable IS NULL
+            AND trigger.tgoldtable IS NOT DISTINCT FROM expected.old_table
             AND trigger.tgqual IS NULL AND trigger.tgnargs = 0
             AND (trigger.tgconstraint <> 0) = expected.is_constraint
             AND trigger.tgdeferrable = expected.is_deferrable

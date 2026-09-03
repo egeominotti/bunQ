@@ -1,9 +1,7 @@
 import type { JobId } from '../../domain/types/job';
-import {
-  PostgresQueueStore,
-  type PostgresDeliveredStoreEvent,
-  type PostgresStoredJob,
-} from '../../infrastructure/persistence/postgres';
+import { PostgresQueueStore } from '../../infrastructure/persistence/postgres';
+import type { PostgresDeliveredStoreEvent } from '../../infrastructure/persistence/postgres';
+import type { PostgresStoredJob } from '../../infrastructure/persistence/postgres';
 import { QueueManager } from '../queueManager';
 import { stopBackgroundTasks } from '../backgroundTasks';
 import type { PostgresQueueManagerConfig } from './config';
@@ -32,7 +30,7 @@ export abstract class PostgresQueueManagerState extends QueueManager {
   private readonly unsubscribeInvalidation: () => void;
   private readonly writes = new PostgresDeferredWriteQueue();
   protected readonly operations: PostgresOperationGate;
-  private readonly projectionRefreshes: PostgresProjectionRefreshes;
+  protected readonly projectionRefreshes: PostgresProjectionRefreshes;
   private shutdownPromise: Promise<void> | null = null;
   private shutdownComplete = false;
   private baseStopped = false;

@@ -141,6 +141,17 @@ the write transaction, so broker B can reference a parent just committed on
 broker A without relying on event timing. Worker and cron views in dashboards,
 per-queue worker routes, and streamed stats likewise read the shared registry.
 
+PostgreSQL-specific bulk paths keep database work proportional to the command:
+one worker heartbeat batch uses one fenced transaction and one set-based update,
+with a pre-write generation ticket preventing late responses from replacing a
+newer terminal or re-leased local projection,
+dependency-free `PUSHB` validation does not materialize the local compatibility
+snapshot, and dashboard queue counts aggregate that snapshot once. Event
+retention uses exact transaction-private deltas and a consolidated per-queue
+count, so under-cap writes do not scan the retained journal window or lock
+shared counter rows. These optimizations do not change the memory or SQLite
+engines.
+
 Completion proofs used by live dependencies are pinned in PostgreSQL; unused
 `removeOnComplete` proofs and each broker's completed/result snapshot are
 bounded independently. Reusing a custom ID retires the previous proof only when
@@ -244,6 +255,12 @@ The initializer refuses a database whose recorded schema version is newer than
 the binary supports. Consequently, after a migration, restarting an old binary
 may fail and an application-only downgrade is not a rollback plan. Roll forward,
 or restore the pre-upgrade database/PITR point together with the old binaries.
+PostgreSQL schema v21 adds exact event-retention state, transaction-private
+deltas, and guarded statement-level insert/delete triggers; it therefore
+requires the same all-brokers-together upgrade procedure. If those derived
+retention tables drift, initialization locks event writes, repairs their exact
+primary keys, rebuilds counts from the journal, and restores the triggers in one
+transaction.
 The current migrations are additive, but that does not by itself certify every
 pair of releases for zero-downtime mixed-version operation; validate the exact
 source/target pair on a clone if continuous availability is mandatory.

@@ -16,6 +16,25 @@ head:
 
 ## Unreleased
 
+### PostgreSQL performance
+
+- Batched worker heartbeats now renew every valid fenced lease in one
+  transaction and apply successful versions locally; invalid fences share one
+  repair query instead of creating per-job transactions and projection reloads.
+  Pre-write generation tickets prevent delayed heartbeat or batch-ACK responses
+  from overwriting a newer completed, removed, retried, or re-leased projection.
+- PostgreSQL event retention now consolidates exact transaction-private deltas
+  into per-queue state and deletes only the oldest excess rows, avoiding both a
+  retained-window index scan and shared counter locks on event writers.
+- Dependency-free `PUSHB` validation no longer builds three full compatibility
+  snapshot views, and dashboard queue summaries aggregate job states in one
+  snapshot pass instead of once per queue.
+- PostgreSQL schema version 21 adds event-retention state, transaction-private
+  deltas, and guarded statement-level insert/delete triggers. Its schema guard
+  now distinguishes real immediate primary keys from same-name unique indexes
+  and atomically rebuilds malformed derived retention state. Upgrade every
+  broker in a cluster together; memory and SQLite schemas and behavior are unchanged.
+
 ### Documentation
 
 - Added a dedicated [bunqueue 2.9.4 performance comparison](/guide/version-performance-2-9-4/)

@@ -70,6 +70,8 @@ admission, claims, outcomes, recovery, mutations, queue control, queries,
 dependencies, flow-failure policies, repeat successors, cron state, worker
 registrations, job logs, metrics, DLQ maintenance, and lease renewal/release.
 `admissionStore.ts` isolates single/batch/flow admission from the facade;
+`leaseStore.ts` exposes scalar and set-based renewal without growing the main
+facade, while `leaseRenewal.ts` owns the fenced SQL transaction;
 `admissionResult.ts` is its typed decision contract, while
 `serialAdmission.ts` reconciles final dependency state and the original
 transactional-outbox payload after feature-bearing batch decisions;
@@ -148,7 +150,7 @@ failed subsystem appear healthy. Schema creation is serialized with the
 transaction-scoped 64-bit advisory identity `bunqueue:schema`. While holding
 that lock, a broker first checks `bunqueue_schema_migrations` and the semantic
 catalog fingerprint. It skips all DDL only when its own
-`POSTGRES_SCHEMA_VERSION` is already present (19 in this release) and every
+`POSTGRES_SCHEMA_VERSION` is already present (21 in this release) and every
 guarded object matches, so a broker joining a healthy live cluster does not
 request locks on active job tables.
 The v17 migration upgrades the shared commit sequencer to the same
@@ -172,9 +174,13 @@ until an operator resolves the inconsistency. An unchanged schema keeps the
 no-DDL path and preserves existing index object IDs. The v19 group fingerprint
 adds the exact `BIGINT CACHE 1` admission sequence, `group_order`, every group-
 state column/default/nullability rule, the semantic three-column primary key,
-and both group indexes to this fast-path decision. Same-name but wrong-type,
-wrong-order, wrong-predicate, or wrong-cache objects therefore cannot pass
-because the recorded version is already current.
+and both group indexes to this fast-path decision. The v21 retention guard also
+requires canonical immediate primary-key constraints rather than merely
+same-name unique indexes. If retention state or delta rows are malformed, the
+initializer locks event writes and reconstructs these derived tables from the
+authoritative journal in the same transaction before restoring their triggers.
+Same-name but wrong-type, wrong-order, wrong-predicate, or wrong-cache objects
+therefore cannot pass because the recorded version is already current.
 
 Schema migration is an automatic one-way compatibility boundary, not permission
 to keep mixed bunqueue binary versions running. The safe production procedure is
@@ -246,6 +252,12 @@ completion.
 Queue refresh, terminal retry, removal, and custom-ID generation reuse clear an
 obsolete cached completion result before a non-completed generation becomes
 visible.
+Dependency-free `PUSHB` validation bypasses the compatibility job/completion
+views entirely. Batches with external dependencies issue only the existing
+set-based PostgreSQL existence probe; memory and SQLite retain their local
+membership validation. Dashboard count, per-queue stats, and queue-summary
+reads aggregate the PostgreSQL compatibility snapshot once per response instead
+of rescanning all jobs once for every queue.
 Events observed during initial snapshot loading are captured by a dedicated
 256-event accumulator and replayed after hydration. Manager hydration reads
 jobs, completion results, crons, queue policies, and lifetime metrics from one
@@ -577,7 +589,14 @@ its ordered identity locks, so pinned proofs remain outside the bound.
 
 Lease renewal increments `lease_renewals`, updates the payload heartbeat, and
 transfers both `lease_broker_id` and `lease_broker_session_id` to the broker
-session that received the heartbeat. This
+session that received the heartbeat. A heartbeat batch locks the broker session
+once, locks all matching jobs in deterministic ID order, and performs one
+set-based `UPDATE ... FROM unnest(...)`; successful returned projections are
+applied locally without a second database read only while their pre-write
+generation ticket, active state, and opaque token still match. A terminal
+transition, journal request, or newer direct mutation invalidates that ticket;
+the delayed response is discarded and the affected jobs share one authoritative
+projection query. Failed fences use the same coalesced repair. This
 matters when a pooled worker pulls through one broker and renews through another.
 Disconnect cleanup releases only a never-renewed lease owned by that exact client;
 a remotely renewed lease remains fenced. Both awaited and deferred disconnect
@@ -673,8 +692,17 @@ retain their existing host-clock behavior.
   orders each lane by ascending BullMQ Pro priority before FIFO ties (`0` is
   highest).
 
-- Event retention finds the first row beyond the configured per-queue window
-  through the `(namespace, queue, id DESC)` index and deletes through that cutoff.
+- PostgreSQL schema version 21 adds `bunqueue_event_retention_state`,
+  `bunqueue_event_retention_deltas`, and statement-level insert/delete triggers.
+  The triggers write exact transaction-private deltas, including when physical
+  event IDs commit out of allocation order. Retention consolidates visible
+  deltas under its existing per-queue lock; event writers never lock shared
+  counter rows and cannot deadlock when transactions visit queues in opposite
+  orders. Older binaries refuse the newer schema; upgrade all brokers together.
+
+- Event retention reads the exact per-queue count and deletes only the oldest
+  excess rows through the `(namespace, queue, id DESC)` index. Under-cap writes
+  no longer walk the complete retained window.
   Inline pruning takes a non-blocking per-queue advisory lock, materializes the
   candidate IDs, and row-locks them in ascending order before deletion. A
   transaction that already owns another queue's event tuples never waits for a
@@ -761,7 +789,10 @@ The normalized schema is defined in `postgres/schema.ts` and summarized in
   runtime coordination;
 - `bunqueue_job_logs`, `bunqueue_metric_buckets`, and
   `bunqueue_metric_totals`: durable observability; and
-- `bunqueue_events`: ordered invalidation and event replay; and
+- `bunqueue_events`: ordered invalidation and event replay;
+- `bunqueue_event_retention_state` and `bunqueue_event_retention_deltas`:
+  consolidated per-queue retained-event counts plus exact transaction-private
+  changes used to avoid repeated window scans; and
 - `bunqueue_event_prune_watermarks`: per-queue proof that retained history has a
   gap requiring an authoritative refresh for brokers behind that watermark, plus
   the carried-forward frontier of commits that pruned their own events; and
@@ -1243,6 +1274,13 @@ See
 for the `pg_stat_activity` bottleneck evidence, 100,000-job diagnostics, batch
 and pool sweeps, `work_mem` comparison, rejected changes, exact integrity
 totals, caveats, and raw artifact hashes.
+
+The subsequent profile-driven PostgreSQL-only work batches fenced heartbeats,
+replaces per-event retained-window scans with exact transactional counters, and
+bounds `PUSHB`/dashboard snapshot work. See
+[PostgreSQL 18 Hot-Path Optimization Verification](../benchmarks/postgres-hot-path-optimizations-2026-09-03.md)
+for the controlled before/after evidence, rejected high-water design, scope,
+and correctness boundaries.
 
 ### PostgreSQL 18 ten-broker functional diagnostic
 

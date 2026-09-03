@@ -61,11 +61,52 @@ describe('PostgreSQL projection refresh lifecycle', () => {
     refreshes.start();
     refreshes.request(id, 'queue');
     await entered.promise;
-    refreshes.supersede(id);
+    const ticket = refreshes.beginDirect(id, 'queue');
     release.resolve(emptyProjection);
     await refreshes.drain();
 
     expect(applied).toEqual([]);
+    expect(refreshes.consumeDirect(ticket)).toBe(true);
+  });
+
+  test('lets a newer event request invalidate a direct mutation ticket', async () => {
+    const applied: JobId[] = [];
+    const refreshes = new PostgresProjectionRefreshes(
+      async (requests) => new Map(requests.map(({ id }) => [id, emptyProjection])),
+      (id) => applied.push(id),
+      () => undefined,
+      1
+    );
+    active.push(refreshes);
+    const id = jobId('event-after-direct');
+    const ticket = refreshes.beginDirect(id, 'queue');
+
+    refreshes.start();
+    refreshes.request(id, 'queue');
+
+    expect(refreshes.consumeDirect(ticket)).toBe(false);
+    expect(await eventually(() => applied.length === 1)).toBe(true);
+    expect(applied).toEqual([id]);
+  });
+
+  test('cancels only the matching direct mutation generation', () => {
+    const refreshes = new PostgresProjectionRefreshes(
+      async () => new Map(),
+      () => undefined,
+      () => undefined,
+      1
+    );
+    active.push(refreshes);
+    const id = jobId('exact-direct-cancel');
+    const older = refreshes.beginDirect(id, 'queue');
+    const newer = refreshes.beginDirect(id, 'queue');
+
+    refreshes.cancelDirect(older);
+
+    expect(refreshes.consumeDirect(older)).toBe(false);
+    expect(refreshes.consumeDirect(newer)).toBe(true);
+    const generations = Reflect.get(refreshes, 'generations') as Map<JobId, symbol>;
+    expect(generations.size).toBe(0);
   });
 
   test('discards in-flight projections superseded by an authoritative queue refresh', async () => {

@@ -22,6 +22,11 @@ interface PendingProjection {
   readonly generation: symbol;
 }
 
+export interface PostgresDirectProjectionTicket {
+  readonly id: JobId;
+  readonly generation: symbol;
+}
+
 type ProjectionLoader = (
   requests: readonly { id: JobId; queue: string }[]
 ) => Promise<ReadonlyMap<JobId, PostgresJobProjection>>;
@@ -52,6 +57,22 @@ export class PostgresProjectionRefreshes {
     const generation = this.beginGeneration(id, queue);
     this.pending.set(id, { queue, generation });
     this.schedule(0);
+  }
+
+  beginDirect(id: JobId, queue: string): PostgresDirectProjectionTicket {
+    const generation = this.beginGeneration(id, queue);
+    this.pending.delete(id);
+    return { id, generation };
+  }
+
+  consumeDirect(ticket: PostgresDirectProjectionTicket): boolean {
+    if (this.generations.get(ticket.id) !== ticket.generation) return false;
+    this.endGeneration(ticket.id, ticket.generation);
+    return true;
+  }
+
+  cancelDirect(ticket: PostgresDirectProjectionTicket): void {
+    this.endGeneration(ticket.id, ticket.generation);
   }
 
   supersede(id: JobId): void {

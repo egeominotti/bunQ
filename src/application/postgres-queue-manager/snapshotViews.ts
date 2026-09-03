@@ -52,16 +52,6 @@ export function snapshotJobIds(
   );
 }
 
-export function snapshotQueueNames(
-  jobs: ReadonlyMap<JobId, PostgresStoredJob>,
-  queues: ReadonlyMap<string, PostgresQueueState>,
-  knownQueues: ReadonlySet<string> = new Set()
-): string[] {
-  const names = new Set([...knownQueues, ...queues.keys()]);
-  for (const row of jobs.values()) names.add(row.job.queue);
-  return [...names].sort();
-}
-
 export function listSnapshotJobs(
   jobs: ReadonlyMap<JobId, PostgresStoredJob>,
   queues: ReadonlyMap<string, PostgresQueueState>,
@@ -102,6 +92,23 @@ export function countSnapshotJobs(
     else counts[row.state]++;
   }
   return counts;
+}
+
+export function countSnapshotJobsByQueue(
+  jobs: ReadonlyMap<JobId, PostgresStoredJob>,
+  knownQueues: ReadonlySet<string>
+): Map<string, PostgresCounts> {
+  const counts = new Map([...knownQueues].map((queue) => [queue, { ...EMPTY_COUNTS }]));
+  for (const row of jobs.values()) {
+    let queueCounts = counts.get(row.job.queue);
+    if (!queueCounts) {
+      queueCounts = { ...EMPTY_COUNTS };
+      counts.set(row.job.queue, queueCounts);
+    }
+    if (row.state === 'waiting-children') queueCounts.waitingChildren++;
+    else queueCounts[row.state]++;
+  }
+  return new Map([...counts].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
 }
 
 export function countSnapshotPriorities(

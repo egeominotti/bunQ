@@ -1240,12 +1240,19 @@ PostgreSQL server major.
 
 Schema initialization runs inside a transaction guarded by a domain-separated
 64-bit `hashtextextended` advisory key. The current
-`POSTGRES_SCHEMA_VERSION` is **19**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
+`POSTGRES_SCHEMA_VERSION` is **21**. Additive `ALTER TABLE ... ADD COLUMN IF NOT
 EXISTS` statements upgrade earlier development schemas before version insertion.
-The v19 group-schema repair also fingerprints catalog semantics after the
-version marker is current: sequence configuration, column types/nullability/
-defaults, the exact group-state primary key, index columns/order, and predicates.
-Drift is repaired under the schema transaction and advisory lock.
+The v21 journal-retention repair and v19 group-schema repair also fingerprint
+catalog semantics after the version marker is current: sequence configuration,
+column types/nullability/defaults, exact primary keys, index columns/order,
+trigger transition tables, and function bodies.
+Drift is repaired under the schema transaction and advisory lock. The two v21
+retention tables contain only derived/transient accounting: repair blocks event
+writes, discards malformed or duplicate accounting rows, recreates canonical
+non-deferrable primary keys, rebuilds state from `bunqueue_events`, and restores
+the triggers atomically. A same-name non-index relation or an external
+dependency fails closed with an actionable PostgreSQL error instead of using
+`CASCADE`.
 The v17 migration upgrades the commit sequencer and runtime lock protocol to
 length-prefixed, domain-separated 64-bit identities; old and new brokers must
 not overlap during this coordinated migration. The v16 migration adds broker
@@ -1420,6 +1427,20 @@ when their protected lease expires or their broker shuts down.
   snapshot without a queue scan. The
   `(namespace, transaction_id, id)` index joins immutable event rows to their
   commit envelope; physical-ID indexes remain for trimming and diagnostics.
+- `bunqueue_event_retention_state`: one consolidated row per
+  `(namespace, queue)` with `retained_count` and the greatest observed
+  `last_event_id`.
+- `bunqueue_event_retention_deltas`: exact insert/delete changes keyed by
+  `(namespace, queue, transaction_id)`. Statement-level transition triggers
+  append only to the current transaction's rows, so event writers never lock
+  shared counter state. Retention consolidates visible deltas under its existing
+  per-queue lock, skips the old newest-window offset scan while under the cap,
+  and deletes exactly the oldest excess. The accounting remains correct when
+  concurrent transactions commit physical event IDs in a different order from
+  allocation and cannot deadlock when transactions visit queues in opposite
+  orders. Both retention primary keys are semantic schema guards rather than
+  name-only checks; missing, reordered, standalone-`UNIQUE`, or deferrable
+  variants are replaced during the transactional derived-state rebuild.
 - `bunqueue_event_prune_watermarks`: namespace, queue, source event ID, and the
   highest physical event ID pruned through, plus `transaction_id`, `commit_seq`,
   cumulative `pruned_commit_seq`, cumulative `self_pruned_commit_seq`, and the
@@ -1474,16 +1495,18 @@ treated as commit order.
 
 Primary key: `version`; `applied_at` stores the application timestamp for that
 schema version. The schema version is database-global because all bunqueue
-namespaces share the same physical tables. PostgreSQL engine schema v20 adds
-durable group pause/manual deadlines and grouped priority indexing; v19 adds
+namespaces share the same physical tables. PostgreSQL engine schema v21 adds
+exact event-retention state, transaction-private deltas, and guarded
+statement-level insert/delete triggers.
+Schema v20 adds durable group pause/manual deadlines and grouped priority indexing; v19 adds
 durable group rotation and shared group limit state. Schema v18 adds the
 per-queue `self_pruned_commit_seq` frontier and the commit sequencer that
 records it, v17 upgrades the advisory-lock protocol, v16 adds broker-session
 fencing, v15 backfills durable queue registry rows, v14 adds
 bounded-completion query indexes, and v13 adds the commit-ordered journal.
-Because schema migrations are database-global, a broker supporting at most v19
-refuses to start once v20 is applied; all brokers in a cluster must be upgraded
-together. The same fail-closed rule protected the v19 group-state change
+Because schema migrations are database-global, a broker supporting at most v20
+refuses to start once v21 is applied; all brokers in a cluster must be upgraded
+together. The same fail-closed rule protected the v20 group-policy and v19 group-state changes
 from v18 binaries and the v18 commit-trigger change
 from v17 binaries.
 Initialization rejects a recorded version newer than the runtime and verifies

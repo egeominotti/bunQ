@@ -211,24 +211,26 @@ export class PostgresQueueManagerQueries extends PostgresQueueManagerGroupQuerie
   }
 
   override getAllQueueJobCounts() {
-    return this.getQueueJobCountsBatch(this.listQueues());
+    return new Map(
+      [...this.postgresSnapshot.countsByQueue()].map(([queue, counts]) => [
+        queue,
+        jobCounts(counts, this.perQueueMetrics.get(queue)),
+      ])
+    );
   }
 
   override getPerQueueStats() {
     return new Map(
-      this.listQueues().map((queue) => {
-        const counts = this.postgresSnapshot.counts(queue);
-        return [
-          queue,
-          {
-            waiting: counts.waiting,
-            prioritized: counts.prioritized,
-            delayed: counts.delayed,
-            active: counts.active,
-            dlq: counts.failed,
-          },
-        ];
-      })
+      [...this.postgresSnapshot.countsByQueue()].map(([queue, counts]) => [
+        queue,
+        {
+          waiting: counts.waiting,
+          prioritized: counts.prioritized,
+          delayed: counts.delayed,
+          active: counts.active,
+          dlq: counts.failed,
+        },
+      ])
     );
   }
 
@@ -254,8 +256,7 @@ export class PostgresQueueManagerQueries extends PostgresQueueManagerGroupQuerie
   }
 
   override getQueuesSummary() {
-    return this.listQueues().map((name) => {
-      const counts = this.postgresSnapshot.counts(name);
+    return [...this.postgresSnapshot.countsByQueue()].map(([name, counts]) => {
       return {
         name,
         paused: this.isPaused(name),

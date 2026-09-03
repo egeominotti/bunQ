@@ -14,12 +14,12 @@ import { processingShardIndex, shardIndex } from '../../shared/hash';
 import { LRUMap } from '../../shared/lru';
 import {
   countSnapshotJobs,
+  countSnapshotJobsByQueue,
   countSnapshotPriorities,
   findSnapshotJob,
   listSnapshotDlq,
   listSnapshotJobs,
   snapshotJobIds,
-  snapshotQueueNames,
 } from './snapshotViews';
 
 /** Eventually-consistent read model; PostgreSQL remains authoritative for every transition. */
@@ -264,7 +264,7 @@ export class PostgresQueueSnapshot {
   }
 
   queueNames(): string[] {
-    return snapshotQueueNames(this.jobs, this.queues, this.knownQueues);
+    return [...this.knownQueues].sort();
   }
 
   list(
@@ -276,6 +276,10 @@ export class PostgresQueueSnapshot {
 
   counts(queue?: string): PostgresCounts {
     return countSnapshotJobs(this.jobs, queue);
+  }
+
+  countsByQueue(): ReadonlyMap<string, PostgresCounts> {
+    return countSnapshotJobsByQueue(this.jobs, this.knownQueues);
   }
 
   priorities(queue: string): Record<number, number> {

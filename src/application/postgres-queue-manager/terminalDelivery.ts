@@ -86,33 +86,53 @@ export class PostgresQueueManagerTerminalDelivery extends PostgresQueueManagerQu
     if (items.length === 0) return;
     if (new Set(items.map((item) => String(item.id))).size === items.length) {
       await this.postgresReady;
-      const transitions = await this.postgresStore.completeMany(
-        items.map((item) => ({
-          id: item.id,
-          token: this.requireToken(item.id, item.token),
-          result: item.result,
-          removeOnComplete: item.removeOnComplete,
-        }))
+      const inputs = items.map((item) => ({
+        id: item.id,
+        token: this.requireToken(item.id, item.token),
+        result: item.result,
+        removeOnComplete: item.removeOnComplete,
+      }));
+      const tickets = new Map(
+        items.map((item) => [
+          item.id,
+          this.projectionRefreshes.beginDirect(
+            item.id,
+            this.postgresSnapshot.get(item.id)?.job.queue ?? ''
+          ),
+        ])
       );
+      let transitions: Awaited<ReturnType<typeof this.postgresStore.completeMany>>;
+      try {
+        transitions = await this.postgresStore.completeMany(inputs);
+      } catch (error) {
+        for (const ticket of tickets.values()) this.projectionRefreshes.cancelDirect(ticket);
+        await this.refreshJobs(items.map(({ id }) => id));
+        throw error;
+      }
       const repeatQueues = new Set<string>();
-      const ignoredIds: JobId[] = [];
+      const refreshIds = new Set<JobId>();
       const ignoredIndices: number[] = [];
       for (let index = 0; index < transitions.length; index++) {
         const transition = transitions[index];
-        this.forgetToken(items[index].id);
-        const repeatQueue = applyPostgresBatchCompletion(
-          this.postgresSnapshot,
-          items[index],
-          transition
-        );
-        if (repeatQueue) repeatQueues.add(repeatQueue);
+        const item = items[index];
+        if (this.activeTokens.get(item.id) === inputs[index].token) this.forgetToken(item.id);
+        const ticket = tickets.get(item.id);
+        if (transition.applied && ticket && this.projectionRefreshes.consumeDirect(ticket)) {
+          const repeatQueue = applyPostgresBatchCompletion(this.postgresSnapshot, item, transition);
+          if (repeatQueue) repeatQueues.add(repeatQueue);
+        } else {
+          if (ticket) this.projectionRefreshes.cancelDirect(ticket);
+          refreshIds.add(item.id);
+          if (transition.applied && transition.job && transition.job.repeat !== null) {
+            repeatQueues.add(transition.job.queue);
+          }
+        }
         if (!transition.applied) {
           ignoredIndices.push(index);
-          ignoredIds.push(items[index].id);
         }
       }
       await Promise.all([
-        ...ignoredIds.map((id) => this.refreshJob(id)),
+        ...[...refreshIds].map((id) => this.refreshJob(id)),
         ...[...repeatQueues].map((queue) => this.refreshQueueAfterCommit(queue)),
       ]);
       return ignoredIndices.length === 0

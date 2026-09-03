@@ -196,6 +196,8 @@ export async function cleanupPostgresNamespace(url: string, namespace: string): 
         'bunqueue_queue_state',
         'bunqueue_event_prune_watermarks',
         'bunqueue_events',
+        'bunqueue_event_retention_deltas',
+        'bunqueue_event_retention_state',
         'bunqueue_event_commits',
         'bunqueue_brokers',
       ]) {

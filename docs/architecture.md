@@ -153,6 +153,10 @@ be claimed.
   SQLite jobs. PostgreSQL group ordering/schema/retention are isolated in
   `groupClaims.ts`, `groupSchema.ts`, `groupSchemaFingerprint.ts`, and
   `groupStateRetention.ts`.
+  PostgreSQL lease renewal is split between the `leaseStore.ts` facade layer and
+  the set-based transaction in `leaseRenewal.ts`; exact journal cardinality and
+  its guarded trigger definitions live in `eventRetention.ts` and
+  `eventRetentionSchema.ts`.
   Server handler routing, protocol parsing, TCP connection/event-subscription
   state, HTTP routes, SSE and WebSocket state are likewise split by
   responsibility. Cloud command families, snapshot collectors and contracts
@@ -661,16 +665,32 @@ manager and per-queue projections in `REPEATABLE READ READ ONLY` transactions,
 decoding it, and `postgres/lifetimeMetricsFinalizer.ts` fences terminal counters
 against the commit-ordered journal. `postgres/brokerSessions.ts` owns duplicate
 ID detection, stale takeover, session locks, heartbeat, and exact-session
-cleanup; lease and worker writers depend on that boundary. The Bun connection
+cleanup; lease and worker writers depend on that boundary. `postgres/leaseStore.ts`
+and `postgres/leaseRenewal.ts` renew an entire fenced heartbeat cohort with one
+broker-session lock and one set-based update. Before that write, the manager
+reserves a projection generation; it applies returned rows without rereading
+only while the generation, active state, and lease token still match. A newer
+event or terminal mutation invalidates the reservation and causes one
+authoritative coalesced reload instead of allowing a late response to resurrect
+stale state. The Bun connection
 factory applies PostgreSQL-native statement, lock, idle-transaction, and
 application-name parameters. `postgres/eventCommitGc.ts` adaptively drains
 orphaned commit envelopes in bounded database turns,
 while `postgres-queue-manager/projectionRefreshes.ts` coalesces authoritative
 per-job repair with job- and queue-scoped generation fencing; completion
 projections retain the queue identity read from PostgreSQL so queue-wide
-replacement cannot miss or resurrect a result. `postgres/eventRetention.ts` centralizes
-the indexed journal cutoff, non-blocking inline lock, ordered candidate plan,
-and blocking single-queue sweep used by manual trim and crash recovery.
+replacement cannot miss or resurrect a result. `postgres/eventRetention.ts`
+centralizes the exact-count lookup, non-blocking inline lock, ordered candidate
+plan, and blocking single-queue sweep used by manual trim and crash recovery;
+`postgres/eventRetentionSchema.ts` owns the statement-level insert/delete
+accounting triggers, transaction-private delta table, and transactional repair
+of both retention primary keys. Because both retention tables are derived from
+the event journal, schema repair locks event writes, rebuilds their contents,
+and restores the triggers atomically. Retention consolidates those deltas under
+its existing per-queue lock, so event transactions do not hold shared
+counter-row locks. Manager-wide queue summaries use one snapshot
+aggregation pass, and PostgreSQL `PUSHB` validation bypasses snapshot
+materialization when no external dependency lookup is required.
 `postgres/eventCatchupCursors.ts` owns the per-queue applied commit cursor and
 the prune watermarks already accounted for, so a reader refreshes a queue when a
 prune could have removed part of the commit it just applied, and refreshes it

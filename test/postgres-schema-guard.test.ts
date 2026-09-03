@@ -67,6 +67,12 @@ describe('PostgreSQL schema guard', () => {
       const ctx = context(sql, url);
       await initializePostgresSchema(ctx);
       await sql.unsafe('DROP TRIGGER bunqueue_events_register_commit ON bunqueue_events').simple();
+      await sql
+        .unsafe('DROP TRIGGER bunqueue_events_track_retention_delete ON bunqueue_events')
+        .simple();
+      await sql
+        .unsafe('DROP TRIGGER bunqueue_events_track_retention_insert ON bunqueue_events')
+        .simple();
 
       await initializePostgresSchema(ctx);
       const triggers = await sql<{ tgname: string }[]>`
@@ -74,6 +80,8 @@ describe('PostgreSQL schema guard', () => {
         WHERE NOT tgisinternal AND tgenabled <> 'D'
           AND tgname IN (
             'bunqueue_events_register_commit',
+            'bunqueue_events_track_retention_delete',
+            'bunqueue_events_track_retention_insert',
             'bunqueue_watermarks_insert_register_commit',
             'bunqueue_watermarks_update_register_commit',
             'bunqueue_assign_event_commit'
@@ -83,6 +91,8 @@ describe('PostgreSQL schema guard', () => {
       expect(triggers.map(({ tgname }) => tgname)).toEqual([
         'bunqueue_assign_event_commit',
         'bunqueue_events_register_commit',
+        'bunqueue_events_track_retention_delete',
+        'bunqueue_events_track_retention_insert',
         'bunqueue_watermarks_insert_register_commit',
         'bunqueue_watermarks_update_register_commit',
       ]);
@@ -144,6 +154,265 @@ describe('PostgreSQL schema guard', () => {
       expect(await objectIds()).toEqual(before);
     });
   });
+
+  for (const repair of [
+    {
+      columns: ['namespace', 'queue'],
+      constraint: 'bunqueue_event_retention_state_pkey',
+      table: 'bunqueue_event_retention_state',
+    },
+    {
+      columns: ['namespace', 'queue', 'transaction_id'],
+      constraint: 'bunqueue_event_retention_deltas_pkey',
+      table: 'bunqueue_event_retention_deltas',
+    },
+  ] as const) {
+    test.skipIf(!postgresUrl)(`repairs the ${repair.table} primary key idempotently`, async () => {
+      await withIsolatedDatabase(async (sql, url) => {
+        const ctx = context(sql, url);
+        await initializePostgresSchema(ctx);
+        await sql
+          .unsafe(`ALTER TABLE ${repair.table} DROP CONSTRAINT ${repair.constraint}`)
+          .simple();
+
+        await initializePostgresSchema(ctx);
+        const primaryKey = async () => {
+          const [state] = await sql<
+            Array<{ columns: string[] | null; constraint_oid: number | string | bigint | null }>
+          >`
+            SELECT constraint_state.oid AS constraint_oid,
+              ARRAY_AGG(attribute.attname::text ORDER BY key.position) AS columns
+            FROM pg_constraint AS constraint_state
+            CROSS JOIN LATERAL
+              unnest(constraint_state.conkey) WITH ORDINALITY AS key(attnum, position)
+            JOIN pg_attribute AS attribute
+              ON attribute.attrelid = constraint_state.conrelid
+             AND attribute.attnum = key.attnum
+            WHERE constraint_state.conrelid = to_regclass(${repair.table})
+              AND constraint_state.contype = 'p'
+            GROUP BY constraint_state.oid
+          `;
+          return {
+            columns: state?.columns ?? null,
+            oid: Number(state?.constraint_oid ?? 0),
+          };
+        };
+        const repaired = await primaryKey();
+        expect(repaired.columns).toEqual([...repair.columns]);
+        expect(repaired.oid).toBeGreaterThan(0);
+
+        await initializePostgresSchema(ctx);
+        expect(await primaryKey()).toEqual(repaired);
+      });
+    });
+  }
+
+  for (const repair of [
+    {
+      columns: 'namespace, queue',
+      constraint: 'bunqueue_event_retention_state_pkey',
+      table: 'bunqueue_event_retention_state',
+    },
+    {
+      columns: 'namespace, queue, transaction_id',
+      constraint: 'bunqueue_event_retention_deltas_pkey',
+      table: 'bunqueue_event_retention_deltas',
+    },
+  ] as const) {
+    test.skipIf(!postgresUrl)(
+      `replaces a standalone ${repair.constraint} unique index with a primary key`,
+      async () => {
+        await withIsolatedDatabase(async (sql, url) => {
+          const ctx = context(sql, url);
+          await initializePostgresSchema(ctx);
+          await sql
+            .unsafe(
+              `ALTER TABLE ${repair.table} DROP CONSTRAINT ${repair.constraint};
+               CREATE UNIQUE INDEX ${repair.constraint}
+                 ON ${repair.table}(${repair.columns});`
+            )
+            .simple();
+
+          await initializePostgresSchema(ctx);
+          const [state] = await sql<{ primary: boolean }[]>`
+            SELECT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conrelid = to_regclass(${repair.table})
+                AND conname = ${repair.constraint} AND contype = 'p'
+            ) AS primary
+          `;
+          expect(state.primary).toBe(true);
+        });
+      }
+    );
+  }
+
+  test.skipIf(!postgresUrl)('repairs reordered and deferrable retention primary keys', async () => {
+    await withIsolatedDatabase(async (sql, url) => {
+      const ctx = context(sql, url);
+      await initializePostgresSchema(ctx);
+      await sql
+        .unsafe(
+          `ALTER TABLE bunqueue_event_retention_state
+               DROP CONSTRAINT bunqueue_event_retention_state_pkey;
+             ALTER TABLE bunqueue_event_retention_state
+               ADD CONSTRAINT bunqueue_event_retention_state_pkey
+               PRIMARY KEY (queue, namespace);
+             ALTER TABLE bunqueue_event_retention_deltas
+               DROP CONSTRAINT bunqueue_event_retention_deltas_pkey;
+             ALTER TABLE bunqueue_event_retention_deltas
+               ADD CONSTRAINT bunqueue_event_retention_deltas_pkey
+               PRIMARY KEY (namespace, queue, transaction_id)
+               DEFERRABLE INITIALLY DEFERRED;`
+        )
+        .simple();
+
+      await initializePostgresSchema(ctx);
+      const constraints = await sql<
+        Array<{ columns: string[]; condeferrable: boolean; conname: string }>
+      >`
+          SELECT constraint_state.conname, constraint_state.condeferrable,
+            ARRAY(
+              SELECT attribute.attname::text
+              FROM unnest(constraint_state.conkey)
+                WITH ORDINALITY AS key(attnum, position)
+              JOIN pg_attribute AS attribute
+                ON attribute.attrelid = constraint_state.conrelid
+               AND attribute.attnum = key.attnum
+              ORDER BY key.position
+            ) AS columns
+          FROM pg_constraint AS constraint_state
+          WHERE constraint_state.conname IN (
+            'bunqueue_event_retention_state_pkey',
+            'bunqueue_event_retention_deltas_pkey'
+          )
+          ORDER BY constraint_state.conname
+        `;
+      expect(constraints).toEqual([
+        {
+          columns: ['namespace', 'queue', 'transaction_id'],
+          condeferrable: false,
+          conname: 'bunqueue_event_retention_deltas_pkey',
+        },
+        {
+          columns: ['namespace', 'queue'],
+          condeferrable: false,
+          conname: 'bunqueue_event_retention_state_pkey',
+        },
+      ]);
+    });
+  });
+
+  test.skipIf(!postgresUrl)(
+    'rebuilds malformed retention rows from authoritative events',
+    async () => {
+      await withIsolatedDatabase(async (sql, url) => {
+        const ctx = context(sql, url);
+        await initializePostgresSchema(ctx);
+        const inserted = await sql<{ id: number | string | bigint }[]>`
+          INSERT INTO bunqueue_events
+            (namespace, queue, event_type, job_id, occurred_at, payload)
+          VALUES
+            ('schema-guard', 'rebuilt', 'pushed', 'first', 1, NULL),
+            ('schema-guard', 'rebuilt', 'pushed', 'second', 2, NULL)
+          RETURNING id
+        `;
+        await sql
+          .unsafe(
+            `DROP TRIGGER bunqueue_events_track_retention_insert ON bunqueue_events;
+             DROP TRIGGER bunqueue_events_track_retention_delete ON bunqueue_events;
+             ALTER TABLE bunqueue_event_retention_state
+               DROP CONSTRAINT bunqueue_event_retention_state_pkey;
+             ALTER TABLE bunqueue_event_retention_deltas
+               DROP CONSTRAINT bunqueue_event_retention_deltas_pkey;
+             TRUNCATE bunqueue_event_retention_state, bunqueue_event_retention_deltas;
+             INSERT INTO bunqueue_event_retention_state
+               (namespace, queue, retained_count, last_event_id)
+             VALUES ('schema-guard', 'rebuilt', 999, 999),
+                    ('schema-guard', 'rebuilt', 888, 888);
+             INSERT INTO bunqueue_event_retention_deltas
+               (namespace, queue, transaction_id, delta_count, last_event_id)
+             VALUES ('schema-guard', 'rebuilt', 1, 999, 999),
+                    ('schema-guard', 'rebuilt', 1, 888, 888);`
+          )
+          .simple();
+
+        await initializePostgresSchema(ctx);
+        const state = await sql<
+          Array<{
+            last_event_id: number | string | bigint;
+            retained_count: number | string | bigint;
+          }>
+        >`
+          SELECT retained_count, last_event_id
+          FROM bunqueue_event_retention_state
+          WHERE namespace = 'schema-guard' AND queue = 'rebuilt'
+        `;
+        expect(
+          state.map(({ retained_count, last_event_id }) => ({
+            retained: Number(retained_count),
+            last: Number(last_event_id),
+          }))
+        ).toEqual([{ retained: 2, last: Math.max(...inserted.map(({ id }) => Number(id))) }]);
+        expect(await sql`SELECT * FROM bunqueue_event_retention_deltas`).toEqual([]);
+
+        await sql`
+          INSERT INTO bunqueue_events
+            (namespace, queue, event_type, job_id, occurred_at, payload)
+          VALUES ('schema-guard', 'rebuilt', 'pushed', 'third', 3, NULL)
+        `;
+        const [delta] = await sql<
+          Array<{ delta_count: number | string | bigint; rows: number | string | bigint }>
+        >`
+          SELECT COUNT(*) AS rows, SUM(delta_count) AS delta_count
+          FROM bunqueue_event_retention_deltas
+          WHERE namespace = 'schema-guard' AND queue = 'rebuilt'
+        `;
+        expect({ count: Number(delta.delta_count), rows: Number(delta.rows) }).toEqual({
+          count: 1,
+          rows: 1,
+        });
+      });
+    }
+  );
+
+  test.skipIf(!postgresUrl)(
+    'fails actionably and transactionally on a retention primary-key name collision',
+    async () => {
+      await withIsolatedDatabase(async (sql, url) => {
+        const ctx = context(sql, url);
+        await initializePostgresSchema(ctx);
+        await sql
+          .unsafe(
+            `ALTER TABLE bunqueue_event_retention_state
+               DROP CONSTRAINT bunqueue_event_retention_state_pkey;
+             CREATE SEQUENCE bunqueue_event_retention_state_pkey;`
+          )
+          .simple();
+
+        const initialize = () => initializePostgresSchema(ctx);
+        await expect(initialize()).rejects.toThrow(
+          'Cannot repair primary key bunqueue_event_retention_state_pkey'
+        );
+        await expect(initialize()).rejects.toThrow(
+          'Cannot repair primary key bunqueue_event_retention_state_pkey'
+        );
+        const [trigger] = await sql<{ present: boolean }[]>`
+          SELECT to_regclass('bunqueue_event_retention_state_pkey') IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM pg_trigger
+              WHERE tgrelid = to_regclass('bunqueue_events')
+                AND tgname = 'bunqueue_events_track_retention_insert'
+                AND NOT tgisinternal
+            ) AS present
+        `;
+        expect(trigger.present).toBe(true);
+
+        await sql.unsafe('DROP SEQUENCE bunqueue_event_retention_state_pkey').simple();
+        await initializePostgresSchema(ctx);
+      });
+    }
+  );
 
   test.skipIf(!postgresUrl)('repairs complete group-state table drift', async () => {
     await withIsolatedDatabase(async (sql, url) => {

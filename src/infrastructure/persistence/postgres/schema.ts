@@ -1,7 +1,8 @@
 import { POSTGRES_EVENT_JOURNAL_SCHEMA } from './eventJournalSchema';
+import { POSTGRES_EVENT_RETENTION_SCHEMA } from './eventRetentionSchema';
 import { POSTGRES_GROUP_SCHEMA } from './groupSchema';
 
-export const POSTGRES_SCHEMA_VERSION = 20;
+export const POSTGRES_SCHEMA_VERSION = 21;
 
 /** PostgreSQL schema for the database-authoritative distributed queue engine. */
 export const POSTGRES_SCHEMA = `
@@ -230,6 +231,8 @@ CREATE INDEX IF NOT EXISTS bunqueue_events_namespace_id_idx
   ON bunqueue_events(namespace, id);
 CREATE INDEX IF NOT EXISTS bunqueue_events_queue_id_idx
   ON bunqueue_events(namespace, queue, id DESC);
+
+${POSTGRES_EVENT_RETENTION_SCHEMA}
 
 CREATE TABLE IF NOT EXISTS bunqueue_event_prune_watermarks (
   namespace TEXT NOT NULL,

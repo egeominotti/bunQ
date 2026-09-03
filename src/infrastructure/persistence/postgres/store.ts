@@ -22,7 +22,6 @@ import {
 import { removePostgresJob, retryPostgresTerminalJob } from './destructiveMutations';
 import { completePostgresJob } from './completionOutcome';
 import { failPostgresJob } from './outcomes';
-import { renewPostgresLease } from './leaseRenewal';
 import {
   getPostgresCounts,
   getPostgresJob,
@@ -42,7 +41,7 @@ import {
 } from './completionQueries';
 import { recoverExpiredPostgresLeases } from './recovery';
 import { getPostgresFlowFailureValues } from './flowFailures';
-import { PostgresAdmissionStore } from './admissionStore';
+import { PostgresLeaseStore } from './leaseStore';
 import { cleanPostgresQueue, purgePostgresDlq } from './maintenance';
 import { maintainPostgresDlq } from './dlqLifecycle';
 import { addPostgresJobLog, clearPostgresJobLogs, getPostgresJobLogs } from './logs';
@@ -102,7 +101,7 @@ function pruneInactiveGroups(ctx: PostgresContext): Promise<void> {
   });
 }
 /** Database-authoritative PostgreSQL queue store safe for concurrent brokers. */
-export class PostgresQueueStore extends PostgresAdmissionStore {
+export class PostgresQueueStore extends PostgresLeaseStore {
   getGroupJobsCount = (queue: string, groupId?: string) =>
     getPostgresGroupJobsCount(this.context, queue, groupId);
   getGroupActiveCount = (queue: string, groupId: string) =>
@@ -187,11 +186,6 @@ export class PostgresQueueStore extends PostgresAdmissionStore {
       await pruneInactiveGroups(this.context);
     }
     return transition;
-  }
-
-  async renew(id: JobId, token: string, durationMs: number): Promise<number | null> {
-    await this.initialize();
-    return await renewPostgresLease(this.context, id, token, durationMs);
   }
 
   async recoverExpired(limit?: number): Promise<number> {

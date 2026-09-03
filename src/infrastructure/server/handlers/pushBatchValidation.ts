@@ -18,13 +18,19 @@ type DurableDependencyManager = HandlerContext['queueManager'] & {
   findMissingDependenciesDurable?: (ids: readonly JobId[]) => Promise<JobId[]>;
 };
 
-interface BatchDependencyState {
+interface LocalBatchDependencyState {
   readonly jobIndex: { has(id: JobId): boolean };
   readonly completedJobs: { has(id: JobId): boolean };
   readonly depCompletions: { has(id: JobId): boolean };
   readonly batchIds: ReadonlySet<string> | null;
-  readonly missingDependencies?: ReadonlySet<JobId>;
 }
+
+interface DurableBatchDependencyState {
+  readonly batchIds: ReadonlySet<string> | null;
+  readonly missingDependencies: ReadonlySet<JobId>;
+}
+
+type BatchDependencyState = LocalBatchDependencyState | DurableBatchDependencyState;
 
 function dependencyExistsLocally(id: JobId, ctx: HandlerContext): boolean {
   return (
@@ -75,9 +81,6 @@ export function validatePushBatchJobs(
   jobs: JobInput[],
   ctx: HandlerContext
 ): string | null | Promise<string | null> {
-  const jobIndex = ctx.queueManager.getJobIndex();
-  const completedJobs = ctx.queueManager.getCompletedJobs();
-  const depCompletions = ctx.queueManager.getDepCompletions();
   // Custom ids of ALL jobs in this batch: they become real job ids the
   // moment the batch is applied. Allocated lazily (most batches have neither
   // custom ids nor dependencies).
@@ -95,24 +98,24 @@ export function validatePushBatchJobs(
       (job.dependsOn ?? []).filter((id) => !(batchIds?.has(String(id)) ?? false))
     );
     if (dependencies.length === 0) {
-      return validateJobs(jobs, { jobIndex, completedJobs, depCompletions, batchIds });
+      return validateJobs(jobs, { batchIds, missingDependencies: new Set() });
     }
     return manager.findMissingDependenciesDurable(dependencies).then((missingIds) =>
       validateJobs(jobs, {
-        jobIndex,
-        completedJobs,
-        depCompletions,
         batchIds,
         missingDependencies: new Set(missingIds),
       })
     );
   }
 
+  const jobIndex = ctx.queueManager.getJobIndex();
+  const completedJobs = ctx.queueManager.getCompletedJobs();
+  const depCompletions = ctx.queueManager.getDepCompletions();
   return validateJobs(jobs, { jobIndex, completedJobs, depCompletions, batchIds });
 }
 
 function validateJobs(jobs: JobInput[], state: BatchDependencyState): string | null {
-  const { jobIndex, completedJobs, depCompletions, batchIds, missingDependencies } = state;
+  const { batchIds } = state;
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i];
 
@@ -144,14 +147,15 @@ function validateJobs(jobs: JobInput[], state: BatchDependencyState): string | n
         if (key === job.customId) {
           return `jobs[${i}]: Job cannot depend on itself: ${key}`;
         }
-        const exists = missingDependencies
-          ? !missingDependencies.has(depId)
-          : jobIndex.has(depId) ||
-            completedJobs.has(depId) ||
-            // removeOnComplete parents leave only a bare completion id behind;
-            // the gate must honor it exactly like PUSH does.
-            depCompletions.has(depId) ||
-            (batchIds?.has(key) ?? false);
+        const exists =
+          (batchIds?.has(key) ?? false) ||
+          ('missingDependencies' in state
+            ? !state.missingDependencies.has(depId)
+            : state.jobIndex.has(depId) ||
+              state.completedJobs.has(depId) ||
+              // removeOnComplete parents leave only a bare completion id behind;
+              // the gate must honor it exactly like PUSH does.
+              state.depCompletions.has(depId));
         if (!exists) {
           return `jobs[${i}]: Dependency job not found: ${key}`;
         }
